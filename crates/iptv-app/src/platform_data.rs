@@ -1,7 +1,7 @@
 //! Platform-owned app storage location. Android supplies its actual user-scoped
 //! files directory before the Rust root starts; package names are not paths.
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
