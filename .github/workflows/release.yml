@@ -447,7 +447,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('rehearsal-{0}', github.run_id) }}
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.rehearsal && format('rehearsal-{0}', github.run_id) || github.ref_name }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
