@@ -46,9 +46,21 @@ def existing_release(repository, tag):
     try:
         return native.gh_json(f"repos/{repository}/releases/tags/{tag}")
     except RuntimeError as error:
-        if "HTTP 404" in str(error):
-            return None
-        raise
+        if "HTTP 404" not in str(error):
+            raise
+    # An unpublished draft whose tag has not been created is absent from the
+    # tag endpoint, including for its creator. Find its immutable release ID.
+    matches = []
+    page = 1
+    while True:
+        releases = native.gh_json(f"repos/{repository}/releases?per_page=100&page={page}")
+        matches.extend(release for release in releases if release.get("tag_name") == tag)
+        if len(releases) < 100:
+            break
+        page += 1
+    if len(matches) > 1:
+        raise ValueError("Multiple dependency drafts use the same tag")
+    return matches[0] if matches else None
 
 
 def unchanged_release(release, assets):
@@ -77,14 +89,15 @@ def promote(platform, registry, cache, publish):
         return
     assets = release_assets(platform, pin, registry, cache)
     if release:
-        raise ValueError("An unfinished dependency release exists; refusing to overwrite")
+        unchanged_release({**release, "draft": False}, assets)
     if not publish:
         print(f"{platform}: candidate provenance, recipe, manifest and all release bytes verified")
         return
     notes = assets[0].parent / "release-notes.txt"
     notes.write_text(f"Pinned {platform} native dependency with the per-stream relay capability guard. The exact corresponding sources, patches, licenses and build recipe accompany the binary. Native synthetic playback and forbidden-connection checks passed before publication. iOS validation uses the arm64 simulator; the device slice is built.\n")
-    subprocess.run(["gh", "release", "create", pin["tag"], "--repo", repository, "--draft", "--target", os.environ["GITHUB_SHA"],
-                    "--title", pin["tag"], "--notes-file", str(notes), "--latest=false", *map(str, assets)], check=True)
+    if not release:
+        subprocess.run(["gh", "release", "create", pin["tag"], "--repo", repository, "--draft", "--target", os.environ["GITHUB_SHA"],
+                        "--title", pin["tag"], "--notes-file", str(notes), "--latest=false", *map(str, assets)], check=True)
     # Compare every uploaded digest before making this dependency public.
     uploaded = existing_release(repository, pin["tag"])
     if not uploaded:
