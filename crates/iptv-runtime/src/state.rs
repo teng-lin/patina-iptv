@@ -10,8 +10,8 @@ use std::{
 };
 
 pub struct ImportWork {
-    pub finished: Cell<bool>,
-    pub catalog_done: Cell<bool>,
+    pub(crate) finished: Cell<bool>,
+    pub(crate) catalog_done: Cell<bool>,
     pub cancel: CancelToken,
     /// Stops the guide phase alone, at once, also while the playlist is
     /// still being fetched (which goes on): the worker then downloads and
@@ -23,7 +23,7 @@ pub struct ImportWork {
     /// handoff and leaves the source without such work.
     pub superseded: Cell<bool>,
     /// Tasks waiting for [`Self::finish`].
-    pub waiting: RefCell<Vec<futures_channel::oneshot::Sender<()>>>,
+    pub(crate) waiting: RefCell<Vec<futures_channel::oneshot::Sender<()>>>,
 }
 impl ImportWork {
     pub fn finished(&self) -> bool {
