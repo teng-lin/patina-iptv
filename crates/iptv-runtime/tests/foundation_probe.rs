@@ -42,6 +42,15 @@ struct Mock {
 }
 impl Mock {
     fn new(body: Vec<u8>, hold: bool) -> Self {
+        let mut response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(&body);
+        Self::response(response, hold)
+    }
+    fn response(response: Vec<u8>, hold: bool) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap().to_string();
         let stopped = Arc::new(AtomicBool::new(false));
@@ -87,12 +96,7 @@ impl Mock {
                 if stop.load(Ordering::SeqCst) {
                     break;
                 }
-                let header = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                    body.len()
-                );
-                let _ = stream.write_all(header.as_bytes());
-                let _ = stream.write_all(&body);
+                let _ = stream.write_all(&response);
             }
         });
         Self {
@@ -518,5 +522,46 @@ fn supplied_urls_do_not_borrow_provider_credentials_or_accept_url_userinfo() {
             Err(InspectionError::Cancelled)
         );
     }
+    runtime.drain_services();
+}
+
+#[test]
+fn probes_stop_after_three_redirects_and_at_the_download_byte_budget() {
+    let redirect=Mock::response(b"HTTP/1.1 302 Found\r\nLocation: /synthetic.xml\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),false);
+    let directory = tempfile::tempdir().unwrap();
+    let source = seed(directory.path(), redirect.url(), 0);
+    let runtime = owner(directory.path());
+    assert_eq!(probe(&runtime, source), Err(InspectionError::Network));
+    assert_eq!(redirect.requests.load(Ordering::SeqCst), 4);
+    runtime.drain_services();
+
+    let mut xml = String::from("<tv><channel id='amber'/>");
+    let comment = format!("<!-- {} -->", "x".repeat(1024));
+    while xml.len() <= 32 << 20 {
+        xml.push_str(&comment);
+    }
+    xml.push_str("</tv>");
+    let server = Mock::new(xml.into_bytes(), false);
+    let directory = tempfile::tempdir().unwrap();
+    let source = seed(directory.path(), server.url(), 0);
+    let runtime = owner(directory.path());
+    assert_eq!(probe(&runtime, source), Err(InspectionError::LimitExceeded));
+    runtime.drain_services();
+}
+
+#[cfg(not(feature = "test-support"))]
+#[test]
+fn configured_local_feed_redirects_cannot_reach_another_private_origin() {
+    let destination = Mock::new(XML.as_bytes().to_vec(), false);
+    let response = format!(
+        "HTTP/1.1 302 Found\r\nLocation: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        destination.url().expose()
+    );
+    let origin = Mock::response(response.into_bytes(), false);
+    let directory = tempfile::tempdir().unwrap();
+    let source = seed(directory.path(), origin.url(), 0);
+    let runtime = owner(directory.path());
+    assert_eq!(probe(&runtime, source), Err(InspectionError::AddressPolicy));
+    assert_eq!(destination.requests.load(Ordering::SeqCst), 0);
     runtime.drain_services();
 }

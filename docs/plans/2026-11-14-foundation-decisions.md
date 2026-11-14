@@ -216,12 +216,33 @@ no partial undo. The delivery plan and preserved reference specify staging,
 retention and digest details; no external-client receipt/grant machinery enters
 the domain transaction.
 
+## F0 reconciliation against the merged implementation
+
+The merged I/R4 baseline is `5904a117`. Its runtime has explicit owner/service
+handles and private store lanes; `commands::channel` already returns a neutral
+`PlaybackChannel`, so no duplicate extraction is required. JNI/key brokers stay
+in the shell; runtime-only tests construct `Ports` with generated private keys.
+The shell still owns rendering and the single event sink. Foundation reads use
+owned domain values and do not introduce a fan-out hub or a player dependency.
+
+PR 1 extends that owner with source-scoped query/inspection methods and a lazy
+analysis reader, preserving I/R4's writer and guide display lanes. Source/feed
+incarnations and conditional semantic revisions are maintained in the store;
+cached feed evidence also carries its publishing incarnation. Existing import
+handoff/supersession remains the basis for PR 2's publication fencing.
+
+The programme/session/job/resource/storage/policy decisions above remain the
+chosen extension boundaries. Only implemented inspection operations acquire a
+working public facade here; future scheduling/session interfaces are not
+placeholder implementations. Current catch-up behavior is retained. The
+[inspection guide](../foundation-inspection.md) records the implemented path,
+its bounds and honest provider/host limits. F5 and repair validation remain
+responsibilities of PR 2.
+
 ## Reconciliation and completion
 
-Before F1, record merged I/R4 commits, inspect the actual public facade and
-owner/service lifetimes, and map each rule above to an existing guarantee or
-the responsible F/P package. Resolve discrepancies explicitly. F0 preparation
-is complete when these decisions and scenarios are reviewable; F0 itself stays
-open until that final-source reconciliation passes. F5 alone declares internal
+The source reconciliation above completes F0 for the inspection slice. Keep
+implementation/test evidence with the relevant PR, and resolve any later
+discrepancy before the affected facade is stabilized. F5 alone declares internal
 contract v1 for implemented foundation operations. Future P1–P6 details remain
 separate decisions and cannot be advertised through capability metadata yet.

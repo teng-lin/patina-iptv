@@ -47,7 +47,7 @@ impl Screen {
             window,
             mode: Mode::Audit,
             samples_back: Mode::Candidates,
-            focus: Row::NewLink,
+            focus: Row::Search,
             request: 0,
             busy: false,
             typing: false,

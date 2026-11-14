@@ -116,6 +116,7 @@ pub struct ProgrammeInfo {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CandidateProgramme {
     pub candidate: CandidateRef,
+    pub source_incarnation: String,
     pub evidence_revision: String,
     pub provider_event_id: Option<String>,
     pub start: i64,

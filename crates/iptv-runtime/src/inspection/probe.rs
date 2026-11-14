@@ -993,6 +993,7 @@ impl Runtime {
                     {
                         programmes.push(CandidateProgramme {
                             candidate: candidate.clone(),
+                            source_incarnation: lease.0.source_incarnation.clone(),
                             evidence_revision: hex(&evidence.digest),
                             provider_event_id: None,
                             start: p.start,
