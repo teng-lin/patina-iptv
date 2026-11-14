@@ -26,6 +26,11 @@ pub(crate) fn set_guide_sources_in(
     // Preserve equal configured rows and their incarnations on a physical
     // reimport. Delete only removed feeds; triggers record actual changes.
     let retained: std::collections::HashSet<_> = sources.iter().map(|g| g.feed.0).collect();
+    if retained.len() != sources.len() {
+        return Err(crate::StoreError::InvalidData(
+            "duplicate guide feed ID".into(),
+        ));
+    }
     let existing = {
         let mut statement =
             conn.prepare_cached("SELECT feed_id FROM guide_sources WHERE source_id = ?1")?;
