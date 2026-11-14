@@ -255,6 +255,7 @@ impl Runtime {
     /// requests are accepted from now until [`Runtime::drain_services`].
     pub fn start_services(&self) {
         self.store.begin();
+        self.inspection.renew();
     }
     pub fn drain_services(&self) -> bool {
         self.cancel_guide_checks();

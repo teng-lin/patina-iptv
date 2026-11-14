@@ -119,6 +119,11 @@ struct Document {
 }
 impl Document {
     fn feed(&mut self, bytes: &[u8], end: bool) -> Result<(), StrictError> {
+        if std::str::from_utf8(bytes).map_or(true, |text| {
+            text.chars().any(|ch| !valid_xml_char(ch as u32))
+        }) {
+            return Err(StrictError::InvalidXml);
+        }
         self.tail.extend_from_slice(bytes);
         // Wait for complete markup and preserve unfinished text/entity tokens.
         let length = if end {
@@ -141,7 +146,10 @@ impl Document {
                     let empty = self.tail.get(reader.buffer_position() as usize - 2) == Some(&b'/');
                     let name = e.name().as_ref().to_owned();
                     for attribute in e.attributes() {
-                        attribute.map_err(|_| StrictError::InvalidXml)?;
+                        let attribute = attribute.map_err(|_| StrictError::InvalidXml)?;
+                        if attribute.value.contains('<') || !valid_entities(&attribute.value) {
+                            return Err(StrictError::InvalidXml);
+                        }
                     }
                     if self.closed || (self.stack.is_empty() && (self.seen || name != "tv")) {
                         return Err(StrictError::InvalidXml);
@@ -177,9 +185,7 @@ impl Document {
                 Event::CData(_) if self.stack.is_empty() => return Err(StrictError::InvalidXml),
                 Event::GeneralRef(e) => {
                     let value = e.as_ref();
-                    if !["amp", "lt", "gt", "apos", "quot"].contains(&value)
-                        && !value.starts_with("#")
-                    {
+                    if self.stack.is_empty() || !valid_entity(value) {
                         return Err(StrictError::InvalidXml);
                     }
                 }
@@ -193,6 +199,35 @@ impl Document {
         }
         Ok(())
     }
+}
+
+fn valid_xml_char(value: u32) -> bool {
+    matches!(value,0x9|0xa|0xd|0x20..=0xd7ff|0xe000..=0xfffd|0x10000..=0x10ffff)
+}
+fn valid_entity(value: &str) -> bool {
+    if ["amp", "lt", "gt", "apos", "quot"].contains(&value) {
+        return true;
+    }
+    value
+        .strip_prefix('#')
+        .and_then(|number| match number.strip_prefix('x') {
+            Some(hex) => u32::from_str_radix(hex, 16).ok(),
+            None => number.parse().ok(),
+        })
+        .is_some_and(valid_xml_char)
+}
+fn valid_entities(mut text: &str) -> bool {
+    while let Some(at) = text.find('&') {
+        text = &text[at + 1..];
+        let Some(end) = text.find(';') else {
+            return false;
+        };
+        if !valid_entity(&text[..end]) {
+            return false;
+        }
+        text = &text[end + 1..];
+    }
+    true
 }
 
 fn complete_prefix(bytes: &[u8]) -> usize {
@@ -266,6 +301,9 @@ mod tests {
             "<tv><channel id='a'><display-name>&bad;</display-name></channel></tv>",
             "<tv><channel id='a'></programme></tv>",
             "<tv><channel id='a' id='b'/></tv>",
+            "<tv><channel id='&untrusted;'/></tv>",
+            "<tv><channel id='a'><display-name>&#xD800;</display-name></channel></tv>",
+            "<tv><channel id='a'><display-name>&#0;</display-name></channel></tv>",
         ] {
             assert!(!parse(xml.as_bytes(), 1), "{xml}");
         }
@@ -282,5 +320,21 @@ mod tests {
             "</x>".repeat(33)
         );
         assert!(!parse(xml.as_bytes(), 5));
+    }
+    #[test]
+    fn chunk_boundaries_preserve_quotes_cdata_comments_and_decoded_limits() {
+        let xml=b"<tv><!-- x > y --><channel id='a>b'><display-name><![CDATA[Amber > Birch]]></display-name></channel></tv>";
+        for chunk in 1..=xml.len() {
+            assert!(parse(xml, chunk), "chunk {chunk}");
+        }
+        use std::io::Write;
+        let xml = format!("<tv><channel id='a'/><!-- {} --></tv>", "x".repeat(16_384));
+        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gzip.write_all(xml.as_bytes()).unwrap();
+        let gzip = gzip.finish().unwrap();
+        let mut options = ParseOptions::default();
+        options.limits.decoded_bytes = 4096;
+        let mut parser = StrictXmltvParser::new(options);
+        assert!(parser.feed(&gzip, &mut |_| {}).is_err());
     }
 }
