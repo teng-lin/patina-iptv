@@ -2,6 +2,12 @@
 //! message a count selects. The rules are the Unicode CLDR cardinal rules
 //! for whole numbers; the app never shows a fractional count.
 //!
+//! The single supported Portuguese catalogue uses European Portuguese
+//! vocabulary (e.g. *ecrã*, *ficheiro*, *definições*). Plural rules follow
+//! Unicode CLDR pt-PT cardinal rules (0 is `other`, 1 is `one`, and whole
+//! millions are `many`), even though Brazilian locales (`pt-BR`) resolve
+//! to this catalogue in [`resolve`](super::resolve).
+//!
 //! They are written out here for the eleven languages of
 //! [`LANGUAGES`](super::LANGUAGES). A language whose rules are none of
 //! these needs its own arm in [`category`] and a row in [`forms`]; a test
@@ -59,13 +65,16 @@ pub fn category(tag: &str, n: u64) -> Category {
             1 => Category::One,
             _ => Category::Other,
         },
-        "es" | "it" => match n {
+        // Spanish, Italian and European Portuguese (pt-PT):
+        // 0 is other ("0 canales", "0 canais"), 1 is one ("1 canal"),
+        // and whole millions are many ("1 000 000 de canais").
+        "es" | "it" | "pt" => match n {
             1 => Category::One,
             _ if whole_millions(n) => Category::Many,
             _ => Category::Other,
         },
-        // Zero is singular in French and Portuguese ("0 chaîne").
-        "fr" | "pt" => match n {
+        // Zero is singular in French ("0 chaîne").
+        "fr" => match n {
             0 | 1 => Category::One,
             _ if whole_millions(n) => Category::Many,
             _ => Category::Other,
@@ -130,10 +139,10 @@ mod tests {
 
     #[test]
     fn romance_languages_differ_at_zero_and_share_the_millions() {
-        for tag in ["es", "it"] {
+        for tag in ["es", "it", "pt"] {
             assert_eq!(of(tag, &[0, 1, 2, 21]), [Other, One, Other, Other]);
         }
-        for tag in ["fr", "pt"] {
+        for tag in ["fr"] {
             assert_eq!(of(tag, &[0, 1, 2, 21]), [One, One, Other, Other]);
         }
         for tag in ["es", "it", "fr", "pt"] {
@@ -143,6 +152,17 @@ mod tests {
                 "{tag}"
             );
         }
+    }
+
+    #[test]
+    fn european_portuguese_zero_is_other_not_one() {
+        // CLDR pt-PT whole numbers: 0 is other ("0 canais"), 1 is one ("1 canal").
+        // Brazilian Portuguese (pt-BR) treats 0 as one, but the catalogue uses
+        // European Portuguese vocabulary.
+        assert_eq!(category("pt", 0), Other);
+        assert_eq!(category("pt", 1), One);
+        assert_eq!(category("pt", 2), Other);
+        assert_eq!(category("pt", 1_000_000), Many);
     }
 
     #[test]

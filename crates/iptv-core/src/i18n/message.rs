@@ -82,9 +82,14 @@ pub struct SyntaxError {
     pub why: &'static str,
 }
 
+/// Maximum depth of nested plural messages. Keeps recursion in `parse`,
+/// `render` and `shape` strictly bounded to prevent stack overflow.
+const MAX_DEPTH: usize = 4;
+
 struct Parser<'a> {
     text: &'a str,
     at: usize,
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -160,6 +165,9 @@ impl<'a> Parser<'a> {
             return self.error("expected , after plural");
         }
         self.at += 1;
+        if self.depth >= MAX_DEPTH {
+            return self.error("a plural is nested too deeply");
+        }
         let mut forms: Vec<(Selector, Vec<Part<'a>>)> = Vec::new();
         loop {
             self.skip_spaces();
@@ -193,7 +201,10 @@ impl<'a> Parser<'a> {
                 return self.error("a plural form's text goes in braces");
             }
             self.at += 1;
-            let text = self.parts(true)?;
+            self.depth += 1;
+            let text = self.parts(true);
+            self.depth -= 1;
+            let text = text?;
             self.at += 1;
             forms.push((selector, text));
         }
@@ -211,6 +222,7 @@ fn parse(message: &str) -> Result<Vec<Part<'_>>, SyntaxError> {
     Parser {
         text: message,
         at: 0,
+        depth: 0,
     }
     .parts(false)
 }
@@ -458,10 +470,31 @@ mod tests {
                 "a plural form's text goes in braces",
             ),
             ("{n, plural other {y}}", "expected , after plural"),
+            (
+                "{a, plural, other {{b, plural, other {{c, plural, other {{d, plural, other {{e, plural, other {x}}}}}}}}}}",
+                "a plural is nested too deeply",
+            ),
         ] {
             assert_eq!(shape(message).unwrap_err().why, why, "{message}");
             assert_eq!(render(message, "en", &[("n", 1u8.into())]), message);
         }
+    }
+
+    #[test]
+    fn very_deep_nested_plural_is_rejected_safely() {
+        let mut deep = String::new();
+        for i in 0..100 {
+            deep.push_str(&format!("{{n{i}, plural, other {{"));
+        }
+        deep.push_str("content");
+        for _ in 0..100 {
+            deep.push_str("}}");
+        }
+        assert_eq!(
+            shape(&deep).unwrap_err().why,
+            "a plural is nested too deeply"
+        );
+        assert_eq!(render(&deep, "en", &[]), deep);
     }
 
     #[test]
