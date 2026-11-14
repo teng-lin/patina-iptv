@@ -164,5 +164,53 @@ class Promotion(unittest.TestCase):
                 promote.release_assets("windows", self.pin, registry, self.cache)
 
 
+class DraftRelease(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location("promote_native", Path(__file__).with_name("promote-native-candidates.py"))
+        self.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.module)
+        self.tag = "mpv-runtime-" + "a" * 64
+        self.draft = {"id": 17, "tag_name": self.tag, "draft": True}
+
+    def test_an_uploaded_draft_is_found_before_its_tag_exists(self):
+        with mock.patch.object(native, "gh_json", side_effect=[RuntimeError("HTTP 404"), [self.draft]]):
+            self.assertEqual(self.module.existing_release("generated/repository", self.tag), self.draft)
+
+    def test_duplicate_drafts_are_refused(self):
+        with mock.patch.object(native, "gh_json", side_effect=[RuntimeError("HTTP 404"), [self.draft, {**self.draft, "id": 18}]]):
+            with self.assertRaisesRegex(ValueError, "Multiple dependency drafts"):
+                self.module.existing_release("generated/repository", self.tag)
+
+    def test_permission_errors_are_not_treated_as_missing_drafts(self):
+        with mock.patch.object(native, "gh_json", side_effect=RuntimeError("HTTP 403")) as api:
+            with self.assertRaisesRegex(RuntimeError, "HTTP 403"):
+                self.module.existing_release("generated/repository", self.tag)
+            self.assertEqual(api.call_count, 1)
+
+    def test_only_a_complete_matching_draft_can_resume_without_uploading(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            names = [*native.SPECS["windows"][1:4], "SHA256SUMS"]
+            paths = []
+            for name in names:
+                path = root / name
+                path.write_bytes(("generated " + name).encode())
+                paths.append(path)
+            pin = {"schema": 1, "tag": self.tag, "url": f"https://github.com/generated/repository/releases/download/{self.tag}/{names[0]}",
+                   "source_url": f"https://github.com/generated/repository/releases/download/{self.tag}/{names[1]}",
+                   "sha256": native.digest(paths[0]), "source_sha256": native.digest(paths[1])}
+            draft = {**self.draft, "assets": [{"name": path.name, "digest": "sha256:" + native.digest(path)} for path in paths]}
+            registry = {"repository": "generated/repository"}
+            with mock.patch.object(native, "load_pin", return_value=pin), mock.patch.object(self.module, "release_assets", return_value=paths):
+                with mock.patch.object(self.module, "existing_release", return_value=draft), mock.patch.object(self.module.subprocess, "run") as command:
+                    self.module.promote("windows", registry, root, True)
+                    command.assert_called_once_with(["gh", "release", "edit", self.tag, "--repo", "generated/repository", "--draft=false", "--latest=false"], check=True)
+                draft["assets"][0]["digest"] = "sha256:" + "c" * 64
+                with mock.patch.object(self.module, "existing_release", return_value=draft), mock.patch.object(self.module.subprocess, "run") as command:
+                    with self.assertRaisesRegex(ValueError, "refusing to overwrite"):
+                        self.module.promote("windows", registry, root, True)
+                    command.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
