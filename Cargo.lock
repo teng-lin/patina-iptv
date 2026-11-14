@@ -2228,6 +2228,7 @@ dependencies = [
  "nsh-platform-macos",
  "nsh-platform-windows",
  "nsh-testing",
+ "objc2-foundation",
  "rusqlite",
  "serde_json",
  "sys-locale",
