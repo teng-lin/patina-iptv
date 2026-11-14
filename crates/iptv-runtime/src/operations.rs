@@ -283,6 +283,21 @@ impl Runtime {
         self.services().occupy_writer(duration);
     }
 
+    /// Holds the actual analysis lane behind a test-owned release barrier.
+    /// Entry acknowledgement makes contention tests independent of scheduling.
+    /// Dropping the release sender, or the watchdog, always releases the lane.
+    pub fn hold_analysis(&self) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (entered, observed) = std::sync::mpsc::channel();
+        let (release, resume) = std::sync::mpsc::channel();
+        // Analyze transfers the queued work immediately; its reply is unused.
+        drop(self.services().analyze(move |_| {
+            let _ = entered.send(());
+            let _ = resume.recv_timeout(std::time::Duration::from_secs(10));
+            Ok(())
+        }));
+        (observed, release)
+    }
+
     /// A stored source's catalogue size as an import worker reads it (a
     /// blocking read on the reader lane), to run on another thread.
     pub fn worker_catalog_size(

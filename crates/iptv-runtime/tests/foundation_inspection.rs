@@ -24,11 +24,11 @@ const KEY: [u8; 32] = [0x71; 32];
 const FEED: FeedId = FeedId(1);
 
 struct Fixture {
-    _directory: tempfile::TempDir,
     store: Store,
     sources: [SourceId; 2],
     catalogue: common::Catalog,
     owner: Rc<Runtime>,
+    _directory: tempfile::TempDir,
 }
 impl Fixture {
     fn new() -> Self {
@@ -414,6 +414,29 @@ fn cursors_refuse_other_owner_scope_filter_window_and_changed_catalogue() {
 }
 
 #[test]
+fn a_channel_filter_with_multiple_sources_uses_the_complete_identity() {
+    let f = Fixture::new();
+    let [a, b] = f.sources;
+    let mut query = Query::source(a);
+    query.scope = SourceScope::Selected(vec![a, b]);
+    let programmes = block_on(f.owner.query_programmes(
+        query,
+        window(),
+        Some(f.channel(a, 0)),
+        InspectionControl::default(),
+    ))
+    .unwrap();
+    assert_eq!(programmes.items.len(), 3);
+    assert!(programmes.items.iter().all(|p| p.channel.source == a));
+    assert!(
+        programmes
+            .items
+            .iter()
+            .all(|p| p.title.starts_with("Synthetic A"))
+    );
+}
+
+#[test]
 fn pre_cancelled_and_expired_queries_do_not_poison_the_reader() {
     let f = Fixture::new();
     let control = InspectionControl::default();
@@ -666,11 +689,18 @@ fn a_hundred_thousand_channel_analysis_keeps_display_reads_responsive() {
     block_on(f.owner.read_library_metadata()).unwrap();
     let mut query = Query::source(source);
     query.limit = MAX_PAGE;
+    let (entered, release) = f.owner.hold_analysis();
+    entered.recv_timeout(Duration::from_secs(5)).unwrap();
     let analysis = f.owner.query_channels(query, InspectionControl::default());
     let (done, result) = mpsc::sync_channel(1);
     let worker = std::thread::spawn(move || done.send(block_on(analysis)).unwrap());
-    let mut reads = 0;
-    let mut maximum = Duration::ZERO;
+    // The query cannot complete while its real lane is held. Display reads
+    // must still finish; a broken shared lane is released by the watchdog.
+    let read = std::time::Instant::now();
+    block_on(f.owner.read_library_metadata()).unwrap();
+    let mut maximum = read.elapsed();
+    release.send(()).unwrap();
+    let mut reads = 1;
     let started = std::time::Instant::now();
     let page = loop {
         match result.try_recv() {
