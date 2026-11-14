@@ -138,10 +138,6 @@ impl Screen {
                 },
                 |p| p.mappings.iter().map(|r| r.channel.clone()).collect(),
             );
-            for key in selected {
-                rows.push(Row::Mapping(key.clone()));
-                rows.push(Row::Remove(key));
-            }
             if !self.request.mappings.is_empty()
                 || !self.request.feeds.is_empty()
                 || !self.request.additions.is_empty()
@@ -156,6 +152,10 @@ impl Screen {
                 if preview.next_indirect.is_some() {
                     rows.push(Row::MoreIndirect);
                 }
+            }
+            for key in selected {
+                rows.push(Row::Mapping(key.clone()));
+                rows.push(Row::Remove(key));
             }
             rows.push(Row::SelectMore);
             if !self.request.mappings.is_empty() {

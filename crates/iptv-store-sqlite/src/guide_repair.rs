@@ -1,7 +1,7 @@
 //! Atomic, affected-row-conditional guide configuration edits and durable inverses.
 //! Network and staged evidence validation belong to the runtime accepting a batch.
 mod verification;
-pub use verification::RepairVerification;
+pub use verification::{RepairBinding, RepairChannel, RepairInputs, RepairVerification};
 
 use std::collections::{HashMap, HashSet};
 
@@ -77,6 +77,8 @@ pub struct RepairCommit {
 pub enum RepairResult {
     Committed(RepairCommit),
     Conflict(Vec<String>),
+    SourceDisabled(SourceId),
+    PermissionDenied,
     Missing,
     Expired,
     Invalid,
@@ -412,6 +414,15 @@ impl Store {
         if incarnation.as_deref() != Some(&batch.source_incarnation) {
             return Ok(RepairResult::Conflict(vec!["source".into()]));
         }
+        let enabled: bool = tx.query_row(
+            "SELECT NOT EXISTS(SELECT 1 FROM source_policy
+            WHERE source_id=?1 AND enabled=0)",
+            [batch.source.0],
+            |r| r.get(0),
+        )?;
+        if !enabled {
+            return Ok(RepairResult::SourceDisabled(batch.source));
+        }
         let mut conflicts = Vec::new();
         let mut current = feeds(&tx, batch.source)?;
         let mut seen = HashSet::new();
@@ -454,8 +465,10 @@ impl Store {
                 params![batch.source.0, patch.channel.as_str()],
                 |r| r.get(0),
             )?;
+            if blocked {
+                return Ok(RepairResult::PermissionDenied);
+            }
             if !exists
-                || blocked
                 || overlay(&tx, batch.source, patch.channel.as_str())? != patch.before
                 || (patch.before.is_some()
                     && !patch.replace_explicit
@@ -479,7 +492,9 @@ impl Store {
                 SELECT 1 FROM epg_feed_channels c
                 JOIN epg_feeds f ON f.source_id=c.source_id AND f.feed_id=c.feed_id
                 JOIN guide_sources g ON g.source_id=f.source_id AND g.feed_id=f.feed_id
-                WHERE c.source_id=?1 AND c.feed_id=?2 AND c.epg_channel=?3
+                JOIN guide_feed_incarnations i ON i.source_id=g.source_id AND i.feed_id=g.feed_id
+                JOIN store_meta m ON m.key='inspection.feed.' || g.source_id || '.' || g.feed_id
+                WHERE m.value=i.incarnation AND c.source_id=?1 AND c.feed_id=?2 AND c.epg_channel=?3
                 AND g.enabled=1 AND g.url=f.url AND g.shift_minutes=f.shift_minutes)",
                     params![batch.source.0, candidate.feed.0, candidate.epg_channel],
                     |r| r.get(0),
@@ -647,6 +662,15 @@ impl Store {
         }
         let rows = payload["rows"].as_array().ok_or_else(invalid)?;
         let patches = payload["feeds"].as_array().ok_or_else(invalid)?;
+        let enabled: bool = tx.query_row(
+            "SELECT NOT EXISTS(SELECT 1 FROM source_policy
+            WHERE source_id=?1 AND enabled=0)",
+            [commit.source.0],
+            |r| r.get(0),
+        )?;
+        if !enabled {
+            return Ok(RepairResult::SourceDisabled(commit.source));
+        }
         let mut conflicts = Vec::new();
         let mut current = feeds(&tx, commit.source)?;
         let touched: HashSet<_> = rows.iter().filter_map(|r| r["channel"].as_str()).collect();

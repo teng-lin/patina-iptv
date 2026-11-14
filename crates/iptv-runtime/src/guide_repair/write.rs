@@ -32,15 +32,25 @@ pub(super) fn begin(phase: &Phase, child: &CancelToken, deadline: Instant) -> Re
     Ok(())
 }
 
+pub(super) struct Wait {
+    pub control: InspectionControl,
+    pub deadline: Instant,
+    pub id: String,
+    pub phase: Phase,
+    pub child: CancelToken,
+}
 pub(super) async fn wait(
     services: &Services,
-    control: InspectionControl,
-    deadline: Instant,
-    id: String,
-    phase: Phase,
-    child: CancelToken,
+    command: Wait,
     reply: impl Future<Output = iptv_store_sqlite::Result<Result<Commit>>> + Send + 'static,
 ) -> Result<Commit> {
+    let Wait {
+        control,
+        deadline,
+        id,
+        phase,
+        child,
+    } = command;
     let task = services.spawn(async move {
         let mut reply = pin!(reply);
         let mut cancelled = pin!(control.cancel.cancelled());

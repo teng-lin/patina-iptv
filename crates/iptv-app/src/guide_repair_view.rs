@@ -680,7 +680,11 @@ fn indirect(ui: Ui, size: Scale) -> impl IntoElement {
                                     format!(
                                         "{} → {}",
                                         v.before.as_ref().map(target).unwrap_or_default(),
-                                        v.after.as_ref().map(target).unwrap_or_default()
+                                        if v.availability_unknown {
+                                            tr("Availability is not verified").into()
+                                        } else {
+                                            v.after.as_ref().map(target).unwrap_or_default()
+                                        }
                                     )
                                 })
                                 .unwrap_or_default()
@@ -693,6 +697,16 @@ fn indirect(ui: Ui, size: Scale) -> impl IntoElement {
     )
 }
 fn rows(ui: Ui, size: Scale) -> impl IntoElement {
+    let list = element_ref();
+    let focused =
+        computed(move || state(ui, |s| s.rows().iter().position(|r| *r == s.focus)).flatten());
+    effect(move || {
+        if let Some(index) = focused.get()
+            && ui.keys_shown()
+        {
+            list.scroll_to_index(index as u32, percentage(0.5), px(0.0), false);
+        }
+    });
     virtual_list(
         move || state(ui, |s| s.rows().len()).unwrap_or(0),
         move |at| {
@@ -756,6 +770,7 @@ fn rows(ui: Ui, size: Scale) -> impl IntoElement {
         },
     )
     .estimated_item_size(move || size.px(ROW_TWO))
+    .element_ref(&list)
     .flex_1()
 }
 pub fn layer(ui: Ui) -> impl IntoElement {

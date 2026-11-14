@@ -528,11 +528,13 @@ fn an_inflight_deadline_reports_uncertainty_and_the_journal_reconciles_actual_co
     wait.recv_timeout(Duration::from_secs(2)).unwrap();
     let result = fixture.drive(write::wait(
         &services,
-        InspectionControl::default(),
-        Instant::now() + Duration::from_millis(30),
-        preview.id.clone(),
-        phase,
-        child,
+        write::Wait {
+            control: InspectionControl::default(),
+            deadline: Instant::now() + Duration::from_millis(30),
+            id: preview.id.clone(),
+            phase,
+            child,
+        },
         reply,
     ));
     *held.0.lock().unwrap() = true;
@@ -771,7 +773,8 @@ mod staged {
             plan.indirect
                 .iter()
                 .any(|effect| effect.channel.content.as_str() == "birch"
-                    && matches!(effect.after, Some(Target::Staged { .. })))
+                    && effect.availability_unknown
+                    && effect.after.is_none())
         );
         let saved = fixture.apply(&plan);
         let feeds = fixture.store().guide_sources(fixture.source).unwrap();
@@ -879,4 +882,208 @@ mod staged {
             Some(None)
         );
     }
+}
+
+#[test]
+fn abandoned_previews_evict_oldest_without_exhausting_the_owner_for_a_day() {
+    let fixture = Fixture::new();
+    let first = fixture.preview(fixture.request("amber", Target::NoGuide));
+    let mut newest = first.clone();
+    for _ in 0..40 {
+        newest = fixture.preview(fixture.request("amber", Target::NoGuide));
+    }
+    assert_eq!(fixture.owner.repairs.borrow().plans.len(), MAX_PLANS);
+    assert_eq!(
+        fixture
+            .owner
+            .guide_repair_plan(&first.id, first.digest, 0, 0, 20),
+        Err(Error::PlanMissing)
+    );
+    assert!(
+        fixture
+            .owner
+            .guide_repair_plan(&newest.id, newest.digest, 0, 0, 20)
+            .is_ok()
+    );
+    assert!(
+        fixture
+            .owner
+            .release_guide_repair_plan(&newest.id, newest.digest)
+            .unwrap()
+    );
+    assert!(
+        fixture
+            .store()
+            .epg_overrides(fixture.source)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn completed_repairs_release_previews_and_terminal_status_eviction_preserves_receipts() {
+    let fixture = Fixture::new();
+    let mut first = None;
+    for index in 0..130 {
+        let mut request = fixture.request(
+            "amber",
+            if index % 2 == 0 {
+                Target::NoGuide
+            } else {
+                Target::Automatic
+            },
+        );
+        request.mappings[0].replace_explicit = true;
+        let window = request.window;
+        let plan = fixture.preview(request);
+        let outcome = fixture.apply(&plan);
+        if first.is_none() {
+            first = Some(outcome.commit.clone());
+        }
+        fixture
+            .drive(fixture.owner.verify_guide_repair(
+                outcome.commit.id,
+                window,
+                InspectionControl::default(),
+            ))
+            .unwrap();
+        assert!(fixture.owner.repairs.borrow().plans.is_empty());
+        assert!(fixture.owner.repairs.borrow().operations.len() <= MAX_OPERATIONS);
+    }
+    assert_eq!(
+        fixture.owner.repairs.borrow().operations.len(),
+        MAX_OPERATIONS
+    );
+    let first = first.unwrap();
+    let recovered = fixture
+        .drive(fixture.owner.guide_repair_operation(first.id.clone()))
+        .unwrap();
+    assert_eq!(recovered.commit.revisions, first.revisions);
+}
+
+#[test]
+fn all_active_operation_capacity_refuses_new_commit_before_writer_mutation() {
+    let fixture = Fixture::new();
+    let mut sources = vec![fixture.source];
+    let mut store = fixture.store();
+    for index in 1..=MAX_OPERATIONS {
+        let source = store
+            .add_source(&Source {
+                name: format!("Synthetic pending source {index}"),
+                config: SourceConfig::M3u(M3uSourceConfig {
+                    location: SecretUrl::new(format!("https://synthetic.invalid/{index}.m3u")),
+                    user_agent: None,
+                    referrer: None,
+                }),
+            })
+            .unwrap();
+        store
+            .replace_catalog(source, &[], &channels(), &[], &[])
+            .unwrap();
+        sources.push(source);
+    }
+    drop(store);
+    for source in &sources[..MAX_OPERATIONS] {
+        let mut request = fixture.request("amber", Target::Automatic);
+        request.source = *source;
+        request.mappings[0].channel.source = *source;
+        let plan = fixture.preview(request);
+        fixture.apply(&plan);
+    }
+    let last = *sources.last().unwrap();
+    let mut request = fixture.request("amber", Target::NoGuide);
+    request.source = last;
+    request.mappings[0].channel.source = last;
+    let plan = fixture.preview(request);
+    assert_eq!(
+        fixture.drive(fixture.owner.apply_guide_repair(
+            plan.id.clone(),
+            plan.digest,
+            InspectionControl::default()
+        )),
+        Err(Error::Busy)
+    );
+    assert_eq!(
+        fixture.owner.repairs.borrow().operations.len(),
+        MAX_OPERATIONS
+    );
+    assert!(
+        fixture
+            .store()
+            .guide_repair_commit(&plan.id)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        fixture
+            .store()
+            .repair_mapping(last, &ContentId::from_stored("amber"))
+            .unwrap(),
+        Some(None)
+    );
+}
+
+#[test]
+fn changed_transport_or_disabled_policy_or_new_block_refuses_a_prepared_edit() {
+    let fixture = Fixture::new();
+    let plan = fixture.preview(fixture.request("amber", Target::NoGuide));
+    let mut source = fixture
+        .store()
+        .source(fixture.source)
+        .unwrap()
+        .unwrap()
+        .source;
+    if let SourceConfig::M3u(config) = &mut source.config {
+        config.user_agent = Some("Synthetic revised agent".into());
+    }
+    fixture
+        .store()
+        .update_source(fixture.source, &source)
+        .unwrap();
+    assert!(matches!(
+        fixture.drive(fixture.owner.apply_guide_repair(
+            plan.id,
+            plan.digest,
+            InspectionControl::default()
+        )),
+        Err(Error::Conflict(_))
+    ));
+    let plan = fixture.preview(fixture.request("amber", Target::NoGuide));
+    fixture
+        .store()
+        .set_source_policy(
+            fixture.source,
+            iptv_store_sqlite::SourcePolicy {
+                enabled: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        fixture.drive(fixture.owner.apply_guide_repair(
+            plan.id,
+            plan.digest,
+            InspectionControl::default()
+        )),
+        Err(Error::Inspection(InspectionError::SourceDisabled(
+            fixture.source
+        )))
+    );
+    fixture
+        .store()
+        .set_source_policy(fixture.source, Default::default())
+        .unwrap();
+    let plan = fixture.preview(fixture.request("amber", Target::NoGuide));
+    fixture
+        .store()
+        .set_blocked(fixture.source, &ContentId::from_stored("amber"), true)
+        .unwrap();
+    assert_eq!(
+        fixture.drive(fixture.owner.apply_guide_repair(
+            plan.id,
+            plan.digest,
+            InspectionControl::default()
+        )),
+        Err(Error::Inspection(InspectionError::PermissionDenied))
+    );
 }

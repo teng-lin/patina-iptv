@@ -32,6 +32,7 @@ struct StoredPlan {
     indirect: Vec<IndirectEffect>,
     batch: RepairBatch,
     epoch: u64,
+    admitted: Instant,
 }
 #[derive(Default)]
 pub(crate) struct State {
@@ -143,6 +144,8 @@ fn committed(value: RepairResult) -> Result<Commit> {
     match value {
         RepairResult::Committed(value) => Ok(commit(value)),
         RepairResult::Conflict(rows) => Err(Error::Conflict(rows)),
+        RepairResult::SourceDisabled(source) => Err(InspectionError::SourceDisabled(source).into()),
+        RepairResult::PermissionDenied => Err(InspectionError::PermissionDenied.into()),
         RepairResult::Missing => Err(Error::CommitMissing),
         RepairResult::Expired => Err(Error::PlanExpired),
         RepairResult::Invalid => Err(Error::InvalidRequest),
@@ -168,28 +171,32 @@ fn leases(owner: &Runtime, request: &Request) -> Result<Vec<ProbeLease>> {
         .map(|e| owner.lease_probe(e).map_err(Error::from))
         .collect()
 }
-fn validate_leases(leases: &[ProbeLease], plan: &StoredPlan) -> Result<()> {
+fn validate_leases(
+    leases: &[ProbeLease],
+    plan: &StoredPlan,
+    cancel: &CancelToken,
+    deadline: Instant,
+) -> Result<()> {
     for held in leases {
-        held.validate_alive()?;
-    }
-    for mapping in &plan.request.mappings {
-        if let Target::Staged {
-            evidence,
-            epg_channel,
-            ..
-        } = &mapping.target
-        {
-            let held = leases
-                .iter()
-                .find(|l| l.evidence() == evidence)
-                .ok_or(InspectionError::StaleEvidence)?;
-            held.validate_candidate(&CandidateRef {
-                source: plan.request.source,
-                feed: evidence.feed.unwrap_or(iptv_epg::FeedId(0)),
-                incarnation: evidence.incarnation.clone(),
-                epg_channel: epg_channel.clone(),
-            })?;
-        }
+        let chosen: Vec<_> = plan
+            .request
+            .mappings
+            .iter()
+            .filter_map(|mapping| match &mapping.target {
+                Target::Staged {
+                    evidence,
+                    epg_channel,
+                    ..
+                } if evidence == held.evidence() => Some(CandidateRef {
+                    source: plan.request.source,
+                    feed: evidence.feed.unwrap_or(iptv_epg::FeedId(0)),
+                    incarnation: evidence.incarnation.clone(),
+                    epg_channel: epg_channel.clone(),
+                }),
+                _ => None,
+            })
+            .collect();
+        held.validate_candidates_with_control(&chosen, cancel, deadline)?;
     }
     Ok(())
 }
@@ -231,12 +238,25 @@ impl Runtime {
         let held = leases(self, &request);
         let id = random_id();
         let created_at = now();
+        let deadline = Instant::now() + control.timeout.min(PREVIEW_DEADLINE);
+        let worker_cancel = CancelToken::new();
+        let child = worker_cancel.clone();
+        let guard = write::CancelOnDrop(worker_cancel);
         let prepared =
             crate::inspection::query_with_deadline(self, control, PREVIEW_DEADLINE, move |store| {
                 let result = match (held, id) {
                     (Ok(held), Ok(id)) => store.guide_repair_snapshot(|store| {
                         Ok(prepare::prepare(
-                            store, request, &held, epoch, id, created_at,
+                            store,
+                            request,
+                            &held,
+                            prepare::Preparation {
+                                epoch,
+                                id,
+                                created_at,
+                                cancel: &child,
+                                deadline,
+                            },
                         ))
                     })?,
                     (Err(error), _) | (_, Err(error)) => Err(error),
@@ -244,6 +264,7 @@ impl Runtime {
                 Ok(Ok(result))
             });
         async move {
+            let _guard = guard;
             let result = prepared.await??;
             if !services.is_current() {
                 return Err(InspectionError::OwnerClosed.into());
@@ -266,7 +287,7 @@ impl Runtime {
                     .plans
                     .iter()
                     .filter(|(id, _)| !state.applying.contains(*id))
-                    .min_by_key(|(id, plan)| (plan.preview.created_at, (*id).clone()))
+                    .min_by_key(|(_, plan)| plan.admitted)
                     .map(|(id, _)| id.clone());
                 if let Some(old) = old {
                     state.plans.remove(&old);
@@ -423,7 +444,7 @@ impl Runtime {
                 if Instant::now() >= deadline {
                     return Ok(Err(InspectionError::Deadline.into()));
                 }
-                if let Err(error) = validate_leases(&held, &worker_plan) {
+                if let Err(error) = validate_leases(&held, &worker_plan, &token, deadline) {
                     return Ok(Err(error));
                 }
                 if let Err(error) = write::begin(&writer_phase, &token, deadline) {
@@ -439,11 +460,13 @@ impl Runtime {
             });
             let saved = write::wait(
                 &services,
-                control,
-                deadline,
-                id.clone(),
-                phase,
-                child,
+                write::Wait {
+                    control,
+                    deadline,
+                    id: id.clone(),
+                    phase,
+                    child,
+                },
                 saved,
             )
             .await;
@@ -513,8 +536,18 @@ impl Runtime {
                 );
                 Ok(result)
             });
-            let saved =
-                write::wait(&services, control, deadline, result_id, phase, child, saved).await;
+            let saved = write::wait(
+                &services,
+                write::Wait {
+                    control,
+                    deadline,
+                    id: result_id,
+                    phase,
+                    child,
+                },
+                saved,
+            )
+            .await;
             cancelled.keep_check(&owner, source, owner.browser_generation(), now());
             let saved = saved?;
             Ok(publication::after_commit(&owner, saved, edit, cancelled.cancelled).await)
@@ -557,7 +590,14 @@ impl Runtime {
                 &owner,
                 remaining,
                 PREVIEW_DEADLINE,
-                move |store| Ok(Ok(store.guide_revisions(source)?)),
+                move |store| {
+                    Ok(Ok(store.guide_repair_snapshot(|store| {
+                        Ok((
+                            store.guide_revisions(source)?,
+                            store.guide_repair_coverage_revision(source, window.from, window.to)?,
+                        ))
+                    })?))
+                },
             )
             .await?;
             let examined = Revisions {
@@ -568,15 +608,21 @@ impl Runtime {
                 mapping: verified.commit.mapping_revision,
                 configuration: verified.commit.configuration_revision,
             };
+            let (current, current_evidence_revision) = current;
             let current = Revisions {
                 mapping: current.mapping,
                 configuration: current.configuration,
             };
-            let same = examined == current && examined == expected && services.is_current();
+            let same = examined == current
+                && examined == expected
+                && services.is_current()
+                && verified.evidence_revision == current_evidence_revision;
             let result = Verification {
                 commit: id.clone(),
                 source,
                 examined,
+                evidence_revision: verified.evidence_revision,
+                current_evidence_revision,
                 expected,
                 current,
                 window,

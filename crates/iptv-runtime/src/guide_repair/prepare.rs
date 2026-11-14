@@ -2,7 +2,7 @@
 use super::*;
 use iptv_epg::{ChannelKey, FeedId, MatchIndex, Overrides, PlaylistChannel, XmltvChannel};
 use iptv_store_sqlite::{
-    ChannelQuery, EpgOverride, GuideSource, RepairBatch, RepairCandidate, RepairChoice, RepairFeed,
+    EpgOverride, GuideSource, RepairBatch, RepairCandidate, RepairChoice, RepairFeed,
     RepairMapping, Store,
 };
 use sha2::{Digest, Sha256};
@@ -11,6 +11,16 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 fn storage<T>(result: iptv_store_sqlite::Result<T>) -> Result<T> {
     result.map_err(|_| Error::Storage)
 }
+fn check(cancel: &CancelToken, deadline: Instant) -> Result<()> {
+    if cancel.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    if Instant::now() >= deadline {
+        return Err(InspectionError::Deadline.into());
+    }
+    Ok(())
+}
+
 fn old_choice(value: Option<&EpgOverride>) -> Choice {
     match value {
         None => Choice::Automatic,
@@ -41,26 +51,24 @@ fn valid_candidate(store: &Store, key: &CandidateRef) -> Result<()> {
 }
 fn matched(
     index: &MatchIndex,
-    rows: &[iptv_store_sqlite::ChannelRow],
+    rows: &[iptv_store_sqlite::RepairChannel],
     overrides: &Overrides,
-) -> HashMap<ChannelKey, Vec<iptv_epg::EpgRef>> {
+) -> iptv_epg::MatchResult {
     let keys: Vec<_> = rows
         .iter()
-        .map(|r| ChannelKey::new(r.channel.id.as_str()))
+        .map(|r| ChannelKey::new(r.key.as_str()))
         .collect();
-    index
-        .match_channels(
-            rows.iter()
-                .zip(keys.iter())
-                .map(|(r, key)| PlaylistChannel {
-                    key,
-                    tvg_id: r.channel.epg_id.as_deref(),
-                    name: &r.channel.name,
-                    tvg_name: r.channel.epg_name.as_deref(),
-                }),
-            overrides,
-        )
-        .matches
+    index.match_channels(
+        rows.iter()
+            .zip(keys.iter())
+            .map(|(r, key)| PlaylistChannel {
+                key,
+                tvg_id: r.epg_id.as_deref(),
+                name: &r.provider_name,
+                tvg_name: r.epg_name.as_deref(),
+            }),
+        overrides,
+    )
 }
 fn index(config: &[GuideSource], channels: &HashMap<FeedId, Vec<XmltvChannel>>) -> MatchIndex {
     let mut index = MatchIndex::new();
@@ -72,18 +80,33 @@ fn index(config: &[GuideSource], channels: &HashMap<FeedId, Vec<XmltvChannel>>) 
     index
 }
 
+pub(super) struct Preparation<'a> {
+    pub epoch: u64,
+    pub id: String,
+    pub created_at: i64,
+    pub cancel: &'a CancelToken,
+    pub deadline: Instant,
+}
 pub(super) fn prepare(
     store: &Store,
     request: Request,
     leases: &[ProbeLease],
-    epoch: u64,
-    id: String,
-    created_at: i64,
+    context: Preparation<'_>,
 ) -> Result<StoredPlan> {
+    let Preparation {
+        epoch,
+        id,
+        created_at,
+        cancel,
+        deadline,
+    } = context;
     if !request.valid() {
         return Err(Error::InvalidRequest);
     }
     let source = request.source;
+    if storage(store.source(source))?.is_none() {
+        return Err(InspectionError::SourceMissing(source).into());
+    }
     let incarnation = storage(store.source_incarnation(source))?;
     if !storage(store.source_policy(source))?.enabled {
         return Err(InspectionError::SourceDisabled(source).into());
@@ -107,6 +130,32 @@ pub(super) fn prepare(
         }
         expires_at = expires_at.min(held.evidence().expires_at);
     }
+    let mut staged_channels = BTreeMap::new();
+    for held in leases {
+        check(cancel, deadline)?;
+        let chosen: Vec<_> = request
+            .mappings
+            .iter()
+            .filter_map(|mapping| match &mapping.target {
+                Target::Staged {
+                    evidence,
+                    epg_channel,
+                    ..
+                } if evidence == held.evidence() => Some(CandidateRef {
+                    source,
+                    feed: evidence.feed.unwrap_or(FeedId(0)),
+                    incarnation: evidence.incarnation.clone(),
+                    epg_channel: epg_channel.clone(),
+                }),
+                _ => None,
+            })
+            .collect();
+        held.validate_candidates_with_control(&chosen, cancel, deadline)?;
+        staged_channels.insert(
+            held.evidence().stage.clone(),
+            held.listed_channels_with_control(cancel, deadline)?,
+        );
+    }
     let configs = storage(store.guide_sources(source))?;
     let listed = storage(store.guide_channels(source))?;
     if listed.len() > 100_000 {
@@ -120,31 +169,43 @@ pub(super) fn prepare(
             icon: None,
         });
     }
+    let mut fresh_feeds = HashSet::new();
+    for config in &configs {
+        check(cancel, deadline)?;
+        if storage(store.inspection_stored_feed_incarnation(source, config.feed))?.is_some() {
+            fresh_feeds.insert(config.feed);
+        } else {
+            channels.remove(&config.feed);
+        }
+    }
+    let before_channels = channels.clone();
     // Staging supplies all display names and candidates, including entries the
     // normal filtered import did not retain programmes for.
     for held in leases {
         if let Some(feed) = held.evidence().feed {
-            channels.insert(feed, held.listed_channels()?);
+            channels.insert(feed, staged_channels[&held.evidence().stage].clone());
+            fresh_feeds.insert(feed);
         }
     }
-    let rows = storage(store.load_channels(
-        source,
-        &ChannelQuery {
-            include_hidden: true,
-            limit: Some(100_001),
-            ..Default::default()
-        },
-    ))?;
+    let inputs = storage(store.guide_repair_inputs(source))?;
+    let rows = inputs.channels;
+    let actual: HashMap<_, _> = inputs
+        .bindings
+        .into_iter()
+        .map(|binding| (binding.key.clone(), binding))
+        .collect();
+    let available: HashSet<_> = inputs.available.into_iter().collect();
     if rows.len() > 100_000 {
         return Err(InspectionError::LimitExceeded.into());
     }
-    let rows_by_id: HashMap<_, _> = rows
+    let rows_by_id: HashMap<_, _> = rows.iter().map(|row| (row.key.as_str(), row)).collect();
+    let before_overrides: Overrides = rows
         .iter()
-        .map(|row| (row.channel.id.as_str(), row))
-        .collect();
-    let before_overrides: Overrides = storage(store.epg_overrides(source))?
-        .into_iter()
-        .map(|(key, value)| (ChannelKey::new(key.as_str()), value.to_override()))
+        .filter_map(|row| {
+            row.epg_override
+                .as_ref()
+                .map(|value| (ChannelKey::new(row.key.as_str()), value.to_override()))
+        })
         .collect();
     let mut after_overrides = before_overrides.clone();
     let mut after_configs = configs.clone();
@@ -235,7 +296,7 @@ pub(super) fn prepare(
             enabled: true,
             shift_minutes: 0,
         };
-        channels.insert(temporary, held.listed_channels()?);
+        channels.insert(temporary, staged_channels[&held.evidence().stage].clone());
         staged_feeds.insert(temporary, (position, addition.evidence.clone()));
         after_configs.push(config.clone());
         additions.push(config);
@@ -255,6 +316,7 @@ pub(super) fn prepare(
     let mut candidates = Vec::new();
     let mut mapped = HashSet::new();
     for selected in &request.mappings {
+        check(cancel, deadline)?;
         if !mapped.insert(selected.channel.content.clone()) {
             return Err(Error::InvalidRequest);
         }
@@ -273,6 +335,11 @@ pub(super) fn prepare(
                     return Err(Error::InvalidRequest);
                 }
                 valid_candidate(store, key)?;
+                if storage(store.inspection_stored_feed_incarnation(source, key.feed))?.as_ref()
+                    != Some(&key.incarnation)
+                {
+                    return Err(InspectionError::StaleEvidence.into());
+                }
                 if !channels
                     .get(&key.feed)
                     .is_some_and(|list| list.iter().any(|c| c.id == key.epg_channel))
@@ -302,7 +369,12 @@ pub(super) fn prepare(
                     incarnation: evidence.incarnation.clone(),
                     epg_channel: epg_channel.clone(),
                 };
-                held.validate_candidate(&candidate)?;
+                if !staged_channels
+                    .get(&held.evidence().stage)
+                    .is_some_and(|rows| rows.iter().any(|row| row.id == candidate.epg_channel))
+                {
+                    return Err(InspectionError::StaleEvidence.into());
+                }
                 match (evidence.feed, addition) {
                     (Some(feed), None) => {
                         candidates.push(RepairCandidate {
@@ -377,8 +449,11 @@ pub(super) fn prepare(
             replace_explicit: selected.replace_explicit,
         });
     }
-    let before = matched(&index(&configs, &channels), &rows, &before_overrides);
+    let before = matched(&index(&configs, &before_channels), &rows, &before_overrides);
     let after = matched(&index(&after_configs, &channels), &rows, &after_overrides);
+    let ambiguous = before.report.ambiguous_name > 0 || after.report.ambiguous_name > 0;
+    let before = before.matches;
+    let after = after.matches;
     let mut incarnations = HashMap::new();
     for feed in &configs {
         incarnations.insert(
@@ -407,16 +482,69 @@ pub(super) fn prepare(
         }
     };
     let mut indirect = Vec::new();
+    let mut unknown = false;
     for row in &rows {
-        if mapped.contains(&row.channel.id) || row.blocked {
+        check(cancel, deadline)?;
+        if mapped.contains(&row.key) || row.blocked {
             continue;
         }
-        let key = ChannelKey::new(row.channel.id.as_str());
-        let old = before.get(&key).and_then(|c| c.first());
-        let new = after.get(&key).and_then(|c| c.first());
-        let timing_changed = old.is_some_and(|old| {
+        let key = ChannelKey::new(row.key.as_str());
+        let old_chain = before.get(&key).map(Vec::as_slice).unwrap_or(&[]);
+        let new_chain = after.get(&key).map(Vec::as_slice).unwrap_or(&[]);
+        let chain_changed = old_chain
+            .iter()
+            .map(|r| (r.source, &r.epg_id))
+            .collect::<Vec<_>>()
+            != new_chain
+                .iter()
+                .map(|r| (r.source, &r.epg_id))
+                .collect::<Vec<_>>();
+        let old = actual.get(&row.key);
+        let touches = |feed| {
             request.feeds.iter().any(|edit| {
-                edit.feed == old.source
+                edit.feed == feed
+                    && configs
+                        .iter()
+                        .find(|f| f.feed == feed)
+                        .is_some_and(|config| {
+                            edit.remove
+                                || edit.enabled.is_some_and(|v| v != config.enabled)
+                                || edit
+                                    .shift_minutes
+                                    .is_some_and(|v| v != config.shift_minutes)
+                        })
+            })
+        };
+        let affected = chain_changed
+            || old.is_some_and(|binding| touches(binding.candidate.source))
+            || old_chain
+                .iter()
+                .chain(new_chain)
+                .any(|candidate| touches(candidate.source));
+        if !affected {
+            continue;
+        }
+        let first = new_chain.first();
+        let proven = first.is_some_and(|candidate| {
+            available.contains(&(candidate.source, candidate.epg_id.clone()))
+                && !touches(candidate.source)
+                && !leases
+                    .iter()
+                    .any(|held| held.evidence().feed == Some(candidate.source))
+        });
+        let availability_unknown = first.is_some() && !proven;
+        unknown |= availability_unknown;
+        let before = old.map(|binding| {
+            Target::Configured(CandidateRef {
+                source,
+                feed: binding.candidate.source,
+                incarnation: binding.incarnation.clone().unwrap_or_default(),
+                epg_channel: binding.candidate.epg_id.clone(),
+            })
+        });
+        let timing_changed = old.is_some_and(|binding| {
+            request.feeds.iter().any(|edit| {
+                edit.feed == binding.candidate.source
                     && edit.shift_minutes.is_some_and(|shift| {
                         configs
                             .iter()
@@ -425,25 +553,24 @@ pub(super) fn prepare(
                     })
             })
         });
-        if old.map(|r| (r.source, &r.epg_id)) != new.map(|r| (r.source, &r.epg_id))
-            || timing_changed
-        {
-            indirect.push(IndirectEffect {
-                channel: ChannelRef {
-                    source,
-                    content: row.channel.id.clone(),
-                },
-                name: row.name.clone(),
-                before: old.map(target),
-                after: new.map(target),
-                timing_changed,
-            });
-        }
+        indirect.push(IndirectEffect {
+            channel: ChannelRef {
+                source,
+                content: row.key.clone(),
+            },
+            name: row.name.clone(),
+            before,
+            after: if proven { first.map(target) } else { None },
+            timing_changed,
+            availability_unknown,
+        });
     }
     let indirect_complete = configs
         .iter()
         .filter(|f| f.enabled)
-        .all(|f| channels.get(&f.feed).is_some_and(|rows| !rows.is_empty()));
+        .all(|f| fresh_feeds.contains(&f.feed))
+        && !ambiguous
+        && !unknown;
     let mut hash = Sha256::new();
     hash.update(id.as_bytes());
     hash.update(epoch.to_le_bytes());
@@ -478,6 +605,7 @@ pub(super) fn prepare(
         order,
     };
     Ok(StoredPlan {
+        admitted: Instant::now(),
         request,
         preview,
         rows: previews,

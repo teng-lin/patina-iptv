@@ -105,6 +105,8 @@ pub struct IndirectEffect {
     pub after: Option<Target>,
     /// Schedule shifts and feed changes can affect a binding that retains identity.
     pub timing_changed: bool,
+    /// Metadata predicts candidates; programme availability may change the effective winner.
+    pub availability_unknown: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Preview {
@@ -181,6 +183,8 @@ pub struct Verification {
     pub commit: String,
     pub source: SourceId,
     pub examined: Revisions,
+    pub evidence_revision: String,
+    pub current_evidence_revision: String,
     pub expected: Revisions,
     pub current: Revisions,
     pub window: TimeWindow,

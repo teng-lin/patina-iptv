@@ -24,6 +24,22 @@ fn rebind(
     if config_changed || choices.iter().any(|(_, choice)| choice.is_none()) {
         return Ok(None);
     }
+    for (_, choice) in &choices {
+        if let Some(value @ EpgOverride::Xmltv { .. }) = choice {
+            let Some(feed) = value.feed() else {
+                return Ok(None);
+            };
+            if store
+                .inspection_stored_feed_incarnation(commit.source, feed)?
+                .is_none()
+            {
+                return Ok(None);
+            }
+        }
+    }
+    let cached = store
+        .epg_guide(commit.source)?
+        .is_some_and(|guide| guide.replaced_at.is_some());
     let (groups, channels) = stored::catalog_in(store, commit.source)?;
     let overrides = store
         .epg_overrides(commit.source)?
@@ -38,6 +54,7 @@ fn rebind(
     let mut all = true;
     for (channel, choice) in choices {
         let selected = match &choice {
+            Some(EpgOverride::Disabled) if !cached => continue,
             Some(EpgOverride::Disabled) => None,
             Some(value @ EpgOverride::Xmltv { epg_channel, .. }) => {
                 value.feed().map(|feed| (feed, epg_channel.as_str()))

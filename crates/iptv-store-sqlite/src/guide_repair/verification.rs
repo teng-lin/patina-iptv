@@ -11,6 +11,7 @@ pub struct RepairVerification {
     pub covered_seconds: u64,
     pub configuration_effective: bool,
     pub authorized: bool,
+    pub evidence_revision: String,
 }
 impl Store {
     /// Consistent read snapshot for preview preparation on the analysis lane.
@@ -44,10 +45,22 @@ impl Store {
             SELECT 1 FROM guide_sources g LEFT JOIN epg_feeds f
             ON f.source_id=g.source_id AND f.feed_id=g.feed_id
             WHERE g.source_id=?1 AND g.enabled=1 AND
-            (f.feed_id IS NULL OR g.url IS NOT f.url OR g.shift_minutes IS NOT f.shift_minutes))",
+            (f.feed_id IS NULL OR g.url IS NOT f.url OR g.shift_minutes IS NOT f.shift_minutes
+             OR NOT EXISTS(SELECT 1 FROM store_meta m JOIN guide_feed_incarnations i
+             ON i.source_id=g.source_id AND i.feed_id=g.feed_id
+             WHERE m.key='inspection.feed.' || g.source_id || '.' || g.feed_id AND m.value=i.incarnation)))",
             [commit.source.0],
             |r| r.get(0),
         )?;
+        let bindings_current:bool=tx.query_row("SELECT NOT EXISTS(SELECT 1 FROM epg_bindings b
+            JOIN epg_channels c ON c.id=b.epg_channel_id
+            LEFT JOIN guide_sources g ON g.source_id=c.source_id AND g.feed_id=c.feed_id
+            LEFT JOIN epg_feeds f ON f.source_id=c.source_id AND f.feed_id=c.feed_id
+            LEFT JOIN guide_feed_incarnations i ON i.source_id=c.source_id AND i.feed_id=c.feed_id
+            LEFT JOIN store_meta m ON m.key='inspection.feed.' || c.source_id || '.' || c.feed_id
+            WHERE b.source_id=?1 AND (g.feed_id IS NULL OR g.enabled=0
+            OR f.url IS NOT g.url OR f.shift_minutes IS NOT g.shift_minutes OR m.value IS NOT i.incarnation))",
+            [commit.source.0],|r|r.get(0))?;
         let mut totals = tx.prepare_cached(
             "SELECT COUNT(*),COALESCE(SUM(
             MAX(0,MIN(stop,?3)-MAX(start,?2))),0) FROM epg_programmes
@@ -56,6 +69,9 @@ impl Store {
         let mut binding = tx.prepare_cached(
             "SELECT c.id,c.feed_id,c.epg_channel,b.match_kind,
             f.url IS g.url AND f.shift_minutes IS g.shift_minutes AND g.enabled=1
+            AND EXISTS(SELECT 1 FROM store_meta m JOIN guide_feed_incarnations i
+             ON i.source_id=g.source_id AND i.feed_id=g.feed_id
+             WHERE m.key='inspection.feed.' || g.source_id || '.' || g.feed_id AND m.value=i.incarnation)
             FROM epg_bindings b JOIN epg_channels c ON c.id=b.epg_channel_id
             JOIN epg_feeds f ON f.source_id=c.source_id AND f.feed_id=c.feed_id
             LEFT JOIN guide_sources g ON g.source_id=c.source_id AND g.feed_id=c.feed_id
@@ -131,8 +147,9 @@ impl Store {
         // Feed-only repairs have indirect effects; certify inputs, not invented
         // programme availability for channels never selected in the batch.
         if rows.is_empty() {
-            effective &= inputs_current;
+            effective &= inputs_current && bindings_current;
         }
+        let evidence_revision = self.guide_repair_coverage_revision(commit.source, from, to)?;
         let result = RepairVerification {
             commit,
             examined_mapping,
@@ -142,6 +159,7 @@ impl Store {
             covered_seconds: covered,
             configuration_effective: effective,
             authorized,
+            evidence_revision,
         };
         drop(binding);
         drop(totals);
@@ -207,5 +225,131 @@ impl Store {
             Some(_) => RepairResult::Invalid,
             None => RepairResult::Missing,
         })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RepairChannel {
+    pub key: ContentId,
+    pub name: String,
+    pub provider_name: String,
+    pub epg_id: Option<String>,
+    pub epg_name: Option<String>,
+    pub blocked: bool,
+    pub epg_override: Option<EpgOverride>,
+}
+#[derive(Clone, Debug)]
+pub struct RepairBinding {
+    pub key: ContentId,
+    pub candidate: iptv_epg::EpgRef,
+    pub incarnation: Option<String>,
+}
+pub struct RepairInputs {
+    pub channels: Vec<RepairChannel>,
+    pub bindings: Vec<RepairBinding>,
+    pub available: Vec<(iptv_epg::FeedId, String)>,
+}
+impl Store {
+    /// Only matching metadata: stream URLs, headers, logos and large membership
+    /// arrays never enter the repair analysis snapshot.
+    pub fn guide_repair_inputs(&self, source: SourceId) -> Result<RepairInputs> {
+        let mut statement = self.conn.prepare_cached(
+            "SELECT c.id,COALESCE(o.custom_name,c.name),
+            c.name,c.epg_id,c.epg_name,COALESCE(o.blocked,0),o.epg_mode,o.epg_source,o.epg_channel
+            FROM channels c LEFT JOIN channel_overlays o
+            ON o.source_id=c.source_id AND o.channel_id=c.id
+            WHERE c.source_id=?1 ORDER BY c.id LIMIT 100001",
+        )?;
+        let channels = statement
+            .query_map([source.0], |r| {
+                Ok(RepairChannel {
+                    key: ContentId::from_stored(r.get::<_, String>(0)?),
+                    name: r.get(1)?,
+                    provider_name: r.get(2)?,
+                    epg_id: r.get(3)?,
+                    epg_name: r.get(4)?,
+                    blocked: r.get(5)?,
+                    epg_override: EpgOverride::from_columns(r.get(6)?, r.get(7)?, r.get(8)?),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut statement = self.conn.prepare_cached(
+            "SELECT b.channel_key,c.feed_id,c.epg_channel,
+            b.match_kind,m.value FROM epg_bindings b JOIN epg_channels c ON c.id=b.epg_channel_id
+            LEFT JOIN store_meta m ON m.key='inspection.feed.' || c.source_id || '.' || c.feed_id
+            WHERE b.source_id=?1 ORDER BY b.channel_key LIMIT 100001",
+        )?;
+        let bindings = statement
+            .query_map([source.0], |r| {
+                Ok(RepairBinding {
+                    key: ContentId::from_stored(r.get::<_, String>(0)?),
+                    candidate: iptv_epg::EpgRef {
+                        source: iptv_epg::FeedId(r.get(1)?),
+                        epg_id: r.get(2)?,
+                        kind: crate::epg::kind_from(&r.get::<_, String>(3)?),
+                    },
+                    incarnation: r.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut statement = self.conn.prepare_cached(
+            "SELECT c.feed_id,c.epg_channel FROM epg_channels c
+            JOIN guide_sources g ON g.source_id=c.source_id AND g.feed_id=c.feed_id
+            JOIN epg_feeds f ON f.source_id=c.source_id AND f.feed_id=c.feed_id
+            JOIN guide_feed_incarnations i ON i.source_id=g.source_id AND i.feed_id=g.feed_id
+            JOIN store_meta m ON m.key='inspection.feed.' || g.source_id || '.' || g.feed_id
+            WHERE c.source_id=?1 AND m.value=i.incarnation AND f.url=g.url
+            AND f.shift_minutes=g.shift_minutes AND g.enabled=1
+            AND EXISTS(SELECT 1 FROM epg_programmes p WHERE p.channel_id=c.id) LIMIT 100001",
+        )?;
+        let available = statement
+            .query_map([source.0], |r| Ok((iptv_epg::FeedId(r.get(0)?), r.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(RepairInputs {
+            channels,
+            bindings,
+            available,
+        })
+    }
+}
+
+impl Store {
+    /// Semantic programme/binding evidence, stable across physical no-op imports.
+    /// Hash rows incrementally on the bounded analysis connection; no row IDs.
+    pub fn guide_repair_coverage_revision(
+        &self,
+        source: SourceId,
+        from: i64,
+        to: i64,
+    ) -> Result<String> {
+        use sha2::{Digest, Sha256};
+        let mut digest = Sha256::new();
+        digest.update(self.source_incarnation(source)?.as_bytes());
+        let mut statement=self.conn.prepare_cached("SELECT b.channel_key,c.feed_id,c.epg_channel,
+            m.value,p.start,p.stop,p.title FROM epg_bindings b
+            JOIN epg_channels c ON c.id=b.epg_channel_id
+            LEFT JOIN store_meta m ON m.key='inspection.feed.' || c.source_id || '.' || c.feed_id
+            LEFT JOIN epg_programmes p ON p.channel_id=c.id AND p.start<?3 AND p.stop>?2
+            WHERE b.source_id=?1 ORDER BY b.channel_key,c.feed_id,c.epg_channel,p.start,p.stop,p.title")?;
+        let mut rows = statement.query(params![source.0, from, to])?;
+        while let Some(row) = rows.next()? {
+            for column in 0..7 {
+                use rusqlite::types::ValueRef;
+                match row.get_ref(column)? {
+                    ValueRef::Null => digest.update([0]),
+                    ValueRef::Integer(value) => {
+                        digest.update([1]);
+                        digest.update(value.to_le_bytes());
+                    }
+                    ValueRef::Text(value) => {
+                        digest.update([2]);
+                        digest.update((value.len() as u64).to_le_bytes());
+                        digest.update(value);
+                    }
+                    _ => return Err(invalid()),
+                }
+            }
+        }
+        Ok(format!("{:x}", digest.finalize()))
     }
 }
