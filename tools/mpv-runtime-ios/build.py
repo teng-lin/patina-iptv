@@ -97,7 +97,9 @@ def compile_probe(work, destination, replacement=None):
     slice_name = "ios-arm64_x86_64-simulator"
     include = work / "probe-include"
     include.mkdir(exist_ok=True)
-    headers = work / "mpvkit/Libmpv.xcframework" / slice_name / "Libmpv.framework/Headers"
+    headers = work / "mpvkit/Libmpv.xcframework" / slice_name / "Libmpv.framework/Headers/mpv"
+    if not (headers / "client.h").is_file():
+        raise ValueError("The pinned MPVKit client headers are missing")
     link = include / "mpv"
     if not link.exists():
         link.symlink_to(headers, target_is_directory=True)
