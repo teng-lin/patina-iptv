@@ -324,14 +324,22 @@ assert_resume "$before_refresh" "playback refresh"
 if applog | grep -E 'iptv player 0 (open:|error)' >/dev/null; then
   fail "refresh reopened or failed the playing stream"
 fi
-keys KEYCODE_BACK KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT
+# Closing the playlist screen runs as an app task. Later keys must wait
+# for that effect, rather than landing on the screen being closed.
+keys KEYCODE_BACK
+expect 'iptv playlists: close' 10
+keys KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT
 pause 1
 shot 09-refreshed
 
 step "kill and reopen after a change"
 mark
-# Focus movement alone is not persisted: select a different channel to play.
-keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
+# Confirm the guide owns navigation before selecting another channel. A
+# fixture EOF reconnect is not evidence that this selection happened.
+keys KEYCODE_DPAD_DOWN
+expect 'key=down .*ctx=Guide' 10
+keys KEYCODE_DPAD_CENTER
+expect 'key=ok .*ctx=Guide' 10
 expect 'iptv player 0 open:' 30
 expect 'iptv player 0 state: ready' 60
 changed_identity=

@@ -513,6 +513,16 @@ fn detail(ui: Ui, row: &Row) -> String {
 }
 pub fn layer(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
+    let rows = element_ref();
+    let focused =
+        computed(move || state(ui, |s| s.rows().iter().position(|row| *row == s.focus)).flatten());
+    effect(move || {
+        if ui.keys_shown()
+            && let Some(index) = focused.get()
+        {
+            rows.scroll_to_index(index as u32, percentage(0.5), px(0.0), false);
+        }
+    });
     let field = element_ref();
     effect(move || {
         if state(ui, |s| s.typing).unwrap_or(false) {
@@ -709,6 +719,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                 })
                         },
                     )
+                    .element_ref(&rows)
                     .estimated_item_size(move || size.px(ROW_TWO))
                     .flex_1(),
                 )

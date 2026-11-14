@@ -168,6 +168,34 @@ fn inspect_offscreen_source_and_unmatched_samples_without_changing_saved_choices
     for _ in 0..3 {
         t.key("down");
     }
+    // Focused actions must actually be mounted inside the list viewport;
+    // activating an offscreen row by its retained identity alone is not enough.
+    let nodes = t.app.screen().layout_nodes();
+    let next = nodes
+        .iter()
+        .find(|node| {
+            !node.hidden
+                && node
+                    .text
+                    .as_ref()
+                    .is_some_and(|text| text.text.text == "Next")
+        })
+        .expect("keyboard focus reveals the Next row");
+    let mut parent = next.parent;
+    let viewport = loop {
+        let node = nodes.iter().find(|node| node.id == parent).unwrap();
+        if node.scroll.is_some() {
+            break node.bounds;
+        }
+        assert_ne!(node.parent, parent, "Next belongs to a scrolling list");
+        parent = node.parent;
+    };
+    assert!(
+        next.bounds.origin.y.0 >= viewport.origin.y.0
+            && next.bounds.origin.y.0 + next.bounds.size.height.0
+                <= viewport.origin.y.0 + viewport.size.height.0,
+        "the focused Next row is visible inside its viewport"
+    );
     t.key("return");
     t.wait("text:Synthetic Extra 050", 10);
     assert!(!t.shows("text:Guide evidence changed; inspect again"));
