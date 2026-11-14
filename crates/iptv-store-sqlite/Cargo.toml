@@ -13,10 +13,11 @@ iptv-sqlcipher-init.workspace = true
 iptv-providers.workspace = true
 iptv-epg.workspace = true
 iptv-import.workspace = true
-rusqlite = { workspace = true, features = ["backup"] }
+rusqlite = { workspace = true, features = ["backup", "hooks"] }
 serde_json.workspace = true
 
 zeroize = "1.8"
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile.workspace = true

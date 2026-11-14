@@ -1,0 +1,218 @@
+//! Guide inspection screen state. Focus and reply ownership use content identity.
+use crate::{SourceId, inspection::*};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    Audit,
+    Candidates,
+    ProbeCandidates,
+    Samples,
+    Link,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Row {
+    Search,
+    Channel(ChannelRef),
+    Candidate(CandidateRef),
+    Next,
+    NewLink,
+    InspectLink,
+    Back,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ParentPage {
+    mode: Mode,
+    next: Option<Cursor>,
+    focus: Row,
+    query: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Screen {
+    pub source: SourceId,
+    pub window: TimeWindow,
+    pub mode: Mode,
+    pub samples_back: Mode,
+    pub focus: Row,
+    pub request: u64,
+    pub busy: bool,
+    pub typing: bool,
+    pub error: Option<InspectionError>,
+    pub query: String,
+    pub link: String,
+    pub audit: Vec<Coverage>,
+    pub candidates: Vec<Candidate>,
+    pub samples: Vec<CandidateProgramme>,
+    pub current: Vec<ProgrammeInfo>,
+    pub subject: Option<ChannelRef>,
+    pub stage: Option<ProbeSummary>,
+    pub next: Option<Cursor>,
+    parents: Vec<ParentPage>,
+}
+impl Screen {
+    pub fn new(source: SourceId, window: TimeWindow) -> Self {
+        Self {
+            source,
+            window,
+            mode: Mode::Audit,
+            samples_back: Mode::Candidates,
+            focus: Row::Search,
+            request: 0,
+            busy: false,
+            typing: false,
+            error: None,
+            query: String::new(),
+            link: String::new(),
+            audit: Vec::new(),
+            candidates: Vec::new(),
+            samples: Vec::new(),
+            current: Vec::new(),
+            subject: None,
+            stage: None,
+            next: None,
+            parents: Vec::new(),
+        }
+    }
+    pub fn enter(&mut self, mode: Mode) {
+        self.parents.push(ParentPage {
+            mode: self.mode,
+            next: self.next.take(),
+            focus: self.focus.clone(),
+            query: self.query.clone(),
+        });
+        self.mode = mode;
+        self.restore_focus();
+    }
+    pub fn begin(&mut self) -> u64 {
+        self.request += 1;
+        self.busy = true;
+        self.error = None;
+        self.request
+    }
+    pub fn finish(&mut self, request: u64) -> bool {
+        if self.request != request {
+            return false;
+        }
+        self.busy = false;
+        true
+    }
+    pub fn rows(&self) -> Vec<Row> {
+        let mut rows = match self.mode {
+            Mode::Audit => self
+                .audit
+                .iter()
+                .map(|r| Row::Channel(r.channel.key.clone()))
+                .collect(),
+            Mode::Candidates | Mode::ProbeCandidates => self
+                .candidates
+                .iter()
+                .map(|c| Row::Candidate(c.key.clone()))
+                .collect(),
+            Mode::Link => vec![Row::InspectLink],
+            Mode::Samples => Vec::new(),
+        };
+        if matches!(
+            self.mode,
+            Mode::Audit | Mode::Candidates | Mode::ProbeCandidates
+        ) {
+            rows.insert(0, Row::Search);
+        }
+        if self.next.is_some() {
+            rows.push(Row::Next);
+        }
+        if self.mode == Mode::Audit {
+            rows.push(Row::NewLink);
+        }
+        rows.push(Row::Back);
+        rows
+    }
+    pub fn restore_focus(&mut self) {
+        let rows = self.rows();
+        if !rows.contains(&self.focus) {
+            self.focus = rows.first().cloned().unwrap_or(Row::Back);
+        }
+    }
+    pub fn move_focus(&mut self, delta: isize) {
+        let rows = self.rows();
+        let at = rows.iter().position(|r| *r == self.focus).unwrap_or(0);
+        self.focus = rows[at.saturating_add_signed(delta).min(rows.len() - 1)].clone();
+    }
+    pub fn back(&mut self) -> bool {
+        self.request += 1;
+        self.busy = false;
+        self.error = None;
+        if let Some(parent) = self.parents.pop() {
+            self.mode = parent.mode;
+            self.next = parent.next;
+            self.focus = parent.focus;
+            self.query = parent.query;
+        } else {
+            if self.mode == Mode::Audit {
+                return false;
+            }
+            self.mode = Mode::Audit;
+            self.next = None;
+        }
+        self.restore_focus();
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn late_replies_and_reordering_cannot_move_identity_focus() {
+        let mut screen = Screen::new(SourceId(1), TimeWindow { from: 1, to: 2 });
+        let first = screen.begin();
+        let second = screen.begin();
+        assert!(!screen.finish(first));
+        assert!(screen.finish(second));
+        screen.mode = Mode::Candidates;
+        let key = CandidateRef {
+            source: SourceId(1),
+            feed: iptv_epg::FeedId(2),
+            incarnation: "generated".into(),
+            epg_channel: "amber".into(),
+        };
+        screen.candidates.push(Candidate {
+            key: key.clone(),
+            name: None,
+            names: Vec::new(),
+            metadata: Vec::new(),
+            assigned: false,
+            evidence: Vec::new(),
+            binding: None,
+        });
+        screen.focus = Row::Candidate(key.clone());
+        screen.candidates.reverse();
+        screen.restore_focus();
+        assert_eq!(screen.focus, Row::Candidate(key));
+        let pending = screen.begin();
+        assert!(screen.back());
+        assert!(!screen.finish(pending));
+    }
+    #[test]
+    fn returning_from_samples_restores_each_parent_page_cursor_and_filter() {
+        let mut screen = Screen::new(SourceId(1), TimeWindow { from: 1, to: 2 });
+        let cursor = |value: &str| Cursor {
+            context: value.into(),
+            snapshot: value.into(),
+            after: vec![value.into()],
+        };
+        screen.next = Some(cursor("audit"));
+        screen.query = "Amber".into();
+        screen.enter(Mode::Candidates);
+        screen.next = Some(cursor("candidates"));
+        screen.query = "East".into();
+        screen.enter(Mode::Samples);
+        assert!(screen.next.is_none());
+        assert!(screen.back());
+        assert_eq!(screen.mode, Mode::Candidates);
+        assert_eq!(screen.next, Some(cursor("candidates")));
+        assert_eq!(screen.query, "East");
+        assert!(screen.back());
+        assert_eq!(screen.mode, Mode::Audit);
+        assert_eq!(screen.next, Some(cursor("audit")));
+        assert_eq!(screen.query, "Amber");
+    }
+}

@@ -132,6 +132,7 @@ fn cancel(ui: Ui) {
 /// Carries out `effect` of the screen of `playlist`.
 fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
     match effect {
+        Effect::Inspect => crate::guide_inspect_view::open(ui, playlist),
         Effect::Edit(edit) => {
             log::info!("iptv guide sources of {}: {}", playlist.0, edit_name(&edit));
             crate::data::spawn_in_app(async move {
@@ -341,12 +342,16 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
         (Some(l), _) => format!("{}.  {}", index + 1, words::title(&l.source)),
         (None, Some(Item::Add)) => tr("+ Add a guide source").to_owned(),
         (None, Some(Item::Update)) => tr("Update the guide now").to_owned(),
+        (None, Some(Item::Inspect)) => tr("Inspect guide coverage").to_owned(),
         _ => String::new(),
     };
     let summary = move || match (line(), item()) {
         (Some(l), _) => words::origin(&l.source),
         (None, Some(Item::Add)) => tr("An XMLTV link (.xml or .xml.gz)").to_owned(),
         (None, Some(Item::Update)) => tr("Downloads every source switched on").to_owned(),
+        (None, Some(Item::Inspect)) => {
+            tr("Compare guide channels and programme samples").to_owned()
+        }
         _ => String::new(),
     };
     let status = move || match (line(), item(), playlist()) {

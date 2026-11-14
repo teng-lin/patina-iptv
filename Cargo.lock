@@ -2228,6 +2228,7 @@ dependencies = [
  "nsh-platform-macos",
  "nsh-platform-windows",
  "nsh-testing",
+ "objc2-foundation",
  "rusqlite",
  "serde_json",
  "sys-locale",
@@ -2370,6 +2371,7 @@ dependencies = [
  "log",
  "rusqlite",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
 ]
@@ -2410,6 +2412,7 @@ dependencies = [
  "iptv-sqlcipher-init",
  "rusqlite",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "zeroize",

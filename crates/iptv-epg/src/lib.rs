@@ -29,7 +29,9 @@ mod parser;
 mod settle;
 mod settled_source;
 mod store;
+mod strict;
 mod superscript;
+pub use strict::{StrictError, StrictXmltvParser};
 mod time;
 mod xmltv;
 

@@ -211,6 +211,45 @@ impl XmltvParser {
         Ok(self.stats)
     }
 
+    /// Accept UTF-8 already produced and bounded by the strict parser's decoder.
+    /// Re-reading the original XML encoding declaration would decode it twice.
+    pub(crate) fn feed_decoded(
+        &mut self,
+        bytes: &[u8],
+        sink: &mut impl FnMut(XmltvItem),
+    ) -> Result<(), DecodeError> {
+        self.check_limits()?;
+        if self.done {
+            return Ok(());
+        }
+        self.stats.bytes_in = self.stats.bytes_in.saturating_add(bytes.len() as u64);
+        LimitExceeded::check(
+            LimitKind::InputBytes,
+            self.stats.bytes_in,
+            self.opts.limits.input_bytes,
+        )
+        .map_err(DecodeError::Limit)?;
+        for piece in bytes.chunks(PLAIN_SLICE) {
+            self.buf.extend_from_slice(piece);
+            self.process(false, sink);
+            self.check_limits()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn finish_decoded(
+        &mut self,
+        sink: &mut impl FnMut(XmltvItem),
+    ) -> Result<ParseStats, DecodeError> {
+        self.check_limits()?;
+        if !self.done {
+            self.done = true;
+            self.process(true, sink);
+            self.check_limits()?;
+        }
+        Ok(self.stats)
+    }
+
     fn drain_decoder(&mut self) -> Result<bool, DecodeError> {
         match self.decoder.drain(&mut self.buf) {
             Ok(more) => Ok(more),

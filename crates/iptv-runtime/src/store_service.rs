@@ -80,6 +80,7 @@ pub(crate) struct Service {
     ports: crate::Ports,
     writer: Lane,
     reader: Lane,
+    analysis: Lane,
     epochs: Epochs,
     executor: super::executor::Executor,
     files: super::file_writer::Files,
@@ -102,6 +103,10 @@ impl Service {
             },
             reader: Lane {
                 name: "iptv-store-read",
+                jobs: OnceLock::new(),
+            },
+            analysis: Lane {
+                name: "iptv-store-analysis",
                 jobs: OnceLock::new(),
             },
             epochs: Epochs::default(),
@@ -167,10 +172,16 @@ impl Service {
     /// Root teardown only, after the favourites writer has submitted its last
     /// work. Accepted requests already belong to their workers, independent
     /// of UI futures.
+    #[cfg(test)]
     pub(crate) fn drain_on_shutdown(self: &Arc<Self>) -> bool {
+        self.drain_on_shutdown_with(|| {})
+    }
+
+    pub(crate) fn drain_on_shutdown_with(self: &Arc<Self>, after_writer: impl FnOnce()) -> bool {
         let epoch = self.epochs.active.load(Ordering::SeqCst);
         if self.writer.jobs.get().is_none() {
             self.epochs.close(epoch);
+            after_writer();
             return true;
         }
         let limit = std::time::Duration::from_secs(10);
@@ -185,10 +196,15 @@ impl Service {
             // FIFO barrier still retires the connection held by preceding work.
             *connection = Connection::default();
         });
+        // Queued writes have acknowledged before transient read/probe cancellation.
+        after_writer();
         let reader = self.reader.barrier(limit, |connection| {
             *connection = Connection::default();
         });
-        writer && reader
+        let analysis = self.analysis.barrier(limit, |connection| {
+            *connection = Connection::default();
+        });
+        writer && reader && analysis
     }
 }
 
@@ -206,6 +222,10 @@ fn stale() -> StoreError {
 }
 
 impl Services {
+    pub(crate) fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
     fn affinity(&self) -> Result<u64, StoreError> {
         if self.service.epochs.permits(self.epoch) {
             Ok(self.epoch)
@@ -343,6 +363,37 @@ impl Services {
             let owner = self.service.clone();
             self.service.reader.queue(Box::new(move |connection| {
                 let _ = sender.send(owner.read(epoch, connection, operation));
+            }))
+        });
+        async move {
+            queued?;
+            receiver
+                .await
+                .map_err(|_| StoreError::Unavailable("store reply lost"))?
+        }
+    }
+
+    /// Bounded inspection uses its own lazy query-only lane so a scan cannot
+    /// queue guide-page reads behind itself.
+    pub(crate) fn analyze<R, F>(
+        &self,
+        operation: F,
+    ) -> impl Future<Output = Result<R, StoreError>> + use<R, F>
+    where
+        R: Send + 'static,
+        F: FnOnce(&mut Store) -> Result<R, StoreError> + Send + 'static,
+    {
+        let (sender, receiver) = oneshot::channel();
+        let queued = self.affinity().and_then(|epoch| {
+            let owner = self.service.clone();
+            self.service.analysis.queue(Box::new(move |connection| {
+                let _ = sender.send(with_epoch(
+                    &owner.epochs,
+                    epoch,
+                    connection,
+                    || owner.open_reader(epoch),
+                    operation,
+                ));
             }))
         });
         async move {

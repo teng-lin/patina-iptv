@@ -23,12 +23,48 @@ pub(crate) fn set_guide_sources_in(
     now: i64,
 ) -> Result<()> {
     ensure_source(conn, source)?;
-    conn.execute("DELETE FROM guide_sources WHERE source_id = ?1", [source.0])?;
+    // Preserve equal configured rows and their incarnations on a physical
+    // reimport. Delete only removed feeds; triggers record actual changes.
+    let retained: std::collections::HashSet<_> = sources.iter().map(|g| g.feed.0).collect();
+    if retained.len() != sources.len() {
+        return Err(crate::StoreError::InvalidData(
+            "duplicate guide feed ID".into(),
+        ));
+    }
+    let existing = {
+        let mut statement =
+            conn.prepare_cached("SELECT feed_id FROM guide_sources WHERE source_id = ?1")?;
+        statement
+            .query_map([source.0], |row| row.get::<_, u32>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for feed in existing {
+        if !retained.contains(&feed) {
+            conn.execute(
+                "DELETE FROM guide_sources WHERE source_id = ?1 AND feed_id = ?2",
+                rusqlite::params![source.0, feed],
+            )?;
+        }
+    }
+    // Release changed provider slots before upserting: two retained feed IDs
+    // may swap provider indices in one otherwise valid replacement.
+    for feed in sources {
+        conn.execute(
+            "UPDATE guide_sources SET provider_index = NULL
+             WHERE source_id = ?1 AND feed_id = ?2 AND provider_index IS NOT ?3",
+            rusqlite::params![source.0, feed.feed.0, feed.provider_index],
+        )?;
+    }
     {
         let mut insert = conn.prepare_cached(
             "INSERT INTO guide_sources (source_id, feed_id, provider_index, url, name,
                      enabled, position, shift_minutes, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 ON CONFLICT (source_id, feed_id) DO UPDATE SET
+                     provider_index = excluded.provider_index, url = excluded.url,
+                     name = excluded.name, enabled = excluded.enabled,
+                     position = excluded.position, shift_minutes = excluded.shift_minutes,
+                     updated_at = excluded.updated_at",
         )?;
         for (position, g) in sources.iter().enumerate() {
             insert.execute(params![

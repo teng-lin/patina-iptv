@@ -235,3 +235,9 @@ pub enum OrganizationScope {
     GroupChannels(GroupId),
     CustomChannels(CustomGroupId),
 }
+
+/// Source-scoped application query and guide-inspection values.
+pub mod inspection;
+
+/// Portable state for inspecting guide coverage and candidate schedules.
+pub mod guide_inspect;

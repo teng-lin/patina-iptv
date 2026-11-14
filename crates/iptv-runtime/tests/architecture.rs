@@ -23,6 +23,7 @@ const DEPENDENCIES: &[&str] = &[
     "libc",
     "log",
     "serde_json",
+    "sha2",
     "tokio",
 ];
 /// Test-only additions.
@@ -43,6 +44,8 @@ const STORE_ADAPTER_USERS: &[&str] = &[
     "error.rs",
     "favorites.rs",
     "imports.rs",
+    "inspection.rs",
+    "inspection/probe.rs",
     "library.rs",
     "model.rs",
     "opening.rs",

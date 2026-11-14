@@ -123,6 +123,21 @@ const HISTORY: &[Version] = &[
             "data_v9.sql",
         ],
     },
+    Version {
+        version: 10,
+        data: &[
+            "data_v1.sql",
+            "data_v2.sql",
+            "data_v3.sql",
+            "data_v4.sql",
+            "data_v5.sql",
+            "data_v6.sql",
+            "data_v7.sql",
+            "data_v8.sql",
+            "data_v9.sql",
+            "data_v10.sql",
+        ],
+    },
 ];
 
 fn fixture(name: &str) -> String {

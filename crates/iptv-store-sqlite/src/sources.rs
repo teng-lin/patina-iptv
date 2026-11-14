@@ -178,6 +178,28 @@ pub(crate) fn update_source_in(
     now: i64,
 ) -> Result<()> {
     ensure_source(conn, id)?;
+    let (desired_config, desired_secrets) = split(&source.config);
+    let (old_kind, old_config): (String, String) =
+        conn.query_row("SELECT kind,config FROM sources WHERE id=?1", [id.0], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?;
+    let old_config: Value = serde_json::from_str(&old_config)?;
+    let old_secrets = {
+        let mut statement =
+            conn.prepare_cached("SELECT name,value FROM source_credentials WHERE source_id=?1")?;
+        statement
+            .query_map([id.0], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<HashMap<_, _>>>()?
+    };
+    let desired_secrets: HashMap<_, _> = desired_secrets
+        .into_iter()
+        .map(|(name, value)| (name.to_owned(), value))
+        .collect();
+    let identity_changed = old_kind != source_kind_slug(source.kind())
+        || old_config != desired_config
+        || old_secrets != desired_secrets;
     let config = write_credentials(conn, id, &source.config)?;
     conn.execute(
         "UPDATE sources SET kind = ?2, name = ?3, config = ?4, updated_at = ?5 WHERE id = ?1",
@@ -189,6 +211,18 @@ pub(crate) fn update_source_in(
             now
         ],
     )?;
+    if identity_changed {
+        conn.execute(
+            "UPDATE guide_revisions SET incarnation=lower(hex(randomblob(16))),
+            configuration_revision=configuration_revision+1 WHERE source_id=?1",
+            [id.0],
+        )?;
+        conn.execute(
+            "UPDATE guide_feed_incarnations SET incarnation=lower(hex(randomblob(16)))
+            WHERE source_id=?1",
+            [id.0],
+        )?;
+    }
     Ok(())
 }
 

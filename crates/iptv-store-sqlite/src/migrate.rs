@@ -73,6 +73,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "search_history",
         sql: include_str!("../migrations/0009_search_history.sql"),
     },
+    Migration {
+        version: 10,
+        name: "guide_revisions",
+        sql: include_str!("../migrations/0010_guide_revisions.sql"),
+    },
 ];
 
 /// The schema version this build writes.

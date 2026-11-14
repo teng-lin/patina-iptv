@@ -215,6 +215,10 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
     }
     // Top-most first: a guide sources screen opens over the playlists
     // screen, which opens over settings.
+    if top == Some(Overlay::GuideInspection) {
+        crate::guide_inspect_view::key(ui, action);
+        return;
+    }
     if top == Some(Overlay::GuideSources) {
         crate::epg_sources_view::key(ui, action);
         return;
