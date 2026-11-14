@@ -71,7 +71,7 @@ use iptv_core::i18n::is_catalogued;
 
 /// How many `[untranslated]` entries there are. Lower it with the list;
 /// it is never raised.
-const UNTRANSLATED: usize = 443;
+const UNTRANSLATED: usize = 439;
 
 /// Source directories read, relative to the workspace's `crates/`.
 const ROOTS: &[&str] = &[
@@ -79,6 +79,7 @@ const ROOTS: &[&str] = &[
     "iptv-core/src",
     "iptv-guide/src",
     "iptv-library/src",
+    "iptv-runtime/src",
     // What a settings row says under the list when it is focused.
     "iptv-settings/src/catalogue",
 ];
@@ -124,8 +125,8 @@ const TRANSLATING_HELPERS: &[(&str, &str, usize)] = &[
 /// through `tr`: a backup error keeps its English text for the log and is
 /// translated when the user is told (`backup::report`, `App`).
 const MESSAGE_FILES: &[&str] = &[
-    "iptv-app/src/runtime/backup.rs",
-    "iptv-app/src/runtime/backup/instance.rs",
+    "iptv-runtime/src/backup.rs",
+    "iptv-runtime/src/backup/instance.rs",
 ];
 
 /// The same for single calls of a file: the backup errors the view makes
@@ -2189,7 +2190,7 @@ fn the_verdicts_tell_messages_from_text_and_from_the_rest() {
         Verdict::Bypass
     );
     // A backup error's text is a message kept as data.
-    let backup = "iptv-app/src/runtime/backup.rs";
+    let backup = "iptv-runtime/src/backup.rs";
     assert_eq!(
         verdict(backup, &literal("Backup is too large", Some("Err"), 0)),
         Verdict::Message
@@ -2205,6 +2206,60 @@ fn the_verdicts_tell_messages_from_text_and_from_the_rest() {
         ),
         Verdict::Message
     );
+}
+
+/// The extracted runtime still contributes stored messages and notices; its
+/// typed settings failures are translated only at the shell boundary.
+#[test]
+fn extracted_runtime_messages_and_shell_failures_remain_checked() {
+    let sources = read_sources();
+    for (file, message) in [
+        (
+            "iptv-runtime/src/backup.rs",
+            "A backup operation is already running",
+        ),
+        (
+            "iptv-runtime/src/backup/instance.rs",
+            "Could not lock application storage",
+        ),
+        (
+            "iptv-app/src/settings_view/words.rs",
+            "Settings could not be saved. Check storage permissions and try again.",
+        ),
+        (
+            "iptv-app/src/settings_view/words.rs",
+            "Settings updated, but we could not confirm they were saved safely. Check storage and try again.",
+        ),
+    ] {
+        assert!(
+            sources.get(file).is_some_and(|literals| literals
+                .iter()
+                .any(|(literal, verdict)| literal.text == message && *verdict == Verdict::Message)),
+            "{file}: message is no longer checked: {message}"
+        );
+    }
+    // The moved data path rejects a missing catalogue row as before.
+    let file = "iptv-runtime/src/backup.rs";
+    let literal = literals(
+        file,
+        "fn f() { Err(\"Synthetic uncatalogued backup failure\") }",
+    )
+    .remove(0);
+    assert_eq!(verdict(file, &literal), Verdict::Message);
+    assert!(!is_catalogued(&literal.text));
+    // Runtime notices retain the dynamic-call and wrapper rules, too.
+    let (messages, carried, unproven) = followed(
+        file,
+        "fn f() { emit(RuntimeEvent::Notify(if ok { \"Saved\" } else { reason })); }",
+    );
+    assert_eq!(messages, ["Saved"]);
+    assert_eq!(carried, ["reason"]);
+    assert!(unproven.is_empty());
+    let (_, _, unproven) = followed(
+        file,
+        "fn f() { emit(RuntimeEvent::Notify(&format!(\"{a} {b}\"))); }",
+    );
+    assert_eq!(unproven.len(), 1);
 }
 
 /// Prints the allowlist the sources need now, for a first list or after a

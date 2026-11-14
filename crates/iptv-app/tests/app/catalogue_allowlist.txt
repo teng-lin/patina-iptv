@@ -72,11 +72,7 @@ iptv-app/src/player_panels/words.rs	◀ ▶ move   OK choose   Back hide
 iptv-app/src/player_panels/words.rs	◀ ▶ move   OK choose   Menu or Back hide
 iptv-app/src/player_panels/words.rs	◀ ▶ seek   Enter play or pause
 iptv-app/src/player_panels/words.rs	◀ ▶ seek (hold: faster)   OK play or pause
-iptv-app/src/runtime/file_writer.rs	could not write ({kind})
-iptv-app/src/runtime/file_writer.rs	written, but not synced ({kind})
-iptv-app/src/runtime/settings.rs	Could not save settings ({kind})
-iptv-app/src/runtime/settings.rs	Settings updated, but saving safely could not be confirmed ({kind})
-iptv-app/src/runtime/wizard_map.rs	Playlist
+iptv-runtime/src/wizard_map.rs	Playlist
 iptv-app/src/search_view.rs	Earlier
 iptv-app/src/search_view.rs	Later
 iptv-app/src/search_view.rs	On now
@@ -469,7 +465,7 @@ iptv-core/src/guide.rs	Channel {}
 iptv-core/src/guide.rs	Group {:02}
 iptv-core/src/guide.rs	Show {}
 # HTTP header names.
-iptv-app/src/runtime/settings.rs	User-Agent
+iptv-runtime/src/settings.rs	User-Agent
 iptv-guide/src/playback.rs	Referer
 iptv-guide/src/playback.rs	User-Agent
 # Markup: icons drawn as SVG.
@@ -504,6 +500,13 @@ iptv-app/src/rail.rs	<rect x='3' y='5' width='18' height='12' rx='2'/><path d='M
 iptv-app/src/rail.rs	<rect x='3' y='7' width='18' height='13' rx='2'/><path d='M8 3l4 4 4-4'/>
 iptv-app/src/rail.rs	<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>{body}</svg>
 iptv-app/src/ui_kit.rs	<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='currentColor' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M15 4.5L7.5 12l7.5 7.5'/></svg>
+# Persistence Display text is diagnostic only: settings::set logs SaveError and
+# emits typed SettingsSaveFailed; the shell translates both publication outcomes.
+# File-writer replies stay inside the runtime (settings, last-channel, teardown).
+iptv-runtime/src/file_writer.rs	could not write ({kind})
+iptv-runtime/src/file_writer.rs	written, but not synced ({kind})
+iptv-runtime/src/settings.rs	Could not save settings ({kind})
+iptv-runtime/src/settings.rs	Settings updated, but saving safely could not be confirmed ({kind})
 # Reasons and marks kept for the log, and messages for the platform.
 iptv-app/src/android_transport.rs	Playback transport unavailable
 iptv-app/src/credential_key.rs	cannot inspect existing database
@@ -519,42 +522,44 @@ iptv-app/src/credential_key.rs	secure random generator failed
 iptv-app/src/credential_key.rs	synthetic database key was not installed
 iptv-app/src/credential_key/android.rs	Android Keystore is unavailable
 iptv-app/src/credential_key/linux.rs	Patina catalog key
+# Startup logs the cause and shows the localized generic storage notice.
+iptv-app/src/platform_data.rs	Android host has not initialized private storage
 iptv-app/src/platform_data.rs	App data base must be an absolute directory; refusing temporary storage
-iptv-app/src/platform_data.rs	App storage contains a reparse point
-iptv-app/src/platform_data.rs	App storage contains a symbolic link
+iptv-runtime/src/storage.rs	App storage contains a reparse point
+iptv-runtime/src/storage.rs	App storage contains a symbolic link
 iptv-app/src/platform_data.rs	Could not exclude private storage from OS backup
 iptv-app/src/platform_data.rs	Expected absolute files directory
 iptv-app/src/platform_data.rs	Files directory changed in one process
 iptv-app/src/platform_data.rs	Library/Application Support/iptv-rs
 iptv-app/src/platform_data.rs	Patina
 iptv-app/src/platform_data.rs	Storage path is not UTF-8
-iptv-app/src/runtime/backup/error.rs	{} (library: {class})
-iptv-app/src/runtime/credential_store.rs	pending restore cannot be read
-iptv-app/src/runtime/favorites.rs	recent favourite edits are not saved
-iptv-app/src/runtime/imports.rs	cannot create document identity
-iptv-app/src/runtime/imports.rs	cannot create private document directory
-iptv-app/src/runtime/imports.rs	private document cannot be saved
-iptv-app/src/runtime/library.rs	library is loading
-iptv-app/src/runtime/opening.rs	{bound} channels, {kib} KiB in {} ms
-iptv-app/src/runtime/opening.rs	{n} in {} ms
-iptv-app/src/runtime/opening.rs	{} channels, {kib} KiB in {} ms
-iptv-app/src/runtime/private_files.rs	Document exceeds buffering limit
-iptv-app/src/runtime/private_files.rs	Private document is unavailable
-iptv-app/src/runtime/private_files.rs	cannot finish private document
-iptv-app/src/runtime/private_files.rs	cannot inspect private documents
-iptv-app/src/runtime/private_files.rs	cannot read legacy document
-iptv-app/src/runtime/private_files.rs	cannot recover private document
-iptv-app/src/runtime/private_files.rs	cannot seal private document
-iptv-app/src/runtime/private_files.rs	document byte budget exceeded
-iptv-app/src/runtime/private_files.rs	invalid private document path
-iptv-app/src/runtime/private_files.rs	linked private documents are refused
-iptv-app/src/runtime/private_files.rs	total document deadline exceeded
-iptv-app/src/runtime/store_service.rs	cannot create data directory
-iptv-app/src/runtime/store_service.rs	credential storage is temporarily unavailable
-iptv-app/src/runtime/store_service.rs	recursive store request
-iptv-app/src/runtime/store_service.rs	request belongs to a closed application
-iptv-app/src/runtime/store_service.rs	store reply lost
-iptv-app/src/runtime/store_service.rs	store worker stopped
+iptv-runtime/src/backup/error.rs	{} (library: {class})
+iptv-runtime/src/credential_store.rs	pending restore cannot be read
+iptv-runtime/src/favorites.rs	recent favourite edits are not saved
+iptv-runtime/src/imports.rs	cannot create document identity
+iptv-runtime/src/imports.rs	cannot create private document directory
+iptv-runtime/src/imports.rs	private document cannot be saved
+iptv-runtime/src/library.rs	library is loading
+iptv-runtime/src/opening.rs	{bound} channels, {kib} KiB in {} ms
+iptv-runtime/src/opening.rs	{n} in {} ms
+iptv-runtime/src/opening.rs	{} channels, {kib} KiB in {} ms
+iptv-runtime/src/private_files.rs	Document exceeds buffering limit
+iptv-runtime/src/private_files.rs	Private document is unavailable
+iptv-runtime/src/private_files.rs	cannot finish private document
+iptv-runtime/src/private_files.rs	cannot inspect private documents
+iptv-runtime/src/private_files.rs	cannot read legacy document
+iptv-runtime/src/private_files.rs	cannot recover private document
+iptv-runtime/src/private_files.rs	cannot seal private document
+iptv-runtime/src/private_files.rs	document byte budget exceeded
+iptv-runtime/src/private_files.rs	invalid private document path
+iptv-runtime/src/private_files.rs	linked private documents are refused
+iptv-runtime/src/private_files.rs	total document deadline exceeded
+iptv-runtime/src/store_service.rs	cannot create data directory
+iptv-runtime/src/store_service.rs	credential storage is temporarily unavailable
+iptv-runtime/src/store_service.rs	recursive store request
+iptv-runtime/src/store_service.rs	request belongs to a closed application
+iptv-runtime/src/store_service.rs	store reply lost
+iptv-runtime/src/store_service.rs	store worker stopped
 iptv-app/src/startup.rs	guide shown
 iptv-core/src/import_limits.rs	decoded byte budget exceeded
 iptv-core/src/import_limits.rs	import {:?} limit exceeded ({})
