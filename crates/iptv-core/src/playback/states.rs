@@ -92,6 +92,16 @@ impl PlayerState {
             _ => return None,
         })
     }
+
+    /// The host's name for it: what [`PlayerState::parse`] reads.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Buffering => "buffering",
+            Self::Ready => "ready",
+            Self::Ended => "ended",
+        }
+    }
 }
 
 /// Where playback stands.

@@ -9,10 +9,10 @@ use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::headless::Headless;
 use nsh_core::ViewKind;
 use nsh_core::geometry::{Point, Points};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
 /// The app, driven by steps that panic with the texts on screen (those
 /// not on it at [`T::rebase`]).
@@ -77,12 +77,20 @@ impl T {
         }
     }
 
+    /// Timeout scaled by `IPTV_TEST_WAIT_SCALE`.
+    pub fn wait_timeout(secs: u64) -> Duration {
+        crate::isolated::scaled_duration(Duration::from_secs(secs))
+    }
+
     /// Presses `sel` once it is on screen. A step is done when the app
     /// rendered nothing for a moment, which a loaded machine can reach
     /// before the screen the last step opened is drawn: the press waits
     /// for its target instead of failing on the old screen.
     pub fn press(&mut self, sel: &str) {
-        let r = self.app.wait_for(sel).and_then(|()| self.app.press(sel));
+        let r = self
+            .app
+            .wait_for_within(sel, Duration::from_secs(10))
+            .and_then(|()| self.app.press(sel));
         self.ok(&format!("press {sel}"), r);
     }
 
@@ -105,13 +113,14 @@ impl T {
     /// Waits until `sel` matches `n` views (within `secs`).
     pub fn count(&mut self, sel: &str, n: usize, secs: u64) {
         let start = std::time::Instant::now();
+        let timeout = Self::wait_timeout(secs);
         loop {
             self.app.catch_up();
             let found = self.app.screen().count(sel).unwrap();
             if found == n {
                 return;
             }
-            if start.elapsed() > Duration::from_secs(secs) {
+            if start.elapsed() > timeout {
                 self.ok(sel, Err(format!("{found} views, not {n}")));
                 return;
             }

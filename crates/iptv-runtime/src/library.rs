@@ -29,14 +29,21 @@ pub fn import_completion(cancel: CancelToken) -> ImportCompletion {
         finished: Cell::new(false),
         catalog_done: Cell::new(false),
         cancel,
+        guide: CancelToken::new(),
+        superseded: Cell::new(false),
         waiting: RefCell::default(),
     })
 }
 pub fn track_import(source: SourceId, completion: &ImportCompletion) {
     crate::current().cancel_guide_check(source);
-    crate::current()
+    let replaced = crate::current()
         .completions
         .with(|jobs| jobs.borrow_mut().insert(source, Rc::downgrade(completion)));
+    if let Some(replaced) = replaced.and_then(|job| job.upgrade())
+        && !Rc::ptr_eq(&replaced, completion)
+    {
+        replaced.superseded.set(true);
+    }
 }
 /// An Add learns its source ID only after saving. A newer known-source job may
 /// already own that ID by then, including a worker that has just completed.
@@ -84,6 +91,25 @@ pub fn revoke_import_handoff(source: SourceId) {
         // phase. Revoke handoff then, but let that phase establish playback.
         job.cancel_guide();
     }
+}
+/// A guide action replaces `source`'s pending work: revokes its handoff
+/// ([`revoke_import_handoff`]) and returns that work when this cancelled
+/// it (its guide phase). Such work only has to unwind, which what follows
+/// may wait for; an import still fetching its playlist goes on and is not
+/// returned.
+pub fn supersede_import(source: SourceId) -> Option<ImportCompletion> {
+    let pending = pending_import(source);
+    revoke_import_handoff(source);
+    pending.filter(|job| job.cancel.is_cancelled())
+}
+/// [`supersede_import`] by newer work for `source` (an update asked for):
+/// the replaced work leaves the next guide check to it
+/// (`ImportWork::superseded`).
+pub fn replace_import(source: SourceId) -> Option<ImportCompletion> {
+    if let Some(pending) = pending_import(source) {
+        pending.superseded.set(true);
+    }
+    supersede_import(source)
 }
 pub fn reset_imports() {
     crate::current().completions.with(|jobs| {
@@ -226,6 +252,18 @@ pub fn running(id: SourceId) -> bool {
     crate::current()
         .imports
         .with(|r| r.borrow().contains_key(&id))
+}
+
+/// [`cancel_running`] for a newer import of `id` that starts now: the
+/// cancelled work leaves the next guide check to it
+/// (`ImportWork::superseded`). Not for a playlist that is being deleted or
+/// switched off: when that fails the playlist stays, and its cancelled
+/// work still has to keep its check.
+pub fn replace_running(id: SourceId) {
+    if let Some(pending) = pending_import(id) {
+        pending.superseded.set(true);
+    }
+    cancel_running(id);
 }
 
 pub fn cancel_running(id: SourceId) {

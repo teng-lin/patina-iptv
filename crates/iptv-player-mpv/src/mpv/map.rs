@@ -67,7 +67,8 @@ pub fn picture(mode: &str, video_aspect: Option<f64>) -> Picture {
 /// The HTTP options of one stream.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Http {
-    /// mpv `user-agent`: the source's, else the `userAgent` prop's.
+    /// mpv `user-agent`: the source's, else the player's own
+    /// ([`super::DEFAULT_UA`]).
     pub user_agent: String,
     /// mpv `http-header-fields` entries (`Name: value`), User-Agent aside.
     pub fields: Vec<String>,
@@ -75,8 +76,10 @@ pub struct Http {
 
 /// Cleans stream headers for the origin-scoped playback transport. These
 /// fields are never installed as mpv's global HTTP headers. CR/LF/NUL values
-/// that could split a request are dropped.
-pub fn http(headers: &[(String, String)], fallback_ua: &str) -> Http {
+/// that could split a request are dropped. A source that names no
+/// `User-Agent`, or a blank one, gets the player's own: the app puts its
+/// setting in the source's headers, so there is nothing else to fall back to.
+pub fn http(headers: &[(String, String)]) -> Http {
     let clean = |s: &str| !s.contains(['\r', '\n', '\0']);
     let mut user_agent = None;
     let mut fields = Vec::new();
@@ -92,7 +95,7 @@ pub fn http(headers: &[(String, String)], fallback_ua: &str) -> Http {
         }
     }
     Http {
-        user_agent: user_agent.unwrap_or_else(|| fallback_ua.to_owned()),
+        user_agent: user_agent.unwrap_or_else(|| super::DEFAULT_UA.to_owned()),
         fields,
     }
 }
@@ -447,22 +450,27 @@ mod tests {
                 .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
                 .collect::<Vec<_>>()
         };
-        let got = http(
-            &h(&[
-                ("user-agent", "Box/1"),
-                ("Referer", "http://example.test/"),
-                ("Cookie", "a=1, b=2"),
-                ("X-Bad", "v\r\nInjected: 1"),
-                ("", "empty"),
-            ]),
-            "fallback",
-        );
+        let got = http(&h(&[
+            ("user-agent", "Box/1"),
+            ("Referer", "http://example.test/"),
+            ("Cookie", "a=1, b=2"),
+            ("X-Bad", "v\r\nInjected: 1"),
+            ("", "empty"),
+        ]));
         assert_eq!(got.user_agent, "Box/1");
         assert_eq!(
             got.fields,
             ["Referer: http://example.test/", "Cookie: a=1, b=2"]
         );
-        assert_eq!(http(&[], "fallback").user_agent, "fallback");
+        // No agent of the source's, or a blank one: the player's own. It
+        // is never a request header field of its own.
+        let own = crate::mpv::DEFAULT_UA;
+        assert_eq!(http(&[]).user_agent, own);
+        let blank = http(&h(&[("User-Agent", "  "), ("X-Synthetic", "1")]));
+        assert_eq!(blank.user_agent, own);
+        assert_eq!(blank.fields, ["X-Synthetic: 1"]);
+        let split = http(&h(&[("User-Agent", "Box/1\r\nInjected: 1")]));
+        assert_eq!(split.user_agent, own, "a value that splits is dropped");
     }
 
     #[test]

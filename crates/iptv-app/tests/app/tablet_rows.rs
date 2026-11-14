@@ -8,11 +8,11 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
 use nsh_core::picker::PickedFile;
 use nsh_core::{ApproxTextEngine, ImageData, Size, TextEngine, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
 const IMPORT: Duration = Duration::from_secs(60);
 const CHANNELS: usize = 10_000;

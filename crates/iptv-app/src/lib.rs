@@ -887,6 +887,8 @@ pub(crate) fn go_back(ui: Ui) -> bool {
     ui.pending_zap.set(None);
     browse_playback::activity(ui);
     untracked(|| {
+        use overlays::Overlay;
+        let top = ui.top_overlay();
         let panels =
             ui.panels.with(|p| p.shown) != iptv_core::panels::Shown::Hidden || play_bar::shows(ui);
         let menu = ui.menu.with(Option::is_some)
@@ -894,35 +896,35 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             || ui.chooser.with(Option::is_some)
             || ui.editor.with(Option::is_some);
         match (ui.mode.get(), ui.focus.with(|f| f.pane), panels || menu) {
-            _ if ui.wizard.with(Option::is_some) => wizard_view::back(ui),
-            _ if epg_sources_view::is_open(ui) => epg_sources_view::back(ui),
-            _ if remote_editor::is_open(ui) => remote_editor::back(ui),
-            _ if organization_view::is_open(ui) => organization_view::back(ui),
-            _ if custom_groups::is_open(ui) => custom_groups::back(ui),
-            _ if playlists_view::is_open(ui) => playlists_view::back(ui),
-            _ if settings_view::is_open(ui) => settings_view::back(ui),
-            _ if guide_assign_view::is_open(ui) => guide_assign_view::back(ui),
-            _ if ui.editor.with(Option::is_some) => {
+            _ if top == Some(Overlay::Wizard) => wizard_view::back(ui),
+            _ if top == Some(Overlay::GuideSources) => epg_sources_view::back(ui),
+            _ if top == Some(Overlay::RemoteEditor) => remote_editor::back(ui),
+            _ if top == Some(Overlay::Organization) => organization_view::back(ui),
+            _ if top == Some(Overlay::CustomGroups) => custom_groups::back(ui),
+            _ if top == Some(Overlay::Playlists) => playlists_view::back(ui),
+            _ if top == Some(Overlay::Settings) => settings_view::back(ui),
+            _ if top == Some(Overlay::GuideAssign) => guide_assign_view::back(ui),
+            _ if top == Some(Overlay::FavoritesEditor) => {
                 fav_editor::close(ui);
                 true
             }
-            _ if ui.chooser.with(Option::is_some) => {
+            _ if top == Some(Overlay::Chooser) => {
                 chooser::close(ui);
                 true
             }
-            _ if ui.menu.with(Option::is_some) || ui.description.with(Option::is_some) => {
+            _ if matches!(top, Some(Overlay::Menu | Overlay::Description)) => {
                 menu_view::close(ui);
                 true
             }
-            _ if search_view::is_open(ui) => {
+            _ if top == Some(Overlay::Search) => {
                 search_view::apply(ui, iptv_search::SearchAction::Back);
                 true
             }
-            _ if channels_view::is_open(ui) => {
+            _ if top == Some(Overlay::ChannelList) => {
                 channels_view::key(ui, iptv_nav::Action::Back);
                 true
             }
-            _ if multiview_picker::is_open(ui) => {
+            _ if top == Some(Overlay::ChannelPicker) => {
                 multiview_picker::key(ui, iptv_nav::Action::Back);
                 true
             }
@@ -959,7 +961,16 @@ pub(crate) fn go_back(ui: Ui) -> bool {
 /// Explicit synthetic-key injection for the headless test binary only.
 #[cfg(feature = "test-support")]
 pub use credential_key::install_test_key;
+/// Whether a stored source has a guide timer or an in-flight guide read,
+/// for the headless tests of what keeps its periodic checks alive.
+#[cfg(feature = "test-support")]
+pub use runtime::guide_check_registered as guide_check_pending;
 /// Keeps the store's writer busy, as a long catalog or guide publish does,
 /// for the headless tests of what must not wait for it.
 #[cfg(feature = "test-support")]
 pub use runtime::occupy_writer;
+/// The refresh workers refuse work as when their queue is full, and an
+/// import waits just before it reports its catalog, for the headless
+/// tests of what such moments must not lose.
+#[cfg(feature = "test-support")]
+pub use runtime::{hold_reports, refuse_work, reports_waiting};

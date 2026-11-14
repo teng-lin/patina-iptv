@@ -1,4 +1,5 @@
 //! Playlist refresh policy does not suppress independently configured guide updates.
+use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
 use iptv_providers::{
     SecretUrl,
@@ -7,7 +8,6 @@ use iptv_providers::{
 use iptv_store_sqlite::{GuideSource, SourcePolicy};
 use nsh_core::{Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[test]
 fn cached_playlist_still_downloads_its_guide_when_epg_startup_refresh_is_enabled() {
@@ -121,7 +121,7 @@ fn cached_playlist_still_downloads_its_guide_when_epg_startup_refresh_is_enabled
     .unwrap();
     app.wait_for_within("text:Independent guide refresh", Duration::from_secs(20))
         .unwrap();
-    let end = std::time::Instant::now() + Duration::from_secs(10);
+    let end = std::time::Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(10));
     loop {
         let store = crate::isolated::open_database(&path).unwrap();
         if store

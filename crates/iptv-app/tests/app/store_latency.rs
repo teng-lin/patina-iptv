@@ -1,8 +1,8 @@
 //! Real SQLCipher write contention must not delay guide input or rendering.
 //! All 10,000 channels and seven days of programmes are generated locally.
+use crate::headless::Headless;
 use nsh_core::{ImageData, Size, element::Root, picker::PickedFile, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -120,7 +120,7 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
         maximum < Duration::from_millis(50),
         "guide input budget exceeded: {maximum:?}"
     );
-    let end = Instant::now() + Duration::from_secs(10);
+    let end = Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(10));
     loop {
         let saved: i64 = lock
             .query_row("SELECT count(*) FROM favourites", [], |row| row.get(0))

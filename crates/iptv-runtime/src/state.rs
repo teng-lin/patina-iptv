@@ -10,11 +10,20 @@ use std::{
 };
 
 pub struct ImportWork {
-    pub finished: Cell<bool>,
-    pub catalog_done: Cell<bool>,
+    pub(crate) finished: Cell<bool>,
+    pub(crate) catalog_done: Cell<bool>,
     pub cancel: CancelToken,
+    /// Stops the guide phase alone, at once, also while the playlist is
+    /// still being fetched (which goes on): the worker then downloads and
+    /// stores no guide, whenever it gets there.
+    pub guide: CancelToken,
+    /// Newer work for the source replaced this (another import, an update
+    /// asked for): that work sets the next guide check, or keeps the owed
+    /// one when it fails. Not set by a guide action, which revokes the
+    /// handoff and leaves the source without such work.
+    pub superseded: Cell<bool>,
     /// Tasks waiting for [`Self::finish`].
-    pub waiting: RefCell<Vec<futures_channel::oneshot::Sender<()>>>,
+    pub(crate) waiting: RefCell<Vec<futures_channel::oneshot::Sender<()>>>,
 }
 impl ImportWork {
     pub fn finished(&self) -> bool {
@@ -43,6 +52,7 @@ impl ImportWork {
         self.catalog_done.set(true);
     }
     pub fn cancel_guide(&self) {
+        self.guide.cancel();
         if self.catalog_done.get() {
             self.cancel.cancel();
         }

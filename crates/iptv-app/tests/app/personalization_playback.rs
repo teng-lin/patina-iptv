@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-fn preview(app: &nsh_testing::Headless) -> bool {
+fn preview(app: &crate::headless::Headless) -> bool {
     app.screen()
         .layout_nodes()
         .iter()

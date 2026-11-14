@@ -39,6 +39,9 @@ impl<T> std::ops::Deref for Slot<T> {
     }
 }
 
+/// A source's turn on screen ([`Runtime::show_turn`]), until dropped.
+pub struct ShowTurn(#[allow(dead_code)] futures_channel::oneshot::Sender<()>);
+
 pub type LocalTask = std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
 struct TaskHost {
     spawn: Box<dyn Fn(LocalTask)>,
@@ -49,6 +52,8 @@ type EventSink = Rc<dyn Fn(RuntimeEvent)>;
 type BrowserObserver = Rc<dyn Fn() -> BrowserState>;
 type PageWaiters = RefCell<Vec<Box<dyn FnOnce()>>>;
 type Resolves = RefCell<[Option<(u64, CancelToken)>; iptv_core::multiview::MAX_SURFACES]>;
+/// The guide updates asked for by hand that have not ended, each with its work.
+type Updates = Vec<(SourceId, Rc<ImportWork>)>;
 type SavedSettings = RefCell<Option<(u64, std::sync::Arc<iptv_settings::Settings>)>>;
 
 pub struct Runtime {
@@ -84,7 +89,7 @@ pub struct Runtime {
     pub(crate) epoch: Slot<Cell<i64>>,
     pub(crate) single: Slot<RefCell<Option<SingleSchedule>>>,
     pub(crate) shown: Slot<Cell<Option<SourceId>>>,
-    pub(crate) updating: Slot<RefCell<Vec<SourceId>>>,
+    pub(crate) updating: Slot<RefCell<Updates>>,
     pub(crate) edits: Slot<RefCell<BTreeMap<SourceId, u64>>>,
     pub(crate) status: Slot<RefCell<StatusSnapshot>>,
     pub(crate) page_waiters: Slot<PageWaiters>,
@@ -98,6 +103,8 @@ pub struct Runtime {
     status_revision: Cell<u64>,
     browser: RefCell<Option<BrowserObserver>>,
     organization_edits: RefCell<HashMap<SourceId, u64>>,
+    /// Each source's last show, which the next one waits for.
+    shows: RefCell<HashMap<SourceId, futures_channel::oneshot::Receiver<()>>>,
 }
 
 impl Runtime {
@@ -145,10 +152,16 @@ impl Runtime {
             tasks: RefCell::new(None),
             foreground: Cell::new(true),
             scheduler_started: Cell::new(false),
+            #[cfg(feature = "test-support")]
+            guide_checks: RefCell::new(guide_checks::GuideChecks::mirrored(
+                store.guide_checks.clone(),
+            )),
+            #[cfg(not(feature = "test-support"))]
             guide_checks: RefCell::default(),
             status_revision: Cell::new(0),
             browser: RefCell::default(),
             organization_edits: RefCell::default(),
+            shows: RefCell::default(),
         }
     }
 }
@@ -258,6 +271,21 @@ impl Runtime {
     }
     pub fn organization_edit_current(&self, source: SourceId, ticket: u64) -> bool {
         self.organization_edits.borrow().get(&source) == Some(&ticket)
+    }
+
+    /// A turn at putting `source` on screen: shows of one source finish in
+    /// the order they began, so one that began earlier, with older data,
+    /// cannot replace a later one. Resolves when the earlier ones have
+    /// finished (or were dropped); the turn ends when the guard is dropped.
+    pub fn show_turn(&self, source: SourceId) -> impl std::future::Future<Output = ShowTurn> {
+        let (done, next) = futures_channel::oneshot::channel();
+        let earlier = self.shows.borrow_mut().insert(source, next);
+        async move {
+            if let Some(earlier) = earlier {
+                let _ = earlier.await;
+            }
+            ShowTurn(done)
+        }
     }
 
     pub fn schedule(&self) -> Rc<dyn Schedule> {
@@ -403,8 +431,13 @@ pub mod model;
 
 pub mod settings;
 
+pub use guide_checks::GuideWork;
+#[cfg(feature = "test-support")]
+pub use guide_checks::guide_check_registered;
 #[cfg(feature = "test-support")]
 pub use store_service::occupy_writer;
+#[cfg(feature = "test-support")]
+pub use workers::{hold_reports, refuse_work, reports_waiting};
 
 mod paths;
 
@@ -480,9 +513,6 @@ impl Runtime {
     }
     pub fn shown(&self) -> &Slot<Cell<Option<SourceId>>> {
         &self.shown
-    }
-    pub fn updating(&self) -> &Slot<RefCell<Vec<SourceId>>> {
-        &self.updating
     }
     pub fn status(&self) -> &Slot<RefCell<StatusSnapshot>> {
         &self.status

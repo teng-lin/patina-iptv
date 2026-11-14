@@ -137,10 +137,18 @@ There is one persistent player surface under the UI
 Both sides implement the same contract of props (`source`, `paused`,
 `pictureSize`, track choices, volume) and events (`state`, `size`, `error`,
 `position`, `tracks`), summed up at the top of `video.rs`.
-`iptv-player-mpv/src/props.rs` declares the typed property bindings and their
-serialized snapshot. Rust and Kotlin tests read the same synthetic JSON
-fixture through their existing serialization and decoding paths. The shell
-supplies the playback transport policy when registering the player.
+
+The contract is declared once, in `iptv-player-mpv`. `props.rs` names each
+prop and nested field with its wire name; the serialized snapshot, the shell's
+typed bindings and the names the shell and the mpv adapter use are all
+generated from that declaration. `events.rs` holds the typed `PlayerEvent`
+that the mpv adapter writes and the shell reads from either host. The Kotlin
+host keeps its names in one file (`PlayerContract.kt`), and two synthetic JSON
+fixtures (`iptv-player-mpv/fixtures`) hold the hosts together: the Rust tests
+read and write them exactly, and the Kotlin test hands every fixture prop to
+`setProp`, failing on a name it does not know, and compares every fixture
+event with what the host emits. The shell supplies the playback transport
+policy when registering the player.
 
 The invariants:
 
@@ -236,7 +244,8 @@ local task executor and timers are installed separately through `bind_tasks`.
 The shell retains one strong handle; local context selection uses weak handles
 and restores the accepting owner on every poll, including nested callbacks and
 unwinding. Local controllers use explicit state accessors; store connections,
-writer queues and native service handles remain private.
+writer queues and native service handles remain private. Restore startup outcomes
+and process locks are retained per storage directory until the process exits.
 
 Run `cargo test --locked -p iptv-runtime` to test application services without
 linking a display toolkit or reaching an OS credential broker. Public-API tests

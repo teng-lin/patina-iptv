@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
 use iptv_providers::model::SourceConfig;
 use iptv_store_sqlite::{SourceId, Store};
@@ -32,11 +33,10 @@ use nsh_core::picker::PickedFile;
 use nsh_core::time::Clock;
 use nsh_core::{ImageData, Size, ViewKind, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
-const IMPORT: Duration = Duration::from_secs(20);
+pub(super) const IMPORT: Duration = Duration::from_secs(20);
 
-fn step(r: Result<(), String>) {
+pub(super) fn step(r: Result<(), String>) {
     r.unwrap_or_else(|e| panic!("{e}"));
 }
 
@@ -49,7 +49,7 @@ fn unix_now() -> i64 {
 
 /// Hour-long programmes from a day back to two days ahead for `channels`,
 /// "<prefix> Now" on air now.
-fn guide(prefix: &str, channels: &[&str]) -> String {
+pub(super) fn guide(prefix: &str, channels: &[&str]) -> String {
     let now = unix_now();
     let hour = now - now.rem_euclid(3600);
     let mut xml = String::from("<?xml version=\"1.0\"?><tv>");
@@ -105,7 +105,7 @@ fn serve(body: Arc<Mutex<Option<String>>>) -> String {
 }
 
 /// An M3U playlist of `channels` (tvg-id, name), its guide at `guide`.
-fn playlist(guide: Option<&Path>, channels: &[(&str, &str)]) -> String {
+pub(super) fn playlist(guide: Option<&Path>, channels: &[(&str, &str)]) -> String {
     let mut m3u = match guide {
         Some(g) => format!("#EXTM3U url-tvg=\"{}\"\n", g.display()),
         None => "#EXTM3U\n".to_owned(),
@@ -119,7 +119,7 @@ fn playlist(guide: Option<&Path>, channels: &[(&str, &str)]) -> String {
 }
 
 /// The app's copy of picked playlist file `name`.
-fn copy_of(data: &Path, name: &str) -> PathBuf {
+pub(super) fn copy_of(data: &Path, name: &str) -> PathBuf {
     std::fs::read_dir(data.join("playlists"))
         .unwrap()
         .map(|d| d.unwrap().path().join(name))
@@ -128,7 +128,7 @@ fn copy_of(data: &Path, name: &str) -> PathBuf {
 }
 
 /// Replace synthetic picked-document content through its encrypted storage API.
-fn replace_copy(
+pub(super) fn replace_copy(
     data: &Path,
     path: impl AsRef<Path>,
     bytes: impl AsRef<[u8]>,
@@ -141,7 +141,7 @@ fn replace_copy(
     std::fs::rename(temporary, path)
 }
 
-fn start() -> Headless {
+pub(super) fn start() -> Headless {
     let size = Size::new(px(1280.0), px(720.0));
     let mut config = EngineConfig {
         viewport: size,
@@ -153,7 +153,7 @@ fn start() -> Headless {
 }
 
 /// The groups, then the rail beside them, then one of its items.
-fn rail(app: &mut Headless, item: &str) {
+pub(super) fn rail(app: &mut Headless, item: &str) {
     step(app.press("text:/^☰  /"));
     step(app.press_key("left"));
     step(app.press_key("left"));
@@ -162,14 +162,14 @@ fn rail(app: &mut Headless, item: &str) {
 }
 
 /// On the playlists screen: playlist `name`'s actions, then `act`.
-fn act(app: &mut Headless, name: &str, act: &str) {
+pub(super) fn act(app: &mut Headless, name: &str, act: &str) {
     step(app.press(&format!("text:{name}")));
     step(app.wait_for(&format!("text:{act}")));
     step(app.press(&format!("text:{act}")));
 }
 
 /// Types `text` into the text sheet on screen in place of its text.
-fn enter_text(app: &mut Headless, text: &str) {
+pub(super) fn enter_text(app: &mut Headless, text: &str) {
     let input = app
         .screen()
         .layout_nodes()
@@ -196,7 +196,7 @@ fn add(app: &mut Headless, name: &str) {
 }
 
 /// Closes the screens over the guide, the top one first.
-fn to_guide(app: &mut Headless) {
+pub(super) fn to_guide(app: &mut Headless) {
     for _ in 0..4 {
         let open = app.screen().count("text:Close").unwrap();
         if open > 0 {
@@ -213,7 +213,13 @@ fn to_guide(app: &mut Headless) {
 
 /// Moves the clock until `done` holds (work off the UI thread takes real
 /// time): `limit` of real time at most.
-fn until(app: &mut Headless, what: &str, limit: Duration, done: impl Fn(&Headless) -> bool) {
+pub(super) fn until(
+    app: &mut Headless,
+    what: &str,
+    limit: Duration,
+    done: impl Fn(&Headless) -> bool,
+) {
+    let limit = crate::isolated::scaled_duration(limit);
     let start = std::time::Instant::now();
     while !done(app) {
         assert!(start.elapsed() < limit, "{what} never happened");
@@ -222,7 +228,7 @@ fn until(app: &mut Headless, what: &str, limit: Duration, done: impl Fn(&Headles
     }
 }
 
-fn store(data: &Path) -> Store {
+pub(super) fn store(data: &Path) -> Store {
     crate::isolated::open_database(data.join("iptv.sqlite")).unwrap()
 }
 
@@ -236,7 +242,7 @@ fn guide_failed(data: &Path, source: SourceId) -> bool {
 
 /// On the playlists screen: waits until playlist `name`'s refresh is done
 /// (its actions offer it again), then closes its actions.
-fn refreshed(app: &mut Headless, name: &str) {
+pub(super) fn refreshed(app: &mut Headless, name: &str) {
     step(app.press(&format!("text:{name}")));
     step(app.wait_for_within("text:Refresh now", IMPORT));
     step(app.back());

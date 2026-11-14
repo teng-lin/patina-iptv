@@ -18,7 +18,8 @@ pub use iptv_library::Playlist;
 pub(super) use crate::library::{
     ImportCompletion, Snapshot, cancel_running, import_completion, import_is_current,
     import_revision, import_revision_is_current, install, load, newest, pending_import,
-    reset_imports, revoke_import_handoff, running, track_added_import, track_import,
+    replace_import, replace_running, reset_imports, revoke_import_handoff, running,
+    supersede_import, track_added_import, track_import,
 };
 pub(super) async fn refresh_cache() -> Result<(), StoreError> {
     let snapshot = crate::library::snapshot().await?;
@@ -101,7 +102,7 @@ fn changed() {
 pub(super) fn run(stored: StoredSource, purpose: Purpose, edit: bool) {
     let id = stored.id;
     // A mode switch can replace a still-running job for this source.
-    cancel_running(id);
+    replace_running(id);
     let due = !matches!(
         purpose,
         Purpose::Startup | Purpose::Switch | Purpose::Combined
@@ -223,7 +224,7 @@ fn switch_to_ready(id: SourceId) {
     };
     super::combined::leave();
     // A refresh of it in the background gives way to the shown one.
-    cancel_running(id);
+    replace_running(id);
     run(stored, Purpose::Switch, false);
 }
 
@@ -271,7 +272,7 @@ pub fn try_details(id: SourceId, source: Source) {
     };
     // Only the details change; the name is the stored one.
     stored.source.config = source.config;
-    cancel_running(id);
+    replace_running(id);
     run(stored, refresh_purpose(id), true);
 }
 
@@ -326,8 +327,14 @@ pub async fn edit_guides(id: SourceId, edit: &guides::Edit) -> Result<bool, Stor
 /// The shown one gives way to the newest other playlist, or to the
 /// first-run state when none is left.
 pub async fn delete(id: SourceId) -> Result<(), StoreError> {
+    let generation = super::generation();
     cancel_running(id);
-    crate::library::delete_source(id).await?;
+    if let Err(error) = crate::library::delete_source(id).await {
+        // The playlist stays, and so does its guide check, which the
+        // cancelling ended (work that was cancelled keeps one itself).
+        super::keep_guide_check(id, generation, None);
+        return Err(error);
+    }
     refresh_after_commit(|snapshot| {
         snapshot.playlists.retain(|p| p.id != id);
         snapshot.details.remove(&id);

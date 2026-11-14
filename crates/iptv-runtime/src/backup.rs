@@ -4,11 +4,12 @@
 
 pub mod error;
 mod instance;
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use iptv_settings::Settings;
 use iptv_store_sqlite::Store;
@@ -24,7 +25,9 @@ pub fn next_document_request() -> String {
     SEQUENCE.fetch_add(1, Ordering::Relaxed).to_string()
 }
 use error::{Context, Error, Result};
-static STARTED: OnceLock<std::result::Result<(), StartupError>> = OnceLock::new();
+type StartupResult = std::result::Result<(), StartupError>;
+static STARTED: Mutex<BTreeMap<PathBuf, Arc<OnceLock<StartupResult>>>> =
+    Mutex::new(BTreeMap::new());
 
 /// Why activating or recovering a restore failed at startup; `error` is
 /// logged by the caller, its message shown when the failure is `fatal`.
@@ -642,8 +645,14 @@ pub fn lock() -> std::result::Result<(), Error> {
 pub fn startup() -> std::result::Result<(), StartupError> {
     // Keep the first outcome, including a fatal recovery failure. Recreating
     // an engine must neither rerun activation nor bypass failed recovery.
-    *STARTED.get_or_init(|| {
-        let root = super::paths::data_dir();
+    let root = super::paths::data_dir();
+    let started = STARTED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry(root.clone())
+        .or_default()
+        .clone();
+    *started.get_or_init(|| {
         activate(&root).map_err(|error| StartupError {
             error,
             fatal: !root.exists(),

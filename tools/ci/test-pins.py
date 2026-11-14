@@ -9,6 +9,7 @@ import sys
 import tempfile
 import tomllib
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("pins", Path(__file__).with_name("pins.py"))
@@ -70,6 +71,28 @@ class Checkout(unittest.TestCase):
     def test_checkout_at_the_pin_passes(self):
         (self.root / "nsh.rev").write_text(self.head + "\n")
         self.assertIsNone(pins.check_nsh(self.checkout, self.root, {}))
+
+    def test_failed_status_is_not_a_clean_checkout(self):
+        (self.root / "nsh.rev").write_text(self.head + "\n")
+        results = [
+            subprocess.CompletedProcess([], 0, self.head + "\n", ""),
+            subprocess.CompletedProcess([], 128, "", "synthetic status failure"),
+        ]
+        with patch.object(pins.subprocess, "run", side_effect=results):
+            problem = pins.check_nsh(self.checkout, self.root, {})
+        self.assertIn("git status failed", problem)
+
+    def test_dirty_checkout_fails(self):
+        (self.root / "nsh.rev").write_text(self.head + "\n")
+        (self.checkout / "dirty.txt").write_text("uncommitted")
+        problem = pins.check_nsh(self.checkout, self.root, {})
+        self.assertIsNotNone(problem)
+        self.assertIn("uncommitted changes", problem)
+
+    def test_dirty_checkout_allowed_with_override(self):
+        (self.root / "nsh.rev").write_text(self.head + "\n")
+        (self.checkout / "dirty.txt").write_text("uncommitted")
+        self.assertIsNone(pins.check_nsh(self.checkout, self.root, {"IPTV_ALLOW_NSH_DRIFT": "1"}))
 
     def test_other_commit_fails_and_names_both(self):
         (self.root / "nsh.rev").write_text(REVISION + "\n")

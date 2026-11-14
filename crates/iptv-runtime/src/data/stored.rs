@@ -29,6 +29,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use tokio::sync::mpsc::unbounded_channel;
 
+use crate::GuideWork;
 use crate::model::{SourceId, StoredGuide};
 use iptv_epg::{ChannelKey, UnixTime};
 use iptv_import::CancelToken;
@@ -61,8 +62,9 @@ pub fn refresh_status() {
 const SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
 
 pub use crate::stored::{
-    configs, guide_edit_is_current, keep_past_days, next_guide_edit, note_shown, shown_sources,
-    updating, with_storage,
+    RETRY_DUE, begin_update, configs, end_update, guide_edit_is_current, keep_past_days,
+    next_guide_edit, note_shown, shown_sources, unwinding_updates, update_current, updating,
+    with_storage,
 };
 
 /// Fetch descriptions on the shared worker; a bounded cache makes later renders synchronous.
@@ -128,7 +130,7 @@ pub fn update_now(done: impl FnOnce() + 'static) -> bool {
                 done();
             }
         };
-        if updating(source) {
+        if update_current(source) {
             remaining.set(remaining.get() - 1);
             started = true;
             continue;
@@ -148,14 +150,73 @@ pub fn update_now(done: impl FnOnce() + 'static) -> bool {
     started
 }
 
+/// Guide work of a source that a guide action replaced ([`supersede`]).
+pub(super) struct Superseded {
+    /// Pending work whose guide download the action cancelled, until it
+    /// has unwound.
+    pub cancelled: Option<super::library::ImportCompletion>,
+    /// The read under way that the action stopped (a timer's check, a
+    /// restore), which would have shown or stored the guide as it was.
+    pub read: Option<GuideWork>,
+}
+
+impl Superseded {
+    /// The read the action stopped set no check when it ended: `source`
+    /// keeps one, unless work that follows the action answers for it. A
+    /// stopped check comes due again at `at`; a stopped read of the cache
+    /// owed none itself (`keep_guide_check` without a time).
+    pub(super) fn keep_check(&self, source: SourceId, generation: u64, at: i64) {
+        match self.read {
+            Some(GuideWork::Check) => super::keep_guide_check(source, generation, Some(at)),
+            Some(_) => super::keep_guide_check(source, generation, None),
+            None => {}
+        }
+    }
+}
+
+/// A guide action (a channel's guide chosen, the guide data deleted)
+/// replaces what work under way on `source` would show or store: an
+/// import's or an update's guide download is revoked, and a read under
+/// way is stopped. A waiting timer stays.
+pub(super) fn supersede(source: SourceId) -> Superseded {
+    Superseded {
+        cancelled: super::library::supersede_import(source),
+        read: crate::current().interrupt_guide_read(source),
+    }
+}
+
 /// Downloads `source`'s guide now (every guide source switched on, with
 /// the storage settings and guide choices of now); the guide on screen
 /// changes when it is `source`'s. `done` runs on the UI thread when it
 /// finished. False when there is no guide to download.
+///
+/// A request joins an update that runs already, unless a guide action
+/// superseded that one: it then downloads nothing any more, and this
+/// request starts an update of its own once that one has unwound.
 pub fn update_source(source: SourceId, done: impl FnOnce(bool) + 'static) -> bool {
-    if updating(source) {
+    if update_current(source) {
         return true;
     }
+    start_update(source, None, done)
+}
+
+/// [`update_source`] for a change the download has to include (a
+/// channel's guide choice just saved): an update that runs already read
+/// the store before it, and is replaced instead of joined. `after`: work
+/// that change cancelled, which the download starts after.
+pub(super) fn restart_update(
+    source: SourceId,
+    after: Option<super::library::ImportCompletion>,
+    done: impl FnOnce(bool) + 'static,
+) -> bool {
+    start_update(source, after, done)
+}
+
+fn start_update(
+    source: SourceId,
+    after: Option<super::library::ImportCompletion>,
+    done: impl FnOnce(bool) + 'static,
+) -> bool {
     let has_guides = crate::current().status().with(|status| {
         let status = status.borrow();
         match status.lines.get(&source) {
@@ -169,95 +230,107 @@ pub fn update_source(source: SourceId, done: impl FnOnce(bool) + 'static) -> boo
     if !has_guides {
         return false;
     }
-    let loaded = crate::commands::guide_sources(source);
-    crate::current()
-        .updating()
-        .with(|updating| updating.borrow_mut().push(source));
+    // This update owns the source's guide from now on: work it replaces
+    // is revoked. What that cancelled, and an update a guide action
+    // superseded before, only unwinds: this one starts after it.
+    let mut unwinding = unwinding_updates(source);
+    unwinding.extend(super::library::replace_import(source));
+    unwinding.extend(after);
+    let cancel = CancelToken::new();
+    let completion = super::library::import_completion(cancel.clone());
+    completion.playlist_done(); // This worker owns guide work only.
+    super::library::track_import(source, &completion);
+    begin_update(source, &completion);
+    let generation = crate::current().generation().with(Cell::get);
     super::spawn_in_app(async move {
-        let (stored, sources) = match loaded.await {
-            Ok(loaded) => loaded,
-            Err(error) => {
-                log::warn!("iptv data: cannot load guide sources: {error}");
-                crate::current()
-                    .updating()
-                    .with(|updating| updating.borrow_mut().retain(|id| *id != source));
-                done(false);
-                return;
-            }
-        };
-        let guides = if sources.is_empty() {
-            with_storage(
+        for job in unwinding {
+            job.until_finished().await;
+        }
+        let guides = match crate::commands::guide_sources(source).await {
+            Ok((stored, sources)) if sources.is_empty() => Ok(with_storage(
                 stored
                     .as_ref()
                     .map(StoredGuide::configs)
                     .unwrap_or_default(),
                 &crate::settings::get(),
-            )
-        } else {
-            configs(&sources)
+            )),
+            Ok((_, sources)) => Ok(configs(&sources)),
+            Err(error) => Err(error),
         };
-        if guides.is_empty() {
-            crate::current()
-                .updating()
-                .with(|updating| updating.borrow_mut().retain(|id| *id != source));
-            crate::current().emit(crate::RuntimeEvent::Notify(
-                "No guide sources are configured",
-            ));
-            done(false);
-            return;
-        }
-        super::library::revoke_import_handoff(source);
-        let cancel = CancelToken::new();
-        let completion = super::library::import_completion(cancel.clone());
-        completion.playlist_done(); // This worker owns guide work only.
-        let had_check = crate::current().has_guide_check(source);
-        super::library::track_import(source, &completion);
-
-        let generation = crate::current().generation().with(Cell::get);
         let (tx, mut rx) = unbounded_channel();
-        let accepted = super::workers::submit(super::source_is_visible(source), move || {
-            super::with_runtime(|| download_now(source, guides, &tx, &cancel));
-        });
-        if !accepted {
-            if had_check {
-                super::schedule_check(
-                    source,
-                    super::now_unix() + super::MIN_WAIT.as_secs() as i64,
-                    generation,
-                );
+        // Without a download (nothing to download, the store unreadable,
+        // the workers busy) the update ends as soon as it began.
+        let accepted = match guides {
+            Ok(guides) if guides.is_empty() => {
+                crate::current().emit(crate::RuntimeEvent::Notify(
+                    "No guide sources are configured",
+                ));
+                // No worker holds the sender: the wait below ends at once.
+                drop(tx);
+                false
             }
-            crate::current().emit(crate::RuntimeEvent::Notify(
-                "Too many playlists are updating. Try again shortly.",
-            ));
-        }
-        super::spawn_in_app(async move {
-            loop {
-                match rx.recv().await {
-                    Some(Msg::Guide(imported))
-                        if (crate::current().shown().with(Cell::get) == Some(source)
-                            || super::combined::includes(source))
-                            && super::library::import_is_current(source, &completion) =>
-                    {
-                        super::show(imported, generation, false).await
-                    }
-                    Some(Msg::NextCheck { source, at })
-                        if (crate::current().shown().with(Cell::get) == Some(source)
-                            || super::combined::includes(source))
-                            && super::library::import_is_current(source, &completion) =>
-                    {
-                        super::schedule_check(source, at, generation);
-                    }
-                    Some(_) => {}
-                    None => break,
+            Ok(guides) => {
+                let visible = super::source_is_visible(source);
+                let accepted = super::workers::submit(visible, move || {
+                    super::with_runtime(|| download_now(source, guides, &tx, &cancel));
+                });
+                if !accepted {
+                    crate::current().emit(crate::RuntimeEvent::Notify(
+                        "Too many playlists are updating. Try again shortly.",
+                    ));
                 }
+                accepted
             }
-            completion.finish();
-            crate::current()
-                .updating()
-                .with(|u| u.borrow_mut().retain(|id| *id != source));
-            crate::current().emit(crate::RuntimeEvent::LibraryChanged);
-            done(accepted);
-        });
+            Err(error) => {
+                log::warn!("iptv data: cannot load guide sources: {error}");
+                drop(tx);
+                false
+            }
+        };
+        // Whether this update set the next check, or settled that the
+        // policy asks for none.
+        let mut answered = false;
+        // The next check this update asked for after it was superseded.
+        let mut unscheduled = None;
+        loop {
+            let shown = || {
+                crate::current().shown().with(Cell::get) == Some(source)
+                    || super::combined::includes(source)
+            };
+            let current = || super::library::import_is_current(source, &completion);
+            match rx.recv().await {
+                Some(Msg::Guide(imported)) if shown() && current() => {
+                    super::show(imported, generation, false).await
+                }
+                Some(Msg::NextCheck { source, at }) if shown() && current() => {
+                    // Not when a newer generation began meanwhile: should
+                    // that fail and leave this playlist on screen, this
+                    // is what it is owed.
+                    if !super::schedule_check(source, at, generation) {
+                        crate::current().owe_guide_check(source, at);
+                    }
+                    answered = true;
+                }
+                Some(Msg::NextCheck { at, .. }) => unscheduled = Some(at),
+                Some(Msg::NoCheck { .. }) if current() => {
+                    crate::current().take_owed_guide_check(source);
+                    answered = true;
+                }
+                Some(_) => {}
+                None => break,
+            }
+        }
+        completion.finish();
+        end_update(source, &completion);
+        // This update cancelled the source's timer and did not answer for
+        // it: a guide action superseded it (its NextCheck was dropped),
+        // the worker pool refused it, or the store could not be read.
+        // Newer work that replaced it answers instead.
+        if !answered && !completion.superseded.get() {
+            super::keep_guide_check(source, generation, unscheduled);
+        }
+        crate::current().emit(crate::RuntimeEvent::LibraryChanged);
+        done(accepted);
     });
     true
 }
@@ -276,6 +349,9 @@ pub fn guides_changed(source: SourceId) {
     {
         return;
     }
+    // A check under way would download and store the feeds as they were.
+    // The check below answers for it, or the update that runs instead.
+    crate::current().interrupt_guide_read(source);
     let edit = next_guide_edit(source);
     let generation = crate::current().generation().with(Cell::get);
     super::spawn_in_app(async move {
@@ -308,13 +384,22 @@ pub fn clear(done: impl FnOnce(bool) + 'static) -> bool {
     if sources.is_empty() {
         return false;
     }
-    for source in &sources {
-        super::library::revoke_import_handoff(*source);
-    }
+    // Work under way would show the guide again or store it anew.
+    let superseded: Vec<_> = sources
+        .iter()
+        .map(|source| (*source, supersede(*source)))
+        .collect();
     let generation = crate::current().generation().with(Cell::get);
     let saved = crate::commands::clear_guides(sources);
     super::spawn_in_app(async move {
-        let Ok((deleted, imports)) = saved.await else {
+        let outcome = saved.await;
+        // A check stopped for it stays owed, as after a download that
+        // was cancelled: still due, later, not at once.
+        let later = super::now_unix() + RETRY_DUE;
+        for (source, superseded) in superseded {
+            superseded.keep_check(source, generation, later);
+        }
+        let Ok((deleted, imports)) = outcome else {
             return done(false);
         };
         for imported in imports {

@@ -1,6 +1,6 @@
+use crate::headless::Headless;
 use crate::personalization;
 use iptv_settings::Settings;
-use nsh_testing::Headless;
 use personalization::*;
 use std::time::Duration;
 fn settings(app: &mut Headless) {
@@ -13,11 +13,15 @@ fn settings(app: &mut Headless) {
 }
 fn setting(app: &mut Headless, label: &str) {
     let selector = format!("text:{label}");
+    // Page/focus effects can still recycle and scroll rows after Right. Wait
+    // for that layout before targeting a row by its visible text.
+    assert!(app.idle(Duration::from_millis(50)).unwrap());
     for _ in 0..100 {
         if app.screen().matches(&selector).unwrap() && app.press(&selector).is_ok() {
             return;
         }
         step(app.press_key("down"));
+        assert!(app.idle(Duration::from_millis(50)).unwrap());
     }
     panic!("missing {label}");
 }
@@ -94,8 +98,12 @@ fn appearance_controls_apply_live_persist_and_change_actual_guide_geometry() {
     step(app.press_key("enter"));
     close(app);
     let dir = f.path.parent().unwrap();
-    let (s, _) =
-        Settings::from_json(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+    let s = personalization::saved_settings(app, &dir.join("settings.json"), |settings| {
+        settings.get("guide.visible_minutes").unwrap() == iptv_settings::Value::Int(240)
+            && settings.get("guide.show_logos").unwrap() == iptv_settings::Value::Bool(false)
+            && settings.get("guide.show_channel_numbers").unwrap()
+                == iptv_settings::Value::Bool(false)
+    });
     assert_eq!(
         s.get("guide.visible_minutes").unwrap(),
         iptv_settings::Value::Int(240)

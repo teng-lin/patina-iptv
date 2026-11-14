@@ -7,10 +7,10 @@
 
 use std::time::Duration;
 
+use crate::headless::Headless;
 use nsh_core::picker::PickedFile;
 use nsh_core::{ImageData, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
 const IMPORT: Duration = Duration::from_secs(30);
 /// Generous: a loaded machine (an instrumented coverage run) is slow.

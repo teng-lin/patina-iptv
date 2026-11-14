@@ -181,7 +181,9 @@ fn synthetic_playlist(n: usize) -> String {
     s.push_str("#EXTM3U url-tvg=\"http://epg.example.com/guide.xml\"\n");
     for i in 0..n {
         s.push_str(&format!(
-            "#EXTINF:-1 tvg-id=\"ch{i}.example\" tvg-name=\"Channel {i}\" tvg-logo=\"http://img.example.com/{i}.png\" tvg-chno=\"{i}\" group-title=\"Group {}\" catchup=\"shift\" catchup-days=\"3\",Channel {i}\n\
+            "#EXTINF:-1 tvg-id=\"ch{i}.example\" tvg-name=\"Channel {i}\" \
+             tvg-logo=\"http://img.example.com/{i}.png\" tvg-chno=\"{i}\" \
+             group-title=\"Group {}\" catchup=\"shift\" catchup-days=\"3\",Channel {i}\n\
              http://live.example.com/stream/{i}.m3u8?token=t{i}\n",
             i % 50
         ));
