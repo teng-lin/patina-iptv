@@ -316,7 +316,15 @@ fn activate(ui: Ui, row: Row) {
     if state(ui, |s| s.busy).unwrap_or(true) && row != Row::Back {
         return;
     }
-    update(ui, |s| s.focus = row.clone());
+    update(ui, |s| {
+        s.focus = row.clone();
+        if row != Row::Search {
+            s.typing = false;
+        }
+    });
+    if row != Row::Search {
+        dismiss_keyboard();
+    }
     match row {
         Row::Channel(subject) => {
             update(ui, |s| {

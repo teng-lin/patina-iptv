@@ -2999,6 +2999,7 @@ dependencies = [
  "libc",
  "log",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
 ]
 
@@ -3028,6 +3029,7 @@ dependencies = [
  "iptv-providers",
  "rusqlite",
  "serde_json",
+ "sha2 0.10.9",
  "zeroize",
 ]
 

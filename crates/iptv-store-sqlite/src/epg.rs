@@ -415,6 +415,22 @@ impl Store {
         let mut counts = EpgCounts::default();
         for f in feeds {
             insert_feed(&tx, source, f)?;
+            let origin_key = format!("inspection.feed.{}.{}", source.0, f.config.id.0);
+            tx.execute("DELETE FROM store_meta WHERE key=?1", [&origin_key])?;
+            tx.execute(
+                "INSERT INTO store_meta(key,value)
+                 SELECT ?1,i.incarnation FROM guide_feed_incarnations i JOIN guide_sources g
+                 ON g.source_id=i.source_id AND g.feed_id=i.feed_id
+                 WHERE g.source_id=?2 AND g.feed_id=?3 AND g.url=?4 AND g.shift_minutes=?5",
+                params![
+                    origin_key,
+                    source.0,
+                    f.config.id.0,
+                    f.config.url.expose(),
+                    f.config.time.shift_minutes
+                ],
+            )?;
+
             insert_feed_channels(&tx, source, f.config.id, import)?;
             counts.feeds += 1;
         }

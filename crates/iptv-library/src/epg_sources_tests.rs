@@ -51,7 +51,7 @@ fn applied(s: &mut Screen, effect: Option<Effect>) {
 }
 
 #[test]
-fn the_list_moves_by_identity_and_ends_with_add_and_update() {
+fn the_list_moves_by_identity_and_exposes_update_and_inspection() {
     let mut s = screen();
     assert_eq!(s.focus(), Item::Source(USER));
     assert_eq!(
@@ -60,7 +60,8 @@ fn the_list_moves_by_identity_and_ends_with_add_and_update() {
             Item::Source(USER),
             Item::Source(PROVIDER),
             Item::Add,
-            Item::Update
+            Item::Update,
+            Item::Inspect
         ]
     );
     s.key(Key::Down);
@@ -68,7 +69,9 @@ fn the_list_moves_by_identity_and_ends_with_add_and_update() {
     s.key(Key::Down);
     assert_eq!(s.key(Key::Ok), Some(Effect::Update));
     s.key(Key::Down);
-    assert_eq!(s.focus(), Item::Update, "no wrap");
+    assert_eq!(s.key(Key::Ok), Some(Effect::Inspect));
+    s.key(Key::Down);
+    assert_eq!(s.focus(), Item::Inspect, "no wrap");
     assert_eq!(s.key(Key::Back), Some(Effect::Close));
     assert_eq!(Screen::new(P, vec![]).focus(), Item::Add);
 }

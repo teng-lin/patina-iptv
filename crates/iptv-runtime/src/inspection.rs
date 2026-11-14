@@ -85,7 +85,16 @@ where
     let deadline = Instant::now() + control.timeout.min(maximum);
     let token = CancelToken::new();
     let operation_cancel = token.clone();
-    let read = services.analyze(move |store| store.inspection_read(token, deadline, operation));
+    let slot = owner.inspection.admit();
+    let read: std::pin::Pin<
+        Box<dyn Future<Output = iptv_store_sqlite::Result<InspectionResult<T>>> + Send>,
+    > = match slot {
+        Some(slot) => Box::pin(services.analyze(move |store| {
+            let _slot = slot;
+            store.inspection_read(token, deadline, operation)
+        })),
+        None => Box::pin(async { Ok(Err(InspectionError::Busy)) }),
+    };
     let accepted = services.clone();
     let cancel_on_drop = operation_cancel.clone();
     let task = services.spawn(async move {

@@ -79,6 +79,21 @@ impl Store {
                     SET incarnation = lower(hex(randomblob(16)))",
             [],
         )?;
+        // Restored data and configuration were validated together. Rebind cached
+        // provenance to the new restore incarnation without reviving old handles.
+        tx.execute(
+            "UPDATE store_meta SET value=(SELECT i.incarnation FROM guide_feed_incarnations i
+             JOIN guide_sources g ON g.source_id=i.source_id AND g.feed_id=i.feed_id
+             JOIN epg_feeds f ON f.source_id=g.source_id AND f.feed_id=g.feed_id
+             WHERE store_meta.key='inspection.feed.' || i.source_id || '.' || i.feed_id
+             AND f.url=g.url AND f.shift_minutes=g.shift_minutes)
+             WHERE key LIKE 'inspection.feed.%' AND EXISTS(SELECT 1 FROM guide_feed_incarnations i
+             JOIN guide_sources g ON g.source_id=i.source_id AND g.feed_id=i.feed_id
+             JOIN epg_feeds f ON f.source_id=g.source_id AND f.feed_id=g.feed_id
+             WHERE store_meta.key='inspection.feed.' || i.source_id || '.' || i.feed_id
+             AND f.url=g.url AND f.shift_minutes=g.shift_minutes)",
+            [],
+        )?;
         tx.commit()?;
         Ok(())
     }
