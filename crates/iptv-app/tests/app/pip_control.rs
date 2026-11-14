@@ -12,12 +12,12 @@
 
 use std::time::Duration;
 
+use crate::headless::Headless;
 use nsh_core::desktop::{DesktopCommand, OpenWindow};
 use nsh_core::picker::PickedFile;
 use nsh_core::platform::{Idiom, Os};
 use nsh_core::{Command, ImageData, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
 const PLAYLIST: &str = "#EXTM3U
 #EXTINF:-1 tvg-id=\"one\" group-title=\"News\",Test Channel One
@@ -153,7 +153,9 @@ fn picture_in_picture_opens_a_window_of_its_own_on_the_same_player() {
     step(app.press_key("enter"));
     // It tunes after the switch delay.
     let tuned = std::time::Instant::now();
-    while iptv_app::player_opens(0) == opens && tuned.elapsed() < Duration::from_secs(5) {
+    while iptv_app::player_opens(0) == opens
+        && tuned.elapsed() < crate::isolated::scaled_duration(Duration::from_secs(5))
+    {
         app.idle(Duration::from_millis(100)).unwrap();
     }
     assert!(pip_open(&mut app), "the window shows the new channel");

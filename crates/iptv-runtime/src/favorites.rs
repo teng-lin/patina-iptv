@@ -53,6 +53,25 @@ pub(crate) enum Write {
     },
 }
 
+#[derive(Clone)]
+enum PendingWrite {
+    MoveFavourite {
+        source: SourceId,
+        key: String,
+        index: usize,
+    },
+    Favourite {
+        source: SourceId,
+        key: String,
+        on: bool,
+    },
+    Watched {
+        source: SourceId,
+        key: String,
+        at: i64,
+    },
+}
+
 /// Writes sent to the writer thread and not yet committed (or dropped with
 /// their deleted playlist).
 fn unsaved() -> std::sync::Arc<AtomicUsize> {
@@ -399,33 +418,15 @@ pub fn flush_on_shutdown() -> bool {
 
 fn write_all(rx: Receiver<Write>, unsaved: std::sync::Arc<AtomicUsize>) {
     write_all_with(rx, |write| {
-        let operation = match write {
-            Write::Barrier(_) | Write::Shutdown(_) => unreachable!(),
-            Write::MoveFavourite { source, key, index } => Write::MoveFavourite {
-                source: *source,
-                key: key.clone(),
-                index: *index,
-            },
-            Write::Favourite { source, key, on } => Write::Favourite {
-                source: *source,
-                key: key.clone(),
-                on: *on,
-            },
-            Write::Watched { source, key, at } => Write::Watched {
-                source: *source,
-                key: key.clone(),
-                at: *at,
-            },
-        };
+        let operation = write.clone();
         let result = super::store_service::blocking(move |store| match operation {
-            Write::Barrier(_) | Write::Shutdown(_) => unreachable!(),
-            Write::MoveFavourite { source, key, index } => store
+            PendingWrite::MoveFavourite { source, key, index } => store
                 .move_favourite(source, &ContentId::from_stored(key), index)
                 .map(|_| ()),
-            Write::Favourite { source, key, on } => {
+            PendingWrite::Favourite { source, key, on } => {
                 store.set_favourite(source, &ContentId::from_stored(key), on)
             }
-            Write::Watched { source, key, at } => store.record_watch(
+            PendingWrite::Watched { source, key, at } => store.record_watch(
                 source,
                 &ContentId::from_stored(key),
                 ContentKind::Live,
@@ -453,7 +454,7 @@ fn write_all(rx: Receiver<Write>, unsaved: std::sync::Arc<AtomicUsize>) {
 
 /// A failed operation stays at the head of the queue. Neither later writes nor
 /// barriers may skip it; barriers and an idle retry timer retry changes in order.
-fn write_all_with(rx: Receiver<Write>, mut persist: impl FnMut(&Write) -> bool) {
+fn write_all_with(rx: Receiver<Write>, mut persist: impl FnMut(&PendingWrite) -> bool) {
     let mut pending = VecDeque::new();
     loop {
         let received = if pending.is_empty() {
@@ -471,8 +472,16 @@ fn write_all_with(rx: Receiver<Write>, mut persist: impl FnMut(&Write) -> bool) 
                 Write::Shutdown(done) => Some(Box::new(move |saved| {
                     let _ = done.send(saved);
                 })),
-                write => {
-                    pending.push_back(write);
+                Write::MoveFavourite { source, key, index } => {
+                    pending.push_back(PendingWrite::MoveFavourite { source, key, index });
+                    None
+                }
+                Write::Favourite { source, key, on } => {
+                    pending.push_back(PendingWrite::Favourite { source, key, on });
+                    None
+                }
+                Write::Watched { source, key, at } => {
+                    pending.push_back(PendingWrite::Watched { source, key, at });
                     None
                 }
             },
@@ -708,19 +717,18 @@ mod writer_tests {
                 return false;
             }
             persisted.push(match write {
-                Write::Favourite { on, .. } => {
+                PendingWrite::Favourite { on, .. } => {
                     assert!(*on);
                     "favorite"
                 }
-                Write::MoveFavourite { index, .. } => {
+                PendingWrite::MoveFavourite { index, .. } => {
                     assert_eq!(*index, 0);
                     "order"
                 }
-                Write::Watched { source, at, .. } => {
+                PendingWrite::Watched { source, at, .. } => {
                     assert_eq!((*source, *at), (SourceId(2), 123));
                     "history"
                 }
-                _ => unreachable!(),
             });
             true
         });

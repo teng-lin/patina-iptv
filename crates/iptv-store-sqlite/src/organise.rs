@@ -18,6 +18,32 @@ use crate::{SourceId, Store};
 
 pub use iptv_library::{CustomGroupId, OrderScope};
 
+/// A position resolved on the writer, against the same IDs it rewrites.
+#[derive(Clone, Copy, Debug)]
+pub enum MoveTarget {
+    Index(usize),
+    Step(isize),
+}
+impl MoveTarget {
+    pub(crate) fn resolve(self, current: usize) -> usize {
+        match self {
+            Self::Index(index) => index,
+            Self::Step(step) => current.saturating_add_signed(step),
+        }
+    }
+    fn in_list(self, list: &[String], present: &HashSet<String>, id: &str) -> usize {
+        match self {
+            Self::Index(index) => index,
+            Self::Step(_) => self.resolve(
+                list.iter()
+                    .filter(|key| present.contains(*key))
+                    .position(|key| key == id)
+                    .unwrap_or(0),
+            ),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CustomGroup {
     pub id: CustomGroupId,
@@ -202,6 +228,15 @@ impl Store {
         id: &ContentId,
         index: usize,
     ) -> Result<bool> {
+        self.move_channel_to(source, scope, id, MoveTarget::Index(index))
+    }
+    pub fn move_channel_to(
+        &mut self,
+        source: SourceId,
+        scope: &OrderScope,
+        id: &ContentId,
+        target: MoveTarget,
+    ) -> Result<bool> {
         let tx = self.conn.transaction()?;
         ensure_source(&tx, source)?;
         let current = scope_channels(&tx, source, scope)?;
@@ -209,6 +244,7 @@ impl Store {
         let mut list = stored_order(&tx, source, scope)?;
         let listed: HashSet<String> = list.iter().cloned().collect();
         list.extend(current.into_iter().filter(|c| !listed.contains(c)));
+        let index = target.in_list(&list, &present, id.as_str());
         if !move_to(&mut list, &present, id.as_str(), index) {
             return Ok(false);
         }
@@ -357,7 +393,10 @@ impl Store {
     pub fn reset_custom_group_order(&mut self, group: CustomGroupId) -> Result<()> {
         let tx = self.conn.transaction()?;
         let source = group_source(&tx, group)?;
-        let mut list = members(&tx, group)?;
+        let list = members(&tx, group)?;
+        if list.is_empty() {
+            return Ok(());
+        }
         let present = present_ids(&tx, source)?;
         let provider = ids(
             &tx,
@@ -366,10 +405,145 @@ impl Store {
              WHERE m.group_id = ?1 ORDER BY c.position",
             params![group.0, source.0],
         )?;
-        for (index, id) in provider.iter().enumerate() {
-            move_to(&mut list, &present, id, index);
+
+        struct Node {
+            item: String,
+            prev: Option<usize>,
+            next: Option<usize>,
+            is_present: bool,
+            placed: bool,
         }
-        write_members(&tx, group, &list)?;
+
+        let len = list.len();
+        let mut map = std::collections::HashMap::with_capacity(len);
+        let mut nodes = Vec::with_capacity(len);
+        let mut head = 0;
+        let mut tail = len.saturating_sub(1);
+        for (i, item) in list.into_iter().enumerate() {
+            let is_present = present.contains(&item);
+            map.insert(item.clone(), i);
+            nodes.push(Node {
+                item,
+                prev: if i > 0 { Some(i - 1) } else { None },
+                next: if i + 1 < len { Some(i + 1) } else { None },
+                is_present,
+                placed: false,
+            });
+        }
+
+        let mut cursor = None;
+        let mut curr = Some(head);
+        while let Some(idx) = curr {
+            if nodes[idx].is_present {
+                cursor = Some(idx);
+                break;
+            }
+            curr = nodes[idx].next;
+        }
+
+        for id in &provider {
+            let Some(&node_idx) = map.get(id) else {
+                continue;
+            };
+            nodes[node_idx].placed = true;
+
+            if cursor == Some(node_idx) {
+                // Advance cursor to next unplaced present node
+                let mut n = nodes[node_idx].next;
+                while let Some(idx) = n {
+                    if nodes[idx].is_present && !nodes[idx].placed {
+                        cursor = Some(idx);
+                        break;
+                    }
+                    n = nodes[idx].next;
+                }
+                if n.is_none() {
+                    cursor = None;
+                }
+                if let Some(target) = cursor {
+                    // Removing and reinserting also moves past any orphan
+                    // between this member and the next present member.
+                    let previous = nodes[node_idx].prev;
+                    let next = nodes[node_idx].next;
+                    if let Some(previous) = previous {
+                        nodes[previous].next = next;
+                    } else {
+                        head = next.expect("target follows current member");
+                    }
+                    if let Some(next) = next {
+                        nodes[next].prev = previous;
+                    }
+                    let previous = nodes[target].prev;
+                    nodes[node_idx].prev = previous;
+                    nodes[node_idx].next = Some(target);
+                    if let Some(previous) = previous {
+                        nodes[previous].next = Some(node_idx);
+                    } else {
+                        head = node_idx;
+                    }
+                    nodes[target].prev = Some(node_idx);
+                } else if node_idx != tail {
+                    // No more unplaced present items; move node_idx to tail.
+                    let p = nodes[node_idx].prev;
+                    let n = nodes[node_idx].next;
+                    if let Some(prev) = p {
+                        nodes[prev].next = n;
+                    } else {
+                        head = n.unwrap_or(0);
+                    }
+                    if let Some(next) = n {
+                        nodes[next].prev = p;
+                    }
+
+                    nodes[tail].next = Some(node_idx);
+                    nodes[node_idx].prev = Some(tail);
+                    nodes[node_idx].next = None;
+                    tail = node_idx;
+                }
+            } else {
+                // Detach node_idx
+                let p = nodes[node_idx].prev;
+                let n = nodes[node_idx].next;
+                if let Some(prev) = p {
+                    nodes[prev].next = n;
+                } else {
+                    head = n.unwrap_or(0);
+                }
+                if let Some(next) = n {
+                    nodes[next].prev = p;
+                } else {
+                    tail = p.unwrap_or(0);
+                }
+
+                if let Some(target) = cursor {
+                    // Insert node_idx before target
+                    let target_prev = nodes[target].prev;
+                    nodes[node_idx].prev = target_prev;
+                    nodes[node_idx].next = Some(target);
+                    if let Some(tp) = target_prev {
+                        nodes[tp].next = Some(node_idx);
+                    } else {
+                        head = node_idx;
+                    }
+                    nodes[target].prev = Some(node_idx);
+                } else {
+                    // Insert at tail
+                    nodes[tail].next = Some(node_idx);
+                    nodes[node_idx].prev = Some(tail);
+                    nodes[node_idx].next = None;
+                    tail = node_idx;
+                }
+            }
+        }
+
+        let mut result_list = Vec::with_capacity(len);
+        let mut curr = Some(head);
+        while let Some(idx) = curr {
+            result_list.push(std::mem::take(&mut nodes[idx].item));
+            curr = nodes[idx].next;
+        }
+
+        write_members(&tx, group, &result_list)?;
         tx.commit()?;
         Ok(())
     }
@@ -381,10 +555,19 @@ impl Store {
         id: &ContentId,
         index: usize,
     ) -> Result<bool> {
+        self.move_in_custom_group_to(group, id, MoveTarget::Index(index))
+    }
+    pub fn move_in_custom_group_to(
+        &mut self,
+        group: CustomGroupId,
+        id: &ContentId,
+        target: MoveTarget,
+    ) -> Result<bool> {
         let tx = self.conn.transaction()?;
         let source = group_source(&tx, group)?;
         let mut list = members(&tx, group)?;
         let present = present_ids(&tx, source)?;
+        let index = target.in_list(&list, &present, id.as_str());
         if !move_to(&mut list, &present, id.as_str(), index) {
             return Ok(false);
         }

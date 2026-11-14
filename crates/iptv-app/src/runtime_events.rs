@@ -32,14 +32,26 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::BrowsingAll(all) => ui.library.all.set(all),
         RuntimeEvent::ShownSource(source) => ui.library.shown.set(source),
         RuntimeEvent::ScheduleReady(schedule) => crate::set_schedule(&ui, schedule),
-        RuntimeEvent::OrganizationReady { schedule, snapshot } => {
-            if std::rc::Rc::ptr_eq(&schedule, &crate::schedule())
-                && let Some(epg) = schedule
-                    .as_any()
-                    .and_then(|s| s.downcast_ref::<iptv_guide::EpgSchedule>())
-            {
+        RuntimeEvent::OrganizationReady {
+            source,
+            ticket,
+            schedule,
+            replacement,
+        } => {
+            let current = crate::schedule();
+            let same_catalogue = schedule
+                .as_any()
+                .and_then(|s| s.downcast_ref::<iptv_guide::EpgSchedule>())
+                .zip(
+                    current
+                        .as_any()
+                        .and_then(|s| s.downcast_ref::<iptv_guide::EpgSchedule>()),
+                )
+                .is_some_and(|(before, now)| before.same_catalogue(now));
+            if same_catalogue && crate::runtime().organization_edit_current(source, ticket) {
                 let kept = crate::lists::keep(ui);
-                snapshot.install(epg);
+                crate::data::combined::remember_single(source, replacement.clone());
+                crate::runtime().set_schedule(replacement);
                 crate::lists::restore(ui, kept);
                 ui.data_version.update(|version| *version += 1);
             }

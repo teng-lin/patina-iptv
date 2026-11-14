@@ -13,7 +13,7 @@
 //! | `default` (also: a source without a type) | the expanded `catchup-source`; one without `scheme://` is appended to the live URL |
 //! | `append` | live URL + expanded `catchup-source` |
 //! | `shift`, `timeshift` (also: days without a type) | live URL with `utc`/`lutc` set; other query bytes kept exactly |
-//! | `flussonic`, `flussonic-hls`, `flussonic-ts`, `fs` | `…/NAME.m3u8` → `…/NAME-{start}-{duration}.m3u8` (≥ 1 s), or `…/NAME-{start}-now.m3u8` while on air; `…/mpegts` → `…/timeshift_abs-{start}.ts` ([Flussonic DVR playback]) |
+//! | `flussonic`, `flussonic-hls`, `flussonic-ts`, `fs` | `NAME-{start}-{duration}.m3u8` / `-now.m3u8`, or `timeshift_abs-{start}.ts` ([Flussonic DVR playback]) |
 //! | `xc` | `[/live]/U/P/ID[.EXT]` → `/timeshift/U/P/{minutes}/{Y-m-d:H-M}/ID.EXT`, EXT `m3u8` for an `.m3u8` live URL, else `ts`; clock: panel's, else the viewer's |
 //! | `vod` | the expanded `catchup-source`, default `{catchup-id}` |
 //! | other values, Stalker | [`CatchupError::Unsupported`] |

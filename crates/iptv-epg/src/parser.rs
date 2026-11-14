@@ -180,6 +180,10 @@ impl XmltvParser {
                 self.sync_decoder_stats();
                 return Err(e);
             }
+            while self.drain_decoder()? {
+                self.process(false, sink);
+                self.check_limits()?;
+            }
         }
         Ok(())
     }
@@ -190,13 +194,32 @@ impl XmltvParser {
         self.check_limits()?;
         if !self.done {
             self.done = true;
-            let r = self.decoder.finish(&mut self.buf);
+            let r = self.decoder.finish_input(&mut self.buf);
+            self.process(false, sink);
+            self.check_limits()?;
+            r?;
+            while self.drain_decoder()? {
+                self.process(false, sink);
+                self.check_limits()?;
+            }
+            let r = self.decoder.finish_text(&mut self.buf);
             self.process(true, sink);
             self.check_limits()?;
             self.sync_decoder_stats();
             r?;
         }
         Ok(self.stats)
+    }
+
+    fn drain_decoder(&mut self) -> Result<bool, DecodeError> {
+        match self.decoder.drain(&mut self.buf) {
+            Ok(more) => Ok(more),
+            Err(error) => {
+                self.done = true;
+                self.sync_decoder_stats();
+                Err(error)
+            }
+        }
     }
 
     fn check_limits(&self) -> Result<(), DecodeError> {

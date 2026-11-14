@@ -28,7 +28,9 @@ thread_local! {
 
 /// Player `id`'s `pip` prop: `{window}` says whether the window shows it.
 pub(super) fn set_prop(id: u64, value: Option<&Value>) {
-    let on = value.and_then(|v| v["window"].as_bool()).unwrap_or(false);
+    let on = value
+        .and_then(|v| v[crate::PipProps::WINDOW].as_bool())
+        .unwrap_or(false);
     let changed = WANTED.with(|w| {
         let next = match (on, w.get()) {
             (true, _) => Some(id),

@@ -9,9 +9,7 @@
 use iptv_core::player_info::StreamFormat;
 use iptv_core::sound::{VOLUME_STEP, Volume};
 use iptv_core::tracks::{Choice, Kind, Tracks};
-pub use iptv_player_mpv::parse_tracks;
 use nsh_core::prelude::*;
-use serde_json::Value;
 
 use crate::Ui;
 
@@ -84,8 +82,7 @@ fn log_volume(ui: Ui) {
 }
 
 /// The host's `tracks` event from `surface`.
-pub fn on_tracks(ui: Ui, surface: usize, data: &Value) {
-    let tracks = parse_tracks(data);
+pub fn on_tracks(ui: Ui, surface: usize, tracks: Tracks) {
     log::info!(
         "iptv tracks {surface}: {} video, {} audio, {} subtitles",
         tracks.video.len(),
@@ -100,14 +97,14 @@ pub fn on_tracks(ui: Ui, surface: usize, data: &Value) {
 
 /// The host's `format` event from `surface`: whichever of `fps` and
 /// `channels` it knows.
-pub fn on_format(ui: Ui, surface: usize, data: &Value) {
+pub fn on_format(ui: Ui, surface: usize, fps: Option<f64>, channels: Option<u32>) {
     let m = ui.player.stream(surface);
     let mut f = m.format.get_untracked();
-    if let Some(fps) = data["fps"].as_f64() {
+    if let Some(fps) = fps {
         f.fps = fps as f32;
     }
-    if let Some(ch) = data["channels"].as_u64() {
-        f.channels = u32::try_from(ch).unwrap_or(0);
+    if let Some(channels) = channels {
+        f.channels = channels;
     }
     if m.format.with_untracked(|old| *old != f) {
         m.format.set(f);

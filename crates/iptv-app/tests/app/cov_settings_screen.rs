@@ -13,12 +13,13 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
 use nsh_core::Checked;
 use nsh_core::picker::PickedFile;
 use nsh_core::{ImageData, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::{Headless, Screen};
+use nsh_testing::Screen;
 
 const IMPORT: Duration = Duration::from_secs(30);
 const GONE: Duration = Duration::from_secs(3);

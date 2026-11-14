@@ -97,6 +97,7 @@ impl std::fmt::Debug for NetConfig {
 pub struct NetClient {
     client: reqwest::Client,
     public_client: reqwest::Client,
+    gzip_clients: Arc<std::sync::OnceLock<Result<(reqwest::Client, reqwest::Client), FetchError>>>,
     config: Arc<NetConfig>,
     started: std::time::Instant,
 }
@@ -111,17 +112,22 @@ impl std::fmt::Debug for NetClient {
 
 impl NetClient {
     pub fn new(config: NetConfig) -> Result<Self, FetchError> {
-        let client = Self::http_client(&config, false)?;
-        let public_client = Self::http_client(&config, true)?;
+        let client = Self::http_client(&config, false, true)?;
+        let public_client = Self::http_client(&config, true, true)?;
         Ok(Self {
             client,
             public_client,
+            gzip_clients: Arc::new(std::sync::OnceLock::new()),
             config: Arc::new(config),
             started: std::time::Instant::now(),
         })
     }
 
-    fn http_client(config: &NetConfig, public_only: bool) -> Result<reqwest::Client, FetchError> {
+    fn http_client(
+        config: &NetConfig,
+        public_only: bool,
+        decode_gzip: bool,
+    ) -> Result<reqwest::Client, FetchError> {
         let tls = crate::tls::client_config(&config.extra_roots_der)?;
         let mut builder = reqwest::Client::builder()
             .tls_backend_preconfigured(tls)
@@ -130,7 +136,7 @@ impl NetClient {
             // Redirects are followed in `redirect::execute` (header hygiene).
             .redirect(reqwest::redirect::Policy::none())
             .referer(false)
-            .gzip(true)
+            .gzip(decode_gzip)
             .deflate(true)
             .no_proxy();
         if public_only {
@@ -221,12 +227,28 @@ impl NetClient {
                 },
             });
         }
+        let preserve_gzip = request.preserve_gzip;
         let shown = request.redacted_url();
         let req = self.build(request)?;
+        let (client, public_client) = if preserve_gzip {
+            let pair = self
+                .gzip_clients
+                .get_or_init(|| {
+                    Ok((
+                        Self::http_client(&self.config, false, false)?,
+                        Self::http_client(&self.config, true, false)?,
+                    ))
+                })
+                .as_ref()
+                .map_err(Clone::clone)?;
+            (&pair.0, &pair.1)
+        } else {
+            (&self.client, &self.public_client)
+        };
         log::debug!("{} {shown}", req.method);
         let resp = redirect::execute(
-            &self.client,
-            &self.public_client,
+            client,
+            public_client,
             req,
             self.config.max_redirects,
             &shown,

@@ -39,7 +39,8 @@ import com.longbridge.nsh.NshComponentContext
  * black frame. The Rust app lays it out like any view and draws its UI above
  * it; changing layout never recreates the decoder.
  *
- * Props:
+ * Props (their names and types are [PlayerProps]'s, the one place this
+ * host matches them; `PlayerContract.kt` holds the contract):
  * - `source`: `{url, headers: {name: value}, token, live, reconnect}` or
  *   null (stops). A new url or token reopens the stream (the token forces a
  *   retry of the same url). The bounded transport confines identity headers
@@ -48,7 +49,8 @@ import com.longbridge.nsh.NshComponentContext
  *   on across a connection the server closes ([start]). `reconnect`: the
  *   app reopens the stream that played (a retry), so the last frame stays
  *   instead of the black shutter; so does a new token for the same url.
- * - `paused` (bool), `userAgent` (fallback when the source sends none),
+ *   A source whose headers name no `User-Agent` is sent this player's own.
+ * - `paused` (bool),
  * - `pictureSize` ("normal", "full", "zoom", "cinema", "reduced", "4:3",
  *   "16:9", "2.35:1"; sizes the surface by layout, never by transform).
  * - `videoTrack` ("auto" or a video track id), `audioTrack` ("auto" or an
@@ -59,7 +61,8 @@ import com.longbridge.nsh.NshComponentContext
  * - `pip` (the main player only): picture in picture, [PipHost], which
  *   also emits its `pip` and `pipAction` events through this component.
  *
- * Events: `state` {state: idle|buffering|ready|ended}, `error` {code, http?}
+ * Events (each a [PlayerEvent]): `state` {state:
+ * idle|buffering|ready|ended}, `error` {code, http?}
  * (code is Media3's error code name, or `ERROR_CODE_UNSUPPORTED_SCHEME` for
  * a load outside the relay, [RelayGuard]; no URLs or messages), `size` {width,
  * height}, `position` {ms} (from where the stream opened; once a second
@@ -105,6 +108,7 @@ class PlayerComponent(
 ) : NshComponent {
     companion object {
         const val NAME = "tv.player"
+        /** The `User-Agent` of a stream whose source names none. */
         private const val DEFAULT_UA = "iptv-rs/0.1 (Media3)"
         /**
          * A live item that played shorter than this before the server closed
@@ -151,7 +155,6 @@ class PlayerComponent(
         addView(shutter, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
     }
 
-    private var userAgent = DEFAULT_UA
     private var url: String? = null
     private var token: Long = 0
     /** The source is a live channel ([start]'s spare items). */
@@ -235,7 +238,7 @@ class PlayerComponent(
 
     private fun emitFormat(video: Format?, audio: Format?) {
         val format = PlayerTracks.format(video, audio)
-        if (format.isNotEmpty()) nsh.emit("format", format)
+        if (!format.isEmpty) emit(format)
     }
 
     /** Frame rate and audio channels as the decoders get them. */
@@ -274,14 +277,7 @@ class PlayerComponent(
             keepScreen()
             // The stop of [background]: the app sees the stream as it was.
             if (away) return
-            val name = when (state) {
-                Player.STATE_IDLE -> "idle"
-                Player.STATE_BUFFERING -> "buffering"
-                Player.STATE_READY -> "ready"
-                Player.STATE_ENDED -> "ended"
-                else -> "unknown"
-            }
-            nsh.emit("state", mapOf("state" to name))
+            emit(PlayerEvent.State(PlayerState.of(state)))
         }
 
         override fun onRenderedFirstFrame() {
@@ -291,7 +287,7 @@ class PlayerComponent(
             // Again for each stream: the app forgets the last one's.
             val size = player.videoSize
             if (size.width > 0 && size.height > 0) {
-                nsh.emit("size", mapOf("width" to size.width, "height" to size.height))
+                emit(PlayerEvent.Size(size.width, size.height))
             }
             emitFormat(player.videoFormat, player.audioFormat)
         }
@@ -312,7 +308,7 @@ class PlayerComponent(
             // Stopped in the background: the tracks come back with the stream.
             if (away) return
             applyChoice()
-            nsh.emit("tracks", PlayerTracks.event(tracks, choice))
+            emit(PlayerTracks.event(tracks, choice))
         }
 
         override fun onCues(cueGroup: CueGroup) {
@@ -323,7 +319,7 @@ class PlayerComponent(
             if (size.width > 0 && size.height > 0) {
                 root.videoAspect = size.width * size.pixelWidthHeightRatio / size.height
                 pip?.videoAspect(this@PlayerComponent, root.videoAspect)
-                nsh.emit("size", mapOf("width" to size.width, "height" to size.height))
+                emit(PlayerEvent.Size(size.width, size.height))
             }
         }
 
@@ -359,9 +355,7 @@ class PlayerComponent(
             // with "Reconnecting…" or its card over the frame.
             if (!live || !rendered) shutter.visibility = View.VISIBLE
             val code = if (refused) "ERROR_CODE_UNSUPPORTED_SCHEME" else transportError ?: error.errorCodeName
-            val event = mutableMapOf<String, Any>("code" to code)
-            status?.let { event["http"] = it }
-            nsh.emit("error", event)
+            emit(PlayerEvent.Error(code, status))
         }
     }
 
@@ -389,7 +383,7 @@ class PlayerComponent(
     private val tick = object : Runnable {
         override fun run() {
             if (player.isPlaying) {
-                nsh.emit("position", mapOf("ms" to player.currentPosition.coerceAtLeast(0)))
+                emit(PlayerEvent.Position(player.currentPosition.coerceAtLeast(0)))
             }
             ticker.postDelayed(this, 1_000)
         }
@@ -406,54 +400,67 @@ class PlayerComponent(
     /** The picture itself (the window's start for picture in picture). */
     internal val picture: View get() = surface
 
-    /** Emits `event` to the app ([PipHost]'s events). */
-    internal fun emit(event: String, data: Any?) = nsh.emit(event, data)
+    /** Emits `event` to the app (this player's, and [PipHost]'s through it). */
+    internal fun emit(event: PlayerEvent) = nsh.emit(event.name, event.data())
 
-    override fun setProp(name: String, value: Any?) {
-        when (name) {
-            "source" -> setSource(value as? Map<*, *>)
-            "paused" -> {
-                player.playWhenReady = value != true
-                pip?.paused(this, value == true)
-            }
-            "pip" -> pip?.setProp(this, value)
-            "pictureSize" -> root.mode = (value as? String) ?: "normal"
-            "videoTrack" -> choose(choice.copy(video = (value as? String) ?: PlayerTracks.AUTO))
-            "audioTrack" -> choose(choice.copy(audio = (value as? String) ?: PlayerTracks.AUTO))
-            "textTrack" -> choose(choice.copy(text = (value as? String) ?: PlayerTracks.OFF))
-            "muted" -> player.volume = if (value == true) 0f else 1f
-            "audioDelay" -> {
-                audioDelayUs = ((value as? Number)?.toLong() ?: 0L).coerceIn(-10_000L, 10_000L) * 1000
-                sink?.delayUs = audioDelayUs
-            }
-            "userAgent" -> {
-                userAgent = (value as? String)?.takeIf { it.isNotBlank() } ?: DEFAULT_UA
-                applyHeaders()
-            }
+    /** What each prop of the contract does on this player. */
+    private val props = object : PlayerProps {
+        override fun source(source: PlayerSource?) = setSource(source)
+
+        override fun paused(paused: Boolean) {
+            player.playWhenReady = !paused
+            this@PlayerComponent.pip?.paused(this@PlayerComponent, paused)
         }
+
+        override fun pictureSize(mode: String) {
+            root.mode = mode
+        }
+
+        override fun videoTrack(id: String) = choose(choice.copy(video = id))
+
+        override fun audioTrack(id: String) = choose(choice.copy(audio = id))
+
+        override fun textTrack(id: String) = choose(choice.copy(text = id))
+
+        /** The volume is the system's here: the app's is the desktops'. */
+        override fun volume(level: Int) {}
+
+        override fun muted(muted: Boolean) {
+            player.volume = if (muted) 0f else 1f
+        }
+
+        override fun audioDelay(ms: Long) {
+            audioDelayUs = ms.coerceIn(-10_000L, 10_000L) * 1000
+            sink?.delayUs = audioDelayUs
+        }
+
+        override fun pip(pip: PlayerPip?) {
+            this@PlayerComponent.pip?.setProp(this@PlayerComponent, pip)
+        }
+    }
+
+    /** A name outside the contract sets nothing ([PlayerProps.setProp]). */
+    override fun setProp(name: String, value: Any?) {
+        props.setProp(name, value)
     }
 
     private fun choose(next: PlayerTracks.Choice) {
         if (next == choice) return
         choice = next
         applyChoice()
-        nsh.emit("tracks", PlayerTracks.event(player.currentTracks, choice))
+        emit(PlayerTracks.event(player.currentTracks, choice))
     }
 
-    private fun setSource(source: Map<*, *>?) {
-        val next = source?.get("url") as? String
-        val nextToken = (source?.get("token") as? Number)?.toLong() ?: 0
-        live = source?.get("live") == true
+    private fun setSource(source: PlayerSource?) {
+        val next = source?.url
+        val nextToken = source?.token ?: 0L
+        live = source?.live == true
         // The same stream again (a retry): keep its last frame.
-        val keepFrame = next != null && (next == url || source?.get("reconnect") == true)
-        val nextPublicOnly = source?.get("publicOnly") != false
+        val keepFrame = next != null && (next == url || source?.reconnect == true)
+        val nextPublicOnly = source?.publicOnly != false
         val changed = next != url || nextToken != token || nextPublicOnly != publicOnly
         if (changed) transport.close()
-        sourceHeaders = (source?.get("headers") as? Map<*, *>)
-            ?.entries
-            ?.mapNotNull { (k, v) -> (k as? String)?.let { key -> (v as? String)?.let { key to it } } }
-            ?.toMap()
-            ?: emptyMap()
+        sourceHeaders = source?.headers ?: emptyMap()
         url = next
         publicOnly = nextPublicOnly
         token = nextToken
@@ -516,7 +523,7 @@ class PlayerComponent(
     private fun applyHeaders() {
         val all = LinkedHashMap(sourceHeaders)
         if (all.keys.none { it.equals("User-Agent", ignoreCase = true) }) {
-            all["User-Agent"] = userAgent
+            all["User-Agent"] = DEFAULT_UA
         }
         headers = all
         try {
@@ -524,7 +531,7 @@ class PlayerComponent(
         } catch (_: java.io.IOException) {
             transport.close()
             player.stop()
-            nsh.emit("error", mapOf("code" to "ERROR_CODE_IO_UNSPECIFIED"))
+            emit(PlayerEvent.Error("ERROR_CODE_IO_UNSPECIFIED"))
         }
     }
 
@@ -541,7 +548,7 @@ class PlayerComponent(
             transport.open(target, headers, publicOnly)
         } catch (_: java.io.IOException) {
             player.stop()
-            nsh.emit("error", mapOf("code" to "ERROR_CODE_IO_UNSPECIFIED"))
+            emit(PlayerEvent.Error("ERROR_CODE_IO_UNSPECIFIED"))
             return
         }
         val builder = MediaItem.Builder().setUri(local)

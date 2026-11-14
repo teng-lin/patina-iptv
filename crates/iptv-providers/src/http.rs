@@ -35,6 +35,8 @@ pub struct HttpRequest {
     pub public_only: bool,
     /// A source/guide path the user explicitly selected.
     pub picked_file: bool,
+    /// Let the XMLTV parser count and decode gzip equally for HTTP and .gz files.
+    pub preserve_gzip: bool,
     /// Substrings of `url` that are secrets, replaced in `Debug` output.
     redact: Vec<String>,
 }
@@ -67,6 +69,7 @@ impl HttpRequest {
             timeout: None,
             public_only: false,
             picked_file: false,
+            preserve_gzip: false,
             redact: Vec::new(),
         }
     }

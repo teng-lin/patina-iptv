@@ -43,18 +43,33 @@ def check_nsh(checkout, root=ROOT, environment=os.environ):
     expected = nsh_revision(root)
     result = subprocess.run(["git", "-C", str(checkout), "rev-parse", "HEAD"], capture_output=True, text=True)
     actual = result.stdout.strip() if result.returncode == 0 else None
-    if actual == expected:
-        return None
-    found = f"is at {actual}" if actual else "is not a Git checkout"
-    message = (
-        f"{checkout} {found}, but nsh.rev pins {expected}.\n"
-        f"Check out the pinned commit:  git -C {checkout} fetch origin && git -C {checkout} checkout --detach {expected}\n"
-        "When developing the fork, set IPTV_ALLOW_NSH_DRIFT=1, and update nsh.rev before committing."
-    )
-    if environment.get("IPTV_ALLOW_NSH_DRIFT") == "1":
-        print(f"warning: IPTV_ALLOW_NSH_DRIFT=1: {checkout} {found}; nsh.rev pins {expected}", file=sys.stderr)
-        return None
-    return message
+    if actual != expected:
+        found = f"is at {actual}" if actual else "is not a Git checkout"
+        message = (
+            f"{checkout} {found}, but nsh.rev pins {expected}.\n"
+            f"Check out the pinned commit:  git -C {checkout} fetch origin && git -C {checkout} checkout --detach {expected}\n"
+            "When developing the fork, set IPTV_ALLOW_NSH_DRIFT=1, and update nsh.rev before committing."
+        )
+        if environment.get("IPTV_ALLOW_NSH_DRIFT") == "1":
+            print(f"warning: IPTV_ALLOW_NSH_DRIFT=1: {checkout} {found}; nsh.rev pins {expected}", file=sys.stderr)
+            return None
+        return message
+
+    status_result = subprocess.run(["git", "-C", str(checkout), "status", "--porcelain"], capture_output=True, text=True)
+    if status_result.returncode != 0:
+        return f"Could not inspect the NSH checkout at {checkout}: git status failed"
+    if status_result.stdout.strip():
+        message = (
+            f"{checkout} is at {expected} but has uncommitted changes:\n"
+            f"{status_result.stdout.strip()}\n"
+            "When developing the fork, set IPTV_ALLOW_NSH_DRIFT=1, and update nsh.rev before committing."
+        )
+        if environment.get("IPTV_ALLOW_NSH_DRIFT") == "1":
+            print(f"warning: IPTV_ALLOW_NSH_DRIFT=1: {checkout} has uncommitted changes", file=sys.stderr)
+            return None
+        return message
+
+    return None
 
 
 def main(arguments):

@@ -94,7 +94,7 @@ $adb logcat -c
 for _ in $(seq 1 30); do $adb shell input keyevent 20; pause 0.1; done
 pause 2
 handler=$($adb logcat -d | sed -n 's/.*iptv key=down phase=Down.*handler_us=\([0-9]*\).*/\1/p')
-echo "key handler: median $(printf '%s\n' $handler | median) us, max $(printf '%s\n' $handler | sort -n | tail -1) us"
+echo "key handler: median $(printf '%s\n' "$handler" | median) us, max $(printf '%s\n' "$handler" | sort -n | tail -1) us"
 $adb shell dumpsys gfxinfo $pkg | grep -E "Total frames rendered|Janky frames|50th percentile|90th percentile|99th percentile" | sed 's/^ *//'
 echo "(budget: key to frame under 50 ms)"
 
@@ -111,7 +111,7 @@ focused || { echo "ABORT: the app does not have the focus" >&2; exit 2; }
 $adb shell monkey -f /data/local/tmp/iptv-keys.txt 1 >/dev/null 2>&1
 pause 2
 handler=$($adb logcat -d | sed -n 's/.*iptv key=down phase=Down.*handler_us=\([0-9]*\).*/\1/p')
-echo "key handler: median $(printf '%s\n' $handler | median) us, max $(printf '%s\n' $handler | sort -n | tail -1) us"
+echo "key handler: median $(printf '%s\n' "$handler" | median) us, max $(printf '%s\n' "$handler" | sort -n | tail -1) us"
 $adb shell dumpsys gfxinfo $pkg | grep -E "Total frames rendered|Janky frames|50th percentile|90th percentile|99th percentile" | sed 's/^ *//'
 
 echo "== memory"

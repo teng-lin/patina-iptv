@@ -636,9 +636,10 @@ pub fn cancel(root: &Path) -> Result<()> {
 
 /// Called before opening any file under `root`. If a crash happened after
 /// moving the original aside, finish the validated restore, or recover it.
-pub fn lock() -> std::result::Result<(), &'static str> {
-    instance::acquire(&super::paths::data_dir())
-        .map_err(|error| report("locking application storage", error))
+pub fn lock() -> std::result::Result<(), Error> {
+    instance::acquire(&super::paths::data_dir()).inspect_err(|error| {
+        log::warn!("iptv backup: locking application storage failed: {error}");
+    })
 }
 
 pub fn startup() -> std::result::Result<(), StartupError> {

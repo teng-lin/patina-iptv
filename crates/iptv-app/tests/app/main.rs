@@ -14,6 +14,8 @@
 
 #[macro_use]
 mod isolated;
+mod headless;
+pub use headless::Headless;
 /// Settings for the player scenarios that browse in two steps.
 mod browse_fixture;
 /// The personalization scenarios' start: a stored playlist of favourites.
@@ -36,6 +38,7 @@ mod cov_settings_screen;
 mod cov_settings_wizard;
 mod cov_sources;
 mod cov_sources_assign;
+mod guide_check_recovery;
 mod guide_look;
 mod guide_nav;
 mod guide_pages;

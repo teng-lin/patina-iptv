@@ -69,3 +69,36 @@ pub fn load_last_channel(source: Option<SourceId>) -> Option<String> {
 pub fn forget_source(source: SourceId) {
     drop(super::file_writer::remove(last_channel_path(Some(source))));
 }
+
+/// Reuse connections across Stalker zaps; settings changes replace the client.
+pub fn link_client(
+    config: iptv_net::NetConfig,
+) -> impl std::future::Future<Output = Result<iptv_net::NetClient, iptv_net::FetchError>> + Send {
+    let cache = crate::current().link_client.clone();
+    async move {
+        let mut cached = cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((previous, client)) = cached.as_ref()
+            && previous == &config
+        {
+            return Ok(client.clone());
+        }
+        let client = iptv_net::NetClient::new(config.clone())?;
+        *cached = Some((config, client.clone()));
+        Ok(client)
+    }
+}
+
+pub fn save_combined_channel(key: &str) {
+    drop(super::file_writer::write(
+        super::paths::data_dir().join("last_channel_combined"),
+        key.as_bytes().to_vec(),
+    ));
+}
+
+pub fn load_combined_channel() -> Option<String> {
+    let bytes = super::file_writer::read(&super::paths::data_dir().join("last_channel_combined"))?;
+    let key = String::from_utf8(bytes).ok()?;
+    (!key.trim().is_empty()).then(|| key.trim().to_owned())
+}

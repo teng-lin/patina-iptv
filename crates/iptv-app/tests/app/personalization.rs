@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use crate::headless::Headless;
 use crate::isolated::Home;
 use iptv_providers::{
     SecretUrl,
@@ -8,7 +9,6 @@ use iptv_settings::Settings;
 use iptv_store_sqlite::{SourceId, SourcePolicy};
 use nsh_core::{Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime},
@@ -40,7 +40,7 @@ pub fn saved_settings(
     path: &Path,
     expected: impl Fn(&Settings) -> bool,
 ) -> Settings {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(10));
     loop {
         if let Ok(text) = std::fs::read_to_string(path)
             && let Ok((settings, report)) = Settings::from_json(&text)
