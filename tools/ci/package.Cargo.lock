@@ -2935,6 +2935,7 @@ dependencies = [
  "quick-xml",
  "reqwest",
  "rustls",
+ "subtle",
  "tokio",
  "url",
  "webpki-roots 1.0.11",

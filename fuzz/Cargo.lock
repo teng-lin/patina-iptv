@@ -556,6 +556,7 @@ dependencies = [
  "quick-xml",
  "reqwest",
  "rustls",
+ "subtle",
  "tokio",
  "url",
  "webpki-roots",

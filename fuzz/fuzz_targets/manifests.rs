@@ -7,7 +7,7 @@
 //!
 //! Neither rewriter may panic. A rewritten HLS playlist must also leave a
 //! player nothing to fetch from anywhere but the relay: every URI line and
-//! every `URI="…"` attribute starts with the relay's address, also for a
+//! every quoted or unquoted `URI` attribute starts with the relay's address, also for a
 //! player that ends lines at a lone carriage return or trims control
 //! characters.
 use iptv_net::playback::fuzzing::{rewrite_dash, rewrite_hls};
@@ -55,6 +55,7 @@ fn hls(data: &[u8], base: &str) {
                 assert!(line.starts_with(PREFIX), "URI line off the relay: {line:?}");
                 continue;
             }
+            check_attribute_uris(line);
             let mut rest = line;
             while let Some(at) = rest.find("URI=\"") {
                 let value = &rest[at + 5..];
@@ -68,6 +69,60 @@ fn hls(data: &[u8], base: &str) {
                 rest = &value[end + 1..];
             }
         }
+    }
+}
+
+// Read attributes as a permissive player does, independently of the
+// rewriter: commas delimit fields, quotes may escape their next byte,
+// and an unquoted value ends at whitespace as well as a comma.
+fn check_attribute_uris(line: &str) {
+    let Some((_, mut rest)) = line.split_once(':') else {
+        return;
+    };
+    while !rest.is_empty() {
+        rest = rest.trim_start_matches([',', ' ', '\t']);
+        let Some((name, tail)) = rest.split_once('=') else {
+            break;
+        };
+        let mut value = String::new();
+        let mut consumed = 0;
+        if let Some(quoted) = tail.strip_prefix('"') {
+            consumed = 1;
+            let mut escaped = false;
+            for ch in quoted.chars() {
+                consumed += ch.len_utf8();
+                if escaped {
+                    value.push(ch);
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    break;
+                } else {
+                    value.push(ch);
+                }
+            }
+        } else {
+            for ch in tail.chars() {
+                if ch == ',' || ch.is_ascii_whitespace() {
+                    break;
+                }
+                consumed += ch.len_utf8();
+                value.push(ch);
+            }
+        }
+        if name.eq_ignore_ascii_case("URI") || name.ends_with("-URI") {
+            assert!(
+                value.starts_with(PREFIX),
+                "player URI attribute off relay: {line:?}"
+            );
+        }
+        rest = &tail[consumed..];
+        // A player advances to the next comma after a value.
+        let Some((_, next)) = rest.split_once(',') else {
+            break;
+        };
+        rest = next;
     }
 }
 
