@@ -113,7 +113,8 @@ A deadline is not a rollback acknowledgement for a committed mutation. Reads
 and previews can fail without effects. Apply/undo have a durable commit boundary:
 check cancellation/deadline before mutation, then preserve/report committed
 results or reconcile through the same commit/operation identity after a lost
-reply. A caller must not create a new repair to retry an uncertain old effect.
+reply. `Error::CompletionUnknown { operation }` identifies such an uncertain effect.
+A caller must not create a new repair to retry an uncertain old effect.
 
 ## Repair lifecycle and completion
 
@@ -164,6 +165,9 @@ owner retires or stale crash artifacts are found.
 
 ## Capability and compatibility policy
 
+`Runtime::foundation_capabilities()` returns portable capability names/states.
+This describes implemented service surfaces; credentials, current owner readiness
+and a particular provider's availability still require actual typed operations.
 The capability/status surface must distinguish implemented behavior,
 unsupported-on-this-host behavior, provider-unverified availability and features
 not implemented. Stage 1 stabilizes queries/EPG inspection/repair and their
