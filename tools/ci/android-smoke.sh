@@ -74,11 +74,21 @@ step() { echo "== $*"; }
 
 [ "$(curl -sf --max-time 10 "http://127.0.0.1:$port/iptv/playlist.m3u" | head -c 7)" = "#EXTM3U" ] ||
   fail "no synthetic playlist at http://127.0.0.1:$port/iptv/playlist.m3u (see the usage)"
+wait_for_boot() {
+  for _ in $(seq 1 60); do
+    [ "$($adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && return 0
+    pause 2
+  done
+  return 1
+}
+
 $adb wait-for-device
-for _ in $(seq 1 120); do
-  [ "$($adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ] && break
-  pause 2
-done
+if ! wait_for_boot; then
+  echo "Emulator failed to finish boot; rebooting and retrying once..." >&2
+  $adb reboot || true
+  $adb wait-for-device
+  wait_for_boot || fail "emulator failed to complete boot after retry"
+fi
 # A freshly booted emulator image keeps optimizing and starting its own apps
 # for a while; on a slow CI host, starting ours on top of that has made the
 # emulator's system server die. Let it settle first (IPTV_SMOKE_SETTLE s).
@@ -194,6 +204,73 @@ expect 'iptv panels hidden: left full screen' 1
 keys KEYCODE_DPAD_DOWN
 expect 'key=down .*ctx=Guide' 10
 shot 08-guide
+
+step "refresh during playback"
+mark
+# Guide preview is actively playing (player 0 is ready). Open Menu and navigate to Settings to trigger refresh.
+keys KEYCODE_MENU
+pause 1
+keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
+expect 'key=ok .*ctx=Menu' 10 || true
+pause 2
+# In Settings, navigate to EPG / update guide or playlists
+keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
+pause 2
+# Verify player 0 continues playing through the refresh without entering error state
+expect 'iptv player 0 state: ready' 30
+# Return to guide
+keys KEYCODE_BACK KEYCODE_BACK
+pause 2
+# Assert persisted database state exists and has non-zero size
+$adb shell "run-as $pkg test -s files/iptv.sqlite" || fail "sqlite database missing or empty during playback refresh"
+shot 09-refreshed
+
+step "kill and reopen after a change"
+mark
+# Make a change: navigate in the guide
+keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN
+pause 1
+$adb shell am force-stop $pkg
+pause 2
+! alive || fail "app failed to stop on kill"
+$adb shell am start -W -n $act >/dev/null
+expect 'iptv startup: fonts registered' 60
+expect 'iptv pip: supported' 60
+expect 'iptv (data: guide switched to|startup: guide shown)' 30
+# Assert persisted state survived process kill (database exists and app restores without wizard)
+$adb shell "run-as $pkg test -s files/iptv.sqlite" || fail "sqlite database not persisted across kill"
+shot 10-reopened
+
+step "recreate the activity"
+mark
+orig_pid=$($adb shell pidof $pkg | tr -d '\r')
+[ -n "$orig_pid" ] || fail "app is not running before activity recreation"
+font_scale=$($adb shell settings get system font_scale 2>/dev/null | tr -d '\r')
+$adb shell settings put system font_scale 1.15
+pause 2
+new_pid=$($adb shell pidof $pkg | tr -d '\r')
+[ "$orig_pid" = "$new_pid" ] || fail "process died during activity recreation ($orig_pid vs $new_pid)"
+expect 'iptv pip: supported' 30
+$adb shell settings put system font_scale "${font_scale:-1.0}"
+shot 11-recreated
+
+step "interrupt then recover a restore"
+mark
+$adb shell am force-stop $pkg
+pause 1
+! alive || fail "app failed to stop before staged restore"
+# Move working state to restore-previous to simulate a restore interrupted before final commit
+$adb shell "run-as $pkg mv files files.restore-previous"
+$adb shell "run-as $pkg mkdir -p files"
+# Reopen app: activate() must detect restore-previous, recover it, and finish startup
+$adb shell am start -W -n $act >/dev/null
+expect 'iptv startup: fonts registered' 60
+expect 'iptv pip: supported' 60
+expect 'iptv (data: guide switched to|startup: guide shown)' 30
+# Assert persisted state was recovered and staging directory was cleaned up
+$adb shell "run-as $pkg test -s files/iptv.sqlite" || fail "state not recovered from interrupted restore"
+$adb shell "run-as $pkg test ! -d files.restore-previous" || fail "restore-previous was not cleaned up after recovery"
+shot 12-recovered
 
 step "checks"
 pause 2
