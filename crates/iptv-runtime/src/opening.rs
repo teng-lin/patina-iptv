@@ -64,7 +64,7 @@ pub fn first_rows(channels: &[Channel], focus: Option<&str>) -> Vec<ChannelKey> 
 
 /// Sends `id`'s stored channels with the first screen's programmes, then
 /// with the whole guide window. Nothing when it has no channels.
-pub(crate) async fn send_stored(job: &Job, id: SourceId, now: UnixTime, tx: &Sender<Msg>) -> bool {
+pub async fn send_stored(job: &Job, id: SourceId, now: UnixTime, tx: &Sender<Msg>) -> bool {
     let started = Instant::now();
     let ms = |t: Instant| t.elapsed().as_millis();
     let (groups, channels) =
@@ -80,7 +80,7 @@ pub(crate) async fn send_stored(job: &Job, id: SourceId, now: UnixTime, tx: &Sen
     }
     let n = channels.len();
     log::info!("iptv data: showing {n} stored channels before the refresh");
-    crate::startup::mark_with("channels read", format_args!("{n} in {} ms", ms(started)));
+    crate::ports::mark_with("channels read", format_args!("{n} in {} ms", ms(started)));
     let imported = |groups, channels, guide| {
         let context = super::playback::stored_context(&job.source.config);
         Box::new(Imported {
@@ -121,7 +121,7 @@ pub(crate) async fn send_stored(job: &Job, id: SourceId, now: UnixTime, tx: &Sen
         && guide.bound_count() > 0
     {
         let kib = guide.heap_bytes() / 1024;
-        crate::startup::mark_with(
+        crate::ports::mark_with(
             "first screen read",
             format_args!("{} channels, {kib} KiB in {} ms", keys.len(), ms(started)),
         );
@@ -137,7 +137,7 @@ pub(crate) async fn send_stored(job: &Job, id: SourceId, now: UnixTime, tx: &Sen
     .await
     .unwrap_or_default();
     let (bound, kib) = (guide.bound_count(), guide.heap_bytes() / 1024);
-    crate::startup::mark_with(
+    crate::ports::mark_with(
         "guide window read",
         format_args!("{bound} channels, {kib} KiB in {} ms", ms(started)),
     );

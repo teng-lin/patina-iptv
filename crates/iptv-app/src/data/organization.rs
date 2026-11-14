@@ -4,7 +4,7 @@ use crate::runtime::model::SourceId;
 use iptv_guide::EpgSchedule;
 
 pub fn revision() -> u64 {
-    crate::runtime().organization_revision.get()
+    crate::runtime().organization_revision().get()
 }
 
 use crate::runtime::commands::load_organization as load;
@@ -65,9 +65,12 @@ pub async fn apply(schedule: &EpgSchedule, source: SourceId) {
     }
 }
 pub fn changed(ui: Ui, source: SourceId) {
-    crate::runtime()
-        .organization_revision
-        .set(crate::runtime().organization_revision.get().wrapping_add(1));
+    crate::runtime().organization_revision().set(
+        crate::runtime()
+            .organization_revision()
+            .get()
+            .wrapping_add(1),
+    );
     crate::runtime().emit(crate::runtime::RuntimeEvent::LibraryChanged);
     if super::combined::active(ui) {
         super::combined::organization_changed(ui, source);

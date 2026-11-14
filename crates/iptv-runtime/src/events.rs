@@ -3,7 +3,7 @@ use iptv_core::guide::Schedule;
 use iptv_library::SourceId;
 use std::rc::Rc;
 
-pub(crate) enum RuntimeEvent {
+pub enum RuntimeEvent {
     RefreshDue(SourceId),
     CatalogChanged,
     EarlyResume {

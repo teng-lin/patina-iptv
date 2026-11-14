@@ -89,7 +89,7 @@ fn arrived(ui: Ui, source: SourceId, request: PageRequest, store: GuideStore, to
         crate::runtime().emit(crate::runtime::RuntimeEvent::GuideChanged);
     }
     for waiter in crate::runtime()
-        .page_waiters
+        .page_waiters()
         .with(|w| std::mem::take(&mut *w.borrow_mut()))
     {
         waiter();
@@ -117,7 +117,7 @@ fn each(schedule: &dyn Schedule, mut f: impl FnMut(&EpgSchedule)) {
 /// first screen, `opening.rs`): what waited for its programmes looks again.
 pub fn replaced() {
     for waiter in crate::runtime()
-        .page_waiters
+        .page_waiters()
         .with(|w| std::mem::take(&mut *w.borrow_mut()))
     {
         waiter();
@@ -151,7 +151,7 @@ pub fn ready(
     }
     log::info!("iptv data: catch-up waits for its guide day");
     crate::runtime()
-        .page_waiters
+        .page_waiters()
         .with(|w| w.borrow_mut().push(Box::new(retry)));
     false
 }
@@ -252,7 +252,7 @@ mod tests {
         assert!(ready(&schedule, 0, time, || panic!("A is already loaded")));
         assert!(!b.ensure_loaded(time));
         crate::runtime()
-            .page_waiters
+            .page_waiters()
             .with(|waiters| waiters.borrow_mut().clear());
     }
 

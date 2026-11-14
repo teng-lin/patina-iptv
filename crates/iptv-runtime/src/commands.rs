@@ -7,7 +7,7 @@ use iptv_providers::ContentId;
 use iptv_store_sqlite::{ChannelQuery, ChannelScope, CustomGroup, Store, StoreError};
 use std::future::Future;
 
-pub(crate) fn custom_groups(
+pub fn custom_groups(
     source: SourceId,
 ) -> impl Future<Output = Result<Vec<CustomGroup>, StoreError>> {
     store_service::read(move |store| store.custom_groups(source))
@@ -35,14 +35,14 @@ fn member_rows(
         .collect())
 }
 
-pub(crate) fn members(
+pub fn members(
     source: SourceId,
     scope: ChannelScope,
 ) -> impl Future<Output = Result<Vec<Member>, StoreError>> {
     store_service::read(move |store| member_rows(store, source, scope))
 }
 
-pub(crate) fn group_members(
+pub fn group_members(
     source: SourceId,
     scope: ChannelScope,
 ) -> impl Future<Output = Result<(Vec<CustomGroup>, Vec<Member>), StoreError>> {
@@ -54,7 +54,7 @@ pub(crate) fn group_members(
     })
 }
 
-pub(crate) fn save_custom_group(
+pub fn save_custom_group(
     source: SourceId,
     group: Option<CustomGroupId>,
     name: String,
@@ -65,14 +65,14 @@ pub(crate) fn save_custom_group(
     })
 }
 
-pub(crate) fn remove_custom_members(
+pub fn remove_custom_members(
     group: CustomGroupId,
     members: Vec<ContentId>,
 ) -> impl Future<Output = Result<(), StoreError>> {
     store_service::call(move |store| store.remove_custom_members(group, &members))
 }
 
-pub(crate) fn transfer_custom_members(
+pub fn transfer_custom_members(
     source: SourceId,
     from: Option<CustomGroupId>,
     to: CustomGroupId,
@@ -84,13 +84,11 @@ pub(crate) fn transfer_custom_members(
     })
 }
 
-pub(crate) fn delete_custom_group(
-    group: CustomGroupId,
-) -> impl Future<Output = Result<(), StoreError>> {
+pub fn delete_custom_group(group: CustomGroupId) -> impl Future<Output = Result<(), StoreError>> {
     store_service::call(move |store| store.delete_custom_group(group).map(|_| ()))
 }
 
-pub(crate) fn hide_channel(
+pub fn hide_channel(
     source: SourceId,
     channel: String,
 ) -> impl Future<Output = Result<(), StoreError>> {
@@ -99,22 +97,18 @@ pub(crate) fn hide_channel(
     })
 }
 
-pub(crate) fn remember_combined_channel(
-    key: String,
-) -> impl Future<Output = Result<(), StoreError>> {
+pub fn remember_combined_channel(key: String) -> impl Future<Output = Result<(), StoreError>> {
     store_service::call(move |store| store.set_combined_last_channel(&key))
 }
 
-pub(crate) fn channel(
+pub fn channel(
     source: SourceId,
     channel: ContentId,
 ) -> impl Future<Output = Result<Option<iptv_store_sqlite::ChannelRow>, StoreError>> {
     store_service::read(move |store| store.channel(source, &channel))
 }
 
-pub(crate) fn save_search_history(
-    history: Vec<String>,
-) -> impl Future<Output = Result<(), StoreError>> {
+pub fn save_search_history(history: Vec<String>) -> impl Future<Output = Result<(), StoreError>> {
     store_service::call(move |store| store.set_search_history(&history))
 }
 
@@ -124,7 +118,7 @@ use iptv_library::OrganizationScope as Kind;
 use iptv_providers::GroupId;
 use iptv_store_sqlite::{ChannelOrder, OrderScope};
 
-pub(crate) async fn organization_items(
+pub async fn organization_items(
     source: SourceId,
     kind: Kind,
     favorites: Vec<String>,
@@ -203,7 +197,7 @@ pub(crate) fn organization_in(store: &Store, source: SourceId) -> Result<Organiz
         .collect();
     Ok(Organization { channels, groups })
 }
-pub(crate) fn edit_organization(
+pub fn edit_organization(
     source: SourceId,
     kind: Kind,
     editor: Editor,
@@ -273,7 +267,7 @@ pub(crate) fn edit_organization(
     })
 }
 
-pub(crate) fn favorite_provider_order(
+pub fn favorite_provider_order(
     source: SourceId,
     keys: Vec<String>,
 ) -> impl Future<Output = Result<Vec<String>, StoreError>> {
@@ -294,7 +288,7 @@ pub(crate) fn favorite_provider_order(
     })
 }
 
-pub(crate) fn rename_organization_item(
+pub fn rename_organization_item(
     source: SourceId,
     kind: Kind,
     id: String,
@@ -336,7 +330,7 @@ pub(crate) fn import_legacy_history(
     Ok(())
 }
 
-pub(crate) fn load_search_history(
+pub fn load_search_history(
     legacy: std::path::PathBuf,
 ) -> impl Future<Output = Result<Vec<String>, StoreError>> {
     store_service::call(move |store| {
@@ -348,9 +342,7 @@ pub(crate) fn load_search_history(
 use iptv_search::SearchHistory;
 
 use super::state::OrganizationSnapshot;
-pub(crate) async fn load_organization(
-    source: SourceId,
-) -> Result<OrganizationSnapshot, StoreError> {
+pub async fn load_organization(source: SourceId) -> Result<OrganizationSnapshot, StoreError> {
     store_service::read(move |store| {
         Ok(OrganizationSnapshot {
             organization: organization_in(store, source)?,
@@ -408,7 +400,7 @@ fn group_lists_in(
     Ok(lists)
 }
 
-pub(crate) fn startup_library() -> impl std::future::Future<
+pub fn startup_library() -> impl std::future::Future<
     Output = Result<
         (
             Option<iptv_store_sqlite::StoredSource>,
@@ -436,7 +428,7 @@ pub(crate) fn startup_library() -> impl std::future::Future<
     })
 }
 
-pub(crate) fn source_policies() -> impl std::future::Future<
+pub fn source_policies() -> impl std::future::Future<
     Output = Result<
         Vec<(iptv_store_sqlite::SourceSummary, iptv_library::SourcePolicy)>,
         StoreError,
@@ -454,7 +446,7 @@ pub(crate) fn source_policies() -> impl std::future::Future<
     })
 }
 
-pub(crate) fn guide_status_snapshot()
+pub fn guide_status_snapshot()
 -> impl std::future::Future<Output = Result<super::state::StatusSnapshot, StoreError>> {
     super::store_service::call(|store| {
         let mut snapshot = super::state::StatusSnapshot {
@@ -487,7 +479,7 @@ pub(crate) fn guide_status_snapshot()
     })
 }
 
-pub(crate) fn description(
+pub fn description(
     source: SourceId,
     key: iptv_epg::ChannelKey,
     start: iptv_epg::UnixTime,
@@ -495,7 +487,7 @@ pub(crate) fn description(
     super::store_service::read(move |store| store.epg_description(source, &key, start))
 }
 
-pub(crate) fn guide_sources(
+pub fn guide_sources(
     source: SourceId,
 ) -> impl std::future::Future<
     Output = Result<
@@ -511,7 +503,7 @@ pub(crate) fn guide_sources(
     })
 }
 
-pub(crate) fn clear_guides(
+pub fn clear_guides(
     sources: Vec<SourceId>,
 ) -> impl std::future::Future<Output = Result<(bool, Vec<super::imports::Imported>), StoreError>> {
     super::store_service::call(move |store| {
@@ -539,13 +531,13 @@ pub(crate) fn clear_guides(
     })
 }
 
-pub(crate) fn first_programme(
+pub fn first_programme(
     source: SourceId,
 ) -> impl std::future::Future<Output = Result<Option<iptv_epg::UnixTime>, StoreError>> {
     super::store_service::read(move |store| store.epg_first_start(source))
 }
 
-pub(crate) fn guide_page(
+pub fn guide_page(
     source: SourceId,
     request: iptv_guide::pages::PageRequest,
 ) -> impl std::future::Future<Output = Result<iptv_epg::GuideStore, StoreError>> {
@@ -559,8 +551,8 @@ pub(crate) fn guide_page(
     })
 }
 
-pub(crate) fn combined_resume_key()
--> impl std::future::Future<Output = Result<Option<String>, StoreError>> {
+pub fn combined_resume_key() -> impl std::future::Future<Output = Result<Option<String>, StoreError>>
+{
     super::store_service::call(|store| {
         let s = store;
         Ok(s.combined_last_channel()?.or_else(|| {

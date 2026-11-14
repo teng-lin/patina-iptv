@@ -2212,6 +2212,7 @@ dependencies = [
  "iptv-net",
  "iptv-player-mpv",
  "iptv-providers",
+ "iptv-runtime",
  "iptv-search",
  "iptv-settings",
  "iptv-store-sqlite",
@@ -2302,6 +2303,7 @@ dependencies = [
  "rcgen",
  "reqwest",
  "rustls",
+ "subtle",
  "tokio",
  "tokio-rustls",
  "url",
@@ -2346,6 +2348,30 @@ dependencies = [
  "url",
  "xxhash-rust",
  "zeroize",
+]
+
+[[package]]
+name = "iptv-runtime"
+version = "0.1.1"
+dependencies = [
+ "futures-channel",
+ "getrandom 0.4.3",
+ "iptv-core",
+ "iptv-epg",
+ "iptv-guide",
+ "iptv-import",
+ "iptv-library",
+ "iptv-net",
+ "iptv-providers",
+ "iptv-search",
+ "iptv-settings",
+ "iptv-store-sqlite",
+ "libc",
+ "log",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

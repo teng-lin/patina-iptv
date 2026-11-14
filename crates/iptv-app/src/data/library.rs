@@ -52,7 +52,7 @@ pub(super) async fn refresh_cache(ui: Ui) -> Result<(), StoreError> {
 
 /// A committed mutation must retain its cleanup even if a subsequent read fails.
 async fn refresh_after_commit(ui: Ui, patch: impl FnOnce(&mut Snapshot)) {
-    crate::runtime().library.with(|snapshot| {
+    crate::runtime().library().with(|snapshot| {
         if let Some(snapshot) = snapshot.borrow_mut().as_mut() {
             patch(snapshot);
         }
@@ -129,7 +129,7 @@ pub(super) fn run(ui: Ui, stored: StoredSource, purpose: Purpose, edit: bool) {
     let due = !matches!(
         purpose,
         Purpose::Startup | Purpose::Switch | Purpose::Combined
-    ) || crate::runtime().library.with(|snapshot| {
+    ) || crate::runtime().library().with(|snapshot| {
         let snapshot = snapshot.borrow();
         let Some(snapshot) = snapshot.as_ref() else {
             return true;
@@ -149,7 +149,7 @@ pub(super) fn run(ui: Ui, stored: StoredSource, purpose: Purpose, edit: bool) {
     });
     if due {
         crate::runtime()
-            .attempts
+            .attempts()
             .with(|a| a.borrow_mut().insert(id, super::now_unix()));
     }
     log::info!(
@@ -157,13 +157,13 @@ pub(super) fn run(ui: Ui, stored: StoredSource, purpose: Purpose, edit: bool) {
         id.0,
         stored.source.kind()
     );
-    let ticket = crate::runtime().tickets.with(|t| {
+    let ticket = crate::runtime().tickets().with(|t| {
         t.set(t.get() + 1);
         t.get()
     });
     let current = move || {
         crate::runtime()
-            .imports
+            .imports()
             .with(|r| r.borrow().get(&id).is_some_and(|(at, _)| *at == ticket))
     };
     let job = Job {
@@ -175,7 +175,7 @@ pub(super) fn run(ui: Ui, stored: StoredSource, purpose: Purpose, edit: bool) {
     };
     let token = CancelToken::new();
     crate::runtime()
-        .imports
+        .imports()
         .with(|r| r.borrow_mut().insert(id, (ticket, token.clone())));
     crate::runtime::library::set_activity(
         id,
@@ -199,7 +199,7 @@ pub(super) fn run(ui: Ui, stored: StoredSource, purpose: Purpose, edit: bool) {
             Update::Done(Err(f)) if edit => {
                 log::warn!("iptv data: the new details did not import ({f:?}); the old ones stay");
                 crate::runtime()
-                    .imports
+                    .imports()
                     .with(|r| r.borrow_mut().remove(&id));
                 changed(ui);
                 Activity::Rejected(f)
@@ -212,7 +212,7 @@ pub(super) fn run(ui: Ui, stored: StoredSource, purpose: Purpose, edit: bool) {
                     }
                 }
                 crate::runtime()
-                    .imports
+                    .imports()
                     .with(|r| r.borrow_mut().remove(&id));
                 changed(ui);
                 Activity::Done(result)

@@ -4,18 +4,18 @@ use iptv_library::SourceId;
 use iptv_search::{ChannelIndex, ProgrammeIndex, ProgrammeIndexBuilder};
 use iptv_store_sqlite::StoreError;
 #[derive(Default)]
-pub(crate) struct Indexes {
+pub struct Indexes {
     /// The `data_version` they were built for.
-    pub(crate) version: Option<u64>,
-    pub(crate) channels: ChannelIndex,
+    pub version: Option<u64>,
+    pub channels: ChannelIndex,
     /// Every day the store keeps; dropped when the screen closes (it is
     /// about the size of a week's guide).
-    pub(crate) programmes: Option<ProgrammeIndex>,
+    pub programmes: Option<ProgrammeIndex>,
     /// The `data_version` whose programme index is being built.
-    pub(crate) building: Option<u64>,
+    pub building: Option<u64>,
 }
 
-pub(crate) fn programmes(
+pub fn programmes(
     sources: Vec<(SourceId, Vec<ChannelKey>, usize)>,
     rows: usize,
     from: UnixTime,
