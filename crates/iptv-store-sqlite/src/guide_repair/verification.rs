@@ -11,6 +11,7 @@ pub struct RepairVerification {
     pub covered_seconds: u64,
     pub configuration_effective: bool,
     pub authorized: bool,
+    pub source_enabled: bool,
     pub evidence_revision: String,
 }
 impl Store {
@@ -32,6 +33,11 @@ impl Store {
         let Some((commit, payload)) = commit_value(&tx, id)? else {
             return Ok(None);
         };
+        let source_enabled: bool = tx.query_row(
+            "SELECT NOT EXISTS(SELECT 1 FROM source_policy WHERE source_id=?1 AND enabled=0)",
+            [commit.source.0],
+            |row| row.get(0),
+        )?;
         let (examined_mapping, examined_configuration) = revisions(&tx, commit.source)?;
         let mut effective = true;
         let mut authorized = true;
@@ -159,6 +165,7 @@ impl Store {
             covered_seconds: covered,
             configuration_effective: effective,
             authorized,
+            source_enabled,
             evidence_revision,
         };
         drop(binding);

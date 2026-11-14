@@ -1459,3 +1459,31 @@ fn held_verification_cannot_certify_later_programmes_with_unchanged_mapping_and_
     assert_ne!(result.evidence_revision, result.current_evidence_revision);
     assert!(!result.current_revision && !result.verified_coverage);
 }
+
+#[test]
+fn verification_observes_current_disabled_source_policy() {
+    let fixture = Fixture::new();
+    let request = fixture.request("amber", Target::NoGuide);
+    let preview = fixture.preview(request.clone());
+    let saved = fixture.apply(&preview);
+    fixture
+        .store()
+        .set_source_policy(
+            fixture.source,
+            iptv_store_sqlite::SourcePolicy {
+                enabled: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        fixture.drive(fixture.owner.verify_guide_repair(
+            saved.commit.id,
+            request.window,
+            InspectionControl::default()
+        )),
+        Err(Error::Inspection(InspectionError::SourceDisabled(
+            fixture.source
+        )))
+    );
+}

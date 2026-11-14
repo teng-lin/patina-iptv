@@ -578,6 +578,9 @@ impl Runtime {
             });
         async move {
             let verified = analyzed.await?.ok_or(Error::CommitMissing)?;
+            if !verified.source_enabled {
+                return Err(InspectionError::SourceDisabled(verified.commit.source).into());
+            }
             if !verified.authorized {
                 return Err(InspectionError::PermissionDenied.into());
             }
