@@ -11,9 +11,7 @@ test -r "$KEYSTORE_PATH"
 unsigned=target/android-unsigned
 python3 tools/ci/check-android-artifacts.py "$unsigned/app-release-unsigned.apk" "$unsigned/app-release.aab"
 mkdir -p dist
-if [ -f "$unsigned/Patina-$VERSION-android-classpath-sbom.cdx.json" ]; then
-  cp "$unsigned/Patina-$VERSION-android-classpath-sbom.cdx.json" dist/
-fi
+cp "$unsigned/Patina-$VERSION-android-classpath-sbom.cdx.json" dist/
 apk="dist/Patina-$VERSION-android-tablet-tv.apk"
 aab="dist/Patina-$VERSION-android-tablet-tv.aab"
 apksigner="$ANDROID_HOME/build-tools/35.0.1/apksigner"
