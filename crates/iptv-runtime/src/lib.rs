@@ -1,7 +1,7 @@
 //! Application-owned state and events. This module has no UI toolkit imports.
 mod events;
-pub(crate) mod state;
-pub(crate) use events::RuntimeEvent;
+pub mod state;
+pub use events::RuntimeEvent;
 
 use iptv_core::guide::{Schedule, SyntheticSchedule};
 use std::{cell::RefCell, rc::Rc};
@@ -15,9 +15,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Weak;
 
 #[derive(Default)]
-pub(crate) struct Slot<T>(T);
+pub struct Slot<T>(T);
 impl<T> Slot<T> {
-    pub(crate) fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+    pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R {
         f(&self.0)
     }
 }
@@ -28,7 +28,7 @@ impl<T> std::ops::Deref for Slot<T> {
     }
 }
 
-pub(crate) type LocalTask = std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
+pub type LocalTask = std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
 struct TaskHost {
     spawn: Box<dyn Fn(LocalTask)>,
     delay: Box<dyn Fn(std::time::Duration) -> LocalTask>,
@@ -39,7 +39,7 @@ type PageWaiters = RefCell<Vec<Box<dyn FnOnce()>>>;
 type Resolves = RefCell<[Option<(u64, CancelToken)>; iptv_core::multiview::MAX_SURFACES]>;
 type SavedSettings = RefCell<Option<(u64, std::sync::Arc<iptv_settings::Settings>)>>;
 
-pub(crate) struct Runtime {
+pub struct Runtime {
     pub(crate) account_streams: Slot<Cell<Option<u32>>>,
     pub(crate) resolving: Slot<Resolves>,
     pub(crate) wizard_import: Slot<RefCell<Option<(iptv_core::wizard::ImportId, CancelToken)>>>,
@@ -81,9 +81,9 @@ pub(crate) struct Runtime {
     pub(crate) scheduler_started: Cell<bool>,
 }
 
-impl Default for Runtime {
-    fn default() -> Self {
-        let store = std::sync::Arc::new(store_service::Service::default());
+impl Runtime {
+    pub fn new(ports: Ports) -> Self {
+        let store = std::sync::Arc::new(store_service::Service::new(ports));
         Self {
             account_streams: Slot::default(),
             resolving: Slot::default(),
@@ -129,7 +129,12 @@ impl Default for Runtime {
 }
 
 impl Runtime {
-    pub(crate) fn bind_tasks(
+    /// Private storage captured when this owner was constructed.
+    pub fn data_dir(&self) -> &std::path::Path {
+        &self.store.directory
+    }
+
+    pub fn bind_tasks(
         &self,
         spawn: impl Fn(LocalTask) + 'static,
         delay: impl Fn(std::time::Duration) -> LocalTask + 'static,
@@ -155,12 +160,12 @@ impl Runtime {
             .expect("runtime task host installed");
         (host.delay)(duration).await;
     }
-    pub(crate) fn with_context<R>(&self, run: impl FnOnce() -> R) -> R {
+    pub fn with_context<R>(&self, run: impl FnOnce() -> R) -> R {
         store_service::with_service(self.store.clone(), run)
     }
     /// Capture native context before starting a worker, including bootstrap
     /// work accepted before the store's UI epoch exists.
-    pub(crate) fn scope_worker<R: 'static, F>(
+    pub fn scope_worker<R: 'static, F>(
         &self,
         work: F,
     ) -> impl FnOnce() -> R + Send + 'static + use<R, F>
@@ -169,23 +174,23 @@ impl Runtime {
     {
         self.with_context(|| store_service::scoped(work))
     }
-    pub(crate) fn scope_future<F: std::future::Future + 'static>(
+    pub fn scope_future<F: std::future::Future + 'static>(
         &self,
         future: F,
     ) -> impl std::future::Future<Output = F::Output> + 'static + use<F> {
         store_service::scope_future(self.store.clone(), future)
     }
-    pub(crate) fn flush_files(&self, limit: std::time::Duration) -> bool {
+    pub fn flush_files(&self, limit: std::time::Duration) -> bool {
         self.with_context(|| file_writer::flush(limit))
     }
 
-    pub(crate) fn activate(&self) {
+    pub fn activate(&self) {
         store_service::activate(self.store.clone());
     }
-    pub(crate) fn start_services(&self) {
+    pub fn start_services(&self) {
         store_service::with_service(self.store.clone(), store_service::register_ui_thread);
     }
-    pub(crate) fn drain_services(&self) -> bool {
+    pub fn drain_services(&self) -> bool {
         let drained =
             store_service::with_service(self.store.clone(), store_service::drain_on_shutdown);
         // Detached local tasks can retain this Runtime after the root closes.
@@ -194,11 +199,11 @@ impl Runtime {
         drained
     }
 
-    pub(crate) fn bind(&self, sink: impl Fn(RuntimeEvent) + 'static) {
+    pub fn bind(&self, sink: impl Fn(RuntimeEvent) + 'static) {
         *self.events.borrow_mut() = Some(Rc::new(sink));
     }
 
-    pub(crate) fn emit(&self, event: RuntimeEvent) {
+    pub fn emit(&self, event: RuntimeEvent) {
         if let RuntimeEvent::AccountStreams(limit) = &event {
             self.account_streams.set(*limit);
         }
@@ -208,11 +213,11 @@ impl Runtime {
         }
     }
 
-    pub(crate) fn schedule(&self) -> Rc<dyn Schedule> {
+    pub fn schedule(&self) -> Rc<dyn Schedule> {
         self.schedule.borrow().clone()
     }
 
-    pub(crate) fn set_schedule(&self, schedule: Rc<dyn Schedule>) {
+    pub fn set_schedule(&self, schedule: Rc<dyn Schedule>) {
         *self.schedule.borrow_mut() = schedule;
     }
 }
@@ -233,6 +238,15 @@ impl Drop for Runtime {
             completion.cancel.cancel();
         }
     }
+}
+
+/// Flush accepted file writes from a host callback that can run off-thread.
+pub fn flush_pending_writes(limit: std::time::Duration) -> bool {
+    let Some(owner) = store_service::active_service() else {
+        // A host can stop before the application root has accepted any work.
+        return true;
+    };
+    store_service::with_service(owner, || file_writer::flush(limit))
 }
 
 #[cfg(test)]
@@ -264,15 +278,15 @@ mod tests {
         let first = Rc::new(Runtime::default());
         let second = Rc::new(Runtime::default());
         let (reply, answer) = futures_channel::oneshot::channel();
-        let task = crate::with_runtime(first.clone(), || {
-            crate::in_runtime(async move {
+        let task = crate::context::with_runtime(first.clone(), || {
+            crate::context::in_runtime(async move {
                 let limit = answer.await.unwrap();
-                crate::runtime().account_streams.set(Some(limit));
+                crate::current().account_streams.set(Some(limit));
             })
         });
         let mut task = std::pin::pin!(task);
         let mut context = Context::from_waker(Waker::noop());
-        crate::with_runtime(second.clone(), || {
+        crate::context::with_runtime(second.clone(), || {
             assert_eq!(task.as_mut().poll(&mut context), Poll::Pending);
             reply.send(3).unwrap();
             assert_eq!(task.as_mut().poll(&mut context), Poll::Ready(()));
@@ -303,46 +317,136 @@ mod tests {
 
 mod store_service;
 
-pub(crate) mod executor;
+pub mod executor;
 
 pub(crate) mod file_writer;
 
-pub(crate) mod commands;
+pub mod commands;
 
-pub(crate) mod imports;
+pub mod imports;
 
-pub(crate) mod stored;
+pub mod stored;
 
-pub(crate) mod opening;
+pub mod opening;
 
-pub(crate) mod paging;
+pub mod paging;
 
-pub(crate) mod playback;
+pub mod playback;
 
-pub(crate) mod guides;
+pub mod guides;
 
-pub(crate) mod workers;
+pub mod workers;
 
-pub(crate) mod wizard_map;
+pub mod wizard_map;
 
 pub(crate) mod private_files;
 
-pub(crate) mod library;
+pub mod library;
 
-pub(crate) mod favorites;
+pub mod favorites;
 
-pub(crate) mod search;
+pub mod search;
 
-pub(crate) mod backup;
+pub mod backup;
 
-pub(crate) mod assign;
+pub mod assign;
 
 pub(crate) mod credential_store;
-pub(crate) mod model;
+pub mod model;
 
-pub(crate) mod settings;
+pub mod settings;
 
 #[cfg(feature = "test-support")]
 pub use store_service::occupy_writer;
 
 mod paths;
+
+mod ports;
+pub use ports::Ports;
+mod context;
+pub use context::{current, in_runtime, set_current, try_current, with_runtime};
+pub mod storage;
+
+#[cfg(test)]
+impl Default for Runtime {
+    fn default() -> Self {
+        Self::new(Ports::for_tests())
+    }
+}
+
+impl Runtime {
+    pub fn account_streams(&self) -> &Slot<Cell<Option<u32>>> {
+        &self.account_streams
+    }
+    pub fn resolving(&self) -> &Slot<Resolves> {
+        &self.resolving
+    }
+    pub fn wizard_import(
+        &self,
+    ) -> &Slot<RefCell<Option<(iptv_core::wizard::ImportId, CancelToken)>>> {
+        &self.wizard_import
+    }
+    pub fn search_indexes(&self) -> &Slot<RefCell<search::Indexes>> {
+        &self.search_indexes
+    }
+    pub fn saved_search(&self) -> &Slot<RefCell<Option<Vec<String>>>> {
+        &self.saved_search
+    }
+    pub fn pending_search(&self) -> &Slot<Cell<u64>> {
+        &self.pending_search
+    }
+    pub fn all(&self) -> &Cell<bool> {
+        &self.all
+    }
+    pub fn generation(&self) -> &Slot<Cell<u64>> {
+        &self.generation
+    }
+    pub fn imports(&self) -> &Slot<RefCell<HashMap<SourceId, (u64, CancelToken)>>> {
+        &self.imports
+    }
+    pub fn attempts(&self) -> &Slot<RefCell<HashMap<SourceId, i64>>> {
+        &self.attempts
+    }
+    pub fn tickets(&self) -> &Slot<Cell<u64>> {
+        &self.tickets
+    }
+    pub fn library(&self) -> &Slot<RefCell<Option<LibrarySnapshot>>> {
+        &self.library
+    }
+    pub fn parts(&self) -> &Slot<RefCell<BTreeMap<SourceId, Rc<EpgSchedule>>>> {
+        &self.parts
+    }
+    pub fn limits(&self) -> &Slot<RefCell<BTreeMap<SourceId, Option<u32>>>> {
+        &self.limits
+    }
+    pub fn resume(&self) -> &Slot<Cell<bool>> {
+        &self.resume
+    }
+    pub fn rebuild(&self) -> &Slot<Cell<u64>> {
+        &self.rebuild
+    }
+    pub fn epoch(&self) -> &Slot<Cell<i64>> {
+        &self.epoch
+    }
+    pub fn single(&self) -> &Slot<RefCell<Option<SingleSchedule>>> {
+        &self.single
+    }
+    pub fn shown(&self) -> &Slot<Cell<Option<SourceId>>> {
+        &self.shown
+    }
+    pub fn updating(&self) -> &Slot<RefCell<Vec<SourceId>>> {
+        &self.updating
+    }
+    pub fn status(&self) -> &Slot<RefCell<StatusSnapshot>> {
+        &self.status
+    }
+    pub fn page_waiters(&self) -> &Slot<PageWaiters> {
+        &self.page_waiters
+    }
+    pub fn organization_revision(&self) -> &Slot<Cell<u64>> {
+        &self.organization_revision
+    }
+    pub fn foreground(&self) -> &Cell<bool> {
+        &self.foreground
+    }
+}

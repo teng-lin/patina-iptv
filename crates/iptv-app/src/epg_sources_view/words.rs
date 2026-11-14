@@ -162,7 +162,7 @@ pub fn remove_consequences(s: &GuideSource) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::runtime::model::FeedResult;
+    use iptv_library::FeedResult;
     use iptv_providers::SecretUrl;
 
     use super::*;

@@ -17,9 +17,6 @@ try {
     if (!(Get-Command perl -ErrorAction SilentlyContinue)) {
         throw 'Install Strawberry Perl and put its perl/bin directory on PATH (SQLCipher builds OpenSSL).'
     }
-    # NSH fix carried locally until upstreamed: drag-region crossings retain hover.
-    $pointerPatch = Join-Path $PSScriptRoot 'patches/nsh-windows-pointer-leave.patch'
-    & "$PSScriptRoot/ci/apply-windows-pointer-patch.ps1" -Repository ../nsh -Patch $pointerPatch
     & "$PSScriptRoot/fetch-mpv-windows.ps1"
     $env:PATH = "$(Join-Path $root 'target/mpv');$env:PATH"
     if ($Check) {
@@ -29,9 +26,9 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'The NSH checkout is not at the commit in nsh.rev' }
         & cargo clippy --locked --workspace --all-targets --features iptv-app/test-support -- -D warnings
         if ($LASTEXITCODE -ne 0) { throw 'Windows lint checks failed' }
-        & cargo test --locked -p nsh-platform-windows --lib chrome::pointer_tests
+        & cargo test --locked -p nsh-platform-windows --lib chrome::tests
         if ($LASTEXITCODE -ne 0) { throw 'Windows pointer regression failed' }
-        & cargo test --locked -p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-providers -p iptv-guide -p iptv-import -p iptv-net -p iptv-store-sqlite -p iptv-search -p iptv-player-mpv -p iptv-library
+        & cargo test --locked -p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-providers -p iptv-guide -p iptv-import -p iptv-net -p iptv-store-sqlite -p iptv-search -p iptv-player-mpv -p iptv-library -p iptv-runtime
         if ($LASTEXITCODE -ne 0) { throw 'Library crate tests failed' }
         foreach ($crate in @('iptv-core', 'iptv-nav', 'iptv-settings', 'iptv-epg', 'iptv-providers', 'iptv-guide', 'iptv-import', 'iptv-search', 'iptv-library')) {
             & cargo build --locked -p $crate --target wasm32-unknown-unknown

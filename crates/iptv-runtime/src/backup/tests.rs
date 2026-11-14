@@ -5,6 +5,80 @@ use iptv_providers::{
 };
 use iptv_store_sqlite::{ChannelQuery, OrderScope};
 
+#[test]
+fn startup_outcomes_and_replay_protection_are_independent_per_root() {
+    let directory = tempfile::tempdir().unwrap();
+    let alpha = directory.path().join("alpha");
+    let beta = directory.path().join("beta");
+    let gamma = directory.path().join("gamma");
+    for root in [&alpha, &beta, &gamma] {
+        fs::create_dir(root).unwrap();
+        let mut store = Store::open(root.join("iptv.sqlite")).unwrap();
+        store
+            .set_combined_last_channel("generated-original")
+            .unwrap();
+    }
+    let start = |root: &Path| {
+        let mut ports = crate::Ports::for_tests();
+        ports.directory = root.to_owned();
+        crate::with_runtime(std::rc::Rc::new(crate::Runtime::new(ports)), startup)
+    };
+    assert!(start(&alpha).is_ok());
+    let pending_beta = sibling(&beta, "restore-pending");
+    fs::create_dir(&pending_beta).unwrap();
+    fs::write(
+        pending_beta.join("iptv.sqlite"),
+        b"generated invalid database",
+    )
+    .unwrap();
+    fs::write(
+        pending_beta.join("settings.json"),
+        Settings::new().to_json_string(),
+    )
+    .unwrap();
+    let failure = start(&beta).expect_err("beta must validate its own pending restore");
+    assert!(!failure.fatal);
+    fs::remove_dir_all(&pending_beta).unwrap();
+    let repeated = start(&beta).expect_err("beta keeps its first outcome until restart");
+    assert_eq!(repeated.error, failure.error);
+    assert_eq!(repeated.fatal, failure.fatal);
+
+    let replacement = directory.path().join("replacement.sqlite");
+    let mut store = Store::open(&replacement).unwrap();
+    store
+        .set_combined_last_channel("generated-replacement")
+        .unwrap();
+    drop(store);
+    let archive = packed(vec![
+        ("iptv.sqlite", fs::read(replacement).unwrap()),
+        (
+            "settings.json",
+            Settings::new().to_json_string().into_bytes(),
+        ),
+    ]);
+    stage(&gamma, &mut archive.as_slice()).unwrap();
+    assert!(start(&gamma).is_ok());
+    assert!(!sibling(&gamma, "restore-pending").exists());
+    let store = Store::open(gamma.join("iptv.sqlite")).unwrap();
+    assert_eq!(
+        store.combined_last_channel().unwrap().as_deref(),
+        Some("generated-replacement")
+    );
+    drop(store);
+
+    stage(&alpha, &mut archive.as_slice()).unwrap();
+    assert!(start(&alpha).is_ok());
+    assert!(
+        sibling(&alpha, "restore-pending").exists(),
+        "root recreation must not activate a newly staged restore"
+    );
+    let store = Store::open(alpha.join("iptv.sqlite")).unwrap();
+    assert_eq!(
+        store.combined_last_channel().unwrap().as_deref(),
+        Some("generated-original")
+    );
+}
+
 fn seed(root: &Path, name: &str) {
     fs::create_dir_all(root.join("playlists/generated")).unwrap();
     let playlist = root.join("playlists/generated/list.m3u");
@@ -211,7 +285,7 @@ fn interrupted_swap_recovers_current_data_before_rejecting_invalid_pending() {
     stage(&root, &mut File::open(archive).unwrap()).unwrap();
     fs::rename(&root, sibling(&root, "restore-previous")).unwrap();
     // App initializes its private directory before the recovery worker runs.
-    crate::platform_data::protect_directory(&root).unwrap();
+    crate::storage::protect_directory(&root, |_| Ok(())).unwrap();
     fs::write(
         sibling(&root, "restore-pending").join("iptv.sqlite"),
         b"damaged",
@@ -248,7 +322,7 @@ fn interrupted_valid_swap_finishes_and_export_cannot_replace_live_database() {
     stage(&root, &mut File::open(archive).unwrap()).unwrap();
     fs::rename(&root, sibling(&root, "restore-previous")).unwrap();
     // App initializes its private directory before the recovery worker runs.
-    crate::platform_data::protect_directory(&root).unwrap();
+    crate::storage::protect_directory(&root, |_| Ok(())).unwrap();
     activate(&root).unwrap();
     assert!(root.join("iptv.sqlite").exists());
     assert!(!sibling(&root, "restore-pending").exists());

@@ -47,7 +47,7 @@ impl Drop for Executor {
 
 /// Runs `future` on the runtime; await the handle for its output. Dropping
 /// the handle detaches the task (cancel it with its `CancelToken`).
-pub(crate) fn spawn<F>(future: F) -> JoinHandle<F::Output>
+pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
 where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
@@ -59,7 +59,7 @@ where
 
 /// Runs CPU-bound `work` on the runtime's blocking threads (building a
 /// large schedule); await the handle for its output.
-pub(crate) fn spawn_blocking<R: Send + 'static>(
+pub fn spawn_blocking<R: Send + 'static>(
     work: impl FnOnce() -> R + Send + 'static,
 ) -> JoinHandle<R> {
     let owner = super::store_service::service();
@@ -70,7 +70,7 @@ pub(crate) fn spawn_blocking<R: Send + 'static>(
 }
 
 /// Drive a non-Send import on its bounded blocking worker, sharing the IO executor.
-pub(crate) fn block_on<F: Future>(future: F) -> F::Output {
+pub fn block_on<F: Future>(future: F) -> F::Output {
     super::store_service::service()
         .executor
         .runtime()

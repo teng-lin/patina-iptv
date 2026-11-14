@@ -2,13 +2,14 @@
 //! settings, SQLite connection, import job or player is started. Directory
 //! renames keep the previous state recoverable across an interrupted swap.
 
-pub(crate) mod error;
+pub mod error;
 mod instance;
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use iptv_settings::Settings;
 use iptv_store_sqlite::Store;
@@ -20,41 +21,43 @@ use iptv_import::backup_manifest::{
 };
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[cfg(target_os = "android")]
-pub(crate) fn next_document_request() -> String {
+pub fn next_document_request() -> String {
     SEQUENCE.fetch_add(1, Ordering::Relaxed).to_string()
 }
 use error::{Context, Error, Result};
-static STARTED: OnceLock<std::result::Result<(), StartupError>> = OnceLock::new();
+type StartupResult = std::result::Result<(), StartupError>;
+static STARTED: Mutex<BTreeMap<PathBuf, Arc<OnceLock<StartupResult>>>> =
+    Mutex::new(BTreeMap::new());
 
 /// Why activating or recovering a restore failed at startup; `error` is
 /// logged by the caller, its message shown when the failure is `fatal`.
 #[derive(Clone, Copy)]
-pub(crate) struct StartupError {
+pub struct StartupError {
     pub error: Error,
     pub fatal: bool,
 }
 
 /// The one log line of a failed backup operation (its cause as a class,
 /// without paths: [`error`]); what the user is told.
-pub(crate) fn report(operation: &str, error: Error) -> &'static str {
+pub fn report(operation: &str, error: Error) -> &'static str {
     log::warn!("iptv backup: {operation} failed: {error}");
     error.message()
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Progress {
+pub enum Progress {
     Idle,
     Selecting,
     Working,
 }
 
 fn progress(phase: Progress) {
-    crate::runtime().backup_progress.set(phase);
-    crate::runtime().emit(super::RuntimeEvent::BackupProgress(phase));
+    crate::current().backup_progress.set(phase);
+    crate::current().emit(super::RuntimeEvent::BackupProgress(phase));
 }
-pub(crate) struct Busy(std::rc::Rc<super::Runtime>);
+pub struct Busy(std::rc::Rc<super::Runtime>);
 impl Busy {
-    pub(crate) fn begin() -> Option<Self> {
-        let runtime = crate::runtime();
+    pub fn begin() -> Option<Self> {
+        let runtime = crate::current();
         if runtime.backup_busy.replace(true) {
             runtime.emit(super::RuntimeEvent::Notify(
                 "A backup operation is already running",
@@ -75,7 +78,7 @@ impl Drop for Busy {
     }
 }
 
-pub(crate) fn is_pending() -> bool {
+pub fn is_pending() -> bool {
     sibling(&super::paths::data_dir(), "restore-pending").exists()
 }
 
@@ -86,7 +89,7 @@ impl Drop for Scratch {
     }
 }
 
-pub(crate) fn sibling(root: &Path, suffix: &str) -> PathBuf {
+pub fn sibling(root: &Path, suffix: &str) -> PathBuf {
     root.with_file_name(format!(
         "{}.{}",
         root.file_name().unwrap_or_default().to_string_lossy(),
@@ -115,7 +118,7 @@ fn private_dir(path: &Path) -> io::Result<()> {
         builder.mode(0o700);
     }
     builder.create(path)?;
-    crate::platform_data::exclude_from_backup(path)
+    crate::ports::exclude_from_backup(path)
 }
 fn private_file(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
@@ -274,7 +277,7 @@ fn remove_stale_work(root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn export(root: &Path, destination: &Path, settings: &str) -> Result<()> {
+pub fn export(root: &Path, destination: &Path, settings: &str) -> Result<()> {
     validate_settings(settings)?;
     // Small files written in the background (a last channel) reach the disk
     // before they are copied.
@@ -485,7 +488,7 @@ fn validate_settings(text: &str) -> Result<()> {
 
 /// Validates all content before replacing an existing pending restore. No
 /// running database or settings file is changed by staging or cancellation.
-pub(crate) fn stage(root: &Path, input: &mut impl Read) -> Result<()> {
+pub fn stage(root: &Path, input: &mut impl Read) -> Result<()> {
     let work = scratch(root)?;
     let mut magic = [0; 9];
     input
@@ -617,7 +620,7 @@ fn recover_replacement(root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn cancel(root: &Path) -> Result<()> {
+pub fn cancel(root: &Path) -> Result<()> {
     // Remove fallback first, so a crash during cancellation cannot resurrect
     // a superseded scheduled restore on the next launch.
     let replaced = sibling(root, "restore-replaced");
@@ -633,16 +636,22 @@ pub(crate) fn cancel(root: &Path) -> Result<()> {
 
 /// Called before opening any file under `root`. If a crash happened after
 /// moving the original aside, finish the validated restore, or recover it.
-pub(crate) fn lock() -> std::result::Result<(), &'static str> {
+pub fn lock() -> std::result::Result<(), &'static str> {
     instance::acquire(&super::paths::data_dir())
         .map_err(|error| report("locking application storage", error))
 }
 
-pub(crate) fn startup() -> std::result::Result<(), StartupError> {
+pub fn startup() -> std::result::Result<(), StartupError> {
     // Keep the first outcome, including a fatal recovery failure. Recreating
     // an engine must neither rerun activation nor bypass failed recovery.
-    *STARTED.get_or_init(|| {
-        let root = super::paths::data_dir();
+    let root = super::paths::data_dir();
+    let started = STARTED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry(root.clone())
+        .or_default()
+        .clone();
+    *started.get_or_init(|| {
         activate(&root).map_err(|error| StartupError {
             error,
             fatal: !root.exists(),
@@ -728,7 +737,7 @@ fn activate(root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) async fn worker<T: Send + 'static>(
+pub async fn worker<T: Send + 'static>(
     job: impl FnOnce() -> Result<T> + Send + 'static,
 ) -> Result<T> {
     let (tx, rx) = futures_channel::oneshot::channel();

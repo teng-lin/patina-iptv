@@ -10,17 +10,17 @@ use std::{fmt, io};
 
 use iptv_store_sqlite::StoreError;
 
-pub(crate) type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Error {
+pub struct Error {
     message: &'static str,
     cause: Cause,
 }
 
 /// Why, as far as it may be logged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Cause {
+pub enum Cause {
     /// A rule of the backup itself refused it: the message says which.
     Rule,
     Io(io::ErrorKind),
@@ -31,7 +31,7 @@ pub(crate) enum Cause {
 }
 
 impl Error {
-    pub(crate) fn new(message: &'static str, cause: impl Into<Cause>) -> Self {
+    pub fn new(message: &'static str, cause: impl Into<Cause>) -> Self {
         Self {
             message,
             cause: cause.into(),
@@ -39,12 +39,12 @@ impl Error {
     }
 
     /// The text for the user.
-    pub(crate) fn message(&self) -> &'static str {
+    pub fn message(&self) -> &'static str {
         self.message
     }
 
     #[cfg(test)]
-    pub(crate) fn cause(&self) -> Cause {
+    pub fn cause(&self) -> Cause {
         self.cause
     }
 }
@@ -71,7 +71,7 @@ impl From<&'static str> for Error {
 }
 
 /// Gives a failed step the message the user is shown, keeping its cause.
-pub(crate) trait Context<T> {
+pub trait Context<T> {
     fn context(self, message: &'static str) -> Result<T>;
 }
 

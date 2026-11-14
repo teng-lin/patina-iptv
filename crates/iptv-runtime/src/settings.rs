@@ -48,8 +48,8 @@ fn path() -> PathBuf {
 /// Loads the saved settings (startup).
 pub fn load() {
     let settings = Arc::new(read_file(&path()));
-    crate::runtime().settings_saved.with(|saved| {
-        *saved.borrow_mut() = Some((crate::runtime().settings_changed.get(), settings.clone()))
+    crate::current().settings_saved.with(|saved| {
+        *saved.borrow_mut() = Some((crate::current().settings_changed.get(), settings.clone()))
     });
     *current_handle()
         .write()
@@ -161,29 +161,29 @@ pub fn set(key: &str, value: Value) -> Result<(), SaveError> {
         .unwrap_or_else(PoisonError::into_inner) = Some(next.clone());
     if !changes.is_empty() {
         log::info!("iptv settings: {key} changed");
-        crate::runtime().emit(super::RuntimeEvent::SettingsChanged);
+        crate::current().emit(super::RuntimeEvent::SettingsChanged);
     }
-    let revision = crate::runtime().settings_changed.get() + 1;
-    crate::runtime().settings_changed.set(revision);
+    let revision = crate::current().settings_changed.get() + 1;
+    crate::current().settings_changed.set(revision);
     let saved = super::file_writer::write(path(), json.into_bytes());
-    crate::runtime().spawn(async move {
+    crate::current().spawn(async move {
         let result = saved.await;
         match settle(result) {
-            Settled::Saved => crate::runtime().settings_saved.with(|saved| {
+            Settled::Saved => crate::current().settings_saved.with(|saved| {
                 let mut saved = saved.borrow_mut();
                 if saved.as_ref().is_none_or(|(at, _)| *at < revision) {
                     *saved = Some((revision, next));
                 }
             }),
-            Settled::Failed if crate::runtime().settings_changed.get() == revision => {
-                if let Some((_, previous)) = crate::runtime()
+            Settled::Failed if crate::current().settings_changed.get() == revision => {
+                if let Some((_, previous)) = crate::current()
                     .settings_saved
                     .with(|saved| saved.borrow().clone())
                 {
                     *current_handle()
                         .write()
                         .unwrap_or_else(PoisonError::into_inner) = Some(previous);
-                    crate::runtime().emit(super::RuntimeEvent::SettingsChanged);
+                    crate::current().emit(super::RuntimeEvent::SettingsChanged);
                 }
             }
             Settled::Failed => {}
@@ -191,7 +191,7 @@ pub fn set(key: &str, value: Value) -> Result<(), SaveError> {
         if let Err(error) = result {
             let error = SaveError::from(error);
             log::warn!("iptv settings: {error}");
-            crate::runtime().emit(super::RuntimeEvent::Message(error.to_string()));
+            crate::current().emit(super::RuntimeEvent::Message(error.to_string()));
         }
     });
     Ok(())

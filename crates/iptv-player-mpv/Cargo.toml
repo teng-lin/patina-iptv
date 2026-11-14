@@ -80,6 +80,7 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
 ] }
 
 [dev-dependencies]
+iptv-net = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 
 [lints]

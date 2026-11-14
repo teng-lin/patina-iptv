@@ -167,7 +167,10 @@ pub fn offer(key: &str) -> Offer {
     }
 }
 
-pub use crate::runtime::settings::get;
+pub fn get() -> std::sync::Arc<iptv_settings::Settings> {
+    crate::runtime();
+    crate::runtime::settings::get()
+}
 
 /// [`get`], subscribing the calling reactive closure to changes.
 pub fn read(ui: Ui) -> Arc<Settings> {
@@ -180,7 +183,10 @@ pub fn set(_ui: Ui, key: &str, value: Value) -> Result<(), SaveError> {
     crate::runtime::settings::set(key, value)
 }
 
-pub use crate::runtime::settings::flag;
+pub fn flag(key: iptv_settings::keys::BoolKey) -> bool {
+    crate::runtime();
+    crate::runtime::settings::flag(key)
+}
 
 pub fn browse_mode() -> crate::ViewMode {
     if choice(keys::BROWSE_MODE) == "overlay" {

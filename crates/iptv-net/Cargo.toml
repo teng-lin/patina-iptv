@@ -11,6 +11,8 @@ license.workspace = true
 # Exposes the HLS and DASH manifest rewriters to the fuzz crate
 # (`playback::fuzzing`). Nothing else enables it.
 fuzzing = []
+# Exposes in-memory key-request counters to the player integration tests.
+test-support = []
 
 [dependencies]
 iptv-providers.workspace = true
@@ -28,6 +30,7 @@ tokio = { version = "1", default-features = false, features = ["fs", "io-util", 
 cookie_store = { version = "0.22", default-features = false }
 getrandom = "0.4"
 quick-xml = "0.42"
+subtle = "2.6"
 
 [target.'cfg(unix)'.dependencies]
 # Only the `O_NONBLOCK` constant, for opening a picked file (`file.rs`).
