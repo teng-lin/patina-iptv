@@ -44,7 +44,7 @@ pub fn open(ui: Ui, channel: usize) {
     let schedule = crate::schedule();
     let Some((playlist, key)) = schedule
         .channel_key(channel)
-        .and_then(|k| crate::data::combined::owner(ui, &k))
+        .and_then(|k| crate::data::combined::owner(&k))
     else {
         crate::settings_view::notify("No playlist on screen");
         return;
@@ -154,7 +154,7 @@ fn perform(ui: Ui, playlist: SourceId, key: String, effect: Effect) {
         Effect::Close => close(ui),
         Effect::Choose(choice) => {
             log::info!("iptv guide choice: {}", choice_name(&choice));
-            assign::choose(ui, playlist, key, choice, move |applied| {
+            assign::choose(playlist, key, choice, move |applied| {
                 crate::settings_view::notify(applied_words(applied));
                 close(ui);
             });

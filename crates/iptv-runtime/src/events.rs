@@ -4,7 +4,8 @@ use iptv_library::SourceId;
 use std::rc::Rc;
 
 pub enum RuntimeEvent {
-    RefreshDue(SourceId),
+    ResumeChannel(usize),
+    SchedulePresented(Vec<(&'static str, std::time::Duration)>),
     CatalogChanged,
     EarlyResume {
         source: Box<super::model::StoredSource>,

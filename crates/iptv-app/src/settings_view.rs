@@ -217,7 +217,7 @@ fn run(ui: Ui, key: &'static str) {
         "general.backup" => crate::backup::export_ui(),
         "general.restore" => crate::backup::restore_ui(ui),
         "epg.update_now" => {
-            if stored::update_now(ui, move || refresh(ui)) {
+            if stored::update_now(move || refresh(ui)) {
                 refresh(ui);
             } else {
                 notify("This playlist has no guide source switched on");
@@ -229,14 +229,14 @@ fn run(ui: Ui, key: &'static str) {
                 crate::epg_sources_view::open_add(ui, playlist);
             }
             Some(playlist) => crate::epg_sources_view::open(ui, playlist),
-            None if crate::data::combined::active(ui) => {
+            None if crate::data::combined::active() => {
                 crate::playlists_view::open(ui);
                 notify("Choose a playlist to manage its guide sources");
             }
             None => notify("No playlist on screen"),
         },
         "epg.clear" => {
-            let cleared = stored::clear(ui, move |deleted| {
+            let cleared = stored::clear(move |deleted| {
                 notify(if deleted {
                     "Guide data deleted"
                 } else {

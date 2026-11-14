@@ -139,7 +139,7 @@ fn perform(ui: Ui, effect: Effect) {
         let result = match effect {
             Effect::AllPlaylists => {
                 close(ui);
-                data::switch_all(ui);
+                data::switch_all();
                 Ok(())
             }
             Effect::Add => {
@@ -148,14 +148,14 @@ fn perform(ui: Ui, effect: Effect) {
             }
             Effect::Show(id) => {
                 close(ui);
-                data::switch_to(ui, id);
+                data::switch_to(id);
                 Ok(())
             }
             Effect::Refresh(id) => {
-                data::refresh(ui, id);
+                data::refresh(id);
                 Ok(())
             }
-            Effect::Policy(id, policy) => data::set_policy(ui, id, policy).await,
+            Effect::Policy(id, policy) => data::set_policy(id, policy).await,
             Effect::CustomGroups(id) => {
                 crate::custom_groups::open(ui, id, false);
                 Ok(())
@@ -173,14 +173,14 @@ fn perform(ui: Ui, effect: Effect) {
                 );
                 Ok(())
             }
-            Effect::Rename(id, name) => data::rename(ui, id, &name).await,
+            Effect::Rename(id, name) => data::rename(id, &name).await,
             Effect::Guides(id) => {
                 crate::epg_sources_view::open(ui, id);
                 Ok(())
             }
-            Effect::Delete(id) => data::delete(ui, id).await,
+            Effect::Delete(id) => data::delete(id).await,
             Effect::RefreshAll => {
-                data::refresh_all(ui);
+                data::refresh_all();
                 Ok(())
             }
             Effect::OpenDetails(id) => {
@@ -193,11 +193,11 @@ fn perform(ui: Ui, effect: Effect) {
                 Ok(())
             }
             Effect::TryDetails(id, source) => {
-                data::try_details(ui, id, *source);
+                data::try_details(id, *source);
                 Ok(())
             }
             Effect::SetUserAgent(id, agent) => {
-                data::set_user_agent(ui, id, agent);
+                data::set_user_agent(id, agent);
                 Ok(())
             }
             Effect::Close => {

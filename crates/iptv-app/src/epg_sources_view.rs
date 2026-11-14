@@ -134,13 +134,13 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
         Effect::Edit(edit) => {
             log::info!("iptv guide sources of {}: {}", playlist.0, edit_name(&edit));
             crate::data::spawn_in_app(async move {
-                if let Err(e) = crate::data::edit_guides(ui, playlist, &edit).await {
+                if let Err(e) = crate::data::edit_guides(playlist, &edit).await {
                     log::warn!("iptv guide sources: the store refused it: {e}");
                 }
             });
         }
         Effect::Update => {
-            let started = stored::update_source(ui, playlist, move |completed| {
+            let started = stored::update_source(playlist, move |completed| {
                 if completed {
                     crate::settings_view::notify("Guide updated");
                 }

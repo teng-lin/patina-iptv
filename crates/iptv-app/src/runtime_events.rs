@@ -3,7 +3,12 @@ use crate::{Ui, runtime::RuntimeEvent};
 
 pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
     match event {
-        RuntimeEvent::RefreshDue(source) => crate::data::refresh(ui, source),
+        RuntimeEvent::ResumeChannel(channel) => {
+            if ui.playing.get_untracked().is_none() {
+                ui.play(channel, crate::Playback::Live);
+            }
+        }
+        RuntimeEvent::SchedulePresented(steps) => crate::startup::shown(&steps),
         RuntimeEvent::CatalogChanged => ui.data_version.update(|version| *version += 1),
         RuntimeEvent::EarlyResume { source, done } => crate::data::spawn_in_app(async move {
             crate::player::resume::early(ui, &source).await;
