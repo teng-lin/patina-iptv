@@ -971,12 +971,13 @@ async fn raw_exchange(relay: &PlaybackRelay, request: &str) -> String {
 
 /// `127.0.0.1:<port>` of the relay.
 fn relay_address(relay: &PlaybackRelay) -> String {
-    relay.proxy().strip_prefix("http://").unwrap().to_owned()
+    let url = reqwest::Url::parse(relay.url()).unwrap();
+    format!("{}:{}", url.host_str().unwrap(), url.port().unwrap())
 }
 
-/// mpv's second guard: with the relay as the player's HTTP proxy, a load
-/// the player makes by itself arrives at the relay. One for the capability
-/// is served as ever; any other is closed without a request to anyone.
+/// Absolute-form requests must name this relay and its capability.
+/// Refusing other targets protects this server from acting as an open proxy;
+/// it makes no guarantee about requests a player sends elsewhere.
 #[tokio::test]
 async fn as_a_proxy_the_relay_serves_its_capability_and_nothing_else() {
     let second = TestServer::http(|_| Resp::ok("0123456789abcdef")).await;
@@ -986,8 +987,6 @@ async fn as_a_proxy_the_relay_serves_its_capability_and_nothing_else() {
     })
     .await;
     let relay = fixture_relay(&origin.url("/list.m3u8"), &[]);
-    assert_eq!(relay.proxy(), format!("http://{}", relay_address(&relay)));
-    assert!(relay.url().starts_with(&format!("{}/", relay.proxy())));
 
     // The request line a proxy receives names the whole address.
     let proxied = raw_exchange(
@@ -1003,7 +1002,8 @@ async fn as_a_proxy_the_relay_serves_its_capability_and_nothing_else() {
     assert_eq!(origin.requests().len(), 2);
 
     // What a manifest could make a player load by itself.
-    let token = relay.prefix().strip_prefix(relay.proxy()).unwrap();
+    let prefix_url = reqwest::Url::parse(relay.prefix()).unwrap();
+    let token = prefix_url.path();
     let other_relay = relay.url().replace(&relay_address(&relay), "127.0.0.1:1");
     for request in [
         format!("GET {} HTTP/1.1\r\n\r\n", second.url("/key.bin")),
@@ -1041,7 +1041,8 @@ async fn idle_and_half_sent_connections_do_not_keep_the_relay_from_the_player() 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let origin = TestServer::http(|_| Resp::ok(vec![0x47, 0, 1, 2])).await;
     let relay = fixture_relay(&origin.url("/media.ts"), &[]);
-    let token = relay.prefix().strip_prefix(relay.proxy()).unwrap();
+    let prefix_url = reqwest::Url::parse(relay.prefix()).unwrap();
+    let token = prefix_url.path();
     let mut held = Vec::new();
     // Twice the slots: the second dozen waits in the listener's queue.
     for index in 0..24 {

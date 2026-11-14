@@ -7,10 +7,10 @@
 //!
 //! The relay serves only requests that name its capability, a random path.
 //! A peer has a second to send it ([`UNAUTHENTICATED`]) and is cut off as
-//! soon as its first bytes cannot become such a request ([`admit`]). A
-//! player may also use the relay as its HTTP proxy ([`PlaybackRelay::proxy`]):
-//! requests for the capability arrive the same, and everything else the
-//! player tries to load by itself ends here, refused.
+//! soon as its first bytes cannot become such a request ([`admit`]).
+//! Absolute-form HTTP requests are admitted only when they name this
+//! relay and its capability. This does not constrain requests a player
+//! makes directly; manifest rewriting remains the native load boundary.
 
 use std::{
     io,
@@ -73,7 +73,6 @@ impl Default for PlaybackPolicy {
 pub struct PlaybackRelay {
     url: String,
     prefix: String,
-    proxy: String,
     source_url: String,
     url_auth: Option<HeaderValue>,
     cookies: Arc<OriginCookies>,
@@ -318,7 +317,6 @@ impl PlaybackRelay {
             .map_err(io_error)?;
         Ok(Self {
             prefix,
-            proxy,
             url,
             source_url,
             url_auth,
@@ -341,17 +339,6 @@ impl PlaybackRelay {
     /// A native player's top-level load must stay inside this capability.
     pub fn owns_url(&self, url: &str) -> bool {
         url.starts_with(&self.prefix)
-    }
-
-    /// This relay as an HTTP proxy, `http://127.0.0.1:<port>`, for a player
-    /// that loads the resources a manifest names by itself. Set as the
-    /// player's proxy, the relay receives every such load: one for
-    /// [`Self::url`] or an address a rewritten manifest names is served as
-    /// ever, and any other is refused before a connection to its host
-    /// exists. That is the player's second guard, should a manifest ever
-    /// leave the rewriter with an address the relay did not put there.
-    pub fn proxy(&self) -> &str {
-        &self.proxy
     }
 
     pub fn source_url(&self) -> &str {
