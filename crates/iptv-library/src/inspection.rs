@@ -112,6 +112,17 @@ pub struct ProgrammeInfo {
     pub title: String,
 }
 
+/// A sample belongs to an XMLTV candidate, which may have no catalogue channel.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CandidateProgramme {
+    pub candidate: CandidateRef,
+    pub evidence_revision: String,
+    pub provider_event_id: Option<String>,
+    pub start: i64,
+    pub stop: i64,
+    pub title: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Evidence {
     Manual,

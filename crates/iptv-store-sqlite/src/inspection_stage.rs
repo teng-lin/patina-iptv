@@ -8,6 +8,7 @@ use std::path::Path;
 pub struct InspectionStage {
     conn: Connection,
     next: i64,
+    index_bytes: u64,
 }
 impl InspectionStage {
     pub fn create(path: &Path, key: &DatabaseKey) -> Result<Self> {
@@ -31,12 +32,20 @@ impl InspectionStage {
             CREATE TABLE chunks(ordinal INTEGER PRIMARY KEY,bytes BLOB NOT NULL);
             CREATE TABLE channels(id TEXT PRIMARY KEY,names TEXT NOT NULL);",
         )?;
-        Ok(Self { conn, next: 0 })
+        Ok(Self {
+            conn,
+            next: 0,
+            index_bytes: 0,
+        })
     }
     pub fn open(path: &Path, key: &DatabaseKey) -> Result<Self> {
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         key.apply(&conn)?;
-        Ok(Self { conn, next: 0 })
+        Ok(Self {
+            conn,
+            next: 0,
+            index_bytes: 0,
+        })
     }
     pub fn chunk(&mut self, bytes: &[u8]) -> Result<()> {
         for chunk in bytes.chunks(64 * 1024) {
@@ -48,16 +57,43 @@ impl InspectionStage {
         }
         Ok(())
     }
-    pub fn channel(&self, channel: &XmltvChannel) -> Result<()> {
+    pub fn channel(&mut self, channel: &XmltvChannel) -> Result<()> {
+        let names = serde_json::to_string(&channel.display_names)?;
+        self.index_bytes = self
+            .index_bytes
+            .saturating_add((channel.id.len() + names.len()) as u64);
+        if self.index_bytes > 64 << 20
+            || channel.id.len() > 4096
+            || channel.display_names.len() > 16
+            || channel.display_names.iter().any(|n| n.len() > 4096)
+        {
+            return Err(StoreError::Unavailable(
+                "probe channel index limit exceeded",
+            ));
+        }
         self.conn.execute(
             "INSERT INTO channels VALUES(?1,?2)",
-            params![channel.id, serde_json::to_string(&channel.display_names)?],
+            params![channel.id, names],
         )?;
         Ok(())
     }
     pub fn finish(self) -> Result<()> {
         self.conn.execute_batch("COMMIT; PRAGMA optimize;")?;
         Ok(())
+    }
+    pub fn bounded<T>(
+        &mut self,
+        cancel: iptv_import::CancelToken,
+        deadline: std::time::Instant,
+        operation: impl FnOnce(&Self) -> Result<T>,
+    ) -> Result<T> {
+        self.conn.progress_handler(
+            1000,
+            Some(move || cancel.is_cancelled() || std::time::Instant::now() >= deadline),
+        )?;
+        let result = operation(self);
+        self.conn.progress_handler(0, None::<fn() -> bool>)?;
+        result
     }
     pub fn channels(&self, after: &str, text: &str, limit: u32) -> Result<Vec<XmltvChannel>> {
         let mut statement = self.conn.prepare_cached(

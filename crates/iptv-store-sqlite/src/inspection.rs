@@ -65,9 +65,6 @@ fn scope(store: &Store, query: &Query) -> crate::Result<InspectionResult<Vec<Sou
     };
     ids.sort();
     ids.dedup();
-    if ids.len() > MAX_SOURCES {
-        return Ok(Err(InspectionError::LimitExceeded));
-    }
     let mut enabled = Vec::new();
     for id in ids {
         if store.source(id)?.is_none() {
@@ -81,10 +78,13 @@ fn scope(store: &Store, query: &Query) -> crate::Result<InspectionResult<Vec<Sou
             enabled.push(id);
         }
     }
+    if enabled.len() > MAX_SOURCES {
+        return Ok(Err(InspectionError::LimitExceeded));
+    }
     Ok(Ok(enabled))
 }
 
-fn context(query: &Query, mode: &str) -> String {
+fn query_context(query: &Query, mode: &str) -> String {
     digest([
         format!("{:?}", query.scope),
         query.text.clone(),
@@ -193,12 +193,18 @@ impl Store {
     /// Stable ordering is `(source, content)`; search matches displayed/provider
     /// names, with the same literal behavior on FTS and non-FTS hosts.
     pub fn inspection_channels(&self, query: &Query) -> Result<Page<ChannelInfo>> {
+        let tx = self.conn.unchecked_transaction()?;
+        let result = self.inspection_channels_inner(query);
+        tx.commit()?;
+        result
+    }
+
+    fn inspection_channels_inner(&self, query: &Query) -> Result<Page<ChannelInfo>> {
         let ids = match scope(self, query)? {
             Ok(ids) => ids,
             Err(e) => return Ok(Err(e)),
         };
-        let tx = self.conn.unchecked_transaction()?;
-        let context = context(query, "channels");
+        let context = query_context(query, "channels");
         let snapshot = snapshot(self, &ids)?;
         if !check_cursor(query, &context, &snapshot, 2) {
             return Ok(Err(InspectionError::StaleCursor));
@@ -255,7 +261,6 @@ impl Store {
                 break;
             }
         }
-        tx.commit()?;
         Ok(Ok(page(items, query.limit, context, snapshot, |c| {
             vec![
                 c.key.source.0.to_string(),
@@ -286,7 +291,7 @@ impl Store {
             }
         }
         let tx = self.conn.unchecked_transaction()?;
-        let context = context(query, &format!("programmes:{window:?}:{channel:?}"));
+        let context = query_context(query, &format!("programmes:{window:?}:{channel:?}"));
         let mut hash = Sha256::new();
         hash.update(snapshot(self, &ids)?.as_bytes());
         let mut items = Vec::new();
@@ -321,10 +326,13 @@ impl Store {
                     continue;
                 }
                 let feed = FeedId(row.get(1)?);
+                let Some(feed_incarnation) = self.feed_incarnation(*source, feed)? else {
+                    continue;
+                };
                 let candidate = CandidateRef {
                     source: *source,
                     feed,
-                    incarnation: self.feed_incarnation(*source, feed)?.unwrap_or_default(),
+                    incarnation: feed_incarnation,
                     epg_channel: row.get(2)?,
                 };
                 let (start, stop): (i64, i64) = (row.get(3)?, row.get(4)?);
@@ -390,13 +398,13 @@ impl Store {
             return Ok(Err(InspectionError::InvalidRequest));
         }
         let tx = self.conn.unchecked_transaction()?;
-        let context = context(query, &format!("candidates:{key:?}"));
+        let context = query_context(query, &format!("candidates:{key:?}"));
         let channels = self.guide_channels(key.source)?;
         let mut rows = Vec::new();
         for channel in channels {
-            let incarnation = self
-                .feed_incarnation(key.source, channel.feed)?
-                .unwrap_or_default();
+            let Some(incarnation) = self.feed_incarnation(key.source, channel.feed)? else {
+                continue;
+            };
             let mut evidence = Vec::new();
             if matches!(&subject.choice,Choice::Channel{feed,epg_channel}
                 if *feed==channel.feed && *epg_channel==channel.epg_channel)
@@ -478,16 +486,71 @@ impl Store {
         if !window.valid() {
             return Ok(Err(InspectionError::InvalidRequest));
         }
-        let channels = match self.inspection_channels(query)? {
+        let ids = match scope(self, query)? {
+            Ok(ids) => ids,
+            Err(e) => return Ok(Err(e)),
+        };
+        let tx = self.conn.unchecked_transaction()?;
+        let context = query_context(query, &format!("audit:{window:?}"));
+        let mut hash = Sha256::new();
+        hash.update(snapshot(self, &ids)?.as_bytes());
+        let mut name_counts = std::collections::HashMap::new();
+        let mut suspicious = std::collections::HashSet::new();
+        for source in &ids {
+            let revisions = self.guide_revisions(*source)?;
+            hash.update(format!("{source:?}:{revisions:?}").as_bytes());
+            for guide in self.guide_sources(*source)? {
+                if guide.shift_minutes.unsigned_abs() > 24 * 60 {
+                    suspicious.insert((*source, guide.feed));
+                }
+            }
+            for channel in self.guide_channels(*source)? {
+                if self.feed_incarnation(*source, channel.feed)?.is_none() {
+                    continue;
+                }
+                if let Some(name) = channel.name {
+                    *name_counts
+                        .entry((*source, channel.feed, iptv_epg::normalize_name(&name)))
+                        .or_insert(0usize) += 1;
+                }
+            }
+            let mut statement = self.conn.prepare_cached(
+                "SELECT c.feed_id,c.epg_channel,p.start,p.stop,p.title
+                 FROM epg_programmes p JOIN epg_channels c ON c.id=p.channel_id
+                 WHERE c.source_id=?1 ORDER BY c.feed_id,c.epg_channel,p.start",
+            )?;
+            let mut rows = statement.query([source.0])?;
+            while let Some(row) = rows.next()? {
+                for at in 0..5 {
+                    hash.update(format!("{:?};", row.get::<_, Value>(at)?).as_bytes());
+                }
+            }
+        }
+        let channel_snapshot = snapshot(self, &ids)?;
+        let snapshot = format!("{:x}", hash.finalize());
+        if !check_cursor(query, &context, &snapshot, 2) {
+            return Ok(Err(InspectionError::StaleCursor));
+        }
+        let mut channel_query = query.clone();
+        if let Some(cursor) = &mut channel_query.cursor {
+            cursor.context = query_context(query, "channels");
+            cursor.snapshot = channel_snapshot;
+        }
+        let channels = match self.inspection_channels_inner(&channel_query)? {
             Ok(p) => p,
             Err(e) => return Ok(Err(e)),
         };
         let mut items = Vec::new();
         for channel in channels.items {
-            let binding = self.epg_binding(
+            let mut binding = self.epg_binding(
                 channel.key.source,
                 &ChannelKey::new(channel.key.content.as_str()),
             )?;
+            if let Some((feed, _, _)) = &binding {
+                if self.feed_incarnation(channel.key.source, *feed)?.is_none() {
+                    binding = None;
+                }
+            }
             let guide_error: Option<String> = self
                 .conn
                 .query_row(
@@ -497,10 +560,8 @@ impl Store {
                 )
                 .optional()?
                 .flatten();
-            let mut covered = 0u64;
-            let mut count = 0;
-            let mut latest = None;
-            let mut previous = window.from;
+            let (mut covered, mut count, mut latest, mut earliest, mut previous) =
+                (0u64, 0, None, None, window.from);
             if let Some((feed, ref epg, _)) = binding {
                 let mut statement=self.conn.prepare_cached(
                     "SELECT p.start,p.stop FROM epg_programmes p JOIN epg_channels c ON c.id=p.channel_id
@@ -508,6 +569,7 @@ impl Store {
                 let mut rows = statement.query(params![channel.key.source.0, feed.0, epg])?;
                 while let Some(row) = rows.next()? {
                     let (start, stop): (i64, i64) = (row.get(0)?, row.get(1)?);
+                    earliest = Some(earliest.map_or(start, |old: i64| old.min(start)));
                     latest = Some(latest.map_or(stop, |old: i64| old.max(stop)));
                     let from = start.max(window.from).max(previous);
                     let to = stop.min(window.to);
@@ -518,6 +580,24 @@ impl Store {
                     }
                 }
             }
+            let ambiguous = binding.as_ref().is_some_and(|(feed, _, kind)| {
+                *kind == iptv_epg::MatchKind::Name
+                    && name_counts
+                        .get(&(
+                            channel.key.source,
+                            *feed,
+                            iptv_epg::normalize_name(
+                                channel.epg_name.as_deref().unwrap_or(&channel.name),
+                            ),
+                        ))
+                        .copied()
+                        .unwrap_or(0)
+                        > 1
+            });
+            let timing = binding
+                .as_ref()
+                .is_some_and(|(feed, _, _)| suspicious.contains(&(channel.key.source, *feed)))
+                || earliest.is_some_and(|start| start > window.to.saturating_add(7 * 86_400));
             let diagnosis = if channel.choice == Choice::NoGuide {
                 Diagnosis::Disabled
             } else if guide_error.is_some() {
@@ -526,6 +606,10 @@ impl Store {
                 Diagnosis::UnresolvedOverride
             } else if binding.is_none() {
                 Diagnosis::Unmatched
+            } else if ambiguous {
+                Diagnosis::Ambiguous
+            } else if timing {
+                Diagnosis::SuspiciousTiming
             } else if latest.is_some_and(|t| t <= window.from) {
                 Diagnosis::Stale
             } else if count == 0 {
@@ -542,7 +626,7 @@ impl Store {
                         feed,
                         incarnation: self
                             .feed_incarnation(channel.key.source, feed)?
-                            .unwrap_or_default(),
+                            .expect("validated incarnation"),
                         epg_channel,
                     })
                 })
@@ -557,9 +641,14 @@ impl Store {
                 identity_verified: false,
             });
         }
+        tx.commit()?;
         Ok(Ok(Page {
             items,
-            next: channels.next,
+            next: channels.next.map(|mut cursor| {
+                cursor.context = context.clone();
+                cursor.snapshot = snapshot.clone();
+                cursor
+            }),
         }))
     }
 }

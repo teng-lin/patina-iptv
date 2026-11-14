@@ -9,6 +9,7 @@ use iptv_store_sqlite::{DatabaseKey, InspectionStage};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
+    fs::{File, OpenOptions},
     future::Future,
     path::PathBuf,
     sync::{
@@ -23,6 +24,7 @@ pub const PROBE_EXPANDED_BYTES: u64 = 256 << 20;
 pub const PROBE_DEADLINE: Duration = Duration::from_secs(60);
 pub const STAGE_BUDGET: u64 = 512 << 20;
 pub const STAGE_TTL: i64 = 24 * 60 * 60;
+const RESERVATION: u64 = 128 << 20;
 
 #[derive(Clone, Debug)]
 pub enum ProbeTarget {
@@ -65,7 +67,8 @@ fn check(services: &Services, cancel: &CancelToken, deadline: Instant) -> Inspec
 pub(crate) struct Vault {
     nonce: String,
     key: Option<DatabaseKey>,
-    stages: Arc<Mutex<BTreeMap<ProbeId, Arc<Snapshot>>>>,
+    stages: Arc<Mutex<Space>>,
+    directory: Arc<Mutex<Option<Arc<Directory>>>>,
     running: Arc<AtomicUsize>,
 }
 impl Vault {
@@ -74,7 +77,8 @@ impl Vault {
         Self {
             nonce: random::<16>().map(|b| hex(&b)).unwrap_or_default(),
             key,
-            stages: Arc::new(Mutex::new(BTreeMap::new())),
+            stages: Arc::new(Mutex::new(Space::default())),
+            directory: Arc::new(Mutex::new(None)),
             running: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -85,7 +89,117 @@ impl Vault {
         self.stages
             .lock()
             .unwrap_or_else(|e| e.into_inner())
+            .stages
             .clear();
+        self.directory
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+    }
+}
+
+#[derive(Default)]
+struct Space {
+    stages: BTreeMap<ProbeId, Arc<Snapshot>>,
+    reserved: u64,
+}
+struct Reservation(Arc<Mutex<Space>>);
+impl Reservation {
+    fn acquire(space: Arc<Mutex<Space>>) -> InspectionResult<Self> {
+        {
+            let mut state = space.lock().unwrap_or_else(|e| e.into_inner());
+            state
+                .stages
+                .retain(|_, s| s.evidence.expires_at > now() || Arc::strong_count(s) > 1);
+            loop {
+                let used: u64 = state.stages.values().map(|s| s.bytes).sum();
+                if used
+                    .saturating_add(state.reserved)
+                    .saturating_add(RESERVATION)
+                    <= STAGE_BUDGET
+                {
+                    break;
+                }
+                let evict = state
+                    .stages
+                    .iter()
+                    .find(|(_, s)| Arc::strong_count(s) == 1)
+                    .map(|(id, _)| id.clone());
+                let Some(evict) = evict else {
+                    return Err(InspectionError::LimitExceeded);
+                };
+                state.stages.remove(&evict);
+            }
+            state.reserved += RESERVATION;
+        }
+        Ok(Self(space))
+    }
+}
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).reserved -= RESERVATION;
+    }
+}
+struct Directory {
+    path: PathBuf,
+    _lock: File,
+}
+impl Directory {
+    fn create(services: &Services, nonce: &str) -> InspectionResult<Arc<Self>> {
+        let base = services.directory().join("guide-probes");
+        std::fs::create_dir_all(&base).map_err(|_| InspectionError::Storage)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700))
+                .map_err(|_| InspectionError::Storage)?;
+        }
+        (services.ports().exclude_from_backup)(&base).map_err(|_| InspectionError::Storage)?;
+        // A random disposable key is never persisted. Remove unreadable crash
+        // remnants only after obtaining their owner lock; active owners survive.
+        for entry in std::fs::read_dir(&base).map_err(|_| InspectionError::Storage)? {
+            let entry = entry.map_err(|_| InspectionError::Storage)?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.len() != 32 || !name.bytes().all(|b| b.is_ascii_hexdigit()) {
+                continue;
+            }
+            if !entry
+                .file_type()
+                .map_err(|_| InspectionError::Storage)?
+                .is_dir()
+            {
+                continue;
+            }
+            if let Ok(file) = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(entry.path().join("owner.lock"))
+            {
+                if file.try_lock().is_ok() {
+                    let _ = std::fs::remove_dir_all(entry.path());
+                }
+            }
+        }
+        let path = base.join(nonce);
+        std::fs::create_dir(&path).map_err(|_| InspectionError::Storage)?;
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let lock = options
+            .open(path.join("owner.lock"))
+            .map_err(|_| InspectionError::Storage)?;
+        lock.try_lock().map_err(|_| InspectionError::Busy)?;
+        Ok(Arc::new(Self { path, _lock: lock }))
+    }
+}
+impl Drop for Directory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
     }
 }
 
@@ -104,6 +218,7 @@ struct Snapshot {
     bytes: u64,
     time: TimePolicy,
     location: SecretUrl,
+    _directory: Arc<Directory>,
 }
 impl Drop for Snapshot {
     fn drop(&mut self) {
@@ -147,8 +262,55 @@ impl ProbeLease {
     pub fn source_incarnation(&self) -> &str {
         &self.0.source_incarnation
     }
-    pub fn validate_candidate(&self, candidate: &CandidateRef) -> InspectionResult<()> {
+    fn integrity(&self) -> InspectionResult<()> {
         self.check()?;
+        let stage = storage(InspectionStage::open(&self.0.path, &self.0.key))?;
+        let mut hash = Sha256::new();
+        let deadline = Instant::now() + super::QUERY_DEADLINE;
+        storage(stage.for_each_chunk(|bytes| {
+            if Instant::now() >= deadline {
+                return Err(iptv_store_sqlite::StoreError::Unavailable(
+                    "probe integrity deadline",
+                ));
+            }
+            hash.update(bytes);
+            Ok(())
+        }))?;
+        let actual: [u8; 32] = hash.finalize().into();
+        if actual != self.0.evidence.digest {
+            return Err(InspectionError::StaleEvidence);
+        }
+        Ok(())
+    }
+
+    fn current_configuration(&self) -> InspectionResult<()> {
+        self.check()?;
+        let source = self.0.evidence.source;
+        let source_incarnation = self.0.source_incarnation.clone();
+        let feed = self.0.evidence.feed;
+        let incarnation = self.0.evidence.incarnation.clone();
+        let current = self.0.services.analyze(move |store| {
+            Ok(store.source_incarnation(source)? == source_incarnation
+                && match feed {
+                    Some(feed) => {
+                        store.feed_incarnation(source, feed)?.as_ref() == Some(&incarnation)
+                    }
+                    None => true,
+                })
+        });
+        if !self
+            .0
+            .services
+            .block_on(current)
+            .map_err(|_| InspectionError::Storage)?
+        {
+            return Err(InspectionError::StaleEvidence);
+        }
+        Ok(())
+    }
+
+    pub fn validate_candidate(&self, candidate: &CandidateRef) -> InspectionResult<()> {
+        self.integrity()?;
         if candidate.source != self.0.evidence.source
             || self.0.evidence.feed.is_some_and(|f| f != candidate.feed)
             || candidate.incarnation != self.0.evidence.incarnation
@@ -181,6 +343,7 @@ struct Configuration {
     time: TimePolicy,
     net: iptv_net::NetConfig,
     user_agent: Option<String>,
+    public_only: bool,
 }
 fn configuration(
     owner: &Runtime,
@@ -196,7 +359,7 @@ fn configuration(
             return Ok(Err(InspectionError::SourceDisabled(request.source)));
         }
         let source_incarnation = store.source_incarnation(request.source)?;
-        let (url, feed, incarnation, time) = match request.target {
+        let (url, feed, incarnation, time, public_only) = match request.target {
             ProbeTarget::Configured(feed) => {
                 let Some(config) = store
                     .guide_sources(request.source)?
@@ -209,27 +372,32 @@ fn configuration(
                     return Ok(Err(InspectionError::StaleEvidence));
                 };
                 (
-                    config.url,
+                    config.url.clone(),
                     Some(feed),
                     incarnation,
                     TimePolicy {
                         shift_minutes: config.shift_minutes,
                         ..TimePolicy::UTC
                     },
+                    config.is_provider(),
                 )
             }
             ProbeTarget::Supplied(url) => {
                 let incarnation = hex(&random::<16>().map_err(|_| {
                     iptv_store_sqlite::StoreError::Unavailable("probe identity unavailable")
                 })?);
-                (url, None, incarnation, TimePolicy::UTC)
+                (url, None, incarnation, TimePolicy::UTC, true)
             }
         };
         let source = store.source(request.source)?.expect("source checked");
-        let user_agent = match source.source.config {
-            iptv_providers::model::SourceConfig::M3u(c) => c.user_agent,
-            iptv_providers::model::SourceConfig::Xtream(c) => c.user_agent,
-            _ => None,
+        let user_agent = if feed.is_none() {
+            None
+        } else {
+            match source.source.config {
+                iptv_providers::model::SourceConfig::M3u(c) => c.user_agent,
+                iptv_providers::model::SourceConfig::Xtream(c) => c.user_agent,
+                _ => None,
+            }
         };
         Ok(Ok(Configuration {
             url,
@@ -239,6 +407,7 @@ fn configuration(
             time,
             net,
             user_agent,
+            public_only,
         }))
     });
     async move { read.await.map_err(|_| InspectionError::Storage)? }
@@ -275,6 +444,26 @@ fn network_error(error: iptv_import::FetchError) -> InspectionError {
     }
 }
 
+fn await_worker<T: Send + 'static>(
+    services: Services,
+    control: InspectionControl,
+    deadline: Instant,
+    task: tokio::task::JoinHandle<InspectionResult<T>>,
+) -> impl Future<Output = InspectionResult<T>> + use<T> {
+    let guard = super::CancelOnDrop(control.cancel.clone());
+    let accepted = services.clone();
+    let reply = services.spawn(async move {
+        guarded(&accepted, &control, deadline, async move {
+            task.await.map_err(|_| InspectionError::OwnerClosed)?
+        })
+        .await
+    });
+    async move {
+        let _guard = guard;
+        reply.await.map_err(|_| InspectionError::OwnerClosed)?
+    }
+}
+
 impl Runtime {
     pub fn probe_feed(
         &self,
@@ -286,10 +475,13 @@ impl Runtime {
         let services = self.services();
         let stages = self.inspection.stages.clone();
         let key = self.inspection.key.clone();
+        let directory = self.inspection.directory.clone();
+        let nonce = self.inspection.nonce.clone();
         let running = self.inspection.running.clone();
         let deadline = Instant::now() + control.timeout.min(PROBE_DEADLINE);
         let accepted = services.clone();
         let cancel = control.cancel.clone();
+        let worker_control = control.clone();
         let task = services.spawn_blocking(move || {
             if running.fetch_add(1, Ordering::SeqCst) >= 2 {
                 running.fetch_sub(1, Ordering::SeqCst);
@@ -297,24 +489,22 @@ impl Runtime {
             }
             let _running = Running(running);
             let key = key.ok_or(InspectionError::Storage)?;
+            let reservation = Reservation::acquire(stages.clone())?;
             check(&accepted, &cancel, deadline)?;
             let configuration =
-                accepted.block_on(guarded(&accepted, &control, deadline, config))?;
+                accepted.block_on(guarded(&accepted, &worker_control, deadline, config))?;
             if configuration.url.expose().len() > 4096 {
                 return Err(InspectionError::InvalidRequest);
             }
             let id = ProbeId(hex(&random::<16>()?));
-            let directory = accepted.directory().join("guide-probes");
-            std::fs::create_dir_all(&directory).map_err(|_| InspectionError::Storage)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))
-                    .map_err(|_| InspectionError::Storage)?;
-            }
-            (accepted.ports().exclude_from_backup)(&directory)
-                .map_err(|_| InspectionError::Storage)?;
-            let path = directory.join(format!("{}.sqlite", id.0));
+            let directory = {
+                let mut directory = directory.lock().unwrap_or_else(|e| e.into_inner());
+                if directory.is_none() {
+                    *directory = Some(Directory::create(&accepted, &nonce)?);
+                }
+                directory.as_ref().expect("initialized directory").clone()
+            };
+            let path = directory.path.join(format!("{}.sqlite", id.0));
             let evidence = ProbeEvidence {
                 stage: id.clone(),
                 source,
@@ -332,6 +522,7 @@ impl Runtime {
                 bytes: 0,
                 time: configuration.time,
                 location: configuration.url.clone(),
+                _directory: directory,
             };
             let mut stage = storage(InspectionStage::create(&snapshot.path, &snapshot.key))?;
             let mut net = configuration.net;
@@ -342,14 +533,14 @@ impl Runtime {
             net.read_timeout = Duration::from_secs(15);
             let client = iptv_net::NetClient::new(net).map_err(network_error)?;
             let mut request = HttpRequest::get(configuration.url.expose());
-            request.public_only = true;
+            request.public_only = configuration.public_only;
             request.preserve_gzip = true;
             request.timeout = Some(deadline.saturating_duration_since(Instant::now()));
             if let Some(agent) = configuration.user_agent {
                 request = request.with_header("User-Agent", agent);
             }
             let mut response =
-                accepted.block_on(guarded(&accepted, &control, deadline, async {
+                accepted.block_on(guarded(&accepted, &worker_control, deadline, async {
                     client.fetch_stream(request).await.map_err(network_error)
                 }))?;
             if !response.is_success() {
@@ -361,9 +552,10 @@ impl Runtime {
             let mut error = None;
             loop {
                 check(&accepted, &cancel, deadline)?;
-                let chunk = accepted.block_on(guarded(&accepted, &control, deadline, async {
-                    response.body.next_chunk().await.map_err(network_error)
-                }))?;
+                let chunk =
+                    accepted.block_on(guarded(&accepted, &worker_control, deadline, async {
+                        response.body.next_chunk().await.map_err(network_error)
+                    }))?;
                 let Some(chunk) = chunk else { break };
                 for part in chunk.chunks(64 * 1024) {
                     check(&accepted, &cancel, deadline)?;
@@ -419,18 +611,37 @@ impl Runtime {
                 warnings: stats.warnings.total(),
             };
             check(&accepted, &cancel, deadline)?;
-            let mut stages = stages.lock().unwrap_or_else(|e| e.into_inner());
-            stages.retain(|_, stage| {
-                stage.evidence.expires_at > now() || Arc::strong_count(stage) > 1
-            });
-            let used: u64 = stages.values().map(|s| s.bytes).sum();
-            if used.saturating_add(snapshot.bytes) > STAGE_BUDGET {
+            if snapshot.bytes > RESERVATION {
                 return Err(InspectionError::LimitExceeded);
             }
-            stages.insert(id, Arc::new(snapshot));
+            let current_source = configuration.source_incarnation.clone();
+            let current_feed = configuration.feed;
+            let current_incarnation = configuration.incarnation.clone();
+            let current = accepted.analyze(move |store| {
+                Ok(store.source_incarnation(source)? == current_source
+                    && match current_feed {
+                        Some(feed) => {
+                            store.feed_incarnation(source, feed)?.as_ref()
+                                == Some(&current_incarnation)
+                        }
+                        None => true,
+                    })
+            });
+            if !accepted
+                .block_on(current)
+                .map_err(|_| InspectionError::Storage)?
+            {
+                return Err(InspectionError::StaleEvidence);
+            }
+            {
+                let mut state = stages.lock().unwrap_or_else(|e| e.into_inner());
+                check(&accepted, &cancel, deadline)?;
+                state.stages.insert(id, Arc::new(snapshot));
+            }
+            drop(reservation);
             Ok(summary)
         });
-        async move { task.await.map_err(|_| InspectionError::OwnerClosed)? }
+        await_worker(services, control, deadline, task)
     }
 
     pub fn lease_probe(&self, evidence: &ProbeEvidence) -> InspectionResult<ProbeLease> {
@@ -440,6 +651,7 @@ impl Runtime {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let stage = stages
+            .stages
             .get(&evidence.stage)
             .ok_or(InspectionError::StaleEvidence)?;
         if stage.evidence != *evidence {
@@ -460,18 +672,22 @@ impl Runtime {
     ) -> impl Future<Output = InspectionResult<Page<Candidate>>> + use<> {
         let lease = self.lease_probe(&evidence);
         let services = self.services();
+        let deadline = Instant::now() + control.timeout.min(super::QUERY_DEADLINE);
+        let worker_control = control.clone();
         let task = services.spawn_blocking(move || {
             let lease = lease?;
-            lease.check()?;
+            lease.current_configuration()?;
+            check(&lease.0.services, &worker_control.cancel, deadline)?;
             if limit == 0 || limit > MAX_PAGE || text.len() > MAX_QUERY_BYTES {
                 return Err(InspectionError::InvalidRequest);
             }
-            let stage = storage(InspectionStage::open(&lease.0.path, &lease.0.key))?;
-            let mut channels =
-                storage(stage.channels(after.as_deref().unwrap_or(""), &text, limit + 1))?;
-            if control.cancel.is_cancelled() {
-                return Err(InspectionError::Cancelled);
-            }
+            let mut stage = storage(InspectionStage::open(&lease.0.path, &lease.0.key))?;
+            let mut channels = storage(stage.bounded(
+                worker_control.cancel.clone(),
+                deadline,
+                |stage| stage.channels(after.as_deref().unwrap_or(""), &text, limit + 1),
+            ))?;
+            check(&lease.0.services, &worker_control.cancel, deadline)?;
             let more = channels.len() > limit as usize;
             channels.truncate(limit as usize);
             let next = more.then(|| Cursor {
@@ -500,7 +716,7 @@ impl Runtime {
                 next,
             })
         });
-        async move { task.await.map_err(|_| InspectionError::OwnerClosed)? }
+        await_worker(services, control, deadline, task)
     }
 
     pub fn probe_schedule(
@@ -509,15 +725,18 @@ impl Runtime {
         candidate: CandidateRef,
         window: TimeWindow,
         control: InspectionControl,
-    ) -> impl Future<Output = InspectionResult<Vec<ProgrammeInfo>>> + use<> {
+    ) -> impl Future<Output = InspectionResult<Vec<CandidateProgramme>>> + use<> {
         let lease = self.lease_probe(&evidence);
         let services = self.services();
         let deadline = Instant::now() + control.timeout.min(PROBE_DEADLINE);
+        let worker_control = control.clone();
         let task = services.spawn_blocking(move || {
             if !window.valid() {
                 return Err(InspectionError::InvalidRequest);
             }
             let lease = lease?;
+            lease.current_configuration()?;
+            check(&lease.0.services, &worker_control.cancel, deadline)?;
             lease.validate_candidate(&candidate)?;
             let stage = storage(InspectionStage::open(&lease.0.path, &lease.0.key))?;
             let mut hash = Sha256::new();
@@ -532,16 +751,9 @@ impl Runtime {
                         if let Some(stop) =
                             p.stop.filter(|stop| *stop > p.start && *stop > window.from)
                         {
-                            if programmes.len() < MAX_PAGE as usize {
-                                programmes.push(ProgrammeInfo {
-                                    channel: ChannelRef {
-                                        source: evidence.source,
-                                        content: iptv_providers::ContentId::from_stored(
-                                            candidate.epg_channel.clone(),
-                                        ),
-                                    },
+                            if programmes.len() <= MAX_PAGE as usize {
+                                programmes.push(CandidateProgramme {
                                     candidate: candidate.clone(),
-                                    source_incarnation: lease.0.source_incarnation.clone(),
                                     evidence_revision: hex(&evidence.digest),
                                     provider_event_id: None,
                                     start: p.start,
@@ -554,7 +766,7 @@ impl Runtime {
                 }
             };
             storage(stage.for_each_chunk(|bytes| {
-                if let Err(error) = check(&lease.0.services, &control.cancel, deadline) {
+                if let Err(error) = check(&lease.0.services, &worker_control.cancel, deadline) {
                     failure = Some(error);
                     return Err(iptv_store_sqlite::StoreError::Unavailable(
                         "probe inspection stopped",
@@ -575,10 +787,13 @@ impl Runtime {
             if actual != evidence.digest {
                 return Err(InspectionError::StaleEvidence);
             }
-            check(&lease.0.services, &control.cancel, deadline)?;
+            check(&lease.0.services, &worker_control.cancel, deadline)?;
+            if programmes.len() > MAX_PAGE as usize {
+                return Err(InspectionError::LimitExceeded);
+            }
             programmes.sort_by_key(|p| p.start);
             Ok(programmes)
         });
-        async move { task.await.map_err(|_| InspectionError::OwnerClosed)? }
+        await_worker(services, control, deadline, task)
     }
 }
