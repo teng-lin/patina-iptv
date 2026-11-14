@@ -16,6 +16,7 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
 use iptv_settings::{Settings, Value};
 use nsh_core::picker::PickedFile;
@@ -24,7 +25,6 @@ use nsh_core::{
     EventKind, EventPayload, ImageData, Point, Size, ViewKind, element::Root, prelude::*,
 };
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 use serde_json::json;
 
 const IMPORT: Duration = Duration::from_secs(20);
@@ -340,7 +340,8 @@ fn search_by_touch(app: &mut Headless, data: &std::path::Path) {
     // file had held: they are in the store now, and the file is gone.
     assert!(!data.join("search-history.json").exists());
     let store = crate::isolated::open_database(data.join("iptv.sqlite")).unwrap();
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let deadline =
+        std::time::Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(10));
     loop {
         let saved = store.search_history().unwrap();
         if saved == ["Zebra", "weather"] {

@@ -1,4 +1,5 @@
 //! Foreground refresh integration with synthetic local files; no network/provider data.
+use crate::headless::Headless;
 use iptv_providers::{
     SecretUrl,
     model::{M3uSourceConfig, Source, SourceConfig},
@@ -6,7 +7,6 @@ use iptv_providers::{
 use iptv_store_sqlite::{SourceId, SourcePolicy, Store};
 use nsh_core::{Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
@@ -48,7 +48,7 @@ fn add(store: &mut Store, dir: &Path, label: &str, policy: SourcePolicy) -> (Sou
     (id, file)
 }
 fn until(app: &mut Headless, what: &str, timeout: Duration, mut ready: impl FnMut() -> bool) {
-    let end = Instant::now() + timeout;
+    let end = Instant::now() + crate::isolated::scaled_duration(timeout);
     while !ready() {
         assert!(Instant::now() < end, "timed out: {what}");
         step(app.wait(Duration::from_millis(50)));

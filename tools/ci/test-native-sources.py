@@ -2,7 +2,6 @@
 """Source collection for bundled native libraries, without Homebrew, apt or network."""
 import hashlib
 import importlib.util
-import io
 import json
 from pathlib import Path
 import tarfile
@@ -356,7 +355,7 @@ class Collecting(unittest.TestCase):
             self.assertEqual(archive.extractfile("synthetic-1.2.3_1/synthetic-1.2.3.tar.xz").read(),
                              b"synthetic upstream archive")
             self.assertTrue(all(member.mtime == 0 and member.uid == 0 and member.mode == 0o644 for member in archive))
-        self.assertEqual(names, ["SOURCE.txt", "sources.json", f"synthetic-1.2.3_1/formula.rb",
+        self.assertEqual(names, ["SOURCE.txt", "sources.json", "synthetic-1.2.3_1/formula.rb",
                                  f"synthetic-1.2.3_1/synthetic-{COMMIT}.tar", "synthetic-1.2.3_1/synthetic-1.2.3.tar.xz"])
         self.assertEqual(inside, description)
         self.assertEqual(json.loads(output.with_suffix(".json").read_text()), description)

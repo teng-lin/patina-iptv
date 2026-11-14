@@ -13,9 +13,19 @@ concurrency:
   group: mpv-runtime-dependency-${{ inputs.platform }}
   cancel-in-progress: false
 jobs:
+  guard:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Refuse runtime dispatch outside master
+        if: github.ref != 'refs/heads/master'
+        run: |
+          echo "Runtime-publish workflows can be dispatched on master only" >&2
+          exit 1
+
   # Windows: tools/mpv-runtime. Linux and macOS: tools/mpv-runtime-unix, from
   # the same pinned sources. Each platform publishes its own retained release.
   build:
+    needs: [guard]
     if: inputs.platform == 'windows'
     runs-on: ubuntu-24.04
     timeout-minutes: 180
@@ -120,6 +130,7 @@ jobs:
           gh release edit "$tag" --draft=false --latest=false
 
   linux-build:
+    needs: [guard]
     if: inputs.platform == 'linux'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -237,6 +248,7 @@ jobs:
   # macos/build.sh isolates itself (empty environment, no Homebrew, network
   # denied by a sandbox profile). Not yet run: see tools/mpv-runtime-unix/README.md.
   macos-build:
+    needs: [guard]
     if: inputs.platform == 'macos'
     runs-on: macos-15
     timeout-minutes: 120

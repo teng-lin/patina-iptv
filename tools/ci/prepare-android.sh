@@ -15,6 +15,9 @@ cp -R hosts/android/app/build/reports/dependency-license hosts/android/app/build
 (cd hosts/android && ./gradlew --no-daemon lintRelease assembleRelease bundleRelease)
 rm -rf target/android-unsigned
 mkdir -p target/android-unsigned
+python3 tools/ci/sbom.py android-classpath \
+  hosts/android/app/build/reports/dependency-license/index.json \
+  "target/android-unsigned/Patina-$VERSION-android-classpath-sbom.cdx.json" "$VERSION"
 cp hosts/android/app/build/outputs/apk/release/app-release-unsigned.apk target/android-unsigned/
 cp hosts/android/app/build/outputs/bundle/release/app-release.aab target/android-unsigned/
 python3 tools/ci/check-android-artifacts.py \

@@ -171,6 +171,12 @@ released so far is unsigned, and Gatekeeper and SmartScreen warn about them.
 Create a GitHub environment named release and set these secrets for Android:
 - ANDROID_KEYSTORE_BASE64, ANDROID_STORE_PASSWORD, ANDROID_KEY_PASSWORD,
   ANDROID_KEY_ALIAS: a persistent release signing key.
+
+Keep every signing secret in that environment, not at repository or
+organization level, and keep its protection rules (deployment branches and
+tags, required reviewers): they decide which refs may sign with the release
+credentials. A release without the Android secrets fails in the signing job
+(`tools/ci/sign-android.sh`); it never falls back to a debug or throwaway key.
 To sign and notarize the macOS disk image, also set (all or none):
 - MACOS_CERTIFICATE_BASE64, MACOS_CERTIFICATE_PASSWORD, MACOS_SIGN_IDENTITY: a
   Developer ID Application certificate (base64 of its .p12), the .p12's
@@ -215,9 +221,98 @@ workflow_dispatch builds artifacts
 without publishing; use platforms=desktop to validate desktop packages alone.
 A manual run on master is also the dry run for the release-only steps: it
 downloads the native source archives and writes the SBOM, and stops before the
-checksum, attestation and publish steps.
+checksum, attestation and publish steps. It signs with the release
+credentials, so it is refused on any other ref (`tools/ci/release-plan.py`).
 A tag publishes Android and desktop artifacts and SHA256SUMS to GitHub Releases only
 after every job succeeds.
+
+## Release rehearsal
+
+A manual run with `rehearsal` checked runs the whole release pipeline,
+publication included, without the release credentials and without leaving
+anything behind. It can start from any branch:
+
+```sh
+gh workflow run release.yml --ref <branch> -f rehearsal=true
+```
+
+What it does differently from a release:
+
+- **Environment.** The two signing jobs (`sign`, `windows-sign`) run in the
+  `release-rehearsal` environment instead of `release`. That environment must
+  hold no secrets and needs no protection rules; create it once (Settings,
+  Environments), or let GitHub create it empty on the first rehearsal. The
+  `release` environment and its rules are not changed and are not used.
+- **No release credentials.** Environment secrets of `release` are not sent to
+  a job in another environment. As a second barrier, every `secrets.`
+  expression in the two signing jobs is forced empty when
+  `github.event_name == 'workflow_dispatch' && inputs.rehearsal`, the "is it
+  configured" flags included, so a secret stored at repository level would not
+  reach a rehearsal step either. `tools/ci/test-release-workflow.py` evaluates
+  the workflow's expressions for each kind of run and fails if a rehearsal
+  would receive a secret, or if any other run would sign outside `release`.
+- **Android.** The APK and AAB still go through the real signing and
+  verification (`tools/ci/package-android.sh`), with a key pair that
+  `tools/ci/sign-android.sh` makes for that run alone: a PKCS12 store in
+  `RUNNER_TEMP`, outside the checkout, behind a random password that is masked
+  in the log, deleted when the script ends and again by the job's `always()`
+  step. The script refuses to make it for anything but a manual rehearsal, and
+  refuses to run a rehearsal that received any release credential. The job
+  log names the throwaway certificate's SHA-256.
+- **macOS and Windows.** Unsigned previews, as in any run without their
+  credentials: the disk image is ad hoc signed and not notarized, the
+  installer has no Authenticode signature, and the signing records and the
+  draft's release notes say so.
+- **Publication.** The publish job creates the lightweight tag
+  `rehearsal-<run id>` at the run's commit, attests the files, uploads them to
+  a draft release, never makes it public, then deletes the draft and the tag
+  (`tools/ci/rehearsal.py`, which only removes a tag and drafts it can show to
+  be its own). Checksums, SBOMs, source archives and provenance attestations
+  are produced as in a release.
+
+When rehearsing workflow changes before they reach the default branch, GitHub
+may refuse creation of the throwaway tag with `403 Resource not accessible by
+integration`. The publish job already requests `contents: write`; a commit with
+changed workflow files also needs workflow-write authority, which the built-in
+`GITHUB_TOKEN` cannot request. See [GitHub's token permission rules for release
+creation](https://docs.github.com/en/rest/releases/releases#create-a-release).
+Do not broaden repository permissions or relax release-tag protection.
+
+A maintainer whose GitHub CLI authentication can write workflows can seed the
+exact tag with the existing ownership-checking helper, then rerun only the failed
+publish job. Read the run's full `headSha` and the publish job's `databaseId` from
+`gh run view <run-id> --json headSha,jobs`, then run from that source checkout:
+
+```sh
+GH_REPO=teng-lin/patina-iptv python3 tools/ci/rehearsal.py create \
+  rehearsal-<run-id> <full-run-commit-sha>
+gh run rerun <run-id> --repo teng-lin/patina-iptv --job <publish-job-id>
+```
+
+This keeps the original run's package and signing artifacts. The helper refuses
+a tag at another commit; publication accepts the existing owned tag and performs
+the usual draft upload, verification and cleanup. The target must remain the
+original run's commit. Do not substitute the default-branch commit or rerun the
+packaging jobs just to recover publication.
+
+Limits:
+
+- A rehearsal covers `platforms=android-desktop` only (with the Windows
+  installer). `platforms=all` is refused at the start of the run: an IPA
+  cannot be signed without the distribution certificate and provisioning
+  profile, and a rehearsal never receives them. iOS signing is validated with
+  a manual `platforms=all` run on master. A partial selection is refused too.
+- It proves the pipeline, not the credentials: whether the production
+  keystore, the Apple certificate or the Azure profile are valid is only known
+  from a run in the `release` environment.
+- The Android packages of a rehearsal are in the run's `packages-android`
+  artifact until it expires. They are signed with a key that no longer
+  exists: they install, but cannot update a released build or be updated by
+  one. Do not distribute them.
+- Rehearsal attestations remain in GitHub's attestation store after the draft
+  and the tag are gone. They name the rehearsal run and the branch it ran on,
+  not a release tag, so `gh attestation verify --source-ref refs/tags/v<version>`
+  does not accept them.
 
 ## Published releases are immutable
 
