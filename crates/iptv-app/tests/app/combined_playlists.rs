@@ -849,6 +849,10 @@ fn automatic_join_reloads_previous_source_whose_account_refresh_is_still_pending
     use nsh_core::{ImageData, picker::PickedFile};
     use std::sync::atomic::Ordering;
     let Some(home) = isolated!() else { return };
+    let _ = env_logger::builder()
+        .is_test(true)
+        .filter_level(log::LevelFilter::Info)
+        .try_init();
     let dir = home.data_dir();
     std::fs::create_dir_all(&dir).unwrap();
     let (server, accounts, _, release) = delayed_account(true);
@@ -871,6 +875,8 @@ fn automatic_join_reloads_previous_source_whose_account_refresh_is_still_pending
         .replace_catalog(source, &cached.groups, &cached.channels.items, &[], &[])
         .unwrap();
     store.set_active_source(source).unwrap();
+    let policy = store.source_policy(source).unwrap();
+    assert!(policy.enabled && policy.refresh_on_start);
     drop(store);
     let mut app = Headless::start(EngineConfig {
         viewport: Size::new(px(1920.0), px(1080.0)),
@@ -881,11 +887,25 @@ fn automatic_join_reloads_previous_source_whose_account_refresh_is_still_pending
         b"#EXTM3U\n#EXTINF:-1 group-title=\"News\",Added Alpha\nhttp://stream.example.test/added-alpha\n".to_vec()
     ))]);
     step(app.wait_for_within("text:Cached Beta", Duration::from_secs(20)));
-    step(app.wait_until(
+    // This waits for native client initialization and the first loopback
+    // request, so use the same startup/import budget as the surrounding steps.
+    // The cached guide is already visible; the request itself remains held.
+    let held = app.wait_until(
         "previous startup account request held",
-        Duration::from_secs(10),
-        |_| accounts.load(Ordering::SeqCst) == 1,
-    ));
+        Duration::from_secs(20),
+        |_| accounts.load(Ordering::SeqCst) >= 1,
+    );
+    step(held.map_err(|error| {
+        format!(
+            "{error}; observed account requests: {}",
+            accounts.load(Ordering::SeqCst)
+        )
+    }));
+    assert_eq!(
+        accounts.load(Ordering::SeqCst),
+        1,
+        "the first startup account request must remain held"
+    );
     step(app.press("text:+ Add playlist"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
