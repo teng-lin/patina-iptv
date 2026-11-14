@@ -25,7 +25,11 @@ known=$(cargo-fuzz list)
 [ -n "$known" ] || { echo "cargo fuzz list reports no targets" >&2; exit 1; }
 failed=()
 targets=("$@")
-[ "${#targets[@]}" -gt 0 ] || read -r -a targets <<< "$known"
+if [ "${#targets[@]}" -eq 0 ]; then
+  while IFS= read -r target; do
+    targets+=("$target")
+  done <<< "$known"
+fi
 for target in "${targets[@]}"; do
   grep -qxF -- "$target" <<< "$known" || { echo "unknown fuzz target: $target" >&2; exit 1; }
   # Committed seeds join whatever corpus earlier runs accumulated.
