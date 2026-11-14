@@ -9,6 +9,8 @@ on:
       - 'crates/**'
       - 'rust-toolchain.toml'
       - 'tools/ci/coverage.sh'
+      - 'tools/ci/check-coverage-floors.py'
+      - 'tools/ci/test-coverage-floors.py'
   push:
     branches: [master]
   workflow_dispatch:
@@ -27,6 +29,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      - name: Test coverage floor enforcement
+        run: python3 tools/ci/test-coverage-floors.py
       - name: Install cargo-llvm-cov
         run: |
           rustup component add llvm-tools
