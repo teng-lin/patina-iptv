@@ -30,13 +30,6 @@ impl Default for InspectionControl {
         }
     }
 }
-struct CancelOnDrop(CancelToken);
-impl Drop for CancelOnDrop {
-    fn drop(&mut self) {
-        self.0.cancel();
-    }
-}
-
 pub(crate) async fn guarded<T>(
     services: &Services,
     control: &InspectionControl,
@@ -96,7 +89,7 @@ where
         None => Box::pin(async { Ok(Err(InspectionError::Busy)) }),
     };
     let accepted = services.clone();
-    let cancel_on_drop = operation_cancel.clone();
+    let guard = owner.inspection.register(operation_cancel.clone());
     let task = services.spawn(async move {
         let result = guarded(&accepted, &control, deadline, async move {
             if !ready {
@@ -110,7 +103,6 @@ where
         }
         result
     });
-    let guard = CancelOnDrop(cancel_on_drop);
     async move {
         let _guard = guard;
         task.await.map_err(|_| InspectionError::OwnerClosed)?

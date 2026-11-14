@@ -151,6 +151,7 @@ pub enum Diagnosis {
     Disabled,
     UnresolvedOverride,
     Unmatched,
+    MissingMetadata,
     Ambiguous,
     Empty,
     Stale,

@@ -14,7 +14,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -71,6 +71,8 @@ pub(crate) struct Vault {
     directory: Arc<Mutex<Option<Arc<Directory>>>>,
     running: Arc<AtomicUsize>,
     queries: Arc<AtomicUsize>,
+    calls: Arc<Mutex<BTreeMap<u64, CancelToken>>>,
+    next_call: AtomicU64,
 }
 impl Vault {
     pub(crate) fn new() -> Self {
@@ -82,6 +84,8 @@ impl Vault {
             directory: Arc::new(Mutex::new(None)),
             running: Arc::new(AtomicUsize::new(0)),
             queries: Arc::new(AtomicUsize::new(0)),
+            calls: Arc::new(Mutex::new(BTreeMap::new())),
+            next_call: AtomicU64::new(0),
         }
     }
     pub(crate) fn context(&self, epoch: u64) -> String {
@@ -97,6 +101,24 @@ impl Vault {
             None
         } else {
             Some(QuerySlot(self.queries.clone()))
+        }
+    }
+    pub(super) fn register(&self, cancel: CancelToken) -> CallGuard {
+        let id = self.next_call.fetch_add(1, Ordering::SeqCst);
+        self.calls
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, cancel.clone());
+        CallGuard {
+            calls: self.calls.clone(),
+            id,
+            cancel,
+        }
+    }
+    pub(crate) fn cancel_requests(&self) {
+        let calls = std::mem::take(&mut *self.calls.lock().unwrap_or_else(|e| e.into_inner()));
+        for cancel in calls.into_values() {
+            cancel.cancel();
         }
     }
     pub(crate) fn ready(&self) -> bool {
@@ -115,6 +137,7 @@ impl Vault {
             random().ok().map(DatabaseKey::from_bytes);
     }
     pub(crate) fn clear(&self) {
+        self.cancel_requests();
         self.stages
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -126,6 +149,21 @@ impl Vault {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take();
+    }
+}
+
+pub(super) struct CallGuard {
+    calls: Arc<Mutex<BTreeMap<u64, CancelToken>>>,
+    id: u64,
+    cancel: CancelToken,
+}
+impl Drop for CallGuard {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+        self.calls
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.id);
     }
 }
 
@@ -352,6 +390,9 @@ impl ProbeLease {
         let feed = self.0.evidence.feed;
         let incarnation = self.0.evidence.incarnation.clone();
         let current = self.0.services.analyze(move |store| {
+            if store.source(source)?.is_none() || !store.source_policy(source)?.enabled {
+                return Ok(false);
+            }
             Ok(store.source_incarnation(source)? == source_incarnation
                 && match feed {
                     Some(feed) => {
@@ -553,8 +594,8 @@ fn await_worker<T: Send + 'static>(
     deadline: Instant,
     task: tokio::task::JoinHandle<InspectionResult<T>>,
     cancel: CancelToken,
+    guard: CallGuard,
 ) -> impl Future<Output = InspectionResult<T>> + use<T> {
-    let guard = super::CancelOnDrop(cancel.clone());
     let accepted = services.clone();
     let reply = services.spawn(async move {
         let result = guarded(&accepted, &control, deadline, async move {
@@ -602,6 +643,7 @@ impl Runtime {
         let mut worker_control = control.clone();
         worker_control.cancel = CancelToken::new();
         let operation_cancel = worker_control.cancel.clone();
+        let guard = self.inspection.register(operation_cancel.clone());
         let cancel = operation_cancel.clone();
         let task = services.spawn_blocking(move || {
             if running.fetch_add(1, Ordering::SeqCst) >= 2 {
@@ -688,6 +730,9 @@ impl Runtime {
                     hash.update(part);
                     parser
                         .feed(part, &mut |item| {
+                            if error.is_some() {
+                                return;
+                            }
                             if let XmltvItem::Channel(channel) = item {
                                 channels += 1;
                                 if channels > 100_000 {
@@ -705,6 +750,9 @@ impl Runtime {
             }
             let stats = parser
                 .finish(&mut |item| {
+                    if error.is_some() {
+                        return;
+                    }
                     if let XmltvItem::Channel(channel) = item {
                         channels += 1;
                         if stage.channel(&channel).is_err() {
@@ -742,6 +790,9 @@ impl Runtime {
             let current_feed = configuration.feed;
             let current_incarnation = configuration.incarnation.clone();
             let current = accepted.analyze(move |store| {
+                if store.source(source)?.is_none() || !store.source_policy(source)?.enabled {
+                    return Ok(false);
+                }
                 Ok(store.source_incarnation(source)? == current_source
                     && match current_feed {
                         Some(feed) => {
@@ -765,7 +816,7 @@ impl Runtime {
             drop(reservation);
             Ok(summary)
         });
-        await_worker(services, control, deadline, task, operation_cancel)
+        await_worker(services, control, deadline, task, operation_cancel, guard)
     }
 
     pub fn lease_probe(&self, evidence: &ProbeEvidence) -> InspectionResult<ProbeLease> {
@@ -800,6 +851,7 @@ impl Runtime {
         let mut worker_control = control.clone();
         worker_control.cancel = CancelToken::new();
         let operation_cancel = worker_control.cancel.clone();
+        let guard = self.inspection.register(operation_cancel.clone());
         let task = services.spawn_blocking(move || {
             let lease = lease?;
             lease.current_configuration()?;
@@ -859,7 +911,7 @@ impl Runtime {
                 next,
             })
         });
-        await_worker(services, control, deadline, task, operation_cancel)
+        await_worker(services, control, deadline, task, operation_cancel, guard)
     }
 
     pub fn probe_schedule(
@@ -875,6 +927,7 @@ impl Runtime {
         let mut worker_control = control.clone();
         worker_control.cancel = CancelToken::new();
         let operation_cancel = worker_control.cancel.clone();
+        let guard = self.inspection.register(operation_cancel.clone());
         let task = services.spawn_blocking(move || {
             if !window.valid() {
                 return Err(InspectionError::InvalidRequest);
@@ -1008,6 +1061,6 @@ impl Runtime {
             }
             Ok(programmes)
         });
-        await_worker(services, control, deadline, task, operation_cancel)
+        await_worker(services, control, deadline, task, operation_cancel, guard)
     }
 }
