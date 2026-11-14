@@ -235,7 +235,11 @@ impl Runtime {
         let owner = self.clone();
         let services = self.services();
         let epoch = services.epoch();
-        let held = leases(self, &request);
+        let held = if request.valid() {
+            leases(self, &request)
+        } else {
+            Err(Error::InvalidRequest)
+        };
         let id = random_id();
         let created_at = now();
         let deadline = Instant::now() + control.timeout.min(PREVIEW_DEADLINE);
