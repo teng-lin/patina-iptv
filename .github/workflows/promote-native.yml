@@ -1,0 +1,33 @@
+name: Promote tested native dependencies
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'tools/ci/native-candidates.json'
+      - 'tools/ci/native_candidates.py'
+      - 'tools/ci/promote-native-candidates.py'
+      - 'tools/mpv-runtime/runtime.json'
+      - 'tools/mpv-runtime-unix/runtime-*.json'
+      - 'tools/mpv-runtime-ios/runtime-ios.json'
+      - '.github/workflows/promote-native.yml'
+permissions:
+  contents: read
+concurrency:
+  group: promote-native-dependencies
+  cancel-in-progress: false
+jobs:
+  promote:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify provenance and promote exact dependency assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/ci/promote-native-candidates.py --publish

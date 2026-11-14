@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "platform": "ios",
+  "ffmpeg": "8.1.2",
+  "relay_guard": "patina-relay-guard-v1",
+  "url": "https://github.com/teng-lin/patina-iptv/releases/download/mpv-runtime-ios-353506dc03abf1d3c8e928f3e79ed578bb750ad9c30c120b61adc7ce096301f9/Libavformat.xcframework.zip",
+  "sha256": "f356959497e04dea4774e0d566bae9b026eb6bf0d847757a22c9d5ad1d64cd63",
+  "source_url": "https://github.com/teng-lin/patina-iptv/releases/download/mpv-runtime-ios-353506dc03abf1d3c8e928f3e79ed578bb750ad9c30c120b61adc7ce096301f9/mpv-runtime-ios-sources.tar.gz",
+  "source_sha256": "e96f8ad0b2562785122bce5f089ca569aafd210b2f29d5331123b16f7d2b94ba",
+  "tag": "mpv-runtime-ios-353506dc03abf1d3c8e928f3e79ed578bb750ad9c30c120b61adc7ce096301f9",
+  "xcode": "16.4",
+  "simulator_tested": "arm64",
+  "device_tested": false
+}

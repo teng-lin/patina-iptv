@@ -52,6 +52,19 @@ def generate(manifest_path, output, fetch_script):
             destination = output / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(data)
+    # The base inventory still verifies all stock inputs. The shipped format
+    # framework is replaced by Patina's checksum-pinned, guarded build.
+    if any(artifact['name'] == 'Libavformat' for artifact in manifest['artifacts']):
+        pin_path = Path(__file__).resolve().parents[1] / 'mpv-runtime-ios/runtime-ios.json'
+        pin = json.loads(pin_path.read_text())
+        artifact = next(item for item in manifest['artifacts'] if item['name'] == 'Libavformat')
+        artifact['modified_from'] = {'url': artifact['url'], 'sha256': artifact['sha256']}
+        artifact.update(url=pin['url'], sha256=pin['sha256'], source_url=pin['source_url'], source_sha256=pin['source_sha256'])
+        artifact['modifications'] = 'Per-stream relay capability guard; exact patches and build configuration accompany the corresponding source.'
+        (output / 'PATINA-LIBAVFORMAT-SOURCE.txt').write_text(
+            f"Guarded Libavformat {pin['ffmpeg']}\nCorresponding source, patches, licenses and build configuration:\n"
+            f"{pin['source_url']}\nSHA-256: {pin['source_sha256']}\n"
+            "Other frameworks retain the MPVKit versions in components.json.\n")
     (output / 'components.json').write_text(json.dumps(manifest, indent=2) + '\n')
 
 

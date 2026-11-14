@@ -74,5 +74,21 @@ list | while read -r name url sum; do
   mv "$tmp/$name.xcframework" "$dest"
   rm -rf "$tmp"
 done
+# Replace only libavformat; the builder uses the verified stock frameworks as
+# its baseline. The receipt makes reuse sensitive to a changed native pin.
+if [ "${PATINA_MPVKIT_BASE_ONLY:-0}" != 1 ]; then
+  guarded=$(python3 "$root/tools/ci/native_candidates.py" ios)
+  expected=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sha256"])' "$root/tools/mpv-runtime-ios/runtime-ios.json")
+  receipt="$out/.patina-libavformat-sha256"
+  if [ ! -f "$receipt" ] || [ "$(cat "$receipt")" != "$expected" ]; then
+    tmp=$(mktemp -d "$out/guarded.XXXXXX")
+    unzip -q "$guarded" -d "$tmp"
+    test -d "$tmp/Libavformat.xcframework"
+    rm -rf "$out/Libavformat.xcframework"
+    mv "$tmp/Libavformat.xcframework" "$out/Libavformat.xcframework"
+    rmdir "$tmp"
+    printf '%s\n' "$expected" > "$receipt"
+  fi
+fi
 du -sh "$out"/*.xcframework | sort -h | tail -5
 echo "$out"

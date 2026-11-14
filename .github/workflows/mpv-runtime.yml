@@ -13,6 +13,7 @@ on:
         default: true
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: mpv-runtime-dependency-${{ inputs.platform }}-${{ inputs.publish }}
   cancel-in-progress: false
@@ -223,7 +224,7 @@ jobs:
         run: |
           export LIBRARY_PATH="$PWD/target/mpv-runtime-linux/lib" LD_LIBRARY_PATH="$PWD/target/mpv-runtime-linux/lib"
           export PATH="$PWD/target/mpv-runtime-linux-tools/bin:$PATH"
-          cargo test --locked -p iptv-app --lib --features test-support mpv::
+          cargo test --locked -p iptv-player-mpv --lib
   linux-publish:
     if: inputs.platform == 'linux' && inputs.publish
     needs: [linux-build, linux-smoke]

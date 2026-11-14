@@ -503,5 +503,20 @@ class NativeDependencyWorkflow(unittest.TestCase):
                                          {expected[platform]} if publish and not refused else set())
 
 
+class NativePromotionWorkflow(unittest.TestCase):
+    def test_promotion_only_runs_after_a_master_push(self):
+        workflow = ROOT / ".github/workflows/promote-native.yml"
+        native = jobs(workflow)
+        self.assertEqual(set(native), {"promote"})
+        condition = re.search(r"^    if: (.+)$", native["promote"], re.M)[1]
+        for event in ("push", "pull_request", "workflow_dispatch", "pull_request_target"):
+            for ref in ("refs/heads/master", "refs/heads/synthetic", "refs/pull/56/merge"):
+                with self.subTest(event=event, ref=ref):
+                    context = {"github": {"event_name": event, "ref": ref}}
+                    self.assertEqual(bool(evaluate(condition, context)), event == "push" and ref == "refs/heads/master")
+        self.assertIn("python3 tools/ci/promote-native-candidates.py --publish", native["promote"])
+        self.assertIn("persist-credentials: false", native["promote"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -3,6 +3,11 @@
 # crates, and the app build. Run before committing.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# macOS strips DYLD_* when starting a protected shell. Restore the selected
+# runtime inside this shell before Cargo launches the real player tests.
+if [ "$(uname -s)" = Darwin ] && [ -n "${IPTV_RS_MPV_LIB_DIR:-}" ]; then
+  export DYLD_LIBRARY_PATH="$IPTV_RS_MPV_LIB_DIR"
+fi
 # NSH is a path dependency, so Cargo.lock cannot pin it: nsh.rev does. Fail
 # before compiling against another commit (IPTV_ALLOW_NSH_DRIFT=1 allows it).
 python3 tools/ci/pins.py check-nsh
@@ -48,6 +53,7 @@ python3 tools/ci/test-sign-android.py
 python3 tools/ci/test-sbom.py
 python3 tools/ci/test-coverage-floors.py
 python3 tools/ci/test-native-sources.py
+python3 tools/ci/test-native-candidates.py
 python3 tools/mpv-runtime-ios/test_build.py
 python3 tools/ci/test-check-parity.py
 python3 tools/ci/test-fuzz-targets.py
