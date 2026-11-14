@@ -3,17 +3,22 @@
 # crates, and the app build. Run before committing.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# macOS strips DYLD_* when starting a protected shell. Restore the selected
+# runtime inside this shell before Cargo launches the real player tests.
+if [ "$(uname -s)" = Darwin ] && [ -n "${IPTV_RS_MPV_LIB_DIR:-}" ]; then
+  export DYLD_LIBRARY_PATH="$IPTV_RS_MPV_LIB_DIR"
+fi
 # NSH is a path dependency, so Cargo.lock cannot pin it: nsh.rev does. Fail
 # before compiling against another commit (IPTV_ALLOW_NSH_DRIFT=1 allows it).
 python3 tools/ci/pins.py check-nsh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools -p test_version.py
 # Only our packages: `--all` would also format path dependencies (the NSH checkout).
-cargo fmt -p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-providers -p iptv-guide -p iptv-import -p iptv-net -p iptv-store-sqlite -p iptv-search -p iptv-player-mpv -p iptv-library -p iptv-runtime -p iptv-app --check
+cargo fmt -p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-providers -p iptv-guide -p iptv-import -p iptv-net -p iptv-store-sqlite -p iptv-sqlcipher-init -p iptv-search -p iptv-player-mpv -p iptv-library -p iptv-runtime -p iptv-app --check
 bash tools/ci/check-line-length.sh
 bash tools/ci/lint.sh
 cargo clippy --locked --workspace --all-targets --features iptv-app/test-support -- -D warnings
 cargo deny --locked check
-cargo test --locked --features iptv-runtime/test-support -p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-providers -p iptv-guide -p iptv-import -p iptv-net -p iptv-store-sqlite -p iptv-search -p iptv-player-mpv -p iptv-library -p iptv-runtime --quiet
+cargo test --locked --features iptv-runtime/test-support -p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-providers -p iptv-guide -p iptv-import -p iptv-net -p iptv-store-sqlite -p iptv-sqlcipher-init -p iptv-search -p iptv-player-mpv -p iptv-library -p iptv-runtime --quiet
 for c in iptv-core iptv-nav iptv-settings iptv-epg iptv-providers iptv-guide iptv-import iptv-search iptv-library; do
   cargo build --locked -p "$c" --target wasm32-unknown-unknown --quiet
 done
@@ -48,6 +53,8 @@ python3 tools/ci/test-sign-android.py
 python3 tools/ci/test-sbom.py
 python3 tools/ci/test-coverage-floors.py
 python3 tools/ci/test-native-sources.py
+python3 tools/ci/test-native-candidates.py
+python3 tools/mpv-runtime-ios/test_build.py
 python3 tools/ci/test-check-parity.py
 python3 tools/ci/test-fuzz-targets.py
 echo "all checks passed"

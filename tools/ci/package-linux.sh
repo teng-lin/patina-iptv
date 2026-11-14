@@ -16,10 +16,13 @@ mkdir -p "$out" target/linux
 runtime="$root/target/mpv-runtime-linux"
 fetch=(--platform linux --destination "$runtime")
 [ -z "${PATINA_MPV_RUNTIME_MANIFEST:-}" ] || fetch+=(--manifest "$PATINA_MPV_RUNTIME_MANIFEST")
+if [ -z "${PATINA_MPV_RUNTIME_ARCHIVE:-}" ] && [ -z "${PATINA_MPV_RUNTIME_MANIFEST:-}" ]; then
+  PATINA_MPV_RUNTIME_ARCHIVE=$(python3 "$root/tools/ci/native_candidates.py" linux)
+fi
 [ -z "${PATINA_MPV_RUNTIME_ARCHIVE:-}" ] || fetch+=(--archive "$PATINA_MPV_RUNTIME_ARCHIVE")
 python3 tools/mpv-runtime-unix/runtime.py fetch "${fetch[@]}"
-# Link against it too. The native packages built from the same executable
-# depend on the distribution's libmpv2 (same SONAME, same client API).
+# Link every package against the guarded runtime. Native packages retain it
+# in a private directory so distribution libmpv cannot lose the IO guard.
 export LIBRARY_PATH="$runtime/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
 (cd crates/iptv-app && "$NSH" package --target linux -o "$root/target/linux" .)
 bash "$root/tools/ci/notices.sh"
@@ -35,6 +38,11 @@ exe=${executables[0]}
 id=com.hantekllc.iptvrs
 mkdir -p "$stage/opt/patina" "$stage/usr/bin" "$stage/usr/share/applications" "$stage/usr/share/icons/hicolor/1024x1024/apps"
 cp -a "$native/." "$stage/opt/patina/"
+mkdir -p "$stage/opt/patina/lib"
+cp "$runtime/lib/libmpv.so.2" "$stage/opt/patina/lib/"
+patchelf --set-rpath "\$ORIGIN/lib" "$stage/opt/patina/$exe"
+python3 tools/mpv-runtime-unix/runtime.py notices --runtime "$runtime" \
+  --output "$stage/opt/patina/notices/mpv-runtime"
 printf '#!/bin/sh\nset -e\ncd /opt/patina\nexec "./%s" "$@"\n' "$exe" > "$stage/usr/bin/patina"
 chmod +x "$stage/usr/bin/patina"
 cp "$native/$id.png" "$stage/usr/share/icons/hicolor/1024x1024/apps/"
@@ -44,9 +52,9 @@ desktop-file-validate "$stage/usr/share/applications/$id.desktop"
 # not add its dispatch library to native package requirements.
 for format in deb rpm pacman; do
   case "$format" in
-    deb) deps=(--depends 'libc6 (>= 2.39)' --depends 'libgtk-4-1 (>= 4.14)' --depends libdbus-1-3 --depends libmpv2 --depends libgles2 --depends libgstreamer1.0-0 --depends libgstreamer-plugins-base1.0-0); extension=deb;;
-    rpm) deps=(--depends 'glibc >= 2.39' --depends 'gtk4 >= 4.14' --depends dbus-libs --depends mpv-libs --depends libglvnd-gles --depends gstreamer1 --depends gstreamer1-plugins-base); extension=rpm;;
-    pacman) deps=(--depends 'glibc>=2.39' --depends 'gtk4>=4.14' --depends dbus --depends mpv --depends libglvnd --depends gstreamer --depends gst-plugins-base-libs --pacman-compression zstd); extension=pkg.tar.zst;;
+    deb) deps=(--depends 'libc6 (>= 2.39)' --depends 'libgtk-4-1 (>= 4.14)' --depends libdbus-1-3 --depends libfontconfig1 --depends libva-drm2 --depends libssl3t64 --depends libva2 --depends libasound2t64 --depends libpipewire-0.3-0t64 --depends libpulse0 --depends libstdc++6 --depends libgles2 --depends libgstreamer1.0-0 --depends libgstreamer-plugins-base1.0-0); extension=deb;;
+    rpm) deps=(--depends 'glibc >= 2.39' --depends 'gtk4 >= 4.14' --depends dbus-libs --depends 'libfontconfig.so.1()(64bit)' --depends 'libva-drm.so.2()(64bit)' --depends 'libssl.so.3()(64bit)' --depends 'libva.so.2()(64bit)' --depends 'libasound.so.2()(64bit)' --depends 'libpipewire-0.3.so.0()(64bit)' --depends 'libpulse.so.0()(64bit)' --depends 'libstdc++.so.6()(64bit)' --depends libglvnd-gles --depends gstreamer1 --depends gstreamer1-plugins-base); extension=rpm;;
+    pacman) deps=(--depends 'glibc>=2.39' --depends 'gtk4>=4.14' --depends dbus --depends fontconfig --depends libva --depends openssl --depends alsa-lib --depends libpipewire --depends libpulse --depends libstdc++ --depends libglvnd --depends gstreamer --depends gst-plugins-base-libs --pacman-compression zstd); extension=pkg.tar.zst;;
   esac
   fpm --force -s dir -t "$format" -n patina -v "$VERSION" --license "$license" \
     --url https://github.com/teng-lin/patina-iptv \

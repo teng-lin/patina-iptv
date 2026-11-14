@@ -115,6 +115,9 @@ pub(super) fn cell(
     // A memo each: the colours below re-run when one changes, not on every
     // change of what they are made from.
     let look = computed(move || match program() {
+        // An unused slot never follows focus. Restyling invisible cells on
+        // every row move wastes the same native work as a visible programme.
+        None => Look::Rest,
         Some(p) if focus.start.get() == Some(p.start) && ui.keys_shown() => Look::Focused,
         _ if focus.lit.get() => Look::Lit,
         _ => Look::Rest,

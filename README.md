@@ -68,7 +68,8 @@ Release builds are published on
 | Windows x64 (experimental) | `-setup.exe` installer (preview: unsigned) |
 | iPad | Not released yet; [build from source](#ipad) |
 
-The native Linux packages need the system's GTK 4, libmpv and GStreamer.
+The native Linux packages need the system's GTK 4 and GStreamer; they carry
+Patina's guarded libmpv in a private directory.
 The AppImage bundles them: GTK and GStreamer from Ubuntu 24.04, and Patina's
 own libmpv, built with an LGPL-only FFmpeg from pinned sources. The macOS
 disk image and the Windows installer bundle the same build of libmpv.
@@ -125,12 +126,29 @@ packages are signed. Verify the download as above first.
 
 - **Linux:** GTK 4 and libmpv 2 (`mpv` on Arch, `libmpv-dev` on
   Debian/Ubuntu).
-- **macOS:** Xcode command line tools and `brew install mpv` for development
-  builds. Packages use the pinned libmpv runtime instead
-  (`tools/mpv-runtime-unix`).
+- **macOS:** Xcode command line tools and the pinned libmpv runtime below.
 - **Android:** JDK 21, Android SDK (platform 35, build-tools 35.0.1), NDK 30.
 - **iPad:** Xcode. `tools/fetch-mpvkit.sh` downloads the libmpv build.
 - `python3` and `ffmpeg` for the synthetic test streams.
+
+Linux and macOS development builds also require Patina's native relay guard.
+After installing the platform prerequisites, fetch the pinned runtime and set
+its library paths in the shell used for Cargo (use `platform=macos` on macOS):
+
+```sh
+platform=linux
+archive=$(python3 tools/ci/native_candidates.py "$platform")
+python3 tools/mpv-runtime-unix/runtime.py fetch --platform "$platform" --archive "$archive" --destination "target/mpv-runtime-$platform"
+export LIBRARY_PATH="$PWD/target/mpv-runtime-$platform/lib"
+export LD_LIBRARY_PATH="$LIBRARY_PATH"
+export IPTV_RS_MPV_LIB_DIR="$LIBRARY_PATH"
+export DYLD_LIBRARY_PATH="$LIBRARY_PATH"
+```
+
+Published assets are verified by SHA-256. During an unmerged runtime update,
+`gh` with read access to the repository's Actions artifacts fetches the exact
+checksum-pinned candidate instead. HTTP playback fails closed when the native
+guard is absent. Windows and iPad build scripts fetch the guarded runtime.
 
 ### Windows (x64, experimental)
 
@@ -272,11 +290,13 @@ mocks: `tools/mock-xtream.py` (Xtream API), `tools/mock-live-cuts.py`
 | `crates/iptv-runtime` | Headless application runtime, lanes, background tasks and scheduler |
 | `crates/iptv-net` | HTTP adapter (reqwest + rustls) |
 | `crates/iptv-store-sqlite` | Encrypted SQLite store |
+| `crates/iptv-sqlcipher-init` | Native SQLCipher initialization barrier |
 | `crates/iptv-app` | NSH app: screens, theme, video layer (libmpv on desktop and iPad) |
 | `hosts/android` | Kotlin host with the Media3 player |
 | `tools/` | Mock servers, fixtures, packaging and CI scripts |
 
-All crates except `iptv-app`, `iptv-net`, `iptv-store-sqlite`, `iptv-player-mpv` and `iptv-runtime` are
+All crates except `iptv-app`, `iptv-net`, `iptv-store-sqlite`, `iptv-sqlcipher-init`,
+`iptv-player-mpv` and `iptv-runtime` are
 sans-IO and build for `wasm32-unknown-unknown`.
 
 Run every check before committing:

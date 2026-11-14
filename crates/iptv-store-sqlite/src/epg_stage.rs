@@ -144,6 +144,7 @@ impl EpgStage {
         let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
             | OpenFlags::SQLITE_OPEN_CREATE
             | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        iptv_sqlcipher_init::initialize()?;
         let conn = Connection::open_with_flags(&path, flags)?;
         Self::create_with_connection(path, conn)
     }

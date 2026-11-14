@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "url": "https://github.com/teng-lin/patina-iptv/releases/download/mpv-runtime-0f752fa7ea77332db23607ae81a5601700ede15067d78c2a6fe997d54e56bbcc/mpv-runtime-windows-x86_64.zip",
-  "sha256": "98b5e520f08f27c15fdf769fccd85bb0754002dca0507f037bd72fa7dc693288",
-  "dll_sha256": "a5b8409c159125b093fdd6a088530198e51d9e06640fc2d85654f8ca3b55db87",
-  "source_url": "https://github.com/teng-lin/patina-iptv/releases/download/mpv-runtime-0f752fa7ea77332db23607ae81a5601700ede15067d78c2a6fe997d54e56bbcc/mpv-runtime-sources.tar.gz",
-  "source_sha256": "8dd4294609800b87af80930ba0b89b2fe9e433274d1d80e4463180e9ea4e1371",
-  "tag": "mpv-runtime-0f752fa7ea77332db23607ae81a5601700ede15067d78c2a6fe997d54e56bbcc"
+  "url": "https://github.com/teng-lin/patina-iptv/releases/download/mpv-runtime-2fc49540977a2b099b68167c12c90aad2c8ca79b85bb5d8ac73806ca06a2af60/mpv-runtime-windows-x86_64.zip",
+  "sha256": "3be6365250af8ba4a4abb918c50729d47c78e5eba86d62b0f6507e2dd9b45f2e",
+  "dll_sha256": "a768dec6a3829e1b31559175db7b30bffd9a2b3ae100805d4dae07fcf3be5d99",
+  "source_url": "https://github.com/teng-lin/patina-iptv/releases/download/mpv-runtime-2fc49540977a2b099b68167c12c90aad2c8ca79b85bb5d8ac73806ca06a2af60/mpv-runtime-sources.tar.gz",
+  "source_sha256": "dae5dbcece517d2b5ca4f75766f8a6d8eb7eae3ab0bc9251ee66d94c2e522f4e",
+  "tag": "mpv-runtime-2fc49540977a2b099b68167c12c90aad2c8ca79b85bb5d8ac73806ca06a2af60"
 }

@@ -8,6 +8,10 @@ use zeroize::Zeroizing;
 
 use crate::{OpenOptions as StoreOptions, Result, Store, StoreError};
 
+#[cfg(test)]
+#[path = "../tests/initialization_support/mod.rs"]
+mod initialization_support;
+
 /// A random database key. Copies erase their bytes on drop; Debug never reveals it.
 #[derive(Clone)]
 pub struct DatabaseKey(Zeroizing<[u8; 32]>);
@@ -26,6 +30,7 @@ impl DatabaseKey {
         value
     }
     pub(super) fn apply(&self, conn: &Connection) -> Result<()> {
+        iptv_sqlcipher_init::initialize()?;
         let version: String = conn
             .pragma_query_value(None, "cipher_version", |r| r.get(0))
             .map_err(|_| StoreError::Unavailable("SQLCipher is not available"))?;
@@ -91,6 +96,7 @@ impl Store {
         }
         // Create with private permissions before SQLite opens a new file.
         drop(private_file(path, false)?);
+        iptv_sqlcipher_init::initialize()?;
         let conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -115,6 +121,7 @@ impl Store {
     /// Plaintext is possible only for an explicitly plaintext/test Store.
     pub fn open_staging_connection(&self, path: &Path) -> Result<Connection> {
         drop(private_file(path, false)?);
+        iptv_sqlcipher_init::initialize()?;
         let conn = Connection::open(path)?;
         if let Some(key) = &self.key {
             key.apply(&conn)?;
@@ -170,6 +177,7 @@ impl Store {
         }
         drop(private_file(&destination, true)?);
         let result = (|| {
+            iptv_sqlcipher_init::initialize()?;
             let original = Connection::open_with_flags(
                 path,
                 OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -203,6 +211,7 @@ impl Store {
             original.execute_batch("COMMIT; DETACH DATABASE encrypted;")?;
             // Run every pending schema migration on the encrypted copy before
             // replacing the legacy database. An unsupported schema keeps the old file.
+            iptv_sqlcipher_init::initialize()?;
             let conn = Connection::open(&destination)?;
             key.apply(&conn)?;
             let checked = Self::init(conn, &StoreOptions::default())?;
@@ -261,6 +270,67 @@ mod tests {
                 .any(|part| part == b"synthetic-secret")
         );
     }
+    /// SQLite's first initialization must finish the cipher provider before
+    /// another connection can accept a key, including callers using rusqlite
+    /// directly (a legacy database or a scratch connection).
+    #[test]
+    fn concurrent_first_connections_wait_for_cipher_initialization() {
+        const CHILD: &str = "IPTV_SQLCIPHER_CONCURRENT_OPEN_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            // Other encryption tests may already have initialized the provider.
+            // Each child starts with a genuinely cold SQLite/SQLCipher process.
+            for _ in 0..4 {
+                let output = initialization_support::child(
+                    "encryption::tests::concurrent_first_connections_wait_for_cipher_initialization",
+                    CHILD,
+                );
+                assert!(
+                    output.status.success(),
+                    "cold concurrent cipher initialization failed:\n{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            return;
+        }
+
+        const CONNECTIONS: usize = 16;
+        let directory = tempfile::tempdir().unwrap();
+        let begin = std::sync::Barrier::new(CONNECTIONS);
+        std::thread::scope(|threads| {
+            for index in 0..CONNECTIONS {
+                let begin = &begin;
+                let path = directory.path().join(format!("generated-{index}.sqlite"));
+                threads.spawn(move || {
+                    let key = DatabaseKey::from_bytes([0x60 + index as u8; 32]);
+                    begin.wait();
+                    if index % 2 == 0 {
+                        let mut store = Store::open_encrypted(&path, &key).unwrap();
+                        store.set_combined_last_channel("synthetic-secret").unwrap();
+                        assert_eq!(
+                            store.combined_last_channel().unwrap().as_deref(),
+                            Some("synthetic-secret")
+                        );
+                        no_plaintext(&path);
+                        no_plaintext(&sibling(&path, "-wal"));
+                    } else {
+                        let connection = Connection::open_in_memory().unwrap();
+                        key.apply(&connection).unwrap();
+                        connection
+                            .execute_batch(
+                                "CREATE TABLE generated(value); INSERT INTO generated VALUES(1);",
+                            )
+                            .unwrap();
+                        let value: i64 = connection
+                            .query_row("SELECT value FROM generated", [], |row| row.get(0))
+                            .unwrap();
+                        assert_eq!(value, 1);
+                    }
+                });
+            }
+        });
+    }
+
     #[test]
     fn encrypted_database_and_wal_reject_plaintext_and_wrong_key() {
         let dir = tempfile::tempdir().unwrap();

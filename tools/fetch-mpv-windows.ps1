@@ -8,16 +8,9 @@ $pin = Get-Content -Raw (Join-Path $PSScriptRoot 'mpv-runtime/runtime.json') | C
 if ($pin.schema -ne 1 -or $pin.sha256 -notmatch '^[a-f0-9]{64}$' -or $pin.dll_sha256 -notmatch '^[a-f0-9]{64}$') {
     throw 'Invalid pinned libmpv runtime manifest'
 }
-$archive = Join-Path $destination "$($pin.sha256).zip"
-$url = $pin.url
-$sha256 = $pin.sha256
-New-Item -ItemType Directory -Force $destination | Out-Null
-if (!(Test-Path $archive) -or (Get-FileHash $archive -Algorithm SHA256).Hash -ne $sha256) {
-    Invoke-WebRequest $url -OutFile $archive
-}
-if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $sha256) {
-    throw 'libmpv archive checksum mismatch'
-}
+$archive = python (Join-Path $PSScriptRoot 'ci/native_candidates.py') windows
+if ($LASTEXITCODE -ne 0) { throw 'Could not fetch the verified native runtime.' }
+$archive = $archive.Trim()
 Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
 if ((Get-FileHash (Join-Path $destination 'libmpv-2.dll') -Algorithm SHA256).Hash -ne $pin.dll_sha256) {
     throw 'libmpv DLL checksum mismatch'

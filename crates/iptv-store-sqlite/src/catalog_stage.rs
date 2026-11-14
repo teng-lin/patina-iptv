@@ -66,6 +66,7 @@ impl CatalogStage {
         dir: impl AsRef<Path>,
         open: impl FnOnce(&Path) -> Result<Connection>,
     ) -> Result<Self> {
+        iptv_sqlcipher_init::initialize()?;
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let path = loop {
             let path = dir.as_ref().join(format!(

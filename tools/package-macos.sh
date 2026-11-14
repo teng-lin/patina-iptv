@@ -17,6 +17,9 @@ out=$(mkdir -p "${1:-$root/target/package}" && cd "${1:-$root/target/package}" &
 runtime="$root/target/mpv-runtime-macos"
 fetch=(--platform macos --destination "$runtime")
 [ -z "${PATINA_MPV_RUNTIME_MANIFEST:-}" ] || fetch+=(--manifest "$PATINA_MPV_RUNTIME_MANIFEST")
+if [ -z "${PATINA_MPV_RUNTIME_ARCHIVE:-}" ] && [ -z "${PATINA_MPV_RUNTIME_MANIFEST:-}" ]; then
+  PATINA_MPV_RUNTIME_ARCHIVE=$(python3 "$root/tools/ci/native_candidates.py" macos)
+fi
 [ -z "${PATINA_MPV_RUNTIME_ARCHIVE:-}" ] || fetch+=(--archive "$PATINA_MPV_RUNTIME_ARCHIVE")
 python3 "$root/tools/mpv-runtime-unix/runtime.py" fetch "${fetch[@]}"
 # The app's build script asks pkg-config where libmpv is: the runtime first,

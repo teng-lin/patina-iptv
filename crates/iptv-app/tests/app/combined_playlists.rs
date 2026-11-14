@@ -583,6 +583,154 @@ fn guide_browses_playlist_sections_by_touch_and_remote_and_remembers_expansion()
     );
 }
 
+/// A fold changes the next remote row before its preference can be saved.
+/// Keeping a real writer transaction open makes the old asynchronous window
+/// deterministic: Alpha's hidden child must never receive the following Down.
+#[test]
+fn playlist_section_navigation_does_not_wait_for_the_expansion_writer() {
+    let Some(home) = isolated!() else { return };
+    let dir = home.data_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    let alpha = seed(&mut store, home.path(), "Alpha");
+    seed(&mut store, home.path(), "Beta");
+    drop(store);
+    let mut app = Headless::start(EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    step(app.wait_for_within("text:/^Only Beta · Beta/", Duration::from_secs(20)));
+    step(app.press("text:☰  All playlists"));
+    step(app.wait_for("id:guide-groups >> text:▾  Alpha"));
+    step(app.wait_for("id:guide-groups >> text:▾  Beta"));
+
+    let writer = rusqlite::Connection::open(&path).unwrap();
+    writer
+        .pragma_update(None, "key", format!("x'{}'", "54".repeat(32)))
+        .unwrap();
+    writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+    step(app.press("id:guide-groups >> text:▾  Alpha"));
+    // These keys immediately follow the tap, just as on a fast remote.
+    step(app.press_key("down"));
+    step(app.press_key("right"));
+    step(app.wait_for("text:☰  Beta"));
+    step(app.wait_for("text:/^Only Beta · Beta/"));
+    assert_eq!(app.screen().count("id:guide-channel-name").unwrap(), 2);
+    // More folds queue before any save can finish; each uses the immediately
+    // preceding projection, and the final fold is the one persisted.
+    step(app.press("text:☰  Beta"));
+    step(app.wait_for("id:guide-groups >> text:▸  Alpha"));
+    step(app.press("id:guide-groups >> text:▸  Alpha"));
+    step(app.press("id:guide-groups >> text:▾  Alpha"));
+    step(app.press_key("down"));
+    step(app.press_key("right"));
+    step(app.wait_for("text:☰  Beta"));
+    let saved: i64 = writer
+        .query_row(
+            "SELECT count(*) FROM store_meta WHERE key='collapsed_playlists'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        saved, 0,
+        "navigation completed while the preference was unsaved"
+    );
+    writer.execute_batch("ROLLBACK").unwrap();
+    drop(writer);
+    step(crate::isolated::wait_outside(
+        &mut app,
+        "the expansion is saved after the writer is released",
+        Duration::from_secs(10),
+        || {
+            crate::isolated::open_database(&path)
+                .unwrap()
+                .collapsed_playlists()
+                .unwrap()
+                == [alpha.0]
+        },
+    ));
+    // The later save/rebuild must preserve Beta by identity, too.
+    step(app.wait_for("text:☰  Beta"));
+    step(app.wait_for("text:/^Only Beta · Beta/"));
+}
+
+#[test]
+fn a_failed_expansion_save_preserves_a_newer_choice_and_recovers_the_last_failure() {
+    let Some(home) = isolated!() else { return };
+    let dir = home.data_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    seed(&mut store, home.path(), "Alpha");
+    seed(&mut store, home.path(), "Beta");
+    drop(store);
+    let mut app = Headless::start(EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    step(app.wait_for_within("text:/^Only Beta · Beta/", Duration::from_secs(20)));
+    step(app.press("text:☰  All playlists"));
+    step(app.wait_for("id:guide-groups >> text:▾  Alpha"));
+    let writer = rusqlite::Connection::open(&path).unwrap();
+    writer
+        .pragma_update(None, "key", format!("x'{}'", "54".repeat(32)))
+        .unwrap();
+    // Reject folds, but allow the newer expansion that follows one to save.
+    writer
+        .execute_batch(
+            "CREATE TRIGGER generated_fold_failure BEFORE INSERT ON store_meta \
+             WHEN NEW.key='collapsed_playlists' AND NEW.value<>'[]' \
+             BEGIN SELECT RAISE(FAIL,'synthetic expansion failure'); END; \
+             BEGIN IMMEDIATE;",
+        )
+        .unwrap();
+    step(app.press("id:guide-groups >> text:▾  Alpha"));
+    step(app.press("id:guide-groups >> text:▸  Alpha"));
+    step(app.wait_for("id:guide-groups >> text:▾  Alpha"));
+    writer.execute_batch("ROLLBACK").unwrap();
+    step(crate::isolated::wait_outside(
+        &mut app,
+        "the newer expansion is saved despite the older fold failure",
+        Duration::from_secs(10),
+        || {
+            writer
+                .query_row(
+                    "SELECT value FROM store_meta WHERE key='collapsed_playlists'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .is_ok_and(|saved| saved == "[]")
+        },
+    ));
+    step(app.wait_for("text:The change could not be saved. Reopen the list and try again."));
+    step(app.wait_for("id:guide-groups >> text:▾  Alpha"));
+    step(app.wait_for("id:guide-groups >> text:▾  Beta"));
+    assert_eq!(
+        app.screen()
+            .count("id:guide-groups >> text:    News")
+            .unwrap(),
+        2
+    );
+
+    // A last failed choice rolls back to persisted state, with no newer
+    // choice for its recovery to overwrite.
+    writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+    step(app.press("id:guide-groups >> text:▾  Alpha"));
+    step(app.wait_for("id:guide-groups >> text:▸  Alpha"));
+    writer.execute_batch("ROLLBACK").unwrap();
+    step(app.wait_for("id:guide-groups >> text:▾  Alpha"));
+    assert_eq!(
+        app.screen()
+            .count("id:guide-groups >> text:    News")
+            .unwrap(),
+        2
+    );
+}
+
 #[test]
 fn adding_second_playlist_opens_combined_browser_without_management_switch() {
     use nsh_core::{ImageData, picker::PickedFile};

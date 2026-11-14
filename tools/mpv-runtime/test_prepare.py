@@ -77,6 +77,18 @@ class SourcePreparationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "License changed"):
             prepare.bundle(lock, work, self.root / "bundle.tar.gz")
 
+    def test_changed_patch_receipt_cannot_be_bundled(self):
+        lock, work, _ = self.fixture()
+        prepare.prepare(lock, work)
+        path = work / "components.json"
+        inventory = json.loads(path.read_text())
+        inventory["components"][0]["patches"] = [
+            {"path": "patches/synthetic.patch", "sha256": "0" * 64}
+        ]
+        path.write_text(json.dumps(inventory))
+        with self.assertRaisesRegex(ValueError, "patches changed after source preparation"):
+            prepare.bundle(lock, work, self.root / "bundle.tar.gz")
+
     def test_corrupt_download_is_not_cached(self):
         item = {"name": "synthetic", "url": "https://example.invalid/source", "sha256": "0" * 64}
         response = io.BytesIO(b"wrong bytes")

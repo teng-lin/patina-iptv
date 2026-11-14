@@ -3,23 +3,28 @@ on:
   workflow_dispatch:
     inputs:
       platform:
-        description: Runtime to build, test and publish
+        description: Runtime to build and test
         type: choice
         default: windows
-        options: [windows, linux, macos]
+        options: [windows, linux, macos, ios]
+      publish:
+        description: Publish the tested runtime (master only)
+        type: boolean
+        default: true
 permissions:
   contents: read
+  actions: read
 concurrency:
-  group: mpv-runtime-dependency-${{ inputs.platform }}
+  group: mpv-runtime-dependency-${{ inputs.platform }}-${{ inputs.publish }}
   cancel-in-progress: false
 jobs:
   guard:
     runs-on: ubuntu-24.04
     steps:
-      - name: Refuse runtime dispatch outside master
-        if: github.ref != 'refs/heads/master'
+      - name: Refuse runtime publication outside master
+        if: inputs.publish && github.ref != 'refs/heads/master'
         run: |
-          echo "Runtime-publish workflows can be dispatched on master only" >&2
+          echo "Runtime publication requires master; use publish=false for branch candidates" >&2
           exit 1
 
   # Windows: tools/mpv-runtime. Linux and macOS: tools/mpv-runtime-unix, from
@@ -99,8 +104,10 @@ jobs:
           if ((Get-FileHash "$dist/test-tools/ffmpeg.exe" -Algorithm SHA256).Hash.ToLowerInvariant() -ne $components.build.ffmpeg_sha256) { throw 'Synthetic media generator hash mismatch' }
           python tools/mpv-runtime/smoke.py --dll "$dist/runtime/libmpv-2.dll" --ffmpeg "$dist/test-tools/ffmpeg.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Synthetic TS/HLS runtime smoke failed' }
+          python tools/mpv-runtime/relay_guard.py --library "$dist/runtime/libmpv-2.dll" --ffmpeg "$dist/test-tools/ffmpeg.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Native relay guard failed' }
   publish:
-    if: inputs.platform == 'windows'
+    if: inputs.platform == 'windows' && inputs.publish
     needs: [build, smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -209,14 +216,17 @@ jobs:
           tar -xzf "$dist/test-tools-linux-x86_64.tar.gz" -C target/mpv-runtime-linux-tools
           python3 tools/mpv-runtime-unix/smoke.py --library target/mpv-runtime-linux/lib/libmpv.so.2 \
             --ffmpeg target/mpv-runtime-linux-tools/bin/ffmpeg
+          python3 tools/mpv-runtime/relay_guard.py --library target/mpv-runtime-linux/lib/libmpv.so.2 \
+            --ffmpeg target/mpv-runtime-linux-tools/bin/ffmpeg
       - name: App player tests against the candidate
         env:
           IPTV_REQUIRE_PLAYER_TESTS: '1'
         run: |
           export LIBRARY_PATH="$PWD/target/mpv-runtime-linux/lib" LD_LIBRARY_PATH="$PWD/target/mpv-runtime-linux/lib"
           export PATH="$PWD/target/mpv-runtime-linux-tools/bin:$PATH"
-          cargo test --locked -p iptv-app --lib --features test-support mpv::
+          cargo test --locked -p iptv-player-mpv --lib
   linux-publish:
+    if: inputs.platform == 'linux' && inputs.publish
     needs: [linux-build, linux-smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -318,7 +328,10 @@ jobs:
           tar -xzf "$dist/test-tools-macos-arm64.tar.gz" -C target/mpv-runtime-macos-tools
           /usr/bin/python3 tools/mpv-runtime-unix/smoke.py --library target/mpv-runtime-macos/lib/libmpv.2.dylib \
             --ffmpeg target/mpv-runtime-macos-tools/bin/ffmpeg
+          /usr/bin/python3 tools/mpv-runtime/relay_guard.py --library target/mpv-runtime-macos/lib/libmpv.2.dylib \
+            --ffmpeg target/mpv-runtime-macos-tools/bin/ffmpeg
   macos-publish:
+    if: inputs.platform == 'macos' && inputs.publish
     needs: [macos-build, macos-smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -345,4 +358,73 @@ jobs:
           printf 'Pinned macOS arm64 libmpv dependency (LGPL-only FFmpeg). Sources, licenses and build configuration accompany the runtime. Synthetic MPEG-TS/HLS playback passed on macOS 15.\n' > release-notes.txt
           gh release create "$tag" --draft --target "$COMMIT" --title "$tag" --notes-file release-notes.txt --latest=false \
             mpv-runtime-macos-arm64.tar.gz mpv-runtime-macos-sources.tar.gz runtime-macos.json SHA256SUMS
+          gh release edit "$tag" --draft=false --latest=false
+
+  ios-build:
+    needs: [guard]
+    if: inputs.platform == 'ios'
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Select the pinned Xcode and prepare synthetic media tools
+        run: |
+          developer="/Applications/Xcode_$(tr -d '[:space:]' < tools/mpv-runtime-unix/macos/xcode-version).app/Contents/Developer"
+          test -d "$developer"
+          echo "DEVELOPER_DIR=$developer" >> "$GITHUB_ENV"
+          brew install ffmpeg
+      - name: Build device and simulator archives and exercise the native iOS player
+        run: |
+          python3 tools/mpv-runtime-ios/build.py --work target/mpv-runtime-ios-work \
+            --output target/mpv-runtime-ios-dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mpv-runtime-ios-candidate
+          path: |
+            target/mpv-runtime-ios-dist/*.zip
+            target/mpv-runtime-ios-dist/*.json
+            target/mpv-runtime-ios-dist/*sources.tar.gz
+            target/mpv-runtime-ios-dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain iOS build diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mpv-runtime-ios-build-logs
+          path: |
+            target/mpv-runtime-ios-work/build/*/ffbuild/config.log
+            target/mpv-runtime-ios-work/build/*/config.h
+            target/mpv-runtime-ios-work/build/*/config_components.h
+          retention-days: 14
+  ios-publish:
+    if: inputs.platform == 'ios' && inputs.publish
+    needs: [ios-build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mpv-runtime-ios-candidate
+          path: dist
+      - name: Publish the tested iOS dependency without overwriting
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          cd dist
+          sha256sum --check SHA256SUMS
+          tag=$(python3 -c 'import json; print(json.load(open("runtime-ios.json"))["tag"])')
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo 'Dependency release already exists; refusing to overwrite it.' >&2
+            exit 1
+          fi
+          printf 'Guarded iOS Libavformat dependency. Sources, patches and build configuration accompany it. Native guard playback tests passed on the arm64 iOS simulator.\n' > release-notes.txt
+          gh release create "$tag" --draft --target "$COMMIT" --title "$tag" --notes-file release-notes.txt --latest=false \
+            Libavformat.xcframework.zip mpv-runtime-ios-sources.tar.gz runtime-ios.json SHA256SUMS
           gh release edit "$tag" --draft=false --latest=false
