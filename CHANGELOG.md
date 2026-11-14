@@ -40,9 +40,9 @@ is below 1.0, a minor release may change behaviour.
 - The NSH fork commit is recorded in `nsh.rev`. Clone that exact commit;
   `tools/check.sh` refuses another one unless `IPTV_ALLOW_NSH_DRIFT=1` is set.
 - The minimum supported Rust version is the pinned toolchain, 1.99.1.
-- With English as the interface language (outside the United Kingdom, Ireland
-  and South Africa), Korean or Traditional Chinese, times are shown on a
-  12-hour clock unless **Settings → General → Clock** says otherwise.
+- Automatic clock format follows CLDR 49 regional conventions (including
+  Spanish in Mexico and numeric Latin America locales), with Unicode
+  hour-cycle extensions and **Settings → General → Clock** overrides.
 - The remote-key editor names the screen a binding applies in (`Guide`,
   `Player controls`) where it showed an internal name (`guide`, `controls`).
 - Package scripts work without `rustup`, using the Cargo on `PATH`.

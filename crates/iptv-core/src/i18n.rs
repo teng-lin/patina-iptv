@@ -43,6 +43,10 @@ pub const LANGUAGES: &[Language] = &[
         tag: "it",
         name: "Italiano",
     },
+    // The Portuguese catalogue uses European Portuguese vocabulary (e.g.
+    // "ecrã", "ficheiro", "definições") and CLDR pt-PT plural rules (zero
+    // other, one one, million many). Regional locales like pt-BR resolve
+    // to it as the closest match.
     Language {
         tag: "pt",
         name: "Português",
@@ -71,6 +75,8 @@ pub const LANGUAGES: &[Language] = &[
 
 /// Resolve regional/script tags, including POSIX locale names. Unsupported
 /// languages fall back to English; Chinese regions select the right script.
+/// The single supported Portuguese catalogue is European (vocabulary and
+/// pt-PT plural rules); Brazilian locales (`pt-BR`) resolve to it.
 pub fn resolve(preference: &str, system: Option<&str>) -> &'static Language {
     let tag = if preference == "system" {
         system.unwrap_or("en")
@@ -260,6 +266,10 @@ mod tests {
         assert_eq!(of("fr", 0), "0 chaîne");
         assert_eq!(of("fr", 2), "2 chaînes");
         assert_eq!(of("de", 1), "1 Sender");
+        assert_eq!(of("pt", 0), "0 canais");
+        assert_eq!(of("pt", 1), "1 canal");
+        assert_eq!(of("pt", 2), "2 canais");
+        assert_eq!(of("pt-BR", 0), "0 canais");
         assert_eq!(of("ru", 1), "1 канал");
         assert_eq!(of("ru", 2), "2 канала");
         assert_eq!(of("ru", 5), "5 каналов");
