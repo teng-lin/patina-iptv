@@ -37,28 +37,45 @@ import kotlin.math.roundToInt
  * The window takes the stream's aspect ratio (within the system's limits)
  * and the video's place on screen as the start of its animation.
  */
-class PipHost(private val activity: Activity) {
-    private val supported = activity.packageManager
-        .hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+class PipHost(
+    private val activity: Activity,
+) {
+    private val supported =
+        activity.packageManager
+            .hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
     private val tv = activity.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+
     /** The window is open. */
     private var active = false
+
     /** The player the window shows. */
     private var main: PlayerComponent? = null
     private var auto = false
+
     /** The last `enter` count seen. */
     private var asked = 0L
     private var aspect = Rational(16, 9)
     private var paused = false
+
     /** What the system was last given. */
     private var given: Given? = null
-    private data class Given(val auto: Boolean, val aspect: Rational, val paused: Boolean, val hint: Rect?)
+
+    private data class Given(
+        val auto: Boolean,
+        val aspect: Rational,
+        val paused: Boolean,
+        val hint: Rect?,
+    )
+
     /** The video moved or changed size: the window's start follows it. */
     private val moved = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> update() }
     private var listening = false
 
     /** `player`'s `pip` prop: null for every player but the main one. */
-    internal fun setProp(player: PlayerComponent, pip: PlayerPip?) {
+    internal fun setProp(
+        player: PlayerComponent,
+        pip: PlayerPip?,
+    ) {
         if (pip == null) {
             if (main === player) main = null
             return
@@ -80,14 +97,20 @@ class PipHost(private val activity: Activity) {
     }
 
     /** `player`'s `paused` prop (the window's play/pause button). */
-    fun paused(player: PlayerComponent, paused: Boolean) {
+    fun paused(
+        player: PlayerComponent,
+        paused: Boolean,
+    ) {
         if (player !== main) return
         this.paused = paused
         update()
     }
 
     /** `player`'s video has aspect `ratio` (width / height, pixels' shape included). */
-    fun videoAspect(player: PlayerComponent, ratio: Float) {
+    fun videoAspect(
+        player: PlayerComponent,
+        ratio: Float,
+    ) {
         if (player !== main || ratio <= 0f) return
         // The system's limits: between 1:2.39 and 2.39:1.
         val r = ratio.coerceIn(1f / MAX_ASPECT, MAX_ASPECT)
@@ -155,9 +178,11 @@ class PipHost(private val activity: Activity) {
     }
 
     private fun params(): PictureInPictureParams {
-        val b = PictureInPictureParams.Builder()
-            .setAspectRatio(aspect)
-            .setActions(actions())
+        val b =
+            PictureInPictureParams
+                .Builder()
+                .setAspectRatio(aspect)
+                .setActions(actions())
         hint()?.let { b.setSourceRectHint(it) }
         if (Build.VERSION.SDK_INT >= 31) {
             b.setAutoEnterEnabled(auto && systemAutoEnter())
@@ -173,14 +198,23 @@ class PipHost(private val activity: Activity) {
         return r.takeIf { main?.picture?.getGlobalVisibleRect(it) == true && !it.isEmpty }
     }
 
-    private fun actions(): List<RemoteAction> = listOf(
-        action(PipButton.PREVIOUS, R.drawable.pip_previous, "Previous channel", 1),
-        if (paused) action(PipButton.PLAY, R.drawable.pip_play, "Play", 2)
-        else action(PipButton.PAUSE, R.drawable.pip_pause, "Pause", 2),
-        action(PipButton.NEXT, R.drawable.pip_next, "Next channel", 3),
-    )
+    private fun actions(): List<RemoteAction> =
+        listOf(
+            action(PipButton.PREVIOUS, R.drawable.pip_previous, "Previous channel", 1),
+            if (paused) {
+                action(PipButton.PLAY, R.drawable.pip_play, "Play", 2)
+            } else {
+                action(PipButton.PAUSE, R.drawable.pip_pause, "Pause", 2)
+            },
+            action(PipButton.NEXT, R.drawable.pip_next, "Next channel", 3),
+        )
 
-    private fun action(button: PipButton, icon: Int, title: String, code: Int): RemoteAction {
+    private fun action(
+        button: PipButton,
+        icon: Int,
+        title: String,
+        code: Int,
+    ): RemoteAction {
         val intent = Intent(ACTION).setPackage(activity.packageName).putExtra(EXTRA, button.wire)
         val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         val pending = PendingIntent.getBroadcast(activity, code, intent, flags)
@@ -188,12 +222,16 @@ class PipHost(private val activity: Activity) {
     }
 
     /** The window's buttons, while it is open. */
-    private val receiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            val action = intent.getStringExtra(EXTRA) ?: return
-            main?.emit(PlayerEvent.PipAction(action))
+    private val receiver =
+        object : BroadcastReceiver() {
+            override fun onReceive(
+                context: Context,
+                intent: Intent,
+            ) {
+                val action = intent.getStringExtra(EXTRA) ?: return
+                main?.emit(PlayerEvent.PipAction(action))
+            }
         }
-    }
 
     private fun listen(on: Boolean) {
         if (on == listening) return
@@ -202,7 +240,9 @@ class PipHost(private val activity: Activity) {
             activity.unregisterReceiver(receiver)
         } else {
             androidx.core.content.ContextCompat.registerReceiver(
-                activity, receiver, IntentFilter(ACTION),
+                activity,
+                receiver,
+                IntentFilter(ACTION),
                 androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
             )
         }
