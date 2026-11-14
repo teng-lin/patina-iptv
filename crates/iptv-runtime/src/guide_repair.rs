@@ -1,6 +1,9 @@
 //! Application-owned immutable repair previews, atomic commit and observed status.
 mod prepare;
 mod publication;
+#[cfg(test)]
+mod tests;
+mod write;
 use crate::{
     Runtime,
     inspection::{InspectionControl, ProbeLease},
@@ -11,7 +14,7 @@ use iptv_library::inspection::{CandidateRef, ChannelRef, InspectionError, TimeWi
 use iptv_library::{Choice, SourceId};
 use iptv_store_sqlite::{RepairBatch, RepairCommit, RepairResult};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     future::Future,
     rc::Rc,
     time::{Duration, Instant},
@@ -33,6 +36,7 @@ struct StoredPlan {
 #[derive(Default)]
 pub(crate) struct State {
     plans: HashMap<String, StoredPlan>,
+    applying: HashSet<String>,
     operations: HashMap<String, Operation>,
     refreshes: HashMap<SourceId, (String, CancelToken)>,
 }
@@ -49,12 +53,40 @@ impl State {
     }
     pub(crate) fn clear(&mut self) {
         self.plans.clear();
+        self.applying.clear();
         self.operations.clear();
         for (_, (_, cancel)) in self.refreshes.drain() {
             cancel.cancel();
         }
     }
 }
+struct Applying {
+    owner: std::rc::Weak<Runtime>,
+    id: String,
+}
+impl Drop for Applying {
+    fn drop(&mut self) {
+        if let Some(owner) = self.owner.upgrade() {
+            owner.repairs.borrow_mut().applying.remove(&self.id);
+        }
+    }
+}
+fn receipt(owner: &Runtime, saved: Commit) -> Outcome {
+    let cached = owner.repairs.borrow().operations.get(&saved.id).cloned();
+    Outcome {
+        operation: saved.id.clone(),
+        commit: saved,
+        configuration_committed: true,
+        mapping_saved: true,
+        effective: cached
+            .as_ref()
+            .map_or(Effective::Pending, |op| op.effective),
+        verification_pending: !cached
+            .and_then(|op| op.verification)
+            .is_some_and(|v| v.verified_coverage),
+    }
+}
+
 fn now() -> i64 {
     crate::imports::now_unix()
 }
@@ -136,41 +168,56 @@ fn validate_leases(leases: &[ProbeLease], plan: &StoredPlan) -> Result<()> {
 }
 
 impl Runtime {
+    /// Implemented service surface, not a successful provider/credential probe.
+    /// Host/storage readiness and source failures remain typed operation results.
+    pub fn foundation_capabilities(&self) -> Vec<Capability> {
+        [
+            ("catalogue_queries", CapabilityState::Implemented),
+            ("programme_queries", CapabilityState::Implemented),
+            ("epg_inspection", CapabilityState::Implemented),
+            ("epg_probe", CapabilityState::Implemented),
+            ("epg_repair", CapabilityState::Implemented),
+            ("epg_verification", CapabilityState::Implemented),
+            ("epg_undo", CapabilityState::Implemented),
+            ("provider_catchup", CapabilityState::ProviderUnverified),
+            ("runtime_playback_control", CapabilityState::NotImplemented),
+            ("recording", CapabilityState::NotImplemented),
+            ("reminders", CapabilityState::NotImplemented),
+            ("local_timeshift", CapabilityState::NotImplemented),
+            ("vod_browsing", CapabilityState::NotImplemented),
+            ("parental_pin", CapabilityState::NotImplemented),
+            ("mcp", CapabilityState::NotImplemented),
+        ]
+        .into_iter()
+        .map(|(name, state)| Capability { name, state })
+        .collect()
+    }
+
     pub fn preview_guide_repair(
         self: &Rc<Self>,
         request: Request,
         control: InspectionControl,
     ) -> impl Future<Output = Result<Preview>> + use<> {
         let owner = self.clone();
-        let held = leases(self, &request);
         let services = self.services();
         let epoch = services.epoch();
-        let deadline = Instant::now() + control.timeout.min(PREVIEW_DEADLINE);
+        let held = leases(self, &request);
         let id = random_id();
         let created_at = now();
+        let prepared =
+            crate::inspection::query_with_deadline(self, control, PREVIEW_DEADLINE, move |store| {
+                let result = match (held, id) {
+                    (Ok(held), Ok(id)) => store.guide_repair_snapshot(|store| {
+                        Ok(prepare::prepare(
+                            store, request, &held, epoch, id, created_at,
+                        ))
+                    })?,
+                    (Err(error), _) | (_, Err(error)) => Err(error),
+                };
+                Ok(Ok(result))
+            });
         async move {
-            if !services.is_current() {
-                return Err(InspectionError::OwnerClosed.into());
-            }
-            if control.cancel.is_cancelled() {
-                return Err(Error::Cancelled);
-            }
-            let held = held?;
-            let id = id?;
-            let cancel = control.cancel.clone();
-            let result = services
-                .analyze(move |store| {
-                    store.inspection_read(cancel, deadline, move |store| {
-                        let result = store.guide_repair_snapshot(|store| {
-                            Ok(prepare::prepare(
-                                store, request, &held, epoch, id, created_at,
-                            ))
-                        })?;
-                        Ok(Ok(result))
-                    })
-                })
-                .await
-                .map_err(|_| Error::Storage)???;
+            let result = prepared.await??;
             if !services.is_current() {
                 return Err(InspectionError::OwnerClosed.into());
             }
@@ -240,7 +287,11 @@ impl Runtime {
         let owner = self.clone();
         let services = self.services();
         let plan = self.repairs.borrow().plans.get(&id).cloned();
+        let deadline = Instant::now() + control.timeout.min(PREVIEW_DEADLINE);
+        let child = CancelToken::new();
+        let guard = write::CancelOnDrop(child.clone());
         async move {
+            let _guard = guard;
             let plan = plan.ok_or(Error::PlanMissing)?;
             if plan.preview.digest != digest {
                 return Err(Error::WrongDigest);
@@ -254,31 +305,73 @@ impl Runtime {
             if control.cancel.is_cancelled() {
                 return Err(Error::Cancelled);
             }
+            if !owner.repairs.borrow_mut().applying.insert(id.clone()) {
+                return Err(Error::Busy);
+            }
+            let _applying = Applying {
+                owner: Rc::downgrade(&owner),
+                id: id.clone(),
+            };
+            let lookup = id.clone();
+            let remaining = InspectionControl {
+                cancel: control.cancel.clone(),
+                timeout: deadline.saturating_duration_since(Instant::now()),
+            };
+            if let Some(existing) = crate::inspection::query_with_deadline(
+                &owner,
+                remaining,
+                PREVIEW_DEADLINE,
+                move |store| Ok(Ok(store.guide_repair_commit(&lookup)?)),
+            )
+            .await?
+            {
+                return Ok(receipt(&owner, commit(existing)));
+            }
             let held = leases(&owner, &plan.request)?;
             let source = plan.request.source;
             let cancelled = crate::data::stored::supersede(&owner, source);
             let edit = crate::stored::guide_edit_revision(&owner, source);
             let id_for_write = id.clone();
             let digest = digest_hex(&digest);
-            let token = control.cancel.clone();
+            let token = child.clone();
+            let phase = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
+            let writer_phase = phase.clone();
             let worker_plan = plan.clone();
-            let saved = services
-                .call(move |store| {
-                    if token.is_cancelled() {
-                        return Ok(Err(Error::Cancelled));
-                    }
-                    if let Err(error) = validate_leases(&held, &worker_plan) {
-                        return Ok(Err(error));
-                    }
-                    let saved =
-                        store.apply_guide_repair(&id_for_write, &digest, &worker_plan.batch)?;
-                    Ok(committed(saved))
-                })
-                .await;
+            let saved = services.call(move |store| {
+                if token.is_cancelled() {
+                    return Ok(Err(Error::Cancelled));
+                }
+                if Instant::now() >= deadline {
+                    return Ok(Err(InspectionError::Deadline.into()));
+                }
+                if let Err(error) = validate_leases(&held, &worker_plan) {
+                    return Ok(Err(error));
+                }
+                if let Err(error) = write::begin(&writer_phase, &token, deadline) {
+                    return Ok(Err(error));
+                }
+                let saved = store.apply_guide_repair(&id_for_write, &digest, &worker_plan.batch)?;
+                let result = committed(saved);
+                writer_phase.store(
+                    if result.is_ok() { 2 } else { 3 },
+                    std::sync::atomic::Ordering::SeqCst,
+                );
+                Ok(result)
+            });
+            let saved = write::wait(
+                &services,
+                control,
+                deadline,
+                id.clone(),
+                phase,
+                child,
+                saved,
+            )
+            .await;
             cancelled.keep_check(&owner, source, owner.browser_generation(), now());
             // Once committed, cancellation/reply loss cannot turn durable effects
             // into a reported rollback. A retry uses the same journal receipt.
-            let saved = saved.map_err(|_| Error::Storage)??;
+            let saved = saved?;
             let outcome = publication::after_commit(&owner, saved, edit, cancelled.cancelled).await;
             Ok(outcome)
         }
@@ -291,33 +384,55 @@ impl Runtime {
     ) -> impl Future<Output = Result<Outcome>> + use<> {
         let owner = self.clone();
         let services = self.services();
+        let deadline = Instant::now() + control.timeout.min(PREVIEW_DEADLINE);
+        let child = CancelToken::new();
+        let guard = write::CancelOnDrop(child.clone());
         async move {
+            let _guard = guard;
             if control.cancel.is_cancelled() {
                 return Err(Error::Cancelled);
             }
             let read_id = id.clone();
-            let existing = services
-                .read(move |store| store.guide_repair_commit(&read_id))
-                .await
-                .map_err(|_| Error::Storage)?
-                .ok_or(Error::CommitMissing)?;
+            let remaining = InspectionControl {
+                cancel: control.cancel.clone(),
+                timeout: deadline.saturating_duration_since(Instant::now()),
+            };
+            let existing = crate::inspection::query_with_deadline(
+                &owner,
+                remaining,
+                PREVIEW_DEADLINE,
+                move |store| Ok(Ok(store.guide_repair_commit(&read_id)?)),
+            )
+            .await?
+            .ok_or(Error::CommitMissing)?;
             let source = existing.source;
             let cancelled = crate::data::stored::supersede(&owner, source);
             let edit = crate::stored::guide_edit_revision(&owner, source);
-            let token = control.cancel.clone();
-            let saved = services
-                .call(move |store| {
-                    if token.is_cancelled() {
-                        return Ok(Err(Error::Cancelled));
-                    }
-                    Ok(match store.undo_guide_repair(&id)? {
-                        RepairResult::Expired => Err(Error::UndoExpired),
-                        result => committed(result),
-                    })
-                })
-                .await;
+            let token = child.clone();
+            let result_id = id.clone();
+            let phase = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
+            let writer_phase = phase.clone();
+            let saved = services.call(move |store| {
+                if token.is_cancelled() {
+                    return Ok(Err(Error::Cancelled));
+                }
+                if let Err(error) = write::begin(&writer_phase, &token, deadline) {
+                    return Ok(Err(error));
+                }
+                let result = match store.undo_guide_repair(&id)? {
+                    RepairResult::Expired => Err(Error::UndoExpired),
+                    result => committed(result),
+                };
+                writer_phase.store(
+                    if result.is_ok() { 2 } else { 3 },
+                    std::sync::atomic::Ordering::SeqCst,
+                );
+                Ok(result)
+            });
+            let saved =
+                write::wait(&services, control, deadline, result_id, phase, child, saved).await;
             cancelled.keep_check(&owner, source, owner.browser_generation(), now());
-            let saved = saved.map_err(|_| Error::Storage)??;
+            let saved = saved?;
             Ok(publication::after_commit(&owner, saved, edit, cancelled.cancelled).await)
         }
     }
@@ -330,34 +445,37 @@ impl Runtime {
     ) -> impl Future<Output = Result<Verification>> + use<> {
         let owner = self.clone();
         let services = self.services();
+        let read_id = id.clone();
+        let deadline = Instant::now() + control.timeout.min(PREVIEW_DEADLINE);
+        let again = control.clone();
+        let analyzed =
+            crate::inspection::query_with_deadline(self, control, PREVIEW_DEADLINE, move |store| {
+                if !window.valid() {
+                    return Ok(Err(InspectionError::InvalidRequest));
+                }
+                Ok(Ok(store.verify_guide_repair(
+                    &read_id,
+                    window.from,
+                    window.to,
+                )?))
+            });
         async move {
-            if !window.valid() {
-                return Err(Error::InvalidRequest);
-            }
-            let read_id = id.clone();
-            let cancel = control.cancel.clone();
-            let deadline = Instant::now() + control.timeout.min(PREVIEW_DEADLINE);
-            let verified = services
-                .analyze(move |store| {
-                    store.inspection_read(cancel, deadline, move |store| {
-                        Ok(Ok(store.verify_guide_repair(
-                            &read_id,
-                            window.from,
-                            window.to,
-                        )?))
-                    })
-                })
-                .await
-                .map_err(|_| Error::Storage)??
-                .ok_or(Error::CommitMissing)?;
+            let verified = analyzed.await?.ok_or(Error::CommitMissing)?;
             if !verified.authorized {
                 return Err(InspectionError::PermissionDenied.into());
             }
             let source = verified.commit.source;
-            let current = services
-                .read(move |store| store.guide_revisions(source))
-                .await
-                .map_err(|_| Error::Storage)?;
+            let remaining = InspectionControl {
+                cancel: again.cancel,
+                timeout: deadline.saturating_duration_since(Instant::now()),
+            };
+            let current = crate::inspection::query_with_deadline(
+                &owner,
+                remaining,
+                PREVIEW_DEADLINE,
+                move |store| Ok(Ok(store.guide_revisions(source)?)),
+            )
+            .await?;
             let examined = Revisions {
                 mapping: verified.examined_mapping,
                 configuration: verified.examined_configuration,
@@ -391,6 +509,11 @@ impl Runtime {
                     OperationPhase::Verified
                 } else if !same {
                     OperationPhase::Superseded
+                } else if matches!(
+                    operation.phase,
+                    OperationPhase::Pending | OperationPhase::Refreshing
+                ) {
+                    operation.phase
                 } else {
                     OperationPhase::ReadyToVerify
                 };

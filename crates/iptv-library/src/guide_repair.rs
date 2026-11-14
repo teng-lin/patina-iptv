@@ -200,6 +200,10 @@ pub enum Error {
     PlanExpired,
     WrongDigest,
     CommitMissing,
+    /// The writer may already have committed; recover by operation ID before retrying.
+    CompletionUnknown {
+        operation: String,
+    },
     UndoExpired,
     Conflict(Vec<String>),
     Storage,

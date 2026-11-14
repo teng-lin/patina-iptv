@@ -77,40 +77,16 @@ pub(super) async fn after_commit(
 ) -> Outcome {
     let id = commit.id.clone();
     let source = commit.source;
-    let keep = stored::keep_past_days(&owner.settings());
-    let read = id.clone();
-    let published = owner
-        .services()
-        .call(move |store| rebind(store, &read, keep))
-        .await;
-    let still_current = crate::stored::guide_edit_revision(owner, source) == edit;
-    let effective = match published {
-        Ok(Some(imported)) => {
-            if crate::stored::guide_edit_revision(owner, source) == edit
-                && crate::data::repair_source_shown(owner, source)
-            {
-                crate::data::show_repair(owner, imported, owner.browser_generation(), edit).await;
-            }
-            Effective::Installed
-        }
-        Ok(None) => Effective::Pending,
-        Err(_) => Effective::Failed,
-    };
     {
         let mut state = owner.repairs.borrow_mut();
         if state.operations.len() >= MAX_OPERATIONS {
-            // Durable commits remain queryable even when transient status is evicted.
             if let Some(old) = state
                 .operations
                 .iter()
                 .find(|(_, op)| {
-                    matches!(
+                    !matches!(
                         op.phase,
-                        OperationPhase::Verified
-                            | OperationPhase::Failed
-                            | OperationPhase::Superseded
-                            | OperationPhase::Cancelled
-                            | OperationPhase::ReadyToVerify
+                        OperationPhase::Pending | OperationPhase::Refreshing
                     )
                 })
                 .map(|(id, _)| id.clone())
@@ -123,27 +99,72 @@ pub(super) async fn after_commit(
             Operation {
                 id: id.clone(),
                 commit: commit.clone(),
-                phase: if still_current {
-                    OperationPhase::ReadyToVerify
-                } else {
-                    OperationPhase::Superseded
-                },
-                effective,
+                phase: OperationPhase::Pending,
+                effective: Effective::Pending,
                 verification: None,
             },
         );
     }
-    if still_current && effective != Effective::Installed {
-        schedule(owner, &commit, cancelled);
-    }
-    Outcome {
-        commit,
+    let outcome = Outcome {
+        commit: commit.clone(),
         configuration_committed: true,
         mapping_saved: true,
-        effective,
+        effective: Effective::Pending,
         verification_pending: true,
-        operation: id,
-    }
+        operation: id.clone(),
+    };
+    let owner = owner.clone();
+    owner.clone().spawn(async move {
+        let current_operation = || {
+            owner
+                .repairs
+                .borrow()
+                .operations
+                .get(&id)
+                .is_some_and(|op| {
+                    op.commit.revisions == commit.revisions
+                        && op.commit.undone == commit.undone
+                        && op.phase != OperationPhase::Cancelled
+                })
+        };
+        if !current_operation() {
+            return;
+        }
+        let keep = stored::keep_past_days(&owner.settings());
+        let read = id.clone();
+        let published = owner
+            .services()
+            .call(move |store| rebind(store, &read, keep))
+            .await;
+        let still_current = crate::stored::guide_edit_revision(&owner, source) == edit;
+        let effective = match published {
+            Ok(Some(imported)) => {
+                if still_current && crate::data::repair_source_shown(&owner, source) {
+                    crate::data::show_repair(&owner, imported, owner.browser_generation(), edit)
+                        .await;
+                }
+                Effective::Installed
+            }
+            Ok(None) => Effective::Pending,
+            Err(_) => Effective::Failed,
+        };
+        if !current_operation() {
+            return;
+        }
+        if let Some(op) = owner.repairs.borrow_mut().operations.get_mut(&id) {
+            op.effective = effective;
+            op.phase = if still_current {
+                OperationPhase::ReadyToVerify
+            } else {
+                OperationPhase::Superseded
+            };
+        }
+        if still_current && effective != Effective::Installed {
+            schedule(&owner, &commit, cancelled);
+        }
+        owner.emit(crate::RuntimeEvent::GuideChanged);
+    });
+    outcome
 }
 
 fn schedule(owner: &Rc<Runtime>, commit: &Commit, after: Option<crate::library::ImportCompletion>) {
@@ -190,6 +211,13 @@ fn schedule(owner: &Rc<Runtime>, commit: &Commit, after: Option<crate::library::
         }) && let Some(status) = owner.repairs.borrow_mut().operations.get_mut(&id)
         {
             status.phase = OperationPhase::Failed;
+        }
+        if !cancel.is_cancelled() {
+            owner
+                .repairs
+                .borrow_mut()
+                .refreshes
+                .insert(source, (id, cancel));
         }
     });
 }

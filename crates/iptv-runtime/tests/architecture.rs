@@ -38,6 +38,8 @@ const STORE_ADAPTER_USERS: &[&str] = &[
     "guide_repair.rs",
     "guide_repair/prepare.rs",
     "guide_repair/publication.rs",
+    "guide_repair/tests.rs",
+    "guide_repair/write.rs",
     "backup.rs",
     "backup/error.rs",
     "backup/tests.rs",

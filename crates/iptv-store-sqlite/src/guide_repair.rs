@@ -476,8 +476,11 @@ impl Store {
             let present: bool = candidate.staged
                 || tx.query_row(
                     "SELECT EXISTS(
-                SELECT 1 FROM epg_feed_channels WHERE source_id=?1 AND feed_id=?2
-                AND epg_channel=?3)",
+                SELECT 1 FROM epg_feed_channels c
+                JOIN epg_feeds f ON f.source_id=c.source_id AND f.feed_id=c.feed_id
+                JOIN guide_sources g ON g.source_id=f.source_id AND g.feed_id=f.feed_id
+                WHERE c.source_id=?1 AND c.feed_id=?2 AND c.epg_channel=?3
+                AND g.enabled=1 AND g.url=f.url AND g.shift_minutes=f.shift_minutes)",
                     params![batch.source.0, candidate.feed.0, candidate.epg_channel],
                     |r| r.get(0),
                 )?;
