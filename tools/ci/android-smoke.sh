@@ -203,17 +203,15 @@ step "full screen"
 mark
 keys KEYCODE_DPAD_CENTER
 pause 3
-# The control strip: Search, Channels, Recordings, Multiview.
-keys KEYCODE_MENU KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT
-expect 'key=menu .*mode=Fullscreen' 10
-shot 05-fullscreen-controls
+shot 05-fullscreen
 
 step "multiview with a second player"
-# Capturing the controls can exceed their auto-hide timeout on a hosted
-# emulator. Long OK opens them without toggling; clamp the prior focus (0–3)
-# to the first control, then select Multiview in one ADB round trip.
-$adb shell 'input keyevent --longpress KEYCODE_DPAD_CENTER
-  input keyevent KEYCODE_DPAD_LEFT KEYCODE_DPAD_LEFT KEYCODE_DPAD_LEFT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_CENTER'
+# The control strip: Search, Channels, Recordings, Multiview. Complete the
+# selection in one adb call: a screenshot on a loaded emulator can take
+# longer than the strip's auto-hide timer.
+keys KEYCODE_MENU KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_CENTER
+expect 'key=menu .*mode=Fullscreen' 10
+
 expect 'iptv multiview: open' 10
 pause 2
 keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER          # another channel for tile 2
