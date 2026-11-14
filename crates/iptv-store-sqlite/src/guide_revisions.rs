@@ -189,6 +189,38 @@ mod tests {
     }
 
     #[test]
+    fn source_transport_edits_retire_old_evidence_but_rename_and_no_op_preserve_it() {
+        let mut store = Store::open_in_memory().unwrap();
+        let id = source(&mut store);
+        store.set_guide_sources(id, &[feed()]).unwrap();
+        let identity = store.source_incarnation(id).unwrap();
+        let original_feed = store.feed_incarnation(id, FeedId(1)).unwrap();
+        let original_revisions = store.guide_revisions(id).unwrap();
+        let mut same = store.source(id).unwrap().unwrap().source;
+        store.update_source(id, &same).unwrap();
+        store.rename_source(id, "Synthetic renamed source").unwrap();
+        assert_eq!(store.source_incarnation(id).unwrap(), identity);
+        assert_eq!(
+            store.feed_incarnation(id, FeedId(1)).unwrap(),
+            original_feed
+        );
+        assert_eq!(store.guide_revisions(id).unwrap(), original_revisions);
+        if let iptv_providers::model::SourceConfig::M3u(config) = &mut same.config {
+            config.location = SecretUrl::new("https://synthetic.invalid/replaced.m3u");
+        }
+        store.update_source(id, &same).unwrap();
+        assert_ne!(store.source_incarnation(id).unwrap(), identity);
+        assert_ne!(
+            store.feed_incarnation(id, FeedId(1)).unwrap(),
+            original_feed
+        );
+        assert_eq!(
+            store.guide_revisions(id).unwrap().configuration,
+            original_revisions.configuration + 1
+        );
+    }
+
+    #[test]
     fn feed_and_source_reuse_never_revive_old_identity() {
         let mut store = Store::open_in_memory().unwrap();
         let id = source(&mut store);
