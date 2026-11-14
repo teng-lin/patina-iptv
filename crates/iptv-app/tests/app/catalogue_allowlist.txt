@@ -1,0 +1,581 @@
+# What the catalogue lint (catalogue_lint.rs) lets pass: `file<TAB>literal`.
+#
+# [untranslated] is text the user reads that no translation reaches yet. It only
+# shrinks: translate a literal (tr/trf and a row in messages.tsv), remove its line
+# and lower UNTRANSLATED in catalogue_lint.rs. Nothing is added here.
+#
+# [not-shown] is text that never reaches the screen, or is not the app's to
+# translate. A new line here says why by the group it joins.
+
+[untranslated]
+iptv-app/src/channels_view.rs	No channels here
+iptv-app/src/channels_view.rs	No favourites yet
+iptv-app/src/chooser.rs	Normal
+iptv-app/src/chooser.rs	Smaller
+iptv-app/src/chooser.rs	Stretch to fill
+iptv-app/src/chooser.rs	Use for all channels
+iptv-app/src/chooser.rs	Zoom
+iptv-app/src/chooser.rs	Zoom wide films
+iptv-app/src/desktop.rs	Settings…
+iptv-app/src/desktop.rs	View
+iptv-app/src/desktop.rs	Window
+iptv-app/src/fav_editor.rs	OK add or remove   ◀ remove all in this list   ▶ add all in this list   Back done
+iptv-app/src/fav_editor.rs	Tap a channel to add or remove it
+iptv-app/src/grid.rs	Channels you watch will appear here.
+iptv-app/src/grid.rs	Hold OK  ·  menu
+iptv-app/src/grid.rs	Hold ◀  ·  groups      Search  ·  search
+iptv-app/src/grid.rs	Home  ·  now      Shift ◀ ▶  ·  hours      Ctrl ◀ ▶  ·  days
+iptv-app/src/grid.rs	Home  ·  now      Shift ◀ ▶  ·  hours      ⌘ ◀ ▶  ·  days
+iptv-app/src/grid.rs	No favourite channels yet.\nHold OK (or press Menu) on a channel and choose “Add to favourites”, or star channels with “Manage favourites…”.
+iptv-app/src/grid.rs	Tab  ·  groups      / or Ctrl+F  ·  search
+iptv-app/src/grid.rs	Tab  ·  groups      / or ⌘F  ·  search
+iptv-app/src/grid.rs	This group has no channels.
+iptv-app/src/grid.rs	◀  ·  replays (catch-up), then groups
+iptv-app/src/grid.rs	◀ in the groups  ·  search
+iptv-app/src/grid.rs	◀ in the groups  ·  search      m  ·  menu
+iptv-app/src/grid/ruler.rs	Now
+iptv-app/src/header.rs	Nothing playing
+iptv-app/src/menu_view.rs	Copy channels to a group…
+iptv-app/src/menu_view.rs	Manage blocked channels…
+iptv-app/src/menu_view.rs	Manage hidden channels…
+iptv-app/src/menu_view.rs	Save to my list
+iptv-app/src/menu_view.rs	Schedule a recording…
+iptv-app/src/multiview_picker.rs	Choose a group or search its channels, then tap a channel
+iptv-app/src/multiview_picker.rs	No channels in this group. Choose another group.
+iptv-app/src/multiview_picker.rs	No matching channels. Clear the search or choose another group.
+iptv-app/src/multiview_picker.rs	Search this group by channel or number
+iptv-app/src/multiview_picker.rs	▲▼ move   ◀▶ groups / channels   OK choose   Back clear search or close
+iptv-app/src/multiview_view.rs	Add it anyway
+iptv-app/src/multiview_view.rs	Another one may not play, or may stop one that is playing.
+iptv-app/src/multiview_view/chrome.rs	+  Add screen
+iptv-app/src/multiview_view/chrome.rs	Exit multiview
+iptv-app/src/multiview_view/chrome.rs	OK: menu · Back: full screen
+iptv-app/src/player.rs	no account
+iptv-app/src/player.rs	no channel
+iptv-app/src/player.rs	no stream
+iptv-app/src/player_panels.rs	CATCH-UP
+iptv-app/src/player_panels.rs	LIVE
+iptv-app/src/player_panels.rs	PAUSED
+iptv-app/src/player_panels/status.rs	Can't play {}
+iptv-app/src/player_panels/status.rs	Next (⏭) returns to live.
+iptv-app/src/player_panels/status.rs	OK  Try again
+iptv-app/src/player_panels/status.rs	The programme has ended
+iptv-app/src/player_panels/words.rs	The provider is refusing this stream for now.
+iptv-app/src/player_panels/words.rs	⏪ ⏩ seek
+iptv-app/src/player_panels/words.rs	▼ ▲ seek   Enter play or pause
+iptv-app/src/player_panels/words.rs	▼ ▲ seek (hold: faster)   OK play or pause
+iptv-app/src/player_panels/words.rs	◀ ▶ actions   Enter hide   M more controls
+iptv-app/src/player_panels/words.rs	◀ ▶ actions   OK hide   Hold OK more controls
+iptv-app/src/player_panels/words.rs	◀ ▶ move   Enter choose   Esc hide
+iptv-app/src/player_panels/words.rs	◀ ▶ move   Enter choose   M or Esc hide
+iptv-app/src/player_panels/words.rs	◀ ▶ move   OK choose   Back hide
+iptv-app/src/player_panels/words.rs	◀ ▶ move   OK choose   Menu or Back hide
+iptv-app/src/player_panels/words.rs	◀ ▶ seek   Enter play or pause
+iptv-app/src/player_panels/words.rs	◀ ▶ seek (hold: faster)   OK play or pause
+iptv-app/src/runtime/file_writer.rs	could not write ({kind})
+iptv-app/src/runtime/file_writer.rs	written, but not synced ({kind})
+iptv-app/src/runtime/settings.rs	Could not save settings ({kind})
+iptv-app/src/runtime/settings.rs	Settings updated, but saving safely could not be confirmed ({kind})
+iptv-app/src/runtime/wizard_map.rs	Playlist
+iptv-app/src/search_view.rs	Earlier
+iptv-app/src/search_view.rs	Later
+iptv-app/src/search_view.rs	On now
+iptv-app/src/search_view.rs	{when} · no replay
+iptv-app/src/search_view.rs	{when} · ↺ replay
+iptv-app/src/search_view/view.rs	Nothing found for “{}”
+iptv-app/src/search_view/view.rs	OK type   ▼ recent searches   Back close
+iptv-app/src/search_view/view.rs	Tap a result to add its channel to multiview
+iptv-app/src/search_view/view.rs	Tap a result to watch it
+iptv-app/src/search_view/view.rs	Type a channel or programme, or tap a recent search
+iptv-app/src/search_view/view.rs	▲▼ move   ◀▶ channels / programmes   OK add   Back keyboard, then close
+iptv-app/src/search_view/view.rs	▲▼ move   ◀▶ channels / programmes   OK watch   Back keyboard, then close
+iptv-app/src/settings_view/words.rs	1 hour
+iptv-app/src/settings_view/words.rs	10 minutes
+iptv-app/src/settings_view/words.rs	2 hours
+iptv-app/src/settings_view/words.rs	30 minutes
+iptv-app/src/settings_view/words.rs	A playlist opens on
+iptv-app/src/settings_view/words.rs	Add an XMLTV guide link to the playlist on screen.
+iptv-app/src/settings_view/words.rs	Add to history after
+iptv-app/src/settings_view/words.rs	Add to recent channels after
+iptv-app/src/settings_view/words.rs	Add, choose, refresh, rename and delete playlists, and arrange their guide sources.
+iptv-app/src/settings_view/words.rs	All channels category
+iptv-app/src/settings_view/words.rs	All playlists category
+iptv-app/src/settings_view/words.rs	Amlogic workaround
+iptv-app/src/settings_view/words.rs	Animated scrolling
+iptv-app/src/settings_view/words.rs	Animated transitions
+iptv-app/src/settings_view/words.rs	Appended
+iptv-app/src/settings_view/words.rs	As the playlist says
+iptv-app/src/settings_view/words.rs	As the provider says
+iptv-app/src/settings_view/words.rs	Ask
+iptv-app/src/settings_view/words.rs	Ask every time
+iptv-app/src/settings_view/words.rs	Audio decoding
+iptv-app/src/settings_view/words.rs	Black picture while tuning
+iptv-app/src/settings_view/words.rs	Blocked content
+iptv-app/src/settings_view/words.rs	Blocked content and settings
+iptv-app/src/settings_view/words.rs	Buffer
+iptv-app/src/settings_view/words.rs	Changed keys
+iptv-app/src/settings_view/words.rs	Channel names on two lines
+iptv-app/src/settings_view/words.rs	Channel order
+iptv-app/src/settings_view/words.rs	Channels of hidden groups
+iptv-app/src/settings_view/words.rs	Choose a key, press and action per screen; capture keys or restore defaults.
+iptv-app/src/settings_view/words.rs	Clear history
+iptv-app/src/settings_view/words.rs	Clear recent searches
+iptv-app/src/settings_view/words.rs	Clock corner
+iptv-app/src/settings_view/words.rs	Clock size
+iptv-app/src/settings_view/words.rs	Colour the playing channel
+iptv-app/src/settings_view/words.rs	Correct replay start by
+iptv-app/src/settings_view/words.rs	Date with the clock
+iptv-app/src/settings_view/words.rs	Decoding
+iptv-app/src/settings_view/words.rs	Description only on a channel change
+iptv-app/src/settings_view/words.rs	Dim finished programmes
+iptv-app/src/settings_view/words.rs	Down
+iptv-app/src/settings_view/words.rs	Down and Up
+iptv-app/src/settings_view/words.rs	Download every guide source of the playlist on screen now.
+iptv-app/src/settings_view/words.rs	Emphasise programmes on air
+iptv-app/src/settings_view/words.rs	Enter the PIN with
+iptv-app/src/settings_view/words.rs	Favourites category
+iptv-app/src/settings_view/words.rs	File type
+iptv-app/src/settings_view/words.rs	Flussonic
+iptv-app/src/settings_view/words.rs	Focus fill
+iptv-app/src/settings_view/words.rs	Forget downloaded logos
+iptv-app/src/settings_view/words.rs	Forget viewing time
+iptv-app/src/settings_view/words.rs	From the guide data
+iptv-app/src/settings_view/words.rs	From the logo folder
+iptv-app/src/settings_view/words.rs	From the playlist
+iptv-app/src/settings_view/words.rs	Group order
+iptv-app/src/settings_view/words.rs	Guide button
+iptv-app/src/settings_view/words.rs	History button
+iptv-app/src/settings_view/words.rs	Keep each playlist together
+iptv-app/src/settings_view/words.rs	Keep history for
+iptv-app/src/settings_view/words.rs	Left
+iptv-app/src/settings_view/words.rs	Left and Right
+iptv-app/src/settings_view/words.rs	Logo folder
+iptv-app/src/settings_view/words.rs	Look for a new version
+iptv-app/src/settings_view/words.rs	Manage groups
+iptv-app/src/settings_view/words.rs	Match the content's frame rate
+iptv-app/src/settings_view/words.rs	Matroska
+iptv-app/src/settings_view/words.rs	May change the refresh rate
+iptv-app/src/settings_view/words.rs	May change the resolution
+iptv-app/src/settings_view/words.rs	Movie and series order
+iptv-app/src/settings_view/words.rs	Movies and series only
+iptv-app/src/settings_view/words.rs	Movies by category
+iptv-app/src/settings_view/words.rs	Near matches of file names
+iptv-app/src/settings_view/words.rs	No replay
+iptv-app/src/settings_view/words.rs	Nothing
+iptv-app/src/settings_view/words.rs	Number keys
+iptv-app/src/settings_view/words.rs	Offer test versions
+iptv-app/src/settings_view/words.rs	On-air emphasis
+iptv-app/src/settings_view/words.rs	On-screen keypad
+iptv-app/src/settings_view/words.rs	Only for 50 and 60 fps
+iptv-app/src/settings_view/words.rs	Only tell me
+iptv-app/src/settings_view/words.rs	Play in another app
+iptv-app/src/settings_view/words.rs	Play the next episode
+iptv-app/src/settings_view/words.rs	Playlist and group of channels
+iptv-app/src/settings_view/words.rs	Prefer surround audio tracks
+iptv-app/src/settings_view/words.rs	Preferred logos
+iptv-app/src/settings_view/words.rs	Programme description
+iptv-app/src/settings_view/words.rs	Programme grid
+iptv-app/src/settings_view/words.rs	Programme on air in the list
+iptv-app/src/settings_view/words.rs	Programme titles on two lines
+iptv-app/src/settings_view/words.rs	Protect live channels
+iptv-app/src/settings_view/words.rs	Protect movies and series
+iptv-app/src/settings_view/words.rs	Recent channels kept
+iptv-app/src/settings_view/words.rs	Recording folder
+iptv-app/src/settings_view/words.rs	Refresh all playlists now
+iptv-app/src/settings_view/words.rs	Refresh playlists every
+iptv-app/src/settings_view/words.rs	Refresh when the app starts
+iptv-app/src/settings_view/words.rs	Remind me before the start
+iptv-app/src/settings_view/words.rs	Reminder closes after
+iptv-app/src/settings_view/words.rs	Remove from the end of names
+iptv-app/src/settings_view/words.rs	Remove from the start of names
+iptv-app/src/settings_view/words.rs	Replay addresses
+iptv-app/src/settings_view/words.rs	Replay mark
+iptv-app/src/settings_view/words.rs	Replay window
+iptv-app/src/settings_view/words.rs	Resolution in pixels
+iptv-app/src/settings_view/words.rs	Restore the original keys
+iptv-app/src/settings_view/words.rs	Rewind and fast-forward keys
+iptv-app/src/settings_view/words.rs	Rewind live channels with
+iptv-app/src/settings_view/words.rs	See-through player panels
+iptv-app/src/settings_view/words.rs	Send a diagnostic log
+iptv-app/src/settings_view/words.rs	Series by category
+iptv-app/src/settings_view/words.rs	Set the PIN
+iptv-app/src/settings_view/words.rs	Share anonymous usage counts
+iptv-app/src/settings_view/words.rs	Shift guide times by
+iptv-app/src/settings_view/words.rs	Show groups that appear later
+iptv-app/src/settings_view/words.rs	Start early by
+iptv-app/src/settings_view/words.rs	Start when the device turns on
+iptv-app/src/settings_view/words.rs	Start when the device wakes
+iptv-app/src/settings_view/words.rs	Start with voice input
+iptv-app/src/settings_view/words.rs	Stay unlocked
+iptv-app/src/settings_view/words.rs	Stop late by
+iptv-app/src/settings_view/words.rs	Stream properties
+iptv-app/src/settings_view/words.rs	Surround audio to the receiver
+iptv-app/src/settings_view/words.rs	Switch to the channel
+iptv-app/src/settings_view/words.rs	That info along the bottom
+iptv-app/src/settings_view/words.rs	The PIN guards
+iptv-app/src/settings_view/words.rs	The playlist's guide sources: switch on or off, order (the first with a channel wins), time shift, how each last downloaded.
+iptv-app/src/settings_view/words.rs	The rewind key
+iptv-app/src/settings_view/words.rs	The version of this app. Text is set in Roboto and Roboto Condensed (Google, SIL Open Font License 1.1).
+iptv-app/src/settings_view/words.rs	Thorough channel matching
+iptv-app/src/settings_view/words.rs	Tile shape
+iptv-app/src/settings_view/words.rs	Time for the second Back
+iptv-app/src/settings_view/words.rs	Time line across the grid
+iptv-app/src/settings_view/words.rs	Time shift
+iptv-app/src/settings_view/words.rs	Tunnelled video
+iptv-app/src/settings_view/words.rs	UDP relay
+iptv-app/src/settings_view/words.rs	Until an open channel plays
+iptv-app/src/settings_view/words.rs	Until the app restarts
+iptv-app/src/settings_view/words.rs	Update by itself
+iptv-app/src/settings_view/words.rs	User-Agent
+iptv-app/src/settings_view/words.rs	Video decoding
+iptv-app/src/settings_view/words.rs	Wake the device for reminders
+iptv-app/src/settings_view/words.rs	When a reminder is due
+iptv-app/src/settings_view/words.rs	Xtream Codes
+iptv-app/src/theme.rs	Amber
+iptv-app/src/theme.rs	Black
+iptv-app/src/theme.rs	Blue
+iptv-app/src/theme.rs	Blue grey
+iptv-app/src/theme.rs	Brown
+iptv-app/src/theme.rs	Cyan
+iptv-app/src/theme.rs	Dark
+iptv-app/src/theme.rs	Dark grey
+iptv-app/src/theme.rs	Green
+iptv-app/src/theme.rs	Grey
+iptv-app/src/theme.rs	Indigo
+iptv-app/src/theme.rs	Lime
+iptv-app/src/theme.rs	Orange
+iptv-app/src/theme.rs	Pink
+iptv-app/src/theme.rs	Purple
+iptv-app/src/theme.rs	Red
+iptv-app/src/theme.rs	Teal
+iptv-app/src/theme.rs	Yellow
+iptv-core/src/pip_window.rs	Picture-in-Picture
+iptv-core/src/tracks.rs	Arabic
+iptv-core/src/tracks.rs	Automatic
+iptv-core/src/tracks.rs	Chinese
+iptv-core/src/tracks.rs	Czech
+iptv-core/src/tracks.rs	Danish
+iptv-core/src/tracks.rs	Dutch
+iptv-core/src/tracks.rs	English
+iptv-core/src/tracks.rs	Finnish
+iptv-core/src/tracks.rs	French
+iptv-core/src/tracks.rs	German
+iptv-core/src/tracks.rs	Greek
+iptv-core/src/tracks.rs	Hebrew
+iptv-core/src/tracks.rs	Hindi
+iptv-core/src/tracks.rs	Hungarian
+iptv-core/src/tracks.rs	Italian
+iptv-core/src/tracks.rs	Japanese
+iptv-core/src/tracks.rs	Korean
+iptv-core/src/tracks.rs	Mono
+iptv-core/src/tracks.rs	Norwegian
+iptv-core/src/tracks.rs	Off
+iptv-core/src/tracks.rs	On
+iptv-core/src/tracks.rs	Opus
+iptv-core/src/tracks.rs	Persian
+iptv-core/src/tracks.rs	Polish
+iptv-core/src/tracks.rs	Portuguese
+iptv-core/src/tracks.rs	Romanian
+iptv-core/src/tracks.rs	Russian
+iptv-core/src/tracks.rs	Spanish
+iptv-core/src/tracks.rs	Stereo
+iptv-core/src/tracks.rs	Swedish
+iptv-core/src/tracks.rs	Track {}
+iptv-core/src/tracks.rs	Turkish
+iptv-core/src/tracks.rs	Ukrainian
+iptv-core/src/tracks.rs	Vorbis
+iptv-core/src/tracks.rs	{:.1} Mb/s
+iptv-guide/src/lib.rs	Loading…
+iptv-guide/src/lib.rs	No information
+iptv-guide/src/lib.rs	Other
+iptv-settings/src/catalogue/commands.rs	Add an XMLTV guide source.
+iptv-settings/src/catalogue/commands.rs	Arrange playlists by hand.
+iptv-settings/src/catalogue/commands.rs	Assign, prioritise and remove guide sources.
+iptv-settings/src/catalogue/commands.rs	Delete stored guide data until the next update.
+iptv-settings/src/catalogue/commands.rs	Download guide data now.
+iptv-settings/src/catalogue/commands.rs	Drop downloaded logo images.
+iptv-settings/src/catalogue/commands.rs	Drop every key customisation.
+iptv-settings/src/catalogue/commands.rs	Forget earlier search queries.
+iptv-settings/src/catalogue/commands.rs	Forget per-channel viewing time.
+iptv-settings/src/catalogue/commands.rs	Forget watch history.
+iptv-settings/src/catalogue/commands.rs	Look for a newer version now.
+iptv-settings/src/catalogue/commands.rs	Open the add-playlist wizard.
+iptv-settings/src/catalogue/commands.rs	Open the playlists screen: add, choose, refresh, rename, change the guide address, delete.
+iptv-settings/src/catalogue/commands.rs	Rebind keys per screen.
+iptv-settings/src/catalogue/commands.rs	Refresh every playlist now.
+iptv-settings/src/catalogue/commands.rs	Replace everything with a backup's contents.
+iptv-settings/src/catalogue/commands.rs	Restart the app now.
+iptv-settings/src/catalogue/commands.rs	Send a diagnostic log, redacted of credentials.
+iptv-settings/src/catalogue/commands.rs	Set or change the parental PIN.
+iptv-settings/src/catalogue/commands.rs	Show, hide, rename and arrange groups.
+iptv-settings/src/catalogue/commands.rs	Version, licences and policies.
+iptv-settings/src/catalogue/commands.rs	Write settings and customisations to a backup file.
+iptv-settings/src/catalogue/general.rs	Bring the app back when the device leaves standby; not every device reports this.
+iptv-settings/src/catalogue/general.rs	Clock for times of day: `auto` follows the language's convention, or 12-hour, or 24-hour.
+iptv-settings/src/catalogue/general.rs	Comma-separated fragments removed from the end of channel names.
+iptv-settings/src/catalogue/general.rs	Comma-separated fragments removed from the start of channel names.
+iptv-settings/src/catalogue/general.rs	Groups that appear after a refresh start visible rather than hidden.
+iptv-settings/src/catalogue/general.rs	HTTP User-Agent for provider requests; empty sends the app's own.
+iptv-settings/src/catalogue/general.rs	How long the second Back press may take to count as confirmation.
+iptv-settings/src/catalogue/general.rs	Import live channels from a playlist. The global value applies to new playlists.
+iptv-settings/src/catalogue/general.rs	Import movies and series from a playlist that offers them.
+iptv-settings/src/catalogue/general.rs	Inside the merged category, keep each playlist's channels together.
+iptv-settings/src/catalogue/general.rs	Install new versions automatically where the app distributes its own updates.
+iptv-settings/src/catalogue/general.rs	Interface language: `system` follows the device, otherwise a language tag.
+iptv-settings/src/catalogue/general.rs	Launch the app once the device has booted, where the platform permits it.
+iptv-settings/src/catalogue/general.rs	Leaving the app from the top level needs Back twice in a short window.
+iptv-settings/src/catalogue/general.rs	Offer a category that merges the channels of every playlist.
+iptv-settings/src/catalogue/general.rs	Offer a category with every channel of the playlist.
+iptv-settings/src/catalogue/general.rs	Offer a category with the favourite channels.
+iptv-settings/src/catalogue/general.rs	Offer pre-release builds when checking for updates.
+iptv-settings/src/catalogue/general.rs	Order of channels; a playlist or a single group may override it.
+iptv-settings/src/catalogue/general.rs	Order of groups; a playlist may override it.
+iptv-settings/src/catalogue/general.rs	Order of playlists in lists that show several.
+iptv-settings/src/catalogue/general.rs	Refresh a playlist after this long; 0 refreshes only on request.
+iptv-settings/src/catalogue/general.rs	Refresh playlists every time the app starts, regardless of the interval.
+iptv-settings/src/catalogue/general.rs	Relay that turns multicast UDP streams into HTTP, as host:port; empty plays UDP directly.
+iptv-settings/src/catalogue/general.rs	Share anonymous usage counts. Off unless the user opts in.
+iptv-settings/src/catalogue/general.rs	Start playing the channel that was on when the app was last closed.
+iptv-settings/src/catalogue/general.rs	Still list channels whose group is hidden (in the all-channel categories).
+iptv-settings/src/catalogue/general.rs	Streams the provider allows at once; limits multiview and background recording.
+iptv-settings/src/catalogue/general.rs	Which category opens when a playlist is chosen.
+iptv-settings/src/catalogue/general.rs	Which on-screen keyboard text fields open: the platform's or the app's own.
+iptv-settings/src/catalogue/general.rs	system
+iptv-settings/src/catalogue/guide.rs	Accent bundle used for focus, selection and progress.
+iptv-settings/src/catalogue/guide.rs	Animate list and guide scrolling; off jumps directly.
+iptv-settings/src/catalogue/guide.rs	Animate screens and panels as they open and close.
+iptv-settings/src/catalogue/guide.rs	Back in a guide scrolled away from now first returns to the programmes on air.
+iptv-settings/src/catalogue/guide.rs	Background bundle for panels and windows.
+iptv-settings/src/catalogue/guide.rs	Channel list layout: preview window or over full-screen video.
+iptv-settings/src/catalogue/guide.rs	Channel rows carry the channel's name.
+iptv-settings/src/catalogue/guide.rs	Channel rows carry the channel's number.
+iptv-settings/src/catalogue/guide.rs	Colour the channel that is playing, independently of focus.
+iptv-settings/src/catalogue/guide.rs	Download guide data again after this long; 0 updates only on request.
+iptv-settings/src/catalogue/guide.rs	Draw finished programmes with less contrast.
+iptv-settings/src/catalogue/guide.rs	Emphasise programmes that are on air.
+iptv-settings/src/catalogue/guide.rs	Extend the current-time line across the whole grid, not just the time bar.
+iptv-settings/src/catalogue/guide.rs	Fetch guide data after a playlist is added, changed or refreshed.
+iptv-settings/src/catalogue/guide.rs	Fetch guide data when the app starts if the interval has passed.
+iptv-settings/src/catalogue/guide.rs	Folder of logo images matched to channels by file name; empty for none.
+iptv-settings/src/catalogue/guide.rs	Go full screen after a preview has played this long without input; 0 never does.
+iptv-settings/src/catalogue/guide.rs	Guide layout: video in a preview window beside the grid, or the grid over full-screen video.
+iptv-settings/src/catalogue/guide.rs	How many days of finished programmes stay in the guide (for catch-up and browsing back).
+iptv-settings/src/catalogue/guide.rs	How much video shows through browsing surfaces drawn over it.
+iptv-settings/src/catalogue/guide.rs	How on-air programmes are emphasised: plain, tinted, or only by their progress bar.
+iptv-settings/src/catalogue/guide.rs	Keep programme descriptions; turning this off saves storage on large guides.
+iptv-settings/src/catalogue/guide.rs	Keep the channel list open after choosing a channel.
+iptv-settings/src/catalogue/guide.rs	Keep the guide open after choosing a channel (preview layout).
+iptv-settings/src/catalogue/guide.rs	Keep the guide open after choosing a channel when it is drawn over video.
+iptv-settings/src/catalogue/guide.rs	Mark channels whose past programmes can be replayed.
+iptv-settings/src/catalogue/guide.rs	Match guide data against every channel instead of a quick partial pass; slower.
+iptv-settings/src/catalogue/guide.rs	Match logo files whose names only approximately equal the channel name.
+iptv-settings/src/catalogue/guide.rs	Minutes visible across the programme grid; navigation retains its focused programme.
+iptv-settings/src/catalogue/guide.rs	Preferred logo source when several have one; a playlist may override it.
+iptv-settings/src/catalogue/guide.rs	See-through level of the player's info and control panels.
+iptv-settings/src/catalogue/guide.rs	Shift a playlist's guide times when the source's time zone is wrong.
+iptv-settings/src/catalogue/guide.rs	Show channel logos in the guide column.
+iptv-settings/src/catalogue/guide.rs	Show programme cells; off leaves a plain channel list.
+iptv-settings/src/catalogue/guide.rs	Show the focused programme's description in the details area.
+iptv-settings/src/catalogue/guide.rs	Show the programme on air under each channel in the channel list.
+iptv-settings/src/catalogue/guide.rs	Show which playlist and group a channel comes from.
+iptv-settings/src/catalogue/guide.rs	Start playing the focused channel after the switch delay, without OK.
+iptv-settings/src/catalogue/guide.rs	Text scale across the interface.
+iptv-settings/src/catalogue/guide.rs	Wait before tuning after a channel change, so fast zapping skips channels; cancelable.
+iptv-settings/src/catalogue/guide.rs	Whether the focused item is filled with the accent or a neutral tone.
+iptv-settings/src/catalogue/guide.rs	Wrap long channel names onto a second line instead of truncating.
+iptv-settings/src/catalogue/guide.rs	Wrap long programme titles onto a second line instead of truncating.
+iptv-settings/src/catalogue/library.rs	A channel enters history only after playing this long.
+iptv-settings/src/catalogue/library.rs	A channel enters the recent list only after playing this long.
+iptv-settings/src/catalogue/library.rs	A reminder fires this long before its programme starts.
+iptv-settings/src/catalogue/library.rs	Also match finished programmes that cannot be replayed.
+iptv-settings/src/catalogue/library.rs	Blocked live channels and groups need the PIN.
+iptv-settings/src/catalogue/library.rs	Blocked movies and series need the PIN.
+iptv-settings/src/catalogue/library.rs	Container recordings are saved in.
+iptv-settings/src/catalogue/library.rs	Continue with the next episode when one ends.
+iptv-settings/src/catalogue/library.rs	Enter the PIN on an on-screen keypad or with the remote's number keys.
+iptv-settings/src/catalogue/library.rs	Hold a key this long for its long-press action.
+iptv-settings/src/catalogue/library.rs	How long a correct PIN keeps blocked content unlocked.
+iptv-settings/src/catalogue/library.rs	How long a reminder prompt waits before dismissing itself.
+iptv-settings/src/catalogue/library.rs	Keep recording this long after the programme's scheduled end.
+iptv-settings/src/catalogue/library.rs	Length of the quick-switch list of recent channels.
+iptv-settings/src/catalogue/library.rs	Offer earlier queries before typing starts.
+iptv-settings/src/catalogue/library.rs	Open search with voice input focused instead of the text field.
+iptv-settings/src/catalogue/library.rs	Order of movies and series; a playlist may override it.
+iptv-settings/src/catalogue/library.rs	Rank favourite channels above other matches.
+iptv-settings/src/catalogue/library.rs	Return to the results, keeping query and focus, after choosing a channel.
+iptv-settings/src/catalogue/library.rs	Shape of movie and series tiles.
+iptv-settings/src/catalogue/library.rs	Split the full movie list into its categories.
+iptv-settings/src/catalogue/library.rs	Split the full series list into its categories.
+iptv-settings/src/catalogue/library.rs	Start a programme recording this early.
+iptv-settings/src/catalogue/library.rs	Typed channel numbers are committed after this pause.
+iptv-settings/src/catalogue/library.rs	User changes to the key → action map, applied over the built-in defaults.
+iptv-settings/src/catalogue/library.rs	Wake the device from standby for a reminder, where the platform allows it.
+iptv-settings/src/catalogue/library.rs	Watched channels and programmes are forgotten after this many days.
+iptv-settings/src/catalogue/library.rs	What Up and Down do over full-screen video: switch channels or open the channel list.
+iptv-settings/src/catalogue/library.rs	What a due reminder does: ask, tune straight away, or only notify.
+iptv-settings/src/catalogue/library.rs	What the PIN guards: blocked content only, or settings as well.
+iptv-settings/src/catalogue/library.rs	Where recordings are written; empty uses app storage.
+iptv-settings/src/catalogue/player.rs	Add the date to the clock.
+iptv-settings/src/catalogue/player.rs	Blank the picture while a new channel tunes instead of holding the old frame.
+iptv-settings/src/catalogue/player.rs	Buffer size: larger rides out network hiccups but makes switching slower.
+iptv-settings/src/catalogue/player.rs	Change the display mode to match the content's frame rate; device support varies.
+iptv-settings/src/catalogue/player.rs	Clock text scale.
+iptv-settings/src/catalogue/player.rs	Correction added to a replayed programme's start time.
+iptv-settings/src/catalogue/player.rs	Decode audio with the platform's decoders or the bundled software ones.
+iptv-settings/src/catalogue/player.rs	Decode video in hardware, or in software when a device's decoder misbehaves.
+iptv-settings/src/catalogue/player.rs	Delay (positive) or advance (negative) audio against video.
+iptv-settings/src/catalogue/player.rs	Flash the info panel whenever the channel changes in full screen.
+iptv-settings/src/catalogue/player.rs	Frame-rate matching may also change the resolution.
+iptv-settings/src/catalogue/player.rs	Frame-rate matching may change the refresh rate.
+iptv-settings/src/catalogue/player.rs	Hand streams to another installed player: never, for movies and series only, or always.
+iptv-settings/src/catalogue/player.rs	Hand video straight to the display pipeline where the device supports it.
+iptv-settings/src/catalogue/player.rs	How replay URLs are built; auto follows what the playlist declares.
+iptv-settings/src/catalogue/player.rs	Include the programme description only in the channel-change panel.
+iptv-settings/src/catalogue/player.rs	Jump made by one fast-forward press.
+iptv-settings/src/catalogue/player.rs	Jump made by one rewind press.
+iptv-settings/src/catalogue/player.rs	Jump made by one step along the time bar, both directions.
+iptv-settings/src/catalogue/player.rs	Keep a channel playing full screen in a small window when you leave the app.
+iptv-settings/src/catalogue/player.rs	Keep a clock on screen.
+iptv-settings/src/catalogue/player.rs	List stream properties (resolution, frame rate, audio format) in the info panel.
+iptv-settings/src/catalogue/player.rs	Offer a guide shortcut in the control panel.
+iptv-settings/src/catalogue/player.rs	Offer a history shortcut in the control panel.
+iptv-settings/src/catalogue/player.rs	Only switch refresh rate for 50 and 60 fps content.
+iptv-settings/src/catalogue/player.rs	Pick a multichannel audio track first when a stream has one.
+iptv-settings/src/catalogue/player.rs	Place that channel-change info panel along the bottom edge.
+iptv-settings/src/catalogue/player.rs	Replay window to assume; 0 uses what the provider reports.
+iptv-settings/src/catalogue/player.rs	Screen corner the clock sits in.
+iptv-settings/src/catalogue/player.rs	Send compressed surround audio to the receiver undecoded.
+iptv-settings/src/catalogue/player.rs	The control panel hides itself after this long without input.
+iptv-settings/src/catalogue/player.rs	The info panel hides itself after this long without input.
+iptv-settings/src/catalogue/player.rs	Which key starts rewinding a live channel that has replay.
+iptv-settings/src/catalogue/player.rs	Which keys seek while replaying: Left/Right, Down/Up, or the transport keys.
+iptv-settings/src/catalogue/player.rs	Work around stutter and freezes seen with some Amlogic decoders.
+iptv-settings/src/catalogue/player.rs	Write resolution as pixel dimensions rather than a quality tag.
+
+[not-shown]
+# Font families and measuring.
+iptv-app/src/fonts.rs	'Roboto Condensed', Roboto, sans-serif
+iptv-app/src/fonts.rs	Roboto
+iptv-app/src/fonts.rs	Roboto Condensed
+iptv-app/src/fonts.rs	Roboto, sans-serif
+iptv-app/src/fonts.rs	unpacked in {unpacked_ms} ms, registered {ms} ms after asking
+iptv-app/src/fonts.rs	{size}px Roboto
+iptv-app/src/numbers.rs	{size}px Roboto
+# Generated demo data, shown as a provider's would be.
+iptv-app/src/menu_view.rs	A synthetic programme description for testing the guide. Real descriptions come from the EPG.
+iptv-core/src/guide.rs	Channel {}
+iptv-core/src/guide.rs	Group {:02}
+iptv-core/src/guide.rs	Show {}
+# HTTP header names.
+iptv-app/src/runtime/settings.rs	User-Agent
+iptv-guide/src/playback.rs	Referer
+iptv-guide/src/playback.rs	User-Agent
+# Markup: icons drawn as SVG.
+iptv-app/src/grid/channel.rs	data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/%3E
+iptv-app/src/play_bar/icons.rs	<circle cx='12' cy='12' r='9'/><path d='M12 11v6'/><circle fill='currentColor' stroke='none' cx='12' cy='7.5' r='1.3'/>
+iptv-app/src/play_bar/icons.rs	<path d='M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z'/>
+iptv-app/src/play_bar/icons.rs	<path d='M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5'/>
+iptv-app/src/play_bar/icons.rs	<path d='M6 6l12 12M18 6L6 18'/>
+iptv-app/src/play_bar/icons.rs	<path d='M8 6.5h13M8 12h13M8 17.5h13'/><circle fill='currentColor' stroke='none' cx='4' cy='6.5' r='1.3'/><circle fill='currentColor' stroke='none' cx='4' cy='12' r='1.3'/><circle fill='currentColor' stroke='none' cx='4' cy='17.5' r='1.3'/>
+iptv-app/src/play_bar/icons.rs	<path d='M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5'/>
+iptv-app/src/play_bar/icons.rs	<path fill='currentColor' d='M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z'/>
+iptv-app/src/play_bar/icons.rs	<path fill='currentColor' stroke='none' d='M11.5 6v12L3 12zM21 6v12l-8.5-6z'/>
+iptv-app/src/play_bar/icons.rs	<path fill='currentColor' stroke='none' d='M12.5 6v12L21 12zM3 6v12l8.5-6z'/>
+iptv-app/src/play_bar/icons.rs	<path fill='currentColor' stroke='none' d='M3 9h4l5-4v14l-5-4H3z'/><path d='M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13'/>
+iptv-app/src/play_bar/icons.rs	<path fill='currentColor' stroke='none' d='M3 9h4l5-4v14l-5-4H3z'/><path d='M16 9l6 6M22 9l-6 6'/>
+iptv-app/src/play_bar/icons.rs	<path fill='currentColor' stroke='none' d='M6 4.5h4v15H6zM14 4.5h4v15h-4z'/>
+iptv-app/src/play_bar/icons.rs	<path fill='currentColor' stroke='none' d='M7 4.5v15L19.5 12z'/>
+iptv-app/src/play_bar/icons.rs	<rect x='2' y='4' width='20' height='16' rx='2'/><path d='M16 15L9 8M9 13V8h5'/>
+iptv-app/src/play_bar/icons.rs	<rect x='2' y='4' width='20' height='16' rx='2'/><rect x='12' y='11' width='8' height='7' rx='1' fill='currentColor'/>
+iptv-app/src/play_bar/icons.rs	<rect x='2.5' y='5' width='19' height='14' rx='2'/><path d='M6 11V8.5h3M18 13v2.5h-3'/>
+iptv-app/src/play_bar/icons.rs	<rect x='3' y='4' width='18' height='16' rx='2'/><path d='M3 9h18M3 14.5h18M9 9v11M15 14.5V20'/>
+iptv-app/src/play_bar/icons.rs	<rect x='3' y='4' width='8' height='7' rx='1.5'/><rect x='13' y='4' width='8' height='7' rx='1.5'/><rect x='3' y='13' width='8' height='7' rx='1.5'/><rect x='13' y='13' width='8' height='7' rx='1.5'/>
+iptv-app/src/play_bar/icons.rs	<rect x='3' y='5' width='18' height='14' rx='2'/><path d='M7 12h3M12 12h5M7 15.5h7M16 15.5h1'/>
+iptv-app/src/play_bar/icons.rs	<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>{}</svg>
+iptv-app/src/rail.rs	<circle cx='10.5' cy='10.5' r='6'/><path d='M15 15l5.5 5.5'/>
+iptv-app/src/rail.rs	<circle cx='12' cy='12' r='3.5'/><path d='M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8'/>
+iptv-app/src/rail.rs	<circle cx='12' cy='12' r='8'/><circle cx='12' cy='12' r='3' fill='currentColor'/>
+iptv-app/src/rail.rs	<path d='M4 6h12M4 11h12M4 16h7'/><path d='M15 14v6l5-3z'/>
+iptv-app/src/rail.rs	<path d='M6 3h12v18l-6-4-6 4z'/>
+iptv-app/src/rail.rs	<rect x='3' y='4' width='18' height='16' rx='2'/><path d='M8 4v16M16 4v16M3 12h18'/>
+iptv-app/src/rail.rs	<rect x='3' y='5' width='18' height='12' rx='2'/><path d='M8 21h8'/>
+iptv-app/src/rail.rs	<rect x='3' y='7' width='18' height='13' rx='2'/><path d='M8 3l4 4 4-4'/>
+iptv-app/src/rail.rs	<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>{body}</svg>
+iptv-app/src/ui_kit.rs	<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='currentColor' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M15 4.5L7.5 12l7.5 7.5'/></svg>
+# Reasons and marks kept for the log, and messages for the platform.
+iptv-app/src/android_transport.rs	Playback transport unavailable
+iptv-app/src/credential_key.rs	cannot inspect existing database
+iptv-app/src/credential_key.rs	cannot lock the credential broker
+iptv-app/src/credential_key.rs	database key is missing from the platform credential broker
+iptv-app/src/credential_key.rs	no platform credential broker for this target
+iptv-app/src/credential_key.rs	platform credential broker could not be opened
+iptv-app/src/credential_key.rs	platform credential broker could not save the database key
+iptv-app/src/credential_key.rs	platform credential broker is locked or unavailable
+iptv-app/src/credential_key.rs	platform database key has an invalid encoding
+iptv-app/src/credential_key.rs	platform database key has an invalid length
+iptv-app/src/credential_key.rs	secure random generator failed
+iptv-app/src/credential_key.rs	synthetic database key was not installed
+iptv-app/src/credential_key/android.rs	Android Keystore is unavailable
+iptv-app/src/credential_key/linux.rs	Patina catalog key
+iptv-app/src/platform_data.rs	App data base must be an absolute directory; refusing temporary storage
+iptv-app/src/platform_data.rs	App storage contains a reparse point
+iptv-app/src/platform_data.rs	App storage contains a symbolic link
+iptv-app/src/platform_data.rs	Could not exclude private storage from OS backup
+iptv-app/src/platform_data.rs	Expected absolute files directory
+iptv-app/src/platform_data.rs	Files directory changed in one process
+iptv-app/src/platform_data.rs	Library/Application Support/iptv-rs
+iptv-app/src/platform_data.rs	Patina
+iptv-app/src/platform_data.rs	Storage path is not UTF-8
+iptv-app/src/runtime/backup/error.rs	{} (library: {class})
+iptv-app/src/runtime/credential_store.rs	pending restore cannot be read
+iptv-app/src/runtime/favorites.rs	recent favourite edits are not saved
+iptv-app/src/runtime/imports.rs	cannot create document identity
+iptv-app/src/runtime/imports.rs	cannot create private document directory
+iptv-app/src/runtime/imports.rs	private document cannot be saved
+iptv-app/src/runtime/library.rs	library is loading
+iptv-app/src/runtime/opening.rs	{bound} channels, {kib} KiB in {} ms
+iptv-app/src/runtime/opening.rs	{n} in {} ms
+iptv-app/src/runtime/opening.rs	{} channels, {kib} KiB in {} ms
+iptv-app/src/runtime/private_files.rs	Document exceeds buffering limit
+iptv-app/src/runtime/private_files.rs	Private document is unavailable
+iptv-app/src/runtime/private_files.rs	cannot finish private document
+iptv-app/src/runtime/private_files.rs	cannot inspect private documents
+iptv-app/src/runtime/private_files.rs	cannot read legacy document
+iptv-app/src/runtime/private_files.rs	cannot recover private document
+iptv-app/src/runtime/private_files.rs	cannot seal private document
+iptv-app/src/runtime/private_files.rs	document byte budget exceeded
+iptv-app/src/runtime/private_files.rs	invalid private document path
+iptv-app/src/runtime/private_files.rs	linked private documents are refused
+iptv-app/src/runtime/private_files.rs	total document deadline exceeded
+iptv-app/src/runtime/store_service.rs	cannot create data directory
+iptv-app/src/runtime/store_service.rs	credential storage is temporarily unavailable
+iptv-app/src/runtime/store_service.rs	recursive store request
+iptv-app/src/runtime/store_service.rs	request belongs to a closed application
+iptv-app/src/runtime/store_service.rs	store reply lost
+iptv-app/src/runtime/store_service.rs	store worker stopped
+iptv-app/src/startup.rs	guide shown
+iptv-core/src/import_limits.rs	decoded byte budget exceeded
+iptv-core/src/import_limits.rs	import {:?} limit exceeded ({})
+iptv-core/src/wizard.rs	SecretText(***)
+iptv-core/src/wizard.rs	UrlText({})
+# The debug overlay (IPTV_DEBUG).
+iptv-app/src/header.rs	keys {} · {} µs (max {})
+# The product's name and its files.
+iptv-app/src/backup.rs	Patina.patinabackup
+iptv-app/src/desktop.rs	Patina
+iptv-app/src/main.rs	Patina
+# What an edit or an effect is called in the log.
+iptv-app/src/epg_sources_view.rs	add (named {})
+iptv-app/src/epg_sources_view.rs	move {} by {step}
+iptv-app/src/epg_sources_view.rs	new link for {}
+iptv-app/src/epg_sources_view.rs	shift {} to {m} min
+iptv-app/src/guide_assign_view.rs	a guide channel
+iptv-app/src/guide_assign_view.rs	no guide
+iptv-app/src/playlists_view.rs	User-Agent of {}: set {}
+iptv-app/src/playlists_view.rs	custom groups {}
+iptv-app/src/playlists_view.rs	details of {}
+iptv-app/src/playlists_view.rs	guide sources of {}
+iptv-app/src/playlists_view.rs	playlist policy {}
+iptv-app/src/playlists_view.rs	refresh all
+iptv-app/src/playlists_view.rs	show all playlists
+iptv-app/src/playlists_view.rs	try new details of {}
