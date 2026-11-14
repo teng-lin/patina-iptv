@@ -5,7 +5,7 @@
 //! group's name at the right), and its description in grey. At the right
 //! the list on screen (a tap opens the groups) and Add playlist.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 use iptv_core::lists::group_of;
 use std::time::Duration;
@@ -46,9 +46,15 @@ fn span(p: Program) -> String {
 /// How far along it is, in our words.
 fn left(now: i32, p: Program) -> String {
     match p.airing(now) {
-        Airing::Live => format!("{} min left", p.end - now),
-        Airing::Upcoming => format!("in {} min", p.start - now),
-        Airing::Ended => "ended".to_owned(),
+        Airing::Live => trf(
+            "{minutes} min left",
+            &[("minutes", (p.end - now).unsigned_abs().into())],
+        ),
+        Airing::Upcoming => trf(
+            "in {minutes} min",
+            &[("minutes", (p.start - now).unsigned_abs().into())],
+        ),
+        Airing::Ended => tr("ended").to_owned(),
     }
 }
 
@@ -57,6 +63,7 @@ fn preview(ui: Ui, size: Scale) -> impl IntoElement {
     // rectangle in guide mode. A tap opens full screen.
     let idle = move || ui.playing.get().is_none();
     view()
+        .role(AccessibilityRole::Button)
         .w(move || px(header_now().1))
         .h(move || px(header_now().2))
         .rounded(px(PREVIEW_RADIUS))
@@ -279,6 +286,7 @@ fn side(ui: Ui) -> impl IntoElement {
         .gap(px(8.0))
         .child(
             text(move || format!("☰  {}", crate::lists::list_name(ui)))
+                .role(AccessibilityRole::Button)
                 .px(px(10.0))
                 .py(px(6.0))
                 .rounded(px(RADIUS))

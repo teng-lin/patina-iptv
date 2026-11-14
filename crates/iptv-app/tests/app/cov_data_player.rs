@@ -30,6 +30,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
 use nsh_core::picker::PickedFile;
 use nsh_core::platform::Idiom;
@@ -39,7 +40,6 @@ use nsh_core::{
     prelude::*,
 };
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 use serde_json::{Value, json};
 
 const IMPORT: Duration = Duration::from_secs(20);
@@ -72,6 +72,35 @@ fn guide(now: i64) -> String {
         }
     }
     xml + "</tv>"
+}
+
+/// The app's log lines so far. The scenario's process has no other logger:
+/// they are printed as the app prints them (into the test's output) and
+/// kept, for what an event does that only its log line shows.
+struct Lines(Mutex<Vec<String>>);
+
+static LOG: Lines = Lines(Mutex::new(Vec::new()));
+
+impl log::Log for Lines {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let line = record.args().to_string();
+        eprintln!("[{} {}] {line}", record.level(), record.target());
+        self.0.lock().unwrap().push(line);
+    }
+
+    fn flush(&self) {}
+}
+
+/// Whether the app logged exactly `line`.
+fn logged(line: &str) -> bool {
+    LOG.0.lock().unwrap().iter().any(|l| l == line)
 }
 
 fn step(r: Result<(), String>) {
@@ -165,11 +194,9 @@ fn run(app: &mut Headless, time: Duration) {
 fn the_player_follows_its_host_through_waits_failures_and_replays() {
     let Some(home) = isolated!() else { return };
     browse_fixture::two_step_preview(home.path());
-    // Log lines run as in the app (into the test's captured output).
-    let _ = env_logger::builder()
-        .is_test(true)
-        .filter_level(log::LevelFilter::Info)
-        .try_init();
+    // Log lines run as in the app, into the test's output and `LOG`.
+    log::set_logger(&LOG).expect("this process's only logger");
+    log::set_max_level(log::LevelFilter::Info);
     // Where the first playlist's last channel goes is taken (a directory):
     // saving it fails, which only logs.
     let data = home.data_dir();
@@ -259,6 +286,26 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     state(&mut app, "warming-up");
     send(&mut app, "unknown", json!({}));
     assert!(!seen(&app, "text:/…$/"), "no pill");
+    // A state outside the contract is still named on the status line,
+    // which its log line shows; one without a name is `?`.
+    send(&mut app, "state", json!({}));
+    assert!(logged("iptv player 0 state: warming-up"));
+    assert!(logged("iptv player 0 state: ?"));
+    // A `size` without its two numbers is no size, yet it is the first
+    // frame's mark as it always was, and is logged as it came.
+    assert!(!iptv_app::startup::marked("video frame"));
+    send(&mut app, "size", json!({ "width": 1280 }));
+    assert!(iptv_app::startup::marked("video frame"));
+    assert!(logged("iptv player 0 size: 1280×null"));
+    send(
+        &mut app,
+        "size",
+        json!({ "width": (1_u64 << 32) + 1280, "height": 720 }),
+    );
+    assert!(logged("iptv player 0 size: 4294968576×720"));
+    // A position without its time does nothing.
+    send(&mut app, "position", json!({}));
+    assert!(!seen(&app, "text:/…$/"), "still no pill");
 
     // A stream that played drops: it reconnects quietly for a second
     // (the last frame stays), then says so; the retry reopens it as a
@@ -468,7 +515,13 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for("text:/Test Channel Two$/"));
     send(&mut app, "pipAction", json!({ "action": "previous" }));
     step(app.wait_for("text:/Test Channel One$/"));
+    // A button the window does not have does nothing, and is logged like
+    // the others.
+    let before = opens();
     send(&mut app, "pipAction", json!({ "action": "unknown" }));
+    assert!(logged("iptv pip: unknown") && logged("iptv pip: previous"));
+    assert_eq!(opens(), before, "nothing opened");
+    assert!(seen(&app, "text:/Test Channel One$/"), "no zap");
     // The desktop's window state as the host reports it again: no change.
     send(
         &mut app,

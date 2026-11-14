@@ -1,5 +1,5 @@
-//! Hold the application storage lock for the process lifetime. The lock is a
-//! sibling of the data directory, so activating a restore never moves it.
+//! Hold each application storage lock for the process lifetime. A lock is a
+//! sibling of its data directory, so activating a restore never moves it.
 use super::error::{Context, Error, Result};
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
@@ -62,6 +62,7 @@ mod tests {
     use std::process::{Command, Stdio};
     const ROOT: &str = "IPTV_RS_INSTANCE_LOCK_TEST_ROOT";
     const MODE: &str = "IPTV_RS_INSTANCE_LOCK_TEST_MODE";
+    const SECOND_ROOT: &str = "IPTV_RS_INSTANCE_LOCK_TEST_SECOND_ROOT";
     const CHILD: &str = "backup::instance::tests::lock_child_process";
 
     fn child(root: &Path, mode: &str) -> Command {
@@ -82,6 +83,10 @@ mod tests {
             "holder" => {
                 acquire(root).unwrap();
                 acquire(root).unwrap(); // Same-process root recreation is safe.
+                if let Some(second) = std::env::var_os(SECOND_ROOT) {
+                    acquire(Path::new(&second)).unwrap();
+                    acquire(Path::new(&second)).unwrap();
+                }
                 println!("instance-lock-ready");
                 std::io::stdout().flush().unwrap();
                 let mut release = [0];
@@ -137,5 +142,44 @@ mod tests {
         holder.stdin.take().unwrap().write_all(b"x").unwrap();
         assert!(holder.wait().unwrap().success());
         assert!(child(&root, "successor").output().unwrap().status.success());
+    }
+
+    #[test]
+    fn one_process_locks_each_storage_root_it_opens() {
+        let directory = tempfile::tempdir().unwrap();
+        let alpha = directory.path().join("alpha");
+        let beta = directory.path().join("beta");
+        let mut holder = child(&alpha, "holder")
+            .env(SECOND_ROOT, &beta)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap();
+        let mut output = BufReader::new(holder.stdout.take().unwrap());
+        loop {
+            let mut line = String::new();
+            assert!(
+                output.read_line(&mut line).unwrap() > 0,
+                "holder exited before locking both roots"
+            );
+            if line.contains("instance-lock-ready") {
+                break;
+            }
+        }
+        for root in [&alpha, &beta] {
+            let result = child(root, "contender").output().unwrap();
+            assert!(
+                result.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+        holder.stdin.take().unwrap().write_all(b"x").unwrap();
+        assert!(holder.wait().unwrap().success());
+        for root in [&alpha, &beta] {
+            assert!(child(root, "successor").output().unwrap().status.success());
+        }
     }
 }

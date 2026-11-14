@@ -34,10 +34,20 @@ proptest! {
     #[test]
     fn xmltv_and_gzip_chunking_preserve_programmes(count in 0usize..40,chunk in 1usize..89) {
         let mut xml=String::from("<tv><channel id=\"s\"><display-name>Synthetic</display-name></channel>");
-        for i in 0..count{xml.push_str(&format!("<programme channel=\"s\" start=\"20261112010000 +0000\" stop=\"20261112020000 +0000\"><title>Synthetic {i}</title></programme>"));}xml.push_str("</tv>");
+        for i in 0..count {
+            xml.push_str(&format!(
+                "<programme channel=\"s\" start=\"20261112010000 +0000\" stop=\"20261112020000 +0000\"><title>Synthetic {i}</title></programme>"
+            ));
+        }
+        xml.push_str("</tv>");
         let expected=iptv_epg::parse_xmltv(xml.as_bytes(),Default::default()).unwrap();
         use std::io::Write;let mut encoder=flate2::write::GzEncoder::new(Vec::new(),Default::default());encoder.write_all(xml.as_bytes()).unwrap();let compressed=encoder.finish().unwrap();
-        let mut parser=iptv_epg::XmltvParser::new(Default::default());let mut out=Vec::new();for c in compressed.chunks(chunk){parser.feed(c,&mut |i|out.push(i)).unwrap();}parser.finish(&mut |i|out.push(i)).unwrap();
+        let mut parser = iptv_epg::XmltvParser::new(Default::default());
+        let mut out = Vec::new();
+        for c in compressed.chunks(chunk) {
+            parser.feed(c, &mut |i| out.push(i)).unwrap();
+        }
+        parser.finish(&mut |i| out.push(i)).unwrap();
         prop_assert_eq!(out.len(),expected.channels.len()+expected.programmes.len());
         prop_assert_eq!(iptv_epg::parse_xmltv(&compressed,Default::default()).unwrap().programmes,expected.programmes);
     }
@@ -50,12 +60,31 @@ proptest! {
     #[test]
     fn unsafe_backup_entries_never_validate(tail in "[a-z]{1,30}",prefix in prop::sample::select(vec!["../","/","playlists/../","playlists/./","playlists//","playlists/\\","playlists/C:"])) {
         let name=format!("{prefix}{tail}");prop_assert!(!backup_manifest::allowed(&name));
-        let bytes=serde_json::to_vec(&serde_json::json!({"format":"patina-whole-app","version":1,"root":"/synthetic","files":[{"name":"iptv.sqlite","length":0},{"name":"settings.json","length":0},{"name":name,"length":0}]})).unwrap();
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "format": "patina-whole-app",
+            "version": 1,
+            "root": "/synthetic",
+            "files": [
+                {"name": "iptv.sqlite", "length": 0},
+                {"name": "settings.json", "length": 0},
+                {"name": name, "length": 0}
+            ]
+        }))
+        .unwrap();
         prop_assert!(backup_manifest::parse(&bytes).is_err());
     }
     #[test]
     fn manifest_declared_sizes_are_bounded(size in any::<u64>()) {
-        let bytes=serde_json::to_vec(&serde_json::json!({"format":"patina-whole-app","version":1,"root":"/synthetic","files":[{"name":"iptv.sqlite","length":0},{"name":"settings.json","length":size}]})).unwrap();
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "format": "patina-whole-app",
+            "version": 1,
+            "root": "/synthetic",
+            "files": [
+                {"name": "iptv.sqlite", "length": 0},
+                {"name": "settings.json", "length": size}
+            ]
+        }))
+        .unwrap();
         prop_assert_eq!(backup_manifest::parse(&bytes).is_ok(),size<=1<<20);
     }
     #[test]

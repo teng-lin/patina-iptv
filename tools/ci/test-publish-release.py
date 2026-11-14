@@ -52,10 +52,13 @@ elif action == "delete-asset":
         sys.exit("unexpected delete")
     state["assets"].remove(arguments[3])
 elif action == "edit":
-    if arguments[3:] != ["--draft=false"] or state["release"] != "draft":
+    if state["release"] != "draft":
         sys.exit("unexpected edit")
-    state["release"] = "public"
-    state["published"] = state.get("published", 0) + 1
+    if "--notes-file" in arguments:
+        state["notes"] = Path(arguments[arguments.index("--notes-file") + 1]).read_text()
+    if "--draft=false" in arguments:
+        state["release"] = "public"
+        state["published"] = state.get("published", 0) + 1
 state_file.write_text(json.dumps(state))
 '''
 
@@ -113,6 +116,38 @@ class Publishing(unittest.TestCase):
                                 env=self.environment, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.state()["notes"], "## Preview builds: Windows installer\n")
+
+    def test_draft_retry_updates_notes_from_unsigned_to_signed(self):
+        self.checksums()
+        self.release("draft", notes="## Preview builds: Windows installer\n")
+        notes = self.home / "notes.md"
+        notes.write_text("")
+        result = subprocess.run([sys.executable, str(SCRIPT), "publish", str(self.dist), TAG, str(notes)],
+                                env=self.environment, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.state()["notes"], "")
+        self.assertEqual(self.state()["release"], "public")
+
+    def test_draft_retry_updates_notes_from_signed_to_unsigned(self):
+        self.checksums()
+        self.release("draft", notes="")
+        notes = self.home / "notes.md"
+        notes.write_text("## Preview builds: macOS disk image\n")
+        result = subprocess.run([sys.executable, str(SCRIPT), "publish", str(self.dist), TAG, str(notes)],
+                                env=self.environment, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.state()["notes"], "## Preview builds: macOS disk image\n")
+        self.assertEqual(self.state()["release"], "public")
+
+    def test_rehearsal_publishes_to_draft_without_making_public(self):
+        self.checksums()
+        self.release("absent")
+        result = subprocess.run([sys.executable, str(SCRIPT), "publish", "--rehearsal", str(self.dist), TAG],
+                                env=self.environment, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.state()["release"], "draft")
+        self.assertNotIn("published", self.state())
+        self.assertEqual(self.actions(), ["view", "create", "upload", "view"])
 
     def test_interrupted_draft_is_completed_without_creating_again(self):
         self.checksums()

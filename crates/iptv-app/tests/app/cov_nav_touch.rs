@@ -16,6 +16,7 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
 use iptv_settings::{Settings, Value};
 use nsh_core::picker::PickedFile;
@@ -24,7 +25,6 @@ use nsh_core::{
     EventKind, EventPayload, ImageData, Point, Size, ViewKind, element::Root, prelude::*,
 };
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 use serde_json::json;
 
 const IMPORT: Duration = Duration::from_secs(20);
@@ -40,7 +40,7 @@ const WAIT: Duration = Duration::from_secs(3);
 /// details popover's (mounted, empty, while closed).
 // A time on another local day carries its weekday and date ("Thu 12 · 00:22"):
 // late in the evening the programme two hours on ends, or starts, tomorrow.
-const GALA: &str = "text:/^Test Channel One · ([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+–([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+$/";
+const GALA: &str = "text:/^Test Channel One · ([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+ [AP]M–([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+ [AP]M$/";
 
 /// As in `cov_nav.rs`: "Morning Talk" on now on channel one, "Recital
 /// Replay" two hours back (replayable), "Gala Evening" two hours on;
@@ -340,7 +340,8 @@ fn search_by_touch(app: &mut Headless, data: &std::path::Path) {
     // file had held: they are in the store now, and the file is gone.
     assert!(!data.join("search-history.json").exists());
     let store = crate::isolated::open_database(data.join("iptv.sqlite")).unwrap();
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let deadline =
+        std::time::Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(10));
     loop {
         let saved = store.search_history().unwrap();
         if saved == ["Zebra", "weather"] {

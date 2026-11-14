@@ -32,15 +32,15 @@ const WHITE: u32 = 0xFFFFFF;
 pub fn action_label(action: TileAction) -> &'static str {
     match action {
         TileAction::Retry => tr("Try again"),
-        TileAction::Add => "Add screen",
+        TileAction::Add => tr("Add screen"),
         TileAction::SearchAdd => tr("Search and add"),
-        TileAction::Replace => "Change channel",
+        TileAction::Replace => tr("Change channel"),
         TileAction::Pause => tr("Pause"),
         TileAction::Play => tr("Play"),
-        TileAction::Enlarge => "Enlarge screen",
-        TileAction::Reduce => "Reduce screen",
-        TileAction::FullScreen => "Full screen",
-        TileAction::Remove => "Remove screen",
+        TileAction::Enlarge => tr("Enlarge screen"),
+        TileAction::Reduce => tr("Reduce screen"),
+        TileAction::FullScreen => tr("Full screen"),
+        TileAction::Remove => tr("Remove screen"),
     }
 }
 
@@ -63,6 +63,7 @@ pub fn panel(ui: Ui) -> impl IntoElement {
             move || action().is_some(),
             move || {
                 list_rows::row(size, ROW, mark)
+                    .role(AccessibilityRole::Menuitem)
                     .hover(|s| s.bg(tint(WHITE, RESTING_ALPHA)))
                     .on_press(move || multiview::choose(ui, i))
                     .child(

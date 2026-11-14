@@ -53,6 +53,7 @@ fn every_public_command_returns_its_declared_application_value() {
     check!(rename_organization_item(source, scope(), "generated-channel".into(), "Generated".into()) => ());
     check!(load_search_history(std::path::PathBuf::new()) => Vec<String>);
     check!(combined_resume_key() => Option<String>);
+    check!(stored_guide(source, 1_800_000_000) => iptv_epg::GuideStore);
 
     let source = include_str!("../src/commands.rs");
     let exported: BTreeSet<_> = source

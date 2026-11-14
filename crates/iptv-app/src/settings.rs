@@ -37,6 +37,7 @@ use crate::theme::{ACCENTS, BACKGROUNDS, Theme};
 /// The settings the app acts on.
 pub const WIRED: &[&str] = &[
     "general.language",
+    "general.clock",
     "guide.autoplay",
     "guide.switch_delay",
     "guide.fullscreen_timeout",

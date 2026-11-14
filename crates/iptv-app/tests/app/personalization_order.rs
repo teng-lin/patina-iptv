@@ -3,7 +3,7 @@ use iptv_settings::Settings;
 use iptv_store_sqlite::{ChannelQuery, ChannelScope};
 use personalization::*;
 use std::time::Duration;
-fn reorder(app: &mut nsh_testing::Headless, row: usize) {
+fn reorder(app: &mut crate::headless::Headless, row: usize) {
     menu(app, "Reorder channels");
     step(app.press(&format!("id:organization-row-{row}")));
     step(app.wait_for("text:Move to first"));

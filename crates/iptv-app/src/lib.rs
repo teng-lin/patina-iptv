@@ -432,7 +432,6 @@ pub(crate) fn runtime() -> Rc<runtime::Runtime> {
 static ROOT_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Whether an application owner exists (none before storage is resolved).
-#[cfg(test)]
 pub(crate) fn has_runtime() -> bool {
     RUNTIME.with(|runtime| runtime.borrow().is_some())
 }
@@ -530,10 +529,10 @@ pub fn App() -> impl IntoElement {
                 .flex_1()
                 .items_center()
                 .justify_center()
-                .child(text("Private app storage is unavailable"))
-                .child(text(
+                .child(text(i18n::tr("Private app storage is unavailable")))
+                .child(text(i18n::tr(
                     "Check your home directory and file permissions, then reopen Patina.",
-                ));
+                )));
         }
     };
     // This root's owner becomes the shell's handle, and the one the host's
@@ -544,11 +543,12 @@ pub fn App() -> impl IntoElement {
     RUNTIME.set(Some(owner));
     ROOT_STARTED.store(true, std::sync::atomic::Ordering::Release);
     if let Err(error) = runtime().lock_storage() {
+        let message = error.message();
         return view()
             .flex_1()
             .items_center()
             .justify_center()
-            .child(text(error.message()));
+            .child(text(i18n::tr(message)));
     }
     // Restore validation can decrypt/migrate SQLite and copied documents. It
     // must finish off the UI thread before settings or the live store open.
@@ -574,12 +574,15 @@ pub fn App() -> impl IntoElement {
             }
         });
     if started.is_err() {
-        outcome.set(Some(Err("The startup task could not be started")));
+        outcome.set(Some(Err(i18n::key(
+            "The startup task could not be started",
+        ))));
     } else {
         // Detach under this root owner; disposing the root cancels the reply
         // task, while recovery itself safely completes on its worker.
         drop(spawn(async move {
-            outcome.set(Some(rx.await.unwrap_or(Err("The startup task stopped"))));
+            let stopped = Err(i18n::key("The startup task stopped"));
+            outcome.set(Some(rx.await.unwrap_or(stopped)));
         }));
     }
     view().flex_1().child(dynamic(move || {
@@ -591,15 +594,15 @@ pub fn App() -> impl IntoElement {
                 .flex_1()
                 .items_center()
                 .justify_center()
-                .child(text("Opening saved library…"))
+                .child(text(i18n::tr("Opening saved library…")))
                 .into_element(),
             Some(Err(message)) => view()
                 .flex_1()
                 .items_center()
                 .justify_center()
-                .child(text("Saved data could not be recovered"))
-                .child(text(message))
-                .child(text("Close Patina and try opening it again."))
+                .child(text(i18n::tr("Saved data could not be recovered")))
+                .child(text(i18n::tr(message)))
+                .child(text(i18n::tr("Close Patina and try opening it again.")))
                 .into_element(),
             Some(Ok(())) => ready_app().into_element(),
         })
@@ -756,8 +759,10 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
     let fullscreen = move || ui.mode.get() == ViewMode::Fullscreen;
     let shown = move || pip::ui_shown(ui);
     view()
+        .test_id("app-ui")
         .absolute()
         .inset_0()
+        .accessibility_elements_hidden(move || !shown())
         .opacity(move || if shown() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {
             if shown() {
@@ -768,7 +773,9 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         })
         .child(
             view()
+                .test_id("guide-ui")
                 .flex_1()
+                .accessibility_elements_hidden(move || fullscreen() || ui.any_overlay_open())
                 .opacity(move || if fullscreen() { 0.0_f32 } else { 1.0 })
                 .pointer_events(move || {
                     if fullscreen() {
@@ -792,6 +799,9 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
             // there is no pointer).
             view()
                 .test_id("video")
+                .accessibility_elements_hidden(move || {
+                    !fullscreen() || ui.any_overlay_open() || multiview::is_open(ui)
+                })
                 .absolute()
                 .inset_0()
                 .pointer_events(move || {
@@ -934,6 +944,8 @@ pub(crate) fn go_back(ui: Ui) -> bool {
     ui.pending_zap.set(None);
     browse_playback::activity(ui);
     untracked(|| {
+        use overlays::Overlay;
+        let top = ui.top_overlay();
         let panels =
             ui.panels.with(|p| p.shown) != iptv_core::panels::Shown::Hidden || play_bar::shows(ui);
         let menu = ui.menu.with(Option::is_some)
@@ -941,35 +953,35 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             || ui.chooser.with(Option::is_some)
             || ui.editor.with(Option::is_some);
         match (ui.mode.get(), ui.focus.with(|f| f.pane), panels || menu) {
-            _ if ui.wizard.with(Option::is_some) => wizard_view::back(ui),
-            _ if epg_sources_view::is_open(ui) => epg_sources_view::back(ui),
-            _ if remote_editor::is_open(ui) => remote_editor::back(ui),
-            _ if organization_view::is_open(ui) => organization_view::back(ui),
-            _ if custom_groups::is_open(ui) => custom_groups::back(ui),
-            _ if playlists_view::is_open(ui) => playlists_view::back(ui),
-            _ if settings_view::is_open(ui) => settings_view::back(ui),
-            _ if guide_assign_view::is_open(ui) => guide_assign_view::back(ui),
-            _ if ui.editor.with(Option::is_some) => {
+            _ if top == Some(Overlay::Wizard) => wizard_view::back(ui),
+            _ if top == Some(Overlay::GuideSources) => epg_sources_view::back(ui),
+            _ if top == Some(Overlay::RemoteEditor) => remote_editor::back(ui),
+            _ if top == Some(Overlay::Organization) => organization_view::back(ui),
+            _ if top == Some(Overlay::CustomGroups) => custom_groups::back(ui),
+            _ if top == Some(Overlay::Playlists) => playlists_view::back(ui),
+            _ if top == Some(Overlay::Settings) => settings_view::back(ui),
+            _ if top == Some(Overlay::GuideAssign) => guide_assign_view::back(ui),
+            _ if top == Some(Overlay::FavoritesEditor) => {
                 fav_editor::close(ui);
                 true
             }
-            _ if ui.chooser.with(Option::is_some) => {
+            _ if top == Some(Overlay::Chooser) => {
                 chooser::close(ui);
                 true
             }
-            _ if ui.menu.with(Option::is_some) || ui.description.with(Option::is_some) => {
+            _ if matches!(top, Some(Overlay::Menu | Overlay::Description)) => {
                 menu_view::close(ui);
                 true
             }
-            _ if search_view::is_open(ui) => {
+            _ if top == Some(Overlay::Search) => {
                 search_view::apply(ui, iptv_search::SearchAction::Back);
                 true
             }
-            _ if channels_view::is_open(ui) => {
+            _ if top == Some(Overlay::ChannelList) => {
                 channels_view::key(ui, iptv_nav::Action::Back);
                 true
             }
-            _ if multiview_picker::is_open(ui) => {
+            _ if top == Some(Overlay::ChannelPicker) => {
                 multiview_picker::key(ui, iptv_nav::Action::Back);
                 true
             }
@@ -1006,6 +1018,28 @@ pub(crate) fn go_back(ui: Ui) -> bool {
 /// Explicit synthetic-key injection for the headless test binary only.
 #[cfg(feature = "test-support")]
 pub use credential_key::install_test_key;
+/// Whether a stored source has a guide timer or an in-flight guide read,
+/// for the headless tests of what keeps its periodic checks alive.
+#[cfg(feature = "test-support")]
+pub fn guide_check_pending(source: runtime::model::SourceId) -> bool {
+    platform_data::host_handle().is_some_and(|owner| owner.guide_check_registered(source))
+}
+#[cfg(feature = "test-support")]
+pub fn refuse_work(count: usize) {
+    platform_data::host_handle()
+        .expect("refuse_work needs a started app")
+        .refuse_work(count);
+}
+#[cfg(feature = "test-support")]
+pub fn hold_reports(held: bool) {
+    platform_data::host_handle()
+        .expect("hold_reports needs a started app")
+        .hold_reports(held);
+}
+#[cfg(feature = "test-support")]
+pub fn reports_waiting() -> usize {
+    platform_data::host_handle().map_or(0, |owner| owner.reports_waiting())
+}
 /// Keeps the store's writer busy, as a long catalog or guide publish does,
 /// for the headless tests of what must not wait for it.
 #[cfg(feature = "test-support")]

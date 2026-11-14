@@ -19,7 +19,8 @@ pub use iptv_library::Playlist;
 pub(super) use crate::library::{
     ImportCompletion, Snapshot, cancel_running, import_completion, import_is_current,
     import_revision, import_revision_is_current, install, load, newest, pending_import,
-    reset_imports, revoke_import_handoff, running, track_added_import, track_import,
+    replace_import, replace_running, reset_imports, revoke_import_handoff, running,
+    supersede_import, track_added_import, track_import,
 };
 pub(super) async fn refresh_cache(owner: &Rc<crate::Runtime>) -> Result<(), StoreError> {
     let snapshot = crate::library::snapshot(owner).await?;
@@ -112,7 +113,7 @@ fn changed(owner: &Rc<crate::Runtime>) {
 pub(super) fn run(owner: &Rc<crate::Runtime>, stored: StoredSource, purpose: Purpose, edit: bool) {
     let id = stored.id;
     // A mode switch can replace a still-running job for this source.
-    cancel_running(owner, id);
+    replace_running(owner, id);
     let due = !matches!(
         purpose,
         Purpose::Startup | Purpose::Switch | Purpose::Combined
@@ -239,7 +240,7 @@ fn switch_to_ready(owner: &Rc<crate::Runtime>, id: SourceId) {
     };
     super::combined::leave(owner);
     // A refresh of it in the background gives way to the shown one.
-    cancel_running(owner, id);
+    replace_running(owner, id);
     run(owner, stored, Purpose::Switch, false);
 }
 
@@ -287,7 +288,7 @@ pub fn try_details(owner: &Rc<crate::Runtime>, id: SourceId, source: Source) {
     };
     // Only the details change; the name is the stored one.
     stored.source.config = source.config;
-    cancel_running(owner, id);
+    replace_running(owner, id);
     run(owner, stored, refresh_purpose(owner, id), true);
 }
 
@@ -342,7 +343,6 @@ pub async fn edit_guides(
         return Ok(false);
     }
     refresh_after_commit(owner, |_| {}).await;
-    revoke_import_handoff(owner, id);
     stored::guides_changed(owner, id);
     Ok(true)
 }
@@ -351,8 +351,12 @@ pub async fn edit_guides(
 /// The shown one gives way to the newest other playlist, or to the
 /// first-run state when none is left.
 pub async fn delete(owner: &Rc<crate::Runtime>, id: SourceId) -> Result<(), StoreError> {
+    let generation = super::generation(owner);
     cancel_running(owner, id);
-    crate::library::delete_source(owner, id).await?;
+    if let Err(error) = crate::library::delete_source(owner, id).await {
+        super::keep_guide_check(owner, id, generation, None);
+        return Err(error.into());
+    }
     refresh_after_commit(owner, |snapshot| {
         snapshot.playlists.retain(|p| p.id != id);
         snapshot.details.remove(&id);

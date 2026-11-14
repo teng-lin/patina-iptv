@@ -11,6 +11,7 @@ use std::{
     time::Duration,
 };
 
+use crate::headless::Headless;
 use iptv_providers::{
     HttpResponse, SecretUrl,
     model::{ContentKind, M3uSourceConfig, MacAddress, Source, SourceConfig, StalkerCredentials},
@@ -20,7 +21,6 @@ use iptv_settings::{Settings, Value};
 use iptv_store_sqlite::{SourceId, SourcePolicy, Store};
 use nsh_core::{ImageData, MountItem, Size, element::Root, picker::PickedFile, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
 const IMPORT: Duration = Duration::from_secs(20);
 const STREAM: &str = "http://stream.example.test/resumed-stalker.m3u8";

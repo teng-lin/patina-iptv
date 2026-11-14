@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Source to compile C dependencies (TLS and SQLCipher) for Android: they need
 # the NDK compiler and archive tools. Vendored OpenSSL uses ranlib separately;
 # modern NDKs ship only llvm-ranlib.

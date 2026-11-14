@@ -2,7 +2,7 @@
 //! The portable picker owns selection, filtering and remote focus; the
 //! guide's list and the persistent player surfaces stay in place.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 use crate::lists::entry_name;
 
 use iptv_core::channel_picker::{ChannelPicker, Pane};
@@ -250,6 +250,9 @@ fn screen(ui: Ui) -> impl IntoElement {
         groups.scroll_to_index(entry.get() as u32, percentage(0.5), px(0.0), false);
     });
     ui_kit::screen(ui, size)
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::ChannelPicker.accessibility_covered(ui)
+        })
         .test_id("multiview-picker")
         .child(header(ui, size))
         .child(ui_kit::caption(size, move || {
@@ -277,9 +280,11 @@ fn screen(ui: Ui) -> impl IntoElement {
                             ui.data_version.get();
                             let catalog = catalog(ui);
                             state(ui, |p| {
-                                let count = p.channels().len();
-                                let unit = if count == 1 { "channel" } else { "channels" };
-                                format!("{} · {count} {unit}", entry_name(p.entry(&*catalog), &*catalog))
+                                let name = entry_name(p.entry(&*catalog), &*catalog);
+                                trf(
+                                    "{name} · {count, plural, one {# channel} other {# channels}}",
+                                    &[("name", (&name).into()), ("count", p.channels().len().into())],
+                                )
                             }).unwrap_or_default()
                         }))
                         .child(when(
@@ -329,9 +334,9 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
                 if m.as_ref().is_some_and(|m| {
                     matches!(m.pick(), Some(iptv_core::multiview::Pick::Replace(_)))
                 }) {
-                    "Change channel"
+                    tr("Change channel")
                 } else {
-                    "Add screen"
+                    tr("Add screen")
                 }
             })
         }))

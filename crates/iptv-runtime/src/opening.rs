@@ -20,6 +20,7 @@ use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender as Sender;
 
 use iptv_epg::{ChannelKey, GuideStore, UnixTime};
+use iptv_import::CancelToken;
 use iptv_providers::model::Channel;
 use iptv_store_sqlite::{EpgWindow, SourceId};
 
@@ -70,6 +71,22 @@ pub(crate) async fn send_stored(
     id: SourceId,
     now: UnixTime,
     tx: &Sender<Msg>,
+    cancel: &CancelToken,
+    revoked: &CancelToken,
+) -> bool {
+    send_stored_after(services, job, id, now, tx, &[cancel, revoked], async {}).await
+}
+
+// The continuation is normally ready immediately. A unit test can hold this
+// one opening after its metadata read without changing any other owner/task.
+async fn send_stored_after(
+    services: &super::store_service::Services,
+    job: &Job,
+    id: SourceId,
+    now: UnixTime,
+    tx: &Sender<Msg>,
+    stops: &[&CancelToken],
+    metadata_read: impl std::future::Future<Output = ()>,
 ) -> bool {
     let settings = services.settings();
     let started = Instant::now();
@@ -106,9 +123,9 @@ pub(crate) async fn send_stored(
     let (from, to) = first_screen(now);
     let resumes = super::settings::flag(&settings, iptv_settings::keys::RESUME_LAST_CHANNEL);
     let focus = if resumes {
-        let files = services.clone();
+        let accepted = services.clone();
         services
-            .read(move |_| Ok(super::playback::load_last_channel(&files, Some(id))))
+            .read(move |_| Ok(super::playback::load_last_channel(&accepted, Some(id))))
             .await
             .ok()
             .flatten()
@@ -142,7 +159,7 @@ pub(crate) async fn send_stored(
         let _ = tx.send(Msg::FirstScreen(first, held));
     }
     let started = Instant::now();
-    let window = super::paging::window(now, stored::keep_past_days(&settings));
+    let window = super::paging::window(now, stored::keep_past_days(&services.settings()));
     let guide = services
         .read(move |store| store.load_epg(id, &super::paging::store_window(window)))
         .await
@@ -164,6 +181,7 @@ pub(crate) async fn send_stored(
             ))
         })
         .await;
+    metadata_read.await;
     if let Ok((policy, status, state, sources, overrides)) = metadata {
         let playlist_due = status.last_success_at.is_none()
             || policy.due(
@@ -176,7 +194,7 @@ pub(crate) async fn send_stored(
             );
         if !playlist_due {
             let configs = stored::configs_from_sources(
-                &settings,
+                &services.settings(),
                 &sources,
                 state.as_ref(),
                 Some(&job.source.config),
@@ -190,7 +208,7 @@ pub(crate) async fn send_stored(
                 overrides: &overrides,
             };
             let decision = stored::plan_with(
-                &settings,
+                &services.settings(),
                 job.purpose.trigger(),
                 &configs,
                 matching,
@@ -199,11 +217,19 @@ pub(crate) async fn send_stored(
             );
             if !matches!(decision, iptv_import::Decision::Refresh(_)) {
                 let guide = if matches!(decision, iptv_import::Decision::Discard) {
-                    if services
-                        .call(move |store| store.delete_epg(id))
-                        .await
-                        .is_err()
-                    {
+                    let stops = stored::Stops::of(stops);
+                    let discarded = services
+                        .call(move |store| {
+                            if stops.superseded() {
+                                return Ok(None);
+                            }
+                            store.delete_epg(id).map(Some)
+                        })
+                        .await;
+                    if !matches!(discarded, Ok(Some(_))) {
+                        // A superseded opening has no authoritative policy
+                        // answer. Let its caller's cancelled/current work
+                        // decide what follows, just as after a store error.
                         let _ = tx.send(Msg::Guide(imported(groups, channels, guide)));
                         return false;
                     }
@@ -216,19 +242,22 @@ pub(crate) async fn send_stored(
                 } else {
                     state.as_ref()
                 };
-                if let Some(at) = stored::check_at(
-                    stored::plan_with(
-                        &settings,
-                        iptv_import::Trigger::Timer,
-                        &configs,
-                        matching,
-                        state,
+                let _ = tx.send(
+                    match stored::check_at(
+                        stored::plan_with(
+                            &services.settings(),
+                            iptv_import::Trigger::Timer,
+                            &configs,
+                            matching,
+                            state,
+                            now,
+                        ),
                         now,
-                    ),
-                    now,
-                ) {
-                    let _ = tx.send(Msg::NextCheck { source: id, at });
-                }
+                    ) {
+                        Some(at) => Msg::NextCheck { source: id, at },
+                        None => Msg::NoCheck { source: id },
+                    },
+                );
                 let counts = iptv_core::wizard::ImportCounts {
                     channels: channels.len() as u32,
                     groups: groups.len() as u32,
@@ -246,6 +275,12 @@ pub(crate) async fn send_stored(
     let _ = tx.send(Msg::Guide(imported(groups, channels, guide)));
     false
 }
+
+#[cfg(test)]
+#[path = "../../iptv-store-sqlite/tests/common/mod.rs"]
+mod common;
+#[cfg(test)]
+mod revocation;
 
 #[cfg(test)]
 mod tests {

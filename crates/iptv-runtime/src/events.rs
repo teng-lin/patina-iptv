@@ -12,6 +12,7 @@ pub enum RuntimeEvent {
         done: futures_channel::oneshot::Sender<()>,
     },
     Message(String),
+    SettingsSaveFailed(super::settings::SaveFailure),
     BackupProgress(super::backup::Progress),
     FavoritesChanged {
         channels: std::collections::BTreeSet<usize>,

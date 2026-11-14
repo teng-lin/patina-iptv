@@ -106,6 +106,59 @@ impl Drop for Pool {
     }
 }
 
+/// Synthetic conditions of one owner's workers, for the headless tests: a
+/// queue that refuses work, and an import held just before it reports.
+#[cfg(feature = "test-support")]
+#[derive(Default)]
+pub(crate) struct Hooks {
+    refusals: std::sync::atomic::AtomicUsize,
+    reports: Mutex<(bool, usize)>,
+    released: Condvar,
+}
+#[cfg(feature = "test-support")]
+impl Hooks {
+    pub(crate) fn refuse(&self) -> bool {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.refusals
+            .try_update(SeqCst, SeqCst, |left| left.checked_sub(1))
+            .is_ok()
+    }
+    fn reports(&self) -> std::sync::MutexGuard<'_, (bool, usize)> {
+        self.reports
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    pub(crate) fn refuse_work(&self, count: usize) {
+        self.refusals
+            .store(count, std::sync::atomic::Ordering::SeqCst);
+    }
+    pub(crate) fn hold_reports(&self, held: bool) {
+        if held {
+            self.reports().0 = true;
+        } else {
+            self.release();
+        }
+    }
+    pub(crate) fn reports_waiting(&self) -> usize {
+        self.reports().1
+    }
+    pub(crate) fn before_report(&self) {
+        let mut reports = self.reports();
+        reports.1 += 1;
+        while reports.0 {
+            reports = self
+                .released
+                .wait(reports)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        reports.1 -= 1;
+    }
+    pub(crate) fn release(&self) {
+        self.reports().0 = false;
+        self.released.notify_all();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

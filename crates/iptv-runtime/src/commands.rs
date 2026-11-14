@@ -984,3 +984,16 @@ pub fn combined_resume_key(
             .map_err(crate::Error::from)
     }
 }
+
+/// The guide after every write queued before this request (deletion or rematching).
+pub fn stored_guide(
+    owner: &super::Runtime,
+    source: SourceId,
+    now: iptv_epg::UnixTime,
+) -> impl Future<Output = Result<iptv_epg::GuideStore, super::Error>> + use<> {
+    let window = super::paging::window(now, super::stored::keep_past_days(&owner.settings()));
+    let read = owner
+        .services()
+        .call(move |store| store.load_epg(source, &super::paging::store_window(window)));
+    async move { Ok(read.await?) }
+}

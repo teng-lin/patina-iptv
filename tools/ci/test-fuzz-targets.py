@@ -42,7 +42,7 @@ class Targets(unittest.TestCase):
 
     def test_repository_manifest_lists_the_import_target(self):
         result = subprocess.run([sys.executable, str(SCRIPT)], check=True, capture_output=True, text=True)
-        self.assertIn("imports", json.loads(result.stdout))
+        self.assertIn("m3u", json.loads(result.stdout))
 
 
 class Runner(unittest.TestCase):

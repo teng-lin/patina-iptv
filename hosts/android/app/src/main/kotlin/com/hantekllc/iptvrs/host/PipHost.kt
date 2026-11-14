@@ -58,13 +58,12 @@ class PipHost(private val activity: Activity) {
     private var listening = false
 
     /** `player`'s `pip` prop: null for every player but the main one. */
-    fun setProp(player: PlayerComponent, value: Any?) {
-        val map = value as? Map<*, *>
-        if (map == null) {
+    internal fun setProp(player: PlayerComponent, pip: PlayerPip?) {
+        if (pip == null) {
             if (main === player) main = null
             return
         }
-        val enter = (map["enter"] as? Number)?.toLong() ?: 0L
+        val enter = pip.enter
         if (main !== player) {
             main = player
             // A count from before this player is no request.
@@ -73,7 +72,7 @@ class PipHost(private val activity: Activity) {
             player.view().addOnLayoutChangeListener(moved)
             player.picture.addOnLayoutChangeListener(moved)
         }
-        auto = map["auto"] == true
+        auto = pip.auto
         val wanted = enter > asked
         asked = maxOf(asked, enter)
         update()
@@ -137,7 +136,7 @@ class PipHost(private val activity: Activity) {
         // Also for an activity that starts in the window (recreated there).
         active = activity.isInPictureInPictureMode
         listen(active)
-        main?.emit("pip", mapOf("supported" to supported, "tv" to tv, "active" to active))
+        main?.emit(PlayerEvent.Pip(supported, tv, active))
     }
 
     /** Gives the system what the window would show, when it changed. */
@@ -175,14 +174,14 @@ class PipHost(private val activity: Activity) {
     }
 
     private fun actions(): List<RemoteAction> = listOf(
-        action("previous", R.drawable.pip_previous, "Previous channel", 1),
-        if (paused) action("play", R.drawable.pip_play, "Play", 2)
-        else action("pause", R.drawable.pip_pause, "Pause", 2),
-        action("next", R.drawable.pip_next, "Next channel", 3),
+        action(PipButton.PREVIOUS, R.drawable.pip_previous, "Previous channel", 1),
+        if (paused) action(PipButton.PLAY, R.drawable.pip_play, "Play", 2)
+        else action(PipButton.PAUSE, R.drawable.pip_pause, "Pause", 2),
+        action(PipButton.NEXT, R.drawable.pip_next, "Next channel", 3),
     )
 
-    private fun action(name: String, icon: Int, title: String, code: Int): RemoteAction {
-        val intent = Intent(ACTION).setPackage(activity.packageName).putExtra(EXTRA, name)
+    private fun action(button: PipButton, icon: Int, title: String, code: Int): RemoteAction {
+        val intent = Intent(ACTION).setPackage(activity.packageName).putExtra(EXTRA, button.wire)
         val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         val pending = PendingIntent.getBroadcast(activity, code, intent, flags)
         return RemoteAction(Icon.createWithResource(activity, icon), title, title, pending)
@@ -192,7 +191,7 @@ class PipHost(private val activity: Activity) {
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val action = intent.getStringExtra(EXTRA) ?: return
-            main?.emit("pipAction", mapOf("action" to action))
+            main?.emit(PlayerEvent.PipAction(action))
         }
     }
 

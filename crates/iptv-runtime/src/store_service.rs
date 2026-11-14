@@ -87,6 +87,10 @@ pub(crate) struct Service {
     settings: super::settings::Shared,
     /// The thread that started the services; it may not block on the store.
     ui_thread: OnceLock<ThreadId>,
+    #[cfg(feature = "test-support")]
+    pub(crate) guide_checks: super::guide_checks::Mirror,
+    #[cfg(feature = "test-support")]
+    pub(crate) hooks: super::workers::Hooks,
 }
 impl Service {
     pub(crate) fn new(ports: crate::Ports) -> Self {
@@ -106,6 +110,10 @@ impl Service {
             pool: OnceLock::new(),
             settings: Default::default(),
             ui_thread: OnceLock::new(),
+            #[cfg(feature = "test-support")]
+            guide_checks: Default::default(),
+            #[cfg(feature = "test-support")]
+            hooks: Default::default(),
         }
     }
 
@@ -130,6 +138,8 @@ impl Service {
 
     pub(crate) fn retire(&self) {
         self.epochs.active.store(0, Ordering::SeqCst);
+        #[cfg(feature = "test-support")]
+        self.hooks.release();
         self.files.close();
         if let Some(pool) = self.pool.get() {
             pool.close();
@@ -263,6 +273,10 @@ impl Services {
     /// Queues refresh `work` on the owner's bounded pool; false when it is
     /// full. Work for the visible source precedes background work.
     pub(crate) fn submit(&self, visible: bool, work: impl FnOnce() + Send + 'static) -> bool {
+        #[cfg(feature = "test-support")]
+        if self.service.hooks.refuse() {
+            return false;
+        }
         let accepted = self.clone();
         self.service
             .pool
@@ -278,6 +292,11 @@ impl Services {
                     }
                 }),
             )
+    }
+
+    #[cfg(feature = "test-support")]
+    pub(crate) fn before_report(&self) {
+        self.service.hooks.before_report();
     }
 
     /// Queues `operation` on the writer and returns its reply. Transfers

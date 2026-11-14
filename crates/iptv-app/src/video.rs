@@ -12,14 +12,19 @@
 //! shrinks to nothing (it is never hidden or detached).
 //!
 //! The `tv.player` contract (both hosts; every instance is independent: its
-//! own player, props and events, several playing at once):
+//! own player, props and events, several playing at once). Its names are
+//! declared once, in `iptv-player-mpv` (`props.rs`, `events.rs`): the props
+//! go out under the names generated there ([`PlayerBindings::into_wire`])
+//! and the events come in as its typed [`PlayerEvent`].
 //! - props `source` `{url, headers, token, live, reconnect}` or null (a new
 //!   url or token reopens; the picture goes black until the new stream's
 //!   first frame, except when `reconnect` says the app reopens the stream
 //!   that played, or only the token changed: the last frame stays; `live`
 //!   streams play on across connections the server closes where the
 //!   player can bridge them, keep their last frame after an error (the app
-//!   reconnects them) and are buffered to ride out short outages), `paused`, `userAgent`, `pictureSize`; `videoTrack` (`auto` or a video track id),
+//!   reconnects them) and are buffered to ride out short outages; its
+//!   `User-Agent` is one of the headers, else the player's own), `paused`,
+//!   `pictureSize`; `videoTrack` (`auto` or a video track id),
 //!   `audioTrack` (`auto` or an audio track id), `textTrack` (`off` or a
 //!   text track id) for the open stream (a new source starts again from
 //!   `auto`/`auto`/`off`); `volume` (0–100; the desktop's, Android keeps
@@ -42,8 +47,10 @@
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use iptv_player_mpv::{
+    PlayerBindings, PlayerEvent, PlayerEventError, PlayerEventKind, SourceProps,
+};
 use nsh_core::prelude::*;
-use serde_json::{Value, json};
 
 use crate::{Ui, ViewMode};
 
@@ -146,11 +153,9 @@ pub fn has_source(surface: usize) -> bool {
 static SOURCED: [AtomicBool; crate::player::SURFACES] =
     [const { AtomicBool::new(false) }; crate::player::SURFACES];
 
-/// Counts `value` as an open when its url or token differs from `last`'s.
-fn count_open(surface: usize, last: &RefCell<Option<(String, u64)>>, value: &Value) {
-    let now = value["url"]
-        .as_str()
-        .map(|url| (url.to_owned(), value["token"].as_u64().unwrap_or(0)));
+/// Counts `source` as an open when its url or token differs from `last`'s.
+fn count_open(surface: usize, last: &RefCell<Option<(String, u64)>>, source: Option<&SourceProps>) {
+    let now = source.map(|s| (s.url.clone(), s.token));
     let mut last = last.borrow_mut();
     if now.is_some() && *last != now {
         OPENS[surface].fetch_add(1, Ordering::Relaxed);
@@ -161,7 +166,7 @@ fn count_open(surface: usize, last: &RefCell<Option<(String, u64)>>, value: &Val
 
 /// The stream as the host's `source` prop: `{url, headers, token, live,
 /// reconnect}`, or null when nothing plays.
-fn source_prop(ui: Ui, surface: usize) -> Option<iptv_player_mpv::SourceProps> {
+fn source_prop(ui: Ui, surface: usize) -> Option<SourceProps> {
     let stream = ui.player.stream(surface);
     let playing = if surface == 0 {
         ui.playing.get().is_some() || crate::player::resume::playing(ui)
@@ -176,7 +181,7 @@ fn source_prop(ui: Ui, surface: usize) -> Option<iptv_player_mpv::SourceProps> {
     let live = stream.live.get_untracked();
     let reconnect = stream.reconnect.get_untracked();
     stream.source.with(|s| {
-        s.as_ref().map(|s| iptv_player_mpv::SourceProps {
+        s.as_ref().map(|s| SourceProps {
             url: s.url.clone(),
             public_only: s.public_only,
             headers: s.headers.iter().cloned().collect(),
@@ -191,10 +196,10 @@ fn source_prop(ui: Ui, surface: usize) -> Option<iptv_player_mpv::SourceProps> {
 pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
     let stream = ui.player.stream(surface);
     let sent = RefCell::new(None);
-    let props: iptv_player_mpv::PlayerBindings = iptv_player_mpv::PlayerBindings {
+    let props = PlayerBindings {
         source: Box::new(move || {
             let source = source_prop(ui, surface);
-            count_open(surface, &sent, &json!(source));
+            count_open(surface, &sent, source.as_ref());
             source
         }),
         paused: Box::new(move || {
@@ -221,64 +226,94 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
         audio_delay: Box::new(move || ui.media.delay_ms.get()),
         pip: Box::new(move || crate::pip::prop(ui, surface)),
     };
-    native("tv.player")
+    let mut player = native(iptv_player_mpv::PLAYER_VIEW)
         .absolute()
         .left(move || px(surface_rect(ui, surface).0))
         .top(move || px(surface_rect(ui, surface).1))
         .w(move || px(surface_rect(ui, surface).2))
-        .h(move || px(surface_rect(ui, surface).3))
-        .prop("source", move || json!((props.source)()))
-        .prop("paused", move || json!((props.paused)()))
-        .prop("pictureSize", move || json!((props.picture_size)()))
-        .prop("videoTrack", move || json!((props.video_track)()))
-        .prop("audioTrack", move || json!((props.audio_track)()))
-        .prop("textTrack", move || json!((props.text_track)()))
-        .prop("volume", move || json!((props.volume)()))
-        .prop("muted", move || json!((props.muted)()))
-        .prop("audioDelay", move || json!((props.audio_delay)()))
-        .prop("pip", move || json!((props.pip)()))
-        .on_native_event(move |e: &NativeEvent| {
-            match e.name.as_ref() {
-                // Once a second while playing: not logged.
-                "position" => {
-                    if let Some(ms) = e.data["ms"].as_u64() {
-                        stream.position_ms.set(ms);
-                    }
-                    return;
-                }
-                "tracks" => return crate::media::on_tracks(ui, surface, &e.data),
-                "format" => return crate::media::on_format(ui, surface, &e.data),
-                "pip" => return crate::pip::on_state(ui, &e.data),
-                "pipAction" => return crate::pip::on_action(ui, &e.data),
-                _ => {}
-            }
-            let status = match &*e.name {
-                "state" => {
-                    let state = e.data["state"].as_str().unwrap_or("?");
-                    crate::player::on_state(ui, surface, state);
-                    state.to_owned()
-                }
-                "size" => {
-                    let (w, h) = (e.data["width"].as_u64(), e.data["height"].as_u64());
-                    if let (Some(w), Some(h)) = (w, h) {
-                        stream.size.set(Some((w as u32, h as u32)));
-                    }
-                    if surface == 0 {
-                        crate::startup::mark("video frame");
-                    }
-                    format!("{}×{}", e.data["width"], e.data["height"])
-                }
-                "error" => {
-                    let code = e.data["code"].as_str().unwrap_or("?");
-                    let http = e.data["http"].as_u64().and_then(|h| u16::try_from(h).ok());
-                    crate::player::on_error(ui, surface, code, http);
-                    format!("error {code}")
-                }
-                _ => return,
-            };
-            log::info!("iptv player {surface} {}: {status}", e.name);
+        .h(move || px(surface_rect(ui, surface).3));
+    // Every prop of the contract, under its one declared name.
+    for (prop, value) in props.into_wire() {
+        player = player.prop(prop.wire(), value);
+    }
+    player.on_native_event(
+        move |e: &NativeEvent| match PlayerEvent::decode(&e.name, &e.data) {
+            Ok(event) => on_event(ui, surface, event),
+            Err(error) => on_unread(ui, surface, error),
+        },
+    )
+}
+
+/// An event the contract does not have, from surface `surface`'s player. It
+/// does what it did before the events were typed: a state without one of
+/// the four names shows on the status line and changes nothing else, a
+/// `size` without its two numbers still counts as the first frame (the
+/// stream's size stays), and the rest sets nothing.
+fn on_unread(ui: Ui, surface: usize, error: PlayerEventError) {
+    let (kind, status) = match error {
+        // Another component's event or a later host's, and a `position`
+        // without its `ms`: not logged.
+        PlayerEventError::UnknownName | PlayerEventError::NoPosition => return,
+        // The window has no such button: logged as every action is.
+        PlayerEventError::UnknownAction(action) => {
+            log::info!("iptv pip: {action}");
+            return;
+        }
+        PlayerEventError::UnknownState(name) => (PlayerEventKind::State, name),
+        PlayerEventError::NoSize { width, height } => {
             if surface == 0 {
-                ui.player_status.set(status);
+                crate::startup::mark("video frame");
             }
-        })
+            (PlayerEventKind::Size, format!("{width}×{height}"))
+        }
+    };
+    report(ui, surface, kind, status);
+}
+
+/// Logs `status`, what the `kind` event from `surface` said, and shows
+/// surface 0's on the status line.
+fn report(ui: Ui, surface: usize, kind: PlayerEventKind, status: String) {
+    log::info!("iptv player {surface} {}: {status}", kind.wire());
+    if surface == 0 {
+        ui.player_status.set(status);
+    }
+}
+
+/// One event from surface `surface`'s player.
+fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
+    let stream = ui.player.stream(surface);
+    let kind = event.kind();
+    let status = match event {
+        // Once a second while playing: not logged.
+        PlayerEvent::Position { ms } => {
+            stream.position_ms.set(ms);
+            return;
+        }
+        PlayerEvent::Tracks(tracks) => return crate::media::on_tracks(ui, surface, tracks),
+        PlayerEvent::Format { fps, channels } => {
+            return crate::media::on_format(ui, surface, fps, channels);
+        }
+        PlayerEvent::Pip {
+            supported,
+            tv,
+            active,
+        } => return crate::pip::on_state(ui, supported, tv, active),
+        PlayerEvent::PipAction(action) => return crate::pip::on_action(ui, action),
+        PlayerEvent::State(state) => {
+            crate::player::on_state(ui, surface, state);
+            state.name().to_owned()
+        }
+        PlayerEvent::Size { width, height } => {
+            stream.size.set(Some((width as u32, height as u32)));
+            if surface == 0 {
+                crate::startup::mark("video frame");
+            }
+            format!("{width}×{height}")
+        }
+        PlayerEvent::Error { code, http } => {
+            crate::player::on_error(ui, surface, &code, http);
+            format!("error {code}")
+        }
+    };
+    report(ui, surface, kind, status);
 }

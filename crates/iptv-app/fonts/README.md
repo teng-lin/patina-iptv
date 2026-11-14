@@ -31,3 +31,15 @@ currency and the symbols Roboto has, as WOFF2, keeping every name record
 Characters outside the subset (Arabic, Hebrew, CJK, Thai, Devanagari, ▶,
 ★, emoji) are drawn with the system's fonts: every family list the app
 names ends in `sans-serif`, and the platforms fall back per character.
+
+## Chinese, Japanese and Korean
+
+Install system fonts covering simplified Chinese, traditional Chinese,
+Japanese and Korean when running Patina on a minimal desktop installation.
+For example, a distribution's Noto CJK package supplies these scripts.
+Android and Apple systems normally supply their own fallback fonts.
+Patina relies on those fonts for both interface text and playlist content.
+Bundling a subset of the interface catalogue would not cover arbitrary
+channel names or programme titles, so it would still require system fonts.
+Check all four CJK interface choices with synthetic channel and programme
+names when changing font registration or packaging.

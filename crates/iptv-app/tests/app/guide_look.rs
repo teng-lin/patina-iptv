@@ -13,11 +13,11 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
 use nsh_core::picker::PickedFile;
 use nsh_core::{ImageData, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
 const IMPORT: Duration = Duration::from_secs(30);
 /// The rows of the playlist.
@@ -204,7 +204,9 @@ fn styles_when(
         // The screen moves only as its batches are applied.
         app.catch_up();
         let found = styles(app, text);
-        if ok(&found) || start.elapsed() > std::time::Duration::from_secs(3) {
+        if ok(&found)
+            || start.elapsed() > crate::isolated::scaled_duration(std::time::Duration::from_secs(3))
+        {
             return found;
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -250,14 +252,22 @@ fn check_ruler(app: &mut Headless) {
         .into_iter()
         .filter_map(|n| {
             let t = n.text.as_ref()?.text.text.to_string();
-            // "23:30", or past midnight "Wed 11 · 00:00" (not a programme's
-            // "23:10 – 00:10", nor the clock's "Tue 10 Nov  23:11").
-            let hhmm = t.rsplit(" · ").next().unwrap_or(&t);
-            let time = hhmm.len() == 5
-                && hhmm.as_bytes()[2] == b':'
-                && hhmm.replace(':', "").parse::<u32>().is_ok()
-                && !t.contains('–')
-                && (t.len() == 5 || t.contains(" · "));
+            // "11:30 PM" on the scenarios' 12-hour clock ("23:30" on a
+            // 24-hour one), or past midnight "Wed 11 · 12:00 AM" (not a
+            // programme's "11:10 PM – 12:10 AM", nor the clock's
+            // "Tue 10 Nov  11:11 PM").
+            let last = t.rsplit(" · ").next().unwrap_or(&t);
+            let clock = last
+                .strip_suffix(" AM")
+                .or_else(|| last.strip_suffix(" PM"))
+                .unwrap_or(last);
+            let time = clock.split_once(':').is_some_and(|(hour, minute)| {
+                (1..=2).contains(&hour.len())
+                    && minute.len() == 2
+                    && hour.parse::<u32>().is_ok()
+                    && minute.parse::<u32>().is_ok()
+            }) && !t.contains('–')
+                && (last.len() == t.len() || t.contains(" · "));
             time.then_some((
                 t,
                 n.bounds.origin.x.0,
@@ -306,7 +316,9 @@ fn number_y_when(app: &mut Headless, row: usize, ok: impl Fn(f32) -> bool) -> Op
     loop {
         app.catch_up();
         let y = number_y(app, row);
-        if y.is_some_and(&ok) || start.elapsed() > std::time::Duration::from_secs(3) {
+        if y.is_some_and(&ok)
+            || start.elapsed() > crate::isolated::scaled_duration(std::time::Duration::from_secs(3))
+        {
             return y;
         }
         std::thread::sleep(std::time::Duration::from_millis(20));

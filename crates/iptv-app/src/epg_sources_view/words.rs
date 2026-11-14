@@ -1,6 +1,6 @@
 //! The guide sources screen's wording (iptv-rs's own).
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 use crate::runtime::model::{GuideSource, ImportErrorKind};
 use iptv_core::wizard::FieldError;
@@ -14,7 +14,10 @@ pub fn title(s: &GuideSource) -> String {
     match (&s.name, s.provider_index) {
         (Some(name), _) => name.clone(),
         (None, Some(0)) => tr("The provider's guide").to_owned(),
-        (None, Some(n)) => format!("The provider's guide {}", n + 1),
+        (None, Some(n)) => trf(
+            "The provider's guide {number}",
+            &[("number", (n + 1).into())],
+        ),
         (None, None) => masked_link(s.url.expose()),
     }
 }
@@ -36,28 +39,25 @@ pub fn shift(minutes: i32) -> String {
     }
     let sign = if minutes > 0 { "+" } else { "−" };
     let (h, m) = (minutes.abs() / 60, minutes.abs() % 60);
-    if m == 0 {
-        format!("Times {sign}{h} h")
+    let hours = if m == 0 {
+        format!("{sign}{h}")
     } else {
-        format!("Times {sign}{h}:{m:02} h")
-    }
+        format!("{sign}{h}:{m:02}")
+    };
+    trf("Times {hours} h", &[("hours", (&hours).into())])
 }
 
 /// Why a feed did not load (kind only).
 pub fn failure(kind: ImportErrorKind) -> &'static str {
     match kind {
-        ImportErrorKind::Network => "no answer from the server",
-        ImportErrorKind::Timeout => "the server took too long",
-        ImportErrorKind::HttpStatus => "the server turned the request down",
-        ImportErrorKind::InvalidBody => "the answer was not guide data",
-        ImportErrorKind::InvalidConfig => "the link is incomplete",
-        ImportErrorKind::Cancelled => "it was stopped",
-        _ => "something went wrong",
+        ImportErrorKind::Network => tr("no answer from the server"),
+        ImportErrorKind::Timeout => tr("the server took too long"),
+        ImportErrorKind::HttpStatus => tr("the server turned the request down"),
+        ImportErrorKind::InvalidBody => tr("the answer was not guide data"),
+        ImportErrorKind::InvalidConfig => tr("the link is incomplete"),
+        ImportErrorKind::Cancelled => tr("it was stopped"),
+        _ => tr("something went wrong"),
     }
-}
-
-fn count(n: u64, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 /// The source's status: off, its last result, or not downloaded yet.
@@ -65,42 +65,50 @@ fn count(n: u64, one: &str, many: &str) -> String {
 pub fn status(line: &SourceLine, when: impl Fn(i64) -> String) -> (String, bool) {
     let s = &line.source;
     let state = match &line.result {
-        _ if !s.enabled => return ("Switched off: not downloaded".to_owned(), false),
+        _ if !s.enabled => return (tr("Switched off: not downloaded").to_owned(), false),
         None => return (tr("Not downloaded yet").to_owned(), false),
         Some(r) => r,
     };
-    let shift = if s.shift_minutes == 0 {
-        String::new()
-    } else {
-        format!(" · {}", shift(s.shift_minutes))
-    };
-    match state.error {
+    let at = when(state.attempted_at);
+    let updated = trf("updated {when}", &[("when", (&at).into())]);
+    let (mut parts, failed) = match state.error {
         Some(kind) => (
-            format!(
-                "Failed {}: {}{shift}",
-                when(state.attempted_at),
-                failure(kind)
-            ),
+            vec![trf(
+                "Failed {when}: {reason}",
+                &[("when", (&at).into()), ("reason", failure(kind).into())],
+            )],
             true,
         ),
         None if state.channel_count == 0 && state.listed_count > 0 => (
-            format!(
-                "None of its {} is used here · updated {}{shift}",
-                count(state.listed_count, "channel", "channels"),
-                when(state.attempted_at)
-            ),
+            vec![
+                trf(
+                    "{count, plural, one {Its # channel is not used here} \
+                     other {None of its # channels is used here}}",
+                    &[("count", state.listed_count.into())],
+                ),
+                updated,
+            ],
             false,
         ),
         None => (
-            format!(
-                "{} used · {} · updated {}{shift}",
-                count(state.channel_count, "channel", "channels"),
-                count(state.programme_count, "programme", "programmes"),
-                when(state.attempted_at)
-            ),
+            vec![
+                trf(
+                    "{count, plural, one {# channel used} other {# channels used}}",
+                    &[("count", state.channel_count.into())],
+                ),
+                trf(
+                    "{count, plural, one {# programme} other {# programmes}}",
+                    &[("count", state.programme_count.into())],
+                ),
+                updated,
+            ],
             false,
         ),
+    };
+    if s.shift_minutes != 0 {
+        parts.push(shift(s.shift_minutes));
     }
+    (parts.join(" · "), failed)
 }
 
 pub fn act(act: Act, s: &GuideSource) -> String {
@@ -118,9 +126,9 @@ pub fn act(act: Act, s: &GuideSource) -> String {
 
 pub fn notice(notice: Notice) -> &'static str {
     match notice {
-        Notice::Link(FieldError::Required) => "Type the guide's link (XMLTV).",
+        Notice::Link(FieldError::Required) => tr("Type the guide's link (XMLTV)."),
         Notice::Link(e) => crate::wizard_view::words::field_error(e),
-        Notice::Duplicate => "This playlist has that guide already.",
+        Notice::Duplicate => tr("This playlist has that guide already."),
     }
 }
 
@@ -128,20 +136,27 @@ pub fn notice(notice: Notice) -> &'static str {
 pub fn sheet(kind: &EditKind) -> (&'static str, &'static str) {
     match kind {
         EditKind::AddLink => (
-            "New guide source: link (XMLTV)",
-            "http://…/guide.xml or .xml.gz",
+            tr("New guide source: link (XMLTV)"),
+            tr("http://…/guide.xml or .xml.gz"),
         ),
-        EditKind::AddName { .. } => ("Its name (optional)", "Left empty, the link is shown"),
-        EditKind::Rename(_) => (tr("Name"), "Left empty, where it comes from is shown"),
-        EditKind::Relink(_) => ("New link (XMLTV)", "Left empty, the current one stays"),
+        EditKind::AddName { .. } => (
+            tr("Its name (optional)"),
+            tr("Left empty, the link is shown"),
+        ),
+        EditKind::Rename(_) => (tr("Name"), tr("Left empty, where it comes from is shown")),
+        EditKind::Relink(_) => (
+            tr("New link (XMLTV)"),
+            tr("Left empty, the current one stays"),
+        ),
     }
 }
 
 /// What removing a source does.
 pub fn remove_consequences(s: &GuideSource) -> String {
-    format!(
-        "“{}” will no longer be downloaded. Its programmes go away at the next guide update.",
-        title(s)
+    trf(
+        "“{name}” will no longer be downloaded. \
+         Its programmes go away at the next guide update.",
+        &[("name", (&title(s)).into())],
     )
 }
 
@@ -281,5 +296,86 @@ mod tests {
         r.error = Some(ImportErrorKind::HttpStatus);
         let (text, failed) = status(&line(true, Some(r)), when);
         assert!(failed && text.starts_with("Failed 14:05: the server turned"));
+    }
+
+    #[test]
+    fn the_status_follows_the_language() {
+        use crate::i18n::in_language;
+        let when = |_| "14:05".to_owned();
+        let mut r = FeedResult {
+            feed: guides::FIRST_USER_FEED,
+            attempted_at: 0,
+            error: None,
+            channel_count: 2,
+            programme_count: 240,
+            listed_count: 50,
+        };
+        let used = line(true, Some(r.clone()));
+        assert_eq!(
+            in_language("de", || status(&used, when).0),
+            "2 Sender verwendet · 240 Sendungen · aktualisiert 14:05 · Zeiten −1:30 Std."
+        );
+        assert_eq!(
+            in_language("ru", || status(&used, when).0),
+            "Используется 2 канала · 240 программ · обновлено 14:05 · Сдвиг времени −1:30 ч"
+        );
+        assert_eq!(
+            in_language("ja", || status(&used, when).0),
+            "2チャンネルを使用中 · 240番組 · 14:05に更新 · 時差補正 −1:30時間"
+        );
+        r.error = Some(ImportErrorKind::HttpStatus);
+        let failed = line(true, Some(r));
+        assert_eq!(
+            in_language("de", || status(&failed, when)),
+            (
+                "Fehlgeschlagen 14:05: der Server hat die Anfrage abgelehnt \
+                 · Zeiten −1:30 Std."
+                    .to_owned(),
+                true
+            )
+        );
+        // The time goes where the language puts it.
+        assert!(
+            in_language("ja", || status(&failed, when).0)
+                .starts_with("14:05に失敗：サーバーがリクエストを拒否しました")
+        );
+        let off = line(false, None);
+        assert_eq!(
+            in_language("de", || status(&off, when).0),
+            "Ausgeschaltet: nicht heruntergeladen"
+        );
+        let urls = [
+            SecretUrl::new("http://p.example.test/a"),
+            SecretUrl::new("http://p.example.test/b"),
+        ];
+        let provider = guides::sync_provider(&[], &urls);
+        assert_eq!(
+            in_language("de", || title(&provider[1])),
+            "Programm des Anbieters 2"
+        );
+        assert_eq!(in_language("de", || shift(0)), "Keine Zeitverschiebung");
+    }
+
+    #[test]
+    fn every_guide_failure_is_told_in_every_language() {
+        use crate::i18n::in_language;
+        let kinds = [
+            ImportErrorKind::Network,
+            ImportErrorKind::Timeout,
+            ImportErrorKind::HttpStatus,
+            ImportErrorKind::InvalidBody,
+            ImportErrorKind::InvalidConfig,
+            ImportErrorKind::Cancelled,
+            ImportErrorKind::Other,
+        ];
+        let english = kinds.map(failure);
+        for language in iptv_core::i18n::LANGUAGES.iter().skip(1) {
+            let texts = in_language(language.tag, || kinds.map(failure));
+            let distinct: std::collections::BTreeSet<_> = texts.iter().collect();
+            assert_eq!(distinct.len(), kinds.len(), "{}", language.tag);
+            for (text, source) in texts.iter().zip(&english) {
+                assert_ne!(text, source, "{}: not translated", language.tag);
+            }
+        }
     }
 }

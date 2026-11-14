@@ -48,6 +48,10 @@ fn screen(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     let idle = computed(move || state(ui, |s| s.state.phase() == Phase::Idle).unwrap_or(true));
     ui_kit::screen(ui, size)
+        .test_id("search-screen")
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::Search.accessibility_covered(ui)
+        })
         .child(header(ui, size))
         .child(ui_kit::caption(size, move || hint(ui)))
         .child(

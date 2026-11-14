@@ -296,6 +296,17 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             _ => mark().disabled(),
         });
         list_rows::row(size, ROW, mark)
+            .role(move || {
+                if heading() {
+                    AccessibilityRole::Header
+                } else {
+                    AccessibilityRole::Menuitem
+                }
+            })
+            .accessibility_state(move || AccessibilityState {
+                disabled: matches!(row(), Some(Row::Action { enabled: false, .. })),
+                ..Default::default()
+            })
             .child(name)
             .on_press(move || {
                 ui.touched();
@@ -314,6 +325,11 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .inset_0()
         .flex_row()
         // The description popover is in it and shows without the menu.
+        .test_id("menu-layer")
+        .accessibility_elements_hidden(move || {
+            (!open() && !ui.description.with(Option::is_some))
+                || crate::overlays::Overlay::Description.accessibility_covered(ui)
+        })
         .opacity(move || {
             if open() || ui.description.with(Option::is_some) {
                 1.0_f32
@@ -332,6 +348,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             view()
                 .flex_1()
                 .bg(tint(0x000000, 0x80))
+                .accessibility_elements_hidden(move || {
+                    crate::overlays::Overlay::Menu.accessibility_hidden(ui)
+                })
                 .opacity(menu_opacity)
                 .on_press(move || {
                     ui.touched();
@@ -340,7 +359,11 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         )
         .child(
             view()
+                .test_id("menu-panel")
                 .w(move || px(size.whole(PANEL_W)))
+                .accessibility_elements_hidden(move || {
+                    crate::overlays::Overlay::Menu.accessibility_hidden(ui)
+                })
                 .opacity(menu_opacity)
                 .pt_safe_area()
                 .px(px(12.0))
@@ -377,6 +400,10 @@ fn description(ui: Ui) -> impl IntoElement {
         .px(px(40.0))
         .py(px(40.0))
         .bg(move || tint(0x000000, if shown() { 0x80 } else { 0 }))
+        .test_id("description-layer")
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::Description.accessibility_hidden(ui)
+        })
         .opacity(move || if shown() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || if shown() { PointerEvents::Auto } else { PointerEvents::None })
         .on_press(move || {

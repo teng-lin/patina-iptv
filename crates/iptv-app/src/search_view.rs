@@ -18,6 +18,7 @@
 //! the grid, without leaving full screen; a result adds its channel as a
 //! new tile and the screen closes, Back closes it without one.
 
+use crate::i18n::{tr, trf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -190,10 +191,12 @@ fn tab_label(tab: Tab, count: usize, programmes: Programmes) -> String {
         count.to_string()
     };
     match (tab, programmes) {
-        (Tab::Channels, _) => format!("Channels · {count}"),
-        (Tab::Programs, Programmes::Unavailable) => "Programmes · no guide data".to_owned(),
-        (Tab::Programs, Programmes::Building) => "Programmes · …".to_owned(),
-        (Tab::Programs, Programmes::Ready) => format!("Programmes · {count}"),
+        (Tab::Channels, _) => trf("Channels · {count}", &[("count", (&count).into())]),
+        (Tab::Programs, Programmes::Unavailable) => tr("Programmes · no guide data").to_owned(),
+        (Tab::Programs, Programmes::Building) => tr("Programmes · …").to_owned(),
+        (Tab::Programs, Programmes::Ready) => {
+            trf("Programmes · {count}", &[("count", (&count).into())])
+        }
     }
 }
 

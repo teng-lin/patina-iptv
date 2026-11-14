@@ -30,10 +30,10 @@ internal object PlayerTracks {
 
     /** The `tracks` event: supported tracks of each kind and what plays. */
     @OptIn(UnstableApi::class)
-    fun event(tracks: Tracks, choice: Choice): Map<String, Any?> {
-        val video = mutableListOf<Map<String, Any?>>()
-        val audio = mutableListOf<Map<String, Any?>>()
-        val text = mutableListOf<Map<String, Any?>>()
+    fun event(tracks: Tracks, choice: Choice): PlayerEvent.Tracks {
+        val video = mutableListOf<PlayerEvent.Tracks.Video>()
+        val audio = mutableListOf<PlayerEvent.Tracks.Audio>()
+        val text = mutableListOf<PlayerEvent.Tracks.Text>()
         var audioSelected: String? = null
         var textSelected: String? = null
         tracks.groups.forEachIndexed { g, group ->
@@ -42,29 +42,29 @@ internal object PlayerTracks {
                 val f = group.getTrackFormat(t)
                 val id = "$g:$t"
                 when (group.type) {
-                    C.TRACK_TYPE_VIDEO -> video += mapOf(
-                        "id" to id,
-                        "label" to (f.label ?: ""),
-                        "width" to positive(f.width),
-                        "height" to positive(f.height),
-                        "fps" to positive(f.frameRate),
-                        "bitrate" to positive(f.bitrate),
+                    C.TRACK_TYPE_VIDEO -> video += PlayerEvent.Tracks.Video(
+                        id = id,
+                        label = f.label ?: "",
+                        width = positive(f.width),
+                        height = positive(f.height),
+                        fps = positive(f.frameRate),
+                        bitrate = positive(f.bitrate),
                     )
                     C.TRACK_TYPE_AUDIO -> {
-                        audio += mapOf(
-                            "id" to id,
-                            "label" to (f.label ?: ""),
-                            "language" to (f.language ?: ""),
-                            "channels" to positive(f.channelCount),
-                            "codec" to (f.sampleMimeType ?: ""),
+                        audio += PlayerEvent.Tracks.Audio(
+                            id = id,
+                            label = f.label ?: "",
+                            language = f.language ?: "",
+                            channels = positive(f.channelCount),
+                            codec = f.sampleMimeType ?: "",
                         )
                         if (group.isTrackSelected(t) && audioSelected == null) audioSelected = id
                     }
                     C.TRACK_TYPE_TEXT -> {
-                        text += mapOf(
-                            "id" to id,
-                            "label" to (f.label ?: ""),
-                            "language" to (f.language ?: ""),
+                        text += PlayerEvent.Tracks.Text(
+                            id = id,
+                            label = f.label ?: "",
+                            language = f.language ?: "",
                         )
                         if (group.isTrackSelected(t) && textSelected == null) textSelected = id
                     }
@@ -74,15 +74,13 @@ internal object PlayerTracks {
         // An adaptive video group selects all its tracks: "auto" unless the
         // viewer fixed one.
         val videoSelected = choice.video.takeIf { it != AUTO && find(tracks, C.TRACK_TYPE_VIDEO, it) != null }
-        return mapOf(
-            "video" to video,
-            "audio" to audio,
-            "text" to text,
-            "selected" to mapOf(
-                "video" to (videoSelected ?: AUTO),
-                "audio" to audioSelected,
-                "text" to (textSelected ?: OFF),
-            ),
+        return PlayerEvent.Tracks(
+            video = video,
+            audio = audio,
+            text = text,
+            selectedVideo = videoSelected ?: AUTO,
+            selectedAudio = audioSelected,
+            selectedText = textSelected ?: OFF,
         )
     }
 
@@ -112,12 +110,10 @@ internal object PlayerTracks {
     }
 
     /** The `format` event's fields Media3 knows for [video] and [audio]. */
-    fun format(video: Format?, audio: Format?): Map<String, Any> {
-        val out = mutableMapOf<String, Any>()
-        video?.frameRate?.let { positive(it) }?.let { out["fps"] = it }
-        audio?.channelCount?.let { positive(it) }?.let { out["channels"] = it }
-        return out
-    }
+    fun format(video: Format?, audio: Format?): PlayerEvent.Format = PlayerEvent.Format(
+        fps = video?.frameRate?.let { positive(it) },
+        channels = audio?.channelCount?.let { positive(it) },
+    )
 }
 
 /**

@@ -8,11 +8,11 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
 use nsh_core::picker::PickedFile;
 use nsh_core::{ApproxTextEngine, ImageData, Size, TextEngine, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
 const IMPORT: Duration = Duration::from_secs(60);
 const CHANNELS: usize = 10_000;
@@ -89,6 +89,89 @@ fn a_tablet_first_run_shows_whole_numbers_and_no_development_defaults() {
 
     // The badge reads as a word after the title.
     step(app.wait_for_within("text:Cup Final Live", IMPORT));
+    assert!(app.screen().matches("role:cell[/Cup Final Live/]").unwrap());
+    assert!(
+        app.screen()
+            .matches("role:button[/Test Channel 00001/]")
+            .unwrap()
+    );
+
+    // Selection reflects content identity and does not change merely when focus or keys visibility changes.
+    let cell_selector = "role:cell[/Cup Final Live/]";
+    let channel_selector = "role:button[/Test Channel 00001/]";
+    assert!(
+        app.screen()
+            .accessibility_state(cell_selector)
+            .unwrap()
+            .selected
+    );
+    assert!(
+        app.screen()
+            .accessibility_state(channel_selector)
+            .unwrap()
+            .selected
+    );
+
+    // Unselected channels are not selected.
+    if app
+        .screen()
+        .matches("role:button[/Test Channel 00002/]")
+        .unwrap()
+    {
+        assert!(
+            !app.screen()
+                .accessibility_state("role:button[/Test Channel 00002/]")
+                .unwrap()
+                .selected
+        );
+    }
+
+    // Keys visibility changes (keys shown via navigation key). Selection does not change.
+    step(app.press_key("home"));
+    assert!(
+        app.screen()
+            .accessibility_state(cell_selector)
+            .unwrap()
+            .selected
+    );
+    assert!(
+        app.screen()
+            .accessibility_state(channel_selector)
+            .unwrap()
+            .selected
+    );
+
+    // Pointer/touch action (keys hidden). Selection does not change.
+    step(app.press("text:Test Channel 00001"));
+    assert!(
+        app.screen()
+            .accessibility_state(cell_selector)
+            .unwrap()
+            .selected
+    );
+    assert!(
+        app.screen()
+            .accessibility_state(channel_selector)
+            .unwrap()
+            .selected
+    );
+
+    // Moving focus to another pane (Groups column via Tab).
+    // Programme cell and channel in the guide retain selection even when focus moves to groups pane.
+    step(app.press_key("tab"));
+    assert!(
+        app.screen()
+            .accessibility_state(cell_selector)
+            .unwrap()
+            .selected
+    );
+    assert!(
+        app.screen()
+            .accessibility_state(channel_selector)
+            .unwrap()
+            .selected
+    );
+    step(app.press_key("tab"));
 
     // The key-timing line: development builds only.
     let timing = app.screen().matches("text:/^keys \\d+ · \\d+ µs/").unwrap();

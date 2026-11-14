@@ -221,6 +221,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     };
     let groups_column = view()
         .test_id("channel-list-groups")
+        .accessibility_elements_hidden(move || !groups())
         .w(move || px(if groups() { size.whole(GROUPS_W) } else { 0.0 }))
         .opacity(move || if groups() { 1.0_f32 } else { 0.0 })
         .overflow_hidden()
@@ -281,9 +282,13 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     // through the closed layer's `None`); in the open layer's `BoxNone`
     // they take presses by default.
     view()
+        .test_id("channel-list-layer")
         .absolute()
         .inset_0()
         .flex_row()
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::ChannelList.accessibility_hidden(ui)
+        })
         .opacity(move || if open() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {
             if open() {
@@ -321,6 +326,11 @@ fn entry_row(
     let focused = move || ui.keys_shown() && focus.get() == Some((at.index(), true));
     let mark = move || Mark::of(focused(), current());
     list_rows::row(size, ROW, mark)
+        .role(AccessibilityRole::Tab)
+        .accessibility_state(move || AccessibilityState {
+            selected: current(),
+            ..Default::default()
+        })
         .mx(px(8.0))
         .on_press(move || {
             ui.touched();
@@ -375,8 +385,14 @@ fn channel_row(
     let focused = move || ui.keys_shown() && focus().is_some_and(|f| f.1);
     // While the groups have the focus, the row it returns to stays marked.
     let resting = move || focus().is_some_and(|f| !f.1);
+    let is_selected = move || focus().is_some();
     let mark = move || Mark::of(focused(), resting());
     list_rows::row(size, ROW_TWO, mark)
+        .role(AccessibilityRole::Row)
+        .accessibility_state(move || AccessibilityState {
+            selected: is_selected(),
+            ..Default::default()
+        })
         .on_press(move || {
             ui.touched();
             let playing = playing(ui);

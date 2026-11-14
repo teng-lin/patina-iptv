@@ -46,6 +46,8 @@ const STORE_ADAPTER_USERS: &[&str] = &[
     "library.rs",
     "model.rs",
     "opening.rs",
+    "opening/revocation.rs",
+    "guide_checks/retry.rs",
     "paging.rs",
     "private_files.rs",
     "search.rs",

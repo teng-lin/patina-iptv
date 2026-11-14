@@ -188,6 +188,7 @@ fn empty_state(ui: Ui) -> impl IntoElement {
         .items_center()
         .justify_center()
         .px(px(40.0))
+        .accessibility_elements_hidden(move || !empty())
         .opacity(move || if empty() { 1.0_f32 } else { 0.0 })
         .pointer_events(PointerEvents::None)
         .child(
@@ -210,6 +211,7 @@ fn hint_card(ui: Ui) -> impl IntoElement {
         .gap(px(4.0))
         .rounded(px(RADIUS))
         .bg(move || tint(ui.theme.with(|t| t.background.alt), 0xF0))
+        .accessibility_elements_hidden(move || !shown())
         .opacity(move || if shown() { 1.0_f32 } else { 0.0 })
         .pointer_events(PointerEvents::None)
         .children(hint_lines().map(|line| text(line).text_size(px(13.0)).text_color(rgb(WHITE))))
@@ -301,7 +303,17 @@ fn row(
     // Now, for the past cells the row cannot replay (a memo: keys move
     // the focus without the cells' dimming running again).
     let now = computed(move || ui.focus.with(|f| f.now));
-    let focus = RowFocus { start: focus, lit };
+    let selected = computed(move || {
+        ui.guide_data();
+        let view = crate::lists::view(ui);
+        ui.focus
+            .with(|f| (f.channel == at.index()).then(|| f.program(&view).start))
+    });
+    let focus = RowFocus {
+        start: focus,
+        lit,
+        selected,
+    };
     let cell = move |i| cell::cell(ui, (at, i), (programs, channel), focus, now, (pan, size));
     view()
         .test_id("guide-row")

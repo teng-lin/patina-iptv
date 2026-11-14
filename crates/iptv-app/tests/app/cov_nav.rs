@@ -14,13 +14,13 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
 use iptv_settings::{Settings, Value};
 use nsh_core::picker::PickedFile;
 use nsh_core::platform::Idiom;
 use nsh_core::{ImageData, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
 const IMPORT: Duration = Duration::from_secs(20);
 const WAIT: Duration = Duration::from_secs(3);
@@ -32,7 +32,7 @@ const MENU: &str = "id:multiview-menu";
 /// result) shows them.
 // A time on another local day carries its weekday and date ("Thu 12 · 00:22"):
 // late in the evening the programme two hours on ends, or starts, tomorrow.
-const TIMES: &str = "text:/^Test Channel One · ([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+–([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+$/";
+const TIMES: &str = "text:/^Test Channel One · ([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+ [AP]M–([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+ [AP]M$/";
 
 /// How many lines of channel one's programme times show: the details
 /// popover adds one (it stays mounted, empty, while closed).

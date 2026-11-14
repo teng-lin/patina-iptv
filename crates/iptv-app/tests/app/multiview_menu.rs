@@ -9,13 +9,13 @@
 //! Synthetic data only: a generated playlist "picked" from a file.
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use crate::headless::Headless;
 use nsh_core::picker::PickedFile;
 use nsh_core::platform::Idiom;
 use nsh_core::{ImageData, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
 const PLAYLIST: &str = "#EXTM3U
 #EXTINF:-1 tvg-id=\"one\" group-title=\"News\",Test Channel One
@@ -117,6 +117,14 @@ fn picker_channel_visible(app: &Headless, label: &str) -> bool {
     })
 }
 
+fn wait_picker_channel_visible(app: &mut Headless, label: &str, reason: &str) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !picker_channel_visible(app, label) {
+        assert!(Instant::now() < deadline, "{reason}");
+        app.wait(Duration::from_millis(16)).unwrap();
+    }
+}
+
 #[test]
 fn changing_picker_group_or_query_reveals_selection_after_touch_scrolling() {
     let Some(_home) = isolated!() else { return };
@@ -171,9 +179,10 @@ fn changing_picker_group_or_query_reveals_selection_after_touch_scrolling() {
     // Both groups have 60 rows and resolve selection to row zero. A different
     // group must reveal its selected channel even though that index is equal.
     step(app.press(&format!("{picker} >> text:Beta")));
-    assert!(
-        picker_channel_visible(&app, "1  Shared Beta 000"),
-        "changing group must reveal its selected channel"
+    wait_picker_channel_visible(
+        &mut app,
+        "1  Shared Beta 000",
+        "changing group must reveal its selected channel",
     );
 
     // This query keeps the same results, selected key, and selected row. A new
@@ -181,9 +190,10 @@ fn changing_picker_group_or_query_reveals_selection_after_touch_scrolling() {
     step(app.scroll(channels, px(800.0)));
     assert!(!picker_channel_visible(&app, "1  Shared Beta 000"));
     step(app.type_text("id:multiview-channel-search", "Shared"));
-    assert!(
-        picker_channel_visible(&app, "1  Shared Beta 000"),
-        "changing query must reveal selection even when key and row stay equal"
+    wait_picker_channel_visible(
+        &mut app,
+        "1  Shared Beta 000",
+        "changing query must reveal selection even when key and row stay equal",
     );
     assert_eq!(tiles(&app), 1, "browsing does not open another stream");
 }

@@ -37,6 +37,7 @@ pub struct BrowserState {
 }
 
 mod guide_checks;
+pub use guide_checks::GuideWork;
 pub(crate) mod state;
 pub use events::RuntimeEvent;
 
@@ -65,6 +66,9 @@ impl<T> std::ops::Deref for Slot<T> {
     }
 }
 
+/// A source's turn on screen ([`Runtime::show_turn`]), until dropped.
+pub struct ShowTurn(#[allow(dead_code)] futures_channel::oneshot::Sender<()>);
+
 pub type LocalTask = std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
 struct TaskHost {
     spawn: Box<dyn Fn(LocalTask)>,
@@ -75,6 +79,8 @@ type EventSink = Rc<dyn Fn(RuntimeEvent)>;
 type BrowserObserver = Rc<dyn Fn() -> BrowserState>;
 type PageWaiters = RefCell<Vec<Box<dyn FnOnce()>>>;
 type Resolves = RefCell<[Option<(u64, CancelToken)>; iptv_core::multiview::MAX_SURFACES]>;
+/// The guide updates asked for by hand that have not ended, each with its work.
+type Updates = Vec<(SourceId, Rc<ImportWork>)>;
 type SavedSettings = RefCell<Option<(u64, std::sync::Arc<iptv_settings::Settings>)>>;
 
 pub struct Runtime {
@@ -110,7 +116,7 @@ pub struct Runtime {
     epoch: Slot<Cell<i64>>,
     single: Slot<RefCell<Option<SingleSchedule>>>,
     shown: Slot<Cell<Option<SourceId>>>,
-    updating: Slot<RefCell<Vec<SourceId>>>,
+    updating: Slot<RefCell<Updates>>,
     edits: Slot<RefCell<BTreeMap<SourceId, u64>>>,
     status: Slot<RefCell<StatusSnapshot>>,
     page_waiters: Slot<PageWaiters>,
@@ -124,6 +130,8 @@ pub struct Runtime {
     status_revision: Cell<u64>,
     browser: RefCell<Option<BrowserObserver>>,
     organization_edits: RefCell<HashMap<SourceId, u64>>,
+    /// Each source's last show, which the next one waits for.
+    shows: RefCell<HashMap<SourceId, futures_channel::oneshot::Receiver<()>>>,
 }
 
 impl Runtime {
@@ -132,6 +140,10 @@ impl Runtime {
     /// [`Runtime::start_services`].
     pub fn new(ports: Ports) -> Self {
         let store = std::sync::Arc::new(store_service::Service::new(ports));
+        #[cfg(feature = "test-support")]
+        let guide_checks = guide_checks::GuideChecks::mirrored(store.guide_checks.clone());
+        #[cfg(not(feature = "test-support"))]
+        let guide_checks = guide_checks::GuideChecks::default();
         Self {
             account_streams: Slot::default(),
             resolving: Slot::default(),
@@ -174,10 +186,11 @@ impl Runtime {
             tasks: RefCell::new(None),
             foreground: Cell::new(true),
             scheduler_started: Cell::new(false),
-            guide_checks: RefCell::default(),
+            guide_checks: RefCell::new(guide_checks),
             status_revision: Cell::new(0),
             browser: RefCell::default(),
             organization_edits: RefCell::default(),
+            shows: RefCell::default(),
         }
     }
 }
@@ -284,6 +297,21 @@ impl Runtime {
         self.organization_edits.borrow().get(&source) == Some(&ticket)
     }
 
+    /// A turn at putting `source` on screen: shows of one source finish in
+    /// the order they began, so one that began earlier, with older data,
+    /// cannot replace a later one. Resolves when the earlier ones have
+    /// finished (or were dropped); the turn ends when the guard is dropped.
+    pub fn show_turn(&self, source: SourceId) -> impl std::future::Future<Output = ShowTurn> {
+        let (done, next) = futures_channel::oneshot::channel();
+        let earlier = self.shows.borrow_mut().insert(source, next);
+        async move {
+            if let Some(earlier) = earlier {
+                let _ = earlier.await;
+            }
+            ShowTurn(done)
+        }
+    }
+
     pub fn schedule(&self) -> Rc<dyn Schedule> {
         self.schedule.borrow().clone()
     }
@@ -324,6 +352,35 @@ impl HostHandle {
         self.0
             .upgrade()
             .is_none_or(|service| service.files().flush(limit))
+    }
+
+    #[cfg(feature = "test-support")]
+    pub fn guide_check_registered(&self, source: SourceId) -> bool {
+        self.0.upgrade().is_some_and(|service| {
+            service
+                .guide_checks
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .contains(&source)
+        })
+    }
+    #[cfg(feature = "test-support")]
+    pub fn refuse_work(&self, count: usize) {
+        if let Some(service) = self.0.upgrade() {
+            service.hooks.refuse_work(count);
+        }
+    }
+    #[cfg(feature = "test-support")]
+    pub fn hold_reports(&self, held: bool) {
+        if let Some(service) = self.0.upgrade() {
+            service.hooks.hold_reports(held);
+        }
+    }
+    #[cfg(feature = "test-support")]
+    pub fn reports_waiting(&self) -> usize {
+        self.0
+            .upgrade()
+            .map_or(0, |service| service.hooks.reports_waiting())
     }
 
     /// Occupies this owner's store writer for `duration` after the work

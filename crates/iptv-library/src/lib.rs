@@ -1,4 +1,6 @@
 //! Portable library model and screen state machines. No persistence or UI toolkit.
+#![forbid(unsafe_code)]
+
 mod records;
 use iptv_epg::UnixTime;
 use iptv_providers::{GroupId, SecretUrl};
