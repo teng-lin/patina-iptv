@@ -45,7 +45,7 @@ impl StrictXmltvParser {
         sink: &mut impl FnMut(XmltvItem),
     ) -> Result<(), StrictError> {
         self.document.feed(&bytes, end)?;
-        self.parser.feed(&bytes, sink)?;
+        self.parser.feed_decoded(&bytes, sink)?;
         if self.decoder.invalid_utf8 != 0 || self.decoder.unknown_charset {
             return Err(StrictError::InvalidXml);
         }
@@ -95,7 +95,7 @@ impl StrictXmltvParser {
         let mut decoded = Vec::new();
         self.decoder.finish_text(&mut decoded)?;
         self.process(decoded, true, sink)?;
-        let mut stats = self.parser.finish(sink)?;
+        let mut stats = self.parser.finish_decoded(sink)?;
         let warnings = stats.warnings;
         if warnings.malformed_xml != 0
             || warnings.truncated != 0
@@ -336,5 +336,30 @@ mod tests {
         options.limits.decoded_bytes = 4096;
         let mut parser = StrictXmltvParser::new(options);
         assert!(parser.feed(&gzip, &mut |_| {}).is_err());
+    }
+    #[test]
+    fn declared_single_byte_text_is_decoded_exactly_once() {
+        let xml = b"<?xml version='1.0' encoding='ISO-8859-1'?><tv>\
+            <channel id='caf\xe9.id'><display-name>Caf\xe9</display-name></channel>\
+            <programme channel='caf\xe9.id' start='20261114120000 +0000' stop='20261114130000 +0000'>\
+            <title>Synthetic Caf\xe9</title></programme></tv>";
+        for size in [1, 7, xml.len()] {
+            let mut parser = StrictXmltvParser::new(ParseOptions::default());
+            let mut channels = Vec::new();
+            let mut programmes = Vec::new();
+            let mut collect = |item| match item {
+                XmltvItem::Channel(channel) => channels.push(channel),
+                XmltvItem::Programme(programme) => programmes.push(programme),
+            };
+            for piece in xml.chunks(size) {
+                parser.feed(piece, &mut collect).unwrap();
+            }
+            let stats = parser.finish(&mut collect).unwrap();
+            assert_eq!(stats.bytes_in, xml.len() as u64);
+            assert_eq!(channels[0].id, "café.id", "chunk size {size}");
+            assert_eq!(channels[0].display_names, ["Café"]);
+            assert_eq!(programmes[0].channel, "café.id");
+            assert_eq!(programmes[0].title, "Synthetic Café");
+        }
     }
 }
