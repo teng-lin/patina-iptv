@@ -393,20 +393,29 @@ impl Ui {
 }
 
 thread_local! {
-    static RUNTIME: RefCell<Rc<runtime::Runtime>> = RefCell::new(Rc::new(new_runtime()));
+    static RUNTIME: RefCell<Option<Rc<runtime::Runtime>>> = const { RefCell::new(None) };
 }
 
 /// The shell owns one application handle; all library state belongs to it.
 pub(crate) fn runtime() -> Rc<runtime::Runtime> {
     runtime::try_current().unwrap_or_else(|| {
-        let owner = RUNTIME.with(|runtime| runtime.borrow().clone());
+        let owner = RUNTIME.with(|runtime| {
+            runtime
+                .borrow_mut()
+                .get_or_insert_with(|| {
+                    let directory = platform_data::resolve_data_dir()
+                        .expect("private storage must be resolved before using runtime services");
+                    Rc::new(new_runtime(directory))
+                })
+                .clone()
+        });
         runtime::set_current(&owner);
         owner
     })
 }
 
-fn new_runtime() -> runtime::Runtime {
-    let mut ports = runtime::Ports::new(platform_data::data_dir(), credential_key::database_key);
+fn new_runtime(directory: std::path::PathBuf) -> runtime::Runtime {
+    let mut ports = runtime::Ports::new(directory, credential_key::database_key);
     ports.exclude_from_backup = platform_data::exclude_from_backup;
     ports.startup_mark = |phase, detail| startup::mark_with(phase, detail);
     runtime::Runtime::new(ports)
@@ -469,23 +478,27 @@ pub fn channel_name(ch: usize) -> String {
 
 #[component]
 pub fn App() -> impl IntoElement {
-    RUNTIME.set(Rc::new(new_runtime()));
-    RUNTIME.with(|owner| runtime::set_current(&owner.borrow()));
-    runtime().activate();
     startup::mark("rust root");
     startup::log_library_base();
     fonts::register();
-    if let Err(error) = platform_data::initialize() {
-        log::error!("iptv storage initialization failed: {error}");
-        return view()
-            .flex_1()
-            .items_center()
-            .justify_center()
-            .child(text("Private app storage is unavailable"))
-            .child(text(
-                "Check your home directory and file permissions, then reopen Patina.",
-            ));
-    }
+    let directory = match platform_data::initialize() {
+        Ok(directory) => directory,
+        Err(error) => {
+            log::error!("iptv storage initialization failed: {error}");
+            return view()
+                .flex_1()
+                .items_center()
+                .justify_center()
+                .child(text("Private app storage is unavailable"))
+                .child(text(
+                    "Check your home directory and file permissions, then reopen Patina.",
+                ));
+        }
+    };
+    let owner = Rc::new(new_runtime(directory));
+    runtime::set_current(&owner);
+    owner.activate();
+    RUNTIME.set(Some(owner));
     if let Err(message) = backup::lock() {
         return view()
             .flex_1()

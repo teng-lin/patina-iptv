@@ -83,7 +83,7 @@ thread_local! {
 /// container, or
 /// `~/.local/share/iptv-rs` on the other desktops.
 pub fn data_dir() -> PathBuf {
-    crate::platform_data::data_dir()
+    crate::runtime().data_dir().to_owned()
 }
 
 /// Runs `future` on the UI thread under the app's root owner.

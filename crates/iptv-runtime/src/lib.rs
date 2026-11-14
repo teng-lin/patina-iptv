@@ -129,6 +129,11 @@ impl Runtime {
 }
 
 impl Runtime {
+    /// Private storage captured when this owner was constructed.
+    pub fn data_dir(&self) -> &std::path::Path {
+        &self.store.directory
+    }
+
     pub fn bind_tasks(
         &self,
         spawn: impl Fn(LocalTask) + 'static,
