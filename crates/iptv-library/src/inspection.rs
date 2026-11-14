@@ -105,6 +105,8 @@ pub struct ProgrammeInfo {
     pub candidate: CandidateRef,
     pub source_incarnation: String,
     pub evidence_revision: String,
+    /// Provider event identity when supplied; scoped by candidate, never global.
+    pub provider_event_id: Option<String>,
     pub start: i64,
     pub stop: i64,
     pub title: String,
@@ -123,6 +125,9 @@ pub struct Candidate {
     pub key: CandidateRef,
     pub name: Option<String>,
     pub names: Vec<String>,
+    /// Full labels retained for regional/language/time-shift distinctions.
+    /// Empty metadata means the feed did not supply a structured value.
+    pub metadata: Vec<(String, String)>,
     pub assigned: bool,
     pub evidence: Vec<Evidence>,
     pub binding: Option<MatchKind>,
@@ -138,6 +143,7 @@ pub enum Diagnosis {
     Empty,
     Stale,
     Partial,
+    SuspiciousTiming,
     Covered,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]

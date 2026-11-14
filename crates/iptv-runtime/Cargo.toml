@@ -24,9 +24,10 @@ iptv-search.workspace = true
 iptv-settings.workspace = true
 getrandom = "0.4"
 futures-channel = "0.3"
-tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "sync"] }
+tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "sync", "time"] }
 log.workspace = true
 serde_json.workspace = true
+sha2 = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
