@@ -56,7 +56,7 @@ pub(crate) enum Write {
 /// Writes sent to the writer thread and not yet committed (or dropped with
 /// their deleted playlist).
 fn unsaved() -> std::sync::Arc<AtomicUsize> {
-    crate::runtime().favorite_unsaved.clone()
+    crate::current().favorite_unsaved.clone()
 }
 
 /// Reads saved favourites. The store's reader does not wait for a long
@@ -78,12 +78,12 @@ async fn load<R: Send + 'static>(
 }
 
 /// A new app root must reload persisted favourites, including an applied restore.
-pub(crate) fn reset() {
+pub fn reset() {
     // Never reuse a previous root's epoch-bound writer when restoring a library.
-    crate::runtime()
+    crate::current()
         .favorite_writer
         .with(|writer| writer.borrow_mut().take());
-    crate::runtime()
+    crate::current()
         .favorites
         .with(|state| *state.borrow_mut() = State::default());
 }
@@ -92,7 +92,7 @@ pub(crate) fn reset() {
 /// `set_schedule`): its saved favourites and recent channels. The same
 /// source keeps its in-memory lists (writes may still be on their way).
 pub async fn prepare_source(source: Option<SourceId>) -> Option<impl FnOnce()> {
-    let generation = crate::runtime().generation.get();
+    let generation = crate::current().generation.get();
     let id = source?;
     let loaded = load(move |store| {
         let has_vod = store
@@ -111,7 +111,7 @@ pub async fn prepare_source(source: Option<SourceId>) -> Option<impl FnOnce()> {
         Ok((has_vod, rows, recent))
     })
     .await;
-    if crate::runtime().generation.get() != generation {
+    if crate::current().generation.get() != generation {
         return None;
     }
     let (has_vod, rows, recent) = match loaded {
@@ -122,7 +122,7 @@ pub async fn prepare_source(source: Option<SourceId>) -> Option<impl FnOnce()> {
         }
     };
     Some(move || {
-        crate::runtime().favorites.with(|state| {
+        crate::current().favorites.with(|state| {
             let mut state = state.borrow_mut();
             state.has_vod = has_vod;
             if state.source == source {
@@ -145,7 +145,7 @@ pub async fn prepare_source(source: Option<SourceId>) -> Option<impl FnOnce()> {
 
 /// Load enabled-source favourites while preserving edits already held in memory.
 pub async fn prepare_combined() -> Option<impl FnOnce()> {
-    let generation = crate::runtime().generation.get();
+    let generation = crate::current().generation.get();
     use iptv_guide::combined::{qualified_key, split_key};
     let loaded = load(|store| {
         let mut ids = Vec::new();
@@ -174,14 +174,14 @@ pub async fn prepare_combined() -> Option<impl FnOnce()> {
         ))
     })
     .await;
-    if crate::runtime().generation.get() != generation {
+    if crate::current().generation.get() != generation {
         return None;
     }
     let Ok((ids, favorites, recent)) = loaded else {
         return None;
     };
     Some(move || {
-        crate::runtime().favorites.with(|state| {
+        crate::current().favorites.with(|state| {
             let mut state = state.borrow_mut();
             let previous = state.combined_sources.clone();
             let mut keys: Vec<_> = state
@@ -233,18 +233,18 @@ fn write_owner(state: &State, key: &str) -> Option<(SourceId, String)> {
 /// its favourites.
 pub fn catalog_changed(catalog: &dyn Schedule) {
     let index = KeyIndex::build(catalog);
-    crate::runtime()
+    crate::current()
         .favorites
         .with(|s| s.borrow_mut().index = index);
     publish();
 }
 
 fn publish() {
-    let (set, has_vod) = crate::runtime().favorites.with(|s| {
+    let (set, has_vod) = crate::current().favorites.with(|s| {
         let s = s.borrow();
         (s.favorites.set_of(&s.index), s.has_vod)
     });
-    crate::runtime().emit(super::RuntimeEvent::FavoritesChanged {
+    crate::current().emit(super::RuntimeEvent::FavoritesChanged {
         channels: set,
         has_vod,
     });
@@ -252,7 +252,7 @@ fn publish() {
 
 /// The favourites on screen as catalog channels, in their order.
 pub fn favorite_channels() -> Vec<usize> {
-    crate::runtime().favorites.with(|s| {
+    crate::current().favorites.with(|s| {
         let s = s.borrow();
         s.favorites.channels(&s.index)
     })
@@ -260,7 +260,7 @@ pub fn favorite_channels() -> Vec<usize> {
 
 /// The recently watched channels on screen, newest first.
 pub fn recent_channels() -> Vec<usize> {
-    crate::runtime().favorites.with(|s| {
+    crate::current().favorites.with(|s| {
         let s = s.borrow();
         s.recent.channels(&s.index)
     })
@@ -269,7 +269,7 @@ pub fn recent_channels() -> Vec<usize> {
 /// The player's History: the recently watched channels (newest first) and
 /// the row of `playing` among them.
 pub fn history(playing: Option<usize>) -> History {
-    crate::runtime().favorites.with(|s| {
+    crate::current().favorites.with(|s| {
         let s = s.borrow();
         s.recent.history(&s.index, playing)
     })
@@ -277,7 +277,7 @@ pub fn history(playing: Option<usize>) -> History {
 
 /// The catalog channel with `key`.
 pub fn channel_of(key: &str) -> Option<usize> {
-    crate::runtime()
+    crate::current()
         .favorites
         .with(|s| s.borrow().index.get(key))
 }
@@ -285,7 +285,7 @@ pub fn channel_of(key: &str) -> Option<usize> {
 /// Changes favourites through their catalog channels (the editor works on
 /// sets of them): what `f` adds or removes is saved by key.
 pub fn edit(f: impl FnOnce(&mut BTreeSet<usize>)) {
-    let before = crate::runtime().favorites.with(|state| {
+    let before = crate::current().favorites.with(|state| {
         let state = state.borrow();
         state.favorites.set_of(&state.index)
     });
@@ -295,14 +295,14 @@ pub fn edit(f: impl FnOnce(&mut BTreeSet<usize>)) {
     if added.is_empty() && removed.is_empty() {
         return;
     }
-    let catalog = crate::runtime().schedule();
+    let catalog = crate::current().schedule();
     for (channels, on) in [(added, true), (removed, false)] {
         for key in channels.into_iter().filter_map(|c| catalog.channel_key(c)) {
             set_key(&key, on);
         }
     }
     publish();
-    crate::runtime().emit(super::RuntimeEvent::FavoriteOrderChanged);
+    crate::current().emit(super::RuntimeEvent::FavoriteOrderChanged);
 }
 
 /// Adds `channel` (catalog) to the favourites or removes it.
@@ -315,7 +315,7 @@ pub fn toggle(channel: usize) {
 }
 
 fn set_key(key: &str, on: bool) {
-    let source = crate::runtime().favorites.with(|s| {
+    let source = crate::current().favorites.with(|s| {
         let mut s = s.borrow_mut();
         if s.favorites.set(key, on) {
             write_owner(&s, key)
@@ -330,7 +330,7 @@ fn set_key(key: &str, on: bool) {
 
 /// A live channel started playing (by key).
 pub fn played(key: &str) {
-    let source = crate::runtime().favorites.with(|s| {
+    let source = crate::current().favorites.with(|s| {
         let mut s = s.borrow_mut();
         s.recent.played(key);
         write_owner(&s, key)
@@ -349,7 +349,7 @@ fn send(write: Write) {
     if counted {
         unsaved().fetch_add(1, Ordering::AcqRel);
     }
-    crate::runtime().favorite_writer.with(|w| {
+    crate::current().favorite_writer.with(|w| {
         let mut w = w.borrow_mut();
         let tx = w.get_or_insert_with(|| {
             let (tx, rx) = mpsc::channel();
@@ -366,15 +366,15 @@ fn send(write: Write) {
 }
 
 /// The writer thread: one store connection, writes in order.
-pub(crate) async fn flush() -> bool {
+pub async fn flush() -> bool {
     let (tx, rx) = futures_channel::oneshot::channel();
     send(Write::Barrier(tx));
     rx.await.unwrap_or(false)
 }
 
 /// Root teardown only: queued edits outlive their UI owner and drain first.
-pub(crate) fn flush_on_shutdown() -> bool {
-    let writer = crate::runtime()
+pub fn flush_on_shutdown() -> bool {
+    let writer = crate::current()
         .favorite_writer
         .with(|writer| writer.borrow_mut().take());
     let Some(writer) = writer else { return true };
@@ -498,12 +498,12 @@ fn write_all_with(rx: Receiver<Write>, mut persist: impl FnMut(&Write) -> bool) 
 /// Ordered keys of the displayed source. Reorders use the same writer queue
 /// as membership changes, so rapid add/move/remove cannot race persistence.
 pub fn ordered_keys() -> Vec<String> {
-    crate::runtime()
+    crate::current()
         .favorites
         .with(|s| s.borrow().favorites.keys().to_vec())
 }
 pub fn reorder(key: &str, index: usize) {
-    let write = crate::runtime().favorites.with(|s| {
+    let write = crate::current().favorites.with(|s| {
         let mut s = s.borrow_mut();
         if s.favorites.move_key(key, index) {
             move_write(&s, key, index)
@@ -515,7 +515,7 @@ pub fn reorder(key: &str, index: usize) {
         send(write);
     }
     publish();
-    crate::runtime().emit(super::RuntimeEvent::FavoriteOrderChanged);
+    crate::current().emit(super::RuntimeEvent::FavoriteOrderChanged);
 }
 
 /// The store write for a favourite that the list in memory just moved to
@@ -574,8 +574,8 @@ mod reorder_tests {
         let (writer, inbox) = mpsc::channel();
         *runtime.favorite_writer.borrow_mut() = Some(writer);
         runtime.favorite_unsaved.store(1, Ordering::Release);
-        let task = crate::with_runtime(runtime, || {
-            crate::in_runtime(async {
+        let task = crate::context::with_runtime(runtime, || {
+            crate::context::in_runtime(async {
                 let result =
                     load::<()>(|_| panic!("failed edits must not produce a stale read")).await;
                 assert!(matches!(result, Err(StoreError::Unavailable(_))));

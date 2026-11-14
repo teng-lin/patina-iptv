@@ -14,6 +14,7 @@ members = [
     "crates/iptv-app",
     "crates/iptv-player-mpv",
     "crates/iptv-library",
+    "crates/iptv-runtime",
 ]
 # nsh generates its own Cargo workspaces under the app crate.
 exclude = ["crates/iptv-app/.nsh"]
@@ -27,6 +28,7 @@ license = "AGPL-3.0-only"
 publish = false
 
 [workspace.dependencies]
+iptv-runtime = { path = "crates/iptv-runtime" }
 iptv-library = { path = "crates/iptv-library" }
 iptv-player-mpv = { path = "crates/iptv-player-mpv" }
 iptv-core = { path = "crates/iptv-core" }

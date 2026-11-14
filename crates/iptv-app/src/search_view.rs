@@ -213,7 +213,7 @@ fn guide_epoch() -> UnixTime {
 
 fn load_history() -> SearchHistory {
     let list = crate::runtime()
-        .saved_search
+        .saved_search()
         .with(|saved| saved.borrow().clone().unwrap_or_default());
     SearchHistory::from_list(list, SearchHistory::DEFAULT_CAPACITY)
 }
@@ -224,7 +224,7 @@ fn load_history() -> SearchHistory {
 /// given them unless a search was made meanwhile.
 pub(crate) fn load_saved_history(ui: Ui) {
     crate::runtime()
-        .saved_search
+        .saved_search()
         .with(|saved| *saved.borrow_mut() = None);
     let legacy = crate::data::data_dir().join(LEGACY_HISTORY_FILE);
     let loaded = crate::runtime::commands::load_search_history(legacy);
@@ -247,7 +247,7 @@ pub(crate) fn load_saved_history(ui: Ui) {
             });
         }
         crate::runtime()
-            .saved_search
+            .saved_search()
             .with(|saved| *saved.borrow_mut() = Some(list));
     });
 }
@@ -265,13 +265,13 @@ fn save_history(ui: Ui) {
     let shown = options(&crate::settings::get()).show_history;
     let list = to_save(shown, load_history(), &session);
     if crate::runtime()
-        .saved_search
+        .saved_search()
         .with(|saved| saved.borrow().as_ref() == Some(&list))
     {
         return;
     }
     crate::runtime()
-        .saved_search
+        .saved_search()
         .with(|saved| *saved.borrow_mut() = Some(list.clone()));
     let saved = crate::runtime::commands::save_search_history(list);
     crate::data::spawn_in_app(async move {
@@ -296,7 +296,7 @@ fn prepare(ui: Ui) {
     let version = ui.data_version.get_untracked();
     let schedule = crate::schedule();
     if crate::runtime()
-        .search_indexes
+        .search_indexes()
         .with(|i| i.borrow().version != Some(version))
     {
         let mut channels = ChannelIndex::from_schedule(&*schedule);
@@ -306,7 +306,7 @@ fn prepare(ui: Ui) {
                 channels.add_key(c, &schedule.channel_number(c).to_string());
             }
         }
-        crate::runtime().search_indexes.with(|i| {
+        crate::runtime().search_indexes().with(|i| {
             *i.borrow_mut() = Indexes {
                 version: Some(version),
                 channels,
@@ -325,7 +325,7 @@ fn prepare(ui: Ui) {
         return;
     }
     if crate::runtime()
-        .search_indexes
+        .search_indexes()
         .with(|i| i.borrow().programmes.is_some())
     {
         set_programmes(ui, Programmes::Ready);
@@ -337,7 +337,7 @@ fn prepare(ui: Ui) {
     // closes. A timer that finds the index built does nothing.
     crate::data::spawn_in_app(async move {
         timer(Duration::from_millis(30)).await;
-        let wanted = crate::runtime().search_indexes.with(|i| {
+        let wanted = crate::runtime().search_indexes().with(|i| {
             let mut i = i.borrow_mut();
             let wanted = i.version == Some(version) && i.programmes.is_none();
             // One build per guide (its thread may still be reading).
@@ -349,7 +349,7 @@ fn prepare(ui: Ui) {
         }
         let t = Instant::now();
         programme_index::build(&*schedule, schedule.channel_count(), move |index| {
-            let current = crate::runtime().search_indexes.with(|i| {
+            let current = crate::runtime().search_indexes().with(|i| {
                 let mut i = i.borrow_mut();
                 if i.building == Some(version) {
                     i.building = None;
@@ -365,7 +365,7 @@ fn prepare(ui: Ui) {
                 t.elapsed().as_millis()
             );
             crate::runtime()
-                .search_indexes
+                .search_indexes()
                 .with(|i| i.borrow_mut().programmes = Some(index));
             set_programmes(ui, Programmes::Ready);
             search_again(ui);
@@ -380,7 +380,7 @@ fn run_search(ui: Ui, query: &str) {
     let days = |c: usize| schedule.catchup_days(c);
     let visible = |c: usize| !schedule.channel_hidden(c);
     let options = options(&crate::settings::get());
-    let (channels, programmes) = crate::runtime().search_indexes.with(|i| {
+    let (channels, programmes) = crate::runtime().search_indexes().with(|i| {
         let i = i.borrow();
         let mut channels = i.channels.search_channels(
             query,
@@ -430,13 +430,13 @@ fn search_again(ui: Ui) {
 /// search hides the recent searches, and a timer owned by the tapped row
 /// would go with it (the search never ran).
 fn debounce(ui: Ui, query: String) {
-    let ticket = crate::runtime().pending_search.with(|p| {
+    let ticket = crate::runtime().pending_search().with(|p| {
         p.set(p.get() + 1);
         p.get()
     });
     crate::data::spawn_in_app(async move {
         timer(DEBOUNCE).await;
-        if crate::runtime().pending_search.with(Cell::get) == ticket {
+        if crate::runtime().pending_search().with(Cell::get) == ticket {
             run_search(ui, &query);
         }
     });
@@ -481,7 +481,7 @@ pub fn close(ui: Ui) {
     }
     save_history(ui);
     crate::runtime()
-        .search_indexes
+        .search_indexes()
         .with(|i| i.borrow_mut().programmes = None);
     ui.search.set(None);
     dismiss_keyboard();

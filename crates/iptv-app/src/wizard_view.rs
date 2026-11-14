@@ -158,10 +158,10 @@ fn perform(ui: Ui, effect: WizardEffect) {
                 )
             });
             crate::runtime()
-                .wizard_import
+                .wizard_import()
                 .with(|r| *r.borrow_mut() = Some((id, token)));
         }
-        WizardEffect::CancelImport { id } => crate::runtime().wizard_import.with(|r| {
+        WizardEffect::CancelImport { id } => crate::runtime().wizard_import().with(|r| {
             let mut running = r.borrow_mut();
             if running.as_ref().is_some_and(|(at, _)| *at == id)
                 && let Some((_, token)) = running.take()
@@ -174,7 +174,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
             log::info!("iptv wizard: closed ({exit:?})");
             if let WizardExit::Added { .. } = exit {
                 crate::runtime()
-                    .wizard_import
+                    .wizard_import()
                     .with(|r| r.borrow_mut().take());
                 // Added from the playlists screen: "Watch" goes to the guide.
                 crate::playlists_view::close(ui);

@@ -63,18 +63,18 @@ pub enum Purpose {
 }
 
 impl Purpose {
-    pub(crate) fn shows(self) -> bool {
+    pub fn shows(self) -> bool {
         !matches!(self, Self::Background | Self::Combined)
     }
 
     /// What the store has is shown before the network.
-    pub(crate) fn shows_stored_first(self) -> bool {
+    pub fn shows_stored_first(self) -> bool {
         matches!(self, Self::Startup | Self::Switch | Self::Combined)
     }
 
     /// The guide's refresh trigger: opening uses the stored guide while it
     /// is fresh; an added or refreshed playlist downloads it again.
-    pub(crate) fn trigger(self) -> Trigger {
+    pub fn trigger(self) -> Trigger {
         match self {
             Self::Startup | Self::Switch | Self::Combined => Trigger::Startup,
             Self::Add | Self::Refresh | Self::Background => Trigger::PlaylistChanged,
@@ -129,32 +129,32 @@ pub enum Msg {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum GuideRead {
+pub enum GuideRead {
     Check,
     RestoreAndCheck,
     CacheOnly,
 }
 
-pub(crate) fn now_unix() -> i64 {
+pub fn now_unix() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64)
 }
 
-pub(crate) fn with_runtime<F: Future<Output = ()>>(future: impl FnOnce() -> F) -> bool {
+pub fn with_runtime<F: Future<Output = ()>>(future: impl FnOnce() -> F) -> bool {
     super::executor::block_on(future());
     true
 }
 
 /// The import itself, on its own thread with a small tokio runtime.
-pub(crate) fn run(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
+pub fn run(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
     if !with_runtime(|| pipeline(job, tx, cancel)) {
         let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(FailureKind::Network))));
     }
 }
 
 /// The timer's guide check: the stored feeds for the stored channels.
-pub(crate) async fn guide_pipeline(source: SourceId, tx: &Sender<Msg>, read: GuideRead) {
+pub async fn guide_pipeline(source: SourceId, tx: &Sender<Msg>, read: GuideRead) {
     let now = now_unix();
     let state = stored::guide_state(source);
     let guides = stored::current_configs(source, state.as_ref());
@@ -700,7 +700,7 @@ const CATALOG_IMPORT_TIME: std::time::Duration = std::time::Duration::from_secs(
 /// A kept playlist file's name: letters, digits, `-`, `_` and `.` only, no
 /// leading or trailing dot, and never a name Windows reserves (`con.m3u`),
 /// which a whole-app backup would refuse to carry.
-pub(crate) fn kept_file_name(name: &str) -> String {
+pub fn kept_file_name(name: &str) -> String {
     let name: String = name
         .chars()
         .map(|c| {

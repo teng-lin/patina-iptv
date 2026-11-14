@@ -2,52 +2,13 @@
 use iptv_store_sqlite::{DatabaseKey, Store, StoreError};
 use std::path::Path;
 
-#[cfg(all(test, unix))]
-pub(crate) fn plain_test_database(path: std::path::PathBuf) -> Result<Store, StoreError> {
-    Store::open(path)
-}
-
 pub(crate) fn open_database(path: &Path) -> Result<Store, StoreError> {
-    let key = crate::credential_key::database_key(path)?;
+    let key = crate::ports::database_key(path)?;
     let store = Store::open_encrypted(path, &key)?;
     seal_documents(store, path)
 }
 
-#[cfg(all(test, target_os = "linux", not(feature = "test-support")))]
-mod tests {
-    use super::*;
-    /// Run only inside a new dbus-run-session with an isolated unlocked
-    /// gnome-keyring-daemon. Never touches the user's login keyring.
-    #[test]
-    #[ignore = "requires an isolated Secret Service daemon"]
-    fn isolated_secret_service_persists_key_and_reopens_catalog() {
-        assert_eq!(
-            std::env::var("IPTV_TEST_ISOLATED_BROKER").as_deref(),
-            Ok("1")
-        );
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("synthetic.sqlite");
-        let first = crate::credential_key::database_key(&path).unwrap();
-        let mut store = Store::open_encrypted(&path, &first).unwrap();
-        store.set_combined_last_channel("synthetic-secret").unwrap();
-        drop(store);
-        drop(first);
-        let second = crate::credential_key::database_key(&path).unwrap();
-        let reopened = Store::open_encrypted(&path, &second).unwrap();
-        assert_eq!(
-            reopened.combined_last_channel().unwrap().as_deref(),
-            Some("synthetic-secret")
-        );
-        assert!(
-            !std::fs::read(&path)
-                .unwrap()
-                .windows(16)
-                .any(|bytes| bytes == b"synthetic-secret")
-        );
-    }
-}
-
-#[cfg(all(test, feature = "test-support"))]
+#[cfg(test)]
 mod test_support_tests {
     #[test]
     fn absent_synthetic_key_never_reaches_the_platform_broker() {
@@ -81,7 +42,7 @@ fn seal_documents(store: Store, path: &Path) -> Result<Store, StoreError> {
 /// plaintext pending content before it can become active.
 #[cfg(not(test))]
 pub(crate) fn validate_staged_database(path: &Path) -> Result<(), StoreError> {
-    let key = crate::credential_key::database_key(path)?;
+    let key = crate::ports::database_key(path)?;
     validate_staged_with_key(path, &key)
 }
 

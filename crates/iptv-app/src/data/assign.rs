@@ -14,7 +14,7 @@ pub fn choose(
     done: impl FnOnce(Applied) + 'static,
 ) {
     super::library::revoke_import_handoff(source);
-    let generation = crate::runtime().generation.with(std::cell::Cell::get);
+    let generation = crate::runtime().generation().with(std::cell::Cell::get);
     let saved = crate::runtime::assign::save(source, key, choice);
     super::spawn_in_app(async move {
         let outcome = saved.await;

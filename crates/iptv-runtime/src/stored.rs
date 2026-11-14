@@ -26,7 +26,7 @@ pub fn keep_past_days(settings: &Settings) -> u32 {
 
 /// The guides' storage options from the settings (`epg.keep_past`,
 /// `epg.store_descriptions`).
-pub(crate) fn with_storage(
+pub fn with_storage(
     mut configs: Vec<EpgSourceConfig>,
     settings: &Settings,
 ) -> Vec<EpgSourceConfig> {
@@ -43,7 +43,7 @@ pub fn catalog(source: SourceId) -> Result<(Vec<Group>, Vec<Channel>), StoreErro
 }
 
 /// [`catalog`] from an open store.
-pub fn catalog_in(
+pub(crate) fn catalog_in(
     store: &Store,
     source: SourceId,
 ) -> Result<(Vec<Group>, Vec<Channel>), StoreError> {
@@ -151,7 +151,7 @@ pub fn current_configs(source: SourceId, state: Option<&StoredGuide>) -> Vec<Epg
     configs_from_sources(&sources, state, source.as_ref().map(|s| &s.source.config))
 }
 
-pub(crate) fn configs_from_sources(
+pub fn configs_from_sources(
     sources: &[GuideSource],
     state: Option<&StoredGuide>,
     source: Option<&iptv_providers::model::SourceConfig>,
@@ -212,7 +212,7 @@ impl Matching<'_> {
     }
 }
 
-pub(crate) fn plan_with(
+pub fn plan_with(
     settings: &Settings,
     trigger: Trigger,
     configs: &[EpgSourceConfig],
@@ -249,7 +249,7 @@ pub fn next_check(
 }
 
 /// The time a guide check is due after `decision`.
-pub(crate) fn check_at(decision: Decision, now: UnixTime) -> Option<UnixTime> {
+pub fn check_at(decision: Decision, now: UnixTime) -> Option<UnixTime> {
     match decision {
         Decision::Keep { next_check } => next_check,
         Decision::Backoff { retry_at } => Some(retry_at),
@@ -266,7 +266,7 @@ const RETRY_DUE: i64 = 3600;
 /// and drops programmes older than [`keep_past_days`]. A feed that failed
 /// is recorded, so automatic refreshes back off; each feed's result is
 /// kept for the guide sources screen.
-pub fn replace(
+pub(crate) fn replace(
     source: SourceId,
     mut guide: Downloaded,
     configs: &[EpgSourceConfig],
@@ -339,7 +339,7 @@ pub fn discard(source: SourceId) {
         Err(e) => log::warn!("iptv data: could not delete the stored guide: {e}"),
     }
 }
-pub(crate) async fn download_now(
+pub async fn download_now(
     source: SourceId,
     guides: Vec<EpgSourceConfig>,
     restart_checks: bool,
@@ -416,7 +416,7 @@ pub fn error_kind(error: &ImportError) -> ImportErrorKind {
 
 /// `data.rs` put `source`'s schedule on screen.
 pub fn note_shown(source: Option<SourceId>) {
-    crate::runtime().shown.with(|s| s.set(source));
+    crate::current().shown.with(|s| s.set(source));
 }
 
 /// How the guide on screen was last updated.
@@ -441,7 +441,7 @@ pub enum GuideStatus {
 pub fn guide_status() -> GuideStatus {
     let sources = shown_sources();
     if sources.is_empty() {
-        return if crate::runtime()
+        return if crate::current()
             .status
             .with(|status| status.borrow().combined)
         {
@@ -474,10 +474,10 @@ pub fn guide_status() -> GuideStatus {
 /// Individual mode has one guide owner; aggregate commands cover every
 /// enabled source, with failures and feeds still managed per playlist.
 pub fn shown_sources() -> Vec<SourceId> {
-    if let Some(source) = crate::runtime().shown.with(Cell::get) {
+    if let Some(source) = crate::current().shown.with(Cell::get) {
         return vec![source];
     }
-    crate::runtime().status.with(|status| {
+    crate::current().status.with(|status| {
         let status = status.borrow();
         if status.combined {
             status.enabled.clone()
@@ -489,12 +489,12 @@ pub fn shown_sources() -> Vec<SourceId> {
 
 /// The source whose guide is on screen.
 pub fn shown() -> Option<SourceId> {
-    crate::runtime().shown.with(Cell::get)
+    crate::current().shown.with(Cell::get)
 }
 
 /// An update of `source`'s guide asked for by hand is running.
 pub fn updating(source: SourceId) -> bool {
-    crate::runtime()
+    crate::current()
         .updating
         .with(|u| u.borrow().contains(&source))
 }
@@ -504,7 +504,7 @@ pub use iptv_library::SourceLine;
 /// `source`'s guide sources in order, each with its last result (one
 /// short read of the store).
 pub fn source_lines(source: SourceId) -> Vec<SourceLine> {
-    crate::runtime().status.with(|status| {
+    crate::current().status.with(|status| {
         status
             .borrow()
             .lines
@@ -529,13 +529,13 @@ pub fn status_of(stored: Option<&StoredGuide>) -> GuideStatus {
 }
 
 pub fn cached_guide_state(source: SourceId) -> Option<StoredGuide> {
-    crate::runtime()
+    crate::current()
         .status
         .with(|status| status.borrow().guides.get(&source).cloned())
 }
 
-pub(crate) fn next_guide_edit(source: SourceId) -> u64 {
-    crate::runtime().edits.with(|edits| {
+pub fn next_guide_edit(source: SourceId) -> u64 {
+    crate::current().edits.with(|edits| {
         let mut edits = edits.borrow_mut();
         let generation = edits.entry(source).or_default();
         *generation += 1;
@@ -543,8 +543,8 @@ pub(crate) fn next_guide_edit(source: SourceId) -> u64 {
     })
 }
 
-pub(crate) fn guide_edit_is_current(source: SourceId, generation: u64) -> bool {
-    crate::runtime()
+pub fn guide_edit_is_current(source: SourceId, generation: u64) -> bool {
+    crate::current()
         .edits
         .with(|edits| edits.borrow().get(&source) == Some(&generation))
 }

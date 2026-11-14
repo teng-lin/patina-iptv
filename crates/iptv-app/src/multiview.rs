@@ -66,12 +66,12 @@ const HINT_MS: u64 = 5_000;
 /// The streams the shown source's account allows at once, if known: the
 /// failure card names it when the provider refuses a stream.
 pub fn account_limit() -> Option<u32> {
-    crate::runtime().account_streams.with(Cell::get)
+    crate::runtime().account_streams().with(Cell::get)
 }
 
 /// The source on screen changed its account's allowance (`data.rs`).
 pub fn set_account_streams(allowed: Option<u32>) {
-    crate::runtime().account_streams.with(|a| a.set(allowed));
+    crate::runtime().account_streams().with(|a| a.set(allowed));
 }
 
 /// A multiview session exists (its grid shows, or it waits for a detour).
@@ -172,7 +172,7 @@ pub fn open(ui: Ui) {
     crate::channels_view::close(ui);
     let limits = Limits {
         decoders: DECODERS,
-        connections: crate::runtime().account_streams.with(Cell::get),
+        connections: crate::runtime().account_streams().with(Cell::get),
     };
     log::info!(
         "iptv multiview: open (device {} streams, account {:?})",

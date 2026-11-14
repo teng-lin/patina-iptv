@@ -3,7 +3,7 @@
 use std::{
     path::Path,
     sync::{Arc, Mutex},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use iptv_providers::{
@@ -19,6 +19,25 @@ use nsh_testing::Headless;
 #[track_caller]
 fn step(result: Result<(), String>) {
     result.unwrap_or_else(|error| panic!("{error}"));
+}
+
+#[track_caller]
+fn wait_for_requests(
+    app: &mut Headless,
+    what: &str,
+    timeout: Duration,
+    requests: &std::sync::atomic::AtomicUsize,
+    expected: usize,
+) {
+    use std::sync::atomic::Ordering;
+    let deadline = Instant::now() + timeout;
+    // A held HTTP request updates only the mock server's counter. Waiting
+    // for a UI batch can sleep until the deadline after the request arrived.
+    while requests.load(Ordering::SeqCst) < expected {
+        assert!(Instant::now() < deadline, "{what} did not arrive");
+        step(app.wait(Duration::from_millis(10)));
+    }
+    assert_eq!(requests.load(Ordering::SeqCst), expected, "{what}");
 }
 
 fn seed(store: &mut Store, home: &Path, name: &str) -> SourceId {
@@ -763,11 +782,13 @@ fn automatic_join_keeps_account_format_limit_and_the_original_guide_job_and_time
     step(app.press("text:Watch"));
     step(app.wait_for_within("text:☰  All playlists", Duration::from_secs(20)));
     step(app.wait_for("text:/^Imported Beta Two · /"));
-    step(app.wait_until(
+    wait_for_requests(
+        &mut app,
         "original guide download waiting",
         Duration::from_secs(10),
-        |_| guides.load(Ordering::SeqCst) == 1,
-    ));
+        &guides,
+        1,
+    );
     assert_eq!(
         accounts.load(Ordering::SeqCst),
         1,
@@ -849,6 +870,10 @@ fn automatic_join_reloads_previous_source_whose_account_refresh_is_still_pending
     use nsh_core::{ImageData, picker::PickedFile};
     use std::sync::atomic::Ordering;
     let Some(home) = isolated!() else { return };
+    let _ = env_logger::builder()
+        .is_test(true)
+        .filter_level(log::LevelFilter::Info)
+        .try_init();
     let dir = home.data_dir();
     std::fs::create_dir_all(&dir).unwrap();
     let (server, accounts, _, release) = delayed_account(true);
@@ -871,6 +896,8 @@ fn automatic_join_reloads_previous_source_whose_account_refresh_is_still_pending
         .replace_catalog(source, &cached.groups, &cached.channels.items, &[], &[])
         .unwrap();
     store.set_active_source(source).unwrap();
+    let policy = store.source_policy(source).unwrap();
+    assert!(policy.enabled && policy.refresh_on_start);
     drop(store);
     let mut app = Headless::start(EngineConfig {
         viewport: Size::new(px(1920.0), px(1080.0)),
@@ -881,11 +908,13 @@ fn automatic_join_reloads_previous_source_whose_account_refresh_is_still_pending
         b"#EXTM3U\n#EXTINF:-1 group-title=\"News\",Added Alpha\nhttp://stream.example.test/added-alpha\n".to_vec()
     ))]);
     step(app.wait_for_within("text:Cached Beta", Duration::from_secs(20)));
-    step(app.wait_until(
+    wait_for_requests(
+        &mut app,
         "previous startup account request held",
         Duration::from_secs(10),
-        |_| accounts.load(Ordering::SeqCst) == 1,
-    ));
+        &accounts,
+        1,
+    );
     step(app.press("text:+ Add playlist"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
@@ -1054,11 +1083,13 @@ fn exercise_previous_guide_handoff(home: &super::isolated::Home, action: Previou
         step(app.press("text:TV guide data"));
         step(app.wait_for("text:Update the guide now"));
         step(app.press("text:Update the guide now"));
-        step(app.wait_until(
+        wait_for_requests(
+            &mut app,
             "explicit previous guide update held",
             Duration::from_secs(10),
-            |_| feed_requests.load(Ordering::SeqCst) == 2,
-        ));
+            &feed_requests,
+            2,
+        );
         step(app.back());
         step(app.back());
     } else {
@@ -1066,11 +1097,13 @@ fn exercise_previous_guide_handoff(home: &super::isolated::Home, action: Previou
         step(app.press("text:Previous"));
         step(app.wait_for("text:Refresh now"));
         step(app.press("text:Refresh now"));
-        step(app.wait_until(
+        wait_for_requests(
+            &mut app,
             "previous guide refresh held after playlist",
             Duration::from_secs(10),
-            |_| feed_requests.load(Ordering::SeqCst) == 2,
-        ));
+            &feed_requests,
+            2,
+        );
         // RUNNING clears at Playlist Done, before this guide response is released.
         step(app.press("text:Previous"));
         step(app.wait_for_within("text:Refresh now", Duration::from_secs(10)));
