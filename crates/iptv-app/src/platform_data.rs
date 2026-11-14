@@ -1,8 +1,10 @@
 //! Platform-owned app storage location. Android supplies its actual user-scoped
 //! files directory before the Rust root starts; package names are not paths.
 
+#[cfg(test)]
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
-use std::{fs, io};
 
 #[cfg(target_os = "android")]
 static ANDROID_FILES: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
@@ -71,6 +73,27 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_TvActivity_initializeDataD
     }
 }
 
+/// The Android host's `onStop`: the activity may be the process's last
+/// moment, so it waits (at most a second) for queued file writes before
+/// it lets the system stop it. NSH tells Rust about the move to the
+/// background asynchronously, which the same wait in `data.rs` relies on.
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_hantekllc_iptvrs_host_TvActivity_flushPendingWrites(
+    _env: jni::JNIEnv,
+    _activity: jni::objects::JObject,
+) {
+    // A panic must not unwind out of an `extern "system"` function into the
+    // JVM (the process aborts): it is logged, without its message.
+    match std::panic::catch_unwind(|| {
+        crate::runtime::flush_pending_writes(std::time::Duration::from_secs(1))
+    }) {
+        Ok(true) => {}
+        Ok(false) => log::warn!("iptv files: queued writes did not finish before the stop"),
+        Err(_) => log::error!("iptv files: waiting for queued writes panicked"),
+    }
+}
+
 /// Called before opening settings, the database, restore state, or any worker.
 /// The restrictive process mask also covers SQLite WAL/SHM and temporary files.
 pub(crate) fn initialize() -> io::Result<()> {
@@ -99,53 +122,9 @@ fn home_directory(home: Option<std::ffi::OsString>) -> io::Result<PathBuf> {
         })
 }
 
-/// Correct old installations too. Never follow a link out of private storage.
+/// Protect storage before opening application services.
 pub(crate) fn protect_directory(path: &Path) -> io::Result<()> {
-    let mut builder = fs::DirBuilder::new();
-    builder.recursive(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
-    }
-    builder.create(path)?;
-    protect_tree(path)?;
-    exclude_from_backup(path)
-}
-
-fn protect_tree(path: &Path) -> io::Result<()> {
-    let metadata = fs::symlink_metadata(path)?;
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        // Reject junctions and all other reparse points, not just symlinks.
-        if metadata.file_attributes() & 0x400 != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "App storage contains a reparse point",
-            ));
-        }
-    }
-    if metadata.file_type().is_symlink() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "App storage contains a symbolic link",
-        ));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(
-            path,
-            fs::Permissions::from_mode(if metadata.is_dir() { 0o700 } else { 0o600 }),
-        )?;
-    }
-    if metadata.is_dir() {
-        for entry in fs::read_dir(path)? {
-            protect_tree(&entry?.path())?;
-        }
-    }
-    Ok(())
+    crate::runtime::storage::protect_directory(path, exclude_from_backup)
 }
 
 /// User-initiated exports are separate; OS backups must not copy credentials.
@@ -195,9 +174,7 @@ mod tests {
             }
             initialize().unwrap();
             let root = data_dir();
-            let _store =
-                crate::runtime::credential_store::plain_test_database(root.join("iptv.sqlite"))
-                    .unwrap();
+            let _store = rusqlite::Connection::open(root.join("iptv.sqlite")).unwrap();
             fs::write(root.join("copied.m3u"), b"#EXTM3U\n").unwrap();
             for entry in fs::read_dir(root).unwrap() {
                 let entry = entry.unwrap();

@@ -34,7 +34,8 @@ mod list_rows;
 mod lists;
 mod media;
 mod menu_view;
-mod runtime;
+use iptv_runtime as runtime;
+pub(crate) use runtime::with_runtime;
 mod runtime_events;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", windows))]
 use iptv_player_mpv as mpv;
@@ -392,42 +393,30 @@ impl Ui {
 }
 
 thread_local! {
-    static RUNTIME: RefCell<Rc<runtime::Runtime>> = RefCell::new(Rc::new(runtime::Runtime::default()));
+    static RUNTIME: RefCell<Rc<runtime::Runtime>> = RefCell::new(Rc::new(new_runtime()));
 }
 
 /// The shell owns one application handle; all library state belongs to it.
 pub(crate) fn runtime() -> Rc<runtime::Runtime> {
-    RUNTIME.with(|runtime| runtime.borrow().clone())
+    runtime::try_current().unwrap_or_else(|| {
+        let owner = RUNTIME.with(|runtime| runtime.borrow().clone());
+        runtime::set_current(&owner);
+        owner
+    })
 }
 
-pub(crate) fn with_runtime<R>(owner: Rc<runtime::Runtime>, run: impl FnOnce() -> R) -> R {
-    struct Restore(Rc<runtime::Runtime>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            RUNTIME.set(self.0.clone());
-        }
-    }
-    let _restore = Restore(RUNTIME.replace(owner.clone()));
-    owner.with_context(run)
+fn new_runtime() -> runtime::Runtime {
+    let mut ports = runtime::Ports::new(platform_data::data_dir(), credential_key::database_key);
+    ports.exclude_from_backup = platform_data::exclude_from_backup;
+    ports.startup_mark = |phase, detail| startup::mark_with(phase, detail);
+    runtime::Runtime::new(ports)
 }
 
-/// Poll an application task with the runtime that accepted it. A late wake
-/// from an old root must never read or change its successor's state.
 pub(crate) fn in_runtime(
     future: impl std::future::Future<Output = ()> + 'static,
 ) -> impl std::future::Future<Output = ()> {
-    let runtime = runtime();
-    let mut future = Box::pin(runtime.scope_future(future));
-    std::future::poll_fn(move |context| {
-        struct Restore(Rc<runtime::Runtime>);
-        impl Drop for Restore {
-            fn drop(&mut self) {
-                RUNTIME.set(self.0.clone());
-            }
-        }
-        let _restore = Restore(RUNTIME.replace(runtime.clone()));
-        future.as_mut().poll(context)
-    })
+    let owner = runtime();
+    runtime::with_runtime(owner, || runtime::in_runtime(future))
 }
 
 /// The guide data in use (synthetic until a playlist is imported).
@@ -480,7 +469,8 @@ pub fn channel_name(ch: usize) -> String {
 
 #[component]
 pub fn App() -> impl IntoElement {
-    RUNTIME.set(Rc::new(runtime::Runtime::default()));
+    RUNTIME.set(Rc::new(new_runtime()));
+    RUNTIME.with(|owner| runtime::set_current(&owner.borrow()));
     runtime().activate();
     startup::mark("rust root");
     startup::log_library_base();

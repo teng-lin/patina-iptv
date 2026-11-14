@@ -31,7 +31,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Windows lint checks failed' }
         & cargo test --locked -p nsh-platform-windows --lib chrome::pointer_tests
         if ($LASTEXITCODE -ne 0) { throw 'Windows pointer regression failed' }
-        & cargo test --locked -p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-providers -p iptv-guide -p iptv-import -p iptv-net -p iptv-store-sqlite -p iptv-search -p iptv-player-mpv -p iptv-library
+        & cargo test --locked -p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-providers -p iptv-guide -p iptv-import -p iptv-net -p iptv-store-sqlite -p iptv-search -p iptv-player-mpv -p iptv-library -p iptv-runtime
         if ($LASTEXITCODE -ne 0) { throw 'Library crate tests failed' }
         foreach ($crate in @('iptv-core', 'iptv-nav', 'iptv-settings', 'iptv-epg', 'iptv-providers', 'iptv-guide', 'iptv-import', 'iptv-search', 'iptv-library')) {
             & cargo build --locked -p $crate --target wasm32-unknown-unknown

@@ -378,7 +378,7 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
 /// the surface reopens or plays nothing.
 fn cancel_resolve(surface: usize) {
     let running = crate::runtime()
-        .resolving
+        .resolving()
         .with(|r| r.borrow_mut().get_mut(surface).and_then(Option::take));
     if let Some((_, cancel)) = running {
         cancel.cancel();
@@ -405,7 +405,7 @@ fn resolve_link(
     } = *link;
     cancel_resolve(surface);
     let cancel = CancelToken::new();
-    crate::runtime().resolving.with(|r| {
+    crate::runtime().resolving().with(|r| {
         if let Some(slot) = r.borrow_mut().get_mut(surface) {
             *slot = Some((session, cancel.clone()));
         }
@@ -423,7 +423,7 @@ fn resolve_link(
     let _task = ui.player.owner.run(|| {
         spawn(crate::in_runtime(async move {
             let answered = request.await;
-            crate::runtime().resolving.with(|r| {
+            crate::runtime().resolving().with(|r| {
                 if let Some(slot) = r.borrow_mut().get_mut(surface)
                     && slot.as_ref().is_some_and(|(s, _)| *s == session)
                 {

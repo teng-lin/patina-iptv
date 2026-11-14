@@ -2853,9 +2853,9 @@ dependencies = [
  "iptv-net",
  "iptv-player-mpv",
  "iptv-providers",
+ "iptv-runtime",
  "iptv-search",
  "iptv-settings",
- "iptv-store-sqlite",
  "jni 0.21.1",
  "keyring",
  "libc",
@@ -2977,6 +2977,28 @@ dependencies = [
  "url",
  "xxhash-rust",
  "zeroize",
+]
+
+[[package]]
+name = "iptv-runtime"
+version = "0.1.1"
+dependencies = [
+ "futures-channel",
+ "getrandom 0.4.3",
+ "iptv-core",
+ "iptv-epg",
+ "iptv-guide",
+ "iptv-import",
+ "iptv-library",
+ "iptv-net",
+ "iptv-providers",
+ "iptv-search",
+ "iptv-settings",
+ "iptv-store-sqlite",
+ "libc",
+ "log",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

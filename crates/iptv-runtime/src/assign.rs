@@ -151,7 +151,7 @@ fn save_and_rebind(
     }
 }
 
-pub(crate) fn save(
+pub fn save(
     source: SourceId,
     key: String,
     choice: Choice,

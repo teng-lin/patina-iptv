@@ -151,3 +151,49 @@ fn platform_key(_: &Path) -> Result<DatabaseKey, StoreError> {
         "no platform credential broker for this target",
     ))
 }
+
+#[cfg(all(test, target_os = "linux", not(feature = "test-support")))]
+mod tests {
+    use super::*;
+
+    /// Run only in a new dbus-run-session with an isolated unlocked daemon.
+    #[test]
+    #[ignore = "requires an isolated Secret Service daemon"]
+    fn isolated_secret_service_persists_key_and_reopens_catalog() {
+        assert_eq!(
+            std::env::var("IPTV_TEST_ISOLATED_BROKER").as_deref(),
+            Ok("1")
+        );
+        let directory = tempfile::tempdir().unwrap();
+        let owner = || {
+            std::rc::Rc::new(crate::runtime::Runtime::new(crate::runtime::Ports::new(
+                directory.path().to_owned(),
+                database_key,
+            )))
+        };
+        let first = owner();
+        crate::with_runtime(first.clone(), || {
+            first.start_services();
+            crate::executor::block_on(crate::runtime::commands::remember_combined_channel(
+                "synthetic-secret".into(),
+            ))
+            .unwrap();
+            assert!(first.drain_services());
+        });
+        drop(first);
+        let second = owner();
+        crate::with_runtime(second.clone(), || {
+            second.start_services();
+            let saved =
+                crate::executor::block_on(crate::runtime::commands::combined_resume_key()).unwrap();
+            assert_eq!(saved.as_deref(), Some("synthetic-secret"));
+            assert!(second.drain_services());
+        });
+        assert!(
+            !std::fs::read(directory.path().join("iptv.sqlite"))
+                .unwrap()
+                .windows(16)
+                .any(|bytes| bytes == b"synthetic-secret")
+        );
+    }
+}

@@ -74,6 +74,7 @@ impl Epochs {
     }
 }
 pub(crate) struct Service {
+    pub(crate) ports: crate::Ports,
     pub(crate) directory: std::path::PathBuf,
     writer: Lane,
     reader: Lane,
@@ -83,10 +84,11 @@ pub(crate) struct Service {
     pub(crate) pool: OnceLock<super::workers::Pool>,
     pub(crate) settings: super::settings::Current,
 }
-impl Default for Service {
-    fn default() -> Self {
+impl Service {
+    pub(crate) fn new(ports: crate::Ports) -> Self {
         Self {
-            directory: crate::platform_data::data_dir(),
+            directory: ports.directory.clone(),
+            ports,
             writer: Lane {
                 role: Role::Writer,
                 name: "iptv-store",
@@ -123,13 +125,15 @@ static ACTIVE: Mutex<Weak<Service>> = Mutex::new(Weak::new());
 pub(crate) fn service() -> Arc<Service> {
     CONTEXT
         .with(|context| context.borrow().as_ref().and_then(Weak::upgrade))
-        .or_else(|| {
-            ACTIVE
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .upgrade()
-        })
-        .unwrap_or_else(|| crate::runtime().store.clone())
+        .or_else(active_service)
+        .unwrap_or_else(|| crate::current().store.clone())
+}
+
+pub(crate) fn active_service() -> Option<Arc<Service>> {
+    ACTIVE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .upgrade()
 }
 
 pub(crate) fn activate(owner: Arc<Service>) {
@@ -458,6 +462,13 @@ pub(crate) fn drain_on_shutdown() -> bool {
         RETRY_OPEN_AT.set(None);
     });
     writer && reader
+}
+
+#[cfg(test)]
+impl Default for Service {
+    fn default() -> Self {
+        Self::new(crate::Ports::for_tests())
+    }
 }
 
 #[cfg(test)]

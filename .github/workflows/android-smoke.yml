@@ -9,6 +9,7 @@ on:
       - 'hosts/android/**'
       - 'crates/iptv-app/**'
       - 'crates/iptv-net/**'
+      - 'crates/iptv-runtime/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'nsh.rev'

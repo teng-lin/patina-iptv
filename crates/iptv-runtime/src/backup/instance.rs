@@ -64,7 +64,7 @@ mod tests {
     use std::process::{Command, Stdio};
     const ROOT: &str = "IPTV_RS_INSTANCE_LOCK_TEST_ROOT";
     const MODE: &str = "IPTV_RS_INSTANCE_LOCK_TEST_MODE";
-    const CHILD: &str = "runtime::backup::instance::tests::lock_child_process";
+    const CHILD: &str = "backup::instance::tests::lock_child_process";
 
     fn child(root: &Path, mode: &str) -> Command {
         let mut command = Command::new(std::env::current_exe().unwrap());

@@ -39,7 +39,7 @@ pub fn account_streams(meta: &SourceMeta) -> Option<u32> {
 }
 
 const LAST_CHANNEL_FILE: &str = "last_channel";
-pub(crate) fn last_channel_path(source: Option<SourceId>) -> std::path::PathBuf {
+pub fn last_channel_path(source: Option<SourceId>) -> std::path::PathBuf {
     super::paths::data_dir().join(match source {
         Some(id) => format!("{LAST_CHANNEL_FILE}-{}", id.0),
         None => LAST_CHANNEL_FILE.to_owned(),
@@ -47,7 +47,7 @@ pub(crate) fn last_channel_path(source: Option<SourceId>) -> std::path::PathBuf 
 }
 
 /// Queues the write: a zap never waits for the disk (`file_writer`).
-pub(crate) fn save_last_channel(source: Option<SourceId>, key: &str) {
+pub fn save_last_channel(source: Option<SourceId>, key: &str) {
     drop(super::file_writer::write(
         last_channel_path(source),
         key.as_bytes().to_vec(),
@@ -55,7 +55,7 @@ pub(crate) fn save_last_channel(source: Option<SourceId>, key: &str) {
 }
 
 /// Includes a write still queued, so a zap is remembered at once.
-pub(crate) fn load_last_channel(source: Option<SourceId>) -> Option<String> {
+pub fn load_last_channel(source: Option<SourceId>) -> Option<String> {
     let read = |path: std::path::PathBuf| {
         let key = String::from_utf8(super::file_writer::read(&path)?).ok()?;
         let key = key.trim();

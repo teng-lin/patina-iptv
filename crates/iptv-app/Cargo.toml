@@ -9,9 +9,10 @@ license.workspace = true
 
 [features]
 # Synthetic fixture transport and key injection; never enabled in packages.
-test-support = []
+test-support = ["iptv-runtime/test-support"]
 
 [dependencies]
+iptv-runtime.workspace = true
 iptv-library.workspace = true
 base64 = "0.22"
 sys-locale = "0.3.2"
@@ -23,7 +24,6 @@ iptv-epg.workspace = true
 iptv-providers.workspace = true
 iptv-import.workspace = true
 iptv-net.workspace = true
-iptv-store-sqlite.workspace = true
 iptv-search.workspace = true
 iptv-settings.workspace = true
 futures-channel = "0.3"
@@ -55,6 +55,7 @@ nsh-platform-macos.workspace = true
 nsh-platform-ios.workspace = true
 
 [dev-dependencies]
+iptv-store-sqlite.workspace = true
 rusqlite.workspace = true
 # Headless runs of the app: what a press reaches (tests/app/pointer.rs).
 nsh-engine.workspace = true

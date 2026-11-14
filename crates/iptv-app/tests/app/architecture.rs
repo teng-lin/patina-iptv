@@ -97,39 +97,10 @@ fn app_sources() -> (PathBuf, Vec<PathBuf>) {
 
 #[test]
 fn only_runtime_can_use_the_store_adapter() {
-    let (root, files) = app_sources();
+    let (_, files) = app_sources();
     for file in files {
-        if file.starts_with(root.join("runtime")) {
-            continue;
-        }
         let source = code(&file);
         for forbidden in ["iptv_store_sqlite", "store_service::"] {
-            assert!(
-                !source.contains(forbidden),
-                "{} uses {forbidden}",
-                file.display()
-            );
-        }
-    }
-}
-
-#[test]
-fn runtime_does_not_depend_on_the_ui_toolkit_or_views() {
-    let (root, files) = app_sources();
-    for file in files {
-        if !file.starts_with(root.join("runtime")) {
-            continue;
-        }
-        let source = code(&file);
-        for forbidden in [
-            "nsh_",
-            "crate::Ui",
-            "crate::player::",
-            "crate::lists::",
-            "crate::settings_view::",
-            "crate::playlists_view::",
-            "crate::wizard_view::",
-        ] {
             assert!(
                 !source.contains(forbidden),
                 "{} uses {forbidden}",
@@ -144,9 +115,6 @@ fn shell_statics_are_only_the_documented_platform_cache_and_ui_handles() {
     let (root, files) = app_sources();
     let mut retained = BTreeSet::new();
     for file in files {
-        if file.starts_with(root.join("runtime")) {
-            continue;
-        }
         let name = file
             .strip_prefix(&root)
             .unwrap()

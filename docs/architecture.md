@@ -6,11 +6,13 @@ security model is in [security.md](security.md).
 
 ## Crates and the direction of dependencies
 
-The workspace has thirteen crates in three layers. Dependencies only point
+The workspace has fourteen crates. Dependencies only point
 down: a crate may depend on crates in its own layer or below, never above.
 
 ```text
   Shell            iptv-app
+                      │
+  Application      iptv-runtime
                       │
   Native adapters  iptv-net        iptv-store-sqlite  iptv-player-mpv
                       │                   │
@@ -30,12 +32,14 @@ down: a crate may depend on crates in its own layer or below, never above.
 | `iptv-net` | `iptv-providers`, `iptv-import` |
 | `iptv-store-sqlite` | `iptv-providers`, `iptv-epg`, `iptv-import`, `iptv-library` |
 | `iptv-player-mpv` | `iptv-core`, `iptv-net`, platform NSH components |
-| `iptv-app` | all of the above, and NSH |
+| `iptv-runtime` | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-library`, `iptv-net`, `iptv-providers`, `iptv-search`, `iptv-settings`, `iptv-store-sqlite` |
+| `iptv-app` | portable crates, `iptv-runtime`, `iptv-net`, `iptv-player-mpv`, NSH |
 
 | Layer | Crates | May use |
 | --- | --- | --- |
 | Portable core | `iptv-core`, `iptv-nav`, `iptv-settings`, `iptv-providers`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-search`, `iptv-library` | Plain Rust only. No NSH, no platform APIs, no blocking I/O, no clock, no async runtime. |
 | Native adapters | `iptv-net`, `iptv-store-sqlite` | Tokio and reqwest; SQLite. No NSH. |
+| Native application | `iptv-runtime` | Native services, Tokio, filesystem I/O and adapter value types. No NSH. Host JNI and credential brokers stay in the shell. |
 | Player adapter | `iptv-player-mpv` | NSH native components, platform APIs, libmpv. The Android build contains only the wire contract and track parser. |
 | Shell | `iptv-app` | NSH, the adapters, platform APIs. |
 
@@ -185,11 +189,11 @@ downloaded again is decided by `iptv_import::plan_startup` from the
 
 ## Application runtime and commands
 
-`iptv-app/src/runtime/` is the native application layer. It has no NSH
-imports. The shell holds one `Rc<Runtime>` and installs a task host, timers
+`iptv-runtime` is the native application layer. It builds and tests without
+NSH or the player. The shell holds one `Rc<Runtime>` and installs a task host, timers
 and an event sink. Runtime events enter the shell at
 `runtime_events::apply`; views issue named commands rather than closures
-that can reach a `Store`. `runtime/model.rs` exposes command values, without
+that can reach a `Store`. `iptv-runtime/src/model.rs` exposes command values, without
 exposing the connection or worker API.
 
 Runtime owns the current schedule, library snapshot, refresh tickets and
@@ -199,8 +203,8 @@ refresh pool, file writer and shared two-worker Tokio executor. Refresh
 scheduling consumes foreground notifications and emits refresh requests;
 it does not wake a sleeping device. Platform handles, caches and UI gesture
 flags remain in the shell, with an explicit list in
-`tests/app/architecture.rs`. The same tests guard the SQLite and NSH
-boundaries.
+`iptv-app/tests/app/architecture.rs`. The shell guards SQLite references and
+statics; `iptv-runtime/tests/architecture.rs` guards toolkit and host dependencies.
 
 Every local future and worker captures the owner that accepted it. A late
 reply keeps that owner's settings, paths and epoch; it cannot adopt a newer
@@ -224,9 +228,20 @@ callbacks on the UI thread, retaining its `Rc` model. The storage prerequisite
 measured the expensive preparation at 100k channels; no `Rc` to `Arc` rewrite
 is needed for that work to leave the UI thread.
 
-The runtime remains a module in the shell crate for this refactor. Moving it
-to a separate crate is optional; its remaining platform inputs (key broker,
-private paths and startup instrumentation) would become explicit ports.
+The shell constructs `Runtime::new(Ports)` with its private directory,
+credential-key callback, OS backup-exclusion hook and startup instrumentation.
+Native workers capture those inputs with their accepting service. JNI entry
+points and credential-broker implementations remain in the shell. The host's
+local task executor and timers are installed separately through `bind_tasks`.
+The shell retains one strong handle; local context selection uses weak handles
+and restores the accepting owner on every poll, including nested callbacks and
+unwinding. Local controllers use explicit state accessors; store connections,
+writer queues and native service handles remain private.
+
+Run `cargo test --locked -p iptv-runtime` to test application services without
+linking a display toolkit or reaching an OS credential broker. Public-API tests
+cover suspended task delivery, unwinding, weak owner lifetime, and native worker
+capture of the original private directory and key broker.
 Scenario processes stay isolated because NSH and the player have their own
 platform globals.
 
