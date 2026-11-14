@@ -29,7 +29,6 @@ use iptv_core::tracks::{Choice, Tracks};
 use iptv_guide::EpgSchedule;
 use iptv_guide::playback::{Clock, Resolution, StalkerLink, Unavailable};
 use iptv_import::CancelToken;
-use iptv_net::NetClient;
 use nsh_core::platform::Lifecycle;
 use nsh_core::prelude::*;
 
@@ -195,13 +194,7 @@ pub fn start(ui: &Ui, channel: usize) {
                 if let Some((source, local)) = crate::data::combined::owner(ui, &key) {
                     save_last_channel(Some(source), &local);
                 }
-                let saved_key = key.clone();
-                let saved = crate::runtime::commands::remember_combined_channel(saved_key);
-                crate::data::spawn_in_app(async move {
-                    if let Err(e) = saved.await {
-                        log::warn!("iptv combined: cannot save last channel: {e}");
-                    }
-                });
+                crate::runtime::playback::save_combined_channel(&key);
             } else {
                 save_last_channel(ui.library.shown.get_untracked(), &key);
             }
@@ -410,9 +403,9 @@ fn resolve_link(
             *slot = Some((session, cancel.clone()));
         }
     });
-    let config = crate::settings::net_config();
+    let client = crate::runtime::playback::link_client(crate::settings::net_config());
     let request = crate::executor::spawn(async move {
-        let result = match NetClient::new(config) {
+        let result = match client.await {
             Ok(net) => iptv_import::stalker_link(&net, &mut portal, &cmd, false, &cancel)
                 .await
                 .map_err(|e| format!("{:?}", e.kind())),
@@ -442,10 +435,9 @@ fn resolve_link(
             {
                 return;
             }
-            // Keep a refreshed token for the next link, if the data is the same.
-            if Rc::ptr_eq(&schedule, &crate::schedule())
-                && let Some(ctx) = context
-            {
+            // This resolve still owns the player's session. Organization copies
+            // share its playback context even though their schedule pointers differ.
+            if let Some(ctx) = context {
                 ctx.update_stalker_session(portal.clone());
             }
             match result {

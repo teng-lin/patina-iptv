@@ -109,6 +109,7 @@ fn seed(root: &Path, name: &str) {
     store.set_active_source(id).unwrap();
     fs::write(root.join("settings.json"), Settings::new().to_json_string()).unwrap();
     fs::write(root.join(format!("last_channel-{}", id.0)), key.as_str()).unwrap();
+    fs::write(root.join("last_channel_combined"), "generated-combined-key").unwrap();
     fs::write(root.join("search-history.json"), "[\"Generated query\"]").unwrap();
 }
 
@@ -157,6 +158,10 @@ fn whole_app_round_trip_rebases_local_files_and_activates_only_on_restart() {
     assert_eq!(
         fs::read_to_string(target.join(format!("last_channel-{}", id.0))).unwrap(),
         channels[0].channel.id.as_str()
+    );
+    assert_eq!(
+        fs::read_to_string(target.join("last_channel_combined")).unwrap(),
+        "generated-combined-key"
     );
     assert_eq!(
         fs::read_to_string(target.join("search-history.json")).unwrap(),

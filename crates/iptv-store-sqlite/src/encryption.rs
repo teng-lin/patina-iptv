@@ -80,7 +80,13 @@ impl Store {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
             Err(e) => return Err(io_error(e)),
         };
+        let encrypted_marker = sibling(path, ".encrypted");
         if legacy {
+            if encrypted_marker.exists() {
+                return Err(StoreError::Unavailable(
+                    "refusing plaintext database in place of encrypted installation",
+                ));
+            }
             Self::encrypt_legacy(path, key)?;
         }
         // Create with private permissions before SQLite opens a new file.
@@ -92,6 +98,17 @@ impl Store {
         key.apply(&conn)?;
         let mut store = Self::init(conn, &StoreOptions::default())?;
         store.key = Some(key.clone());
+        if !encrypted_marker.exists() {
+            private_file(&encrypted_marker, false)?
+                .sync_all()
+                .map_err(io_error)?;
+            #[cfg(unix)]
+            if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                File::open(parent)
+                    .and_then(|dir| dir.sync_all())
+                    .map_err(io_error)?;
+            }
+        }
         Ok(store)
     }
     /// Opens scratch storage with exactly the live store's encryption policy.
@@ -261,6 +278,30 @@ mod tests {
             .query_row("SELECT value FROM secret_test", [], |r| r.get(0))
             .unwrap();
         assert_eq!(value, "https://synthetic.invalid/synthetic-secret");
+    }
+    #[test]
+    fn encrypted_installation_refuses_plaintext_replacement() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("catalog.sqlite");
+        let store = Store::open_encrypted(&path, &key()).unwrap();
+        drop(store);
+
+        // Replace the encrypted database with a plaintext SQLite database.
+        let _ = std::fs::remove_file(&path);
+        let plain_conn = Connection::open(&path).unwrap();
+        plain_conn
+            .execute_batch("CREATE TABLE untrusted(id INTEGER);")
+            .unwrap();
+        drop(plain_conn);
+
+        // Attempting to reopen as encrypted must refuse the plaintext file.
+        let err = Store::open_encrypted(&path, &key()).unwrap_err();
+        assert!(matches!(err, StoreError::Unavailable(_)));
+        let header = std::fs::read(&path).unwrap();
+        assert!(
+            header.starts_with(b"SQLite format 3"),
+            "file was not adopted or converted"
+        );
     }
     #[test]
     fn every_legacy_schema_migrates_without_plaintext_sidecars() {

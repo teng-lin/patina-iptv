@@ -125,7 +125,7 @@ fn changed(_ui: Ui) {
 pub(super) fn run(ui: Ui, stored: StoredSource, purpose: Purpose, edit: bool) {
     let id = stored.id;
     // A mode switch can replace a still-running job for this source.
-    cancel_running(id);
+    replace_running(id);
     let due = !matches!(
         purpose,
         Purpose::Startup | Purpose::Switch | Purpose::Combined
@@ -247,7 +247,7 @@ fn switch_to_ready(ui: Ui, id: SourceId) {
     };
     super::combined::leave(ui);
     // A refresh of it in the background gives way to the shown one.
-    cancel_running(id);
+    replace_running(id);
     run(ui, stored, Purpose::Switch, false);
 }
 
@@ -295,7 +295,7 @@ pub fn try_details(ui: Ui, id: SourceId, source: Source) {
     };
     // Only the details change; the name is the stored one.
     stored.source.config = source.config;
-    cancel_running(id);
+    replace_running(id);
     run(ui, stored, refresh_purpose(ui, id), true);
 }
 
@@ -342,7 +342,6 @@ pub async fn edit_guides(ui: Ui, id: SourceId, edit: &guides::Edit) -> Result<bo
         return Ok(false);
     }
     refresh_after_commit(ui, |_| {}).await;
-    revoke_import_handoff(id);
     stored::guides_changed(ui, id);
     Ok(true)
 }
@@ -351,8 +350,14 @@ pub async fn edit_guides(ui: Ui, id: SourceId, edit: &guides::Edit) -> Result<bo
 /// The shown one gives way to the newest other playlist, or to the
 /// first-run state when none is left.
 pub async fn delete(ui: Ui, id: SourceId) -> Result<(), StoreError> {
+    let generation = super::generation();
     cancel_running(id);
-    crate::runtime::library::delete_source(id).await?;
+    if let Err(error) = crate::runtime::library::delete_source(id).await {
+        // The playlist stays, and so does its guide check, which the
+        // cancelling ended (work that was cancelled keeps one itself).
+        super::keep_guide_check(ui, id, generation, None);
+        return Err(error);
+    }
     refresh_after_commit(ui, |snapshot| {
         snapshot.playlists.retain(|p| p.id != id);
         snapshot.details.remove(&id);

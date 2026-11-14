@@ -499,7 +499,8 @@ pub fn App() -> impl IntoElement {
     runtime::set_current(&owner);
     owner.activate();
     RUNTIME.set(Some(owner));
-    if let Err(message) = backup::lock() {
+    if let Err(error) = backup::lock() {
+        let message = error.message();
         return view()
             .flex_1()
             .items_center()
@@ -969,7 +970,16 @@ pub(crate) fn go_back(ui: Ui) -> bool {
 /// Explicit synthetic-key injection for the headless test binary only.
 #[cfg(feature = "test-support")]
 pub use credential_key::install_test_key;
+/// Whether a stored source has a guide timer or an in-flight guide read,
+/// for the headless tests of what keeps its periodic checks alive.
+#[cfg(feature = "test-support")]
+pub use runtime::guide_check_registered as guide_check_pending;
 /// Keeps the store's writer busy, as a long catalog or guide publish does,
 /// for the headless tests of what must not wait for it.
 #[cfg(feature = "test-support")]
 pub use runtime::occupy_writer;
+/// The refresh workers refuse work as when their queue is full, and an
+/// import waits just before it reports its catalog, for the headless
+/// tests of what such moments must not lose.
+#[cfg(feature = "test-support")]
+pub use runtime::{hold_reports, refuse_work, reports_waiting};

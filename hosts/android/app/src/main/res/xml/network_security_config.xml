@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- IPTV endpoints are user supplied, so their domains cannot be enumerated.
-     Explicit HTTP sources are supported with a visible not-encrypted hint.
-     The shared native transport refuses HTTPS downgrades (including manifests).
-     The loopback player connection carries no identity headers. -->
+<!-- User-supplied HTTP sources use the native transport and its redirect
+     policy. Java players receive only capability URLs on the loopback relay;
+     deny their direct cleartext subresource loads to all other hosts. -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors><certificates src="system" /></trust-anchors>
     </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
 </network-security-config>

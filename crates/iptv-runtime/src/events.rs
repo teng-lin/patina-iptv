@@ -7,7 +7,7 @@ pub enum RuntimeEvent {
     RefreshDue(SourceId),
     CatalogChanged,
     EarlyResume {
-        source: super::model::StoredSource,
+        source: Box<super::model::StoredSource>,
         done: futures_channel::oneshot::Sender<()>,
     },
     Message(String),
@@ -23,8 +23,10 @@ pub enum RuntimeEvent {
     ShownSource(Option<SourceId>),
     ScheduleReady(Rc<dyn Schedule>),
     OrganizationReady {
+        source: SourceId,
+        ticket: u64,
         schedule: Rc<dyn Schedule>,
-        snapshot: super::state::OrganizationSnapshot,
+        replacement: Rc<iptv_guide::EpgSchedule>,
     },
     SourceReady(bool),
     SourceChanged,

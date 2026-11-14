@@ -24,6 +24,10 @@ const HOUR: i64 = 3600;
 
 /// One server for every source type. `base` is filled in after binding.
 async fn server() -> TestServer {
+    encoded_server(false, false).await
+}
+
+async fn encoded_server(encoded: bool, nested: bool) -> TestServer {
     let base = Arc::new(Mutex::new(String::new()));
     let b2 = base.clone();
     let guide = synth::gzip(
@@ -54,7 +58,17 @@ async fn server() -> TestServer {
                 synth::m3u(CHANNELS, 24, None, &base).as_bytes(),
             )),
             "/iptv/guide.xml.gz" | "/xmltv.php" => {
-                Resp::ok(guide.clone()).header("Content-Type", "application/gzip")
+                let response = Resp::ok(if nested {
+                    synth::gzip(&guide)
+                } else {
+                    guide.clone()
+                })
+                .header("Content-Type", "application/gzip");
+                if encoded {
+                    response.header("Content-Encoding", "gzip")
+                } else {
+                    response
+                }
             }
             "/moved.m3u" => Resp::redirect(302, "/iptv/playlist.m3u"),
             "/player_api.php" => xtream.handle(req).into(),
@@ -77,7 +91,16 @@ fn m3u(url: String) -> SourceConfig {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn m3u_playlist_then_its_url_tvg_guide() {
-    let server = server().await;
+    check_m3u_guide(server().await).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn http_gzip_and_nested_gzip_guides_import() {
+    check_m3u_guide(encoded_server(true, false).await).await;
+    check_m3u_guide(encoded_server(true, true).await).await;
+}
+
+async fn check_m3u_guide(server: TestServer) {
     let net = NetClient::new(iptv_net::NetConfig {
         allow_private_fixture: true,
         ..Default::default()

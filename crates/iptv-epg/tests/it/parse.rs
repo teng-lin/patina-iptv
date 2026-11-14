@@ -233,6 +233,52 @@ fn corrupt_gzip_reports_an_error() {
     assert!(matches!(r, Err(DecodeError::Gzip(_))), "{r:?}");
 }
 
+/// HTTP gzip around a `.gz` file whose inner layer is corrupt beyond its
+/// first decoding slice: the error comes while the parser drains the inner
+/// layer between records, and ends the parse like any other decode error.
+#[test]
+fn a_late_inner_gzip_error_ends_the_parse() {
+    // Small identical members keep the inner stream valid for several
+    // slices and let the outer layer deliver all of it in one step.
+    let mut inner = gzip(b"<tv>");
+    let filler = gzip(b" ");
+    for _ in 0..1000 {
+        inner.extend_from_slice(&filler);
+    }
+    // An invalid byte: its warning must survive the failure too.
+    inner.extend(gzip(
+        b"<channel id=\"early.example\"><display-name>Early\xFF</display-name></channel>",
+    ));
+    for _ in 0..1000 {
+        inner.extend_from_slice(&filler);
+    }
+    let slice = 8 * 1024;
+    assert!(inner.len() > 3 * slice, "{}", inner.len());
+    inner.extend_from_slice(&[0xff; 64]);
+    let outer = gzip(&inner);
+    assert!(outer.len() < slice, "one outer step: {}", outer.len());
+
+    let mut channels = Vec::new();
+    let mut sink = |item| {
+        if let XmltvItem::Channel(c) = item {
+            channels.push(c.id);
+        }
+    };
+    let mut parser = XmltvParser::new(ParseOptions::default());
+    let r = parser.feed(&outer, &mut sink);
+    assert!(matches!(r, Err(DecodeError::Gzip(_))), "{r:?}");
+    let failed = parser.stats();
+    assert_eq!(failed.bytes_in, outer.len() as u64);
+    assert_eq!(failed.warnings.invalid_utf8, 1);
+    // Later calls are no-ops: nothing more is counted, decoded or emitted.
+    parser
+        .feed(b"<channel id=\"late.example\"/>", &mut sink)
+        .unwrap();
+    assert_eq!(parser.stats(), failed);
+    assert_eq!(parser.finish(&mut sink).unwrap(), failed);
+    assert_eq!(channels, ["early.example"]);
+}
+
 #[test]
 fn latin1_documents_are_transcoded() {
     let mut xml = b"<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>\n<tv><channel id=\"c.example\"><display-name>Cin\xE9ma</display-name></channel>".to_vec();

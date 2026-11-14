@@ -58,11 +58,24 @@ pub async fn build(
         }
     }
 }
-pub async fn apply(schedule: &EpgSchedule, source: SourceId) {
-    match load(source).await {
-        Ok(snapshot) => snapshot.install(schedule),
-        Err(error) => log::warn!("iptv organization: store unavailable: {error}"),
-    }
+pub async fn apply(schedule: &EpgSchedule, source: SourceId) -> Option<EpgSchedule> {
+    let snapshot = match load(source).await {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            log::warn!("iptv organization: store unavailable: {error}");
+            crate::runtime().emit(crate::runtime::RuntimeEvent::Notify(
+                "The list could not be reloaded. Reopen it and try again.",
+            ));
+            return None;
+        }
+    };
+    let input = schedule.organization_builder();
+    let prepared = crate::executor::spawn_blocking(move || {
+        input.prepare(snapshot.organization, snapshot.lists)
+    })
+    .await
+    .ok()?;
+    Some(schedule.with_prepared_organization(prepared))
 }
 pub fn changed(ui: Ui, source: SourceId) {
     crate::runtime().organization_revision().set(
@@ -71,9 +84,10 @@ pub fn changed(ui: Ui, source: SourceId) {
             .get()
             .wrapping_add(1),
     );
+    let ticket = crate::runtime().begin_organization_edit(source);
     crate::runtime().emit(crate::runtime::RuntimeEvent::LibraryChanged);
     if super::combined::active(ui) {
-        super::combined::organization_changed(ui, source);
+        super::combined::organization_changed(ui, source, ticket);
         return;
     }
     if ui.library.shown.get_untracked() != Some(source) {
@@ -81,16 +95,17 @@ pub fn changed(ui: Ui, source: SourceId) {
     }
     let schedule = crate::schedule();
     super::spawn_in_app(async move {
-        if schedule
+        if let Some(epg) = schedule
             .as_any()
             .and_then(|s| s.downcast_ref::<EpgSchedule>())
-            .is_some()
+            && let Some(replacement) = apply(epg, source).await
         {
-            let Ok(snapshot) = load(source).await else {
-                return;
-            };
-            crate::runtime()
-                .emit(crate::runtime::RuntimeEvent::OrganizationReady { schedule, snapshot });
+            crate::runtime().emit(crate::runtime::RuntimeEvent::OrganizationReady {
+                source,
+                ticket,
+                schedule,
+                replacement: std::rc::Rc::new(replacement),
+            });
         }
     });
 }
