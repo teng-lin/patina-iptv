@@ -586,3 +586,7 @@ iptv-app/src/playlists_view.rs	playlist policy {}
 iptv-app/src/playlists_view.rs	refresh all
 iptv-app/src/playlists_view.rs	show all playlists
 iptv-app/src/playlists_view.rs	try new details of {}
+# Internal store refusal classes: the shell logs the reason and presents a
+# translated generic edit failure; a superseded guide reply is never displayed.
+iptv-runtime/src/commands.rs	favourites use their ordered writer
+iptv-runtime/src/stored.rs	the guide download was superseded

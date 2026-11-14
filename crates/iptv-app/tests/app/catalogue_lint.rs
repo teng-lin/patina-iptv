@@ -85,7 +85,12 @@ const ROOTS: &[&str] = &[
 ];
 
 /// The catalogue itself and its formatter: messages about messages.
-const NOT_READ: &[&str] = &["iptv-core/src/i18n.rs", "iptv-core/src/i18n/"];
+const NOT_READ: &[&str] = &[
+    "iptv-core/src/i18n.rs",
+    "iptv-core/src/i18n/",
+    // Declared only by opening.rs's #[cfg(test)] mod revocation; synthetic fixtures.
+    "iptv-runtime/src/opening/revocation.rs",
+];
 
 /// Calls whose literal is a message: it must be a catalogue row.
 /// `translate` and `format` are the core's own (`i18n::format`; the
@@ -2214,6 +2219,14 @@ fn the_verdicts_tell_messages_from_text_and_from_the_rest() {
 fn extracted_runtime_messages_and_shell_failures_remain_checked() {
     let sources = read_sources();
     for (file, message) in [
+        (
+            "iptv-app/src/custom_groups.rs",
+            "The list could not be reloaded. Reopen it and try again.",
+        ),
+        (
+            "iptv-app/src/data/organization.rs",
+            "The list could not be reloaded. Reopen it and try again.",
+        ),
         (
             "iptv-runtime/src/backup.rs",
             "A backup operation is already running",
