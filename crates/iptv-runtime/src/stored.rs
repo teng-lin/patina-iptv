@@ -2,6 +2,7 @@
 use super::guides;
 use super::imports::{Downloaded, Imported, Msg, Streams};
 use super::private_files::Client as NetClient;
+use super::store_service::Services;
 use iptv_epg::{ChannelKey, DAY, GuideStore, Overrides, UnixTime};
 use iptv_import::{
     CancelToken, Decision, EpgSourceConfig, ImportError, NoProgress, RefreshPolicy, Trigger,
@@ -38,8 +39,11 @@ pub fn with_storage(
 }
 
 /// A stored source's live groups and channels, in provider order.
-pub fn catalog(source: SourceId) -> Result<(Vec<Group>, Vec<Channel>), StoreError> {
-    super::store_service::blocking_read(move |store| catalog_in(store, source))
+pub(crate) fn catalog(
+    services: &Services,
+    source: SourceId,
+) -> Result<(Vec<Group>, Vec<Channel>), StoreError> {
+    services.blocking_read(move |store| catalog_in(store, source))
 }
 
 /// [`catalog`] from an open store.
@@ -62,8 +66,8 @@ pub(crate) fn catalog_in(
 }
 
 /// What is stored about `source`'s guide.
-pub fn guide_state(source: SourceId) -> Option<StoredGuide> {
-    match super::store_service::blocking_read(move |store| store.epg_guide(source)) {
+pub(crate) fn guide_state(services: &Services, source: SourceId) -> Option<StoredGuide> {
+    match services.blocking_read(move |store| store.epg_guide(source)) {
         Ok(guide) => guide,
         Err(e) => {
             log::warn!("iptv data: stored guide state: {e}");
@@ -75,16 +79,24 @@ pub fn guide_state(source: SourceId) -> Option<StoredGuide> {
 /// The part of `source`'s stored guide a schedule shown at `now` holds
 /// (`pages::window`: the last day on; older days are paged in), without
 /// descriptions; `None` when nothing is stored.
-pub fn load_guide(source: SourceId, now: UnixTime) -> Option<GuideStore> {
-    let window = super::paging::window(now, keep_past_days(&super::settings::get()));
-    read_guide(source, &super::paging::store_window(window))
+pub(crate) fn load_guide(
+    services: &Services,
+    source: SourceId,
+    now: UnixTime,
+) -> Option<GuideStore> {
+    let window = super::paging::window(now, keep_past_days(&services.settings()));
+    read_guide(services, source, &super::paging::store_window(window))
 }
 
 /// `window` of `source`'s stored guide; `None` when nothing is stored.
-pub fn read_guide(source: SourceId, window: &EpgWindow<'_>) -> Option<GuideStore> {
+pub(crate) fn read_guide(
+    services: &Services,
+    source: SourceId,
+    window: &EpgWindow<'_>,
+) -> Option<GuideStore> {
     let (from, to, descriptions) = (window.from, window.to, window.descriptions);
     let keys = window.keys.map(<[ChannelKey]>::to_vec);
-    match super::store_service::blocking_read(move |store| {
+    match services.blocking_read(move |store| {
         store.load_epg(
             source,
             &EpgWindow {
@@ -105,30 +117,31 @@ pub fn read_guide(source: SourceId, window: &EpgWindow<'_>) -> Option<GuideStore
 }
 
 /// `source`'s guide sources in the user's order (empty when unreadable).
-pub fn guide_sources(source: SourceId) -> Vec<GuideSource> {
-    super::store_service::blocking_read(move |store| store.guide_sources(source)).unwrap_or_else(
-        |e| {
+pub(crate) fn guide_sources(services: &Services, source: SourceId) -> Vec<GuideSource> {
+    services
+        .blocking_read(move |store| store.guide_sources(source))
+        .unwrap_or_else(|e| {
             log::warn!("iptv data: guide sources: {e}");
             Vec::new()
-        },
-    )
+        })
 }
 
 /// The download configs of `sources` (those switched on), with the storage
 /// settings of now (a stored config has those it was fetched with).
-pub fn configs(sources: &[GuideSource]) -> Vec<EpgSourceConfig> {
+pub fn configs(settings: &Settings, sources: &[GuideSource]) -> Vec<EpgSourceConfig> {
     let template = EpgSourceConfig::new(iptv_epg::FeedId(0), SecretUrl::new(""));
-    let template = with_storage(vec![template], &super::settings::get()).remove(0);
+    let template = with_storage(vec![template], settings).remove(0);
     guides::configs_of(sources, &template)
 }
 
 /// An Xtream XMLTV endpoint is derived from the user-entered account, rather
 /// than read from response content. Its explicit origin remains trusted.
 pub fn configs_for(
+    settings: &Settings,
     sources: &[GuideSource],
     source: &iptv_providers::model::SourceConfig,
 ) -> Vec<EpgSourceConfig> {
-    let mut configs = configs(sources);
+    let mut configs = configs(settings, sources);
     if let iptv_providers::model::SourceConfig::Xtream(credentials) = source
         && let Ok(client) = iptv_providers::xtream::XtreamClient::from_credentials(credentials)
     {
@@ -145,32 +158,43 @@ pub fn configs_for(
 /// A stored source's guides without its playlist: its guide sources; for a
 /// source whose guides were never arranged, the feeds stored with its
 /// guide.
-pub fn current_configs(source: SourceId, state: Option<&StoredGuide>) -> Vec<EpgSourceConfig> {
-    let sources = guide_sources(source);
-    let source = super::store_service::blocking_read(move |store| store.source(source))
+pub(crate) fn current_configs(
+    services: &Services,
+    source: SourceId,
+    state: Option<&StoredGuide>,
+) -> Vec<EpgSourceConfig> {
+    let sources = guide_sources(services, source);
+    let source = services
+        .blocking_read(move |store| store.source(source))
         .ok()
         .flatten();
-    configs_from_sources(&sources, state, source.as_ref().map(|s| &s.source.config))
+    configs_from_sources(
+        &services.settings(),
+        &sources,
+        state,
+        source.as_ref().map(|s| &s.source.config),
+    )
 }
 
 pub fn configs_from_sources(
+    settings: &Settings,
     sources: &[GuideSource],
     state: Option<&StoredGuide>,
     source: Option<&iptv_providers::model::SourceConfig>,
 ) -> Vec<EpgSourceConfig> {
     if sources.is_empty() {
         let stored = state.map(StoredGuide::configs).unwrap_or_default();
-        return with_storage(stored, &super::settings::get());
+        return with_storage(stored, settings);
     }
     match source {
-        Some(source) => configs_for(sources, source),
-        None => configs(sources),
+        Some(source) => configs_for(settings, sources, source),
+        None => configs(settings, sources),
     }
 }
 
 /// The channels of `source` whose guide the user chose by hand.
-pub fn overrides(source: SourceId) -> Overrides {
-    match super::store_service::blocking_read(move |store| store.epg_overrides(source)) {
+pub(crate) fn overrides(services: &Services, source: SourceId) -> Overrides {
+    match services.blocking_read(move |store| store.epg_overrides(source)) {
         Ok(rows) => rows
             .into_iter()
             .map(|(id, epg)| (ChannelKey::new(id.as_str()), epg.to_override()))
@@ -183,23 +207,6 @@ pub fn overrides(source: SourceId) -> Overrides {
 }
 
 /// Whether to download the guide again (the `epg.update_*` settings).
-pub fn plan(
-    trigger: Trigger,
-    configs: &[EpgSourceConfig],
-    matching: Matching<'_>,
-    stored: Option<&StoredGuide>,
-    now: UnixTime,
-) -> Decision {
-    plan_with(
-        &super::settings::get(),
-        trigger,
-        configs,
-        matching,
-        stored,
-        now,
-    )
-}
-
 /// What EPG matching reads: the playlist's channels and the user's guide
 /// choices.
 #[derive(Clone, Copy)]
@@ -237,28 +244,37 @@ pub fn plan_with(
 /// When to look at `source`'s guide again: when the policy will want it
 /// (stale, running out, after a back-off), `None` when only a request or a
 /// restart would.
-pub fn next_check(
+pub(crate) fn next_check(
+    services: &Services,
     source: SourceId,
     configs: &[EpgSourceConfig],
     matching: Matching<'_>,
     now: UnixTime,
 ) -> Option<UnixTime> {
-    let stored = guide_state(source);
+    let stored = guide_state(services, source);
     check_at(
-        plan(Trigger::Timer, configs, matching, stored.as_ref(), now),
+        plan_with(
+            &services.settings(),
+            Trigger::Timer,
+            configs,
+            matching,
+            stored.as_ref(),
+            now,
+        ),
         now,
     )
 }
 
 /// Retain automatic checks after a transient storage/worker failure.
 pub(crate) fn retry_check(
+    services: &Services,
     tx: &Sender<Msg>,
     source: SourceId,
     configs: &[EpgSourceConfig],
     now: UnixTime,
 ) {
     if !configs.is_empty()
-        && RefreshPolicy::from_settings(&super::settings::get(), &Target::Global)
+        && RefreshPolicy::from_settings(&services.settings(), &Target::Global)
             .interval
             .is_some()
     {
@@ -288,6 +304,7 @@ const RETRY_DUE: i64 = 3600;
 /// is recorded, so automatic refreshes back off; each feed's result is
 /// kept for the guide sources screen.
 pub(crate) fn replace(
+    services: &Services,
     source: SourceId,
     mut guide: Downloaded,
     configs: &[EpgSourceConfig],
@@ -296,8 +313,8 @@ pub(crate) fn replace(
 ) -> Result<EpgCounts, StoreError> {
     let feeds = EpgFeedMeta::from_import(&guide.import, configs, now);
     let fingerprint = matching.fingerprint();
-    let keep = keep_past_days(&super::settings::get());
-    super::store_service::blocking(move |store| {
+    let keep = keep_past_days(&services.settings());
+    services.blocking(move |store| {
         let import = &guide.import;
 
         let counts = store.replace_epg(source, &mut guide.stage, import, &feeds, fingerprint)?;
@@ -329,21 +346,35 @@ pub(crate) fn replace(
 
 /// Notes a failed guide download (every source in `configs` failed); the
 /// stored guide stays.
-pub fn record_failure(source: SourceId, error: &ImportError, configs: &[EpgSourceConfig]) {
-    record_failure_kind(source, error_kind(error), configs);
+pub(crate) fn record_failure(
+    services: &Services,
+    source: SourceId,
+    error: &ImportError,
+    configs: &[EpgSourceConfig],
+) {
+    record_failure_kind(services, source, error_kind(error), configs);
 }
 
 /// Notes that the guide could not be downloaded because the network
 /// client could not be set up: no source in `configs` was reached, which
 /// the refresh policy treats as a network failure of each (it backs off
 /// and tries again, as after a failed download).
-pub fn record_client_failure(source: SourceId, configs: &[EpgSourceConfig]) {
-    record_failure_kind(source, ImportErrorKind::Network, configs);
+pub(crate) fn record_client_failure(
+    services: &Services,
+    source: SourceId,
+    configs: &[EpgSourceConfig],
+) {
+    record_failure_kind(services, source, ImportErrorKind::Network, configs);
 }
 
-fn record_failure_kind(source: SourceId, kind: ImportErrorKind, configs: &[EpgSourceConfig]) {
+fn record_failure_kind(
+    services: &Services,
+    source: SourceId,
+    kind: ImportErrorKind,
+    configs: &[EpgSourceConfig],
+) {
     let results: Vec<_> = configs.iter().map(|c| (c.id, Some(kind))).collect();
-    let recorded = super::store_service::blocking(move |s| {
+    let recorded = services.blocking(move |s| {
         s.record_epg_failure(source, kind)?;
         s.record_epg_feed_results(source, &results)
     });
@@ -353,35 +384,37 @@ fn record_failure_kind(source: SourceId, kind: ImportErrorKind, configs: &[EpgSo
 }
 
 /// Deletes `source`'s stored guide (no guide is configured any more).
-pub fn discard(source: SourceId) {
-    match super::store_service::blocking(move |store| store.delete_epg(source)) {
+pub(crate) fn discard(services: &Services, source: SourceId) {
+    match services.blocking(move |store| store.delete_epg(source)) {
         Ok(true) => log::info!("iptv data: no guide configured; deleted the stored one"),
         Ok(false) => {}
         Err(e) => log::warn!("iptv data: could not delete the stored guide: {e}"),
     }
 }
-pub async fn download_now(
+/// The download of `data::stored::update_source`, on a refresh worker.
+pub(crate) async fn download_now(
+    services: &Services,
     source: SourceId,
     guides: Vec<EpgSourceConfig>,
     tx: &Sender<Msg>,
     cancel: &CancelToken,
 ) {
     let now = super::imports::now_unix();
-    let (groups, channels) = match catalog(source) {
+    let (groups, channels) = match catalog(services, source) {
         Ok(catalog) => catalog,
         Err(e) => {
             log::warn!("iptv data: stored catalog: {e}");
-            retry_check(tx, source, &guides, now);
+            retry_check(services, tx, source, &guides, now);
             return;
         }
     };
-    let overrides = overrides(source);
+    let overrides = overrides(services, source);
     let matching = Matching {
         channels: &channels,
         overrides: &overrides,
     };
     log::info!("iptv data: downloading the guide (asked for)");
-    match NetClient::new(super::settings::net_config()) {
+    match NetClient::new(services) {
         Ok(net) => {
             let result = super::imports::download_guide(
                 &net,
@@ -395,7 +428,9 @@ pub async fn download_now(
             .await;
             match result {
                 Ok(import) => {
-                    let guide = super::imports::keep_guide(source, import, &guides, matching, now);
+                    let guide = super::imports::keep_guide(
+                        services, source, import, &guides, matching, now,
+                    );
                     let _ = tx.send(Msg::Guide(Box::new(Imported {
                         groups,
                         channels: channels.clone(),
@@ -409,13 +444,13 @@ pub async fn download_now(
                 Err(ImportError::Cancelled) => {}
                 Err(e) => {
                     log::warn!("iptv data: guide: {e}");
-                    record_failure(source, &e, &guides);
+                    record_failure(services, source, &e, &guides);
                 }
             }
         }
         Err(e) => log::warn!("iptv data: network client setup failed: {e}"),
     }
-    super::imports::send_next_check(tx, source, &guides, matching);
+    super::imports::send_next_check(services, tx, source, &guides, matching);
 }
 
 /// The stored kind of a failed import (kind only: no URL, no body).
@@ -434,8 +469,8 @@ pub fn error_kind(error: &ImportError) -> ImportErrorKind {
 }
 
 /// `data.rs` put `source`'s schedule on screen.
-pub fn note_shown(source: Option<SourceId>) {
-    crate::current().shown.with(|s| s.set(source));
+pub fn note_shown(owner: &super::Runtime, source: Option<SourceId>) {
+    owner.shown.with(|s| s.set(source));
 }
 
 /// How the guide on screen was last updated.
@@ -457,25 +492,22 @@ pub enum GuideStatus {
 }
 
 /// The status of the guide on screen (one indexed read of the store).
-pub fn guide_status() -> GuideStatus {
-    let sources = shown_sources();
+pub fn guide_status(owner: &super::Runtime) -> GuideStatus {
+    let sources = shown_sources(owner);
     if sources.is_empty() {
-        return if crate::current()
-            .status
-            .with(|status| status.borrow().combined)
-        {
+        return if owner.status.with(|status| status.borrow().combined) {
             GuideStatus::Empty
         } else {
             GuideStatus::NoSource
         };
     }
-    if sources.iter().any(|&s| updating(s)) {
+    if sources.iter().any(|&s| updating(owner, s)) {
         return GuideStatus::Updating;
     }
     let mut updated = None;
     let mut channels = 0;
     for source in sources {
-        match status_of(cached_guide_state(source).as_ref()) {
+        match status_of(cached_guide_state(owner, source).as_ref()) {
             failed @ GuideStatus::Failed { .. } => return failed,
             GuideStatus::Updated { at, channels: n } => {
                 updated = Some(updated.map_or(at, |old: i64| old.min(at)));
@@ -492,11 +524,11 @@ pub fn guide_status() -> GuideStatus {
 
 /// Individual mode has one guide owner; aggregate commands cover every
 /// enabled source, with failures and feeds still managed per playlist.
-pub fn shown_sources() -> Vec<SourceId> {
-    if let Some(source) = crate::current().shown.with(Cell::get) {
+pub fn shown_sources(owner: &super::Runtime) -> Vec<SourceId> {
+    if let Some(source) = owner.shown.with(Cell::get) {
         return vec![source];
     }
-    crate::current().status.with(|status| {
+    owner.status.with(|status| {
         let status = status.borrow();
         if status.combined {
             status.enabled.clone()
@@ -507,23 +539,21 @@ pub fn shown_sources() -> Vec<SourceId> {
 }
 
 /// The source whose guide is on screen.
-pub fn shown() -> Option<SourceId> {
-    crate::current().shown.with(Cell::get)
+pub fn shown(owner: &super::Runtime) -> Option<SourceId> {
+    owner.shown.with(Cell::get)
 }
 
 /// An update of `source`'s guide asked for by hand is running.
-pub fn updating(source: SourceId) -> bool {
-    crate::current()
-        .updating
-        .with(|u| u.borrow().contains(&source))
+pub fn updating(owner: &super::Runtime, source: SourceId) -> bool {
+    owner.updating.with(|u| u.borrow().contains(&source))
 }
 
 pub use iptv_library::SourceLine;
 
 /// `source`'s guide sources in order, each with its last result (one
 /// short read of the store).
-pub fn source_lines(source: SourceId) -> Vec<SourceLine> {
-    crate::current().status.with(|status| {
+pub fn source_lines(owner: &super::Runtime, source: SourceId) -> Vec<SourceLine> {
+    owner.status.with(|status| {
         status
             .borrow()
             .lines
@@ -547,23 +577,28 @@ pub fn status_of(stored: Option<&iptv_library::GuideSnapshot>) -> GuideStatus {
     }
 }
 
-pub fn cached_guide_state(source: SourceId) -> Option<iptv_library::GuideSnapshot> {
-    crate::current().status.with(|status| {
-        status
-            .borrow()
-            .guides
-            .get(&source)
-            .map(|guide| iptv_library::GuideSnapshot {
-                replaced_at: guide.replaced_at,
-                attempted_at: guide.attempted_at,
-                last_error: guide.last_error,
-                bound_channels: guide.bound_channels,
-            })
-    })
+pub fn cached_guide_state(
+    owner: &super::Runtime,
+    source: SourceId,
+) -> Option<iptv_library::GuideSnapshot> {
+    owner
+        .status
+        .with(|status| status.borrow().guides.get(&source).map(guide_snapshot))
 }
 
-pub fn next_guide_edit(source: SourceId) -> u64 {
-    crate::current().edits.with(|edits| {
+/// What the views see of a stored guide: how its last update went, without
+/// its feeds or their configuration.
+fn guide_snapshot(guide: &StoredGuide) -> iptv_library::GuideSnapshot {
+    iptv_library::GuideSnapshot {
+        replaced_at: guide.replaced_at,
+        attempted_at: guide.attempted_at,
+        last_error: guide.last_error,
+        bound_channels: guide.bound_channels,
+    }
+}
+
+pub fn next_guide_edit(owner: &super::Runtime, source: SourceId) -> u64 {
+    owner.edits.with(|edits| {
         let mut edits = edits.borrow_mut();
         let generation = edits.entry(source).or_default();
         *generation += 1;
@@ -571,8 +606,8 @@ pub fn next_guide_edit(source: SourceId) -> u64 {
     })
 }
 
-pub fn guide_edit_is_current(source: SourceId, generation: u64) -> bool {
-    crate::current()
+pub fn guide_edit_is_current(owner: &super::Runtime, source: SourceId, generation: u64) -> bool {
+    owner
         .edits
         .with(|edits| edits.borrow().get(&source) == Some(&generation))
 }
@@ -588,18 +623,35 @@ mod tests {
 
     const NOW: UnixTime = 1_800_000_000;
 
+    /// The download configs under the default settings.
+    fn configs(sources: &[GuideSource]) -> Vec<EpgSourceConfig> {
+        super::configs(&Settings::new(), sources)
+    }
+
+    /// The refresh decision under the default settings.
+    fn plan(
+        trigger: Trigger,
+        configs: &[EpgSourceConfig],
+        matching: Matching<'_>,
+        stored: Option<&StoredGuide>,
+        now: UnixTime,
+    ) -> Decision {
+        plan_with(&Settings::new(), trigger, configs, matching, stored, now)
+    }
+
     #[test]
     fn guide_edits_debounce_within_a_source_without_cancelling_other_sources() {
+        let owner = super::super::Runtime::default();
         let a = SourceId(9001);
         let b = SourceId(9002);
-        let first_a = next_guide_edit(a);
-        let first_b = next_guide_edit(b);
-        assert!(guide_edit_is_current(a, first_a));
-        assert!(guide_edit_is_current(b, first_b));
-        let second_a = next_guide_edit(a);
-        assert!(!guide_edit_is_current(a, first_a));
-        assert!(guide_edit_is_current(a, second_a));
-        assert!(guide_edit_is_current(b, first_b));
+        let first_a = next_guide_edit(&owner, a);
+        let first_b = next_guide_edit(&owner, b);
+        assert!(guide_edit_is_current(&owner, a, first_a));
+        assert!(guide_edit_is_current(&owner, b, first_b));
+        let second_a = next_guide_edit(&owner, a);
+        assert!(!guide_edit_is_current(&owner, a, first_a));
+        assert!(guide_edit_is_current(&owner, a, second_a));
+        assert!(guide_edit_is_current(&owner, b, first_b));
     }
 
     /// A playlist's guide sources: the provider's own `xmltv.php`, after a
@@ -876,7 +928,7 @@ mod tests {
         assert_eq!(status_of(None), GuideStatus::Empty);
         let mut g = stored(&guides);
         assert_eq!(
-            status_of(Some(&g)),
+            status_of(Some(&guide_snapshot(&g))),
             GuideStatus::Updated {
                 at: NOW - 3600,
                 channels: 10
@@ -885,7 +937,7 @@ mod tests {
         g.last_error = Some(ImportErrorKind::Network);
         g.attempted_at = Some(NOW - 60);
         assert_eq!(
-            status_of(Some(&g)),
+            status_of(Some(&guide_snapshot(&g))),
             GuideStatus::Failed {
                 at: NOW - 60,
                 kind: ImportErrorKind::Network

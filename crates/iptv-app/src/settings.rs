@@ -166,9 +166,9 @@ pub fn offer(key: &str) -> Offer {
     }
 }
 
+/// The effective settings of the shell's application owner.
 pub fn get() -> std::sync::Arc<iptv_settings::Settings> {
-    crate::runtime();
-    crate::runtime::settings::get()
+    crate::runtime().settings()
 }
 
 /// [`get`], subscribing the calling reactive closure to changes.
@@ -177,14 +177,36 @@ pub fn read(ui: Ui) -> Arc<Settings> {
     get()
 }
 
-pub use crate::runtime::settings::{SaveError, load};
+pub use crate::runtime::settings::{SaveError, add_user_agent};
+/// Loads the saved settings (startup).
+pub fn load() {
+    crate::runtime().load_settings();
+}
 pub fn set(_ui: Ui, key: &str, value: Value) -> Result<(), SaveError> {
-    crate::runtime::settings::set(key, value)
+    crate::runtime().set_setting(key, value)
 }
 
 pub fn flag(key: iptv_settings::keys::BoolKey) -> bool {
-    crate::runtime();
-    crate::runtime::settings::flag(key)
+    crate::runtime::settings::flag(&get(), key)
+}
+
+pub fn choice(key: iptv_settings::keys::EnumKey) -> &'static str {
+    crate::runtime::settings::choice(&get(), key)
+}
+
+/// `remote.long_press`, in ms.
+pub fn long_press_ms() -> u64 {
+    crate::runtime::settings::long_press_ms(&get())
+}
+
+/// `general.user_agent`, when set.
+pub fn user_agent() -> Option<String> {
+    crate::runtime::settings::user_agent(&get())
+}
+
+/// The network settings of provider requests.
+pub fn net_config() -> iptv_net::NetConfig {
+    crate::runtime::settings::net_config(&get())
 }
 
 pub fn browse_mode() -> crate::ViewMode {
@@ -194,8 +216,6 @@ pub fn browse_mode() -> crate::ViewMode {
         crate::ViewMode::Guide
     }
 }
-
-pub use crate::runtime::settings::{add_user_agent, choice, long_press_ms, net_config, user_agent};
 
 /// A theme bundle's palette key (`"Blue grey"` → `blue_grey`).
 pub fn palette_key(name: &str) -> String {

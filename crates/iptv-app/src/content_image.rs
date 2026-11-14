@@ -149,7 +149,7 @@ pub(crate) fn source(url: impl Fn() -> String + 'static) -> impl Fn() -> String 
         // Detached: the download fills the cache even if this view moves
         // on meanwhile; dropping `rx` (the effect's next run ends this
         // task) only skips a download that has not started.
-        drop(crate::executor::spawn(fetch(url, tx)));
+        drop(crate::runtime().spawn_network(fetch(url, tx)));
         drop(spawn(async move {
             if let Ok(value) = rx.await
                 && generation.get_untracked() == current

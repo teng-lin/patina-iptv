@@ -123,7 +123,7 @@ fn mutate<R: Send + 'static>(
         let result = result.await;
         // A committed edit affects the guide even if its editor was closed.
         if result.is_ok() {
-            data::organization::changed(source);
+            data::organization::changed(&crate::runtime(), source);
         }
         if GENERATION.get() == generation && is_open(ui) {
             done(ui, result);
@@ -144,7 +144,7 @@ pub fn open(ui: Ui, source: SourceId, browse: bool) {
     }));
     request(
         ui,
-        crate::runtime::commands::custom_groups(source),
+        crate::runtime::commands::custom_groups(&crate::runtime(), source),
         move |ui, result| match result {
             Ok(groups) => {
                 update(ui, |s| s.reload_groups(groups));
@@ -177,7 +177,7 @@ fn reload(ui: Ui) {
     };
     request(
         ui,
-        crate::runtime::commands::group_members(source, scope),
+        crate::runtime::commands::group_members(&crate::runtime(), source, scope),
         |ui, result| {
             if let Ok((groups, rows)) = result {
                 update(ui, |s| {
@@ -210,7 +210,7 @@ fn show_members(ui: Ui, scope: ChannelScope) {
     let loaded_scope = scope.clone();
     request(
         ui,
-        crate::runtime::commands::members(source, loaded_scope),
+        crate::runtime::commands::members(&crate::runtime(), source, loaded_scope),
         move |ui, result| match result {
             Ok(rows) => update(ui, |s| {
                 s.scope = scope;
@@ -313,6 +313,7 @@ fn commit_text(ui: Ui) {
         ui,
         s.source,
         crate::runtime::commands::save_custom_group(
+            &crate::runtime(),
             s.source,
             match kind {
                 Text::Rename(group) => Some(group),
@@ -432,7 +433,7 @@ fn act(ui: Ui, index: usize) {
                 mutate(
                     ui,
                     s.source,
-                    crate::runtime::commands::remove_custom_members(origin, ids),
+                    crate::runtime::commands::remove_custom_members(&crate::runtime(), origin, ids),
                     report,
                 );
             }
@@ -462,6 +463,7 @@ fn act(ui: Ui, index: usize) {
                 ui,
                 s.source,
                 crate::runtime::commands::transfer_custom_members(
+                    &crate::runtime(),
                     s.source,
                     origin(&s),
                     target,
@@ -492,7 +494,7 @@ fn act(ui: Ui, index: usize) {
                 mutate(
                     ui,
                     s.source,
-                    crate::runtime::commands::delete_custom_group(g),
+                    crate::runtime::commands::delete_custom_group(&crate::runtime(), g),
                     |ui, result| {
                         if result.is_ok() {
                             update(ui, |s| {

@@ -128,7 +128,8 @@ fn perform(ui: Ui, effect: WizardEffect) {
         WizardEffect::PickFile => data::spawn_in_app(async move {
             let files = pick_files(FilePickRequest::new(false, 1)).await;
             let path = if let Some(file) = files.first() {
-                data::keep_picked_file(&file.name, file.data.bytes())
+                crate::runtime()
+                    .keep_picked_file(&file.name, file.data.bytes())
                     .await
                     .inspect_err(|e| log::warn!("iptv wizard: keeping the file failed: {e}"))
                     .ok()
@@ -147,7 +148,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
                 purpose: Purpose::Add,
                 edit: false,
             };
-            let token = data::start_import(job, move |update| {
+            let token = data::start_import(&crate::runtime(), job, move |update| {
                 send(
                     ui,
                     match update {

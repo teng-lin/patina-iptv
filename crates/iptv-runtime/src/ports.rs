@@ -47,15 +47,3 @@ impl Ports {
         )
     }
 }
-
-pub(crate) fn database_key(path: &Path) -> Result<DatabaseKey, iptv_store_sqlite::StoreError> {
-    (crate::store_service::service().ports.database_key)(path).map_err(Into::into)
-}
-
-pub(crate) fn exclude_from_backup(path: &Path) -> io::Result<()> {
-    (crate::store_service::service().ports.exclude_from_backup)(path)
-}
-
-pub(crate) fn mark_with(phase: &'static str, detail: impl std::fmt::Display) {
-    (crate::store_service::service().ports.startup_mark)(phase, detail.to_string());
-}

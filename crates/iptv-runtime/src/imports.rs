@@ -1,6 +1,6 @@
 //! Native import and refresh orchestration. No UI toolkit dependency.
-use super::paths::data_dir;
 use super::private_files::Client as NetClient;
+use super::store_service::Services;
 use super::{guides, opening, stored, wizard_map};
 use iptv_core::wizard::{
     FailureKind, Field, ImportCounts, ImportFailure, ImportProgress, ImportStage,
@@ -19,10 +19,7 @@ use iptv_store_sqlite::{
     CatalogCounts, CatalogStage, EpgStage, GuideSource, ImportErrorKind, SourceId, Store,
     StoreError,
 };
-use std::{
-    future::Future,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::UnboundedSender as Sender;
 /// An import to run.
 #[derive(Clone)]
@@ -141,20 +138,15 @@ pub fn now_unix() -> i64 {
         .map_or(0, |d| d.as_secs() as i64)
 }
 
-pub fn with_runtime<F: Future<Output = ()>>(future: impl FnOnce() -> F) -> bool {
-    super::executor::block_on(future());
-    true
-}
-
-/// The import itself, on its own thread with a small tokio runtime.
-pub fn run(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
-    if !with_runtime(|| pipeline(job, tx, cancel)) {
-        let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(FailureKind::Network))));
-    }
+/// The import itself, on a refresh worker of the owner that accepted it,
+/// driven on that owner's network runtime.
+pub(crate) fn run(services: &Services, job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
+    services.block_on(pipeline(services, job, tx, cancel));
 }
 
 /// The timer's guide check: the stored feeds for the stored channels.
-pub async fn guide_pipeline(
+pub(crate) async fn guide_pipeline(
+    services: &Services,
     source: SourceId,
     tx: &Sender<Msg>,
     read: GuideRead,
@@ -164,17 +156,17 @@ pub async fn guide_pipeline(
         return;
     }
     let now = now_unix();
-    let state = stored::guide_state(source);
-    let guides = stored::current_configs(source, state.as_ref());
-    let (groups, channels) = match stored::catalog(source) {
+    let state = stored::guide_state(services, source);
+    let guides = stored::current_configs(services, source, state.as_ref());
+    let (groups, channels) = match stored::catalog(services, source) {
         Ok(catalog) => catalog,
         Err(e) => {
             log::warn!("iptv data: stored catalog: {e}");
-            stored::retry_check(tx, source, &guides, now);
+            stored::retry_check(services, tx, source, &guides, now);
             return;
         }
     };
-    let overrides = stored::overrides(source);
+    let overrides = stored::overrides(services, source);
     let matching = stored::Matching {
         channels: &channels,
         overrides: &overrides,
@@ -184,7 +176,7 @@ pub async fn guide_pipeline(
             groups: groups.clone(),
             channels: channels.clone(),
             playback: Streams::Current,
-            guide: stored::load_guide(source, now).unwrap_or_default(),
+            guide: stored::load_guide(services, source, now).unwrap_or_default(),
             now,
             source,
             resume: false,
@@ -193,10 +185,17 @@ pub async fn guide_pipeline(
     if matches!(read, GuideRead::CacheOnly) {
         return;
     }
-    match stored::plan(Trigger::Timer, &guides, matching, state.as_ref(), now) {
+    match stored::plan_with(
+        &services.settings(),
+        Trigger::Timer,
+        &guides,
+        matching,
+        state.as_ref(),
+        now,
+    ) {
         Decision::Refresh(reason) => {
             log::info!("iptv data: downloading the guide ({reason:?})");
-            match NetClient::new(super::settings::net_config()) {
+            match NetClient::new(services) {
                 Ok(net) => {
                     let result =
                         download_guide(&net, &guides, matching, now, &mut NoProgress, cancel, None)
@@ -206,7 +205,8 @@ pub async fn guide_pipeline(
                             if cancel.is_cancelled() {
                                 return;
                             }
-                            let guide = keep_guide(source, import, &guides, matching, now);
+                            let guide =
+                                keep_guide(services, source, import, &guides, matching, now);
                             let _ = tx.send(Msg::Guide(Box::new(Imported {
                                 groups,
                                 channels: channels.clone(),
@@ -222,7 +222,7 @@ pub async fn guide_pipeline(
                                 return;
                             }
                             log::warn!("iptv data: guide: {e}");
-                            stored::record_failure(source, &e, &guides);
+                            stored::record_failure(services, source, &e, &guides);
                         }
                     }
                 }
@@ -230,7 +230,7 @@ pub async fn guide_pipeline(
             }
         }
         Decision::Discard => {
-            stored::discard(source);
+            stored::discard(services, source);
             // Its programmes went: the guide on screen shows none.
             let _ = tx.send(Msg::Guide(Box::new(Imported {
                 groups,
@@ -244,17 +244,18 @@ pub async fn guide_pipeline(
         }
         Decision::Keep { .. } | Decision::Backoff { .. } => {}
     }
-    send_next_check(tx, source, &guides, matching);
+    send_next_check(services, tx, source, &guides, matching);
 }
 
 /// Tells the UI when to look at the guide again, if ever.
 pub(crate) fn send_next_check(
+    services: &Services,
     tx: &Sender<Msg>,
     source: SourceId,
     guides: &[EpgSourceConfig],
     matching: stored::Matching<'_>,
 ) {
-    if let Some(at) = stored::next_check(source, guides, matching, now_unix()) {
+    if let Some(at) = stored::next_check(services, source, guides, matching, now_unix()) {
         let _ = tx.send(Msg::NextCheck { source, at });
     }
 }
@@ -270,13 +271,20 @@ impl ProgressSink for Forward<'_> {
     }
 }
 
-pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
+pub(crate) async fn pipeline(
+    services: &Services,
+    job: Job,
+    tx: &Sender<Msg>,
+    cancel: &CancelToken,
+) {
     let fail = |failure: ImportFailure| {
         let _ = tx.send(Msg::Playlist(Err(failure)));
     };
     let now = now_unix();
-    if let Some(id) = job.stored.filter(|id| !network_due(*id, job.purpose))
-        && let Ok((groups, channels)) = stored::catalog(id)
+    if let Some(id) = job
+        .stored
+        .filter(|id| !network_due(services, *id, job.purpose))
+        && let Ok((groups, channels)) = stored::catalog(services, id)
         && !channels.is_empty()
     {
         let counts = ImportCounts {
@@ -285,7 +293,7 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
             movies: 0,
             series: 0,
         };
-        let guide = stored::load_guide(id, now).unwrap_or_default();
+        let guide = stored::load_guide(services, id, now).unwrap_or_default();
         let context = super::playback::stored_context(&job.source.config);
         let _ = tx.send(Msg::Playlist(Ok((
             counts,
@@ -299,21 +307,23 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
                 playback: Streams::New(context, None),
             }),
         ))));
-        let overrides = stored::overrides(id);
+        let overrides = stored::overrides(services, id);
         let matching = stored::Matching {
             channels: &channels,
             overrides: &overrides,
         };
-        let guides = stored::current_configs(id, stored::guide_state(id).as_ref());
-        let state = stored::guide_state(id);
-        match stored::plan(
+        let guides =
+            stored::current_configs(services, id, stored::guide_state(services, id).as_ref());
+        let state = stored::guide_state(services, id);
+        match stored::plan_with(
+            &services.settings(),
             job.purpose.trigger(),
             &guides,
             matching,
             state.as_ref(),
             now,
         ) {
-            Decision::Refresh(_) => match NetClient::new(super::settings::net_config()) {
+            Decision::Refresh(_) => match NetClient::new(services) {
                 Ok(net) => {
                     match download_guide(
                         &net,
@@ -327,7 +337,7 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
                     .await
                     {
                         Ok(import) => {
-                            let guide = keep_guide(id, import, &guides, matching, now);
+                            let guide = keep_guide(services, id, import, &guides, matching, now);
                             let _ = tx.send(Msg::Guide(Box::new(Imported {
                                 groups,
                                 channels: channels.clone(),
@@ -339,7 +349,7 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
                             })));
                         }
                         Err(ImportError::Cancelled) => {}
-                        Err(e) => stored::record_failure(id, &e, &guides),
+                        Err(e) => stored::record_failure(services, id, &e, &guides),
                     }
                 }
                 // Without a client no guide source was tried. Noted as the
@@ -348,11 +358,11 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
                 // the guide due again at every check.
                 Err(e) => {
                     log::warn!("iptv data: network client setup failed: {e}");
-                    stored::record_client_failure(id, &guides);
+                    stored::record_client_failure(services, id, &guides);
                 }
             },
             Decision::Discard => {
-                stored::discard(id);
+                stored::discard(services, id);
                 let _ = tx.send(Msg::Guide(Box::new(Imported {
                     groups,
                     channels: channels.clone(),
@@ -365,11 +375,11 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
             }
             _ => {}
         }
-        send_next_check(tx, id, &guides, matching);
+        send_next_check(services, tx, id, &guides, matching);
         return;
     }
-    let stored_guide = job.stored.and_then(stored::guide_state);
-    let Ok(net) = NetClient::new(super::settings::net_config()) else {
+    let stored_guide = job.stored.and_then(|id| stored::guide_state(services, id));
+    let Ok(net) = NetClient::new(services) else {
         log::warn!("iptv data: network client setup failed");
         return fail(ImportFailure::new(FailureKind::Network));
     };
@@ -384,10 +394,10 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
     {
         options.allow_private_fixture = cfg!(feature = "test-support") || DEV_PLAYLIST.is_some();
     }
-    let _ = std::fs::create_dir_all(data_dir());
-    let mut stage = match CatalogStage::create_in_with(data_dir(), |path| {
+    let _ = std::fs::create_dir_all(services.directory());
+    let mut stage = match CatalogStage::create_in_with(services.directory(), |path| {
         let path = path.to_owned();
-        super::store_service::blocking(move |store| store.open_staging_connection(&path))
+        services.blocking(move |store| store.open_staging_connection(&path))
     }) {
         Ok(stage) => stage,
         Err(error) => {
@@ -410,26 +420,26 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
             log::warn!("iptv data: {:?} import failed: {e}", job.source.kind());
             // New details that failed say nothing about the stored ones.
             if !matches!(e, ImportError::Cancelled) && !job.edit {
-                record_failure(job.stored, stored::error_kind(&e));
+                record_failure(services, job.stored, stored::error_kind(&e));
             }
             // The stored guide stays on screen: keep it current.
             if let (Some(id), Some(state)) = (job.stored, stored_guide.as_ref())
-                && let Ok((_, channels)) = stored::catalog(id)
+                && let Ok((_, channels)) = stored::catalog(services, id)
             {
-                let overrides = stored::overrides(id);
+                let overrides = stored::overrides(services, id);
                 let matching = stored::Matching {
                     channels: &channels,
                     overrides: &overrides,
                 };
-                let guides = stored::current_configs(id, Some(state));
-                send_next_check(tx, id, &guides, matching);
+                let guides = stored::current_configs(services, id, Some(state));
+                send_next_check(services, tx, id, &guides, matching);
             }
             return fail(wizard_map::failure_of(&e));
         }
     };
     if catalog.is_empty() {
         if !job.edit {
-            record_failure(job.stored, ImportErrorKind::Other);
+            record_failure(services, job.stored, ImportErrorKind::Other);
         }
         return fail(ImportFailure::new(FailureKind::EmptyPlaylist));
     }
@@ -449,8 +459,11 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
     }
     // The guide sources: the stored source's as the user arranged them (a
     // new source: the guide just typed), with the provider's guides of now.
-    let planned = guides::sync_provider(&planned_guides(&job), &catalog.guide_urls());
-    let overrides = job.stored.map(stored::overrides).unwrap_or_default();
+    let planned = guides::sync_provider(&planned_guides(services, &job), &catalog.guide_urls());
+    let overrides = job
+        .stored
+        .map(|id| stored::overrides(services, id))
+        .unwrap_or_default();
     let matching = stored::Matching {
         channels: &catalog.channels,
         overrides: &overrides,
@@ -461,7 +474,7 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
         Some(_) => {
             match download_guide(
                 &net,
-                &stored::configs_for(&planned, &job.source.config),
+                &stored::configs_for(&services.settings(), &planned, &job.source.config),
                 matching,
                 now,
                 &mut progress,
@@ -491,7 +504,7 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
         done: 0,
         total: None,
     }));
-    let (id, counts, sources) = match save(&job, &catalog, &planned, stage) {
+    let (id, counts, sources) = match save(services, &job, &catalog, &planned, stage) {
         Ok(saved) => saved,
         Err(e) => {
             log::warn!("iptv data: store: {e}");
@@ -525,12 +538,13 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
     let report = |guide| {
         let _ = tx.send(Msg::Playlist(Ok((counts, imported(guide)))));
     };
-    let guides = stored::configs_for(&sources, &job.source.config);
+    let guides = stored::configs_for(&services.settings(), &sources, &job.source.config);
     if let Some(import) = typed_guide {
-        report(keep_guide(id, import, &guides, matching, now));
-        return send_next_check(tx, id, &guides, matching);
+        report(keep_guide(services, id, import, &guides, matching, now));
+        return send_next_check(services, tx, id, &guides, matching);
     }
-    match stored::plan(
+    match stored::plan_with(
+        &services.settings(),
         job.purpose.trigger(),
         &guides,
         matching,
@@ -539,38 +553,38 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
     ) {
         Decision::Refresh(reason) => {
             log::info!("iptv data: downloading the guide ({reason:?})");
-            report(stored::load_guide(id, now).unwrap_or_default());
+            report(stored::load_guide(services, id, now).unwrap_or_default());
             // The guide loads after the channels are on screen.
             match download_guide(&net, &guides, matching, now, &mut NoProgress, cancel, None).await
             {
                 Ok(import) => {
-                    let guide = keep_guide(id, import, &guides, matching, now);
+                    let guide = keep_guide(services, id, import, &guides, matching, now);
                     let _ = tx.send(Msg::Guide(imported(guide)));
                 }
                 Err(ImportError::Cancelled) => {}
                 Err(e) => {
                     log::warn!("iptv data: guide: {e}");
-                    stored::record_failure(id, &e, &guides);
+                    stored::record_failure(services, id, &e, &guides);
                 }
             }
         }
         Decision::Discard => {
-            stored::discard(id);
+            stored::discard(services, id);
             report(GuideStore::default());
         }
         decision => {
             log::info!("iptv data: using the stored guide ({decision:?})");
-            report(stored::load_guide(id, now).unwrap_or_default());
+            report(stored::load_guide(services, id, now).unwrap_or_default());
         }
     }
-    send_next_check(tx, id, &guides, matching);
+    send_next_check(services, tx, id, &guides, matching);
 }
 
 /// The guide sources an import starts from: the stored source's, or the
 /// guide typed for a new source.
-pub(crate) fn planned_guides(job: &Job) -> Vec<GuideSource> {
+pub(crate) fn planned_guides(services: &Services, job: &Job) -> Vec<GuideSource> {
     match (job.stored, &job.epg_url) {
-        (Some(id), _) => stored::guide_sources(id),
+        (Some(id), _) => stored::guide_sources(services, id),
         (None, Some(url)) => vec![guides::user_source(
             guides::FIRST_USER_FEED,
             url.clone(),
@@ -591,16 +605,17 @@ pub(crate) struct Downloaded {
 /// Stores a downloaded guide and reads it back without descriptions (the
 /// stored one, if any, when the store fails).
 pub(crate) fn keep_guide(
+    services: &Services,
     id: SourceId,
     guide: Downloaded,
     guides: &[EpgSourceConfig],
     matching: stored::Matching<'_>,
     now: i64,
 ) -> GuideStore {
-    if let Err(e) = stored::replace(id, guide, guides, matching, now) {
+    if let Err(e) = stored::replace(services, id, guide, guides, matching, now) {
         log::warn!("iptv data: could not store the guide: {e}");
     }
-    stored::load_guide(id, now).unwrap_or_default()
+    stored::load_guide(services, id, now).unwrap_or_default()
 }
 
 /// Downloads `guides` for the catalog's channels with the user's guide
@@ -616,10 +631,13 @@ pub(crate) async fn download_guide<P: ProgressSink>(
     cancel: &CancelToken,
     must_load: Option<iptv_epg::FeedId>,
 ) -> Result<Downloaded, ImportError> {
-    let mut stage =
-        super::store_service::call(|store| EpgStage::create_in_store(store, data_dir()))
-            .await
-            .map_err(|e| ImportError::Storage(e.to_string()))?;
+    // The stage file belongs to the owner the client reads for.
+    let services = net.services();
+    let directory = services.directory().to_owned();
+    let mut stage = services
+        .call(move |store| EpgStage::create_in_store(store, directory))
+        .await
+        .map_err(|e| ImportError::Storage(e.to_string()))?;
     let epg = import_epg(
         net,
         guides,
@@ -646,6 +664,7 @@ pub(crate) async fn download_guide<P: ProgressSink>(
 /// (`planned` for a new source; a stored one's are read again, as the user
 /// may have changed them meanwhile). Returns the guide sources saved.
 pub(crate) fn save(
+    services: &Services,
     job: &Job,
     catalog: &Catalog,
     planned: &[GuideSource],
@@ -654,7 +673,7 @@ pub(crate) fn save(
     let job = job.clone();
     let guide_urls = catalog.guide_urls();
     let planned = planned.to_vec();
-    super::store_service::blocking(move |store| save_in(store, &job, guide_urls, planned, stage))
+    services.blocking(move |store| save_in(store, &job, guide_urls, planned, stage))
 }
 
 pub(crate) fn save_in(
@@ -688,13 +707,11 @@ pub(crate) fn save_in(
 }
 
 /// Notes a failed refresh on the stored source (kind only).
-pub(crate) fn record_failure(stored: Option<SourceId>, kind: ImportErrorKind) {
+pub(crate) fn record_failure(services: &Services, stored: Option<SourceId>, kind: ImportErrorKind) {
     let Some(id) = stored else {
         return;
     };
-    if let Err(e) =
-        super::store_service::blocking(move |store| store.record_import_failure(id, kind))
-    {
+    if let Err(e) = services.blocking(move |store| store.record_import_failure(id, kind)) {
         log::warn!("iptv data: could not record the failure: {e}");
     }
 }
@@ -728,54 +745,61 @@ pub fn kept_file_name(name: &str) -> String {
     }
 }
 
-pub async fn keep_picked_file(name: &str, bytes: &[u8]) -> std::io::Result<String> {
+pub(crate) async fn keep_picked_file(
+    services: &Services,
+    name: &str,
+    bytes: &[u8],
+) -> std::io::Result<String> {
     let name = kept_file_name(name);
     let mut random = [0u8; 8];
     getrandom::fill(&mut random)
         .map_err(|_| std::io::Error::other("cannot create document identity"))?;
-    let dir = data_dir()
+    let dir = services
+        .directory()
         .join("playlists")
         .join(format!("{:016x}", u64::from_le_bytes(random)));
     let path = dir.join(&name);
     let bytes = bytes.to_vec();
-    super::store_service::call(move |store| {
-        let mut builder = std::fs::DirBuilder::new();
-        builder.recursive(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::DirBuilderExt;
-            builder.mode(0o700);
-        }
-        builder.create(&dir).map_err(|_| {
-            iptv_store_sqlite::StoreError::Unavailable("cannot create private document directory")
-        })?;
-        super::private_files::write_atomic(store, &path, &mut bytes.as_slice())?;
-        Ok(path.to_string_lossy().into_owned())
-    })
-    .await
-    .map_err(|_| std::io::Error::other("private document cannot be saved"))
+    services
+        .call(move |store| {
+            let mut builder = std::fs::DirBuilder::new();
+            builder.recursive(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
+            }
+            builder.create(&dir).map_err(|_| {
+                iptv_store_sqlite::StoreError::Unavailable(
+                    "cannot create private document directory",
+                )
+            })?;
+            super::private_files::write_atomic(store, &path, &mut bytes.as_slice())?;
+            Ok(path.to_string_lossy().into_owned())
+        })
+        .await
+        .map_err(|_| std::io::Error::other("private document cannot be saved"))
 }
 
 /// Cached startup/switch can avoid a playlist download independently of EPG policy.
-pub(crate) fn network_due(id: SourceId, purpose: Purpose) -> bool {
+pub(crate) fn network_due(services: &Services, id: SourceId, purpose: Purpose) -> bool {
     if !matches!(
         purpose,
         Purpose::Startup | Purpose::Switch | Purpose::Combined
     ) {
         return true;
     }
-    super::store_service::blocking(move |store| {
-        Ok((store.source_policy(id)?, store.import_status(id)?))
-    })
-    .map(|(p, status)| {
-        status.last_success_at.is_none()
-            || p.due(
-                now_unix(),
-                status.last_attempt_at,
-                matches!(purpose, Purpose::Startup | Purpose::Combined),
-            )
-    })
-    .unwrap_or(true)
+    services
+        .blocking(move |store| Ok((store.source_policy(id)?, store.import_status(id)?)))
+        .map(|(p, status)| {
+            status.last_success_at.is_none()
+                || p.due(
+                    now_unix(),
+                    status.last_attempt_at,
+                    matches!(purpose, Purpose::Startup | Purpose::Combined),
+                )
+        })
+        .unwrap_or(true)
 }
 
 pub const DEV_PLAYLIST: Option<&str> = option_env!("IPTV_RS_DEV_PLAYLIST");

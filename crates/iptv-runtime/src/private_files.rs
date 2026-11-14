@@ -142,12 +142,20 @@ fn local_allowed(config: &iptv_net::NetConfig, request: &HttpRequest) -> bool {
 #[derive(Clone)]
 pub(crate) struct Client {
     net: iptv_net::NetClient,
+    /// The owner whose private documents and network settings this reads.
+    services: super::store_service::Services,
 }
 impl Client {
-    pub(crate) fn new(config: iptv_net::NetConfig) -> Result<Self, FetchError> {
+    /// A client with the owner's network settings of now.
+    pub(crate) fn new(services: &super::store_service::Services) -> Result<Self, FetchError> {
         Ok(Self {
-            net: iptv_net::NetClient::new(config)?,
+            net: iptv_net::NetClient::new(super::settings::net_config(&services.settings()))?,
+            services: services.clone(),
         })
+    }
+    /// The owner this client reads for.
+    pub(crate) fn services(&self) -> &super::store_service::Services {
+        &self.services
     }
     pub(crate) async fn fetch_stream(
         &self,
@@ -171,7 +179,7 @@ impl Client {
     ) -> Result<StreamingResponse<Body>, FetchError> {
         let path = iptv_providers::content_url::local_path(&request.url).map_err(|_| failure())?;
         if let Some(path) = path {
-            let root = super::paths::data_dir().join("playlists");
+            let root = self.services.directory().join("playlists");
             if path.starts_with(&root) {
                 if !local_allowed(self.net.config(), &request) {
                     return Err(failure());
@@ -181,10 +189,11 @@ impl Client {
                 if !actual.starts_with(root) {
                     return Err(failure());
                 }
-                let reader =
-                    super::store_service::call(move |store| store.read_private_file(&actual))
-                        .await
-                        .map_err(|_| failure())?;
+                let reader = self
+                    .services
+                    .call(move |store| store.read_private_file(&actual))
+                    .await
+                    .map_err(|_| failure())?;
                 let remaining = self.net.config().max_streamed_bytes;
                 if reader.len() > remaining {
                     return Err(FetchError::new(

@@ -1,4 +1,10 @@
 //! Application-owned state and events. This module has no UI toolkit imports.
+//!
+//! A [`Runtime`] is one application owner. Everything it owns (its store
+//! connections, file writer, network executor, refresh pool, settings and
+//! platform ports) is reached through the handle the caller passes; nothing
+//! in this crate looks an owner up through a thread-local or a process-wide
+//! registry. The shell keeps the one handle and passes it in.
 pub mod data;
 mod error;
 mod events;
@@ -14,7 +20,7 @@ pub struct BrowserState {
 }
 
 mod guide_checks;
-pub mod state;
+pub(crate) mod state;
 pub use events::RuntimeEvent;
 
 use iptv_core::guide::{Schedule, SyntheticSchedule};
@@ -104,13 +110,16 @@ pub struct Runtime {
 }
 
 impl Runtime {
+    /// A new owner with its own services. Constructing one starts no thread
+    /// and touches no other owner: its store opens on first use, after
+    /// [`Runtime::start_services`].
     pub fn new(ports: Ports) -> Self {
         let store = std::sync::Arc::new(store_service::Service::new(ports));
         Self {
             account_streams: Slot::default(),
             resolving: Slot::default(),
             wizard_import: Slot::default(),
-            store: store.clone(),
+            store,
             settings_saved: Slot::default(),
             settings_changed: Slot::default(),
             settings_read_only: Cell::new(None),
@@ -159,7 +168,14 @@ impl Runtime {
 impl Runtime {
     /// Private storage captured when this owner was constructed.
     pub fn data_dir(&self) -> &std::path::Path {
-        &self.store.directory
+        self.store.directory()
+    }
+
+    /// This owner's services for work accepted now (see
+    /// [`store_service::Services`]): what a worker carries instead of
+    /// looking an owner up.
+    pub(crate) fn services(&self) -> store_service::Services {
+        self.store.accept()
     }
 
     pub fn bind_tasks(
@@ -172,6 +188,8 @@ impl Runtime {
             delay: Box::new(delay),
         }));
     }
+    /// Runs `task` on the host's local executor. The task holds its owner
+    /// itself: it names no other one, whichever owner the host polls it under.
     pub(crate) fn spawn(&self, task: impl std::future::Future<Output = ()> + 'static) {
         let host = self
             .tasks
@@ -180,48 +198,34 @@ impl Runtime {
             .expect("runtime task host installed");
         (host.spawn)(Box::pin(task));
     }
-    pub(crate) async fn delay(&self, duration: std::time::Duration) {
+    pub(crate) fn delay(
+        &self,
+        duration: std::time::Duration,
+    ) -> impl std::future::Future<Output = ()> + use<> {
         let host = self
             .tasks
             .borrow()
             .clone()
             .expect("runtime task host installed");
-        (host.delay)(duration).await;
-    }
-    pub fn with_context<R>(&self, run: impl FnOnce() -> R) -> R {
-        store_service::with_service(self.store.clone(), run)
-    }
-    /// Capture native context before starting a worker, including bootstrap
-    /// work accepted before the store's UI epoch exists.
-    pub fn scope_worker<R: 'static, F>(
-        &self,
-        work: F,
-    ) -> impl FnOnce() -> R + Send + 'static + use<R, F>
-    where
-        F: FnOnce() -> R + Send + 'static,
-    {
-        self.with_context(|| store_service::scoped(work))
-    }
-    pub fn scope_future<F: std::future::Future + 'static>(
-        &self,
-        future: F,
-    ) -> impl std::future::Future<Output = F::Output> + 'static + use<F> {
-        store_service::scope_future(self.store.clone(), future)
+        (host.delay)(duration)
     }
     pub fn flush_files(&self, limit: std::time::Duration) -> bool {
-        self.with_context(|| file_writer::flush(limit))
+        self.store.files().flush(limit)
+    }
+    /// A handle a host callback may use off the application thread (Android
+    /// `onStop`) to wait for this owner's queued file writes.
+    pub fn host_handle(&self) -> HostHandle {
+        HostHandle(std::sync::Arc::downgrade(&self.store))
     }
 
-    pub fn activate(&self) {
-        store_service::activate(self.store.clone());
-    }
+    /// The calling thread becomes this owner's application thread: store
+    /// requests are accepted from now until [`Runtime::drain_services`].
     pub fn start_services(&self) {
-        store_service::with_service(self.store.clone(), store_service::register_ui_thread);
+        self.store.begin();
     }
     pub fn drain_services(&self) -> bool {
         self.cancel_guide_checks();
-        let drained =
-            store_service::with_service(self.store.clone(), store_service::drain_on_shutdown);
+        let drained = self.store.drain_on_shutdown();
         // Detached local tasks can retain this Runtime after the root closes.
         // Retire services now, rather than waiting for its last Rc to drop.
         self.store.retire();
@@ -290,13 +294,30 @@ impl Drop for Runtime {
     }
 }
 
-/// Flush accepted file writes from a host callback that can run off-thread.
-pub fn flush_pending_writes(limit: std::time::Duration) -> bool {
-    let Some(owner) = store_service::active_service() else {
-        // A host can stop before the application root has accepted any work.
-        return true;
-    };
-    store_service::with_service(owner, || file_writer::flush(limit))
+/// What a host may ask of one owner from any thread: to wait for its queued
+/// file writes. It names its owner explicitly and does not keep it alive:
+/// once the owner is gone there is nothing to wait for.
+#[derive(Clone)]
+pub struct HostHandle(std::sync::Weak<store_service::Service>);
+impl HostHandle {
+    /// Waits, at most `limit`, until every write queued so far is on disk.
+    pub fn flush_files(&self, limit: std::time::Duration) -> bool {
+        // A host can stop before the application root has accepted any work,
+        // or after it closed.
+        self.0
+            .upgrade()
+            .is_none_or(|service| service.files().flush(limit))
+    }
+
+    /// Occupies this owner's store writer for `duration` after the work
+    /// queued before it (the headless tests of what must not wait for it
+    /// drive the app from another thread).
+    #[cfg(feature = "test-support")]
+    pub fn occupy_writer(&self, duration: std::time::Duration) {
+        if let Some(service) = self.0.upgrade() {
+            service.accept().occupy_writer(duration);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -328,21 +349,53 @@ mod tests {
         let first = Rc::new(Runtime::default());
         let second = Rc::new(Runtime::default());
         let (reply, answer) = futures_channel::oneshot::channel();
-        let task = crate::context::with_runtime(first.clone(), || {
-            crate::context::in_runtime(async move {
-                let limit = answer.await.unwrap();
-                crate::current().account_streams.set(Some(limit));
-            })
-        });
+        // The task holds the owner that accepted it; no ambient owner exists
+        // for a later poll to pick up instead.
+        let owner = first.clone();
+        let task = async move {
+            let limit = answer.await.unwrap();
+            owner.account_streams.set(Some(limit));
+        };
         let mut task = std::pin::pin!(task);
         let mut context = Context::from_waker(Waker::noop());
-        crate::context::with_runtime(second.clone(), || {
-            assert_eq!(task.as_mut().poll(&mut context), Poll::Pending);
-            reply.send(3).unwrap();
-            assert_eq!(task.as_mut().poll(&mut context), Poll::Ready(()));
-        });
+        assert_eq!(task.as_mut().poll(&mut context), Poll::Pending);
+        reply.send(3).unwrap();
+        assert_eq!(task.as_mut().poll(&mut context), Poll::Ready(()));
         assert_eq!(first.account_streams.get(), Some(3));
         assert_eq!(second.account_streams.get(), None);
+    }
+
+    #[test]
+    fn constructing_another_runtime_leaves_an_open_owner_untouched() {
+        let directory = tempfile::tempdir().unwrap();
+        let make = |name: &str| {
+            let mut ports = Ports::for_tests();
+            ports.directory = directory.path().join(name);
+            Rc::new(Runtime::new(ports))
+        };
+        let first = make("alpha");
+        first.start_services();
+        let accepted = first.services();
+        assert!(accepted.is_current());
+        // Constructing, starting and closing another owner changes nothing
+        // the first owner or its accepted work can observe.
+        let second = make("beta");
+        assert!(accepted.is_current());
+        assert_eq!(first.services().directory(), directory.path().join("alpha"));
+        second.start_services();
+        assert!(accepted.is_current());
+        assert_eq!(accepted.directory(), directory.path().join("alpha"));
+        assert_eq!(second.services().directory(), directory.path().join("beta"));
+        assert!(second.drain_services());
+        drop(second);
+        assert!(accepted.is_current());
+        assert!(first.services().is_current());
+        // Each owner has its own settings.
+        let third = make("gamma");
+        *first.services().shared_settings().write().unwrap() = Some(Default::default());
+        assert!(third.services().shared_settings().read().unwrap().is_none());
+        assert!(first.drain_services());
+        assert!(!accepted.is_current());
     }
 
     #[test]
@@ -367,25 +420,25 @@ mod tests {
 
 mod store_service;
 
-pub mod executor;
+mod executor;
 
 pub(crate) mod file_writer;
 
 pub mod commands;
 
-pub mod imports;
+pub(crate) mod imports;
 
 pub mod stored;
 
-pub mod opening;
+pub(crate) mod opening;
 
-pub mod paging;
+pub(crate) mod paging;
 
 pub mod playback;
 
 pub mod guides;
 
-pub mod workers;
+mod workers;
 
 pub mod wizard_map;
 
@@ -393,28 +446,21 @@ pub(crate) mod private_files;
 
 pub mod library;
 
-pub mod favorites;
+pub(crate) mod favorites;
 
-pub mod search;
+pub(crate) mod search;
 
 pub mod backup;
 
-pub mod assign;
+pub(crate) mod assign;
 
 pub(crate) mod credential_store;
 pub mod model;
 
 pub mod settings;
 
-#[cfg(feature = "test-support")]
-pub use store_service::occupy_writer;
-
-mod paths;
-
 mod ports;
 pub use ports::Ports;
-mod context;
-pub use context::{current, in_runtime, set_current, try_current, with_runtime};
 pub mod storage;
 
 #[cfg(test)]

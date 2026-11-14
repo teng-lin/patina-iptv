@@ -24,6 +24,7 @@
 //! ([`note_shown`]): [`update_now`] downloads its guide (every source
 //! switched on), [`clear`] deletes the stored one, [`guide_status`] says
 //! how the last update went and [`source_lines`] how each source did.
+use std::rc::Rc;
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -35,23 +36,29 @@ use iptv_import::CancelToken;
 
 use super::Msg;
 
-pub fn refresh_status() {
-    let owner = crate::current();
+pub fn refresh_status(owner: &Rc<crate::Runtime>) {
+    let owner = owner.clone();
     owner
         .status_revision
         .set(owner.status_revision.get().wrapping_add(1));
     let expected = owner.status_revision.get();
-    let loaded = crate::commands::guide_status_snapshot();
-    super::spawn_in_app(async move {
-        if let Ok(mut snapshot) = loaded.await
-            && owner.status_revision.get() == expected
-        {
-            let changed = snapshot.library.take().is_some_and(super::library::install);
-            *owner.status.borrow_mut() = snapshot;
-            if changed && super::combined::active() {
-                super::combined::rebuild();
+    let loaded = crate::commands::guide_status_snapshot(&owner);
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            if let Ok(mut snapshot) = loaded.await
+                && owner.status_revision.get() == expected
+            {
+                let changed = snapshot
+                    .library
+                    .take()
+                    .is_some_and(|lib| super::library::install(&owner, lib));
+                *owner.status.borrow_mut() = snapshot;
+                if changed && super::combined::active(&owner) {
+                    super::combined::rebuild(&owner);
+                }
+                owner.emit(crate::RuntimeEvent::SettingsChanged);
             }
-            owner.emit(crate::RuntimeEvent::SettingsChanged);
         }
     });
 }
@@ -66,56 +73,64 @@ pub use crate::stored::{
 };
 
 /// Fetch descriptions on the shared worker; a bounded cache makes later renders synchronous.
+/// The schedule that keeps this lookup is itself kept by its owner, so the
+/// lookup holds the owner weakly.
 pub fn description_lookup(
+    owner: &Rc<crate::Runtime>,
     source: SourceId,
 ) -> Option<impl Fn(&ChannelKey, UnixTime) -> Option<String> + 'static> {
-    let cache = std::rc::Rc::new(RefCell::new(
+    let cache = Rc::new(RefCell::new(
         BTreeMap::<(String, UnixTime), Option<String>>::new(),
     ));
+    let owner = Rc::downgrade(owner);
     Some(move |key: &ChannelKey, start| {
         let identity = (key.to_string(), start);
         if let Some(description) = cache.borrow().get(&identity) {
             return description.clone();
         }
+        let owner = owner.upgrade()?;
         if cache.borrow().len() >= 128 {
             cache.borrow_mut().pop_first();
         }
         cache.borrow_mut().insert(identity.clone(), None);
         let key = key.clone();
-        let read = crate::commands::description(source, key, start);
+        let read = crate::commands::description(&owner, source, key, start);
         let cache = cache.clone();
-        super::spawn_in_app(async move {
-            match read.await {
-                Ok(description) => {
-                    let mut cache = cache.borrow_mut();
-                    let Some(entry) = cache.get_mut(&identity) else {
+        owner.spawn({
+            let owner = owner.clone();
+            async move {
+                match read.await {
+                    Ok(description) => {
+                        let mut cache = cache.borrow_mut();
+                        let Some(entry) = cache.get_mut(&identity) else {
+                            return;
+                        };
+                        *entry = description;
+                    }
+                    Err(error) => {
+                        log::warn!("iptv data: description: {error}");
+                        // A transient read failure is not a cached absence. Retry
+                        // on the next user-driven lookup without causing a render
+                        // loop while the database remains unavailable.
+                        cache.borrow_mut().remove(&identity);
                         return;
-                    };
-                    *entry = description;
+                    }
                 }
-                Err(error) => {
-                    log::warn!("iptv data: description: {error}");
-                    // A transient read failure is not a cached absence. Retry
-                    // on the next user-driven lookup without causing a render
-                    // loop while the database remains unavailable.
-                    cache.borrow_mut().remove(&identity);
-                    return;
-                }
+                owner.emit(crate::RuntimeEvent::GuideChanged);
             }
-            crate::current().emit(crate::RuntimeEvent::GuideChanged);
         });
         None
     })
 }
 
 /// "Update the guide now" of the source on screen: see [`update_source`].
-pub fn update_now(done: impl FnOnce() + 'static) -> bool {
-    let sources = shown_sources();
+pub fn update_now(owner: &Rc<crate::Runtime>, done: impl FnOnce() + 'static) -> bool {
+    let sources = shown_sources(owner);
     if sources.is_empty() {
         return false;
     }
-    let remaining = std::rc::Rc::new(Cell::new(sources.len()));
-    let done = std::rc::Rc::new(RefCell::new(Some(done)));
+    let remaining = Rc::new(Cell::new(sources.len()));
+    let done = Rc::new(RefCell::new(Some(done)));
     let mut started = false;
     for source in sources {
         let left = remaining.clone();
@@ -128,12 +143,12 @@ pub fn update_now(done: impl FnOnce() + 'static) -> bool {
                 done();
             }
         };
-        if updating(source) {
+        if updating(owner, source) {
             remaining.set(remaining.get() - 1);
             started = true;
             continue;
         }
-        if update_source(source, move |_| finish()) {
+        if update_source(owner, source, move |_| finish()) {
             started = true;
         } else {
             remaining.set(remaining.get() - 1);
@@ -152,11 +167,15 @@ pub fn update_now(done: impl FnOnce() + 'static) -> bool {
 /// the storage settings and guide choices of now); the guide on screen
 /// changes when it is `source`'s. `done` runs on the UI thread when it
 /// finished. False when there is no guide to download.
-pub fn update_source(source: SourceId, done: impl FnOnce(bool) + 'static) -> bool {
-    if updating(source) {
+pub fn update_source(
+    owner: &Rc<crate::Runtime>,
+    source: SourceId,
+    done: impl FnOnce(bool) + 'static,
+) -> bool {
+    if updating(owner, source) {
         return true;
     }
-    let has_guides = crate::current().status.with(|status| {
+    let has_guides = owner.status.with(|status| {
         let status = status.borrow();
         match status.lines.get(&source) {
             Some(lines) if !lines.is_empty() => lines.iter().any(|line| line.source.enabled),
@@ -169,95 +188,112 @@ pub fn update_source(source: SourceId, done: impl FnOnce(bool) + 'static) -> boo
     if !has_guides {
         return false;
     }
-    let loaded = crate::commands::guide_sources(source);
-    crate::current()
+    let loaded = crate::commands::guide_sources(owner, source);
+    owner
         .updating
         .with(|updating| updating.borrow_mut().push(source));
-    super::spawn_in_app(async move {
-        let (stored, sources) = match loaded.await {
-            Ok(loaded) => loaded,
-            Err(error) => {
-                log::warn!("iptv data: cannot load guide sources: {error}");
-                crate::current()
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            let (stored, sources) = match loaded.await {
+                Ok(loaded) => loaded,
+                Err(error) => {
+                    log::warn!("iptv data: cannot load guide sources: {error}");
+                    owner
+                        .updating
+                        .with(|updating| updating.borrow_mut().retain(|id| *id != source));
+                    done(false);
+                    return;
+                }
+            };
+            let guides = if sources.is_empty() {
+                with_storage(
+                    stored
+                        .as_ref()
+                        .map(StoredGuide::configs)
+                        .unwrap_or_default(),
+                    &owner.settings(),
+                )
+            } else {
+                configs(&owner.settings(), &sources)
+            };
+            if guides.is_empty() {
+                owner
                     .updating
                     .with(|updating| updating.borrow_mut().retain(|id| *id != source));
+                owner.emit(crate::RuntimeEvent::Notify(
+                    "No guide sources are configured",
+                ));
                 done(false);
                 return;
             }
-        };
-        let guides = if sources.is_empty() {
-            with_storage(
-                stored
-                    .as_ref()
-                    .map(StoredGuide::configs)
-                    .unwrap_or_default(),
-                &crate::settings::get(),
-            )
-        } else {
-            configs(&sources)
-        };
-        if guides.is_empty() {
-            crate::current()
-                .updating
-                .with(|updating| updating.borrow_mut().retain(|id| *id != source));
-            crate::current().emit(crate::RuntimeEvent::Notify(
-                "No guide sources are configured",
-            ));
-            done(false);
-            return;
-        }
-        super::library::revoke_import_handoff(source);
-        let cancel = CancelToken::new();
-        let completion = super::library::import_completion(cancel.clone());
-        completion.playlist_done(); // This worker owns guide work only.
-        let had_check = crate::current().has_guide_check(source);
-        super::library::track_import(source, &completion);
+            super::library::revoke_import_handoff(&owner, source);
+            let cancel = CancelToken::new();
+            let completion = super::library::import_completion(cancel.clone());
+            completion.playlist_done(); // This worker owns guide work only.
+            let had_check = owner.has_guide_check(source);
+            super::library::track_import(&owner, source, &completion);
 
-        let generation = crate::current().generation.with(Cell::get);
-        let (tx, mut rx) = unbounded_channel();
-        let accepted = super::workers::submit(super::source_is_visible(source), move || {
-            super::with_runtime(|| download_now(source, guides, &tx, &cancel));
-        });
-        if !accepted {
-            if had_check {
-                super::schedule_check(
-                    source,
-                    super::now_unix() + super::MIN_WAIT.as_secs() as i64,
-                    generation,
-                );
-            }
-            crate::current().emit(crate::RuntimeEvent::Notify(
-                "Too many playlists are updating. Try again shortly.",
-            ));
-        }
-        super::spawn_in_app(async move {
-            loop {
-                match rx.recv().await {
-                    Some(Msg::Guide(imported))
-                        if (crate::current().shown.with(Cell::get) == Some(source)
-                            || super::combined::includes(source))
-                            && super::library::import_is_current(source, &completion) =>
-                    {
-                        super::show(imported, generation, false).await
-                    }
-                    Some(Msg::NextCheck { source, at })
-                        if (crate::current().shown.with(Cell::get) == Some(source)
-                            || super::combined::includes(source))
-                            && super::library::import_is_current(source, &completion) =>
-                    {
-                        super::schedule_check(source, at, generation);
-                    }
-                    Some(_) => {}
-                    None => break,
+            let generation = owner.generation.with(Cell::get);
+            let (tx, mut rx) = unbounded_channel();
+            let services = owner.services();
+            let worker = services.clone();
+            let accepted = services.submit(super::source_is_visible(&owner, source), move || {
+                worker.block_on(download_now(&worker, source, guides, &tx, &cancel));
+            });
+            if !accepted {
+                if had_check {
+                    super::schedule_check(
+                        &owner,
+                        source,
+                        super::now_unix() + super::MIN_WAIT.as_secs() as i64,
+                        generation,
+                    );
                 }
+                owner.emit(crate::RuntimeEvent::Notify(
+                    "Too many playlists are updating. Try again shortly.",
+                ));
             }
-            completion.finish();
-            crate::current()
-                .updating
-                .with(|u| u.borrow_mut().retain(|id| *id != source));
-            crate::current().emit(crate::RuntimeEvent::LibraryChanged);
-            done(accepted);
-        });
+            owner.spawn({
+                let owner = owner.clone();
+                async move {
+                    loop {
+                        match rx.recv().await {
+                            Some(Msg::Guide(imported))
+                                if (owner.shown.with(Cell::get) == Some(source)
+                                    || super::combined::includes(&owner, source))
+                                    && super::library::import_is_current(
+                                        &owner,
+                                        source,
+                                        &completion,
+                                    ) =>
+                            {
+                                super::show(&owner, imported, generation, false).await
+                            }
+                            Some(Msg::NextCheck { source, at })
+                                if (owner.shown.with(Cell::get) == Some(source)
+                                    || super::combined::includes(&owner, source))
+                                    && super::library::import_is_current(
+                                        &owner,
+                                        source,
+                                        &completion,
+                                    ) =>
+                            {
+                                super::schedule_check(&owner, source, at, generation);
+                            }
+                            Some(_) => {}
+                            None => break,
+                        }
+                    }
+                    completion.finish();
+                    owner
+                        .updating
+                        .with(|u| u.borrow_mut().retain(|id| *id != source));
+                    owner.emit(crate::RuntimeEvent::LibraryChanged);
+                    done(accepted);
+                }
+            });
+        }
     });
     true
 }
@@ -268,26 +304,28 @@ use crate::stored::download_now;
 /// `source`'s guide sources changed: its guide is checked once the edits
 /// settle (the refresh policy downloads changed feeds). Only for the
 /// source on screen; another one is checked when it is shown.
-pub fn guides_changed(source: SourceId) {
-    if crate::current().shown.with(Cell::get) != Some(source) && !super::combined::includes(source)
-    {
+pub fn guides_changed(owner: &Rc<crate::Runtime>, source: SourceId) {
+    if owner.shown.with(Cell::get) != Some(source) && !super::combined::includes(owner, source) {
         return;
     }
-    let edit = next_guide_edit(source);
-    let generation = crate::current().generation.with(Cell::get);
-    super::spawn_in_app(async move {
-        crate::data::delay(SETTLE).await;
-        // A refresh may still be installing its old guide configuration. Wait
-        // for that handoff before checking the edited feeds, rather than turning
-        // this check into a cache-only read and losing the edit's refresh.
-        while let Some(pending) = super::library::pending_import(source) {
-            pending.until_finished().await;
-        }
-        let current = crate::current().generation.with(Cell::get) == generation
-            && guide_edit_is_current(source, edit);
-        if current && !updating(source) {
-            log::info!("iptv data: guide sources changed; checking the guide");
-            super::check_guide(source, generation);
+    let edit = next_guide_edit(owner, source);
+    let generation = owner.generation.with(Cell::get);
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            owner.delay(SETTLE).await;
+            // A refresh may still be installing its old guide configuration. Wait
+            // for that handoff before checking the edited feeds, rather than turning
+            // this check into a cache-only read and losing the edit's refresh.
+            while let Some(pending) = super::library::pending_import(&owner, source) {
+                pending.until_finished().await;
+            }
+            let current = owner.generation.with(Cell::get) == generation
+                && guide_edit_is_current(&owner, source, edit);
+            if current && !updating(&owner, source) {
+                log::info!("iptv data: guide sources changed; checking the guide");
+                super::check_guide(&owner, source, generation);
+            }
         }
     });
 }
@@ -297,24 +335,27 @@ pub fn guides_changed(source: SourceId) {
 /// start, refresh, or "Update the guide now"). The store works off the UI
 /// thread; `done` hears whether the guide was deleted. False when no
 /// playlist is on screen.
-pub fn clear(done: impl FnOnce(bool) + 'static) -> bool {
-    let sources = shown_sources();
+pub fn clear(owner: &Rc<crate::Runtime>, done: impl FnOnce(bool) + 'static) -> bool {
+    let sources = shown_sources(owner);
     if sources.is_empty() {
         return false;
     }
     for source in &sources {
-        super::library::revoke_import_handoff(*source);
+        super::library::revoke_import_handoff(owner, *source);
     }
-    let generation = crate::current().generation.with(Cell::get);
-    let saved = crate::commands::clear_guides(sources);
-    super::spawn_in_app(async move {
-        let Ok((deleted, imports)) = saved.await else {
-            return done(false);
-        };
-        for imported in imports {
-            super::show(Box::new(imported), generation, false).await;
+    let generation = owner.generation.with(Cell::get);
+    let saved = crate::commands::clear_guides(owner, sources);
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            let Ok((deleted, imports)) = saved.await else {
+                return done(false);
+            };
+            for imported in imports {
+                super::show(&owner, Box::new(imported), generation, false).await;
+            }
+            done(deleted);
         }
-        done(deleted);
     });
     true
 }

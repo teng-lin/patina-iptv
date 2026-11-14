@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
-type Work = Box<dyn FnOnce() + Send>;
+pub(crate) type Work = Box<dyn FnOnce() + Send>;
 const PARALLEL: usize = 2;
 const WAITING: usize = 32;
 
@@ -66,7 +66,11 @@ impl Pool {
             capacity,
         }
     }
-    fn submit(&self, visible: bool, work: Work) -> bool {
+    /// The production pool: two refreshes at once, a bounded queue behind.
+    pub(crate) fn standard() -> Self {
+        Self::new(PARALLEL, WAITING)
+    }
+    pub(crate) fn submit(&self, visible: bool, work: Work) -> bool {
         let (lock, ready) = &*self.shared;
         let mut state = lock
             .lock()
@@ -100,20 +104,6 @@ impl Drop for Pool {
         self.close();
         self.workers.clear();
     }
-}
-
-pub fn submit(visible: bool, work: impl FnOnce() + Send + 'static) -> bool {
-    let work = super::store_service::scoped(move || {
-        // Retired queued refreshes must not spend a new app's network budget.
-        // Running work remains guarded again at every store operation.
-        if super::store_service::is_current() {
-            work();
-        }
-    });
-    super::store_service::service()
-        .pool
-        .get_or_init(|| Pool::new(PARALLEL, WAITING))
-        .submit(visible, Box::new(work))
 }
 
 #[cfg(test)]

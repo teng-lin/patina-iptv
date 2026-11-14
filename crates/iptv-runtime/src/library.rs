@@ -32,50 +32,58 @@ pub fn import_completion(cancel: CancelToken) -> ImportCompletion {
         waiting: RefCell::default(),
     })
 }
-pub fn track_import(source: SourceId, completion: &ImportCompletion) {
-    crate::current().cancel_guide_check(source);
-    crate::current()
+pub fn track_import(owner: &super::Runtime, source: SourceId, completion: &ImportCompletion) {
+    owner.cancel_guide_check(source);
+    owner
         .completions
         .with(|jobs| jobs.borrow_mut().insert(source, Rc::downgrade(completion)));
 }
 /// An Add learns its source ID only after saving. A newer known-source job may
 /// already own that ID by then, including a worker that has just completed.
-pub fn track_added_import(source: SourceId, completion: &ImportCompletion) {
-    crate::current().completions.with(|jobs| {
+pub fn track_added_import(owner: &super::Runtime, source: SourceId, completion: &ImportCompletion) {
+    owner.completions.with(|jobs| {
         jobs.borrow_mut()
             .entry(source)
             .or_insert_with(|| Rc::downgrade(completion));
     });
 }
 pub type ImportRevision = Option<Weak<ImportWork>>;
-pub fn import_revision(source: SourceId) -> ImportRevision {
-    crate::current()
+pub fn import_revision(owner: &super::Runtime, source: SourceId) -> ImportRevision {
+    owner
         .completions
         .with(|jobs| jobs.borrow().get(&source).cloned())
 }
-pub fn import_revision_is_current(source: SourceId, revision: &ImportRevision) -> bool {
-    match (import_revision(source), revision) {
+pub fn import_revision_is_current(
+    owner: &super::Runtime,
+    source: SourceId,
+    revision: &ImportRevision,
+) -> bool {
+    match (import_revision(owner, source), revision) {
         (None, None) => true,
         (Some(current), Some(previous)) => Weak::ptr_eq(&current, previous),
         _ => false,
     }
 }
-pub fn pending_import(source: SourceId) -> Option<ImportCompletion> {
-    crate::current()
+pub fn pending_import(owner: &super::Runtime, source: SourceId) -> Option<ImportCompletion> {
+    owner
         .completions
         .with(|jobs| jobs.borrow().get(&source).and_then(Weak::upgrade))
         .filter(|job| !job.finished())
 }
-pub fn import_is_current(source: SourceId, completion: &ImportCompletion) -> bool {
-    crate::current().completions.with(|jobs| {
+pub fn import_is_current(
+    owner: &super::Runtime,
+    source: SourceId,
+    completion: &ImportCompletion,
+) -> bool {
+    owner.completions.with(|jobs| {
         jobs.borrow()
             .get(&source)
             .and_then(Weak::upgrade)
             .is_some_and(|current| Rc::ptr_eq(&current, completion))
     })
 }
-pub fn revoke_import_handoff(source: SourceId) {
-    if let Some(job) = crate::current().completions.with(|jobs| {
+pub fn revoke_import_handoff(owner: &super::Runtime, source: SourceId) {
+    if let Some(job) = owner.completions.with(|jobs| {
         jobs.borrow_mut()
             .remove(&source)
             .and_then(|job| job.upgrade())
@@ -85,8 +93,8 @@ pub fn revoke_import_handoff(source: SourceId) {
         job.cancel_guide();
     }
 }
-pub fn reset_imports() {
-    crate::current().completions.with(|jobs| {
+pub fn reset_imports(owner: &super::Runtime) {
+    owner.completions.with(|jobs| {
         for job in jobs
             .borrow_mut()
             .drain()
@@ -116,8 +124,8 @@ pub(crate) fn snapshot_in(store: &Store) -> Result<Snapshot, StoreError> {
         active: store.active_source()?,
     })
 }
-pub fn install(snapshot: Snapshot) -> bool {
-    crate::current().library.with(|current| {
+pub fn install(owner: &super::Runtime, snapshot: Snapshot) -> bool {
+    owner.library.with(|current| {
         let changed = current.borrow().as_ref() != Some(&snapshot);
         *current.borrow_mut() = Some(snapshot);
         changed
@@ -125,8 +133,8 @@ pub fn install(snapshot: Snapshot) -> bool {
 }
 
 /// The stored playlists in list order.
-fn playlists_native() -> Result<Vec<Playlist>, StoreError> {
-    crate::current().library.with(|snapshot| {
+fn playlists_native(owner: &super::Runtime) -> Result<Vec<Playlist>, StoreError> {
+    owner.library.with(|snapshot| {
         snapshot
             .borrow()
             .as_ref()
@@ -181,8 +189,8 @@ pub(crate) fn startup_source(store: &Store) -> Result<Option<StoredSource>, Stor
     Ok(None)
 }
 
-pub fn newest() -> Result<Option<StoredSource>, StoreError> {
-    crate::current().library.with(|snapshot| {
+pub fn newest(owner: &super::Runtime) -> Result<Option<StoredSource>, StoreError> {
+    owner.library.with(|snapshot| {
         let snapshot = snapshot.borrow();
         let snapshot = snapshot
             .as_ref()
@@ -205,16 +213,19 @@ pub fn newest() -> Result<Option<StoredSource>, StoreError> {
     })
 }
 
-fn policy_native(id: SourceId) -> Result<iptv_store_sqlite::SourcePolicy, StoreError> {
-    playlists()?
+fn policy_native(
+    owner: &super::Runtime,
+    id: SourceId,
+) -> Result<iptv_store_sqlite::SourcePolicy, StoreError> {
+    playlists(owner)?
         .into_iter()
         .find(|source| source.id == id)
         .map(|source| source.policy)
         .ok_or(StoreError::SourceNotFound(id))
 }
 
-pub fn load(id: SourceId) -> Option<StoredSource> {
-    crate::current().library.with(|snapshot| {
+pub fn load(owner: &super::Runtime, id: SourceId) -> Option<StoredSource> {
+    owner.library.with(|snapshot| {
         snapshot
             .borrow()
             .as_ref()
@@ -222,19 +233,14 @@ pub fn load(id: SourceId) -> Option<StoredSource> {
     })
 }
 
-pub fn running(id: SourceId) -> bool {
-    crate::current()
-        .imports
-        .with(|r| r.borrow().contains_key(&id))
+pub fn running(owner: &super::Runtime, id: SourceId) -> bool {
+    owner.imports.with(|r| r.borrow().contains_key(&id))
 }
 
-pub fn cancel_running(id: SourceId) {
-    crate::current().cancel_guide_check(id);
-    revoke_import_handoff(id);
-    if let Some((_, token)) = crate::current()
-        .imports
-        .with(|r| r.borrow_mut().remove(&id))
-    {
+pub fn cancel_running(owner: &super::Runtime, id: SourceId) {
+    owner.cancel_guide_check(id);
+    revoke_import_handoff(owner, id);
+    if let Some((_, token)) = owner.imports.with(|r| r.borrow_mut().remove(&id)) {
         log::info!(
             "iptv data: cancelling the running import of source {}",
             id.0
@@ -243,43 +249,60 @@ pub fn cancel_running(id: SourceId) {
     }
 }
 
-pub fn source_details(id: SourceId) -> Option<Source> {
-    load(id).map(|stored| stored.source)
+/// Stored playlist `id` with its details (secrets included: for the
+/// details form only, never shown or logged).
+pub fn source_details(owner: &super::Runtime, id: SourceId) -> Option<Source> {
+    load(owner, id).map(|stored| stored.source)
 }
 
-/// Tries `source` (new details of stored playlist `id`): they replace the
-/// stored ones once they imported; on failure the playlist stays as it was.
-pub fn snapshot() -> impl std::future::Future<Output = Result<Snapshot, StoreError>> {
-    super::store_service::read(snapshot_in)
+pub fn snapshot(
+    owner: &super::Runtime,
+) -> impl std::future::Future<Output = Result<Snapshot, StoreError>> + use<> {
+    owner.services().read(snapshot_in)
 }
 
 pub fn save_policy(
+    owner: &super::Runtime,
     id: SourceId,
     policy: iptv_library::SourcePolicy,
-) -> impl std::future::Future<Output = Result<(), StoreError>> {
-    super::store_service::call(move |store| store.set_source_policy(id, policy))
+) -> impl std::future::Future<Output = Result<(), StoreError>> + use<> {
+    owner
+        .services()
+        .call(move |store| store.set_source_policy(id, policy))
 }
 
-pub fn remember_shown(id: SourceId) -> impl std::future::Future<Output = Result<(), StoreError>> {
-    super::store_service::call(move |store| store.set_active_source(id))
+pub fn remember_shown(
+    owner: &super::Runtime,
+    id: SourceId,
+) -> impl std::future::Future<Output = Result<(), StoreError>> + use<> {
+    owner
+        .services()
+        .call(move |store| store.set_active_source(id))
 }
 
 pub fn rename_source(
+    owner: &super::Runtime,
     id: SourceId,
     name: String,
-) -> impl std::future::Future<Output = Result<(), StoreError>> {
-    super::store_service::call(move |store| store.rename_source(id, &name))
+) -> impl std::future::Future<Output = Result<(), StoreError>> + use<> {
+    owner
+        .services()
+        .call(move |store| store.rename_source(id, &name))
 }
 
-pub fn delete_source(id: SourceId) -> impl std::future::Future<Output = Result<bool, StoreError>> {
-    super::store_service::call(move |store| store.delete_source(id))
+pub fn delete_source(
+    owner: &super::Runtime,
+    id: SourceId,
+) -> impl std::future::Future<Output = Result<bool, StoreError>> + use<> {
+    owner.services().call(move |store| store.delete_source(id))
 }
 
 pub fn edit_guides(
+    owner: &super::Runtime,
     id: SourceId,
     edit: iptv_library::guides::Edit,
-) -> impl std::future::Future<Output = Result<bool, StoreError>> {
-    super::store_service::call(move |store| {
+) -> impl std::future::Future<Output = Result<bool, StoreError>> + use<> {
+    owner.services().call(move |store| {
         let Some(sources) = iptv_library::guides::apply(&store.guide_sources(id)?, &edit) else {
             return Ok(false);
         };
@@ -288,80 +311,91 @@ pub fn edit_guides(
     })
 }
 
-pub fn set_activity(id: SourceId, activity: Option<Activity>) {
-    let runtime = crate::current();
+pub fn set_activity(owner: &super::Runtime, id: SourceId, activity: Option<Activity>) {
     if let Some(activity) = &activity {
-        runtime.activity.borrow_mut().insert(id, activity.clone());
+        owner.activity.borrow_mut().insert(id, activity.clone());
     } else {
-        runtime.activity.borrow_mut().remove(&id);
+        owner.activity.borrow_mut().remove(&id);
     }
-    runtime.emit(super::RuntimeEvent::RefreshProgress(id, activity));
+    owner.emit(super::RuntimeEvent::RefreshProgress(id, activity));
 }
 
-pub fn set_all(all: bool) {
-    crate::current().all.set(all);
-    crate::current().emit(super::RuntimeEvent::BrowsingAll(all));
+pub fn set_all(owner: &super::Runtime, all: bool) {
+    owner.all.set(all);
+    owner.emit(super::RuntimeEvent::BrowsingAll(all));
 }
 
-pub fn set_shown(source: Option<SourceId>) {
-    crate::current().shown.set(source);
-    crate::current().emit(super::RuntimeEvent::ShownSource(source));
+pub fn set_shown(owner: &super::Runtime, source: Option<SourceId>) {
+    owner.shown.set(source);
+    owner.emit(super::RuntimeEvent::ShownSource(source));
 }
 
-pub fn save_all(all: bool) -> impl std::future::Future<Output = Result<(), StoreError>> {
-    super::store_service::call(move |store| store.set_all_playlists(all))
+pub fn save_all(
+    owner: &super::Runtime,
+    all: bool,
+) -> impl std::future::Future<Output = Result<(), StoreError>> + use<> {
+    owner
+        .services()
+        .call(move |store| store.set_all_playlists(all))
 }
 
-pub fn collapsed() -> impl std::future::Future<Output = Result<Vec<i64>, StoreError>> {
-    super::store_service::call(|store| store.collapsed_playlists())
+pub fn collapsed(
+    owner: &super::Runtime,
+) -> impl std::future::Future<Output = Result<Vec<i64>, StoreError>> + use<> {
+    owner.services().call(|store| store.collapsed_playlists())
 }
 
 pub fn save_collapsed(
+    owner: &super::Runtime,
     collapsed: Vec<i64>,
-) -> impl std::future::Future<Output = Result<(), StoreError>> {
-    super::store_service::call(move |store| store.set_collapsed_playlists(&collapsed))
+) -> impl std::future::Future<Output = Result<(), StoreError>> + use<> {
+    owner
+        .services()
+        .call(move |store| store.set_collapsed_playlists(&collapsed))
 }
 
 /// Refresh policy belongs to the application; the host supplies timers and
 /// foreground notifications. No device wakeups are requested in the background.
-pub fn start_scheduler() {
-    if crate::current().scheduler_started.replace(true) {
+pub fn start_scheduler(owner: &Rc<super::Runtime>) {
+    if owner.scheduler_started.replace(true) {
         return;
     }
-    crate::current().spawn(async {
+    let runtime = owner.clone();
+    owner.spawn(async move {
         let mut startup = true;
         loop {
-            if crate::current().foreground.get() {
-                if let Ok(sources) = super::commands::source_policies().await {
+            if runtime.foreground.get() {
+                if let Ok(sources) = super::commands::source_policies(&runtime).await {
                     for (source, policy) in sources {
-                        let attempted = crate::current()
+                        let attempted = runtime
                             .attempts
                             .borrow()
                             .get(&source.id)
                             .copied()
                             .or(source.import.last_attempt_at);
                         if policy.due(super::imports::now_unix(), attempted, startup)
-                            && !running(source.id)
+                            && !running(&runtime, source.id)
                         {
-                            crate::data::refresh(source.id);
+                            crate::data::refresh(&runtime, source.id);
                         }
                     }
                 }
                 startup = false;
             }
-            crate::current()
-                .delay(std::time::Duration::from_secs(60))
-                .await;
+            runtime.delay(std::time::Duration::from_secs(60)).await;
         }
     });
 }
 
-pub fn playlists() -> Result<Vec<Playlist>, crate::Error> {
-    playlists_native().map_err(crate::Error::from)
+pub fn playlists(owner: &super::Runtime) -> Result<Vec<Playlist>, crate::Error> {
+    playlists_native(owner).map_err(crate::Error::from)
 }
 
-pub fn policy(id: SourceId) -> Result<iptv_store_sqlite::SourcePolicy, crate::Error> {
-    policy_native(id).map_err(crate::Error::from)
+pub fn policy(
+    owner: &super::Runtime,
+    id: SourceId,
+) -> Result<iptv_store_sqlite::SourcePolicy, crate::Error> {
+    policy_native(owner, id).map_err(crate::Error::from)
 }
 
 #[cfg(test)]

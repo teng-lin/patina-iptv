@@ -46,13 +46,13 @@ const CARD_W: f32 = 660.0;
 
 /// Opens the screen for `playlist`.
 pub fn open(ui: Ui, playlist: SourceId) {
-    let screen = Screen::new(playlist, stored::source_lines(playlist));
+    let screen = Screen::new(playlist, crate::runtime().source_lines(playlist));
     ui.guide_sources.set(Some(screen));
 }
 
 /// Opens it on entering a new source's link.
 pub fn open_add(ui: Ui, playlist: SourceId) {
-    let mut screen = Screen::new(playlist, stored::source_lines(playlist));
+    let mut screen = Screen::new(playlist, crate::runtime().source_lines(playlist));
     screen.start_add();
     ui.guide_sources.set(Some(screen));
 }
@@ -134,13 +134,13 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
         Effect::Edit(edit) => {
             log::info!("iptv guide sources of {}: {}", playlist.0, edit_name(&edit));
             crate::data::spawn_in_app(async move {
-                if let Err(e) = crate::data::edit_guides(playlist, &edit).await {
+                if let Err(e) = crate::data::edit_guides(&crate::runtime(), playlist, &edit).await {
                     log::warn!("iptv guide sources: the store refused it: {e}");
                 }
             });
         }
         Effect::Update => {
-            let started = stored::update_source(playlist, move |completed| {
+            let started = stored::update_source(&crate::runtime(), playlist, move |completed| {
                 if completed {
                     crate::settings_view::notify("Guide updated");
                 }
@@ -196,7 +196,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             .guide_sources
             .with_untracked(|s| s.as_ref().map(Screen::playlist));
         if let Some(playlist) = playlist {
-            let lines = stored::source_lines(playlist);
+            let lines = crate::runtime().source_lines(playlist);
             ui.guide_sources.update(|s| {
                 if let Some(s) = s {
                     s.set_lines(lines);
@@ -251,7 +251,8 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
         let playlist = state(ui, Screen::playlist);
         ui.library.version.get();
         let name = playlist.and_then(|id| {
-            crate::data::playlists()
+            crate::runtime()
+                .playlists()
                 .ok()?
                 .into_iter()
                 .find(|p| p.id == id)
@@ -285,10 +286,10 @@ fn list(ui: Ui, size: Scale) -> impl IntoElement {
 
 /// The "Update the guide now" row's status.
 fn update_status(playlist: SourceId) -> (String, bool) {
-    if stored::updating(playlist) {
+    if crate::runtime().is_updating(playlist) {
         return ("Updating…".to_owned(), false);
     }
-    let state = stored::cached_guide_state(playlist);
+    let state = crate::runtime().cached_guide_state(playlist);
     match stored::status_of(state.as_ref()) {
         GuideStatus::Updated { at, channels } => (
             format!(

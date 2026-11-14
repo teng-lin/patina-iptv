@@ -21,7 +21,6 @@ mod custom_groups;
 mod data;
 mod desktop;
 mod epg_sources_view;
-use runtime::executor;
 mod fav_editor;
 mod favorites;
 mod fonts;
@@ -35,7 +34,6 @@ mod lists;
 mod media;
 mod menu_view;
 use iptv_runtime as runtime;
-pub(crate) use runtime::with_runtime;
 mod runtime_events;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", windows))]
 use iptv_player_mpv as mpv;
@@ -393,25 +391,63 @@ impl Ui {
 }
 
 thread_local! {
+    /// The application owner this thread's shell code is working for: the
+    /// root's, or, while a task accepted by an earlier root is polled, that
+    /// task's ([`in_runtime`]). The runtime crate keeps no such handle of its
+    /// own; every call into it is given this one.
     static RUNTIME: RefCell<Option<Rc<runtime::Runtime>>> = const { RefCell::new(None) };
 }
 
 /// The shell owns one application handle; all library state belongs to it.
+///
+/// Application-thread code only. A player, JNI or worker thread holds no
+/// handle and must be given what it needs; once a root exists, asking for
+/// the handle elsewhere is a bug, not a reason to build a second owner.
 pub(crate) fn runtime() -> Rc<runtime::Runtime> {
-    runtime::try_current().unwrap_or_else(|| {
-        let owner = RUNTIME.with(|runtime| {
-            runtime
-                .borrow_mut()
-                .get_or_insert_with(|| {
-                    let directory = platform_data::resolve_data_dir()
-                        .expect("private storage must be resolved before using runtime services");
-                    Rc::new(new_runtime(directory))
-                })
-                .clone()
-        });
-        runtime::set_current(&owner);
-        owner
+    RUNTIME.with(|runtime| {
+        runtime
+            .borrow_mut()
+            .get_or_insert_with(|| {
+                // Before any root (unit tests of shell code), the first use
+                // makes the owner. After one, only its thread may ask: a
+                // debug build stops here; a release build says so and goes
+                // on as it always did, with an owner that is never started.
+                if ROOT_STARTED.load(std::sync::atomic::Ordering::Acquire) {
+                    debug_assert!(
+                        false,
+                        "the application handle was requested off the application thread"
+                    );
+                    log::error!("iptv app: application handle requested off its thread");
+                }
+                let directory = platform_data::resolve_data_dir()
+                    .expect("private storage must be resolved before using runtime services");
+                Rc::new(new_runtime(directory))
+            })
+            .clone()
     })
+}
+
+/// An application root installed its owner in this process. Only a guard
+/// against asking for the handle on another thread; it selects no owner.
+static ROOT_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether an application owner exists (none before storage is resolved).
+#[cfg(test)]
+pub(crate) fn has_runtime() -> bool {
+    RUNTIME.with(|runtime| runtime.borrow().is_some())
+}
+
+/// Runs `run` with `owner` as the shell's handle, then puts the previous
+/// one back (also when `run` unwinds).
+pub(crate) fn with_runtime<R>(owner: Rc<runtime::Runtime>, run: impl FnOnce() -> R) -> R {
+    struct Restore(Option<Rc<runtime::Runtime>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            RUNTIME.set(self.0.take());
+        }
+    }
+    let _restore = Restore(RUNTIME.replace(Some(owner)));
+    run()
 }
 
 fn new_runtime(directory: std::path::PathBuf) -> runtime::Runtime {
@@ -421,11 +457,16 @@ fn new_runtime(directory: std::path::PathBuf) -> runtime::Runtime {
     runtime::Runtime::new(ports)
 }
 
+/// A local task always polls with the owner that accepted it, also after
+/// the root (and with it the shell's handle) was recreated.
 pub(crate) fn in_runtime(
     future: impl std::future::Future<Output = ()> + 'static,
 ) -> impl std::future::Future<Output = ()> {
     let owner = runtime();
-    runtime::with_runtime(owner, || runtime::in_runtime(future))
+    let mut future = Box::pin(future);
+    std::future::poll_fn(move |context| {
+        with_runtime(owner.clone(), || future.as_mut().poll(context))
+    })
 }
 
 /// The guide data in use (synthetic until a playlist is imported).
@@ -495,11 +536,14 @@ pub fn App() -> impl IntoElement {
                 ));
         }
     };
+    // This root's owner becomes the shell's handle, and the one the host's
+    // stop callback flushes. Only a root does this: constructing a runtime
+    // elsewhere changes neither.
     let owner = Rc::new(new_runtime(directory));
-    runtime::set_current(&owner);
-    owner.activate();
+    platform_data::flush_on_host_stop(owner.host_handle());
     RUNTIME.set(Some(owner));
-    if let Err(error) = backup::lock() {
+    ROOT_STARTED.store(true, std::sync::atomic::Ordering::Release);
+    if let Err(error) = runtime().lock_storage() {
         return view()
             .flex_1()
             .items_center()
@@ -512,20 +556,23 @@ pub fn App() -> impl IntoElement {
     let (tx, rx) = futures_channel::oneshot::channel();
     let started = std::thread::Builder::new()
         .name("iptv-bootstrap".into())
-        .spawn(runtime().scope_worker(move || {
-            let result = match backup::startup() {
-                Ok(()) => Ok(()),
-                Err(error) => {
-                    log::warn!("iptv backup: {}", error.error);
-                    if error.fatal {
-                        Err(error.error.message())
-                    } else {
-                        Ok(())
+        .spawn({
+            let activate = runtime().restore_activation();
+            move || {
+                let result = match activate() {
+                    Ok(()) => Ok(()),
+                    Err(error) => {
+                        log::warn!("iptv backup: {}", error.error);
+                        if error.fatal {
+                            Err(error.error.message())
+                        } else {
+                            Ok(())
+                        }
                     }
-                }
-            };
-            let _ = tx.send(result);
-        }));
+                };
+                let _ = tx.send(result);
+            }
+        });
     if started.is_err() {
         outcome.set(Some(Err("The startup task could not be started")));
     } else {
@@ -962,4 +1009,11 @@ pub use credential_key::install_test_key;
 /// Keeps the store's writer busy, as a long catalog or guide publish does,
 /// for the headless tests of what must not wait for it.
 #[cfg(feature = "test-support")]
-pub use runtime::occupy_writer;
+pub fn occupy_writer(duration: Duration) {
+    // The headless tests drive the app from another thread: this reaches the
+    // running root's owner, never one made for the occasion (a test must not
+    // pass by occupying an unused store).
+    platform_data::host_handle()
+        .expect("occupy_writer needs a started app")
+        .occupy_writer(duration);
+}

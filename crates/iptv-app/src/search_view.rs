@@ -221,7 +221,7 @@ fn load_history() -> SearchHistory {
 pub(crate) fn load_saved_history(ui: Ui) {
     crate::runtime().clear_loaded_search_history();
     let legacy = crate::data::data_dir().join(LEGACY_HISTORY_FILE);
-    let loaded = crate::runtime::commands::load_search_history(legacy);
+    let loaded = crate::runtime::commands::load_search_history(&crate::runtime(), legacy);
     crate::data::spawn_in_app(async move {
         let list = match loaded.await {
             Ok(list) => list,
@@ -260,7 +260,7 @@ fn save_history(ui: Ui) {
         return;
     }
     crate::runtime().install_search_history(list.clone());
-    let saved = crate::runtime::commands::save_search_history(list);
+    let saved = crate::runtime::commands::save_search_history(&crate::runtime(), list);
     crate::data::spawn_in_app(async move {
         if let Err(error) = saved.await {
             log::warn!("iptv search: could not save the recent searches: {error}");

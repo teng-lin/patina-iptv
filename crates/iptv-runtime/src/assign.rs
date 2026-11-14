@@ -57,9 +57,13 @@ pub enum Applied {
 pub use iptv_library::Current;
 
 /// The saved choice and the binding of channel `key` of `source`.
-pub async fn current(source: SourceId, key: &str) -> Current {
+pub fn current(
+    owner: &crate::Runtime,
+    source: SourceId,
+    key: &str,
+) -> impl std::future::Future<Output = Current> + use<> {
     let key = key.to_owned();
-    let read = super::store_service::read(move |s| {
+    let read = owner.services().read(move |s| {
         let overlay = s
             .channel(source, &ContentId::from_stored(&key))?
             .and_then(|row| row.epg_override);
@@ -68,22 +72,29 @@ pub async fn current(source: SourceId, key: &str) -> Current {
             choice: Some(choice_of(overlay)),
             bound,
         })
-    })
-    .await;
-    read.unwrap_or_else(|e: StoreError| {
-        log::warn!("iptv data: a channel's guide: {e}");
-        Current::default()
-    })
+    });
+    async move {
+        read.await.unwrap_or_else(|e: StoreError| {
+            log::warn!("iptv data: a channel's guide: {e}");
+            Current::default()
+        })
+    }
 }
 
 /// The channels the stored guides of `source` list.
-pub async fn guide_channels(source: SourceId) -> Vec<GuideChannel> {
-    super::store_service::read(move |store| store.guide_channels(source))
-        .await
-        .unwrap_or_else(|e| {
+pub fn guide_channels(
+    owner: &crate::Runtime,
+    source: SourceId,
+) -> impl std::future::Future<Output = Vec<GuideChannel>> + use<> {
+    let read = owner
+        .services()
+        .read(move |store| store.guide_channels(source));
+    async move {
+        read.await.unwrap_or_else(|e| {
             log::warn!("iptv data: guide channels: {e}");
             Vec::new()
         })
+    }
 }
 
 /// On a worker thread: saves the choice, and when the stored guide can
@@ -94,6 +105,7 @@ fn save_and_rebind(
     source: SourceId,
     key: &str,
     choice: &Choice,
+    keep_past_days: u32,
 ) -> Result<Option<Box<Imported>>, StoreError> {
     let content = ContentId::from_stored(key);
     let overlay = choice_overlay(choice);
@@ -129,10 +141,7 @@ fn save_and_rebind(
         Ok(Some(Box::new(Imported {
             guide: store.load_epg(
                 source,
-                &super::paging::store_window(super::paging::window(
-                    now,
-                    stored::keep_past_days(&super::settings::get()),
-                )),
+                &super::paging::store_window(super::paging::window(now, keep_past_days)),
             )?,
             groups,
             channels,
@@ -151,24 +160,16 @@ fn save_and_rebind(
     }
 }
 
-fn save_native(
+pub(crate) fn save(
+    owner: &crate::Runtime,
     source: SourceId,
     key: String,
     choice: Choice,
-) -> impl std::future::Future<Output = Result<Option<Box<Imported>>, StoreError>> {
-    super::store_service::call(move |store| save_and_rebind(store, source, &key, &choice))
-}
-
-pub fn save(
-    source: SourceId,
-    key: String,
-    choice: Choice,
-) -> impl std::future::Future<Output = Result<Option<Box<Imported>>, crate::Error>> {
-    async move {
-        save_native(source, key, choice)
-            .await
-            .map_err(crate::Error::from)
-    }
+) -> impl std::future::Future<Output = Result<Option<Box<Imported>>, crate::Error>> + use<> {
+    let services = owner.services();
+    let keep = stored::keep_past_days(&services.settings());
+    let saved = services.call(move |store| save_and_rebind(store, source, &key, &choice, keep));
+    async move { saved.await.map_err(crate::Error::from) }
 }
 
 #[cfg(test)]
@@ -198,7 +199,7 @@ mod tests {
         let connection = rusqlite::Connection::open(&path).unwrap();
         connection.execute_batch("DROP TABLE epg_bindings").unwrap();
         assert!(
-            save_and_rebind(&mut store, source, "synthetic-channel", &Choice::NoGuide)
+            save_and_rebind(&mut store, source, "synthetic-channel", &Choice::NoGuide, 7)
                 .unwrap()
                 .is_none()
         );

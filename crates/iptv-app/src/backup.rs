@@ -1,6 +1,8 @@
 //! Platform dialogs and document transport for runtime-owned backups.
 use crate::runtime::backup::error::{Context, Result};
-pub(crate) use crate::runtime::backup::*;
+#[cfg(target_os = "android")]
+use crate::runtime::backup::next_document_request;
+use crate::runtime::backup::{Busy, report};
 #[cfg(target_os = "android")]
 use serde_json::Value;
 #[cfg(target_os = "android")]
@@ -30,7 +32,7 @@ const RESTART_NOTE: &str = "Close Patina, then open it again to apply the backup
 
 pub(crate) fn export_ui() {
     crate::data::spawn_in_app(async move {
-        let Some(_busy) = Busy::begin() else {
+        let Some(busy) = crate::runtime().begin_backup() else {
             return;
         };
         let answer = nsh_base::alert_dialog()
@@ -50,7 +52,7 @@ pub(crate) fn export_ui() {
         let settings = crate::settings::get().to_json_string();
         let root = crate::data::data_dir();
         crate::settings_view::notify("Writing backup…");
-        let result = save_export(root, settings).await;
+        let result = save_export(&busy, root, settings).await;
         crate::settings_view::notify(match result {
             Ok(true) => "Backup saved",
             Ok(false) => "Backup cancelled",
@@ -61,11 +63,11 @@ pub(crate) fn export_ui() {
 
 pub(crate) fn restore_ui(ui: crate::Ui) {
     crate::data::spawn_in_app(async move {
-        let Some(_busy) = Busy::begin() else {
+        let Some(busy) = crate::runtime().begin_backup() else {
             return;
         };
         let root = crate::data::data_dir();
-        if sibling(&root, "restore-pending").exists() {
+        if crate::runtime().restore_is_pending() {
             let answer = nsh_base::alert_dialog()
                 .title("Restore scheduled")
                 .description(PENDING_NOTE)
@@ -76,7 +78,7 @@ pub(crate) fn restore_ui(ui: crate::Ui) {
                 .await;
             match answer.ok().and_then(|a| a.action) {
                 Some(action) if action.as_str() == "cancel" => {
-                    let result = worker(move || cancel(&root)).await;
+                    let result = busy.worker(|archive| archive.cancel()).await;
                     crate::settings_view::refresh(ui);
                     crate::settings_view::notify(match result {
                         Ok(()) => "Scheduled restore cancelled",
@@ -110,11 +112,13 @@ pub(crate) fn restore_ui(ui: crate::Ui) {
             return;
         }
         crate::settings_view::notify("Checking backup…");
-        let result = worker(move || {
-            let mut input = File::open(&file.path).context("Could not read the chosen backup")?;
-            stage(&root, &mut input)
-        })
-        .await;
+        let result = busy
+            .worker(move |archive| {
+                let mut input =
+                    File::open(&file.path).context("Could not read the chosen backup")?;
+                archive.stage(&mut input)
+            })
+            .await;
         crate::settings_view::refresh(ui);
         crate::settings_view::notify(match result {
             Ok(()) => "Restore scheduled. Close and reopen Patina to apply it",
@@ -127,7 +131,7 @@ pub(crate) fn restore_ui(ui: crate::Ui) {
 }
 
 #[cfg(not(target_os = "android"))]
-async fn save_export(root: PathBuf, settings: String) -> Result<bool> {
+async fn save_export(busy: &Busy, _root: PathBuf, settings: String) -> Result<bool> {
     use nsh_core::file_dialog::{FileFilter, SaveDialog};
     let destination = nsh_core::element::pick_save_path(
         SaveDialog::new()
@@ -140,7 +144,8 @@ async fn save_export(root: PathBuf, settings: String) -> Result<bool> {
         Ok(None) => return Ok(false),
         Err(_) => return Err("Saving backup files is unavailable on this device".into()),
     };
-    worker(move || export(&root, &destination, &settings)).await?;
+    busy.worker(move |archive| archive.export(&destination, &settings))
+        .await?;
     Ok(true)
 }
 
@@ -195,11 +200,12 @@ mod android {
         request.set(json!({"requestId": request_id, "archivePath": path.to_string_lossy(), "operation": operation}));
         rx.await.context("The document service stopped")?
     }
-    pub async fn save(root: PathBuf, settings: String) -> Result<bool> {
+    pub async fn save(busy: &Busy, root: PathBuf, settings: String) -> Result<bool> {
         let request_id = next_document_request();
         let path = root.join(format!("backup-export-{request_id}.patinabackup"));
         let prepared = path.clone();
-        worker(move || export(&root, &prepared, &settings)).await?;
+        busy.worker(move |archive| archive.export(&prepared, &settings))
+            .await?;
         let result = document(request_id, &path, "export").await;
         let _ = fs::remove_file(path);
         result
@@ -224,8 +230,8 @@ mod android {
 }
 
 #[cfg(target_os = "android")]
-async fn save_export(root: PathBuf, settings: String) -> Result<bool> {
-    android::save(root, settings).await
+async fn save_export(busy: &Busy, root: PathBuf, settings: String) -> Result<bool> {
+    android::save(busy, root, settings).await
 }
 
 pub(crate) fn service_layer() -> impl nsh_core::prelude::IntoElement {

@@ -16,11 +16,12 @@ pub struct Indexes {
 }
 
 fn programmes_native(
+    services: &super::store_service::Services,
     sources: Vec<(SourceId, Vec<ChannelKey>, usize)>,
     rows: usize,
     from: UnixTime,
-) -> impl std::future::Future<Output = Result<ProgrammeIndex, StoreError>> {
-    super::store_service::read(move |store| {
+) -> impl std::future::Future<Output = Result<ProgrammeIndex, StoreError>> + use<> {
+    services.read(move |store| {
         let mut builder = ProgrammeIndexBuilder::new(rows);
         for (source, keys, offset) in sources {
             store.for_each_epg_title(
@@ -101,14 +102,20 @@ impl crate::Runtime {
     }
 }
 
-pub fn programmes(
-    sources: Vec<(SourceId, Vec<ChannelKey>, usize)>,
-    rows: usize,
-    from: UnixTime,
-) -> impl std::future::Future<Output = Result<ProgrammeIndex, crate::Error>> {
-    async move {
-        programmes_native(sources, rows, from)
-            .await
-            .map_err(crate::Error::from)
+impl crate::Runtime {
+    /// Reads the stored programme titles of `sources` from `from` on into
+    /// an index of `rows` channels (the search screen's programme search).
+    pub fn read_programme_index(
+        &self,
+        sources: Vec<(SourceId, Vec<ChannelKey>, usize)>,
+        rows: usize,
+        from: UnixTime,
+    ) -> impl std::future::Future<Output = Result<ProgrammeIndex, crate::Error>> + use<> {
+        let services = self.services();
+        async move {
+            programmes_native(&services, sources, rows, from)
+                .await
+                .map_err(crate::Error::from)
+        }
     }
 }

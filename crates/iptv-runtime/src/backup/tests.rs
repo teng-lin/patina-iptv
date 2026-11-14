@@ -1,4 +1,15 @@
 use super::*;
+
+/// Each test owns an independent synthetic root with its own services.
+fn export(root: &Path, destination: &Path, settings: &str) -> Result<()> {
+    super::export(&Services::for_tests(root), destination, settings)
+}
+fn stage(root: &Path, input: &mut impl Read) -> Result<()> {
+    super::stage(&Services::for_tests(root), input)
+}
+fn activate(root: &Path) -> Result<()> {
+    super::activate(&crate::Ports::for_tests(), root)
+}
 use iptv_providers::{
     SecretUrl,
     model::{M3uSourceConfig, Source, SourceConfig},

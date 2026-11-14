@@ -17,6 +17,7 @@ pub struct Open {
 }
 async fn items(source: SourceId, kind: &Kind) -> Result<Vec<Item>, Error> {
     crate::runtime::commands::organization_items(
+        &crate::runtime(),
         source,
         kind.clone(),
         crate::favorites::ordered_keys(),
@@ -143,7 +144,8 @@ fn perform(ui: Ui, edit: Edit) {
     if s.kind == Kind::Favorites && edit == Edit::ResetOrder {
         let keys = crate::favorites::ordered_keys();
         let source = s.source;
-        let ordered = crate::runtime::commands::favorite_provider_order(source, keys);
+        let ordered =
+            crate::runtime::commands::favorite_provider_order(&crate::runtime(), source, keys);
         data::spawn_in_app(async move {
             let ordered = ordered.await;
             if OPEN_GENERATION.get() != generation {
@@ -159,8 +161,14 @@ fn perform(ui: Ui, edit: Edit) {
         return;
     }
     let finished = s.clone();
-    let result =
-        crate::runtime::commands::edit_organization(s.source, s.kind, s.editor, item, edit);
+    let result = crate::runtime::commands::edit_organization(
+        &crate::runtime(),
+        s.source,
+        s.kind,
+        s.editor,
+        item,
+        edit,
+    );
     data::spawn_in_app(async move {
         finish(ui, &finished, generation, result.await);
     });
@@ -188,7 +196,7 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
                 }
             });
         }
-        data::organization::changed(expected.source);
+        data::organization::changed(&crate::runtime(), expected.source);
     });
 }
 
@@ -205,6 +213,7 @@ fn commit(ui: Ui) {
     };
     let target = s.clone();
     let result = crate::runtime::commands::rename_organization_item(
+        &crate::runtime(),
         target.source,
         target.kind,
         item.id,

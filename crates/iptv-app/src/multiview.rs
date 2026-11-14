@@ -264,6 +264,7 @@ pub fn picked(ui: Ui, channel: usize) -> bool {
         let exceeded = all.and_then(|all| {
             let (source, _) = all.channel_source(channel)?;
             let allowed = crate::data::combined::connection_limit(
+                &crate::runtime(),
                 crate::runtime::model::SourceId(source.id),
             )?;
             let replacing = match m.pick() {

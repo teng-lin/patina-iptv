@@ -154,6 +154,25 @@ fn platform_key(_: &Path) -> Result<DatabaseKey, Error> {
 mod tests {
     use super::*;
 
+    /// Drives a store reply on this thread; the store's worker wakes it.
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        struct Unpark(std::thread::Thread);
+        impl std::task::Wake for Unpark {
+            fn wake(self: std::sync::Arc<Self>) {
+                self.0.unpark();
+            }
+        }
+        let waker = std::sync::Arc::new(Unpark(std::thread::current())).into();
+        let mut context = std::task::Context::from_waker(&waker);
+        let mut future = std::pin::pin!(future);
+        loop {
+            if let std::task::Poll::Ready(output) = future.as_mut().poll(&mut context) {
+                return output;
+            }
+            std::thread::park();
+        }
+    }
+
     /// Run only in a new dbus-run-session with an isolated unlocked daemon.
     #[test]
     #[ignore = "requires an isolated Secret Service daemon"]
@@ -170,23 +189,19 @@ mod tests {
             )))
         };
         let first = owner();
-        crate::with_runtime(first.clone(), || {
-            first.start_services();
-            crate::executor::block_on(crate::runtime::commands::remember_combined_channel(
-                "synthetic-secret".into(),
-            ))
-            .unwrap();
-            assert!(first.drain_services());
-        });
+        first.start_services();
+        block_on(crate::runtime::commands::remember_combined_channel(
+            &first,
+            "synthetic-secret".into(),
+        ))
+        .unwrap();
+        assert!(first.drain_services());
         drop(first);
         let second = owner();
-        crate::with_runtime(second.clone(), || {
-            second.start_services();
-            let saved =
-                crate::executor::block_on(crate::runtime::commands::combined_resume_key()).unwrap();
-            assert_eq!(saved.as_deref(), Some("synthetic-secret"));
-            assert!(second.drain_services());
-        });
+        second.start_services();
+        let saved = block_on(crate::runtime::commands::combined_resume_key(&second)).unwrap();
+        assert_eq!(saved.as_deref(), Some("synthetic-secret"));
+        assert!(second.drain_services());
         assert!(
             !std::fs::read(directory.path().join("iptv.sqlite"))
                 .unwrap()
