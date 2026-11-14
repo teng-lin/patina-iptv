@@ -296,6 +296,17 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             _ => mark().disabled(),
         });
         list_rows::row(size, ROW, mark)
+            .role(move || {
+                if heading() {
+                    AccessibilityRole::Header
+                } else {
+                    AccessibilityRole::Menuitem
+                }
+            })
+            .accessibility_state(move || AccessibilityState {
+                disabled: matches!(row(), Some(Row::Action { enabled: false, .. })),
+                ..Default::default()
+            })
             .child(name)
             .on_press(move || {
                 ui.touched();

@@ -145,7 +145,7 @@ fn custom_groups_filter_select_copy_move_rename_delete_and_restore_focus() {
     step(app.press("text:Delete group"));
     step(app.press_key("down"));
     step(app.press_key("enter"));
-    step(app.wait_for("text:1 custom groups"));
+    step(app.wait_for("text:1 custom group"));
     assert_eq!(
         crate::isolated::open_database(&f.path)
             .unwrap()

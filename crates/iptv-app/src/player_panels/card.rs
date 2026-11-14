@@ -93,7 +93,8 @@ fn ends(ui: Ui) -> (String, String) {
         _ => {
             let (_, p) = programme(ui);
             let at = ui.focus.with(|f| f.now);
-            let left = minutes_left(p.start, p.end, at).unwrap_or_default();
+            let left =
+                minutes_left(crate::i18n::language(), p.start, p.end, at).unwrap_or_default();
             (format!("{}–{}", clock(p.start), clock(p.end)), left)
         }
     }
@@ -225,10 +226,12 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
                 .child(
                     text(move || {
                         let p = next();
-                        format!(
-                            "Next  {}  {}",
-                            clock(p.start),
-                            crate::schedule().title(channel(), p)
+                        crate::i18n::trf(
+                            "Next  {time}  {title}",
+                            &[
+                                ("time", (&clock(p.start)).into()),
+                                ("title", (&crate::schedule().title(channel(), p)).into()),
+                            ],
                         )
                     })
                     .number_of_lines(1)

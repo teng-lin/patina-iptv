@@ -32,7 +32,7 @@ const MENU: &str = "id:multiview-menu";
 /// result) shows them.
 // A time on another local day carries its weekday and date ("Thu 12 · 00:22"):
 // late in the evening the programme two hours on ends, or starts, tomorrow.
-const TIMES: &str = "text:/^Test Channel One · ([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+–([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+$/";
+const TIMES: &str = "text:/^Test Channel One · ([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+ [AP]M–([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+ [AP]M$/";
 
 /// How many lines of channel one's programme times show: the details
 /// popover adds one (it stays mounted, empty, while closed).

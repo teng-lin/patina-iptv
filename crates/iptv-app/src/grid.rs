@@ -301,7 +301,17 @@ fn row(
     // Now, for the past cells the row cannot replay (a memo: keys move
     // the focus without the cells' dimming running again).
     let now = computed(move || ui.focus.with(|f| f.now));
-    let focus = RowFocus { start: focus, lit };
+    let selected = computed(move || {
+        ui.guide_data();
+        let view = crate::lists::view(ui);
+        ui.focus
+            .with(|f| (f.channel == at.index()).then(|| f.program(&view).start))
+    });
+    let focus = RowFocus {
+        start: focus,
+        lit,
+        selected,
+    };
     let cell = move |i| cell::cell(ui, (at, i), (programs, channel), focus, now, (pan, size));
     view()
         .test_id("guide-row")

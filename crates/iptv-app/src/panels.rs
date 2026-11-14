@@ -101,6 +101,11 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
                 move || current() && ui.focus.with(|f| f.pane) == Pane::Groups && ui.keys_shown();
             let mark = move || Mark::of(focused(), current());
             list_rows::row(size, ROW, mark)
+                .role(AccessibilityRole::Tab)
+                .accessibility_state(move || AccessibilityState {
+                    selected: current(),
+                    ..Default::default()
+                })
                 .mx(px(8.0))
                 .on_press(move || {
                     ui.touched();

@@ -11,7 +11,7 @@
 //! (never alpha on the video). [`status`] draws the waiting and error
 //! states of `player.rs`.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 use iptv_core::panels::{CONTROLS, Control, QUICK_ACTIONS, Shown};
 use iptv_core::player_info::date_time;
@@ -72,7 +72,10 @@ fn label(ui: Ui, control: Control) -> String {
         }
         AudioOffset => with(
             tr("Audio delay"),
-            Some(delay_label(ui.media.delay_ms.get())),
+            Some(delay_label(
+                crate::i18n::language(),
+                ui.media.delay_ms.get(),
+            )),
         ),
         Captions => with(
             tr("Subtitles"),
@@ -83,7 +86,7 @@ fn label(ui: Ui, control: Control) -> String {
             ),
         ),
         Scaling => with(
-            "Picture size",
+            tr("Picture size"),
             Some(crate::chooser::picture_name(ui).into()),
         ),
         SleepTimer => with(
@@ -91,7 +94,9 @@ fn label(ui: Ui, control: Control) -> String {
             Some(
                 ui.sleep
                     .with(|t| t.remaining_minutes(ui.now_ms()))
-                    .map_or(tr("Off").to_owned(), |m| format!("{m} min")),
+                    .map_or(tr("Off").to_owned(), |m| {
+                        trf("{minutes} min", &[("minutes", m.into())])
+                    }),
             ),
         ),
         Favorite if is_favorite(ui) => tr("★ Favourite").to_owned(),
@@ -239,7 +244,9 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
             text(move || {
                 ui.sleep
                     .with(|t| t.remaining_minutes(ui.now_ms()))
-                    .map_or(String::new(), |m| format!("Sleep {m} min"))
+                    .map_or(String::new(), |m| {
+                        trf("Sleep {minutes} min", &[("minutes", m.into())])
+                    })
             })
             .text_size(px(OSD_DETAIL))
             .text_color(tint(WHITE, TEXT_SECONDARY_ALPHA)),
@@ -249,7 +256,11 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
                 ui.guide_data();
                 let s = crate::schedule();
                 let unix = crate::guide::unix_of(&*s, ui.focus.with(|f| f.now));
-                date_time(unix, crate::time::offset_minutes(unix))
+                date_time(
+                    unix,
+                    crate::time::offset_minutes(unix),
+                    crate::i18n::clock_style(),
+                )
             })
             .text_size(px(OSD_TEXT))
             .text_color(rgb(WHITE)),

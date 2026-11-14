@@ -254,6 +254,11 @@ fn button(
     act: impl Fn() + 'static,
 ) -> View {
     view()
+        .role(AccessibilityRole::Button)
+        .accessibility_state(move || AccessibilityState {
+            disabled: !enabled(),
+            ..Default::default()
+        })
         .w(px(size))
         .h(px(size))
         .rounded(px(size / 2.0))

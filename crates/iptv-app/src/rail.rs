@@ -92,6 +92,11 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
         }
     };
     view()
+        .role(AccessibilityRole::Tab)
+        .accessibility_state(move || AccessibilityState {
+            selected: item == RailItem::Tv,
+            ..Default::default()
+        })
         .h(move || px(if index().is_some() { ITEM_H } else { 0.0 }))
         .mx(px(6.0))
         .my(move || px(if index().is_some() { 2.0 } else { 0.0 }))

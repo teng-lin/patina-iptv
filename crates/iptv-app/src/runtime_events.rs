@@ -50,7 +50,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::OpenPlaylists => crate::playlists_view::open(ui),
         RuntimeEvent::ClosePlaylists => crate::playlists_view::close(ui),
         RuntimeEvent::FirstRun => crate::wizard_view::open_first_run(ui),
-        RuntimeEvent::Notify(message) => crate::settings_view::notify(message),
+        RuntimeEvent::Notify(message) => crate::settings_view::notify(crate::i18n::tr(message)),
         RuntimeEvent::ResumeFullscreen => {
             ui.mode.set(crate::ViewMode::Fullscreen);
             ui.show_playing();

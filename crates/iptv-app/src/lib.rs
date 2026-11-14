@@ -491,17 +491,17 @@ pub fn App() -> impl IntoElement {
             .flex_1()
             .items_center()
             .justify_center()
-            .child(text("Private app storage is unavailable"))
-            .child(text(
+            .child(text(i18n::tr("Private app storage is unavailable")))
+            .child(text(i18n::tr(
                 "Check your home directory and file permissions, then reopen Patina.",
-            ));
+            )));
     }
     if let Err(message) = backup::lock() {
         return view()
             .flex_1()
             .items_center()
             .justify_center()
-            .child(text(message));
+            .child(text(i18n::tr(message)));
     }
     // Restore validation can decrypt/migrate SQLite and copied documents. It
     // must finish off the UI thread before settings or the live store open.
@@ -524,12 +524,15 @@ pub fn App() -> impl IntoElement {
             let _ = tx.send(result);
         }));
     if started.is_err() {
-        outcome.set(Some(Err("The startup task could not be started")));
+        outcome.set(Some(Err(i18n::key(
+            "The startup task could not be started",
+        ))));
     } else {
         // Detach under this root owner; disposing the root cancels the reply
         // task, while recovery itself safely completes on its worker.
         drop(spawn(async move {
-            outcome.set(Some(rx.await.unwrap_or(Err("The startup task stopped"))));
+            let stopped = Err(i18n::key("The startup task stopped"));
+            outcome.set(Some(rx.await.unwrap_or(stopped)));
         }));
     }
     view().flex_1().child(dynamic(move || {
@@ -541,15 +544,15 @@ pub fn App() -> impl IntoElement {
                 .flex_1()
                 .items_center()
                 .justify_center()
-                .child(text("Opening saved library…"))
+                .child(text(i18n::tr("Opening saved library…")))
                 .into_element(),
             Some(Err(message)) => view()
                 .flex_1()
                 .items_center()
                 .justify_center()
-                .child(text("Saved data could not be recovered"))
-                .child(text(message))
-                .child(text("Close Patina and try opening it again."))
+                .child(text(i18n::tr("Saved data could not be recovered")))
+                .child(text(i18n::tr(message)))
+                .child(text(i18n::tr("Close Patina and try opening it again.")))
                 .into_element(),
             Some(Ok(())) => ready_app().into_element(),
         })

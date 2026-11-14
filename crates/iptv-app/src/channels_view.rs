@@ -321,6 +321,11 @@ fn entry_row(
     let focused = move || ui.keys_shown() && focus.get() == Some((at.index(), true));
     let mark = move || Mark::of(focused(), current());
     list_rows::row(size, ROW, mark)
+        .role(AccessibilityRole::Tab)
+        .accessibility_state(move || AccessibilityState {
+            selected: current(),
+            ..Default::default()
+        })
         .mx(px(8.0))
         .on_press(move || {
             ui.touched();
@@ -375,8 +380,14 @@ fn channel_row(
     let focused = move || ui.keys_shown() && focus().is_some_and(|f| f.1);
     // While the groups have the focus, the row it returns to stays marked.
     let resting = move || focus().is_some_and(|f| !f.1);
+    let is_selected = move || focus().is_some();
     let mark = move || Mark::of(focused(), resting());
     list_rows::row(size, ROW_TWO, mark)
+        .role(AccessibilityRole::Row)
+        .accessibility_state(move || AccessibilityState {
+            selected: is_selected(),
+            ..Default::default()
+        })
         .on_press(move || {
             ui.touched();
             let playing = playing(ui);

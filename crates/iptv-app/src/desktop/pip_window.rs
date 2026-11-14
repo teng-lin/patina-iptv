@@ -240,6 +240,7 @@ fn button(
     act: impl Fn() + 'static,
 ) -> View {
     view()
+        .role(AccessibilityRole::Button)
         .test_id(id)
         .w(px(size))
         .h(px(size))
@@ -286,13 +287,13 @@ pub fn placeholder(ui: Ui) -> impl IntoElement {
                 )
                 .child(crate::ui_kit::caption(
                     size,
-                    "Playing in picture-in-picture",
+                    tr("Playing in picture-in-picture"),
                 ))
                 .child(
                     crate::ui_kit::button(
                         ui,
                         size,
-                        "Back to the app",
+                        tr("Back to the app"),
                         || false,
                         move || {
                             crate::pip::exit(ui, Exit::BackToApp);

@@ -15,7 +15,8 @@ use nsh_engine::EngineConfig;
 use crate::support::{self, Server, T};
 
 /// "Updated 14:05" and the like.
-const TIME: &str = r"\d\d:\d\d";
+/// A time of day as the scenarios' locale (`en-US`) writes it: 12-hour.
+const TIME: &str = r"\d{1,2}:\d\d [AP]M";
 
 fn playlist(guide: &str) -> String {
     format!(
@@ -319,7 +320,7 @@ fn guide_sources(t: &mut T, srv: &Server) {
         5,
     );
     t.wait(
-        &format!("text:/^None of its 1 channel is used here · updated {TIME}$/"),
+        &format!("text:/^Its 1 channel is not used here · updated {TIME}$/"),
         5,
     );
     user_source(t, srv, &alt);

@@ -49,7 +49,7 @@ custom groups and history.
   channel/programme search.
 - **Resilient live playback:** streams that the provider cuts reconnect
   without dropping to an error screen.
-- **Interface languages:** 11 language options with system-language detection
+- **Interface languages:** 11 partly translated language options with system-language detection
   and a live language picker; [coverage and translation guide](docs/localization.md).
 - **Private by default:** the local catalog, including credentials, is
   encrypted with SQLCipher; HTTPS is the default transport. Whole-app

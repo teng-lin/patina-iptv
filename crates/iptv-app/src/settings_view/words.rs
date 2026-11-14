@@ -2,7 +2,7 @@
 //! subsections, settings, commands and choices, and how values read. The
 //! catalogue's summaries serve as the rows' descriptions.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 use iptv_settings::schema::{IntUnit, TimeUnit, ValueType};
 use iptv_settings::{Section, Setting, Value};
@@ -113,6 +113,7 @@ pub fn label(key: &str) -> &'static str {
         "general.confirm_exit" => tr("Press Back twice to leave"),
         "general.confirm_exit_window" => "Time for the second Back",
         "general.language" => tr("Language"),
+        "general.clock" => tr("Clock"),
         "general.keyboard" => tr("On-screen keyboard"),
         "general.user_agent" => "User-Agent",
         "general.udp_proxy" => "UDP relay",
@@ -369,6 +370,9 @@ pub fn choice(family: &str, variant: &str) -> String {
         ("unlock_window", "until_unblocked_channel") => "Until an open channel plays",
         ("pin_input", "keypad") => "On-screen keypad",
         ("pin_input", "number_keys") => "Number keys",
+        ("clock", "auto") => tr("As the language writes it"),
+        ("clock", "h12") => tr("12-hour"),
+        ("clock", "h24") => tr("24-hour"),
         ("keyboard", "system") => tr("The device's"),
         ("keyboard", "built_in") => tr("The app's own"),
         ("playlist_opens", "all_channels") => tr("All channels"),
@@ -415,12 +419,9 @@ fn empty(key: &str) -> &'static str {
     }
 }
 
-fn plural(n: i64, one: &str, many: &str) -> String {
-    if n == 1 {
-        format!("1 {one}")
-    } else {
-        format!("{n} {many}")
-    }
+/// A number beside its unit: `message` names where `{value}` goes.
+fn with_unit(message: &str, value: impl std::fmt::Display) -> String {
+    trf(message, &[("value", (&value.to_string()).into())])
 }
 
 /// A signed offset as `h:mm` or `h:mm:ss`.
@@ -444,20 +445,26 @@ fn offset(ms: i64, seconds: bool) -> String {
 pub fn amount(ty: &ValueType, n: i64) -> String {
     match *ty {
         ValueType::Int { unit, .. } => match unit {
-            IntUnit::Percent => format!("{n} %"),
+            IntUnit::Percent => with_unit("{value} %", n),
             IntUnit::Count | IntUnit::None => n.to_string(),
         },
         ValueType::Duration { unit, min_ms, .. } => match unit {
-            TimeUnit::Millis if min_ms < 0 && n > 0 => format!("+{n} ms"),
-            TimeUnit::Millis if n < 0 => format!("−{} ms", -n),
-            TimeUnit::Millis => format!("{n} ms"),
+            TimeUnit::Millis if min_ms < 0 && n > 0 => with_unit("{value} ms", format!("+{n}")),
+            TimeUnit::Millis if n < 0 => with_unit("{value} ms", format!("−{}", -n)),
+            TimeUnit::Millis => with_unit("{value} ms", n),
             TimeUnit::Seconds => {
                 let secs = format!("{:.3}", n as f64 / 1000.0);
-                format!("{} s", secs.trim_end_matches('0').trim_end_matches('.'))
+                with_unit(
+                    "{value} s",
+                    secs.trim_end_matches('0').trim_end_matches('.'),
+                )
             }
-            TimeUnit::Minutes => format!("{} min", n / 60_000),
-            TimeUnit::Hours => format!("{} h", n / 3_600_000),
-            TimeUnit::Days => plural(n / 86_400_000, "day", "days"),
+            TimeUnit::Minutes => with_unit("{value} min", n / 60_000),
+            TimeUnit::Hours => with_unit("{value} h", n / 3_600_000),
+            TimeUnit::Days => trf(
+                "{count, plural, one {# day} other {# days}}",
+                &[("count", (n / 86_400_000).unsigned_abs().into())],
+            ),
             TimeUnit::HoursMinutes => offset(n, false),
             TimeUnit::HoursMinutesSeconds => offset(n, true),
         },
@@ -490,7 +497,10 @@ pub fn value(setting: &Setting, value: &Value) -> String {
         }
         Value::Text(t) => t.clone(),
         Value::KeyBindings(list) if list.is_empty() => tr("None").to_owned(),
-        Value::KeyBindings(list) => plural(list.len() as i64, "change", "changes"),
+        Value::KeyBindings(list) => trf(
+            "{count, plural, one {# change} other {# changes}}",
+            &[("count", list.len().into())],
+        ),
     }
 }
 

@@ -1,6 +1,6 @@
 //! Custom groups and filtered bulk membership editing. Provider membership
 //! remains imported data; moves are offered only between custom groups.
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 use crate::runtime::model::{ChannelScope, CustomGroup, CustomGroupId, SourceId, StoreError};
 use crate::{
@@ -12,6 +12,7 @@ use crate::{
 use iptv_core::membership::Membership;
 use iptv_nav::Action;
 use iptv_providers::ContentId;
+use nsh_core::Checked;
 use nsh_core::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -193,7 +194,7 @@ fn report(ui: Ui, result: Result<(), StoreError>) {
             reload(ui);
         }
         Err(_) => update(ui, |s| {
-            s.status = "The change could not be saved. Reopen the list and try again.".into()
+            s.status = tr("The change could not be saved. Reopen the list and try again.").into()
         }),
     }
 }
@@ -300,7 +301,7 @@ fn commit_text(ui: Ui) {
     }
     let name = value.trim();
     if name.is_empty() {
-        update(ui, |s| s.status = "Enter a group name.".into());
+        update(ui, |s| s.status = tr("Enter a group name.").into());
         return;
     }
     let name = name.to_owned();
@@ -318,60 +319,75 @@ fn commit_text(ui: Ui) {
         |ui, result| {
             if result.is_ok() {
                 cancel_text(ui);
-                update(ui, |s| s.status = "Group saved.".into());
+                update(ui, |s| s.status = tr("Group saved.").into());
             }
             report(ui, result);
         },
     );
 }
 
+/// A group's row: its name and how many channels it has.
+fn group_label(name: &str, channels: u32) -> String {
+    trf(
+        "{name} · {count, plural, one {# channel} other {# channels}}",
+        &[("name", name.into()), ("count", channels.into())],
+    )
+}
+
 fn labels(s: &Open) -> Vec<String> {
     match s.page {
-        Page::Groups => ["New group".into(), "Browse all channels".into()]
+        Page::Groups => [tr("New group").into(), tr("Browse all channels").into()]
             .into_iter()
             .chain(
                 s.groups
                     .iter()
-                    .map(|g| format!("{} · {} channels", g.name, g.channel_count)),
+                    .map(|g| group_label(&g.name, g.channel_count)),
             )
             .collect(),
         Page::Detail(_) => [
-            "Edit members",
-            "Rename group",
-            "Reorder members",
-            "Delete group",
+            tr("Edit members"),
+            tr("Rename group"),
+            tr("Reorder members"),
+            tr("Delete group"),
             tr("Back"),
         ]
         .map(str::to_owned)
         .to_vec(),
         Page::Members => {
             let mut labels = vec![
-                format!(
-                    "Search · {}",
-                    if s.members.query.is_empty() {
-                        "all channels"
-                    } else {
-                        &s.members.query
-                    }
+                trf(
+                    "Search · {query}",
+                    &[(
+                        "query",
+                        if s.members.query.is_empty() {
+                            tr("all channels")
+                        } else {
+                            &s.members.query
+                        }
+                        .into(),
+                    )],
                 ),
-                "Select filtered".into(),
-                "Clear selection".into(),
-                "Copy selected".into(),
+                tr("Select filtered").into(),
+                tr("Clear selection").into(),
+                tr("Copy selected").into(),
             ];
             if origin(s).is_some() {
-                labels.extend(["Move selected".into(), "Remove selected".into()]);
+                labels.extend([tr("Move selected").into(), tr("Remove selected").into()]);
             }
             labels
         }
-        Page::Destination(_) => std::iter::once("New group".into())
+        Page::Destination(_) => std::iter::once(tr("New group").into())
             .chain(
                 s.groups
                     .iter()
                     .filter(|g| Some(g.id) != origin(s))
-                    .map(|g| format!("{} · {} channels", g.name, g.channel_count)),
+                    .map(|g| group_label(&g.name, g.channel_count)),
             )
             .collect(),
-        Page::Delete(_) => vec![tr("Cancel").into(), "Delete group and memberships".into()],
+        Page::Delete(_) => vec![
+            tr("Cancel").into(),
+            tr("Delete group and memberships").into(),
+        ],
     }
 }
 fn act(ui: Ui, index: usize) {
@@ -469,10 +485,20 @@ fn act(ui: Ui, index: usize) {
                             s.members.selected.clear();
                             s.page = Page::Members;
                             s.control = Some(3);
-                            s.status = format!(
-                                "{count} channels {}.",
-                                if moving { "moved" } else { "copied" }
-                            );
+                            let count = [("count", count.into())];
+                            s.status = if moving {
+                                trf(
+                                    "{count, plural, one {# channel moved.} \
+                                     other {# channels moved.}}",
+                                    &count,
+                                )
+                            } else {
+                                trf(
+                                    "{count, plural, one {# channel copied.} \
+                                     other {# channels copied.}}",
+                                    &count,
+                                )
+                            };
                         });
                         report(ui, Ok(()));
                     }
@@ -566,12 +592,12 @@ fn entry_sheet(ui: Ui) -> impl IntoElement {
         ui,
         Sheet {
             label: if filter {
-                "Find channels"
+                tr("Find channels")
             } else {
-                "Group name"
+                tr("Group name")
             }
             .into(),
-            placeholder: "Enter text",
+            placeholder: tr("Enter text"),
             keyboard: KeyboardType::Default,
             masked: false,
             current: Rc::new(move || text(ui)),
@@ -583,21 +609,28 @@ fn entry_sheet(ui: Ui) -> impl IntoElement {
     )
 }
 /// Under the screen's title: what copying and moving do.
-const CAPTION: &str = "Copy adds membership. Move transfers between custom groups. \
-                       Channels and provider groups are retained.";
+const CAPTION: &str = crate::i18n::key(
+    "Copy adds membership. Move transfers between custom groups. \
+     Channels and provider groups are retained.",
+);
 
 /// The line over the lists: the selection on a members page, the question
 /// on the delete page, else how many groups there are.
 fn summary(s: &Open) -> String {
     match s.page {
-        Page::Members | Page::Destination(_) => format!(
-            "{} selected · {} matching · {} total",
-            s.members.selected.len(),
-            s.members.visible_len(),
-            s.members.rows.len()
+        Page::Members | Page::Destination(_) => trf(
+            "{selected} selected · {matching} matching · {total} total",
+            &[
+                ("selected", s.members.selected.len().into()),
+                ("matching", s.members.visible_len().into()),
+                ("total", s.members.rows.len().into()),
+            ],
         ),
-        Page::Delete(_) => "Delete this group? Channels are kept.".into(),
-        _ => format!("{} custom groups", s.groups.len()),
+        Page::Delete(_) => tr("Delete this group? Channels are kept.").into(),
+        _ => trf(
+            "{count, plural, one {# custom group} other {# custom groups}}",
+            &[("count", s.groups.len().into())],
+        ),
     }
 }
 
@@ -618,6 +651,7 @@ fn control_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
     ui_kit::action(ui, size, label, focused, 0xFFFFFF, move || {
         act(ui, at.index())
     })
+    .role(AccessibilityRole::Button)
     .test_id(&format!("custom-control-{}", at.index()))
 }
 
@@ -625,10 +659,16 @@ fn control_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
 /// press focuses the member and toggles its selection.
 fn member_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
     let item = move || read(ui, |s| s.members.visible_at(at.index()).cloned()).flatten();
+    let is_selected = move || {
+        read(ui, |s| {
+            item().is_some_and(|r| s.members.selected.contains(&r.id))
+        })
+        .unwrap_or(false)
+    };
     let label = move || {
         item()
             .map(|r| {
-                let selected = read(ui, |s| s.members.selected.contains(&r.id)).unwrap_or(false);
+                let selected = is_selected();
                 format!("{}{}", if selected { "✓ " } else { "" }, r.name)
             })
             .unwrap_or_default()
@@ -651,6 +691,15 @@ fn member_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
         }
     };
     ui_kit::action(ui, size, label, focused, 0xFFFFFF, toggle)
+        .role(AccessibilityRole::Checkbox)
+        .accessibility_state(move || AccessibilityState {
+            checked: Some(if is_selected() {
+                Checked::True
+            } else {
+                Checked::False
+            }),
+            ..Default::default()
+        })
         .test_id(&format!("custom-member-{}", at.index()))
 }
 
@@ -684,8 +733,8 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             });
             ui_kit::screen(ui, size)
                 .test_id("custom-groups-screen")
-                .child(ui_kit::header(ui, size, "Custom groups", close))
-                .child(ui_kit::caption(size, CAPTION))
+                .child(ui_kit::header(ui, size, tr("Custom groups"), close))
+                .child(ui_kit::caption(size, tr(CAPTION)))
                 .child(ui_kit::body(size, move || {
                     read(ui, |s| s.status.clone()).unwrap_or_default()
                 }))

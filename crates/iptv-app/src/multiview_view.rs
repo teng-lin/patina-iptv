@@ -9,7 +9,7 @@
 //! reduces it; the video surfaces are below (`video.rs`). On a detour (a
 //! tile watched full screen) none of this shows.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 mod chrome;
 mod menu;
@@ -45,7 +45,12 @@ fn with_state<T>(ui: Ui, f: impl FnOnce(&State) -> T) -> Option<T> {
 
 /// Why no more tiles fit, while none does.
 fn device_limit(m: &State) -> Option<String> {
-    (!m.can_add()).then(|| format!("This device plays up to {} at once", m.limits().decoders))
+    (!m.can_add()).then(|| {
+        trf(
+            "This device plays up to {count} at once",
+            &[("count", m.limits().decoders.into())],
+        )
+    })
 }
 
 /// What a tile shows over its video.
@@ -232,10 +237,11 @@ fn tile(ui: Ui, index: usize) -> impl IntoElement {
 fn warning_content(ui: Ui) -> (String, String, usize) {
     let content = with_state(ui, |m| match m.dialog() {
         Some(Dialog::Warning { allowed, focus, .. }) => (
-            match allowed {
-                1 => "Your account allows 1 stream at once".to_owned(),
-                n => format!("Your account allows {n} streams at once"),
-            },
+            trf(
+                "{count, plural, one {Your account allows # stream at once} \
+                 other {Your account allows # streams at once}}",
+                &[("count", (*allowed).into())],
+            ),
             "Another one may not play, or may stop one that is playing.".to_owned(),
             *focus,
         ),

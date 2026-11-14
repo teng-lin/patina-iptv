@@ -15,6 +15,15 @@ is below 1.0, a minor release may change behaviour.
 - Releases carry build provenance attestations for every file and for
   `SHA256SUMS`, and a CycloneDX SBOM of the Rust dependencies.
 - `docs/architecture.md`, `CONTRIBUTING.md`, `SECURITY.md` and this changelog.
+- Counts, dates and times follow the interface language: plural forms by
+  each language's rules (`1 канал`, `2 канала`, `5 каналов`), weekday and
+  month names in the language, and a 12-hour or 24-hour clock
+  (**Settings → General → Clock**; by default the language's own convention).
+- Adding and refreshing playlists and guide sources with their failures,
+  backup and restore, organising channels and groups, custom groups, choosing
+  a channel's guide data and the remote-key editor are translated in all
+  eleven languages. Translation of the rest is still partial; see
+  `docs/localization.md`.
 
 - Unsigned macOS and Windows packages are announced as previews in the release
   notes. The Windows installer is signed through Azure Trusted Signing and the
@@ -31,6 +40,11 @@ is below 1.0, a minor release may change behaviour.
 - The NSH fork commit is recorded in `nsh.rev`. Clone that exact commit;
   `tools/check.sh` refuses another one unless `IPTV_ALLOW_NSH_DRIFT=1` is set.
 - The minimum supported Rust version is the pinned toolchain, 1.99.1.
+- With English as the interface language (outside the United Kingdom, Ireland
+  and South Africa), Korean or Traditional Chinese, times are shown on a
+  12-hour clock unless **Settings → General → Clock** says otherwise.
+- The remote-key editor names the screen a binding applies in (`Guide`,
+  `Player controls`) where it showed an internal name (`guide`, `controls`).
 - Package scripts work without `rustup`, using the Cargo on `PATH`.
 
 ### Fixed
