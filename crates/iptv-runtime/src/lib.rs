@@ -25,6 +25,7 @@
 pub mod data;
 mod error;
 mod events;
+pub mod inspection;
 mod operations;
 pub use error::Error;
 
@@ -88,6 +89,7 @@ pub struct Runtime {
     resolving: Slot<Resolves>,
     wizard_import: Slot<RefCell<Option<(iptv_core::wizard::ImportId, CancelToken)>>>,
     store: std::sync::Arc<store_service::Service>,
+    inspection: inspection::Vault,
     settings_saved: Slot<SavedSettings>,
     settings_changed: Slot<Cell<u64>>,
     settings_read_only: Cell<Option<std::io::ErrorKind>>,
@@ -149,6 +151,7 @@ impl Runtime {
             resolving: Slot::default(),
             wizard_import: Slot::default(),
             store,
+            inspection: inspection::Vault::new(),
             settings_saved: Slot::default(),
             settings_changed: Slot::default(),
             settings_read_only: Cell::new(None),
@@ -259,6 +262,7 @@ impl Runtime {
         // Detached local tasks can retain this Runtime after the root closes.
         // Retire services now, rather than waiting for its last Rc to drop.
         self.store.retire();
+        self.inspection.clear();
         drained
     }
 

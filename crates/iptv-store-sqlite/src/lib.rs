@@ -53,6 +53,9 @@ pub use guide_repair::{
 mod guide_sources;
 pub use guide_revisions::GuideRevisions;
 mod history;
+mod inspection;
+mod inspection_stage;
+pub use inspection_stage::InspectionStage;
 mod library_preferences;
 pub mod migrate;
 mod order;
