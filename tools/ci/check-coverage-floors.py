@@ -18,7 +18,7 @@ FLOORS = {
     "iptv-search": 94.0,
     "iptv-player-mpv": 94.0,
     "iptv-library": 91.0,
-    "iptv-runtime": 48.0,
+    "iptv-runtime": 49.5,
 }
 
 

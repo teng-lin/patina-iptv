@@ -454,9 +454,7 @@ jobs:
           persist-credentials: false
       - name: Create throwaway tag for rehearsal
         if: github.event_name == 'workflow_dispatch' && inputs.rehearsal
-        run: |
-          git tag "$TAG"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git" "$TAG"
+        run: python3 tools/ci/rehearsal.py create "$TAG" "$GITHUB_SHA"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: packages-*
@@ -493,6 +491,4 @@ jobs:
           python3 tools/ci/publish-release.py publish $rehearsal_flag dist "$TAG" release-notes.md
       - name: Clean up rehearsal release and tag
         if: always() && github.event_name == 'workflow_dispatch' && inputs.rehearsal
-        run: |
-          gh release delete "$TAG" --yes || true
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git" --delete "$TAG" || true
+        run: python3 tools/ci/rehearsal.py cleanup "$TAG" "$GITHUB_SHA"
