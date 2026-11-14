@@ -84,13 +84,41 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_TvActivity_flushPendingWri
 ) {
     // A panic must not unwind out of an `extern "system"` function into the
     // JVM (the process aborts): it is logged, without its message.
-    match std::panic::catch_unwind(|| {
-        crate::runtime::flush_pending_writes(std::time::Duration::from_secs(1))
-    }) {
+    match std::panic::catch_unwind(|| host_stop_flush(std::time::Duration::from_secs(1))) {
         Ok(true) => {}
         Ok(false) => log::warn!("iptv files: queued writes did not finish before the stop"),
         Err(_) => log::error!("iptv files: waiting for queued writes panicked"),
     }
+}
+
+/// The owner a host callback acts for: the one the application root
+/// registered. A host callback runs off the application thread and outside
+/// any task, so it cannot be handed the shell's handle; the root leaves this
+/// `Send` one for it instead. It holds the owner weakly.
+static HOST_STOP: std::sync::Mutex<Option<crate::runtime::HostHandle>> =
+    std::sync::Mutex::new(None);
+
+/// The application root's owner is the one a host stop flushes from now on.
+pub(crate) fn flush_on_host_stop(owner: crate::runtime::HostHandle) {
+    *HOST_STOP
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(owner);
+}
+
+/// The registered root's owner; none before a root exists.
+#[cfg(any(target_os = "android", test, feature = "test-support"))]
+pub(crate) fn host_handle() -> Option<crate::runtime::HostHandle> {
+    HOST_STOP
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
+/// Waits, at most `limit`, for the registered owner's queued file writes.
+#[cfg(any(target_os = "android", test))]
+fn host_stop_flush(limit: std::time::Duration) -> bool {
+    // A host can stop before the application root exists.
+    host_handle().is_none_or(|owner| owner.flush_files(limit))
 }
 
 /// Called before opening settings, the database, restore state, or any worker.
@@ -149,6 +177,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_host_stop_waits_for_the_registered_owner_and_never_for_a_later_runtime() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = |name: &str| {
+            let path = directory.path().join(name);
+            std::fs::create_dir(&path).unwrap();
+            crate::runtime::Runtime::new(crate::runtime::Ports::new(path, |_| {
+                panic!("a small-file write must not open the credential broker")
+            }))
+        };
+        let root = owner("root");
+        flush_on_host_stop(root.host_handle());
+        // Constructing (and using) another runtime does not re-register it.
+        let other = owner("other");
+        root.save_combined_channel("generated-root-channel");
+        other.save_combined_channel("generated-other-channel");
+        let stopped = std::thread::spawn(|| host_stop_flush(std::time::Duration::from_secs(5)));
+        assert!(stopped.join().unwrap());
+        assert_eq!(
+            std::fs::read_to_string(root.data_dir().join("last_channel_combined")).unwrap(),
+            "generated-root-channel"
+        );
+        assert!(other.flush_files(std::time::Duration::from_secs(5)));
+        // The registration does not keep the owner alive.
+        drop(root);
+        assert!(host_stop_flush(std::time::Duration::ZERO));
+    }
+
+    #[test]
     #[cfg(not(target_os = "android"))]
     fn bad_storage_displays_error_before_runtime_construction() {
         const CHILD: &str = "IPTV_TEST_STORAGE_FAILURE";
@@ -168,7 +224,7 @@ mod tests {
                 assert_ne!(message, "Private app storage is unavailable");
             }
             app.wait_for(&format!("text:{message}")).unwrap();
-            assert!(crate::runtime::try_current().is_none());
+            assert!(!crate::has_runtime());
             std::fs::write(std::env::var_os(RAN).unwrap(), b"storage error shown").unwrap();
             return;
         }

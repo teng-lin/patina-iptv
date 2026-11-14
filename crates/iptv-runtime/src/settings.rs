@@ -3,74 +3,62 @@ use super::file_writer::WriteError;
 use iptv_net::NetConfig;
 use iptv_settings::keys::{self, BoolKey, DurationKey, EnumKey};
 use iptv_settings::{Settings, SettingsError, Target, Value};
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, PoisonError, RwLock, Weak};
+use std::sync::{Arc, PoisonError, RwLock};
 
+/// One owner's effective settings, shared with its workers.
 pub(crate) type Shared = RwLock<Option<Arc<Settings>>>;
-pub(crate) type Current = Arc<Shared>;
-thread_local! { static CONTEXT: RefCell<Option<Weak<Shared>>> = const { RefCell::new(None) }; }
-
-pub(crate) fn current_handle() -> Current {
-    CONTEXT
-        .with(|context| context.borrow().as_ref().and_then(Weak::upgrade))
-        .unwrap_or_else(|| super::store_service::service().settings.clone())
-}
-
-pub(crate) fn with_current<R>(current: Current, run: impl FnOnce() -> R) -> R {
-    struct Restore(Option<Weak<Shared>>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            CONTEXT.set(self.0.take());
-        }
-    }
-    let _restore = Restore(CONTEXT.replace(Some(Arc::downgrade(&current))));
-    run()
-}
 
 const FILE: &str = "settings.json";
 
 const UNREADABLE: &str = "settings.unreadable.json";
 
 /// The effective settings (defaults until [`load`]).
-pub fn get() -> Arc<Settings> {
-    current_handle()
+pub(crate) fn get(shared: &Shared) -> Arc<Settings> {
+    shared
         .read()
         .unwrap_or_else(PoisonError::into_inner)
         .clone()
         .unwrap_or_default()
 }
 
-fn path() -> PathBuf {
-    super::paths::data_dir().join(FILE)
+fn replace(shared: &Shared, settings: Arc<Settings>) {
+    *shared.write().unwrap_or_else(PoisonError::into_inner) = Some(settings);
+}
+
+fn path(directory: &Path) -> PathBuf {
+    directory.join(FILE)
 }
 
 /// Loads the saved settings (startup).
-pub fn load() {
-    crate::current().settings_read_only.set(None);
-    let settings = Arc::new(read_file(&path()));
-    crate::current().settings_saved.with(|saved| {
-        *saved.borrow_mut() = Some((crate::current().settings_changed.get(), settings.clone()))
-    });
-    *current_handle()
-        .write()
-        .unwrap_or_else(PoisonError::into_inner) = Some(settings);
+pub(crate) fn load(owner: &super::Runtime) {
+    let services = owner.services();
+    let (settings, read_only) = read_file(services.files(), &path(services.directory()));
+    owner.settings_read_only.set(read_only);
+    let settings = Arc::new(settings);
+    owner
+        .settings_saved
+        .with(|saved| *saved.borrow_mut() = Some((owner.settings_changed.get(), settings.clone())));
+    replace(services.shared_settings(), settings);
 }
 
 /// The settings saved at `path` (or queued for it); defaults when there
 /// are none. A file that cannot be read as settings is moved aside (never
-/// overwritten).
-fn read_file(path: &Path) -> Settings {
-    let text = match super::file_writer::read(path).map(String::from_utf8) {
+/// overwritten); when that fails, the reason saving is disabled.
+fn read_file(
+    files: &super::file_writer::Files,
+    path: &Path,
+) -> (Settings, Option<std::io::ErrorKind>) {
+    let text = match files.read(path).map(String::from_utf8) {
         Some(Ok(text)) => text,
         Some(Err(_)) => {
             log::warn!("iptv settings: invalid UTF-8; keeping the file aside");
-            return preserve_unreadable(path);
+            return (Settings::new(), preserve_unreadable(path));
         }
-        None if !path.exists() => return Settings::new(),
+        None if !path.exists() => return (Settings::new(), None),
         _ => {
             log::warn!("iptv settings: cannot read the settings; using defaults");
-            return preserve_unreadable(path);
+            return (Settings::new(), preserve_unreadable(path));
         }
     };
     match Settings::from_json(&text) {
@@ -83,33 +71,28 @@ fn read_file(path: &Path) -> Settings {
                     report.rejected.len()
                 );
             }
-            settings
+            (settings, None)
         }
         Err(e) => {
             log::warn!("iptv settings: {e}; using defaults and keeping the file aside");
-            preserve_unreadable(path)
+            (Settings::new(), preserve_unreadable(path))
         }
     }
 }
 
-fn preserve_unreadable(path: &Path) -> Settings {
+/// Moves an unreadable settings file aside; `Some` when it could not be
+/// kept, so nothing may be saved over it.
+fn preserve_unreadable(path: &Path) -> Option<std::io::ErrorKind> {
     if !path.is_file() {
-        if let Some(runtime) = crate::try_current() {
-            runtime
-                .settings_read_only
-                .set(Some(std::io::ErrorKind::InvalidInput));
-        }
-        return Settings::new();
+        return Some(std::io::ErrorKind::InvalidInput);
     }
     if let Some(dir) = path.parent()
         && let Err(error) = std::fs::rename(path, dir.join(UNREADABLE))
     {
         log::warn!("iptv settings: could not preserve unreadable file; saving disabled: {error}");
-        if let Some(runtime) = crate::try_current() {
-            runtime.settings_read_only.set(Some(error.kind()));
-        }
+        return Some(error.kind());
     }
-    Settings::new()
+    None
 }
 
 /// What a finished save means for the live settings.
@@ -184,82 +167,96 @@ impl std::error::Error for SaveError {}
 /// background. Only an invalid value is an error here; a save that fails
 /// later is reported, and the settings go back to the saved ones unless a
 /// newer change is on its way to the file.
-pub fn set(key: &str, value: Value) -> Result<(), SaveError> {
-    if let Some(error) = crate::current().settings_read_only.get() {
+pub(crate) fn set(
+    owner: &std::rc::Rc<super::Runtime>,
+    key: &str,
+    value: Value,
+) -> Result<(), SaveError> {
+    if let Some(error) = owner.settings_read_only.get() {
         return Err(SaveError::Storage(error));
     }
-    let mut next = (*get()).clone();
+    let services = owner.services();
+    let mut next = (*services.settings()).clone();
     let changes = next.set(key, value).map_err(SaveError::Invalid)?;
     let json = next.to_json_string();
     let next = Arc::new(next);
-    *current_handle()
-        .write()
-        .unwrap_or_else(PoisonError::into_inner) = Some(next.clone());
+    replace(services.shared_settings(), next.clone());
     if !changes.is_empty() {
         log::info!("iptv settings: {key} changed");
-        crate::current().emit(super::RuntimeEvent::SettingsChanged);
+        owner.emit(super::RuntimeEvent::SettingsChanged);
     }
-    let revision = crate::current().settings_changed.get() + 1;
-    crate::current().settings_changed.set(revision);
-    let saved = super::file_writer::write(path(), json.into_bytes());
-    crate::current().spawn(async move {
+    let revision = owner.settings_changed.get() + 1;
+    owner.settings_changed.set(revision);
+    let saved = services
+        .files()
+        .write(path(services.directory()), json.into_bytes());
+    let task_owner = owner.clone();
+    owner.spawn(async move {
+        let owner = task_owner;
         let result = saved.await;
         match settle(result) {
-            Settled::Saved => crate::current().settings_saved.with(|saved| {
+            Settled::Saved => owner.settings_saved.with(|saved| {
                 let mut saved = saved.borrow_mut();
                 if saved.as_ref().is_none_or(|(at, _)| *at < revision) {
                     *saved = Some((revision, next));
                 }
             }),
-            Settled::Failed if crate::current().settings_changed.get() == revision => {
-                if let Some((_, previous)) = crate::current()
-                    .settings_saved
-                    .with(|saved| saved.borrow().clone())
+            Settled::Failed if owner.settings_changed.get() == revision => {
+                if let Some((_, previous)) =
+                    owner.settings_saved.with(|saved| saved.borrow().clone())
                 {
-                    *current_handle()
-                        .write()
-                        .unwrap_or_else(PoisonError::into_inner) = Some(previous);
-                    crate::current().emit(super::RuntimeEvent::SettingsChanged);
+                    replace(services.shared_settings(), previous);
+                    owner.emit(super::RuntimeEvent::SettingsChanged);
                 }
             }
             Settled::Failed => {}
         }
         if let Err(error) = result {
             log::warn!("iptv settings: {}", SaveError::from(error));
-            crate::current().emit(super::RuntimeEvent::SettingsSaveFailed(error.into()));
+            owner.emit(super::RuntimeEvent::SettingsSaveFailed(error.into()));
         }
     });
     Ok(())
 }
 
-pub fn flag(key: BoolKey) -> bool {
-    get().bool(key, &Target::Global)
+pub fn flag(settings: &Settings, key: BoolKey) -> bool {
+    settings.bool(key, &Target::Global)
 }
 
-pub fn duration_ms(key: DurationKey) -> i64 {
-    get().duration_ms(key, &Target::Global)
+pub fn duration_ms(settings: &Settings, key: DurationKey) -> i64 {
+    settings.duration_ms(key, &Target::Global)
 }
 
-pub fn choice(key: EnumKey) -> &'static str {
-    get().choice(key, &Target::Global)
+pub fn choice(settings: &Settings, key: EnumKey) -> &'static str {
+    settings.choice(key, &Target::Global)
 }
 
 /// `general.user_agent`, when set.
-pub fn user_agent() -> Option<String> {
-    let ua = get().text(keys::USER_AGENT, &Target::Global);
+pub fn user_agent(settings: &Settings) -> Option<String> {
+    let ua = settings.text(keys::USER_AGENT, &Target::Global);
     (!ua.trim().is_empty()).then(|| ua.trim().to_owned())
 }
 
-/// The network settings of provider requests: `general.user_agent` for
-/// requests that do not name their own.
-pub fn net_config() -> NetConfig {
+/// The part of the provider network configuration that no setting changes
+/// (trust anchors, limits, the development fixture override). Playback
+/// transport reads its trust anchors from it on player threads, which act
+/// for no owner.
+pub fn base_net_config() -> NetConfig {
+    #[cfg_attr(not(debug_assertions), allow(unused_mut))]
     let mut config = NetConfig::default();
     #[cfg(debug_assertions)]
     {
         config.allow_private_fixture =
             cfg!(feature = "test-support") || super::imports::DEV_PLAYLIST.is_some();
     }
-    if let Some(ua) = user_agent() {
+    config
+}
+
+/// The network settings of provider requests: [`base_net_config`] with
+/// `general.user_agent` for requests that do not name their own.
+pub fn net_config(settings: &Settings) -> NetConfig {
+    let mut config = base_net_config();
+    if let Some(ua) = user_agent(settings) {
         config.user_agent = ua;
     }
     config
@@ -277,13 +274,17 @@ pub fn add_user_agent(headers: &mut Vec<(String, String)>, ua: Option<String>) {
 }
 
 /// `remote.long_press`, in ms.
-pub fn long_press_ms() -> u64 {
-    u64::try_from(duration_ms(keys::LONG_PRESS)).unwrap_or(0)
+pub fn long_press_ms(settings: &Settings) -> u64 {
+    u64::try_from(duration_ms(settings, keys::LONG_PRESS)).unwrap_or(0)
 }
 
 #[cfg(test)]
 mod persistence_tests {
     use super::*;
+    /// What a restart reads, with no write queued.
+    fn read_file(path: &Path) -> Settings {
+        super::read_file(&Default::default(), path).0
+    }
     /// What the background writer does with a settings save.
     fn write_file(path: &Path, settings: &Settings) -> Result<(), WriteError> {
         super::super::file_writer::publish(path, settings.to_json_string().as_bytes(), |_| Ok(()))

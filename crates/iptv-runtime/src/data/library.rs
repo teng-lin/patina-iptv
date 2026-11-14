@@ -4,6 +4,7 @@
 //!
 //! One refresh per playlist runs at a time; each has a ticket, so a
 //! cancelled one never overwrites what a newer one reports.
+use std::rc::Rc;
 
 use crate::model::{SourceId, StoreError, StoredSource};
 use iptv_import::CancelToken;
@@ -21,92 +22,102 @@ pub(super) use crate::library::{
     replace_import, replace_running, reset_imports, revoke_import_handoff, running,
     supersede_import, track_added_import, track_import,
 };
-pub(super) async fn refresh_cache() -> Result<(), StoreError> {
-    let snapshot = crate::library::snapshot().await?;
-    install(snapshot);
-    changed();
+pub(super) async fn refresh_cache(owner: &Rc<crate::Runtime>) -> Result<(), StoreError> {
+    let snapshot = crate::library::snapshot(owner).await?;
+    install(owner, snapshot);
+    changed(owner);
     Ok(())
 }
 
 /// A committed mutation must retain its cleanup even if a subsequent read fails.
-async fn refresh_after_commit(patch: impl FnOnce(&mut Snapshot)) {
-    crate::current().library().with(|snapshot| {
+async fn refresh_after_commit(owner: &Rc<crate::Runtime>, patch: impl FnOnce(&mut Snapshot)) {
+    owner.library.with(|snapshot| {
         if let Some(snapshot) = snapshot.borrow_mut().as_mut() {
             patch(snapshot);
         }
     });
-    changed();
-    if let Err(error) = refresh_cache().await {
+    changed(owner);
+    if let Err(error) = refresh_cache(owner).await {
         log::warn!("iptv library: change saved but metadata refresh failed: {error}");
-        crate::current().emit(crate::RuntimeEvent::Notify(
+        owner.emit(crate::RuntimeEvent::Notify(
             "Change saved; library details could not be refreshed.",
         ));
     }
 }
 
-pub use crate::library::{playlists, policy};
+pub fn playlists(owner: &Rc<crate::Runtime>) -> Result<Vec<Playlist>, crate::Error> {
+    crate::library::playlists(owner)
+}
+
+pub fn policy(
+    owner: &Rc<crate::Runtime>,
+    id: SourceId,
+) -> Result<crate::model::SourcePolicy, crate::Error> {
+    crate::library::policy(owner, id)
+}
 
 pub async fn set_policy(
+    owner: &Rc<crate::Runtime>,
     id: SourceId,
     policy: crate::model::SourcePolicy,
 ) -> Result<(), StoreError> {
-    crate::library::save_policy(id, policy).await?;
-    refresh_after_commit(|snapshot| {
+    crate::library::save_policy(owner, id, policy).await?;
+    refresh_after_commit(owner, |snapshot| {
         if let Some(playlist) = snapshot.playlists.iter_mut().find(|p| p.id == id) {
             playlist.policy = policy;
         }
     })
     .await;
-    if super::combined::active() {
+    if super::combined::active(owner) {
         if !policy.enabled {
-            cancel_running(id);
+            cancel_running(owner, id);
         }
-        super::combined::rebuild();
+        super::combined::rebuild(owner);
         if policy.enabled
-            && let Some(source) = load(id)
+            && let Some(source) = load(owner, id)
         {
-            run(source, Purpose::Combined, false);
+            run(owner, source, Purpose::Combined, false);
         }
         return Ok(());
     }
     if !policy.enabled {
-        cancel_running(id);
-        if crate::current().shown.get() == Some(id) {
-            let next = newest()?;
-            super::show_nothing();
+        cancel_running(owner, id);
+        if owner.shown.get() == Some(id) {
+            let next = newest(owner)?;
+            super::show_nothing(owner);
             match next {
-                Some(next) => run(next, Purpose::Switch, false),
-                None => crate::current().emit(crate::RuntimeEvent::OpenPlaylists),
+                Some(next) => run(owner, next, Purpose::Switch, false),
+                None => owner.emit(crate::RuntimeEvent::OpenPlaylists),
             }
         }
     }
     Ok(())
 }
 /// Persists the shown identity without delaying navigation.
-pub(super) fn remember_shown(id: SourceId) {
-    let saved = crate::library::remember_shown(id);
-    super::spawn_in_app(async move {
+pub(super) fn remember_shown(owner: &Rc<crate::Runtime>, id: SourceId) {
+    let saved = crate::library::remember_shown(owner, id);
+    owner.spawn(async move {
         if let Err(error) = saved.await {
             log::warn!("iptv data: could not remember the shown playlist: {error}");
         }
     });
 }
 
-fn changed() {
-    crate::current().emit(crate::RuntimeEvent::LibraryChanged);
+fn changed(owner: &Rc<crate::Runtime>) {
+    owner.emit(crate::RuntimeEvent::LibraryChanged);
 }
 
 /// Imports stored playlist `stored` for `purpose`, reporting into the
 /// library's activity. With `edit`, `stored.source` holds new details to
 /// try (saved only if they import).
-pub(super) fn run(stored: StoredSource, purpose: Purpose, edit: bool) {
+pub(super) fn run(owner: &Rc<crate::Runtime>, stored: StoredSource, purpose: Purpose, edit: bool) {
     let id = stored.id;
     // A mode switch can replace a still-running job for this source.
-    replace_running(id);
+    replace_running(owner, id);
     let due = !matches!(
         purpose,
         Purpose::Startup | Purpose::Switch | Purpose::Combined
-    ) || crate::current().library().with(|snapshot| {
+    ) || owner.library.with(|snapshot| {
         let snapshot = snapshot.borrow();
         let Some(snapshot) = snapshot.as_ref() else {
             return true;
@@ -125,8 +136,8 @@ pub(super) fn run(stored: StoredSource, purpose: Purpose, edit: bool) {
             )
     });
     if due {
-        crate::current()
-            .attempts()
+        owner
+            .attempts
             .with(|a| a.borrow_mut().insert(id, super::now_unix()));
     }
     log::info!(
@@ -134,14 +145,17 @@ pub(super) fn run(stored: StoredSource, purpose: Purpose, edit: bool) {
         id.0,
         stored.source.kind()
     );
-    let ticket = crate::current().tickets().with(|t| {
+    let ticket = owner.tickets.with(|t| {
         t.set(t.get() + 1);
         t.get()
     });
-    let current = move || {
-        crate::current()
-            .imports()
-            .with(|r| r.borrow().get(&id).is_some_and(|(at, _)| *at == ticket))
+    let current = {
+        let owner = owner.clone();
+        move || {
+            owner
+                .imports
+                .with(|r| r.borrow().get(&id).is_some_and(|(at, _)| *at == ticket))
+        }
     };
     let job = Job {
         source: stored.source,
@@ -151,10 +165,11 @@ pub(super) fn run(stored: StoredSource, purpose: Purpose, edit: bool) {
         edit,
     };
     let token = CancelToken::new();
-    crate::current()
-        .imports()
+    owner
+        .imports
         .with(|r| r.borrow_mut().insert(id, (ticket, token.clone())));
     crate::library::set_activity(
+        owner,
         id,
         Some(if edit {
             Activity::Checking(None)
@@ -162,11 +177,13 @@ pub(super) fn run(stored: StoredSource, purpose: Purpose, edit: bool) {
             Activity::Running(None)
         }),
     );
-    start_import_with(job, token, move |update| {
+    let reporting = owner.clone();
+    start_import_with(owner, job, token, move |update| {
+        let owner = &reporting;
         if !current() {
             // Cancelled or replaced by a newer import of it, which reports.
             if matches!(update, Update::Done(_)) {
-                changed();
+                changed(owner);
             }
             return;
         }
@@ -175,10 +192,8 @@ pub(super) fn run(stored: StoredSource, purpose: Purpose, edit: bool) {
             Update::Progress(p) => Activity::Running(Some(p)),
             Update::Done(Err(f)) if edit => {
                 log::warn!("iptv data: the new details did not import ({f:?}); the old ones stay");
-                crate::current()
-                    .imports()
-                    .with(|r| r.borrow_mut().remove(&id));
-                changed();
+                owner.imports.with(|r| r.borrow_mut().remove(&id));
+                changed(owner);
                 Activity::Rejected(f)
             }
             Update::Done(result) => {
@@ -188,63 +203,64 @@ pub(super) fn run(stored: StoredSource, purpose: Purpose, edit: bool) {
                         log::warn!("iptv data: refresh failed ({f:?}); the stored data stays")
                     }
                 }
-                crate::current()
-                    .imports()
-                    .with(|r| r.borrow_mut().remove(&id));
-                changed();
+                owner.imports.with(|r| r.borrow_mut().remove(&id));
+                changed(owner);
                 Activity::Done(result)
             }
         };
-        crate::library::set_activity(id, Some(activity));
+        crate::library::set_activity(owner, id, Some(activity));
     });
 }
 
 /// Shows stored playlist `id`: its stored channels and guide at once,
 /// refreshed in the background as at startup.
-pub fn switch_to(id: SourceId) {
-    super::spawn_in_app(async move {
-        if crate::favorites::flush().await {
-            switch_to_ready(id);
-        } else {
-            crate::current().emit(crate::RuntimeEvent::Notify(
-                "Recent changes could not be saved; try again",
-            ));
+pub fn switch_to(owner: &Rc<crate::Runtime>, id: SourceId) {
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            if crate::favorites::flush(&owner).await {
+                switch_to_ready(&owner, id);
+            } else {
+                owner.emit(crate::RuntimeEvent::Notify(
+                    "Recent changes could not be saved; try again",
+                ));
+            }
         }
     });
 }
-fn switch_to_ready(id: SourceId) {
-    if policy(id).is_ok_and(|p| !p.enabled) {
+fn switch_to_ready(owner: &Rc<crate::Runtime>, id: SourceId) {
+    if policy(owner, id).is_ok_and(|p| !p.enabled) {
         return;
     }
-    if !super::combined::active() && crate::current().shown.get() == Some(id) {
+    if !super::combined::active(owner) && owner.shown.get() == Some(id) {
         return;
     }
-    let Some(stored) = load(id) else {
+    let Some(stored) = load(owner, id) else {
         return;
     };
-    super::combined::leave();
+    super::combined::leave(owner);
     // A refresh of it in the background gives way to the shown one.
-    replace_running(id);
-    run(stored, Purpose::Switch, false);
+    replace_running(owner, id);
+    run(owner, stored, Purpose::Switch, false);
 }
 
 /// Downloads stored playlist `id` again (unless that already runs): the
 /// shown one in place, another one into the store only.
-pub fn refresh(id: SourceId) {
-    if running(id) {
+pub fn refresh(owner: &Rc<crate::Runtime>, id: SourceId) {
+    if running(owner, id) {
         return;
     }
-    let Some(stored) = load(id) else {
+    let Some(stored) = load(owner, id) else {
         return;
     };
-    run(stored, refresh_purpose(id), false);
+    run(owner, stored, refresh_purpose(owner, id), false);
 }
 
 /// The shown playlist refreshes in place, another one into the store only.
-fn refresh_purpose(id: SourceId) -> Purpose {
-    if super::combined::active() {
+fn refresh_purpose(owner: &Rc<crate::Runtime>, id: SourceId) -> Purpose {
+    if super::combined::active(owner) {
         Purpose::Background
-    } else if crate::current().shown.get() == Some(id) {
+    } else if owner.shown.get() == Some(id) {
         Purpose::Refresh
     } else {
         Purpose::Background
@@ -252,12 +268,12 @@ fn refresh_purpose(id: SourceId) -> Purpose {
 }
 
 /// Refreshes every stored playlist (each one not refreshing already).
-pub fn refresh_all() {
-    match playlists() {
+pub fn refresh_all(owner: &Rc<crate::Runtime>) {
+    match playlists(owner) {
         Ok(all) => all
             .iter()
             .filter(|p| p.policy.enabled)
-            .for_each(|p| refresh(p.id)),
+            .for_each(|p| refresh(owner, p.id)),
         Err(e) => log::warn!("iptv data: the store is unavailable: {e}"),
     }
 }
@@ -266,20 +282,20 @@ pub fn refresh_all() {
 /// details form only, never shown or logged).
 pub use crate::library::source_details;
 
-pub fn try_details(id: SourceId, source: Source) {
-    let Some(mut stored) = load(id) else {
+pub fn try_details(owner: &Rc<crate::Runtime>, id: SourceId, source: Source) {
+    let Some(mut stored) = load(owner, id) else {
         return;
     };
     // Only the details change; the name is the stored one.
     stored.source.config = source.config;
-    replace_running(id);
-    run(stored, refresh_purpose(id), true);
+    replace_running(owner, id);
+    run(owner, stored, refresh_purpose(owner, id), true);
 }
 
 /// Sets the User-Agent of playlist `id` (`None`: the app's own), tried
 /// like other new details.
-pub fn set_user_agent(id: SourceId, user_agent: Option<String>) {
-    let Some(mut source) = source_details(id) else {
+pub fn set_user_agent(owner: &Rc<crate::Runtime>, id: SourceId, user_agent: Option<String>) {
+    let Some(mut source) = source_details(owner, id) else {
         return;
     };
     match &mut source.config {
@@ -287,14 +303,18 @@ pub fn set_user_agent(id: SourceId, user_agent: Option<String>) {
         SourceConfig::Xtream(c) => c.user_agent = user_agent,
         SourceConfig::Stalker(_) => return,
     }
-    try_details(id, source);
+    try_details(owner, id, source);
 }
 
-pub async fn rename(id: SourceId, name: &str) -> Result<(), StoreError> {
+pub async fn rename(
+    owner: &Rc<crate::Runtime>,
+    id: SourceId,
+    name: &str,
+) -> Result<(), StoreError> {
     let name = name.to_owned();
     let saved_name = name.clone();
-    crate::library::rename_source(id, name).await?;
-    refresh_after_commit(|snapshot| {
+    crate::library::rename_source(owner, id, name).await?;
+    refresh_after_commit(owner, |snapshot| {
         if let Some(playlist) = snapshot.playlists.iter_mut().find(|p| p.id == id) {
             playlist.name = saved_name.clone();
         }
@@ -303,8 +323,8 @@ pub async fn rename(id: SourceId, name: &str) -> Result<(), StoreError> {
         }
     })
     .await;
-    if super::combined::active() {
-        super::combined::rebuild();
+    if super::combined::active(owner) {
+        super::combined::rebuild(owner);
     }
     Ok(())
 }
@@ -312,30 +332,32 @@ pub async fn rename(id: SourceId, name: &str) -> Result<(), StoreError> {
 /// Changes the guide sources of playlist `id`; false when `edit` changes
 /// nothing. The guide on screen is checked again once the edits settle
 /// (changed feeds are downloaded); another playlist's when it is shown.
-pub async fn edit_guides(id: SourceId, edit: &guides::Edit) -> Result<bool, StoreError> {
+pub async fn edit_guides(
+    owner: &Rc<crate::Runtime>,
+    id: SourceId,
+    edit: &guides::Edit,
+) -> Result<bool, StoreError> {
     let edit = edit.clone();
-    let edited = crate::library::edit_guides(id, edit).await?;
+    let edited = crate::library::edit_guides(owner, id, edit).await?;
     if !edited {
         return Ok(false);
     }
-    refresh_after_commit(|_| {}).await;
-    stored::guides_changed(id);
+    refresh_after_commit(owner, |_| {}).await;
+    stored::guides_changed(owner, id);
     Ok(true)
 }
 
 /// Deletes stored playlist `id` with its channels, guide and favourites.
 /// The shown one gives way to the newest other playlist, or to the
 /// first-run state when none is left.
-pub async fn delete(id: SourceId) -> Result<(), StoreError> {
-    let generation = super::generation();
-    cancel_running(id);
-    if let Err(error) = crate::library::delete_source(id).await {
-        // The playlist stays, and so does its guide check, which the
-        // cancelling ended (work that was cancelled keeps one itself).
-        super::keep_guide_check(id, generation, None);
-        return Err(error);
+pub async fn delete(owner: &Rc<crate::Runtime>, id: SourceId) -> Result<(), StoreError> {
+    let generation = super::generation(owner);
+    cancel_running(owner, id);
+    if let Err(error) = crate::library::delete_source(owner, id).await {
+        super::keep_guide_check(owner, id, generation, None);
+        return Err(error.into());
     }
-    refresh_after_commit(|snapshot| {
+    refresh_after_commit(owner, |snapshot| {
         snapshot.playlists.retain(|p| p.id != id);
         snapshot.details.remove(&id);
         snapshot.imports.remove(&id);
@@ -345,33 +367,33 @@ pub async fn delete(id: SourceId) -> Result<(), StoreError> {
     })
     .await;
     log::info!("iptv data: deleted source {}", id.0);
-    crate::current().emit(crate::RuntimeEvent::ForgetSource(id));
-    crate::library::set_activity(id, None);
-    changed();
-    if super::combined::active() {
+    owner.emit(crate::RuntimeEvent::ForgetSource(id));
+    crate::library::set_activity(owner, id, None);
+    changed(owner);
+    if super::combined::active(owner) {
         // Keep the explicitly selected aggregate usable when its last source
         // is deleted; the playlist screen still offers Add playlist.
-        super::combined::rebuild();
+        super::combined::rebuild(owner);
         return Ok(());
     }
-    if playlists()?.is_empty() {
-        super::show_nothing();
-        crate::current().emit(crate::RuntimeEvent::ClosePlaylists);
-        crate::current().emit(crate::RuntimeEvent::FirstRun);
+    if playlists(owner)?.is_empty() {
+        super::show_nothing(owner);
+        owner.emit(crate::RuntimeEvent::ClosePlaylists);
+        owner.emit(crate::RuntimeEvent::FirstRun);
         return Ok(());
     }
-    if crate::current().shown.get() != Some(id) {
+    if owner.shown.get() != Some(id) {
         return Ok(());
     }
-    match newest()? {
-        Some(next) => run(next, Purpose::Switch, false),
+    match newest(owner)? {
+        Some(next) => run(owner, next, Purpose::Switch, false),
         None => {
-            super::show_nothing();
-            crate::current().emit(crate::RuntimeEvent::ClosePlaylists);
-            if playlists()?.is_empty() {
-                crate::current().emit(crate::RuntimeEvent::FirstRun);
+            super::show_nothing(owner);
+            owner.emit(crate::RuntimeEvent::ClosePlaylists);
+            if playlists(owner)?.is_empty() {
+                owner.emit(crate::RuntimeEvent::FirstRun);
             } else {
-                crate::current().emit(crate::RuntimeEvent::OpenPlaylists);
+                owner.emit(crate::RuntimeEvent::OpenPlaylists);
             }
         }
     }

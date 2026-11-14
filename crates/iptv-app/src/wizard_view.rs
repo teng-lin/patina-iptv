@@ -128,7 +128,8 @@ fn perform(ui: Ui, effect: WizardEffect) {
         WizardEffect::PickFile => data::spawn_in_app(async move {
             let files = pick_files(FilePickRequest::new(false, 1)).await;
             let path = if let Some(file) = files.first() {
-                data::keep_picked_file(&file.name, file.data.bytes())
+                crate::runtime()
+                    .keep_picked_file(&file.name, file.data.bytes())
                     .await
                     .inspect_err(|e| log::warn!("iptv wizard: keeping the file failed: {e}"))
                     .ok()
@@ -147,7 +148,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
                 purpose: Purpose::Add,
                 edit: false,
             };
-            let token = data::start_import(job, move |update| {
+            let token = data::start_import(&crate::runtime(), job, move |update| {
                 send(
                     ui,
                     match update {
@@ -157,25 +158,13 @@ fn perform(ui: Ui, effect: WizardEffect) {
                     },
                 )
             });
-            crate::runtime()
-                .wizard_import()
-                .with(|r| *r.borrow_mut() = Some((id, token)));
+            crate::runtime().remember_wizard_import(id, token);
         }
-        WizardEffect::CancelImport { id } => crate::runtime().wizard_import().with(|r| {
-            let mut running = r.borrow_mut();
-            if running.as_ref().is_some_and(|(at, _)| *at == id)
-                && let Some((_, token)) = running.take()
-            {
-                log::info!("iptv wizard: import {id:?} cancelled");
-                token.cancel();
-            }
-        }),
+        WizardEffect::CancelImport { id } => crate::runtime().cancel_wizard_import(id),
         WizardEffect::Close(exit) => {
             log::info!("iptv wizard: closed ({exit:?})");
             if let WizardExit::Added { .. } = exit {
-                crate::runtime()
-                    .wizard_import()
-                    .with(|r| r.borrow_mut().take());
+                crate::runtime().finish_wizard_import();
                 // Added from the playlists screen: "Watch" goes to the guide.
                 crate::playlists_view::close(ui);
             }

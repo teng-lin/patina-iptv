@@ -45,7 +45,7 @@ pub fn open(ui: Ui, channel: usize) {
     let schedule = crate::schedule();
     let Some((playlist, key)) = schedule
         .channel_key(channel)
-        .and_then(|k| crate::data::combined::owner(&k))
+        .and_then(|k| crate::data::combined::owner(&crate::runtime(), &k))
     else {
         crate::settings_view::notify(tr("No playlist on screen"));
         return;
@@ -59,7 +59,7 @@ pub fn open(ui: Ui, channel: usize) {
         feeds: Vec::new(),
     })));
     crate::data::spawn_in_app(async move {
-        let mut channels = assign::guide_channels(playlist).await;
+        let mut channels = assign::guide_channels(&crate::runtime(), playlist).await;
         if REQUEST.with(|current| current.get()) != request {
             return;
         }
@@ -68,7 +68,8 @@ pub fn open(ui: Ui, channel: usize) {
             crate::settings_view::notify(tr("No guide data is stored yet: update the guide first"));
             return;
         }
-        let feeds: Vec<_> = crate::data::stored::source_lines(playlist)
+        let feeds: Vec<_> = crate::runtime()
+            .source_lines(playlist)
             .iter()
             .map(|line| {
                 (
@@ -86,7 +87,7 @@ pub fn open(ui: Ui, channel: usize) {
         });
         let subject = Subject {
             playlist,
-            current: assign::current(playlist, &key).await,
+            current: assign::current(&crate::runtime(), playlist, &key).await,
             name: schedule.channel_name(channel),
             key,
             channels,
@@ -155,7 +156,7 @@ fn perform(ui: Ui, playlist: SourceId, key: String, effect: Effect) {
         Effect::Close => close(ui),
         Effect::Choose(choice) => {
             log::info!("iptv guide choice: {}", choice_name(&choice));
-            assign::choose(playlist, key, choice, move |applied| {
+            assign::choose(&crate::runtime(), playlist, key, choice, move |applied| {
                 crate::settings_view::notify(applied_words(applied));
                 close(ui);
             });

@@ -44,14 +44,7 @@ impl MoveTarget {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CustomGroup {
-    pub id: CustomGroupId,
-    pub source_id: SourceId,
-    pub name: String,
-    /// Members present in the current catalog (hidden ones included).
-    pub channel_count: u32,
-}
+pub use iptv_library::CustomGroup;
 
 fn ids(conn: &Connection, sql: &str, args: impl rusqlite::Params) -> Result<Vec<String>> {
     let mut stmt = conn.prepare_cached(sql)?;

@@ -29,43 +29,64 @@ pub use crate::paging::{kept_from, window};
 /// `schedule` (source `source`'s stored guide, as [`window`] at `now`
 /// read it) with its older days paged in on demand, back to the first
 /// programme stored.
-pub async fn paged(schedule: EpgSchedule, source: SourceId, now: UnixTime) -> EpgSchedule {
-    let keep = super::stored::keep_past_days(&crate::settings::get());
-    let first = crate::commands::first_programme(source)
+pub async fn paged(
+    owner: &Rc<crate::Runtime>,
+    schedule: EpgSchedule,
+    source: SourceId,
+    now: UnixTime,
+) -> EpgSchedule {
+    let keep = super::stored::keep_past_days(&owner.settings());
+    let first = crate::commands::first_programme(owner, source)
         .await
         .unwrap_or_else(|e| {
             log::warn!("iptv data: the stored guide's first day: {e}");
             None
         });
     let window = kept_from(window(now, keep), first, now);
-    schedule.with_pages(window, loader(source))
+    schedule.with_pages(window, loader(owner, source))
 }
 
 /// Reads a page on the store's reader and updates the visible schedule.
 /// Called from guide queries (maybe inside a view's computation): it only
 /// starts work.
-fn loader(source: SourceId) -> impl Fn(PageRequest) + 'static {
+///
+/// The schedule that keeps this loader is itself kept by its owner, so the
+/// loader holds the owner weakly.
+fn loader(owner: &Rc<crate::Runtime>, source: SourceId) -> impl Fn(PageRequest) + 'static {
+    let owner = Rc::downgrade(owner);
     move |request: PageRequest| {
+        let Some(owner) = owner.upgrade() else {
+            return;
+        };
         let started = std::time::Instant::now();
-        let read = crate::commands::guide_page(source, request);
-        super::spawn_in_app(async move {
-            let read = read.await;
-            let took = started.elapsed();
-            let store = read.unwrap_or_else(|e| {
-                log::warn!("iptv data: older guide day: {e}");
-                GuideStore::default()
-            });
-            arrived(source, request, store, took);
+        let read = crate::commands::guide_page(&owner, source, request);
+        owner.spawn({
+            let owner = owner.clone();
+            async move {
+                let read = read.await;
+                let took = started.elapsed();
+                let store = read.unwrap_or_else(|e| {
+                    log::warn!("iptv data: older guide day: {e}");
+                    GuideStore::default()
+                });
+                arrived(&owner, source, request, store, took);
+            }
         });
     }
 }
 
-fn arrived(source: SourceId, request: PageRequest, store: GuideStore, took: Duration) {
-    let schedule = crate::current().schedule();
+fn arrived(
+    owner: &Rc<crate::Runtime>,
+    source: SourceId,
+    request: PageRequest,
+    store: GuideStore,
+    took: Duration,
+) {
+    let schedule = owner.schedule();
     let child = combined(&*schedule)
         .and_then(|s| s.source(source.0))
         .or_else(|| {
-            (crate::current().shown.get() == Some(source))
+            (owner.shown.get() == Some(source))
                 .then(|| epg(&*schedule))
                 .flatten()
         });
@@ -83,10 +104,10 @@ fn arrived(source: SourceId, request: PageRequest, store: GuideStore, took: Dura
         inserted
     });
     if inserted {
-        crate::current().emit(crate::RuntimeEvent::GuideChanged);
+        owner.emit(crate::RuntimeEvent::GuideChanged);
     }
-    for waiter in crate::current()
-        .page_waiters()
+    for waiter in owner
+        .page_waiters
         .with(|w| std::mem::take(&mut *w.borrow_mut()))
     {
         waiter();
@@ -112,9 +133,9 @@ fn each(schedule: &dyn Schedule, mut f: impl FnMut(&EpgSchedule)) {
 }
 /// A schedule replaced the one on screen (with the whole window after a
 /// first screen, `opening.rs`): what waited for its programmes looks again.
-pub fn replaced() {
-    for waiter in crate::current()
-        .page_waiters()
+pub fn replaced(owner: &Rc<crate::Runtime>) {
+    for waiter in owner
+        .page_waiters
         .with(|w| std::mem::take(&mut *w.borrow_mut()))
     {
         waiter();
@@ -134,6 +155,7 @@ pub fn want(schedule: &dyn Schedule, minute: i32) {
 /// catch-up there resolves with its programme's real times; when not, its
 /// day is pinned and asked for, and `retry` runs once a page arrived.
 pub fn ready(
+    owner: &Rc<crate::Runtime>,
     schedule: &Rc<dyn Schedule>,
     channel: usize,
     t: UnixTime,
@@ -147,15 +169,15 @@ pub fn ready(
         return true;
     }
     log::info!("iptv data: catch-up waits for its guide day");
-    crate::current()
-        .page_waiters()
+    owner
+        .page_waiters
         .with(|w| w.borrow_mut().push(Box::new(retry)));
     false
 }
 
 /// Pin the active archive day and release other pins when playback changes.
-pub fn pin_archive(archive: Option<(usize, UnixTime)>) {
-    let schedule = crate::current().schedule();
+pub fn pin_archive(owner: &Rc<crate::Runtime>, archive: Option<(usize, UnixTime)>) {
+    let schedule = owner.schedule();
     each(&*schedule, |s| s.pin_page(None));
     if let Some((channel, time)) = archive
         && let Some((epg, _)) = iptv_guide::combined::epg_channel(&*schedule, channel)
@@ -163,8 +185,8 @@ pub fn pin_archive(archive: Option<(usize, UnixTime)>) {
         epg.pin_page(Some(time));
     }
 }
-pub fn evict() {
-    let schedule = crate::current().schedule();
+pub fn evict(owner: &Rc<crate::Runtime>) {
+    let schedule = owner.schedule();
     each(&*schedule, |s| {
         let dropped = s.evict_pages();
         if dropped > 0 {
@@ -221,18 +243,35 @@ mod tests {
             NOW,
         ));
         let time = NOW - 2 * DAY;
-        assert!(!ready(&schedule, 0, time, || {}));
+        let owner = Rc::new(crate::Runtime::default());
+        assert!(!ready(&owner, &schedule, 0, time, || {}));
         assert_eq!(requests_a.borrow().len(), 1);
         assert!(requests_b.borrow().is_empty());
         // B remains pending indefinitely. Completing A must still unblock A.
         assert!(!b.ensure_loaded(time));
         let request = requests_a.borrow()[0];
         assert!(a.insert_page(request, GuideStore::default()));
-        assert!(ready(&schedule, 0, time, || panic!("A is already loaded")));
+        assert!(ready(&owner, &schedule, 0, time, || panic!(
+            "A is already loaded"
+        )));
         assert!(!b.ensure_loaded(time));
-        crate::current()
-            .page_waiters()
-            .with(|waiters| waiters.borrow_mut().clear());
+    }
+
+    #[test]
+    fn a_shown_schedule_does_not_keep_its_owner_alive() {
+        let owner = Rc::new(crate::Runtime::default());
+        let weak = Rc::downgrade(&owner);
+        let source = SourceId(1);
+        let lookup = crate::data::stored::description_lookup(&owner, source).unwrap();
+        let schedule = EpgSchedule::new(Vec::new(), GuideStore::default(), NOW)
+            .with_pages(window(NOW, 7), loader(&owner, source))
+            .with_description_lookup(lookup);
+        // The owner keeps the schedule on screen and its source's part.
+        let schedule = Rc::new(schedule);
+        crate::data::combined::remember_single(&owner, source, schedule.clone());
+        owner.set_schedule(schedule);
+        drop(owner);
+        assert!(weak.upgrade().is_none());
     }
 
     #[test]

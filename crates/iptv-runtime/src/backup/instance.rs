@@ -2,18 +2,21 @@
 //! sibling of its data directory, so activating a restore never moves it.
 use super::error::{Context, Error, Result};
 use std::fs::{File, OpenOptions};
-use std::path::Path;
-use std::{collections::BTreeMap, path::PathBuf, sync::Mutex};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 const ALREADY_RUNNING: &str =
     "Patina is already running. Close the other instance before opening it again";
-static FILES: Mutex<BTreeMap<PathBuf, File>> = Mutex::new(BTreeMap::new());
+/// The storage roots this process holds, each with its lock file. An
+/// operating-system lock belongs to the process and its directory, not to
+/// an application owner: every owner of a root shares its entry.
+static HELD: Mutex<Vec<(PathBuf, File)>> = Mutex::new(Vec::new());
 
 /// Acquire before settings, restore activation or any storage worker starts.
 /// Activity/root recreation in this process reuses the already-held lock.
 pub(super) fn acquire(root: &Path) -> Result<()> {
-    let mut files = FILES.lock().context("Could not lock application storage")?;
-    if files.contains_key(root) {
+    let mut held = HELD.lock().context("Could not lock application storage")?;
+    if held.iter().any(|(locked, _)| locked == root) {
         return Ok(());
     }
     let name = root
@@ -46,7 +49,7 @@ pub(super) fn acquire(root: &Path) -> Result<()> {
         file.set_permissions(std::fs::Permissions::from_mode(0o600))
             .context("Could not protect the application storage lock")?;
     }
-    files.insert(root.to_owned(), file);
+    held.push((root.to_owned(), file));
     // Do not unlink or explicitly unlock: every app-owned detached worker may
     // still have database handles until this process exits.
     Ok(())

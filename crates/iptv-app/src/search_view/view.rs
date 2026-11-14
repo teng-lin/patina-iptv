@@ -4,6 +4,7 @@
 //! pill.
 
 use crate::i18n::tr;
+use std::cell::Cell;
 
 use super::*;
 use crate::fonts::{CAPTION, CONDENSED, SANS};

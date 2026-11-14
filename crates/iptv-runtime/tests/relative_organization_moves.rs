@@ -1,10 +1,12 @@
 #[path = "../../iptv-store-sqlite/tests/common/mod.rs"]
 mod common;
+mod support;
 
 use iptv_core::organization::{Action, Editor};
 use iptv_library::OrganizationScope;
-use iptv_runtime::{Ports, Runtime, commands, executor::block_on, with_runtime};
+use iptv_runtime::{Ports, Runtime, commands};
 use std::rc::Rc;
+use support::block_on;
 
 #[test]
 fn two_later_presses_from_one_view_snapshot_move_twice() {
@@ -23,9 +25,10 @@ fn two_later_presses_from_one_view_snapshot_move_twice() {
         directory.path().to_owned(),
         move |_| Ok(key.clone()),
     )));
-    with_runtime(runtime.clone(), || {
+    {
         runtime.start_services();
         let items = block_on(commands::organization_items(
+            &runtime,
             source,
             OrganizationScope::Channels,
             Vec::new(),
@@ -34,6 +37,7 @@ fn two_later_presses_from_one_view_snapshot_move_twice() {
         let item = items[0].clone();
         let editor = Editor::new(items, Some(item.id.clone()));
         let first = commands::edit_organization(
+            &runtime,
             source,
             OrganizationScope::Channels,
             editor.clone(),
@@ -41,6 +45,7 @@ fn two_later_presses_from_one_view_snapshot_move_twice() {
             Action::Later,
         );
         let second = commands::edit_organization(
+            &runtime,
             source,
             OrganizationScope::Channels,
             editor,
@@ -50,6 +55,7 @@ fn two_later_presses_from_one_view_snapshot_move_twice() {
         block_on(first).unwrap();
         block_on(second).unwrap();
         let changed = block_on(commands::organization_items(
+            &runtime,
             source,
             OrganizationScope::Channels,
             Vec::new(),
@@ -59,6 +65,7 @@ fn two_later_presses_from_one_view_snapshot_move_twice() {
         // Favorites still expose visibility and name edits, even though their
         // ordering uses a separate write queue.
         block_on(commands::edit_organization(
+            &runtime,
             source,
             OrganizationScope::Favorites,
             Editor::new(changed, Some(item.id.clone())),
@@ -67,6 +74,7 @@ fn two_later_presses_from_one_view_snapshot_move_twice() {
         ))
         .unwrap();
         let changed = block_on(commands::organization_items(
+            &runtime,
             source,
             OrganizationScope::Channels,
             Vec::new(),
@@ -74,5 +82,5 @@ fn two_later_presses_from_one_view_snapshot_move_twice() {
         .unwrap();
         assert!(changed.iter().find(|row| row.id == item.id).unwrap().hidden);
         assert!(runtime.drain_services());
-    });
+    }
 }

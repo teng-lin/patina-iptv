@@ -25,21 +25,23 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("i18n.rs", "SYSTEM"),              // System locale cache.
     ("i18n.rs", "WORDING_SETTINGS"),    // cfg(test)-only scoped wording preferences.
     ("lib.rs", "RUNTIME"),              // The shell's single application handle.
-    ("lists.rs", "HINT_SHOWN"),         // Visible navigation hint revision.
+    ("lib.rs", "ROOT_STARTED"), // Guard: the handle is asked for on the application thread only.
+    ("lists.rs", "HINT_SHOWN"), // Visible navigation hint revision.
     ("organization_view.rs", "OPEN_GENERATION"), // Discard stale dialog replies.
     ("platform_data.rs", "ANDROID_FILES"), // Android files directory handle.
-    ("seek.rs", "PRESSES"),             // Key gesture state.
-    ("seek.rs", "HOLD"),                // Held-key gesture state.
-    ("settings.rs", "REVISION"),        // Reactive settings subscription handle.
-    ("settings_view.rs", "PAGES"),      // Immutable screen definitions.
-    ("settings_view.rs", "LAST"),       // Last selected settings tab.
-    ("settings_view.rs", "NOTICE"),     // Toast signal handle.
+    ("platform_data.rs", "HOST_STOP"), // The root owner's weak handle for off-thread host callbacks.
+    ("seek.rs", "PRESSES"),            // Key gesture state.
+    ("seek.rs", "HOLD"),               // Held-key gesture state.
+    ("settings.rs", "REVISION"),       // Reactive settings subscription handle.
+    ("settings_view.rs", "PAGES"),     // Immutable screen definitions.
+    ("settings_view.rs", "LAST"),      // Last selected settings tab.
+    ("settings_view.rs", "NOTICE"),    // Toast signal handle.
     ("settings_view.rs", "LEAVE_ASKED"), // Exit confirmation clock.
-    ("startup.rs", "MARKED"),           // Startup phase instrumentation.
-    ("startup.rs", "FALLBACK"),         // Startup clock instrumentation.
-    ("time.rs", "SHOWN"),               // Visible guide clock origin.
-    ("video.rs", "OPENS"),              // Native player open instrumentation.
-    ("video.rs", "SOURCED"),            // Native player source projection.
+    ("startup.rs", "MARKED"),          // Startup phase instrumentation.
+    ("startup.rs", "FALLBACK"),        // Startup clock instrumentation.
+    ("time.rs", "SHOWN"),              // Visible guide clock origin.
+    ("video.rs", "OPENS"),             // Native player open instrumentation.
+    ("video.rs", "SOURCED"),           // Native player source projection.
 ];
 
 fn sources(dir: &Path, files: &mut Vec<PathBuf>) {

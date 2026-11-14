@@ -34,7 +34,9 @@ pub fn build(schedule: &dyn Schedule, rows: usize, done: impl FnOnce(ProgrammeIn
         let keys: Vec<_> = (0..rows)
             .map_while(|c| epg.channel(c).map(|g| g.key.clone()))
             .collect();
-        let Some(source) = crate::data::stored::shown().filter(|_| epg.loaded_from().is_some())
+        let Some(source) = crate::runtime()
+            .shown_source()
+            .filter(|_| epg.loaded_from().is_some())
         else {
             done(ProgrammeIndex::build(epg.store(), &keys));
             return;
@@ -47,7 +49,7 @@ pub fn build(schedule: &dyn Schedule, rows: usize, done: impl FnOnce(ProgrammeIn
     let from: UnixTime =
         crate::time::wall_unix().saturating_sub(i64::from(keep).saturating_mul(DAY));
     let started = Instant::now();
-    let read = crate::runtime::search::programmes(sources, rows, from);
+    let read = crate::runtime().read_programme_index(sources, rows, from);
     crate::data::spawn_in_app(async move {
         match read.await {
             Ok(index) => {

@@ -40,22 +40,10 @@ impl Ports {
                 NEXT.fetch_add(1, Ordering::Relaxed)
             )),
             |_| {
-                Err(StoreError::Unavailable(
+                Err(StoreError::unavailable(
                     "synthetic database key was not installed",
                 ))
             },
         )
     }
-}
-
-pub(crate) fn database_key(path: &Path) -> Result<DatabaseKey, StoreError> {
-    (crate::store_service::service().ports.database_key)(path)
-}
-
-pub(crate) fn exclude_from_backup(path: &Path) -> io::Result<()> {
-    (crate::store_service::service().ports.exclude_from_backup)(path)
-}
-
-pub(crate) fn mark_with(phase: &'static str, detail: impl std::fmt::Display) {
-    (crate::store_service::service().ports.startup_mark)(phase, detail.to_string());
 }

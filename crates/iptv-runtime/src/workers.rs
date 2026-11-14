@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
-type Work = Box<dyn FnOnce() + Send>;
+pub(crate) type Work = Box<dyn FnOnce() + Send>;
 const PARALLEL: usize = 2;
 const WAITING: usize = 32;
 
@@ -66,7 +66,11 @@ impl Pool {
             capacity,
         }
     }
-    fn submit(&self, visible: bool, work: Work) -> bool {
+    /// The production pool: two refreshes at once, a bounded queue behind.
+    pub(crate) fn standard() -> Self {
+        Self::new(PARALLEL, WAITING)
+    }
+    pub(crate) fn submit(&self, visible: bool, work: Work) -> bool {
         let (lock, ready) = &*self.shared;
         let mut state = lock
             .lock()
@@ -113,7 +117,7 @@ pub(crate) struct Hooks {
 }
 #[cfg(feature = "test-support")]
 impl Hooks {
-    fn refuse(&self) -> bool {
+    pub(crate) fn refuse(&self) -> bool {
         use std::sync::atomic::Ordering::SeqCst;
         self.refusals
             .try_update(SeqCst, SeqCst, |left| left.checked_sub(1))
@@ -124,71 +128,35 @@ impl Hooks {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+    pub(crate) fn refuse_work(&self, count: usize) {
+        self.refusals
+            .store(count, std::sync::atomic::Ordering::SeqCst);
+    }
+    pub(crate) fn hold_reports(&self, held: bool) {
+        if held {
+            self.reports().0 = true;
+        } else {
+            self.release();
+        }
+    }
+    pub(crate) fn reports_waiting(&self) -> usize {
+        self.reports().1
+    }
+    pub(crate) fn before_report(&self) {
+        let mut reports = self.reports();
+        reports.1 += 1;
+        while reports.0 {
+            reports = self
+                .released
+                .wait(reports)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        reports.1 -= 1;
+    }
     pub(crate) fn release(&self) {
         self.reports().0 = false;
         self.released.notify_all();
     }
-}
-
-/// The next `count` submissions are refused, as by a full queue.
-#[cfg(feature = "test-support")]
-pub fn refuse_work(count: usize) {
-    super::store_service::service()
-        .hooks
-        .refusals
-        .store(count, std::sync::atomic::Ordering::SeqCst);
-}
-
-/// Imports wait just before they report their catalog (`held`), or go on.
-#[cfg(feature = "test-support")]
-pub fn hold_reports(held: bool) {
-    let owner = super::store_service::service();
-    if held {
-        owner.hooks.reports().0 = true;
-    } else {
-        owner.hooks.release();
-    }
-}
-
-/// How many imports wait to report ([`hold_reports`]).
-#[cfg(feature = "test-support")]
-pub fn reports_waiting() -> usize {
-    super::store_service::service().hooks.reports().1
-}
-
-/// On an import's worker, with its catalog saved and its stored guide
-/// read, just before it reports them ([`hold_reports`]).
-#[cfg(feature = "test-support")]
-pub(crate) fn before_report() {
-    let owner = super::store_service::service();
-    let mut reports = owner.hooks.reports();
-    reports.1 += 1;
-    while reports.0 {
-        reports = owner
-            .hooks
-            .released
-            .wait(reports)
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-    }
-    reports.1 -= 1;
-}
-
-pub fn submit(visible: bool, work: impl FnOnce() + Send + 'static) -> bool {
-    #[cfg(feature = "test-support")]
-    if super::store_service::service().hooks.refuse() {
-        return false;
-    }
-    let work = super::store_service::scoped(move || {
-        // Retired queued refreshes must not spend a new app's network budget.
-        // Running work remains guarded again at every store operation.
-        if super::store_service::is_current() {
-            work();
-        }
-    });
-    super::store_service::service()
-        .pool
-        .get_or_init(|| Pool::new(PARALLEL, WAITING))
-        .submit(visible, Box::new(work))
 }
 
 #[cfg(test)]
