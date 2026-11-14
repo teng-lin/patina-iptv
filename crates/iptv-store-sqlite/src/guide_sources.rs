@@ -41,6 +41,15 @@ pub(crate) fn set_guide_sources_in(
             )?;
         }
     }
+    // Release changed provider slots before upserting: two retained feed IDs
+    // may swap provider indices in one otherwise valid replacement.
+    for feed in sources {
+        conn.execute(
+            "UPDATE guide_sources SET provider_index = NULL
+             WHERE source_id = ?1 AND feed_id = ?2 AND provider_index IS NOT ?3",
+            rusqlite::params![source.0, feed.feed.0, feed.provider_index],
+        )?;
+    }
     {
         let mut insert = conn.prepare_cached(
             "INSERT INTO guide_sources (source_id, feed_id, provider_index, url, name,
