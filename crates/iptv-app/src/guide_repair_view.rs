@@ -638,7 +638,7 @@ fn feeds(ui: Ui, size: Scale) -> impl IntoElement {
                                     let switch =
                                         |enabled| if enabled { tr("On") } else { tr("Off") };
                                     format!(
-                                        "{} → {} · {} → {}",
+                                        "{} → {} · {} → {} · #{} → #{}",
                                         f.before_enabled.map(switch).unwrap_or(tr("Add")),
                                         f.after_enabled.map(switch).unwrap_or(tr("Remove")),
                                         f.before_shift_minutes
@@ -646,6 +646,12 @@ fn feeds(ui: Ui, size: Scale) -> impl IntoElement {
                                             .unwrap_or_default(),
                                         f.after_shift_minutes
                                             .map(|n| n.to_string())
+                                            .unwrap_or_default(),
+                                        f.before_position
+                                            .map(|n| (n + 1).to_string())
+                                            .unwrap_or_default(),
+                                        f.after_position
+                                            .map(|n| (n + 1).to_string())
                                             .unwrap_or_default()
                                     )
                                 })

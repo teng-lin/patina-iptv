@@ -247,6 +247,14 @@ pub(super) fn prepare(
         feed_previews.push(FeedPreview {
             feed: Some(edit.feed),
             name: before.name.clone().unwrap_or_default(),
+            before_position: configs
+                .iter()
+                .position(|f| f.feed == edit.feed)
+                .map(|v| v as u32),
+            after_position: after_configs
+                .iter()
+                .position(|f| f.feed == edit.feed)
+                .map(|v| v as u32),
             before_enabled: Some(before.enabled),
             after_enabled: after.as_ref().map(|f| f.enabled),
             before_shift_minutes: Some(before.shift_minutes),
@@ -274,6 +282,33 @@ pub(super) fn prepare(
     } else {
         None
     };
+    // A priority-only edit is itself reviewable even if every enabled/shift
+    // value stays the same; return the full changed precedence before apply.
+    for (position, config) in after_configs.iter().enumerate() {
+        let before_position = configs
+            .iter()
+            .position(|f| f.feed == config.feed)
+            .map(|v| v as u32);
+        if let Some(preview) = feed_previews
+            .iter_mut()
+            .find(|p| p.feed == Some(config.feed))
+        {
+            preview.after_position = Some(position as u32);
+        } else if before_position != Some(position as u32) {
+            feed_previews.push(FeedPreview {
+                feed: Some(config.feed),
+                name: config.name.clone().unwrap_or_default(),
+                before_position,
+                after_position: Some(position as u32),
+                before_enabled: Some(config.enabled),
+                after_enabled: Some(config.enabled),
+                before_shift_minutes: Some(config.shift_minutes),
+                after_shift_minutes: Some(config.shift_minutes),
+                added: false,
+                removed: false,
+            });
+        }
+    }
     let mut additions = Vec::new();
     let mut staged_feeds = BTreeMap::new();
     for (position, addition) in request.additions.iter().enumerate() {
@@ -303,6 +338,8 @@ pub(super) fn prepare(
         feed_previews.push(FeedPreview {
             feed: None,
             name: addition.name.clone().unwrap_or_default(),
+            before_position: None,
+            after_position: Some((after_configs.len() - 1) as u32),
             before_enabled: None,
             after_enabled: Some(true),
             before_shift_minutes: None,

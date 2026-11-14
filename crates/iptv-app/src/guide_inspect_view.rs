@@ -341,8 +341,11 @@ fn activate(ui: Ui, row: Row) {
         Row::Candidate(candidate) => samples(ui, candidate),
         Row::ReuseInspected => {
             update(ui, |s| {
+                s.enter(Mode::ProbeCandidates);
                 s.stage = s.retained_stage.clone();
+                s.candidates.clear();
                 s.query.clear();
+                s.next = None;
             });
             staged_candidates(ui);
         }

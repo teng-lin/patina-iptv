@@ -27,6 +27,9 @@ test streams.</sub>
 Patina provides no channels or content. You add the playlist or account
 your IPTV provider gave you.
 
+The [internal runtime API contract](docs/runtime-api-v1.md) documents source-scoped
+inspection, guide repair, verification and undo for native application clients.
+
 ### Why "Patina"
 
 A patina is the finish that metal earns with age and handling, like the

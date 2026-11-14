@@ -90,6 +90,9 @@ pub struct MappingPreview {
 pub struct FeedPreview {
     pub feed: Option<FeedId>,
     pub name: String,
+    /// Zero-based precedence within this immutable preview, never a feed identity.
+    pub before_position: Option<u32>,
+    pub after_position: Option<u32>,
     pub before_enabled: Option<bool>,
     pub after_enabled: Option<bool>,
     pub before_shift_minutes: Option<i32>,

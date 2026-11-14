@@ -2,7 +2,9 @@
 
 This is a map of the code for someone about to change it. The rules it
 explains are stated in [AGENTS.md](../AGENTS.md); the storage and transport
-security model is in [security.md](security.md).
+security model is in [security.md](security.md). The declared native application
+service boundary and compatibility policy are in
+[runtime-api-v1.md](runtime-api-v1.md).
 
 ## Crates and the direction of dependencies
 

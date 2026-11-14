@@ -859,7 +859,11 @@ mod staged {
             row.id = ContentId::from_stored(format!("synthetic-{index:03}"));
             row.name = format!("Synthetic {index:03}");
             row.epg_id = Some(format!("synthetic.{index:03}"));
-            xml.push_str(&format!("<channel id=\"synthetic.{index:03}\"><display-name>Synthetic {index:03}</display-name></channel><programme channel=\"synthetic.{index:03}\" start=\"20261114120000 +0000\" stop=\"20261114140000 +0000\"><title>Synthetic segment {index:03}</title></programme>"));
+            xml.push_str(&format!(
+                "<channel id=\"synthetic.{index:03}\"><display-name>Synthetic {index:03}</display-name></channel>\
+                <programme channel=\"synthetic.{index:03}\" start=\"20261114120000 +0000\" stop=\"20261114140000 +0000\">\
+                <title>Synthetic segment {index:03}</title></programme>"
+            ));
             generated.push(row);
         }
         xml.push_str("</tv>");
@@ -1178,7 +1182,7 @@ fn indirect_preview_uses_actual_low_feed_binding_when_high_feed_only_lists_chann
         .collect();
     let mut store = fixture.store();
     store.set_guide_sources(fixture.source, &configs).unwrap();
-    let mut stage = EpgStage::create_in(fixture.dir.path()).unwrap();
+    let mut stage = EpgStage::create_in_store(&store, fixture.dir.path()).unwrap();
     for id in [1, 2] {
         stage
             .begin_feed(FeedId(id), 3 - id as i32, StoreOptions::default(), 0)
@@ -1266,4 +1270,73 @@ fn indirect_preview_uses_actual_low_feed_binding_when_high_feed_only_lists_chann
         ))
         .unwrap();
     assert!(!verified.configuration_effective && !verified.verified_coverage);
+}
+
+#[test]
+fn repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive() {
+    use iptv_providers::{
+        GroupId,
+        model::{ContentKind, Group},
+    };
+    let fixture = Fixture::new();
+    let groups: Vec<_> = (0..1000)
+        .map(|index| Group {
+            id: GroupId::from_stored(format!("synthetic-group-{index}")),
+            name: format!("Synthetic group {index}"),
+            kind: ContentKind::Live,
+            provider_id: None,
+            adult: false,
+        })
+        .collect();
+    let prototype = channels().remove(0);
+    let generated: Vec<_> = (0..100_000)
+        .map(|index| {
+            let mut row = prototype.clone();
+            row.id = ContentId::from_stored(format!("synthetic-{index:06}"));
+            row.name = format!("Synthetic {index:06}");
+            row.groups = vec![groups[index % 1000].id.clone()];
+            row
+        })
+        .collect();
+    fixture
+        .store()
+        .replace_catalog(fixture.source, &groups, &generated, &[], &[])
+        .unwrap();
+    fixture
+        .drive(fixture.owner.read_library_metadata())
+        .unwrap();
+    let request = fixture.request("synthetic-000000", Target::NoGuide);
+    let future = fixture.owner.preview_guide_repair(
+        request,
+        InspectionControl {
+            timeout: Duration::from_secs(10),
+            ..Default::default()
+        },
+    );
+    let mut future = std::pin::pin!(future);
+    let waker = Arc::new(Unpark(std::thread::current())).into();
+    let mut context = Context::from_waker(&waker);
+    let started = Instant::now();
+    let mut maximum = Duration::ZERO;
+    let preview = loop {
+        if let Poll::Ready(value) = future.as_mut().poll(&mut context) {
+            break value.unwrap();
+        }
+        let read = Instant::now();
+        fixture
+            .drive(fixture.owner.read_library_metadata())
+            .unwrap();
+        maximum = maximum.max(read.elapsed());
+        assert!(started.elapsed() < Duration::from_secs(10));
+    };
+    assert!(
+        maximum < Duration::from_millis(50),
+        "display read queued behind repair analysis: {maximum:?}"
+    );
+    assert_eq!(preview.mapping_count, 1);
+    assert_eq!(preview.indirect_count, 0);
+    fixture
+        .owner
+        .release_guide_repair_plan(&preview.id, preview.digest)
+        .unwrap();
 }

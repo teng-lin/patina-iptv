@@ -1,5 +1,8 @@
 //! Application-owned state and events. This module has no UI toolkit imports.
 //!
+//! The supported query/inspection/repair facade is specified in
+//! `docs/runtime-api-v1.md`; other public helpers remain experimental.
+//!
 //! A [`Runtime`] is one application owner. Everything it owns (its store
 //! connections, file writer, network executor, refresh pool, settings and
 //! platform ports) is reached through the handle the caller passes; nothing
