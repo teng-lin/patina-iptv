@@ -137,10 +137,18 @@ There is one persistent player surface under the UI
 Both sides implement the same contract of props (`source`, `paused`,
 `pictureSize`, track choices, volume) and events (`state`, `size`, `error`,
 `position`, `tracks`), summed up at the top of `video.rs`.
-`iptv-player-mpv/src/props.rs` declares the typed property bindings and their
-serialized snapshot. Rust and Kotlin tests read the same synthetic JSON
-fixture through their existing serialization and decoding paths. The shell
-supplies the playback transport policy when registering the player.
+
+The contract is declared once, in `iptv-player-mpv`. `props.rs` names each
+prop and nested field with its wire name; the serialized snapshot, the shell's
+typed bindings and the names the shell and the mpv adapter use are all
+generated from that declaration. `events.rs` holds the typed `PlayerEvent`
+that the mpv adapter writes and the shell reads from either host. The Kotlin
+host keeps its names in one file (`PlayerContract.kt`), and two synthetic JSON
+fixtures (`iptv-player-mpv/fixtures`) hold the hosts together: the Rust tests
+read and write them exactly, and the Kotlin test hands every fixture prop to
+`setProp`, failing on a name it does not know, and compares every fixture
+event with what the host emits. The shell supplies the playback transport
+policy when registering the player.
 
 The invariants:
 

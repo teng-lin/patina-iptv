@@ -7,19 +7,19 @@
     },
     "token": 37,
     "live": true,
-    "reconnect": false
+    "reconnect": true
   },
-  "paused": false,
-  "pictureSize": "normal",
-  "videoTrack": "auto",
-  "audioTrack": "auto",
-  "textTrack": "off",
+  "paused": true,
+  "pictureSize": "zoom",
+  "videoTrack": "1",
+  "audioTrack": "2",
+  "textTrack": "3",
   "volume": 80,
-  "muted": false,
+  "muted": true,
   "audioDelay": 125,
   "pip": {
     "auto": true,
     "enter": 3,
-    "window": false
+    "window": true
   }
 }

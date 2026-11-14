@@ -31,12 +31,17 @@ thread_local! {
 /// GTK registers the components; nothing to register here.
 pub fn register(_components: &nsh_platform_linux::Components) {}
 
-/// The component's side towards the app: the events it emitted.
+/// The component's side towards the app: the events it emitted. Each must
+/// be one the shell can read ([`crate::PlayerEvent::decode`]), so no test
+/// passes on an event outside the contract.
 #[derive(Clone, Default)]
 pub struct ComponentContext(pub Rc<RefCell<Vec<(String, Value)>>>);
 
 impl ComponentContext {
     pub fn emit(&self, name: &str, data: Value) {
+        if let Err(e) = crate::PlayerEvent::decode(name, &data) {
+            panic!("the player emitted `{name}` {data}: {e}");
+        }
         self.0.borrow_mut().push((name.to_owned(), data));
     }
 }

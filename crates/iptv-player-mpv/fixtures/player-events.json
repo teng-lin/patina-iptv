@@ -1,0 +1,44 @@
+[
+  { "name": "state", "data": { "state": "idle" } },
+  { "name": "state", "data": { "state": "buffering" } },
+  { "name": "state", "data": { "state": "ready" } },
+  { "name": "state", "data": { "state": "ended" } },
+  { "name": "size", "data": { "width": 1280, "height": 720 } },
+  { "name": "error", "data": { "code": "ERROR_CODE_IO_BAD_HTTP_STATUS", "http": 404 } },
+  { "name": "error", "data": { "code": "ERROR_CODE_IO_NETWORK_CONNECTION_FAILED" } },
+  { "name": "position", "data": { "ms": 4000 } },
+  {
+    "name": "tracks",
+    "data": {
+      "video": [
+        { "id": "0:0", "label": "HD", "width": 1280, "height": 720, "fps": 50.0, "bitrate": 2500000 },
+        { "id": "0:1", "label": "", "width": null, "height": null, "fps": null, "bitrate": null }
+      ],
+      "audio": [
+        { "id": "1:0", "label": "Commentary", "language": "eng", "channels": 2, "codec": "audio/mp4a-latm" },
+        { "id": "1:1", "label": "", "language": "", "channels": null, "codec": "" }
+      ],
+      "text": [
+        { "id": "2:0", "label": "Synthetic", "language": "fre" }
+      ],
+      "selected": { "video": "0:1", "audio": "1:0", "text": "2:0" }
+    }
+  },
+  {
+    "name": "tracks",
+    "data": {
+      "video": [],
+      "audio": [],
+      "text": [],
+      "selected": { "video": "auto", "audio": null, "text": "off" }
+    }
+  },
+  { "name": "format", "data": { "fps": 25.0, "channels": 2 } },
+  { "name": "format", "data": { "fps": 50.0 } },
+  { "name": "format", "data": { "channels": 6 } },
+  { "name": "pip", "data": { "supported": true, "tv": false, "active": true } },
+  { "name": "pipAction", "data": { "action": "play" } },
+  { "name": "pipAction", "data": { "action": "pause" } },
+  { "name": "pipAction", "data": { "action": "next" } },
+  { "name": "pipAction", "data": { "action": "previous" } }
+]

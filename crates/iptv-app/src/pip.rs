@@ -36,9 +36,9 @@
 
 use iptv_core::pip::{Change, OnLeave};
 use iptv_core::pip_window::Exit;
+use iptv_player_mpv::PipAction;
 use iptv_settings::keys::PIP_ON_LEAVE;
 use nsh_core::prelude::*;
-use serde_json::{Value, json};
 
 use crate::{Ui, ViewMode};
 
@@ -134,10 +134,7 @@ pub fn exit(ui: Ui, how: Exit) -> bool {
 
 /// The desktop window opened or closed.
 fn report(ui: Ui, active: bool) {
-    on_state(
-        ui,
-        &json!({ "supported": true, "tv": false, "active": active }),
-    );
+    on_state(ui, true, false, active);
 }
 
 /// Surface `surface`'s `pip` prop: `{auto, enter, window}` for surface 0
@@ -161,9 +158,7 @@ pub fn prop(ui: Ui, surface: usize) -> Option<iptv_player_mpv::PipProps> {
 }
 
 /// The host's `pip` event.
-pub fn on_state(ui: Ui, data: &Value) {
-    let flag = |name: &str| data[name].as_bool().unwrap_or(false);
-    let (supported, tv, active) = (flag("supported"), flag("tv"), flag("active"));
+pub fn on_state(ui: Ui, supported: bool, tv: bool, active: bool) {
     let mut next = ui.pip.get_untracked();
     let change = next.report(supported, tv, active);
     if next == ui.pip.get_untracked() {
@@ -197,14 +192,12 @@ fn entered(ui: Ui) {
 }
 
 /// The host's `pipAction` event: one of the window's buttons.
-pub fn on_action(ui: Ui, data: &Value) {
-    let action = data["action"].as_str().unwrap_or("?");
-    log::info!("iptv pip: {action}");
+pub fn on_action(ui: Ui, action: PipAction) {
+    log::info!("iptv pip: {}", action.wire());
     match action {
-        "play" => ui.paused.set(false),
-        "pause" => ui.paused.set(true),
-        "next" => crate::player_keys::zap(ui, 1),
-        "previous" => crate::player_keys::zap(ui, -1),
-        _ => {}
+        PipAction::Play => ui.paused.set(false),
+        PipAction::Pause => ui.paused.set(true),
+        PipAction::Next => crate::player_keys::zap(ui, 1),
+        PipAction::Previous => crate::player_keys::zap(ui, -1),
     }
 }
