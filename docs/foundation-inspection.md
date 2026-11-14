@@ -27,8 +27,9 @@ Closing an inspection cancels its request and rejects late replies.
 ## Interpreting the results
 
 Coverage is measured over a half-open UTC interval. It distinguishes source
-failure, guide deliberately disabled, an unresolved saved choice, no match,
-ambiguous names, empty/stale/partial schedules and suspicious timing. Fresh
+failure, guide deliberately disabled, an unresolved saved choice, missing
+identity metadata, no match, ambiguous names, empty/stale/partial schedules
+and suspicious timing. Fresh
 programme data is evidence that a feed works; it does not establish that it
 belongs to the intended station. Regional and `+1` labels remain distinct.
 
@@ -71,8 +72,9 @@ the guide display reader. There are at most 16 admitted analysis requests per
 owner, a three-second maximum query deadline, at most 64 enabled selected
 sources, 200 results per page, 256 input query bytes and a 31-day maximum
 programme window. Successful empty results, unavailable source, denied
-content, failed storage and expired evidence are different outcomes. Inspection
-excludes blocked content; hiding is a separate presentation filter. Complete
+content, failed storage and expired evidence are different outcomes. Catalogue
+and programme queries exclude blocked content; hiding is a separate
+presentation filter. Complete
 PIN/access-control workflows remain in the application feature roadmap.
 
 Probes use a 60-second maximum end-to-end deadline, three redirects, 32 MiB

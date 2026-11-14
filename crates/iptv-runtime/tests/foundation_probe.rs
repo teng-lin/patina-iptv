@@ -332,6 +332,17 @@ fn changed_config_and_forged_evidence_cannot_reuse_a_stage() {
     let source = seed(directory.path(), server.url(), 0);
     let runtime = owner(directory.path());
     let summary = probe(&runtime, source).unwrap();
+    let selected = support::block_on(runtime.probe_candidates(
+        summary.evidence.clone(),
+        String::new(),
+        None,
+        50,
+        control(),
+    ))
+    .unwrap()
+    .items
+    .remove(0)
+    .key;
     let mut forged = summary.evidence.clone();
     forged.digest[0] ^= 1;
     assert!(matches!(
@@ -353,6 +364,21 @@ fn changed_config_and_forged_evidence_cannot_reuse_a_stage() {
             None,
             50,
             control()
+        )),
+        Err(InspectionError::StaleEvidence)
+    );
+    let refreshed = probe(&runtime, source).unwrap();
+    assert_ne!(selected.incarnation, refreshed.evidence.incarnation);
+    // A new snapshot must never retarget the candidate selected from the old list.
+    assert_eq!(
+        support::block_on(runtime.probe_schedule(
+            refreshed.evidence,
+            selected,
+            TimeWindow {
+                from: 1_800_000_000,
+                to: 1_800_007_200
+            },
+            control(),
         )),
         Err(InspectionError::StaleEvidence)
     );

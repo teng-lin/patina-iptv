@@ -182,6 +182,7 @@ fn candidates(ui: Ui, subject: ChannelRef, next: bool) {
     });
 }
 fn inspect_link(ui: Ui) {
+    update(ui, |s| s.typing = false);
     let Some((screen, id, control)) = begin(ui) else {
         return;
     };
