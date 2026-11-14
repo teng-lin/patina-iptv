@@ -32,7 +32,16 @@ async fn hls_redirect_segments_keys_and_maps_scope_headers_by_exact_origin() {
     let to = second.url("/redirected.ts");
     let origin = TestServer::http(move |request| match request.path.as_str() {
         "/start.m3u8" => Resp::redirect(302, "/path/list.m3u8"),
-        "/path/list.m3u8" => Resp::ok(format!("#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin\"\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXT-X-MEDIA:TYPE=AUDIO,URI=\"{external}\"\n#EXT-X-I-FRAME-STREAM-INF:URI=\"iframes.m3u8\"\n#EXTINF:2,\nsegment.ts\n#EXTINF:2,\nredirect.ts\n#EXTINF:2,\n{external}\n")),
+        "/path/list.m3u8" => Resp::ok(format!(
+            "#EXTM3U\n\
+             #EXT-X-KEY:METHOD=AES-128,URI=\"key.bin\"\n\
+             #EXT-X-MAP:URI=\"init.mp4\"\n\
+             #EXT-X-MEDIA:TYPE=AUDIO,URI=\"{external}\"\n\
+             #EXT-X-I-FRAME-STREAM-INF:URI=\"iframes.m3u8\"\n\
+             #EXTINF:2,\nsegment.ts\n\
+             #EXTINF:2,\nredirect.ts\n\
+             #EXTINF:2,\n{external}\n"
+        )),
         "/path/redirect.ts" => Resp::redirect(302, &to),
         "/path/iframes.m3u8" => Resp::ok("#EXTM3U\n"),
         _ => Resp::ok(vec![0x47, 0, 1, 2, 3, 4]),

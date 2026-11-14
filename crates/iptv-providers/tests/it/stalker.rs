@@ -938,7 +938,9 @@ fn malformed_fields_never_panic() {
 #[test]
 fn malformed_optional_commands_and_duplicate_keys_keep_valid_page_rows() {
     let response = HttpResponse::ok(
-        r#"{"js":{"data":[null,17,[],"ignored",{"id":1,"name":"Old","name":"Synthetic","cmd":"http://media.example.test/1","cmds":false},{"id":2,"name":"Synthetic 2","cmds":[null,17,{"url":"http://media.example.test/2"}]}]}}"#,
+        "{\"js\":{\"data\":[null,17,[],\"ignored\",\
+         {\"id\":1,\"name\":\"Old\",\"name\":\"Synthetic\",\"cmd\":\"http://media.example.test/1\",\"cmds\":false},\
+         {\"id\":2,\"name\":\"Synthetic 2\",\"cmds\":[null,17,{\"url\":\"http://media.example.test/2\"}]}]}}",
     );
     let page = iptv_providers::stalker::parse_channel_page(&response).unwrap();
     assert_eq!(page.items.items.len(), 2);

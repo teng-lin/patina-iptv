@@ -270,7 +270,13 @@ impl XtreamSim {
             None | Some("get_account_info" | "get_profile") => match self.fail_account {
                 Some(s) => SimResponse::status(s),
                 None => SimResponse::ok(format!(
-                    r#"{{"user_info":{{"username":"{XT_USER}","password":"{XT_PASS}","auth":1,"status":"{}","exp_date":"{}","is_trial":"0","active_cons":"0","max_connections":"1","allowed_output_formats":["m3u8","ts"]}},"server_info":{{"url":"127.0.0.1","port":"80","server_protocol":"http","timezone":"UTC","timestamp_now":{NOW},"time_now":"2027-01-15 08:00:00"}}}}"#,
+                    "{{\"user_info\":{{\"username\":\"{XT_USER}\",\"password\":\"{XT_PASS}\",\
+                     \"auth\":1,\"status\":\"{}\",\"exp_date\":\"{}\",\"is_trial\":\"0\",\
+                     \"active_cons\":\"0\",\"max_connections\":\"1\",\
+                     \"allowed_output_formats\":[\"m3u8\",\"ts\"]}},\
+                     \"server_info\":{{\"url\":\"127.0.0.1\",\"port\":\"80\",\
+                     \"server_protocol\":\"http\",\"timezone\":\"UTC\",\
+                     \"timestamp_now\":{NOW},\"time_now\":\"2027-01-15 08:00:00\"}}}}",
                     self.status, self.exp_date
                 )),
             },
@@ -287,7 +293,10 @@ impl XtreamSim {
                 let items: Vec<String> = (1..=self.channels)
                     .map(|i| {
                         format!(
-                            r#"{{"num":{i},"name":"Synthetic {i}","stream_type":"live","stream_id":{i},"stream_icon":"http://img.example.com/{i}.png","epg_channel_id":"ch{i}.example","category_id":"live{}","tv_archive":{},"tv_archive_duration":3}}"#,
+                            "{{\"num\":{i},\"name\":\"Synthetic {i}\",\"stream_type\":\"live\",\
+                             \"stream_id\":{i},\"stream_icon\":\"http://img.example.com/{i}.png\",\
+                             \"epg_channel_id\":\"ch{i}.example\",\"category_id\":\"live{}\",\
+                             \"tv_archive\":{},\"tv_archive_duration\":3}}",
                             i % self.categories.max(1),
                             u8::from(i % 10 == 0)
                         )
@@ -299,7 +308,15 @@ impl XtreamSim {
                 Some(s) => SimResponse::status(s),
                 None => {
                     let items: Vec<String> = (1..=self.vod)
-                        .map(|i| format!(r#"{{"num":{i},"name":"Film {i}","stream_type":"movie","stream_id":{},"category_id":"vod{}","container_extension":"mp4","rating":"7.5"}}"#, 1000 + i, i % self.categories.max(1)))
+                        .map(|i| {
+                            format!(
+                                "{{\"num\":{i},\"name\":\"Film {i}\",\"stream_type\":\"movie\",\
+                                 \"stream_id\":{},\"category_id\":\"vod{}\",\
+                                 \"container_extension\":\"mp4\",\"rating\":\"7.5\"}}",
+                                1000 + i,
+                                i % self.categories.max(1)
+                            )
+                        })
                         .collect();
                     SimResponse::ok(format!("[{}]", items.join(",")))
                 }
@@ -423,7 +440,10 @@ impl StalkerSim {
                 let rows: Vec<String> = (start..(start + self.page_size).min(self.channels))
                     .map(|i| {
                         format!(
-                            r#"{{"id":"{}","name":"Portal {i}","number":"{}","cmd":"ffmpeg http://127.0.0.1/ch/{i}.m3u8","tv_genre_id":"{}","xmltv_id":"ch{i}.example","use_http_tmp_link":"0","use_load_balancing":"0"}}"#,
+                            "{{\"id\":\"{}\",\"name\":\"Portal {i}\",\"number\":\"{}\",\
+                             \"cmd\":\"ffmpeg http://127.0.0.1/ch/{i}.m3u8\",\"tv_genre_id\":\"{}\",\
+                             \"xmltv_id\":\"ch{i}.example\",\"use_http_tmp_link\":\"0\",\
+                             \"use_load_balancing\":\"0\"}}",
                             100 + i,
                             i + 1,
                             i % self.genres.max(1) + 1

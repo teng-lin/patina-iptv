@@ -144,7 +144,11 @@ mod tests {
     #[test]
     fn nested_bases_templates_and_absolute_segments_stay_on_relay() {
         let base = Url::parse("https://origin.example.test/manifest/main.mpd").unwrap();
-        let body = br#"<MPD><BaseURL>../video/</BaseURL><Period><AdaptationSet><Representation><SegmentTemplate initialization="init.mp4" media="part-$Number$.m4s" index="https://cdn.example.test/index"/><SegmentList><SegmentURL media="https://cdn.example.test/one.m4s"/></SegmentList></Representation></AdaptationSet></Period></MPD>"#;
+        let body = b"<MPD><BaseURL>../video/</BaseURL><Period><AdaptationSet>\
+<Representation><SegmentTemplate initialization=\"init.mp4\" \
+media=\"part-$Number$.m4s\" index=\"https://cdn.example.test/index\"/>\
+<SegmentList><SegmentURL media=\"https://cdn.example.test/one.m4s\"/>\
+</SegmentList></Representation></AdaptationSet></Period></MPD>";
         let out = String::from_utf8(rewrite_dash(body, &base, "http://127.0.0.1:1/cap/").unwrap())
             .unwrap();
         assert!(
