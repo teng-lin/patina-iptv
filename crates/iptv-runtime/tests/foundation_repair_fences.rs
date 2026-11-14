@@ -435,9 +435,12 @@ fn a_failed_postcommit_refresh_recovers_without_repeating_the_saved_mutation() {
         let operation = host
             .drive(owner.guide_repair_operation(saved.operation.clone()))
             .unwrap();
-        operation.phase == OperationPhase::ReadyToVerify
-            && server.guides.load(Ordering::SeqCst) >= 2
+        operation.phase == OperationPhase::Failed && server.guides.load(Ordering::SeqCst) >= 2
     });
+    let failed_operation = host
+        .drive(owner.guide_repair_operation(saved.operation.clone()))
+        .unwrap();
+    assert_eq!(failed_operation.effective, Effective::Failed);
     let failed = host
         .drive(owner.verify_guide_repair(
             saved.operation.clone(),
@@ -477,6 +480,11 @@ fn a_failed_postcommit_refresh_recovers_without_repeating_the_saved_mutation() {
             && recovered.verified_coverage
     );
     assert_eq!(recovered.programmes_available, 1);
+    let recovered_operation = host
+        .drive(owner.guide_repair_operation(saved.operation.clone()))
+        .unwrap();
+    assert_eq!(recovered_operation.effective, Effective::Installed);
+    assert_eq!(recovered_operation.phase, OperationPhase::Verified);
     let history = host
         .drive(owner.recent_guide_repairs(source, 10, InspectionControl::default()))
         .unwrap();
