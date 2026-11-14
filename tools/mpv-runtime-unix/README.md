@@ -18,7 +18,7 @@ offline restore) and `smoke.py` (synthetic MPEG-TS/HLS playback).
 | `linux/Dockerfile`, `linux/build.sh` | The Linux build: the Windows builder's pinned Ubuntu 24.04 image and package snapshot, plus the headers of the host libraries libmpv links dynamically. Compiles with networking disabled. |
 | `macos/build.sh`, `macos/xcode-version` | The macOS build on an Apple silicon runner with the pinned Xcode; no Docker, so the script isolates itself (see below). |
 | `smoke.py` | Plays generated MPEG-TS and local HLS through the exact library. |
-| `runtime-linux.json`, `runtime-macos.json` | The pinned dependency releases the app packaging fetches. Committed after a dependency release is published; until then packaging fails and says so. |
+| `runtime-linux.json`, `runtime-macos.json` | The pinned dependency releases the app packaging fetches. Matched to successful native candidates in `../ci/native-candidates.json`; `../ci/native_candidates.py` verifies a candidate before the dependency release exists. |
 
 ## What the runtimes contain
 
@@ -86,7 +86,7 @@ python3 tools/mpv-runtime-unix/runtime.py fetch --platform linux \
   --destination target/mpv-runtime-linux
 PATH="$PWD/target/mpv-runtime-linux-tools/bin:$PATH" \
 LIBRARY_PATH="$PWD/target/mpv-runtime-linux/lib" LD_LIBRARY_PATH="$PWD/target/mpv-runtime-linux/lib" \
-IPTV_REQUIRE_PLAYER_TESTS=1 cargo test -p iptv-app --lib --features test-support mpv::
+IPTV_REQUIRE_PLAYER_TESTS=1 cargo test -p iptv-player-mpv --lib
 ```
 
 ## Build on macOS
@@ -138,3 +138,11 @@ Never prune, delete or replace a dependency release or its source assets:
 every distributed AppImage and disk image names its runtime's source archive
 in `notices/mpv-runtime/SOURCE.txt`. Fix a bad release by changing the inputs
 and publishing a new digest.
+
+The relay guard update uses immutable Actions candidates for pre-merge checks.
+`tools/ci/promote-native-candidates.py` verifies the successful platform workflow,
+recipe digest, artifact ownership, committed manifest and all release checksums.
+Its dry run publishes nothing. `.github/workflows/promote-native.yml` publishes
+those exact assets only on a trusted master push, after merge, and refuses to
+overwrite an existing dependency release. The same guarded Linux library ships
+in a private directory in DEB, RPM and pacman packages as well as the AppImage.

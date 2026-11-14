@@ -63,6 +63,7 @@ impl Store {
             .map_err(|_| invalid("cannot create snapshot file"))?;
         drop(file);
         let result = (|| {
+            iptv_sqlcipher_init::initialize()?;
             let mut destination = Connection::open_with_flags(
                 path,
                 OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -116,6 +117,7 @@ impl Store {
     /// unknown schema objects as well as damaged, foreign-key-invalid and newer
     /// files. Migrations run only after the caller accepts the validated file.
     pub fn validate_snapshot(path: &Path) -> Result<()> {
+        iptv_sqlcipher_init::initialize()?;
         let conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -124,6 +126,7 @@ impl Store {
     }
 
     pub fn validate_encrypted_snapshot(path: &Path, key: &crate::DatabaseKey) -> Result<()> {
+        iptv_sqlcipher_init::initialize()?;
         let conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -159,6 +162,7 @@ impl Store {
         if user_version != version {
             return Err(invalid("snapshot schema version mismatch"));
         }
+        iptv_sqlcipher_init::initialize()?;
         let mut expected = Connection::open_in_memory()?;
         migrate::migrate_to(&mut expected, version, 0)?;
         if migrate::schema_dump(conn)? != migrate::schema_dump(&expected)? {

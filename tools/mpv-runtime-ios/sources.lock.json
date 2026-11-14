@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "sources": [
+    {
+      "name": "ffmpeg",
+      "version": "8.1.2",
+      "url": "https://github.com/FFmpeg/FFmpeg/archive/38b88335f99e76ed89ff3c93f877fdefce736c13.tar.gz",
+      "sha256": "2ae7e42343cfffb811d15cfe98b6d005f082595fcdf034d30a4ff90cfed9f9c6",
+      "license_files": [
+        "LICENSE.md",
+        "COPYING.LGPLv2.1",
+        "COPYING.LGPLv3",
+        "COPYING.GPLv2",
+        "COPYING.GPLv3"
+      ]
+    }
+  ]
+}

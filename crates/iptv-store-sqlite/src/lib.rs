@@ -149,6 +149,7 @@ impl Store {
             | OpenFlags::SQLITE_OPEN_CREATE
             | OpenFlags::SQLITE_OPEN_NO_MUTEX
             | OpenFlags::SQLITE_OPEN_URI;
+        iptv_sqlcipher_init::initialize()?;
         Self::init(Connection::open_with_flags(path, flags)?, options)
     }
 
@@ -158,6 +159,7 @@ impl Store {
     }
 
     pub fn open_in_memory_with(options: &OpenOptions) -> Result<Self> {
+        iptv_sqlcipher_init::initialize()?;
         Self::init(Connection::open_in_memory()?, options)
     }
 
@@ -198,6 +200,7 @@ impl Store {
             .filter(|path| !path.is_empty())
             .ok_or(StoreError::Unavailable("an in-memory store has no reader"))?;
         // No CREATE: the file must be the one this store opened.
+        iptv_sqlcipher_init::initialize()?;
         let conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE

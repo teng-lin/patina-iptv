@@ -12,6 +12,15 @@ fn main() {
 }
 
 fn macos() {
+    println!("cargo:rerun-if-env-changed=IPTV_RS_MPV_LIB_DIR");
+    if let Ok(directory) = std::env::var("IPTV_RS_MPV_LIB_DIR") {
+        assert!(
+            Path::new(&directory).join("libmpv.dylib").is_file(),
+            "missing pinned libmpv"
+        );
+        println!("cargo:rustc-link-search=native={directory}");
+        return;
+    }
     let pkg = std::process::Command::new("pkg-config")
         .args(["--variable=libdir", "mpv"])
         .output()

@@ -56,7 +56,7 @@ def recipe_digest(lock_path):
     value = hashlib.sha256()
     inputs = [("sources.lock.json", json.dumps(prepare.read_lock(lock_path)[0], sort_keys=True, separators=(",", ":")).encode())]
     for path in sorted(scripts.rglob("*")):
-        if path.is_file() and "__pycache__" not in path.parts and path.name != "sources.lock.json" and (path.suffix in {".py", ".sh", ".ps1", ".cmake", ".patch"} or path.name in {"Dockerfile", "Makefile"}):
+        if path.is_file() and "__pycache__" not in path.parts and path.name != "sources.lock.json" and (path.suffix in {".py", ".sh", ".ps1", ".cmake", ".patch", ".c", ".h"} or path.name in {"Dockerfile", "Makefile"}):
             inputs.append((path.relative_to(scripts).as_posix(), path.read_bytes().replace(b"\r\n", b"\n")))
     for name, content in sorted(inputs):
         value.update(name.encode() + b"\0" + str(len(content)).encode() + b"\0" + content)

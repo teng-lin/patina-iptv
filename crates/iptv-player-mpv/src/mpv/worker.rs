@@ -331,6 +331,16 @@ fn execute(mpv: &Mpv, cmd: Cmd, bridge: &mut Bridge) -> Vec<Note> {
                     .get(..8)
                     .is_some_and(|s| s.eq_ignore_ascii_case("https://"))
             {
+                if !mpv.get(c"protocol-list").is_some_and(|protocols| {
+                    protocols
+                        .split(|c: char| !c.is_ascii_alphanumeric() && c != '-')
+                        .any(|protocol| protocol == "patina-relay-guard-v1")
+                }) {
+                    mpv.command(&["stop"]);
+                    return vec![Note::TransportError(
+                        "ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED",
+                    )];
+                }
                 let Ok(transport) = iptv_net::playback::PlaybackRelay::start_with_policy(
                     &url,
                     &bridge.headers,
@@ -339,10 +349,22 @@ fn execute(mpv: &Mpv, cmd: Cmd, bridge: &mut Bridge) -> Vec<Note> {
                     mpv.command(&["stop"]);
                     return vec![Note::Loading(None)];
                 };
+                let lavf = options
+                    .iter()
+                    .find(|(name, _)| *name == "demuxer-lavf-o")
+                    .map(|(_, value)| value.as_str())
+                    .unwrap_or_default();
+                if !native_guard(mpv, transport.prefix(), lavf) {
+                    mpv.command(&["stop"]);
+                    return vec![Note::TransportError(
+                        "ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED",
+                    )];
+                }
                 let local = transport.url().to_owned();
                 bridge.transport = Some(transport);
                 local
             } else {
+                mpv.set("stream-lavf-o", "");
                 url
             };
             let ok = mpv.command(&["loadfile", &url, "replace"]);
@@ -403,6 +425,20 @@ fn execute(mpv: &Mpv, cmd: Cmd, bridge: &mut Bridge) -> Vec<Note> {
             fps.into_iter().chain(channels).collect()
         }
     }
+}
+
+/// Every native IO open inherits this handle's exact relay capability, including
+/// redirects and the spare entry opened by libavformat's prefetch path.
+fn native_guard(mpv: &Mpv, prefix: &str, lavf: &str) -> bool {
+    let capability = format!("patina_http_prefix={prefix}");
+    let demuxer = if lavf.is_empty() {
+        capability.clone()
+    } else {
+        format!("{lavf},{capability}")
+    };
+    mpv.try_set("demuxer-lavf-propagate-opts", "yes")
+        && mpv.try_set("stream-lavf-o", &capability)
+        && mpv.try_set("demuxer-lavf-o", &demuxer)
 }
 
 /// The id of the playlist's last entry.
@@ -529,7 +565,16 @@ impl Bridge {
         // default, three segments back, would replay those seconds). A
         // prefetch opens with the global options, not the entry's own: set
         // them now that the current entry is open ([`Cmd::Load`] clears them).
-        mpv.set("demuxer-lavf-o", SPARE_OPTIONS);
+        let guarded = self
+            .transport
+            .as_ref()
+            .is_none_or(|relay| native_guard(mpv, relay.prefix(), SPARE_OPTIONS));
+        if !guarded {
+            return;
+        }
+        if self.transport.is_none() {
+            mpv.set("demuxer-lavf-o", SPARE_OPTIONS);
+        }
         if mpv.command(&["loadfile", url, "append"]) {
             self.spare = last_entry(mpv);
         }
@@ -822,6 +867,96 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn two_live_relays_prefetch_with_independent_native_capabilities() {
+        use std::io::{Read, Write};
+        use std::sync::atomic::AtomicUsize;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let requests = Arc::new([AtomicUsize::new(0), AtomicUsize::new(0)]);
+        let server_stop = stopped.clone();
+        let seen = requests.clone();
+        let server = std::thread::spawn(move || {
+            // Eight seconds of generated mono PCM; the input reaches EOF while
+            // its audio still plays, allowing mpv to prefetch the spare entry.
+            let samples = vec![0_u8; 8 * 8000 * 2];
+            let mut wav = b"RIFF".to_vec();
+            wav.extend_from_slice(&(36_u32 + samples.len() as u32).to_le_bytes());
+            wav.extend_from_slice(b"WAVEfmt ");
+            wav.extend_from_slice(&16_u32.to_le_bytes());
+            wav.extend_from_slice(&1_u16.to_le_bytes());
+            wav.extend_from_slice(&1_u16.to_le_bytes());
+            wav.extend_from_slice(&8000_u32.to_le_bytes());
+            wav.extend_from_slice(&16000_u32.to_le_bytes());
+            wav.extend_from_slice(&2_u16.to_le_bytes());
+            wav.extend_from_slice(&16_u16.to_le_bytes());
+            wav.extend_from_slice(b"data");
+            wav.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+            wav.extend_from_slice(&samples);
+            while !server_stop.load(Ordering::Acquire) {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    std::thread::sleep(Duration::from_millis(5));
+                    continue;
+                };
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+                let mut request = [0; 4096];
+                let length = stream.read(&mut request).unwrap_or(0);
+                let request = String::from_utf8_lossy(&request[..length]);
+                let index = usize::from(request.contains("/beta.wav"));
+                seen[index].fetch_add(1, Ordering::AcqRel);
+                let headers = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: audio/wav\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    wav.len()
+                );
+                let _ = stream
+                    .write_all(headers.as_bytes())
+                    .and_then(|()| stream.write_all(&wav));
+            }
+        });
+        struct Origin(Arc<AtomicBool>, Option<std::thread::JoinHandle<()>>);
+        impl Drop for Origin {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+                self.1.take().unwrap().join().unwrap();
+            }
+        }
+        let _origin = Origin(stopped, Some(server));
+        fn policy(public_only: bool) -> iptv_net::playback::PlaybackPolicy {
+            iptv_net::playback::PlaybackPolicy {
+                public_only,
+                ..Default::default()
+            }
+        }
+        let previous = super::super::POLICY.replace(policy);
+        let first = Worker::spawn(mpv(), || {});
+        let second = Worker::spawn(mpv(), || {});
+        super::super::POLICY.set(previous);
+        for (worker, name) in [(&first, "alpha"), (&second, "beta")] {
+            worker.send(Cmd::Load {
+                public_only: false,
+                url: format!("http://{address}/{name}.wav"),
+                live: true,
+                options: super::super::map::load_options(true, false),
+            });
+            let notes = notes_until(worker, |note| matches!(note, Note::Restarted { .. }));
+            assert!(
+                !notes
+                    .iter()
+                    .any(|note| matches!(note, Note::TransportError(_)))
+            );
+        }
+        wait_until("both guarded live streams to prefetch", || {
+            requests
+                .iter()
+                .all(|count| count.load(Ordering::Acquire) >= 2)
+        });
+        first.send(Cmd::Stop);
+        second.send(Cmd::Stop);
     }
 
     #[test]

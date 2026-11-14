@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "repository": "teng-lin/patina-iptv",
+  "platforms": {
+    "windows": {
+      "tag": "mpv-runtime-2fc49540977a2b099b68167c12c90aad2c8ca79b85bb5d8ac73806ca06a2af60",
+      "run_id": 43637609565,
+      "source_commit": "b417a1e1b7fb03fa8213d28513e73ada7bbabbb7",
+      "artifact_id": 14130478469,
+      "artifact_sha256": "ef854432a135e7ac3c6bb431d23789839fe7ea0ab8413555b98fa26aa0744d30"
+    },
+    "macos": {
+      "tag": "mpv-runtime-macos-a58e38daa58dbb5f38cb343c21c2477509e828af2ca218fb198af3ba13444120",
+      "run_id": 43637611239,
+      "source_commit": "b417a1e1b7fb03fa8213d28513e73ada7bbabbb7",
+      "artifact_id": 14131286617,
+      "artifact_sha256": "d9f607f9e842bb82ef2e9047f242680e875d373e71124fedfdbbe83a0d5be2a0"
+    },
+    "linux": {
+      "tag": "mpv-runtime-linux-8bd2761d32a14451f45398048db01beee83c525dd6df946206faa61edda49fe7",
+      "run_id": 43640222107,
+      "source_commit": "d51d7b1cd244729810863cbcd1a7859f2f8eef76",
+      "artifact_id": 14132301942,
+      "artifact_sha256": "7116ded3138d8b52fea19559594479c63f4a07ed9482ac0fd03fb72ebe28d34a"
+    },
+    "ios": {
+      "tag": "mpv-runtime-ios-353506dc03abf1d3c8e928f3e79ed578bb750ad9c30c120b61adc7ce096301f9",
+      "run_id": 43642656818,
+      "source_commit": "ab69b1c72beb5a4e74f459d4a27ebe71e4fba4c4",
+      "artifact_id": 14132428503,
+      "artifact_sha256": "1ac1b272570039bd11fa85233bf4ab741e27bb382a3a1f21ddaf484d698b9362"
+    }
+  }
+}

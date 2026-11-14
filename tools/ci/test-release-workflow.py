@@ -175,9 +175,9 @@ SECRET_NAMES = sorted(set(re.findall(r"\bsecrets\.([A-Z0-9_]+)", WORKFLOW.read_t
 SIGNING_JOBS = ("sign", "windows-sign")
 
 
-def jobs():
+def jobs(path=WORKFLOW):
     """{job name: its text}. The file indents jobs by two spaces."""
-    text = WORKFLOW.read_text()
+    text = path.read_text()
     body = text[text.index("\njobs:\n") + len("\njobs:\n"):]
     starts = list(re.finditer(r"^  ([A-Za-z0-9_-]+):[ \t]*$", body, re.M))
     return {match[1]: body[match.start():(starts[index + 1].start() if index + 1 < len(starts) else len(body))]
@@ -478,6 +478,44 @@ class Plan(unittest.TestCase):
             with self.subTest(arguments=arguments):
                 result, outputs = self.plan(*arguments, **environment)
                 self.assert_refused(result, outputs, message)
+
+
+class NativeDependencyWorkflow(unittest.TestCase):
+    def test_branch_candidates_cannot_publish(self):
+        native = jobs(ROOT / ".github/workflows/mpv-runtime.yml")
+        publishers = {name: block for name, block in native.items()
+                      if re.search(r"^      contents: write$", block, re.M)}
+        expected = {"windows": "publish", "linux": "linux-publish", "macos": "macos-publish", "ios": "ios-publish"}
+        self.assertEqual(set(publishers), set(expected.values()))
+        guard = re.search(r"^        if: (.+)$", native["guard"], re.M)[1]
+        self.assertIn("exit 1", native["guard"])
+        for ref in ("refs/heads/master", "refs/heads/synthetic-branch"):
+            for publish in (False, True):
+                for platform in expected:
+                    with self.subTest(ref=ref, publish=publish, platform=platform):
+                        context = {"github": {"ref": ref},
+                                   "inputs": {"platform": platform, "publish": publish}}
+                        refused = evaluate(guard, context)
+                        self.assertEqual(refused, publish and ref != "refs/heads/master")
+                        scheduled = {name for name, block in publishers.items()
+                                     if not refused and evaluate(re.search(r"^    if: (.+)$", block, re.M)[1], context)}
+                        self.assertEqual(scheduled,
+                                         {expected[platform]} if publish and not refused else set())
+
+
+class NativePromotionWorkflow(unittest.TestCase):
+    def test_promotion_only_runs_after_a_master_push(self):
+        workflow = ROOT / ".github/workflows/promote-native.yml"
+        native = jobs(workflow)
+        self.assertEqual(set(native), {"promote"})
+        condition = re.search(r"^    if: (.+)$", native["promote"], re.M)[1]
+        for event in ("push", "pull_request", "workflow_dispatch", "pull_request_target"):
+            for ref in ("refs/heads/master", "refs/heads/synthetic", "refs/pull/56/merge"):
+                with self.subTest(event=event, ref=ref):
+                    context = {"github": {"event_name": event, "ref": ref}}
+                    self.assertEqual(bool(evaluate(condition, context)), event == "push" and ref == "refs/heads/master")
+        self.assertIn("python3 tools/ci/promote-native-candidates.py --publish", native["promote"])
+        self.assertIn("persist-credentials: false", native["promote"])
 
 
 if __name__ == "__main__":

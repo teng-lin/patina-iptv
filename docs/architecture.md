@@ -8,7 +8,7 @@ service boundary and compatibility policy are in
 
 ## Crates and the direction of dependencies
 
-The workspace has fourteen crates. Dependencies only point
+The workspace has fifteen crates. Dependencies only point
 down: a crate may depend on crates in its own layer or below, never above.
 
 ```text
@@ -32,7 +32,8 @@ down: a crate may depend on crates in its own layer or below, never above.
 | `iptv-library` | `iptv-core`, `iptv-providers`, `iptv-epg` |
 | `iptv-import` | `iptv-core`, `iptv-providers`, `iptv-epg`, `iptv-settings`, `iptv-library` |
 | `iptv-net` | `iptv-providers`, `iptv-import` |
-| `iptv-store-sqlite` | `iptv-providers`, `iptv-epg`, `iptv-import`, `iptv-library` |
+| `iptv-store-sqlite` | `iptv-providers`, `iptv-epg`, `iptv-import`, `iptv-library`, `iptv-sqlcipher-init` |
+| `iptv-sqlcipher-init` | none |
 | `iptv-player-mpv` | `iptv-core`, `iptv-net`, platform NSH components |
 | `iptv-runtime` | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-library`, `iptv-net`, `iptv-providers`, `iptv-search`, `iptv-settings`, `iptv-store-sqlite` |
 | `iptv-app` | portable crates, `iptv-runtime`, `iptv-net`, `iptv-player-mpv`, NSH |
@@ -40,13 +41,22 @@ down: a crate may depend on crates in its own layer or below, never above.
 | Layer | Crates | May use |
 | --- | --- | --- |
 | Portable core | `iptv-core`, `iptv-nav`, `iptv-settings`, `iptv-providers`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-search`, `iptv-library` | Plain Rust only. No NSH, no platform APIs, no blocking I/O, no clock, no async runtime. |
-| Native adapters | `iptv-net`, `iptv-store-sqlite` | Tokio and reqwest; SQLite. No NSH. |
+| Native adapters | `iptv-net`, `iptv-store-sqlite`, `iptv-sqlcipher-init` | Tokio and reqwest; SQLite. No NSH. |
 | Native application | `iptv-runtime` | Native services, Tokio, filesystem I/O and adapter value types. No NSH. Host JNI and credential brokers stay in the shell. |
 | Player adapter | `iptv-player-mpv` | NSH native components, platform APIs, libmpv. The Android build contains only the wire contract and track parser. |
 | Shell | `iptv-app` | NSH, the adapters, platform APIs. |
 
 `tools/check.sh` builds every portable crate for `wasm32-unknown-unknown`.
 That build is what keeps platform code out of them.
+
+`iptv-sqlcipher-init` is the narrow native FFI boundary for the pinned database
+library. It completes SQLite core initialization, invokes SQLCipher's idempotent
+extra hook, then probes a fresh connection for the export auto-extension before
+allowing store connections. Failed initialization stays an error; only successful
+process readiness is cached, with no key, storage path or application owner.
+The store crate remains `forbid(unsafe_code)`. Readers, staging databases, private
+files and legacy snapshot conversion use the same initialization boundary.
+
 
 What each portable crate owns:
 
