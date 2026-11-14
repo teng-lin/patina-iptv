@@ -291,10 +291,11 @@ jobs:
           cache: 'false'
       - name: Set release metadata
         run: python3 tools/ci/version.py
-      - name: Write the CycloneDX SBOM of the locked Rust dependency graph
+      - name: Write CycloneDX SBOMs for the locked Rust graph and bundled media runtime
         run: |
           cargo install cargo-cyclonedx --version 0.5.10 --locked
           python3 tools/ci/sbom.py "dist/Patina-$VERSION-sbom.cdx.json"
+          python3 tools/ci/sbom.py media-runtime tools/mpv-runtime/sources.lock.json "dist/Patina-$VERSION-media-runtime-sbom.cdx.json" "$VERSION"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: packages-sbom

@@ -44,6 +44,89 @@ class Sbom(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "nsh-core"):
             sbom.finish(document(names=("iptv-core", "iptv-net", "iptv-store-sqlite")), ROOT, "a" * 40)
 
+    def test_media_runtime_sbom_from_components_dict(self):
+        inventory = {
+            "schema": 1,
+            "components": [
+                {
+                    "name": "mpv",
+                    "version": "0.42.0",
+                    "url": "https://github.com/mpv-player/mpv/archive/test.tar.gz",
+                    "sha256": "1" * 64,
+                    "licenses": [{"path": "LICENSE.LGPL", "sha256": "2" * 64}],
+                },
+                {
+                    "name": "ffmpeg",
+                    "version": "8.1.3",
+                    "url": "https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz",
+                    "sha256": "3" * 64,
+                    "license_files": ["COPYING.LGPLv2.1"],
+                },
+            ],
+        }
+        raw = sbom.media_runtime_sbom(inventory, version="1.0.0")
+        doc = json.loads(raw)
+        self.assertEqual(doc["bomFormat"], "CycloneDX")
+        self.assertEqual(doc["metadata"]["component"]["name"], "patina-media-runtime")
+        self.assertEqual(len(doc["components"]), 2)
+        names = {c["name"] for c in doc["components"]}
+        self.assertEqual(names, {"mpv", "ffmpeg"})
+        mpv = next(c for c in doc["components"] if c["name"] == "mpv")
+        self.assertEqual(mpv["hashes"][0]["content"], "1" * 64)
+        self.assertEqual(mpv["licenses"][0]["license"]["name"], "LICENSE.LGPL")
+
+    def test_media_runtime_sbom_from_sources_lock(self):
+        lock = {
+            "schema": 1,
+            "toolchain": {
+                "name": "llvm-mingw",
+                "version": "20261104",
+                "url": "https://example.com/llvm-mingw.tar.xz",
+                "sha256": "4" * 64,
+                "license_files": ["LICENSE.TXT"],
+            },
+            "sources": [
+                {
+                    "name": "zlib",
+                    "version": "1.3.1",
+                    "url": "https://example.com/zlib.tar.gz",
+                    "sha256": "5" * 64,
+                    "license_files": ["LICENSE"],
+                }
+            ],
+        }
+        raw = sbom.media_runtime_sbom(lock)
+        doc = json.loads(raw)
+        self.assertEqual(len(doc["components"]), 2)
+        names = {c["name"] for c in doc["components"]}
+        self.assertEqual(names, {"llvm-mingw", "zlib"})
+
+    def test_android_classpath_sbom(self):
+        report = {
+            "dependencies": [
+                {
+                    "moduleName": "androidx.annotation:annotation",
+                    "moduleUrl": "https://developer.android.com/jetpack/androidx/releases/annotation#1.8.1",
+                    "moduleVersion": "1.8.1",
+                    "moduleLicense": "The Apache Software License, Version 2.0",
+                    "moduleLicenseUrl": "http://www.apache.org/licenses/LICENSE-2.0.txt",
+                },
+                {
+                    "moduleName": "com.google.errorprone:error_prone_annotations",
+                    "moduleVersion": "2.27.0",
+                },
+            ]
+        }
+        raw = sbom.android_classpath_sbom(report, version="1.0.0")
+        doc = json.loads(raw)
+        self.assertEqual(doc["bomFormat"], "CycloneDX")
+        self.assertEqual(doc["metadata"]["component"]["name"], "patina-android-classpath")
+        self.assertEqual(len(doc["components"]), 2)
+        androidx = next(c for c in doc["components"] if c["name"] == "annotation")
+        self.assertEqual(androidx["group"], "androidx.annotation")
+        self.assertEqual(androidx["purl"], "pkg:maven/androidx.annotation/annotation@1.8.1")
+        self.assertEqual(androidx["licenses"][0]["license"]["name"], "The Apache Software License, Version 2.0")
+
 
 if __name__ == "__main__":
     unittest.main()
