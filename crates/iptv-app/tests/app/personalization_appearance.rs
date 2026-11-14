@@ -13,11 +13,15 @@ fn settings(app: &mut Headless) {
 }
 fn setting(app: &mut Headless, label: &str) {
     let selector = format!("text:{label}");
+    // Page/focus effects can still recycle and scroll rows after Right. Wait
+    // for that layout before targeting a row by its visible text.
+    assert!(app.idle(Duration::from_millis(50)).unwrap());
     for _ in 0..100 {
         if app.screen().matches(&selector).unwrap() && app.press(&selector).is_ok() {
             return;
         }
         step(app.press_key("down"));
+        assert!(app.idle(Duration::from_millis(50)).unwrap());
     }
     panic!("missing {label}");
 }
