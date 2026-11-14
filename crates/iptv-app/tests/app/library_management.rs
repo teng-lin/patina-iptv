@@ -7,7 +7,7 @@ use iptv_store_sqlite::{ChannelQuery, SourcePolicy};
 use nsh_core::{Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const PLAYLIST: &str = "#EXTM3U\n\
                         #EXTINF:-1 group-title=\"News\",Local A\n\
@@ -52,6 +52,34 @@ fn read_bindings(dir: &std::path::Path) -> Vec<iptv_settings::KeyBinding> {
         iptv_settings::keys::KEY_OVERRIDES,
         &iptv_settings::Target::Global,
     )
+}
+
+fn saved_bindings(
+    app: &mut Headless,
+    dir: &std::path::Path,
+    expected: impl Fn(&[iptv_settings::KeyBinding]) -> bool,
+) -> Vec<iptv_settings::KeyBinding> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        // The UI edits optimistically; its custom/default marker is not a
+        // durability acknowledgement. Observe the actual atomic publication.
+        if let Ok(text) = std::fs::read_to_string(dir.join("settings.json"))
+            && let Ok((settings, _)) = iptv_settings::Settings::from_json(&text)
+        {
+            let bindings = settings.key_bindings(
+                iptv_settings::keys::KEY_OVERRIDES,
+                &iptv_settings::Target::Global,
+            );
+            if expected(&bindings) {
+                return bindings;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "remote bindings did not reach the expected durable state"
+        );
+        step(app.wait(Duration::from_millis(10)));
+    }
 }
 #[test]
 fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted() {
@@ -292,12 +320,7 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     step(app.wait_for("id:remote-Save"));
     step(app.press("id:remote-Save"));
     step(app.wait_for("text:/^Currently: .* · custom binding$/"));
-    let json = std::fs::read_to_string(dir.join("settings.json")).unwrap();
-    let (settings, _) = iptv_settings::Settings::from_json(&json).unwrap();
-    let bindings = settings.key_bindings(
-        iptv_settings::keys::KEY_OVERRIDES,
-        &iptv_settings::Target::Global,
-    );
+    let bindings = saved_bindings(&mut app, &dir, |bindings| bindings.len() == 1);
     assert_eq!(bindings.len(), 1);
     assert_eq!(bindings[0].action, "ignore");
     // Replacing the same key requires confirmation; Back keeps the previous value.
@@ -309,20 +332,14 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     step(app.wait_for_gone("text:Replace the existing binding?", Duration::from_secs(2)));
     step(app.press("id:remote-Clear"));
     step(app.wait_for("text:/^Currently: .* · default binding$/"));
-    let json = std::fs::read_to_string(dir.join("settings.json")).unwrap();
-    let (settings, _) = iptv_settings::Settings::from_json(&json).unwrap();
-    assert!(
-        settings
-            .key_bindings(
-                iptv_settings::keys::KEY_OVERRIDES,
-                &iptv_settings::Target::Global
-            )
-            .is_empty()
-    );
+    assert!(saved_bindings(&mut app, &dir, |bindings| bindings.is_empty()).is_empty());
     // Separate contexts/presses, physical capture, accepted replacement, and reset confirmation.
     step(app.press("id:remote-Save"));
     step(app.wait_for("text:/^Currently: .* · custom binding$/"));
-    assert_eq!(read_bindings(&dir).len(), 1);
+    assert_eq!(
+        saved_bindings(&mut app, &dir, |bindings| bindings.len() == 1).len(),
+        1
+    );
     step(app.press("id:remote-Context"));
     step(app.wait_for("id:remote-Press"));
     step(app.press("id:remote-Press"));
@@ -331,12 +348,12 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     step(app.press_key("green"));
     step(app.wait_for("text:Key: Green"));
     // A quiet headless batch does not acknowledge a queued settings action.
-    // Observe the captured key's unsaved state, then its saved state before
-    // reading the durable file (a busy engine can otherwise still show one).
+    // Observe the captured key's unsaved state, then its optimistic saved
+    // marker, and separately wait for the durable file publication.
     step(app.wait_for("text:/^Currently: .* · default binding$/"));
     step(app.press("id:remote-Save"));
     step(app.wait_for("text:/^Currently: .* · custom binding$/"));
-    let saved = read_bindings(&dir);
+    let saved = saved_bindings(&mut app, &dir, |bindings| bindings.len() == 2);
     assert_eq!(saved.len(), 2);
     assert!(saved.iter().any(|b| b.context.as_deref() == Some("groups")
         && b.key == "green"
@@ -353,11 +370,17 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     step(app.press_key("left"));
     step(app.press_key("enter"));
     // Replacement keeps the custom marker, so observe the confirmation closing
-    // after save() persists the new action rather than matching the old marker.
+    // after save(), then observe the new action's file publication.
     step(app.wait_for_gone("text:Replace the existing binding?", Duration::from_secs(2)));
-    assert_eq!(read_bindings(&dir).len(), 2);
+    let replaced = saved_bindings(&mut app, &dir, |bindings| {
+        bindings.len() == 2
+            && bindings
+                .iter()
+                .any(|b| b.key == "green" && b.action == "move_down")
+    });
+    assert_eq!(replaced.len(), 2);
     assert!(
-        read_bindings(&dir)
+        replaced
             .iter()
             .any(|b| b.key == "green" && b.action == "move_down")
     );
@@ -372,7 +395,7 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     step(app.press_key("enter"));
     step(app.wait_for_gone("text:Restore all defaults?", Duration::from_secs(2)));
     step(app.wait_for("text:/^Currently: .* · default binding$/"));
-    assert!(read_bindings(&dir).is_empty());
+    assert!(saved_bindings(&mut app, &dir, |bindings| bindings.is_empty()).is_empty());
     // Back closes the editor; reopening starts a fresh draft with defaults intact.
     step(app.back());
     step(app.wait_for_gone("id:remote-editor-screen", Duration::from_secs(2)));
@@ -392,7 +415,10 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     step(app.wait_for("text:Action: Search"));
     step(app.press("id:remote-Save"));
     step(app.wait_for("text:/^Currently: .* · custom binding$/"));
-    assert_eq!(read_bindings(&dir)[0].action, "open_search");
+    let bindings = saved_bindings(&mut app, &dir, |bindings| {
+        bindings.len() == 1 && bindings[0].action == "open_search"
+    });
+    assert_eq!(bindings[0].action, "open_search");
     step(app.press("id:remote-editor-screen >> text:Close"));
     step(app.back());
     step(app.back());
