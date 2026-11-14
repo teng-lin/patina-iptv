@@ -29,6 +29,7 @@ pub struct InspectionStage {
 }
 impl InspectionStage {
     pub fn create(path: &Path, key: &DatabaseKey) -> Result<Self> {
+        iptv_sqlcipher_init::initialize()?;
         let mut options = std::fs::OpenOptions::new();
         options.read(true).write(true).create_new(true);
         #[cfg(unix)]
@@ -62,6 +63,7 @@ impl InspectionStage {
         })
     }
     pub fn open(path: &Path, key: &DatabaseKey) -> Result<Self> {
+        iptv_sqlcipher_init::initialize()?;
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         key.apply(&conn)?;
         Ok(Self {
@@ -163,6 +165,59 @@ impl InspectionStage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::encryption::initialization_support;
+    #[test]
+    fn probe_stage_initialization_precedes_its_first_encrypted_connection() {
+        const CHILD: &str = "IPTV_INSPECTION_FIRST_CIPHER_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            for _ in 0..8 {
+                let output = initialization_support::child(
+                    "inspection_stage::tests::probe_stage_initialization_precedes_its_first_encrypted_connection",
+                    CHILD,
+                );
+                assert!(
+                    output.status.success(),
+                    "fresh probe opener failed:\n{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let begin = std::sync::Barrier::new(32);
+        std::thread::scope(|threads| {
+            for index in 0..32 {
+                let directory = directory.path();
+                let begin = &begin;
+                threads.spawn(move || {
+                    begin.wait();
+                    if index % 4 == 0 {
+                        // A foreign rusqlite consumer bypasses the owned adapter.
+                        let connection=Connection::open_in_memory().unwrap();
+                        connection.execute_batch("SELECT 1").unwrap();
+                        return;
+                    }
+                    let path = directory.join(format!("generated-probe-{index}.sqlite"));
+                    let key = DatabaseKey::from_bytes([0x37; 32]);
+                    // No live Store has opened in this process. A foreign first
+                    // opener must not leave this connection without cipher exports.
+                    let mut stage = InspectionStage::create(&path, &key).unwrap();
+                    let export: bool = stage.conn.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name='sqlcipher_export')",
+                        [],|row|row.get(0)).unwrap();
+                    assert!(export,"first probe connection missed native cipher initialization");
+                    stage.chunk(b"generated first-opener snapshot").unwrap();
+                    stage.finish().unwrap();
+                    assert!(!std::fs::read(&path).unwrap().starts_with(b"SQLite format 3\0"));
+                    let reopened = InspectionStage::open(&path, &key).unwrap();
+                    let mut actual = Vec::new();
+                    reopened.for_each_chunk(|bytes| {actual.extend_from_slice(bytes);Ok(())}).unwrap();
+                    assert_eq!(actual,b"generated first-opener snapshot");
+                });
+            }
+        });
+    }
     #[test]
     fn encrypted_stage_has_a_physical_page_ceiling_and_round_trips_raw_chunks() {
         let directory = tempfile::tempdir().unwrap();

@@ -10,7 +10,7 @@ use crate::{OpenOptions as StoreOptions, Result, Store, StoreError};
 
 #[cfg(test)]
 #[path = "../tests/initialization_support/mod.rs"]
-mod initialization_support;
+pub(crate) mod initialization_support;
 
 /// A random database key. Copies erase their bytes on drop; Debug never reveals it.
 #[derive(Clone)]
