@@ -40,41 +40,8 @@ struct Nav {
 
 /// The surface that owns input now.
 pub fn context(ui: &Ui) -> Context {
-    if crate::remote_editor::is_open(*ui) {
-        return Context::Editor;
-    }
-    if crate::organization_view::is_open(*ui) {
-        return Context::Editor;
-    }
-    if crate::custom_groups::is_open(*ui) {
-        return Context::Editor;
-    }
-    if crate::epg_sources_view::is_open(*ui) {
-        return Context::Editor; // Up/Down/Left/Right, OK, Back
-    }
-    if crate::wizard_view::is_open(*ui) || crate::playlists_view::is_open(*ui) {
-        return Context::Menu;
-    }
-    if crate::settings_view::is_open(*ui) {
-        return Context::Editor; // Up/Down/Left/Right, OK, Back
-    }
-    if crate::guide_assign_view::is_open(*ui) {
-        return Context::Menu;
-    }
-    if ui.editor.with(Option::is_some) {
-        return Context::Editor;
-    }
-    let overlay = ui.menu.with(Option::is_some)
-        || ui.description.with(Option::is_some)
-        || ui.chooser.with(Option::is_some);
-    if overlay {
-        return Context::Menu;
-    }
-    if crate::multiview_picker::is_open(*ui) || crate::channels_view::is_open(*ui) {
-        return Context::ChannelList;
-    }
-    if crate::search_view::is_open(*ui) {
-        return Context::Search; // isolated user bindings
+    if let Some(overlay) = ui.top_overlay() {
+        return overlay.key_context();
     }
     if crate::multiview::is_open(*ui) {
         return Context::Multiview; // Up/Down/Left/Right, OK, Long OK, Menu
@@ -239,42 +206,44 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
     }
     // Any key while panels show keeps them up.
     ui.update_panels(|p, now| p.touch(now));
+    use crate::overlays::Overlay;
+    let top = ui.top_overlay();
     let mv = |m: Move| crate::lists::navigate(ui, m);
-    if crate::wizard_view::is_open(ui) {
+    if top == Some(Overlay::Wizard) {
         crate::wizard_view::key(ui, action);
         return;
     }
     // Top-most first: a guide sources screen opens over the playlists
     // screen, which opens over settings.
-    if crate::epg_sources_view::is_open(ui) {
+    if top == Some(Overlay::GuideSources) {
         crate::epg_sources_view::key(ui, action);
         return;
     }
-    if crate::remote_editor::is_open(ui) {
+    if top == Some(Overlay::RemoteEditor) {
         crate::remote_editor::key(ui, action);
         return;
     }
-    if crate::organization_view::is_open(ui) {
+    if top == Some(Overlay::Organization) {
         crate::organization_view::key(ui, action);
         return;
     }
-    if crate::custom_groups::is_open(ui) {
+    if top == Some(Overlay::CustomGroups) {
         crate::custom_groups::key(ui, action);
         return;
     }
-    if crate::playlists_view::is_open(ui) {
+    if top == Some(Overlay::Playlists) {
         crate::playlists_view::key(ui, action);
         return;
     }
-    if crate::settings_view::is_open(ui) {
+    if top == Some(Overlay::Settings) {
         crate::settings_view::key(ui, action);
         return;
     }
-    if crate::guide_assign_view::is_open(ui) {
+    if top == Some(Overlay::GuideAssign) {
         crate::guide_assign_view::key(ui, action);
         return;
     }
-    if ui.editor.with(Option::is_some) {
+    if top == Some(Overlay::FavoritesEditor) {
         match action {
             Action::MoveUp => crate::fav_editor::move_focus(ui, -1),
             Action::MoveDown => crate::fav_editor::move_focus(ui, 1),
@@ -286,7 +255,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         }
         return;
     }
-    if ui.chooser.with(Option::is_some) {
+    if top == Some(Overlay::Chooser) {
         match action {
             Action::MoveUp => crate::chooser::move_focus(ui, -1),
             Action::MoveDown => crate::chooser::move_focus(ui, 1),
@@ -300,14 +269,14 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         }
         return;
     }
-    if ui.description.with(Option::is_some) {
+    if top == Some(Overlay::Description) {
         // The popover has no actions; Back (or Menu) closes it.
         if matches!(action, Action::Back | Action::ShowMenu) {
             crate::menu_view::close(ui);
         }
         return;
     }
-    if ui.menu.with(Option::is_some) {
+    if top == Some(Overlay::Menu) {
         match action {
             Action::MoveUp => ui
                 .menu
@@ -325,15 +294,15 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         }
         return;
     }
-    if crate::multiview_picker::is_open(ui) {
+    if top == Some(Overlay::ChannelPicker) {
         crate::multiview_picker::key(ui, action);
         return;
     }
-    if crate::channels_view::is_open(ui) {
+    if top == Some(Overlay::ChannelList) {
         crate::channels_view::key(ui, action);
         return;
     }
-    if crate::search_view::is_open(ui) {
+    if top == Some(Overlay::Search) {
         crate::search_view::key(ui, action);
         return;
     }

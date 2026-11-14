@@ -8,8 +8,7 @@
 //!
 //! The order of [`Overlay::ALL`] is the layers', topmost first
 //! (`ui_layers` mounts them bottom to top). Key routing
-//! (`input::context`) and Back (`go_back`) keep their own precedence:
-//! they map screens to key contexts and to each screen's own way back.
+//! (`input::context`) and Back (`go_back`) use that same topmost query.
 
 use crate::Ui;
 
@@ -38,6 +37,30 @@ pub(crate) enum Overlay {
 }
 
 impl Overlay {
+    fn top(is_open: impl Fn(Self) -> bool) -> Option<Self> {
+        Self::ALL.into_iter().find(|overlay| is_open(*overlay))
+    }
+
+    pub(crate) fn key_context(self) -> iptv_nav::Context {
+        use iptv_nav::Context;
+        match self {
+            Self::GuideSources
+            | Self::Organization
+            | Self::CustomGroups
+            | Self::RemoteEditor
+            | Self::Settings
+            | Self::FavoritesEditor => Context::Editor,
+            Self::Wizard
+            | Self::Playlists
+            | Self::GuideAssign
+            | Self::Chooser
+            | Self::Description
+            | Self::Menu => Context::Menu,
+            Self::Search => Context::Search,
+            Self::ChannelPicker | Self::ChannelList => Context::ChannelList,
+        }
+    }
+
     /// Every overlay, topmost layer first.
     pub(crate) const ALL: [Overlay; 15] = [
         Overlay::Wizard,
@@ -129,6 +152,11 @@ impl Overlay {
 }
 
 impl Ui {
+    /// The visually highest open overlay owns keys and Back.
+    pub(crate) fn top_overlay(self) -> Option<Overlay> {
+        Overlay::top(|overlay| overlay.is_open(self))
+    }
+
     /// Whether an overlay that `is` holds for is open.
     pub(crate) fn overlay_open(self, is: impl Fn(Overlay) -> bool) -> bool {
         Overlay::ALL
@@ -145,6 +173,27 @@ impl Ui {
 #[cfg(test)]
 mod tests {
     use super::Overlay;
+
+    #[test]
+    fn nested_screens_keep_input_on_the_visible_top_layer() {
+        use iptv_nav::Context;
+        let mut open = vec![Overlay::Settings, Overlay::Playlists, Overlay::GuideSources];
+        for (expected, context) in [
+            (Overlay::GuideSources, Context::Editor),
+            (Overlay::Playlists, Context::Menu),
+            (Overlay::Settings, Context::Editor),
+        ] {
+            let top = Overlay::top(|overlay| open.contains(&overlay)).unwrap();
+            assert_eq!(top, expected);
+            assert_eq!(top.key_context(), context);
+            open.retain(|overlay| *overlay != top);
+        }
+        assert_eq!(Overlay::top(|overlay| open.contains(&overlay)), None);
+        assert_eq!(
+            Overlay::top(|overlay| [Overlay::Settings, Overlay::GuideAssign].contains(&overlay)),
+            Some(Overlay::GuideAssign),
+        );
+    }
 
     #[test]
     fn every_overlay_is_listed_once() {
