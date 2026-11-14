@@ -35,6 +35,7 @@ mod cov_settings_screen;
 mod cov_settings_wizard;
 mod cov_sources;
 mod cov_sources_assign;
+mod guide_check_recovery;
 mod guide_look;
 mod guide_nav;
 mod guide_pages;

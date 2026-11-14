@@ -3,6 +3,33 @@ use iptv_import::CancelToken;
 use iptv_library::SourceId;
 use std::collections::BTreeMap;
 
+/// The sources with a registered check, for a headless test: it runs on
+/// its own thread and cannot reach the app thread's runtime.
+#[cfg(feature = "test-support")]
+static REGISTERED: std::sync::Mutex<std::collections::BTreeSet<SourceId>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+/// Whether `source` has a guide timer or an in-flight guide read.
+#[cfg(feature = "test-support")]
+pub fn guide_check_registered(source: SourceId) -> bool {
+    REGISTERED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains(&source)
+}
+
+#[cfg(feature = "test-support")]
+fn note(source: SourceId, registered: bool) {
+    let mut sources = REGISTERED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if registered {
+        sources.insert(source);
+    } else {
+        sources.remove(&source);
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct GuideChecks {
     next: u64,
@@ -14,6 +41,8 @@ impl GuideChecks {
         self.next = self.next.wrapping_add(1);
         let token = CancelToken::new();
         self.entries.insert(source, (self.next, token.clone()));
+        #[cfg(feature = "test-support")]
+        note(source, true);
         (self.next, token)
     }
     pub fn current(&self, source: SourceId, ticket: u64) -> bool {
@@ -25,10 +54,14 @@ impl GuideChecks {
         if let Some((_, token)) = self.entries.remove(&source) {
             token.cancel();
         }
+        #[cfg(feature = "test-support")]
+        note(source, false);
     }
     pub fn clear(&mut self) {
-        for (_, (_, token)) in std::mem::take(&mut self.entries) {
+        for (_source, (_, token)) in std::mem::take(&mut self.entries) {
             token.cancel();
+            #[cfg(feature = "test-support")]
+            note(_source, false);
         }
     }
 }

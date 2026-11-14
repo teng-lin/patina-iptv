@@ -217,7 +217,6 @@ pub fn update_source(ui: Ui, source: SourceId, done: impl FnOnce(bool) + 'static
         let cancel = CancelToken::new();
         let completion = super::library::import_completion(cancel.clone());
         completion.playlist_done(); // This worker owns guide work only.
-        let had_check = crate::runtime().has_guide_check(source);
         super::library::track_import(source, &completion);
 
         let generation = crate::runtime().generation().with(Cell::get);
@@ -226,19 +225,13 @@ pub fn update_source(ui: Ui, source: SourceId, done: impl FnOnce(bool) + 'static
             super::with_runtime(|| download_now(source, guides, &tx, &cancel));
         });
         if !accepted {
-            if had_check {
-                super::schedule_check(
-                    ui,
-                    source,
-                    super::now_unix() + super::MIN_WAIT.as_secs() as i64,
-                    generation,
-                );
-            }
             crate::runtime().emit(crate::runtime::RuntimeEvent::Notify(
                 "Too many playlists are updating. Try again shortly.",
             ));
         }
         super::spawn_in_app(async move {
+            // The next check this update asked for after it was superseded.
+            let mut unscheduled = None;
             loop {
                 match rx.recv().await {
                     Some(Msg::Guide(imported))
@@ -255,6 +248,7 @@ pub fn update_source(ui: Ui, source: SourceId, done: impl FnOnce(bool) + 'static
                     {
                         super::schedule_check(ui, source, at, generation);
                     }
+                    Some(Msg::NextCheck { at, .. }) => unscheduled = Some(at),
                     Some(_) => {}
                     None => break,
                 }
@@ -263,6 +257,10 @@ pub fn update_source(ui: Ui, source: SourceId, done: impl FnOnce(bool) + 'static
             crate::runtime()
                 .updating()
                 .with(|u| u.borrow_mut().retain(|id| *id != source));
+            // This update cancelled the source's timer. Its NextCheck is
+            // dropped when newer work or a guide action superseded it, and
+            // none comes when the worker pool refused it.
+            super::keep_guide_check(ui, source, generation, unscheduled);
             crate::runtime().emit(crate::runtime::RuntimeEvent::LibraryChanged);
             done(accepted);
         });

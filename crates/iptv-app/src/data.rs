@@ -203,7 +203,6 @@ pub fn start_import(ui: Ui, job: Job, on_update: impl Fn(Update) + 'static) -> C
 fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(Update) + 'static) {
     let purpose = job.purpose;
     let mut import_source = job.stored;
-    let had_check = import_source.is_some_and(|source| crate::runtime().has_guide_check(source));
     let completion = library::import_completion(cancel.clone());
     if let Some(source) = import_source {
         library::track_import(source, &completion);
@@ -269,6 +268,8 @@ fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(U
     spawn_in_app(async move {
         let mut finished = false;
         let mut failed = false;
+        // The next check this job asked for after its handoff was revoked.
+        let mut unscheduled = None;
         loop {
             let mut progress = None;
             let mut open = true;
@@ -320,7 +321,7 @@ fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(U
                     {
                         schedule_check(ui, source, at, generation);
                     }
-                    Ok(Msg::NextCheck { .. }) => {}
+                    Ok(Msg::NextCheck { at, .. }) => unscheduled = Some(at),
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {
                         open = false;
@@ -349,22 +350,24 @@ fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(U
             }
         }
         completion.finish();
-        // A failed refresh may exit before producing NextCheck. Keep a bounded
-        // retry for a retained source instead of losing its guide timer forever.
+        // This job cancelled the source's timer when it started. A failed
+        // refresh may end without NextCheck, and a job whose handoff a guide
+        // action revoked has its NextCheck dropped.
         if let Some(source) = import_source
-            && failed
-            && had_check
-            && library::import_is_current(source, &completion)
-            && !completion.cancel.is_cancelled()
-            && !crate::runtime().has_guide_check(source)
+            && (failed || !library::import_is_current(source, &completion))
             && (shows || combined::includes(ui, source))
         {
-            schedule_check(
-                ui,
-                source,
-                now_unix() + MIN_WAIT.as_secs() as i64,
-                generation,
-            );
+            keep_guide_check(ui, source, generation, unscheduled);
+        }
+        // A shown job starts a generation, which ends every timer. When it
+        // fails before showing its source (a wizard's Add, a switch), the
+        // playlist that stays on screen would have none.
+        if failed
+            && shows
+            && let Some(still_shown) = ui.library.shown.get_untracked()
+            && Some(still_shown) != import_source
+        {
+            keep_guide_check(ui, still_shown, generation, None);
         }
     });
 }
@@ -497,6 +500,46 @@ fn show_nothing(ui: Ui) {
     )));
 }
 
+/// Work that cancelled `source`'s guide timer ended without setting the
+/// next check: keeps one unless a check is registered or newer work for
+/// the source will set it. `unscheduled` is the check the work asked for
+/// itself before its handoff was revoked. Without one the guide is looked
+/// at again shortly, and only while automatic updates are on: the policy
+/// is in memory, so an unavailable store cannot suppress its own recovery.
+fn keep_guide_check(ui: Ui, source: SourceId, generation: u64, unscheduled: Option<i64>) {
+    if crate::runtime().has_guide_check(source)
+        || library::pending_import(source).is_some()
+        || !(ui.library.shown.get_untracked() == Some(source) || combined::includes(ui, source))
+    {
+        return;
+    }
+    let automatic = || {
+        iptv_import::RefreshPolicy::from_settings(
+            &crate::settings::get(),
+            &iptv_settings::Target::Global,
+        )
+        .interval
+        .is_some()
+    };
+    match unscheduled {
+        Some(at) => schedule_check(ui, source, at, generation),
+        None if automatic() => defer_guide_check(ui, source, generation),
+        None => {}
+    }
+}
+
+/// A check that was due cannot run yet (work on the source is under way,
+/// or the workers are busy): it comes due again shortly, whatever the
+/// refresh policy, since the check itself was already owed.
+fn defer_guide_check(ui: Ui, source: SourceId, generation: u64) {
+    schedule_check(
+        ui,
+        source,
+        now_unix() + MIN_WAIT.as_secs() as i64,
+        generation,
+    );
+}
+
 /// Looks at `source`'s guide again at `at` (unix time), unless a newer
 /// import started meanwhile.
 fn schedule_check(ui: Ui, source: SourceId, at: i64, generation: u64) {
@@ -518,12 +561,23 @@ fn schedule_check(ui: Ui, source: SourceId, at: i64, generation: u64) {
             elapsed.as_mut().poll(cx).map(|_| true)
         })
         .await;
-        if fired
-            && crate::runtime().guide_check_current(source, ticket)
-            && !library::running(source)
-            && crate::runtime().generation().with(Cell::get) == generation
-            && (!combined::active(ui) || combined::includes(ui, source))
+        if !fired || !crate::runtime().guide_check_current(source, ticket) {
+            return;
+        }
+        if crate::runtime().generation().with(Cell::get) != generation
+            || (combined::active(ui) && !combined::includes(ui, source))
         {
+            // No longer this timer's to check (the source left All
+            // playlists): its entry must not outlive it.
+            crate::runtime().cancel_guide_check(source);
+        } else if library::running(source)
+            || stored::updating(source)
+            || library::pending_import(source).is_some()
+        {
+            // The work under way owns the guide: a check now would only
+            // read the cache and end without a next check.
+            defer_guide_check(ui, source, generation);
+        } else {
             check_guide(ui, source, generation);
         }
     });
@@ -569,12 +623,12 @@ async fn read_guide(
     read: GuideRead,
     handoff: Option<library::ImportCompletion>,
 ) {
+    let requested = read;
     let read = if library::running(source) {
         GuideRead::CacheOnly
     } else {
         read
     };
-    let had_check = crate::runtime().has_guide_check(source);
     let Some((ticket, cancel)) = crate::runtime().schedule_guide_check(source, generation) else {
         return;
     };
@@ -583,17 +637,17 @@ async fn read_guide(
         with_runtime(|| guide_pipeline(source, &tx, read, &cancel));
     }) {
         crate::runtime().cancel_guide_check(source);
-        if had_check {
-            schedule_check(
-                ui,
-                source,
-                now_unix() + MIN_WAIT.as_secs() as i64,
-                generation,
-            );
+        // What the caller asked for decides, not what running work reduced
+        // it to: a read meant to check is owed one, and a background check
+        // comes back quietly instead of repeating the message each time.
+        if !matches!(requested, GuideRead::CacheOnly) {
+            defer_guide_check(ui, source, generation);
         }
-        crate::runtime().emit(crate::runtime::RuntimeEvent::Notify(
-            "Too many playlists are updating. Try again shortly.",
-        ));
+        if !matches!(requested, GuideRead::Check) {
+            crate::runtime().emit(crate::runtime::RuntimeEvent::Notify(
+                "Too many playlists are updating. Try again shortly.",
+            ));
+        }
         return;
     }
     loop {
@@ -601,6 +655,12 @@ async fn read_guide(
             .as_ref()
             .is_some_and(|job| !library::import_is_current(source, job))
         {
+            // A guide action revoked the job this read restores for: end
+            // the read with its entry, and keep the source a check.
+            if crate::runtime().guide_check_current(source, ticket) {
+                crate::runtime().cancel_guide_check(source);
+                keep_guide_check(ui, source, generation, None);
+            }
             return;
         }
         let message = rx.recv().await;
@@ -616,6 +676,11 @@ async fn read_guide(
     }
     if crate::runtime().guide_check_current(source, ticket) {
         crate::runtime().cancel_guide_check(source);
+        // Running work reduced a read that was to check the guide to its
+        // cache: the check is still owed once that work has finished.
+        if matches!(read, GuideRead::CacheOnly) && !matches!(requested, GuideRead::CacheOnly) {
+            defer_guide_check(ui, source, generation);
+        }
     }
 }
 

@@ -251,16 +251,10 @@ pub fn next_check(
 }
 
 /// Retain automatic checks after a transient storage/worker failure.
-pub(crate) fn retry_check(
-    tx: &Sender<Msg>,
-    source: SourceId,
-    configs: &[EpgSourceConfig],
-    now: UnixTime,
-) {
-    if !configs.is_empty()
-        && RefreshPolicy::from_settings(&super::settings::get(), &Target::Global)
-            .interval
-            .is_some()
+pub(crate) fn retry_check(tx: &Sender<Msg>, source: SourceId, now: UnixTime) {
+    if RefreshPolicy::from_settings(&super::settings::get(), &Target::Global)
+        .interval
+        .is_some()
     {
         let _ = tx.send(Msg::NextCheck {
             source,
@@ -371,7 +365,7 @@ pub async fn download_now(
         Ok(catalog) => catalog,
         Err(e) => {
             log::warn!("iptv data: stored catalog: {e}");
-            retry_check(tx, source, &guides, now);
+            retry_check(tx, source, now);
             return;
         }
     };

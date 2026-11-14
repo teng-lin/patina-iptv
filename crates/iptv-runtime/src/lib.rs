@@ -378,6 +378,8 @@ pub mod model;
 pub mod settings;
 
 #[cfg(feature = "test-support")]
+pub use guide_checks::guide_check_registered;
+#[cfg(feature = "test-support")]
 pub use store_service::occupy_writer;
 
 mod paths;
