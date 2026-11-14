@@ -342,7 +342,6 @@ pub async fn edit_guides(ui: Ui, id: SourceId, edit: &guides::Edit) -> Result<bo
         return Ok(false);
     }
     refresh_after_commit(ui, |_| {}).await;
-    revoke_import_handoff(id);
     stored::guides_changed(ui, id);
     Ok(true)
 }
