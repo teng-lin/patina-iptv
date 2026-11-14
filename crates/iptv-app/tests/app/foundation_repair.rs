@@ -147,7 +147,9 @@ fn inspected_candidate_applies_verifies_and_undoes_without_switching_active_sour
     t.key("backspace");
     t.key("backspace");
     t.press("text:Synthetic Birch >> nth=0");
+    t.gone("text:Loading…", 10);
     t.press("text:Reuse inspected guide");
+    t.gone("text:Loading…", 10);
     t.wait("text:Synthetic Birch East", 10);
     t.press("text:Synthetic Birch East");
     t.wait("text:/Synthetic Birch Programme/", 10);

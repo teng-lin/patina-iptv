@@ -1,7 +1,9 @@
 //! Atomic, affected-row-conditional guide configuration edits and durable inverses.
 //! Network and staged evidence validation belong to the runtime accepting a batch.
 mod verification;
-pub use verification::{RepairBinding, RepairChannel, RepairInputs, RepairVerification};
+pub use verification::{
+    RepairBinding, RepairChannel, RepairInputs, RepairPublication, RepairVerification,
+};
 
 use std::collections::{HashMap, HashSet};
 
@@ -559,10 +561,10 @@ impl Store {
             additions.push(config.feed);
             current.push(config);
         }
-        if let Some((_, after)) = &batch.order {
-            if !reorder(&mut current, after) {
-                return Ok(RepairResult::Conflict(vec!["feed_order".into()]));
-            }
+        if let Some((_, after)) = &batch.order
+            && !reorder(&mut current, after)
+        {
+            return Ok(RepairResult::Conflict(vec!["feed_order".into()]));
         }
         let mut mapping_payload = Vec::new();
         for patch in &batch.mappings {
@@ -765,10 +767,10 @@ impl Store {
                 current.insert(position.min(current.len()), v);
             }
         }
-        if let Some(before) = original_order {
-            if !reorder(&mut current, &before) {
-                return Ok(RepairResult::Conflict(vec!["feed_order".into()]));
-            }
+        if let Some(before) = original_order
+            && !reorder(&mut current, &before)
+        {
+            return Ok(RepairResult::Conflict(vec!["feed_order".into()]));
         }
         crate::guide_sources::set_guide_sources_in(&tx, commit.source, &current, now)?;
         for row in rows {

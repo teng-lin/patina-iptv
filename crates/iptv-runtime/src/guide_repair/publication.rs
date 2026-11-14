@@ -12,7 +12,12 @@ fn rebind(
     id: &str,
     keep: u32,
 ) -> std::result::Result<Option<Box<Imported>>, StoreError> {
-    let Some((commit, choices, config_changed)) = store.guide_repair_publication(id)? else {
+    let Some(iptv_store_sqlite::RepairPublication {
+        commit,
+        choices,
+        config_changed,
+    }) = store.guide_repair_publication(id)?
+    else {
         return Err(StoreError::Unavailable("guide repair commit is missing"));
     };
     let revisions = store.guide_revisions(commit.source)?;

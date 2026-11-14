@@ -168,13 +168,15 @@ impl Store {
     }
 }
 
+pub struct RepairPublication {
+    pub commit: RepairCommit,
+    pub choices: Vec<(ContentId, Option<EpgOverride>)>,
+    pub config_changed: bool,
+}
 impl Store {
     /// Current inverse direction's mapping choices, privately consumed by the
     /// runtime cache publisher. A configuration edit requires a fresh import.
-    pub fn guide_repair_publication(
-        &self,
-        id: &str,
-    ) -> Result<Option<(RepairCommit, Vec<(ContentId, Option<EpgOverride>)>, bool)>> {
+    pub fn guide_repair_publication(&self, id: &str) -> Result<Option<RepairPublication>> {
         let Some((commit, payload)) = commit_value(&self.conn, id)? else {
             return Ok(None);
         };
@@ -188,7 +190,11 @@ impl Store {
         }
         let changed_config = !payload["feeds"].as_array().ok_or_else(invalid)?.is_empty()
             || !payload["order"].is_null();
-        Ok(Some((commit, choices, changed_config)))
+        Ok(Some(RepairPublication {
+            commit,
+            choices,
+            config_changed: changed_config,
+        }))
     }
 }
 

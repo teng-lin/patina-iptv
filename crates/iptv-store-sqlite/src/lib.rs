@@ -49,7 +49,7 @@ mod guide_revisions;
 pub use guide_repair::{
     MAX_REPAIR_MAPPINGS, REPAIR_UNDO_SECONDS, RepairBatch, RepairBinding, RepairCandidate,
     RepairChannel, RepairChoice, RepairCommit, RepairFeed, RepairInputs, RepairMapping,
-    RepairResult, RepairVerification,
+    RepairPublication, RepairResult, RepairVerification,
 };
 mod guide_sources;
 pub use guide_revisions::GuideRevisions;
