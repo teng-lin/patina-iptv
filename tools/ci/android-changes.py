@@ -24,6 +24,7 @@ PACKAGE = (
     "Cargo.lock", "crates/**/Cargo.toml", "crates/iptv-app/build.rs",
     "crates/iptv-app/nsh.json", "crates/iptv-app/icon.png",
     "crates/iptv-app/fonts/**", "tools/sync-host.sh", "tools/ci/**",
+    "crates/iptv-player-mpv/fixtures/**",
     "rust-toolchain.toml", "nsh.rev", "about.toml",
 )
 RUST = ("crates/**/*.rs", "crates/**/Cargo.toml", "Cargo.toml", "Cargo.lock")

@@ -138,9 +138,7 @@ Windows uses the NSH fork's Win32/Direct2D backend. Install Visual Studio
 2022 Build Tools with **Desktop development with C++** and a Windows SDK,
 Rust's MSVC toolchain, and Strawberry Perl on `PATH` (for bundled OpenSSL).
 Keep the NSH checkout next to this repository at the `nsh.rev` commit as
-above; its CLI is not needed for the Windows build. The build script applies the small
-`tools/patches/nsh-windows-pointer-leave.patch` fix to that checkout; it keeps
-PiP controls visible when crossing from a drag region onto a button.
+above; its CLI is not needed for the Windows build.
 
 From PowerShell:
 
@@ -269,13 +267,16 @@ mocks: `tools/mock-xtream.py` (Xtream API), `tools/mock-live-cuts.py`
 | `crates/iptv-guide` | Guide schedule and stream resolution |
 | `crates/iptv-import` | Source and guide import pipeline |
 | `crates/iptv-search` | Channel and programme search |
+| `crates/iptv-library` | Channel organisation, custom groups, ordering, favourites and history |
+| `crates/iptv-player-mpv` | libmpv playback adapter for desktop and iPad |
+| `crates/iptv-runtime` | Headless application runtime, lanes, background tasks and scheduler |
 | `crates/iptv-net` | HTTP adapter (reqwest + rustls) |
 | `crates/iptv-store-sqlite` | Encrypted SQLite store |
 | `crates/iptv-app` | NSH app: screens, theme, video layer (libmpv on desktop and iPad) |
 | `hosts/android` | Kotlin host with the Media3 player |
 | `tools/` | Mock servers, fixtures, packaging and CI scripts |
 
-All crates except `iptv-app`, `iptv-net` and `iptv-store-sqlite` are
+All crates except `iptv-app`, `iptv-net`, `iptv-store-sqlite`, `iptv-player-mpv` and `iptv-runtime` are
 sans-IO and build for `wasm32-unknown-unknown`.
 
 Run every check before committing:

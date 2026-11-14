@@ -32,7 +32,8 @@ class Selection(unittest.TestCase):
     def test_packaging_inputs_select_the_full_job_only(self):
         for path in ("hosts/android/app/build.gradle.kts", "Cargo.lock", "crates/iptv-net/Cargo.toml",
                      "crates/iptv-app/build.rs", "tools/ci/check-android.sh", "nsh.rev", "rust-toolchain.toml",
-                     ".github/actions/setup/action.yml"):
+                     ".github/actions/setup/action.yml", "crates/iptv-player-mpv/fixtures/player-props.json",
+                     "crates/iptv-player-mpv/fixtures/player-events.json"):
             with self.subTest(path=path):
                 self.assertEqual(self.pull_request(path, "crates/iptv-core/src/menu.rs"),
                                  {"package": True, "compile": False})

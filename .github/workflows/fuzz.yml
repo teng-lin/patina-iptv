@@ -25,7 +25,7 @@ on:
       save-corpus:
         description: Keep the grown corpus for later runs
         type: boolean
-        default: false
+        default: true
   workflow_dispatch:
     inputs:
       seconds:
@@ -35,7 +35,7 @@ on:
       save-corpus:
         description: Keep the grown corpus for later runs
         type: boolean
-        default: false
+        default: true
 # Path-filtered on pull requests, so it must not be a required check.
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('fuzz-pr-{0}', github.event.pull_request.number) || format('fuzz-run-{0}', github.run_id) }}
@@ -91,7 +91,7 @@ jobs:
         run: bash tools/ci/fuzz-imports.sh "$SECONDS_PER_TARGET" "$TARGET"
       # Also after a crash: the inputs that reached new code are worth keeping.
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        if: ${{ !cancelled() && inputs.save-corpus }}
+        if: ${{ !cancelled() && (inputs.save-corpus || github.ref == 'refs/heads/master') }}
         with:
           path: fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
