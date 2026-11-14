@@ -2866,6 +2866,7 @@ dependencies = [
  "nsh-platform-linux",
  "nsh-platform-macos",
  "nsh-platform-windows",
+ "objc2-foundation",
  "serde_json",
  "sys-locale",
  "tokio",

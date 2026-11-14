@@ -539,6 +539,13 @@ iptv-runtime/src/favorites.rs	recent favourite edits are not saved
 iptv-runtime/src/imports.rs	cannot create document identity
 iptv-runtime/src/imports.rs	cannot create private document directory
 iptv-runtime/src/imports.rs	private document cannot be saved
+# Probe errors become typed inspection failures before reaching the UI.
+iptv-runtime/src/inspection/probe.rs	probe identity unavailable
+iptv-runtime/src/inspection/probe.rs	probe inspection stopped
+iptv-runtime/src/inspection/probe.rs	probe integrity deadline
+iptv-runtime/src/inspection/probe.rs	probe snapshot cannot be parsed
+# HTTP protocol header name, never a display label.
+iptv-runtime/src/inspection/probe.rs	User-Agent
 iptv-runtime/src/library.rs	library is loading
 iptv-runtime/src/opening.rs	{bound} channels, {kib} KiB in {} ms
 iptv-runtime/src/opening.rs	{n} in {} ms
