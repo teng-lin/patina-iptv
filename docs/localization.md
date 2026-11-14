@@ -148,8 +148,8 @@ and its calendar to `calendar.rs`; tests check each of the three.
 The setting remains text-valued so older backups and unlisted locale tags survive.
 
 Run `cargo test -p iptv-core -p iptv-settings`, the core wasm build, the app
-build and `cargo test -p iptv-app --features test-support --test app
-catalogue_lint interface_languages`. The `interface_languages` headless
+build, `cargo test -p iptv-app --features test-support --test app catalogue_lint`
+and `cargo test -p iptv-app --features test-support --test app interface_languages`. The `interface_languages` headless
 scenarios check switching languages without remounting settings, persistence,
 returning to the system preference, and the translated flows, counts, dates
 and clock. Headless tests pin their system locale through
