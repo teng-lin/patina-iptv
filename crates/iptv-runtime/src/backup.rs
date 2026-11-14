@@ -594,6 +594,9 @@ fn stage(services: &Services, input: &mut impl Read) -> Result<()> {
         store
             .rebase_local_playlists(old_root, root)
             .context("Backup contains unavailable local playlist files")?;
+        store
+            .invalidate_guide_repair_authority()
+            .context("Could not invalidate restored guide repair authority")?;
     }
     // Check rewritten local references point to files included in this archive.
     let store =

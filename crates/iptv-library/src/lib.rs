@@ -238,3 +238,6 @@ pub enum OrganizationScope {
 
 /// Source-scoped application query and guide-inspection values.
 pub mod inspection;
+
+/// Transactional guide repair contract values.
+pub mod guide_repair;
