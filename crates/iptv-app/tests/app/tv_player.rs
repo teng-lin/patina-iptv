@@ -13,11 +13,11 @@ use crate::browse_fixture;
 
 use std::time::Duration;
 
+use crate::headless::Headless;
 use nsh_core::picker::PickedFile;
 use nsh_core::platform::Idiom;
 use nsh_core::{ImageData, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
 const PLAYLIST: &str = "#EXTM3U
 #EXTINF:-1 tvg-id=\"one\" group-title=\"News\",Test Channel One

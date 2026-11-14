@@ -8,12 +8,12 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
 use iptv_store_sqlite::ChannelQuery;
 use nsh_core::picker::PickedFile;
 use nsh_core::{ImageData, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
 const IMPORT: Duration = Duration::from_secs(20);
 
@@ -72,13 +72,7 @@ fn the_last_channel_opens_once_before_the_guide() {
 
     // First run: the playlist is added; nothing plays.
     let mut first = app();
-    first.on_pick(move |_| {
-        vec![PickedFile::new(
-            "synthetic.m3u",
-            "audio/x-mpegurl",
-            ImageData::new(playlist.as_bytes().to_vec()),
-        )]
-    });
+    first.answer_picks_myself();
     step(first.wait_for("text:No playlists yet"));
     step(first.press("text:Add playlist"));
     step(first.wait_for("text:Playlist file"));
@@ -87,6 +81,20 @@ fn the_last_channel_opens_once_before_the_guide() {
     // The form focuses its file field by identity. Activate that field through
     // the remote key path, without depending on a newly mounted row's layout.
     step(first.press_key("enter"));
+    // The pick request may arrive after press_key's quiet period on a busy
+    // runner. Answer the request explicitly once it exists: wait_for only
+    // pumps batches and does not run Headless's automatic picker handler.
+    step(first.wait_until(
+        "the playlist file picker",
+        Duration::from_secs(5),
+        |screen| !screen.picks().is_empty(),
+    ));
+    assert_eq!(first.picks().len(), 1, "one activation opens one picker");
+    step(first.answer_pick(vec![PickedFile::new(
+        "synthetic.m3u",
+        "audio/x-mpegurl",
+        ImageData::new(playlist.as_bytes().to_vec()),
+    )]));
     step(first.wait_for("text:synthetic.m3u"));
     step(first.press("text:Add playlist"));
     step(first.wait_for_within("text:Playlist added", IMPORT));

@@ -13,10 +13,11 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 
+use crate::headless::Headless;
 use nsh_core::picker::PickedFile;
 use nsh_core::{ImageData, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::{Headless, Screen};
+use nsh_testing::Screen;
 
 const PLAYLIST: &str = "#EXTM3U
 #EXTINF:-1 tvg-id=\"one\" group-title=\"News\",Test Channel One
