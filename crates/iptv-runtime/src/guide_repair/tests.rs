@@ -758,6 +758,49 @@ mod staged {
         (request, summary.evidence)
     }
     #[test]
+    fn staged_preview_cannot_alias_an_unresolved_manual_feed_identity() {
+        let fixture = Fixture::new();
+        fixture
+            .store()
+            .set_epg_override(
+                fixture.source,
+                &ContentId::from_stored("birch"),
+                Some(&EpgOverride::for_feed(
+                    iptv_epg::FeedId(u32::MAX),
+                    "amber.main",
+                )),
+            )
+            .unwrap();
+        let server = Mock::new();
+        let (request, _) = proposal(&fixture, &server);
+        assert!(matches!(
+            fixture.drive(
+                fixture
+                    .owner
+                    .preview_guide_repair(request, InspectionControl::default())
+            ),
+            Err(Error::InvalidRequest)
+        ));
+        assert!(
+            fixture
+                .store()
+                .guide_sources(fixture.source)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            fixture
+                .store()
+                .repair_mapping(fixture.source, &ContentId::from_stored("birch"))
+                .unwrap(),
+            Some(Some(EpgOverride::for_feed(
+                iptv_epg::FeedId(u32::MAX),
+                "amber.main"
+            )))
+        );
+    }
+
+    #[test]
     fn staged_add_allocates_durable_feed_at_commit_and_reports_indirect_effects() {
         let fixture = Fixture::new();
         let server = Mock::new();

@@ -313,6 +313,11 @@ pub(super) fn prepare(
     }
     let mut additions = Vec::new();
     let mut staged_feeds = BTreeMap::new();
+    let feed_floor = if request.additions.is_empty() {
+        0
+    } else {
+        storage(store.guide_repair_feed_high_water(source))?
+    };
     for (position, addition) in request.additions.iter().enumerate() {
         if addition.evidence.feed.is_some() || addition.name.as_ref().is_some_and(|n| n.len() > 256)
         {
@@ -322,7 +327,7 @@ pub(super) fn prepare(
         // A private matching-only ID is translated back to a staged Target in
         // the preview. It is never persisted or exposed as a configured feed.
         let temporary = FeedId(u32::MAX - position as u32);
-        if configs.iter().any(|c| c.feed == temporary) {
+        if temporary.0 <= feed_floor {
             return Err(Error::InvalidRequest);
         }
         let config = GuideSource {
