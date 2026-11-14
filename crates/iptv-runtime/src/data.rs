@@ -117,7 +117,7 @@ pub fn start() {
 /// their guide timers stop.
 fn next_generation() -> u64 {
     crate::current().cancel_guide_checks();
-    crate::current().generation().with(|g| {
+    crate::current().generation.with(|g| {
         g.set(g.get() + 1);
         g.get()
     })
@@ -151,7 +151,7 @@ fn start_import_with(job: Job, cancel: CancelToken, on_update: impl Fn(Update) +
     let generation = if shows {
         next_generation()
     } else {
-        crate::current().generation().with(Cell::get)
+        crate::current().generation.with(Cell::get)
     };
     // Only the startup refresh may start the last channel.
     let resume = purpose == Purpose::Startup;
@@ -182,7 +182,7 @@ fn start_import_with(job: Job, cancel: CancelToken, on_update: impl Fn(Update) +
     let merge_requested = Cell::new(false);
     let show = async move |imported: Box<Imported>, held: Option<opening::Held>| {
         let _ = library::refresh_cache().await;
-        if crate::current().generation().with(Cell::get) != generation {
+        if crate::current().generation.with(Cell::get) != generation {
             return;
         }
         if shows || combined::active() {
@@ -211,7 +211,7 @@ fn start_import_with(job: Job, cancel: CancelToken, on_update: impl Fn(Update) +
                     Ok(Msg::Playlist(result)) => {
                         completion.playlist_done();
                         if import_source.is_none()
-                            && crate::current().generation().with(Cell::get) == generation
+                            && crate::current().generation.with(Cell::get) == generation
                             && let Ok((_, imported)) = &result
                         {
                             import_source = Some(imported.source);
@@ -304,7 +304,7 @@ async fn show_part(
     resume: bool,
     held: Option<opening::Held>,
 ) {
-    if crate::current().generation().with(Cell::get) != generation {
+    if crate::current().generation.with(Cell::get) != generation {
         return;
     }
     if combined::active() {
@@ -331,7 +331,7 @@ async fn show_part(
     } = *imported;
     let mut organization_revision = organization::revision();
     let schedule = organization::build(source, groups, catalog, guide, now).await;
-    if crate::current().generation().with(Cell::get) != generation || combined::active() {
+    if crate::current().generation.with(Cell::get) != generation || combined::active() {
         return;
     }
     let built = started.elapsed();
@@ -360,7 +360,7 @@ async fn show_part(
             .held_channels(held.keys),
         None => pages::paged(schedule, source, now).await,
     };
-    if crate::current().generation().with(Cell::get) != generation || combined::active() {
+    if crate::current().generation.with(Cell::get) != generation || combined::active() {
         return;
     }
     let wrapped = started.elapsed();
@@ -374,7 +374,7 @@ async fn show_part(
             schedule = replacement;
         }
     }
-    if crate::current().generation().with(Cell::get) != generation || combined::active() {
+    if crate::current().generation.with(Cell::get) != generation || combined::active() {
         return;
     }
     let favorites = started.elapsed();
@@ -442,7 +442,7 @@ fn schedule_check(source: SourceId, at: i64, generation: u64) {
         if fired
             && crate::current().guide_check_current(source, ticket)
             && !library::running(source)
-            && crate::current().generation().with(Cell::get) == generation
+            && crate::current().generation.with(Cell::get) == generation
             && (!combined::active() || combined::includes(source))
         {
             check_guide(source, generation);
@@ -536,7 +536,7 @@ use crate::imports::kept_file_name;
 
 /// Current browser generation for async state installation guards.
 pub fn generation() -> u64 {
-    crate::current().generation().with(Cell::get)
+    crate::current().generation.with(Cell::get)
 }
 
 #[cfg(test)]

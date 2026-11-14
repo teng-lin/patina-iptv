@@ -3,7 +3,7 @@ use crate::model::SourceId;
 use iptv_guide::EpgSchedule;
 
 pub fn revision() -> u64 {
-    crate::current().organization_revision().get()
+    crate::current().organization_revision.get()
 }
 
 use crate::commands::load_organization as load;
@@ -77,12 +77,9 @@ pub async fn apply(schedule: &EpgSchedule, source: SourceId) -> Option<EpgSchedu
     Some(schedule.with_prepared_organization(prepared))
 }
 pub fn changed(source: SourceId) {
-    crate::current().organization_revision().set(
-        crate::current()
-            .organization_revision()
-            .get()
-            .wrapping_add(1),
-    );
+    crate::current()
+        .organization_revision
+        .set(crate::current().organization_revision.get().wrapping_add(1));
     let ticket = crate::current().begin_organization_edit(source);
     crate::current().emit(crate::RuntimeEvent::LibraryChanged);
     if super::combined::active() {

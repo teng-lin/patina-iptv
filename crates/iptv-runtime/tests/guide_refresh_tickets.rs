@@ -13,7 +13,7 @@ fn combined_refreshes_replace_one_check_without_disturbing_other_sources() {
     with_runtime(runtime.clone(), || {
         let source = SourceId(1);
         let other = SourceId(2);
-        let generation = runtime.generation().with(std::cell::Cell::get);
+        let generation = runtime.browser_generation();
         let (_, original) = runtime.schedule_guide_check(source, generation).unwrap();
         let (other_ticket, other_token) = runtime.schedule_guide_check(other, generation).unwrap();
         let first = library::import_completion(CancelToken::new());

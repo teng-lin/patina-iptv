@@ -1,6 +1,8 @@
 //! Portable library model and screen state machines. No persistence or UI toolkit.
+mod records;
 use iptv_epg::UnixTime;
 use iptv_providers::{GroupId, SecretUrl};
+pub use records::{ChannelScope, CustomGroup, GuideSnapshot, StoredSource};
 
 /// Row id of a source. Overlay keys are `(SourceId, ContentId)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

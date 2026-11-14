@@ -15,17 +15,7 @@ use crate::codec::{source_kind_from, source_kind_slug};
 use crate::error::{Result, StoreError};
 use crate::{SourceId, Store};
 
-/// A source read back with its secrets. `Debug` is safe: every secret in
-/// [`Source`] is a redacting type.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StoredSource {
-    pub id: SourceId,
-    pub source: Source,
-    /// Order in the source list (insertion order).
-    pub position: i64,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
+pub use iptv_library::StoredSource;
 
 /// A source list row. Carries no secrets.
 #[derive(Clone, Debug, PartialEq, Eq)]

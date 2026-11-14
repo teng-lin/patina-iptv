@@ -15,7 +15,7 @@ pub struct Indexes {
     pub building: Option<u64>,
 }
 
-pub fn programmes(
+fn programmes_native(
     sources: Vec<(SourceId, Vec<ChannelKey>, usize)>,
     rows: usize,
     from: UnixTime,
@@ -33,4 +33,82 @@ pub fn programmes(
         }
         Ok(builder.finish())
     })
+}
+
+impl crate::Runtime {
+    pub fn prepare_search_channels(&self, version: u64, schedule: &dyn iptv_core::guide::Schedule) {
+        if self.search_indexes.borrow().version == Some(version) {
+            return;
+        }
+        let mut channels = ChannelIndex::from_schedule(schedule);
+        for channel in 0..schedule.channel_count() {
+            if !schedule.channel_hidden(channel) {
+                channels.add_key(channel, &schedule.channel_number(channel).to_string());
+            }
+        }
+        *self.search_indexes.borrow_mut() = Indexes {
+            version: Some(version),
+            channels,
+            programmes: None,
+            building: None,
+        };
+    }
+    pub fn has_programme_index(&self) -> bool {
+        self.search_indexes.borrow().programmes.is_some()
+    }
+    pub fn begin_programme_index(&self, version: u64) -> bool {
+        let mut indexes = self.search_indexes.borrow_mut();
+        let wanted = indexes.version == Some(version) && indexes.programmes.is_none();
+        wanted && indexes.building.replace(version) != Some(version)
+    }
+    pub fn finish_programme_index(&self, version: u64) -> bool {
+        let mut indexes = self.search_indexes.borrow_mut();
+        if indexes.building == Some(version) {
+            indexes.building = None;
+        }
+        indexes.version == Some(version)
+    }
+    pub fn install_programme_index(&self, index: ProgrammeIndex) {
+        self.search_indexes.borrow_mut().programmes = Some(index);
+    }
+    pub fn release_programme_index(&self) {
+        self.search_indexes.borrow_mut().programmes = None;
+    }
+    pub fn search_channels(
+        &self,
+        query: &str,
+        favorites: &std::collections::BTreeSet<usize>,
+        options: iptv_search::ChannelSearchOptions,
+    ) -> Vec<iptv_search::ChannelHit> {
+        self.search_indexes
+            .borrow()
+            .channels
+            .search_channels(query, favorites, options)
+    }
+    pub fn search_programmes(
+        &self,
+        query: &str,
+        now: UnixTime,
+        options: iptv_search::ProgrammeSearchOptions<'_>,
+    ) -> Vec<iptv_search::ProgrammeHit> {
+        self.search_indexes
+            .borrow()
+            .programmes
+            .as_ref()
+            .map_or_else(Vec::new, |index| {
+                index.search_programmes(query, now, options)
+            })
+    }
+}
+
+pub fn programmes(
+    sources: Vec<(SourceId, Vec<ChannelKey>, usize)>,
+    rows: usize,
+    from: UnixTime,
+) -> impl std::future::Future<Output = Result<ProgrammeIndex, crate::Error>> {
+    async move {
+        programmes_native(sources, rows, from)
+            .await
+            .map_err(crate::Error::from)
+    }
 }

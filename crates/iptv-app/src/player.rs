@@ -28,7 +28,6 @@ use iptv_core::player_info::StreamFormat as Format;
 use iptv_core::tracks::{Choice, Tracks};
 use iptv_guide::EpgSchedule;
 use iptv_guide::playback::{Clock, Resolution, StalkerLink, Unavailable};
-use iptv_import::CancelToken;
 use nsh_core::platform::Lifecycle;
 use nsh_core::prelude::*;
 
@@ -370,12 +369,7 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
 /// Cancels `surface`'s link request in flight, if any: the viewer zapped,
 /// the surface reopens or plays nothing.
 fn cancel_resolve(surface: usize) {
-    let running = crate::runtime()
-        .resolving()
-        .with(|r| r.borrow_mut().get_mut(surface).and_then(Option::take));
-    if let Some((_, cancel)) = running {
-        cancel.cancel();
-    }
+    crate::runtime().cancel_link_resolution(surface);
 }
 
 /// A Stalker `create_link` on the shared network runtime (`executor.rs`);
@@ -396,13 +390,7 @@ fn resolve_link(
         cmd,
         channel_headers,
     } = *link;
-    cancel_resolve(surface);
-    let cancel = CancelToken::new();
-    crate::runtime().resolving().with(|r| {
-        if let Some(slot) = r.borrow_mut().get_mut(surface) {
-            *slot = Some((session, cancel.clone()));
-        }
-    });
+    let cancel = crate::runtime().begin_link_resolution(surface, session);
     let client = crate::runtime::playback::link_client(crate::settings::net_config());
     let request = crate::executor::spawn(async move {
         let result = match client.await {
@@ -416,13 +404,7 @@ fn resolve_link(
     let _task = ui.player.owner.run(|| {
         spawn(crate::in_runtime(async move {
             let answered = request.await;
-            crate::runtime().resolving().with(|r| {
-                if let Some(slot) = r.borrow_mut().get_mut(surface)
-                    && slot.as_ref().is_some_and(|(s, _)| *s == session)
-                {
-                    *slot = None;
-                }
-            });
+            crate::runtime().finish_link_resolution(surface, session);
             let Ok((result, portal)) = answered else {
                 return;
             };

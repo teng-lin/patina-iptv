@@ -516,7 +516,7 @@ pub fn source_lines(source: SourceId) -> Vec<SourceLine> {
     })
 }
 
-pub fn status_of(stored: Option<&StoredGuide>) -> GuideStatus {
+pub fn status_of(stored: Option<&iptv_library::GuideSnapshot>) -> GuideStatus {
     let Some(g) = stored else {
         return GuideStatus::Empty;
     };
@@ -530,10 +530,19 @@ pub fn status_of(stored: Option<&StoredGuide>) -> GuideStatus {
     }
 }
 
-pub fn cached_guide_state(source: SourceId) -> Option<StoredGuide> {
-    crate::current()
-        .status
-        .with(|status| status.borrow().guides.get(&source).cloned())
+pub fn cached_guide_state(source: SourceId) -> Option<iptv_library::GuideSnapshot> {
+    crate::current().status.with(|status| {
+        status
+            .borrow()
+            .guides
+            .get(&source)
+            .map(|guide| iptv_library::GuideSnapshot {
+                replaced_at: guide.replaced_at,
+                attempted_at: guide.attempted_at,
+                last_error: guide.last_error,
+                bound_channels: guide.bound_channels,
+            })
+    })
 }
 
 pub fn next_guide_edit(source: SourceId) -> u64 {

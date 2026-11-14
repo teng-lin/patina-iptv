@@ -74,7 +74,7 @@ pub fn start(ui: Ui) {
     // also waits for them in `onStop` (`TvActivity.flushPendingWrites`).
     effect(|| {
         let background = lifecycle() == nsh_core::platform::Lifecycle::Background;
-        crate::runtime().foreground().set(!background);
+        crate::runtime().set_foreground(!background);
         if background && !crate::runtime().flush_files(Duration::from_secs(2)) {
             log::warn!("iptv persistence: queued file writes did not finish in the background");
         }

@@ -2,7 +2,7 @@
 //! remains imported data; moves are offered only between custom groups.
 use crate::i18n::tr;
 
-use crate::runtime::model::{ChannelScope, CustomGroup, CustomGroupId, SourceId, StoreError};
+use crate::runtime::Error;
 use crate::{
     Ui, data,
     scale::Scale,
@@ -10,6 +10,7 @@ use crate::{
     wizard_view::entry::{self, Sheet},
 };
 use iptv_core::membership::Membership;
+use iptv_library::{ChannelScope, CustomGroup, CustomGroupId, SourceId};
 use iptv_nav::Action;
 use iptv_providers::ContentId;
 use nsh_core::prelude::*;
@@ -98,8 +99,8 @@ fn advance() {
 }
 fn request<R: Send + 'static>(
     ui: Ui,
-    operation: impl std::future::Future<Output = Result<R, StoreError>> + 'static,
-    done: impl FnOnce(Ui, Result<R, StoreError>) + 'static,
+    operation: impl std::future::Future<Output = Result<R, Error>> + 'static,
+    done: impl FnOnce(Ui, Result<R, Error>) + 'static,
 ) {
     let generation = GENERATION.get();
     let result = operation;
@@ -113,8 +114,8 @@ fn request<R: Send + 'static>(
 fn mutate<R: Send + 'static>(
     ui: Ui,
     source: SourceId,
-    operation: impl std::future::Future<Output = Result<R, StoreError>> + 'static,
-    done: impl FnOnce(Ui, Result<R, StoreError>) + 'static,
+    operation: impl std::future::Future<Output = Result<R, Error>> + 'static,
+    done: impl FnOnce(Ui, Result<R, Error>) + 'static,
 ) {
     let generation = GENERATION.get();
     let result = operation;
@@ -191,7 +192,7 @@ fn reload(ui: Ui) {
         },
     );
 }
-fn report(ui: Ui, result: Result<(), StoreError>) {
+fn report(ui: Ui, result: Result<(), Error>) {
     match result {
         Ok(()) => {
             reload(ui);

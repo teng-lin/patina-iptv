@@ -12,9 +12,9 @@
 //! blocked one, or one the store no longer has starts as before, once the
 //! guide is shown (`player::source_ready`).
 
-use crate::runtime::model::StoredSource;
 use iptv_core::playback::PlaySource;
 use iptv_guide::playback::{Resolution, resolve};
+use iptv_library::StoredSource;
 use iptv_providers::id::ContentId;
 
 use crate::{Playback, Ui, ViewMode};

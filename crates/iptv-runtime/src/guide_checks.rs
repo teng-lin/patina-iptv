@@ -44,8 +44,7 @@ impl crate::Runtime {
         source: SourceId,
         generation: u64,
     ) -> Option<(u64, CancelToken)> {
-        (self.generation().with(std::cell::Cell::get) == generation)
-            .then(|| self.replace_guide_check(source))
+        (self.generation.get() == generation).then(|| self.replace_guide_check(source))
     }
     pub fn replace_guide_check(&self, source: SourceId) -> (u64, CancelToken) {
         self.guide_checks.borrow_mut().replace(source)

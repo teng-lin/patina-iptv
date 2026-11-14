@@ -151,12 +151,24 @@ fn save_and_rebind(
     }
 }
 
-pub fn save(
+fn save_native(
     source: SourceId,
     key: String,
     choice: Choice,
 ) -> impl std::future::Future<Output = Result<Option<Box<Imported>>, StoreError>> {
     super::store_service::call(move |store| save_and_rebind(store, source, &key, &choice))
+}
+
+pub fn save(
+    source: SourceId,
+    key: String,
+    choice: Choice,
+) -> impl std::future::Future<Output = Result<Option<Box<Imported>>, crate::Error>> {
+    async move {
+        save_native(source, key, choice)
+            .await
+            .map_err(crate::Error::from)
+    }
 }
 
 #[cfg(test)]

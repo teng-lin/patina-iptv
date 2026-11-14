@@ -10,10 +10,10 @@ use std::{cell::Cell, rc::Rc};
 
 pub(super) use crate::state::SingleSchedule;
 pub(super) fn reset_single() {
-    crate::current().single().with(|s| s.borrow_mut().take());
+    crate::current().single.with(|s| s.borrow_mut().take());
 }
 pub(super) fn single() -> Option<SingleSchedule> {
-    crate::current().single().with(|s| s.borrow().clone())
+    crate::current().single.with(|s| s.borrow().clone())
 }
 /// Snapshot before Add advances the generation. An unfinished account refresh
 /// can still replace a cached source's provisional playback metadata, so that
@@ -28,11 +28,11 @@ pub(super) fn ready_single() -> Option<SingleSchedule> {
         })
 }
 pub fn remember_single(source: SourceId, schedule: Rc<EpgSchedule>) {
-    crate::current().single().with(|s| {
+    crate::current().single.with(|s| {
         *s.borrow_mut() = Some(SingleSchedule {
             source,
             schedule,
-            limit: crate::current().account_streams().get(),
+            limit: crate::current().account_streams.get(),
             pending: None,
             revision: library::import_revision(source),
         })
@@ -50,7 +50,7 @@ pub(super) fn added(source: SourceId, generation: u64, previous: Option<SingleSc
             return;
         }
         if active()
-            || crate::current().generation().with(Cell::get) != generation
+            || crate::current().generation.with(Cell::get) != generation
             || !has_multiple_enabled()
         {
             return;
@@ -64,7 +64,7 @@ pub(super) fn added(source: SourceId, generation: u64, previous: Option<SingleSc
             log::warn!("iptv combined: cannot save browsing mode: {e}");
             return;
         }
-        if crate::current().generation().with(Cell::get) != generation || active() {
+        if crate::current().generation.with(Cell::get) != generation || active() {
             return;
         }
         let Ok(playlists) = library::playlists() else {
@@ -74,25 +74,25 @@ pub(super) fn added(source: SourceId, generation: u64, previous: Option<SingleSc
         super::source_changed(None);
         stored::note_shown(None);
         crate::library::set_all(true);
-        crate::current().parts().with(|p| p.borrow_mut().clear());
-        crate::current().limits().with(|p| p.borrow_mut().clear());
+        crate::current().parts.with(|p| p.borrow_mut().clear());
+        crate::current().limits.with(|p| p.borrow_mut().clear());
         let previous = previous.filter(|s| {
             enabled(s.source) && library::import_revision_is_current(s.source, &s.revision)
         });
         let previous_guide = previous.as_ref().map(|s| (s.source, s.pending.clone()));
         for kept in previous.into_iter().chain(std::iter::once(added)) {
             crate::current()
-                .parts()
+                .parts
                 .with(|p| p.borrow_mut().insert(kept.source, kept.schedule));
             crate::current()
-                .limits()
+                .limits
                 .with(|p| p.borrow_mut().insert(kept.source, kept.limit));
         }
         reset_single();
         crate::current().emit(crate::RuntimeEvent::AccountStreams(None));
         let now = super::now_unix();
         crate::current()
-            .epoch()
+            .epoch
             .with(|e| e.set(now - now.rem_euclid(3600)));
         rebuild();
         // The previous single source's timer belonged to its older generation.
@@ -102,7 +102,7 @@ pub(super) fn added(source: SourceId, generation: u64, previous: Option<SingleSc
         }
         for playlist in playlists.into_iter().filter(|p| p.policy.enabled) {
             if !crate::current()
-                .parts()
+                .parts
                 .with(|p| p.borrow().contains_key(&playlist.id))
                 && let Some(stored) = library::load(playlist.id)
             {
@@ -121,7 +121,7 @@ fn reattach_guide(source: SourceId, generation: u64, pending: Option<library::Im
     };
     super::spawn_in_app(async move {
         let current = || {
-            crate::current().generation().with(Cell::get) == generation
+            crate::current().generation.with(Cell::get) == generation
                 && includes(source)
                 && library::import_is_current(source, &pending)
         };
@@ -153,7 +153,7 @@ fn reattach_guide(source: SourceId, generation: u64, pending: Option<library::Im
 }
 
 pub fn active() -> bool {
-    crate::current().all().get()
+    crate::current().all.get()
 }
 pub fn includes(id: SourceId) -> bool {
     active() && library::policy(id).is_ok_and(|p| p.enabled)
@@ -173,7 +173,7 @@ pub fn has_multiple_enabled() -> bool {
 }
 
 pub fn start() {
-    crate::current().resume().with(|r| r.set(true));
+    crate::current().resume.with(|r| r.set(true));
     // Startup precedes user edits; install the empty real guide at once.
     super::spawn_in_app(async move {
         switch_all_ready().await;
@@ -191,7 +191,7 @@ pub fn switch_all() {
     });
 }
 async fn switch_all_ready() {
-    let generation = crate::current().generation().with(Cell::get);
+    let generation = crate::current().generation.with(Cell::get);
     if active() {
         return;
     }
@@ -199,7 +199,7 @@ async fn switch_all_ready() {
         log::warn!("iptv combined: cannot save browsing mode: {e}");
         return;
     }
-    if crate::current().generation().with(Cell::get) != generation || active() {
+    if crate::current().generation.with(Cell::get) != generation || active() {
         return;
     }
     super::next_generation();
@@ -207,12 +207,12 @@ async fn switch_all_ready() {
     super::source_changed(None);
     stored::note_shown(None);
     crate::library::set_all(true);
-    crate::current().parts().with(|p| p.borrow_mut().clear());
-    crate::current().limits().with(|p| p.borrow_mut().clear());
+    crate::current().parts.with(|p| p.borrow_mut().clear());
+    crate::current().limits.with(|p| p.borrow_mut().clear());
     crate::current().emit(crate::RuntimeEvent::AccountStreams(None));
     let now = super::now_unix();
     crate::current()
-        .epoch()
+        .epoch
         .with(|e| e.set(now - now.rem_euclid(3600)));
     rebuild();
     if let Ok(playlists) = library::playlists() {
@@ -228,10 +228,10 @@ async fn switch_all_ready() {
 }
 pub fn leave() {
     reset_single();
-    crate::current().resume().with(|r| r.set(false));
+    crate::current().resume.with(|r| r.set(false));
     crate::library::set_all(false);
-    crate::current().parts().with(|p| p.borrow_mut().clear());
-    crate::current().limits().with(|p| p.borrow_mut().clear());
+    crate::current().parts.with(|p| p.borrow_mut().clear());
+    crate::current().limits.with(|p| p.borrow_mut().clear());
     let saved = crate::library::save_all(false);
     super::spawn_in_app(async move {
         if let Err(error) = saved.await {
@@ -244,11 +244,11 @@ pub(super) async fn show(imported: Box<Imported>, held: Option<opening::Held>) {
         return;
     }
     let source = imported.source;
-    let generation = crate::current().generation().with(Cell::get);
+    let generation = crate::current().generation.with(Cell::get);
     let revision = library::import_revision(source);
     let current = || {
         includes(source)
-            && crate::current().generation().with(Cell::get) == generation
+            && crate::current().generation.with(Cell::get) == generation
             && library::import_revision_is_current(source, &revision)
     };
     let Imported {
@@ -266,7 +266,7 @@ pub(super) async fn show(imported: Box<Imported>, held: Option<opening::Held>) {
     }
     schedule = match playback {
         Streams::New(context, allowed) => {
-            crate::current().limits().with(|l| {
+            crate::current().limits.with(|l| {
                 let mut l = l.borrow_mut();
                 if allowed.is_some() || !l.contains_key(&source) {
                     l.insert(source, allowed);
@@ -276,7 +276,7 @@ pub(super) async fn show(imported: Box<Imported>, held: Option<opening::Held>) {
         }
         Streams::Current => schedule.with_shared_playback(
             crate::current()
-                .parts()
+                .parts
                 .with(|p| p.borrow().get(&source).and_then(|s| s.shared_playback())),
         ),
     };
@@ -291,10 +291,10 @@ pub(super) async fn show(imported: Box<Imported>, held: Option<opening::Held>) {
         return;
     }
     crate::current()
-        .parts()
+        .parts
         .with(|p| p.borrow_mut().insert(source, Rc::new(schedule)));
     rebuild_ready().await;
-    if can_resume && crate::current().resume().with(Cell::get) {
+    if can_resume && crate::current().resume.with(Cell::get) {
         resume();
     }
 }
@@ -302,8 +302,8 @@ pub fn rebuild() {
     super::spawn_in_app(rebuild_ready());
 }
 async fn rebuild_ready() {
-    let generation = crate::current().generation().with(Cell::get);
-    let revision = crate::current().rebuild().with(|r| {
+    let generation = crate::current().generation.with(Cell::get);
+    let revision = crate::current().rebuild.with(|r| {
         let next = r.get().wrapping_add(1);
         r.set(next);
         next
@@ -320,9 +320,9 @@ async fn rebuild_ready() {
         .map(|p| p.id)
         .collect();
     crate::current()
-        .parts()
+        .parts
         .with(|p| p.borrow_mut().retain(|id, _| enabled.contains(id)));
-    let sources = crate::current().parts().with(|p| {
+    let sources = crate::current().parts.with(|p| {
         let parts = p.borrow();
         playlists
             .into_iter()
@@ -344,14 +344,14 @@ async fn rebuild_ready() {
     }
     let collapsed = crate::library::collapsed().await.unwrap_or_default();
     if !active()
-        || crate::current().generation().with(Cell::get) != generation
-        || crate::current().rebuild().with(Cell::get) != revision
+        || crate::current().generation.with(Cell::get) != generation
+        || crate::current().rebuild.with(Cell::get) != revision
     {
         return;
     }
     install_favorites();
     crate::current().emit(crate::RuntimeEvent::ScheduleReady(Rc::new(
-        CombinedSchedule::new(sources, crate::current().epoch().with(Cell::get))
+        CombinedSchedule::new(sources, crate::current().epoch.with(Cell::get))
             .with_collapsed_sources(collapsed),
     )));
     pages::replaced();
@@ -359,26 +359,26 @@ async fn rebuild_ready() {
 
 pub fn connection_limit(source: SourceId) -> Option<u32> {
     crate::current()
-        .limits()
+        .limits
         .with(|l| l.borrow().get(&source).copied().flatten())
 }
 pub fn organization_changed(source: SourceId, ticket: u64) {
     let schedule = crate::current()
-        .parts()
+        .parts
         .with(|parts| parts.borrow().get(&source).cloned());
     super::spawn_in_app(async move {
         if let Some(schedule) = schedule {
             let Some(replacement) = organization::apply(&schedule, source).await else {
                 return;
             };
-            let current = crate::current().parts().with(|parts| {
+            let current = crate::current().parts.with(|parts| {
                 parts
                     .borrow()
                     .get(&source)
                     .is_some_and(|s| s.same_catalogue(&schedule))
             });
             if current && crate::current().organization_edit_current(source, ticket) {
-                crate::current().parts().with(|parts| {
+                crate::current().parts.with(|parts| {
                     parts.borrow_mut().insert(source, Rc::new(replacement));
                 });
                 rebuild();
@@ -390,13 +390,13 @@ pub fn resume() {
     if !crate::settings::flag(iptv_settings::keys::RESUME_LAST_CHANNEL)
         || crate::current().browser().playing
     {
-        crate::current().resume().with(|r| r.set(false));
+        crate::current().resume.with(|r| r.set(false));
         return;
     }
     let loaded = crate::commands::combined_resume_key();
     super::spawn_in_app(async move {
         let key = loaded.await.ok().flatten();
-        if !crate::current().resume().with(Cell::get)
+        if !crate::current().resume.with(Cell::get)
             || crate::current().browser().playing
             || !active()
         {
@@ -411,7 +411,7 @@ pub fn resume() {
             {
                 return;
             }
-            crate::current().resume().with(|r| r.set(false));
+            crate::current().resume.with(|r| r.set(false));
             crate::current().emit(crate::RuntimeEvent::ResumeChannel(c));
             crate::current().emit(crate::RuntimeEvent::ResumeFullscreen);
         }

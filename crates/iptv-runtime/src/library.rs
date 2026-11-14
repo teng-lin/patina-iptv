@@ -125,7 +125,7 @@ pub fn install(snapshot: Snapshot) -> bool {
 }
 
 /// The stored playlists in list order.
-pub fn playlists() -> Result<Vec<Playlist>, StoreError> {
+fn playlists_native() -> Result<Vec<Playlist>, StoreError> {
     crate::current().library.with(|snapshot| {
         snapshot
             .borrow()
@@ -205,7 +205,7 @@ pub fn newest() -> Result<Option<StoredSource>, StoreError> {
     })
 }
 
-pub fn policy(id: SourceId) -> Result<iptv_store_sqlite::SourcePolicy, StoreError> {
+fn policy_native(id: SourceId) -> Result<iptv_store_sqlite::SourcePolicy, StoreError> {
     playlists()?
         .into_iter()
         .find(|source| source.id == id)
@@ -354,6 +354,14 @@ pub fn start_scheduler() {
                 .await;
         }
     });
+}
+
+pub fn playlists() -> Result<Vec<Playlist>, crate::Error> {
+    playlists_native().map_err(crate::Error::from)
+}
+
+pub fn policy(id: SourceId) -> Result<iptv_store_sqlite::SourcePolicy, crate::Error> {
+    policy_native(id).map_err(crate::Error::from)
 }
 
 #[cfg(test)]

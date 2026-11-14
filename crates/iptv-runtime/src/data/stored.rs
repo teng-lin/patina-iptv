@@ -156,7 +156,7 @@ pub fn update_source(source: SourceId, done: impl FnOnce(bool) + 'static) -> boo
     if updating(source) {
         return true;
     }
-    let has_guides = crate::current().status().with(|status| {
+    let has_guides = crate::current().status.with(|status| {
         let status = status.borrow();
         match status.lines.get(&source) {
             Some(lines) if !lines.is_empty() => lines.iter().any(|line| line.source.enabled),
@@ -171,7 +171,7 @@ pub fn update_source(source: SourceId, done: impl FnOnce(bool) + 'static) -> boo
     }
     let loaded = crate::commands::guide_sources(source);
     crate::current()
-        .updating()
+        .updating
         .with(|updating| updating.borrow_mut().push(source));
     super::spawn_in_app(async move {
         let (stored, sources) = match loaded.await {
@@ -179,7 +179,7 @@ pub fn update_source(source: SourceId, done: impl FnOnce(bool) + 'static) -> boo
             Err(error) => {
                 log::warn!("iptv data: cannot load guide sources: {error}");
                 crate::current()
-                    .updating()
+                    .updating
                     .with(|updating| updating.borrow_mut().retain(|id| *id != source));
                 done(false);
                 return;
@@ -198,7 +198,7 @@ pub fn update_source(source: SourceId, done: impl FnOnce(bool) + 'static) -> boo
         };
         if guides.is_empty() {
             crate::current()
-                .updating()
+                .updating
                 .with(|updating| updating.borrow_mut().retain(|id| *id != source));
             crate::current().emit(crate::RuntimeEvent::Notify(
                 "No guide sources are configured",
@@ -214,7 +214,7 @@ pub fn update_source(source: SourceId, done: impl FnOnce(bool) + 'static) -> boo
         // Without a stored guide the periodic checks stopped: start them again.
         let restart_checks = stored.is_none();
 
-        let generation = crate::current().generation().with(Cell::get);
+        let generation = crate::current().generation.with(Cell::get);
         let (tx, mut rx) = unbounded_channel();
         let accepted = super::workers::submit(super::source_is_visible(source), move || {
             super::with_runtime(|| download_now(source, guides, restart_checks, &tx, &cancel));
@@ -228,14 +228,14 @@ pub fn update_source(source: SourceId, done: impl FnOnce(bool) + 'static) -> boo
             loop {
                 match rx.recv().await {
                     Some(Msg::Guide(imported))
-                        if (crate::current().shown().with(Cell::get) == Some(source)
+                        if (crate::current().shown.with(Cell::get) == Some(source)
                             || super::combined::includes(source))
                             && super::library::import_is_current(source, &completion) =>
                     {
                         super::show(imported, generation, false).await
                     }
                     Some(Msg::NextCheck { source, at })
-                        if (crate::current().shown().with(Cell::get) == Some(source)
+                        if (crate::current().shown.with(Cell::get) == Some(source)
                             || super::combined::includes(source))
                             && super::library::import_is_current(source, &completion) =>
                     {
@@ -247,7 +247,7 @@ pub fn update_source(source: SourceId, done: impl FnOnce(bool) + 'static) -> boo
             }
             completion.finish();
             crate::current()
-                .updating()
+                .updating
                 .with(|u| u.borrow_mut().retain(|id| *id != source));
             crate::current().emit(crate::RuntimeEvent::LibraryChanged);
             done(accepted);
@@ -263,16 +263,15 @@ use crate::stored::download_now;
 /// settle (the refresh policy downloads changed feeds). Only for the
 /// source on screen; another one is checked when it is shown.
 pub fn guides_changed(source: SourceId) {
-    if crate::current().shown().with(Cell::get) != Some(source)
-        && !super::combined::includes(source)
+    if crate::current().shown.with(Cell::get) != Some(source) && !super::combined::includes(source)
     {
         return;
     }
     let edit = next_guide_edit(source);
-    let generation = crate::current().generation().with(Cell::get);
+    let generation = crate::current().generation.with(Cell::get);
     super::spawn_in_app(async move {
         crate::data::delay(SETTLE).await;
-        let current = crate::current().generation().with(Cell::get) == generation
+        let current = crate::current().generation.with(Cell::get) == generation
             && guide_edit_is_current(source, edit);
         if current && !updating(source) {
             log::info!("iptv data: guide sources changed; checking the guide");
@@ -294,7 +293,7 @@ pub fn clear(done: impl FnOnce(bool) + 'static) -> bool {
     for source in &sources {
         super::library::revoke_import_handoff(*source);
     }
-    let generation = crate::current().generation().with(Cell::get);
+    let generation = crate::current().generation.with(Cell::get);
     let saved = crate::commands::clear_guides(sources);
     super::spawn_in_app(async move {
         let Ok((deleted, imports)) = saved.await else {

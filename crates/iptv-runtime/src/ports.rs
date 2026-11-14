@@ -40,7 +40,7 @@ impl Ports {
                 NEXT.fetch_add(1, Ordering::Relaxed)
             )),
             |_| {
-                Err(StoreError::Unavailable(
+                Err(StoreError::unavailable(
                     "synthetic database key was not installed",
                 ))
             },
@@ -48,8 +48,8 @@ impl Ports {
     }
 }
 
-pub(crate) fn database_key(path: &Path) -> Result<DatabaseKey, StoreError> {
-    (crate::store_service::service().ports.database_key)(path)
+pub(crate) fn database_key(path: &Path) -> Result<DatabaseKey, iptv_store_sqlite::StoreError> {
+    (crate::store_service::service().ports.database_key)(path).map_err(Into::into)
 }
 
 pub(crate) fn exclude_from_backup(path: &Path) -> io::Result<()> {

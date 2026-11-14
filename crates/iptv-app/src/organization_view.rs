@@ -1,6 +1,6 @@
 //! Channel and provider-group organization, including hidden-item recovery.
 use crate::list_rows::{self, Mark, ROW};
-use crate::runtime::model::{SourceId, StoreError};
+use crate::runtime::{Error, model::SourceId};
 use crate::scale::Scale;
 use crate::wizard_view::entry::{self, TextSheet};
 use crate::{Ui, data, ui_kit};
@@ -15,7 +15,7 @@ pub struct Open {
     kind: Kind,
     editor: Editor,
 }
-async fn items(source: SourceId, kind: &Kind) -> Result<Vec<Item>, StoreError> {
+async fn items(source: SourceId, kind: &Kind) -> Result<Vec<Item>, Error> {
     crate::runtime::commands::organization_items(
         source,
         kind.clone(),
@@ -164,7 +164,7 @@ fn perform(ui: Ui, edit: Edit) {
         finish(ui, &finished, generation, result.await);
     });
 }
-fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), StoreError>) {
+fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
     if let Err(e) = result {
         log::warn!("iptv organization: change refused: {e}");
         crate::settings_view::notify(

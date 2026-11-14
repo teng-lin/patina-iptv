@@ -2,7 +2,7 @@
 //! Blocking platform credential access runs exclusively on the store worker.
 use std::path::Path;
 
-use crate::runtime::model::{DatabaseKey, StoreError};
+use crate::runtime::{Error, model::DatabaseKey};
 #[cfg(all(target_os = "linux", not(feature = "test-support")))]
 mod linux;
 #[cfg(all(
@@ -26,11 +26,11 @@ pub fn install_test_key(bytes: [u8; 32]) {
 }
 
 /// Platform credential port. The runtime owns opening and migrating the store.
-pub(crate) fn database_key(path: &Path) -> Result<DatabaseKey, StoreError> {
+pub(crate) fn database_key(path: &Path) -> Result<DatabaseKey, Error> {
     #[cfg(feature = "test-support")]
     {
         let _ = path;
-        TEST_KEY.get().cloned().ok_or(StoreError::Unavailable(
+        TEST_KEY.get().cloned().ok_or(Error::unavailable(
             "synthetic database key was not installed",
         ))
     }
@@ -41,7 +41,7 @@ pub(crate) fn database_key(path: &Path) -> Result<DatabaseKey, StoreError> {
 }
 
 #[cfg(all(target_os = "android", not(feature = "test-support")))]
-fn platform_key(_: &Path) -> Result<DatabaseKey, StoreError> {
+fn platform_key(_: &Path) -> Result<DatabaseKey, Error> {
     android::database_key()
 }
 
@@ -49,7 +49,7 @@ fn platform_key(_: &Path) -> Result<DatabaseKey, StoreError> {
     not(feature = "test-support"),
     any(target_os = "linux", target_os = "macos", target_os = "ios", windows)
 ))]
-fn platform_key(path: &Path) -> Result<DatabaseKey, StoreError> {
+fn platform_key(path: &Path) -> Result<DatabaseKey, Error> {
     use std::io::Read;
     use zeroize::Zeroizing;
     // Serialize first use across processes, before creating the keyring entry.
@@ -64,11 +64,11 @@ fn platform_key(path: &Path) -> Result<DatabaseKey, StoreError> {
     }
     let lock = options
         .open(Path::new(&lock_name))
-        .map_err(|_| StoreError::Unavailable("cannot lock the credential broker"))?;
+        .map_err(|_| Error::unavailable("cannot lock the credential broker"))?;
     lock.lock()
-        .map_err(|_| StoreError::Unavailable("cannot lock the credential broker"))?;
+        .map_err(|_| Error::unavailable("cannot lock the credential broker"))?;
     let entry = Entry::new("org.iptv-rs.database", "catalog-v1")
-        .map_err(|_| StoreError::Unavailable("platform credential broker could not be opened"))?;
+        .map_err(|_| Error::unavailable("platform credential broker could not be opened"))?;
     let secret = match entry.get_secret() {
         Ok(secret) => Zeroizing::new(secret),
         Err(keyring::Error::NoEntry) => {
@@ -77,19 +77,19 @@ fn platform_key(path: &Path) -> Result<DatabaseKey, StoreError> {
                 Ok(mut file) => {
                     let count = file
                         .read(&mut header)
-                        .map_err(|_| StoreError::Unavailable("cannot inspect existing database"))?;
+                        .map_err(|_| Error::unavailable("cannot inspect existing database"))?;
                     if count != 0 && &header != b"SQLite format 3\0" {
-                        return Err(StoreError::Unavailable(
+                        return Err(Error::unavailable(
                             "database key is missing from the platform credential broker",
                         ));
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(_) => return Err(StoreError::Unavailable("cannot inspect existing database")),
+                Err(_) => return Err(Error::unavailable("cannot inspect existing database")),
             }
             let mut bytes = Zeroizing::new(vec![0; 32]);
             getrandom::fill(&mut bytes)
-                .map_err(|_| StoreError::Unavailable("secure random generator failed"))?;
+                .map_err(|_| Error::unavailable("secure random generator failed"))?;
             // UTF-8 encoding also supports KDE Wallet's Secret Service backend.
             const HEX: &[u8; 16] = b"0123456789abcdef";
             let encoded = Zeroizing::new(
@@ -99,21 +99,19 @@ fn platform_key(path: &Path) -> Result<DatabaseKey, StoreError> {
                     .collect::<Vec<_>>(),
             );
             entry.set_secret(&encoded).map_err(|_| {
-                StoreError::Unavailable(
-                    "platform credential broker could not save the database key",
-                )
+                Error::unavailable("platform credential broker could not save the database key")
             })?;
             encoded
         }
         Err(_) => {
-            return Err(StoreError::Unavailable(
+            return Err(Error::unavailable(
                 "platform credential broker is locked or unavailable",
             ));
         }
     };
     let mut bytes = [0; 32];
     if secret.len() != bytes.len() * 2 {
-        return Err(StoreError::Unavailable(
+        return Err(Error::unavailable(
             "platform database key has an invalid length",
         ));
     }
@@ -125,7 +123,7 @@ fn platform_key(path: &Path) -> Result<DatabaseKey, StoreError> {
         };
         let (Some(high), Some(low)) = (digit(pair[0]), digit(pair[1])) else {
             zeroize::Zeroize::zeroize(&mut bytes);
-            return Err(StoreError::Unavailable(
+            return Err(Error::unavailable(
                 "platform database key has an invalid encoding",
             ));
         };
@@ -146,8 +144,8 @@ fn platform_key(path: &Path) -> Result<DatabaseKey, StoreError> {
         windows
     ))
 ))]
-fn platform_key(_: &Path) -> Result<DatabaseKey, StoreError> {
-    Err(StoreError::Unavailable(
+fn platform_key(_: &Path) -> Result<DatabaseKey, Error> {
+    Err(Error::unavailable(
         "no platform credential broker for this target",
     ))
 }

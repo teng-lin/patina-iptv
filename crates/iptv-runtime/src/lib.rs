@@ -1,6 +1,9 @@
 //! Application-owned state and events. This module has no UI toolkit imports.
 pub mod data;
+mod error;
 mod events;
+mod operations;
+pub use error::Error;
 
 /// Shell observations needed to prioritize reads and avoid replacing active playback.
 #[derive(Default)]
@@ -52,48 +55,48 @@ type Resolves = RefCell<[Option<(u64, CancelToken)>; iptv_core::multiview::MAX_S
 type SavedSettings = RefCell<Option<(u64, std::sync::Arc<iptv_settings::Settings>)>>;
 
 pub struct Runtime {
-    pub(crate) account_streams: Slot<Cell<Option<u32>>>,
-    pub(crate) resolving: Slot<Resolves>,
-    pub(crate) wizard_import: Slot<RefCell<Option<(iptv_core::wizard::ImportId, CancelToken)>>>,
+    account_streams: Slot<Cell<Option<u32>>>,
+    resolving: Slot<Resolves>,
+    wizard_import: Slot<RefCell<Option<(iptv_core::wizard::ImportId, CancelToken)>>>,
     store: std::sync::Arc<store_service::Service>,
-    pub(crate) settings_saved: Slot<SavedSettings>,
-    pub(crate) settings_changed: Slot<Cell<u64>>,
-    pub(crate) settings_read_only: Cell<Option<std::io::ErrorKind>>,
-    pub(crate) link_client:
+    settings_saved: Slot<SavedSettings>,
+    settings_changed: Slot<Cell<u64>>,
+    settings_read_only: Cell<Option<std::io::ErrorKind>>,
+    link_client:
         std::sync::Arc<std::sync::Mutex<Option<(iptv_net::NetConfig, iptv_net::NetClient)>>>,
-    pub(crate) backup_busy: Cell<bool>,
-    pub(crate) backup_progress: Cell<backup::Progress>,
-    pub(crate) search_indexes: Slot<RefCell<search::Indexes>>,
-    pub(crate) saved_search: Slot<RefCell<Option<Vec<String>>>>,
-    pub(crate) pending_search: Slot<Cell<u64>>,
-    pub(crate) favorites: Slot<RefCell<favorites::State>>,
-    pub(crate) favorite_writer: Slot<RefCell<Option<std::sync::mpsc::Sender<favorites::Write>>>>,
-    pub(crate) favorite_unsaved: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-    pub(crate) activity: RefCell<BTreeMap<SourceId, library::Activity>>,
-    pub(crate) all: Cell<bool>,
-    pub(crate) generation: Slot<Cell<u64>>,
-    pub(crate) imports: Slot<RefCell<HashMap<SourceId, (u64, CancelToken)>>>,
-    pub(crate) attempts: Slot<RefCell<HashMap<SourceId, i64>>>,
-    pub(crate) tickets: Slot<Cell<u64>>,
-    pub(crate) completions: Slot<RefCell<HashMap<SourceId, Weak<ImportWork>>>>,
-    pub(crate) library: Slot<RefCell<Option<LibrarySnapshot>>>,
-    pub(crate) parts: Slot<RefCell<BTreeMap<SourceId, Rc<EpgSchedule>>>>,
-    pub(crate) limits: Slot<RefCell<BTreeMap<SourceId, Option<u32>>>>,
-    pub(crate) resume: Slot<Cell<bool>>,
-    pub(crate) rebuild: Slot<Cell<u64>>,
-    pub(crate) epoch: Slot<Cell<i64>>,
-    pub(crate) single: Slot<RefCell<Option<SingleSchedule>>>,
-    pub(crate) shown: Slot<Cell<Option<SourceId>>>,
-    pub(crate) updating: Slot<RefCell<Vec<SourceId>>>,
-    pub(crate) edits: Slot<RefCell<BTreeMap<SourceId, u64>>>,
-    pub(crate) status: Slot<RefCell<StatusSnapshot>>,
-    pub(crate) page_waiters: Slot<PageWaiters>,
-    pub(crate) organization_revision: Slot<Cell<u64>>,
+    backup_busy: Cell<bool>,
+    backup_progress: Cell<backup::Progress>,
+    search_indexes: Slot<RefCell<search::Indexes>>,
+    saved_search: Slot<RefCell<Option<Vec<String>>>>,
+    pending_search: Slot<Cell<u64>>,
+    favorites: Slot<RefCell<favorites::State>>,
+    favorite_writer: Slot<RefCell<Option<std::sync::mpsc::Sender<favorites::Write>>>>,
+    favorite_unsaved: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    activity: RefCell<BTreeMap<SourceId, library::Activity>>,
+    all: Cell<bool>,
+    generation: Slot<Cell<u64>>,
+    imports: Slot<RefCell<HashMap<SourceId, (u64, CancelToken)>>>,
+    attempts: Slot<RefCell<HashMap<SourceId, i64>>>,
+    tickets: Slot<Cell<u64>>,
+    completions: Slot<RefCell<HashMap<SourceId, Weak<ImportWork>>>>,
+    library: Slot<RefCell<Option<LibrarySnapshot>>>,
+    parts: Slot<RefCell<BTreeMap<SourceId, Rc<EpgSchedule>>>>,
+    limits: Slot<RefCell<BTreeMap<SourceId, Option<u32>>>>,
+    resume: Slot<Cell<bool>>,
+    rebuild: Slot<Cell<u64>>,
+    epoch: Slot<Cell<i64>>,
+    single: Slot<RefCell<Option<SingleSchedule>>>,
+    shown: Slot<Cell<Option<SourceId>>>,
+    updating: Slot<RefCell<Vec<SourceId>>>,
+    edits: Slot<RefCell<BTreeMap<SourceId, u64>>>,
+    status: Slot<RefCell<StatusSnapshot>>,
+    page_waiters: Slot<PageWaiters>,
+    organization_revision: Slot<Cell<u64>>,
     schedule: RefCell<Rc<dyn Schedule>>,
     events: RefCell<Option<EventSink>>,
     tasks: RefCell<Option<Rc<TaskHost>>>,
-    pub(crate) foreground: Cell<bool>,
-    pub(crate) scheduler_started: Cell<bool>,
+    foreground: Cell<bool>,
+    scheduler_started: Cell<bool>,
     guide_checks: RefCell<guide_checks::GuideChecks>,
     status_revision: Cell<u64>,
     browser: RefCell<Option<BrowserObserver>>,
@@ -418,82 +421,5 @@ pub mod storage;
 impl Default for Runtime {
     fn default() -> Self {
         Self::new(Ports::for_tests())
-    }
-}
-
-impl Runtime {
-    pub fn account_streams(&self) -> &Slot<Cell<Option<u32>>> {
-        &self.account_streams
-    }
-    pub fn resolving(&self) -> &Slot<Resolves> {
-        &self.resolving
-    }
-    pub fn wizard_import(
-        &self,
-    ) -> &Slot<RefCell<Option<(iptv_core::wizard::ImportId, CancelToken)>>> {
-        &self.wizard_import
-    }
-    pub fn search_indexes(&self) -> &Slot<RefCell<search::Indexes>> {
-        &self.search_indexes
-    }
-    pub fn saved_search(&self) -> &Slot<RefCell<Option<Vec<String>>>> {
-        &self.saved_search
-    }
-    pub fn pending_search(&self) -> &Slot<Cell<u64>> {
-        &self.pending_search
-    }
-    pub fn all(&self) -> &Cell<bool> {
-        &self.all
-    }
-    pub fn generation(&self) -> &Slot<Cell<u64>> {
-        &self.generation
-    }
-    pub fn imports(&self) -> &Slot<RefCell<HashMap<SourceId, (u64, CancelToken)>>> {
-        &self.imports
-    }
-    pub fn attempts(&self) -> &Slot<RefCell<HashMap<SourceId, i64>>> {
-        &self.attempts
-    }
-    pub fn tickets(&self) -> &Slot<Cell<u64>> {
-        &self.tickets
-    }
-    pub fn library(&self) -> &Slot<RefCell<Option<LibrarySnapshot>>> {
-        &self.library
-    }
-    pub fn parts(&self) -> &Slot<RefCell<BTreeMap<SourceId, Rc<EpgSchedule>>>> {
-        &self.parts
-    }
-    pub fn limits(&self) -> &Slot<RefCell<BTreeMap<SourceId, Option<u32>>>> {
-        &self.limits
-    }
-    pub fn resume(&self) -> &Slot<Cell<bool>> {
-        &self.resume
-    }
-    pub fn rebuild(&self) -> &Slot<Cell<u64>> {
-        &self.rebuild
-    }
-    pub fn epoch(&self) -> &Slot<Cell<i64>> {
-        &self.epoch
-    }
-    pub fn single(&self) -> &Slot<RefCell<Option<SingleSchedule>>> {
-        &self.single
-    }
-    pub fn shown(&self) -> &Slot<Cell<Option<SourceId>>> {
-        &self.shown
-    }
-    pub fn updating(&self) -> &Slot<RefCell<Vec<SourceId>>> {
-        &self.updating
-    }
-    pub fn status(&self) -> &Slot<RefCell<StatusSnapshot>> {
-        &self.status
-    }
-    pub fn page_waiters(&self) -> &Slot<PageWaiters> {
-        &self.page_waiters
-    }
-    pub fn organization_revision(&self) -> &Slot<Cell<u64>> {
-        &self.organization_revision
-    }
-    pub fn foreground(&self) -> &Cell<bool> {
-        &self.foreground
     }
 }
