@@ -4,12 +4,13 @@
 //! command. Each says what it is about; the remote drives them through
 //! `iptv_settings::screen`, taps directly.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 use std::rc::Rc;
 
 use iptv_settings::screen::{Editor, Effect, grid};
 use iptv_settings::{Setting, Value, ValueType};
+use nsh_core::Checked;
 use nsh_core::prelude::*;
 
 use super::view::swatch_colour;
@@ -57,16 +58,20 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             Editor::Confirm { .. } => Kind::Confirm,
         })
     });
-    view().absolute().inset_0().child(dynamic(move || {
-        let shown = kind.get();
-        untracked(move || match shown {
-            Some(Kind::Choice) => choice(ui).into_element(),
-            Some(Kind::Number) => stepper(ui).into_element(),
-            Some(Kind::Text) => text_sheet(ui).into_element(),
-            Some(Kind::Confirm) => confirm(ui).into_element(),
-            None => view().into_element(),
-        })
-    }))
+    view()
+        .test_id("settings-editor")
+        .absolute()
+        .inset_0()
+        .child(dynamic(move || {
+            let shown = kind.get();
+            untracked(move || match shown {
+                Some(Kind::Choice) => choice(ui).into_element(),
+                Some(Kind::Number) => stepper(ui).into_element(),
+                Some(Kind::Text) => text_sheet(ui).into_element(),
+                Some(Kind::Confirm) => confirm(ui).into_element(),
+                None => view().into_element(),
+            })
+        }))
 }
 
 fn cancel(ui: Ui) {
@@ -171,6 +176,16 @@ fn choice(ui: Ui) -> impl IntoElement {
         };
         let mark = move || entry_mark(ui, focus.get() == Some(at.index()));
         list_rows::row(size, ROW, mark)
+            .role(AccessibilityRole::Option)
+            .accessibility_state(move || AccessibilityState {
+                selected: selected(),
+                checked: Some(if selected() {
+                    Checked::True
+                } else {
+                    Checked::False
+                }),
+                ..Default::default()
+            })
             .flex_row()
             .items_center()
             .justify_start()
@@ -227,11 +242,13 @@ fn number_text(ui: Ui) -> (String, String) {
     };
     let shown = words::value(s, &value);
     let range = grid(&s.ty).map_or(String::new(), |(min, max, step)| {
-        format!(
-            "From {} to {}, in steps of {}",
-            words::amount(&s.ty, min),
-            words::amount(&s.ty, max),
-            words::amount(&s.ty, step)
+        trf(
+            "From {min} to {max}, in steps of {step}",
+            &[
+                ("min", (&words::amount(&s.ty, min)).into()),
+                ("max", (&words::amount(&s.ty, max)).into()),
+                ("step", (&words::amount(&s.ty, step)).into()),
+            ],
         )
     });
     (shown, range)
@@ -240,6 +257,8 @@ fn number_text(ui: Ui) -> (String, String) {
 /// − or + beside the stepper's value (touch and mouse).
 fn step_button(ui: Ui, size: Scale, label: &'static str, act: impl Fn(Ui) + 'static) -> View {
     view()
+        .role(AccessibilityRole::Button)
+        .label(label)
         .w(move || size.px(56.0))
         .h(move || size.px(ui_kit::TOUCH))
         .items_center()
@@ -314,7 +333,7 @@ fn text_sheet(ui: Ui) -> View {
     let note = move || {
         let invalid = editor(ui, |e| matches!(e, Editor::Text { invalid: true, .. }));
         if invalid == Some(true) {
-            "That is not a valid value here".to_owned()
+            tr("That is not a valid value here").to_owned()
         } else {
             String::new()
         }
@@ -344,13 +363,13 @@ fn text_sheet(ui: Ui) -> View {
 /// The question before a command that cannot be undone.
 fn question(key: &str) -> &'static str {
     match key {
-        "general.restore" => {
-            "Choose a backup to apply when you next open Patina. You can cancel the scheduled restore before closing the app."
-        }
-        "epg.clear" => {
-            "The stored programmes are deleted. The guide stays empty until it is downloaded again."
-        }
-        _ => "This cannot be undone.",
+        "general.restore" => tr(
+            "Choose a backup to apply when you next open Patina. You can cancel the scheduled restore before closing the app.",
+        ),
+        "epg.clear" => tr(
+            "The stored programmes are deleted. The guide stays empty until it is downloaded again.",
+        ),
+        _ => tr("This cannot be undone."),
     }
 }
 

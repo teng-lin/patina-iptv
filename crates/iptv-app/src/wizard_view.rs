@@ -225,7 +225,8 @@ pub fn back(ui: Ui) -> bool {
 /// The top bar's entry point.
 pub fn add_button(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
-    ui_kit::caption(size, "+ Add playlist")
+    ui_kit::caption(size, tr("+ Add playlist"))
+        .role(AccessibilityRole::Button)
         .px(move || size.px(12.0))
         .py(move || size.px(5.0))
         .rounded(px(RADIUS))
@@ -308,7 +309,8 @@ fn card(ui: Ui, size: Scale) -> View {
 
 /// Remote hints, shown only while keys drive the UI.
 fn hint(ui: Ui, size: Scale, keys: &'static str) -> impl IntoElement {
-    ui_kit::caption(size, move || if ui.keys_shown() { keys } else { "" }).mt(move || size.px(6.0))
+    ui_kit::caption(size, move || if ui.keys_shown() { tr(keys) } else { "" })
+        .mt(move || size.px(6.0))
 }
 
 /// A step that Back leaves: the keys' hint and, on pointer and touch
@@ -349,8 +351,10 @@ fn empty(ui: Ui) -> impl IntoElement {
         .child(ui_kit::title(size, move || tr("No playlists yet")))
         .child(ui_kit::body(
             size,
-            "Patina has no channels of its own. Add the playlist or account \
-             your TV provider gave you, and the guide fills with its channels.",
+            tr(
+                "Patina has no channels of its own. Add the playlist or account \
+                your TV provider gave you, and the guide fills with its channels.",
+            ),
         ))
         .child(button(ui, size, "Add playlist", Target::AddPlaylist))
         .child(hint(ui, size, "OK add a playlist   Back leave"))
@@ -362,6 +366,7 @@ fn choose_type(ui: Ui) -> impl IntoElement {
         let target = Target::Kind(kind);
         let mark = move || mark(ui, target);
         list_rows::row(size, ROW_TWO, mark)
+            .role(AccessibilityRole::Button)
             .on_press(move || {
                 ui.touched();
                 send(ui, WizardEvent::Tap(target));
@@ -407,6 +412,7 @@ fn field_row(ui: Ui, size: Scale, field: Field) -> impl IntoElement {
         )
     });
     list_rows::row(size, ROW, mark)
+        .role(AccessibilityRole::Button)
         .flex_row()
         .items_center()
         .justify_start()
@@ -460,6 +466,8 @@ fn form(ui: Ui, kind: PlaylistKind) -> impl IntoElement {
     };
     let size = Scale::new();
     card(ui, size)
+        .test_id("wizard-form")
+        .accessibility_elements_hidden(move || entry::is_editing(ui))
         .gap(move || size.px(4.0))
         .child(ui_kit::title(size, move || words::kind_title(kind)))
         .child(
@@ -487,7 +495,7 @@ fn form(ui: Ui, kind: PlaylistKind) -> impl IntoElement {
             move || {
                 ui_kit::caption(
                     size,
-                    "Not encrypted: HTTP can expose your login and viewing activity.",
+                    tr("Not encrypted: HTTP can expose your login and viewing activity."),
                 )
             },
         ))

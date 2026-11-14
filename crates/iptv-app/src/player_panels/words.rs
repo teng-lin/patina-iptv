@@ -1,7 +1,7 @@
 //! The player's words: waiting and failures (short, no addresses), the
 //! action cards' labels and the keys' hints over the video.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 use iptv_core::panels::{QuickAction, Shown};
 use iptv_core::playback::{Cause, ErrorKind, Waiting};
@@ -73,10 +73,12 @@ pub(crate) fn failure_message(kind: &ErrorKind, catch_up: bool) -> String {
 /// account allows plays elsewhere.
 fn refused_message() -> String {
     match crate::multiview::account_limit() {
-        Some(1) => "Your provider allows 1 stream at once — another device may be using it.".into(),
-        Some(n) => {
-            format!("Your provider allows {n} streams at once — another device may be using one.")
-        }
+        Some(n) => trf(
+            "{count, plural, \
+             one {Your provider allows # stream at once — another device may be using it.} \
+             other {Your provider allows # streams at once — another device may be using one.}}",
+            &[("count", n.into())],
+        ),
         None => "The provider is refusing this stream for now.".into(),
     }
 }

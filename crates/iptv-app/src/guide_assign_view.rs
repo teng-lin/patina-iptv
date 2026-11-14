@@ -1,6 +1,6 @@
 //! "Choose guide data…" (Long OK menu on a channel): which guide channel a
 //! playlist channel shows, from the guide channels the stored guides list,
-//! or "Automatic" (matched by id and name) or "No guide data". A search
+//! or tr("Automatic") (matched by id and name) or tr("No guide data"). A search
 //! field narrows the list as one types; the filter shows every guide
 //! channel or only those no channel uses. The choice is saved by channel
 //! key (`data::assign`) and shows at once when the stored guide has the
@@ -13,6 +13,7 @@
 
 use iptv_library::guide_assign as state;
 
+use crate::i18n::{tr, trf};
 use crate::runtime::model::{GuideChannel, SourceId};
 use iptv_nav::Action;
 use nsh_core::element::input;
@@ -46,7 +47,7 @@ pub fn open(ui: Ui, channel: usize) {
         .channel_key(channel)
         .and_then(|k| crate::data::combined::owner(ui, &k))
     else {
-        crate::settings_view::notify("No playlist on screen");
+        crate::settings_view::notify(tr("No playlist on screen"));
         return;
     };
     ui.guide_assign.set(Some(Picker::new(Subject {
@@ -64,7 +65,7 @@ pub fn open(ui: Ui, channel: usize) {
         }
         if channels.is_empty() {
             close(ui);
-            crate::settings_view::notify("No guide data is stored yet: update the guide first");
+            crate::settings_view::notify(tr("No guide data is stored yet: update the guide first"));
             return;
         }
         let feeds: Vec<_> = crate::data::stored::source_lines(playlist)
@@ -173,10 +174,10 @@ fn choice_name(choice: &assign::Choice) -> &'static str {
 
 fn applied_words(applied: Applied) -> &'static str {
     match applied {
-        Applied::Now => "Guide data changed",
-        Applied::Downloading => "Saved; the guide is downloading to show it",
-        Applied::Later => "Saved; it shows after the next guide update",
-        Applied::Failed => "The choice could not be saved",
+        Applied::Now => tr("Guide data changed"),
+        Applied::Downloading => tr("Saved; the guide is downloading to show it"),
+        Applied::Later => tr("Saved; it shows after the next guide update"),
+        Applied::Failed => tr("The choice could not be saved"),
     }
 }
 
@@ -189,6 +190,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
 fn panel(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     view()
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::GuideAssign.accessibility_covered(ui)
+        })
         .absolute()
         .inset_0()
         .flex_row()
@@ -221,19 +225,22 @@ fn now_line(p: &Picker) -> String {
             .find(|c| c.feed == *feed && c.epg_channel == *id)
             .and_then(|c| c.name.clone())
             .unwrap_or_else(|| id.clone());
-        let how = match kind {
-            iptv_epg::MatchKind::Override => "chosen by you",
-            _ => "matched automatically",
-        };
-        format!("{name} ({}, {how})", p.feed_name(*feed))
+        let args = [
+            ("name", (&name).into()),
+            ("source", p.feed_name(*feed).into()),
+        ];
+        match kind {
+            iptv_epg::MatchKind::Override => trf("Now: {name} ({source}, chosen by you)", &args),
+            _ => trf("Now: {name} ({source}, matched automatically)", &args),
+        }
     });
     match (&s.current.choice, bound) {
-        (Some(assign::Choice::NoGuide), _) => "Now: no guide data (chosen by you)".to_owned(),
-        (_, Some(b)) => format!("Now: {b}"),
+        (Some(assign::Choice::NoGuide), _) => tr("Now: no guide data (chosen by you)").to_owned(),
+        (_, Some(bound)) => bound,
         (Some(assign::Choice::Channel { .. }), None) => {
-            "Now: chosen by you; shows after the next guide update".to_owned()
+            tr("Now: chosen by you; shows after the next guide update").to_owned()
         }
-        _ => "Now: no guide channel matches it".to_owned(),
+        _ => tr("Now: no guide channel matches it").to_owned(),
     }
 }
 
@@ -241,7 +248,13 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
     view()
         .gap(move || size.px(4.0))
         .child(ui_kit::title(size, move || {
-            state(ui, |p| format!("Guide data for {}", p.subject().name)).unwrap_or_default()
+            state(ui, |p| {
+                trf(
+                    "Guide data for {channel}",
+                    &[("channel", (&p.subject().name).into())],
+                )
+            })
+            .unwrap_or_default()
         }))
         .child(
             ui_kit::caption(size, move || state(ui, now_line).unwrap_or_default())
@@ -250,9 +263,9 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
         .child(ui_kit::caption(size, move || {
             let busy = state(ui, Picker::busy).unwrap_or(false);
             match (busy, ui.keys_shown()) {
-                (true, _) => "Applying…",
-                (false, true) => "▲▼ move   OK choose   Back close",
-                (false, false) => "Tap the field to search, a row to choose it",
+                (true, _) => tr("Applying…"),
+                (false, true) => tr("▲▼ move   OK choose   Back close"),
+                (false, false) => tr("Tap the field to search, a row to choose it"),
             }
         }))
 }
@@ -284,24 +297,28 @@ fn row(ui: Ui, size: Scale, index: usize, focused: Memo<Option<usize>>) -> AnyEl
     let title = move || match item() {
         Some(Row::Filter) => {
             if state(ui, Picker::all).unwrap_or(true) {
-                "Showing every guide channel".to_owned()
+                tr("Showing every guide channel").to_owned()
             } else {
-                "Showing only guide channels no channel uses".to_owned()
+                tr("Showing only guide channels no channel uses").to_owned()
             }
         }
-        Some(Row::Automatic) => "Automatic".to_owned(),
-        Some(Row::NoGuide) => "No guide data".to_owned(),
+        Some(Row::Automatic) => tr("Automatic").to_owned(),
+        Some(Row::NoGuide) => tr("No guide data").to_owned(),
         Some(Row::Channel(..)) => channel()
             .map(|c| c.name.clone().unwrap_or_else(|| c.epg_channel.clone()))
             .unwrap_or_default(),
         _ => String::new(),
     };
     let detail = move || match item() {
-        Some(Row::Filter) => {
-            state(ui, |p| format!("{} shown · OK to switch", p.matches())).unwrap_or_default()
-        }
-        Some(Row::Automatic) => "Matched by its guide id and name".to_owned(),
-        Some(Row::NoGuide) => "The guide shows no programmes for it".to_owned(),
+        Some(Row::Filter) => state(ui, |p| {
+            trf(
+                "{count} shown · OK to switch",
+                &[("count", p.matches().into())],
+            )
+        })
+        .unwrap_or_default(),
+        Some(Row::Automatic) => tr("Matched by its guide id and name").to_owned(),
+        Some(Row::NoGuide) => tr("The guide shows no programmes for it").to_owned(),
         Some(Row::Channel(..)) => channel()
             .map(|c| channel_detail(ui, &c))
             .unwrap_or_default(),
@@ -309,6 +326,11 @@ fn row(ui: Ui, size: Scale, index: usize, focused: Memo<Option<usize>>) -> AnyEl
     };
     let mark = move || Mark::of(focused.get() == Some(index) && ui.keys_shown(), false);
     list_rows::row(size, ROW_TWO, mark)
+        .role(AccessibilityRole::Option)
+        .accessibility_state(move || AccessibilityState {
+            selected: current(),
+            ..Default::default()
+        })
         .flex_row()
         .items_center()
         .justify_start()
@@ -324,7 +346,7 @@ fn row(ui: Ui, size: Scale, index: usize, focused: Memo<Option<usize>>) -> AnyEl
                 .child(ui_kit::detail(size, detail).text_color(move || mark().secondary())),
         )
         .child(
-            ui_kit::caption(size, move || if current() { "Current" } else { "" }).text_color(
+            ui_kit::caption(size, move || if current() { tr("Current") } else { "" }).text_color(
                 move || match mark() {
                     Mark::Focused => Mark::Focused.text(),
                     _ => rgb(ui.theme.with(|t| t.accent.light)),
@@ -336,8 +358,12 @@ fn row(ui: Ui, size: Scale, index: usize, focused: Memo<Option<usize>>) -> AnyEl
 
 fn channel_detail(ui: Ui, c: &GuideChannel) -> String {
     let feed = state(ui, |p| p.feed_name(c.feed).to_owned()).unwrap_or_default();
-    let used = if c.assigned { " · in use" } else { "" };
-    format!("{} · {feed}{used}", c.epg_channel)
+    let args = [("id", (&c.epg_channel).into()), ("source", (&feed).into())];
+    if c.assigned {
+        trf("{id} · {source} · in use", &args)
+    } else {
+        format!("{} · {feed}", c.epg_channel)
+    }
 }
 
 /// The first row: the search field. OK on it (or a tap) types; Return
@@ -356,7 +382,7 @@ fn search_field(ui: Ui, size: Scale, focused: Memo<Option<usize>>) -> impl IntoE
         ui_kit::field(size, input())
             .element_ref(&field)
             .value(move || state(ui, |p| p.query().to_owned()).unwrap_or_default())
-            .placeholder("Search guide channels by name or id")
+            .placeholder(tr("Search guide channels by name or id"))
             .auto_capitalize(AutoCapitalize::None)
             .auto_correct(false)
             .return_key_type(ReturnKeyType::Search)

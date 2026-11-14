@@ -20,6 +20,7 @@ pub struct ColourKey(pub &'static str);
 pub struct BindingsKey(pub &'static str);
 
 pub const LANGUAGE: TextKey = TextKey("general.language");
+pub const CLOCK: EnumKey = EnumKey("general.clock");
 
 // Input (iptv-nav).
 pub const LONG_PRESS: DurationKey = DurationKey("remote.long_press");

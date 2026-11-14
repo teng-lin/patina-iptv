@@ -40,7 +40,7 @@ const WAIT: Duration = Duration::from_secs(3);
 /// details popover's (mounted, empty, while closed).
 // A time on another local day carries its weekday and date ("Thu 12 · 00:22"):
 // late in the evening the programme two hours on ends, or starts, tomorrow.
-const GALA: &str = "text:/^Test Channel One · ([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+–([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+$/";
+const GALA: &str = "text:/^Test Channel One · ([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+ [AP]M–([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+ [AP]M$/";
 
 /// As in `cov_nav.rs`: "Morning Talk" on now on channel one, "Recital
 /// Replay" two hours back (replayable), "Gala Evening" two hours on;

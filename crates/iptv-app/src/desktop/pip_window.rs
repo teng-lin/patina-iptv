@@ -240,6 +240,7 @@ fn button(
     act: impl Fn() + 'static,
 ) -> View {
     view()
+        .role(AccessibilityRole::Button)
         .test_id(id)
         .w(px(size))
         .h(px(size))
@@ -270,6 +271,7 @@ pub fn placeholder(ui: Ui) -> impl IntoElement {
             let size = crate::scale::Scale::new();
             view()
                 .test_id("pip-placeholder")
+                .accessibility_elements_hidden(move || ui.any_overlay_open())
                 .absolute()
                 .left(move || px(rect().0))
                 .top(move || px(rect().1))
@@ -286,13 +288,13 @@ pub fn placeholder(ui: Ui) -> impl IntoElement {
                 )
                 .child(crate::ui_kit::caption(
                     size,
-                    "Playing in picture-in-picture",
+                    tr("Playing in picture-in-picture"),
                 ))
                 .child(
                     crate::ui_kit::button(
                         ui,
                         size,
-                        "Back to the app",
+                        tr("Back to the app"),
                         || false,
                         move || {
                             crate::pip::exit(ui, Exit::BackToApp);

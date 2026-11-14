@@ -105,7 +105,14 @@ fn reload_time_zone() {}
 pub fn clock(minute: i32) -> String {
     let s = schedule();
     let now = guide::unix_of(&*s, now_minute());
-    iptv_core::clock::label(guide::unix_of(&*s, minute), now, offset_minutes)
+    label(guide::unix_of(&*s, minute), now)
+}
+
+/// The local time of `unix` in the interface language and on the clock
+/// the settings choose, with the weekday and day when it is not the day
+/// of `now` (`14:05`, `Tue 10 · 2:05 PM`).
+pub fn label(unix: i64, now: i64) -> String {
+    iptv_core::clock::label(unix, now, offset_minutes, crate::i18n::clock_style())
 }
 
 /// Moves the guide's now when the minute changed.

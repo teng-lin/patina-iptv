@@ -58,6 +58,16 @@ pub fn saved_settings(
 }
 /// `home`: the scenario's own (`isolated!()`).
 pub fn start(home: Home, settings: Settings, manual: bool) -> Fixture {
+    start_with_setup(home, settings, manual, |_| {})
+}
+
+/// Install observation before the app's initial batches are applied.
+pub fn start_with_setup(
+    home: Home,
+    settings: Settings,
+    manual: bool,
+    setup: impl FnOnce(&mut Headless),
+) -> Fixture {
     let dir = crate::isolated::data_dir(home.path());
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("settings.json"), settings.to_json_string()).unwrap();
@@ -100,6 +110,7 @@ pub fn start(home: Home, settings: Settings, manual: bool) -> Fixture {
         config.clock = nsh_core::time::Clock::manual(SystemTime::now());
     }
     let mut app = Headless::start(config).unwrap();
+    setup(&mut app);
     step(app.wait_for_within("text:★ Local A", Duration::from_secs(20)));
     step(app.press("text:/^☰  /"));
     step(app.press_key("right"));

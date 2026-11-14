@@ -160,8 +160,14 @@ mod tests {
             >(
             )))
             .unwrap();
-            app.wait_for("text:Private app storage is unavailable")
-                .unwrap();
+            let locale = std::env::var("IPTV_RS_TEST_LOCALE").unwrap();
+            let language = iptv_core::i18n::resolve("system", Some(&locale));
+            let message =
+                iptv_core::i18n::translate(language, "Private app storage is unavailable");
+            if locale == "de" {
+                assert_ne!(message, "Private app storage is unavailable");
+            }
+            app.wait_for(&format!("text:{message}")).unwrap();
             assert!(crate::runtime::try_current().is_none());
             std::fs::write(std::env::var_os(RAN).unwrap(), b"storage error shown").unwrap();
             return;
@@ -174,8 +180,11 @@ mod tests {
         } else {
             "HOME"
         };
-        for mode in ["missing", "relative", "non-directory"] {
-            let ran = home.path().join(format!("{mode}-ran"));
+        for (mode, locale) in ["missing", "relative", "non-directory"]
+            .into_iter()
+            .flat_map(|mode| ["en", "de"].map(|locale| (mode, locale)))
+        {
+            let ran = home.path().join(format!("{mode}-{locale}-ran"));
             let mut child = std::process::Command::new(std::env::current_exe().unwrap());
             child
                 .args([
@@ -186,6 +195,7 @@ mod tests {
                 ])
                 .current_dir(home.path())
                 .env(CHILD, mode)
+                .env("IPTV_RS_TEST_LOCALE", locale)
                 .env(RAN, &ran)
                 .env("HOME", home.path())
                 .env("LOCALAPPDATA", home.path());
@@ -204,7 +214,7 @@ mod tests {
             let result = child.output().unwrap();
             assert!(
                 result.status.success(),
-                "{mode}: {}{}",
+                "{mode}/{locale}: {}{}",
                 String::from_utf8_lossy(&result.stdout),
                 String::from_utf8_lossy(&result.stderr)
             );

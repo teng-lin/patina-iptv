@@ -3,7 +3,7 @@
 //! again once retries stopped (OK retries too). Compact in the guide's
 //! preview.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 use iptv_core::playback::Phase;
 use nsh_core::prelude::*;
@@ -50,9 +50,13 @@ fn status_of(ui: Ui) -> Status {
                 title: format!("Can't play {}", channel_name(channel)),
                 message: failure_message(&f.kind, catch_up),
                 detail: match (f.attempts, f.retrying) {
-                    (_, true) => format!("{} · still trying", f.detail),
+                    (_, true) => trf("{detail} · still trying", &[("detail", (&f.detail).into())]),
                     (0, false) => f.detail.clone(),
-                    (n, false) => format!("{} · tried {n} times", f.detail),
+                    (n, false) => trf(
+                        "{count, plural, one {{detail} · tried # time} \
+                         other {{detail} · tried # times}}",
+                        &[("detail", (&f.detail).into()), ("count", n.into())],
+                    ),
                 },
             },
             // A quick reconnect keeps the last frame without a pill.
@@ -72,6 +76,7 @@ pub fn status(ui: Ui) -> impl IntoElement {
     let card = move || matches!(status.get(), Status::Failed { .. } | Status::Over);
     let secondary = move || tint(WHITE, TEXT_SECONDARY_ALPHA);
     view()
+        .accessibility_elements_hidden(move || ui.any_overlay_open())
         .absolute()
         .left(move || px(crate::video::rect(ui).0))
         .top(move || px(crate::video::rect(ui).1))

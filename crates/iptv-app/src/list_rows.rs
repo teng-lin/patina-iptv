@@ -99,6 +99,7 @@ pub fn row_with(
     mark: impl Fn() -> Mark + 'static,
 ) -> View {
     view()
+        .role(AccessibilityRole::Row)
         .h(move || px(size.whole(pitch()) - 2.0 * size.whole(GAP)))
         .my(move || px(size.whole(GAP)))
         .px(move || size.px(INSET))

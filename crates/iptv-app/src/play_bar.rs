@@ -161,6 +161,16 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             view()
                 .absolute()
                 .inset_0()
+                .test_id("play-bar-layer")
+                .accessibility_elements_hidden(move || {
+                    ui.overlay_open(|overlay| {
+                        !matches!(
+                            overlay,
+                            crate::overlays::Overlay::Chooser
+                                | crate::overlays::Overlay::Description
+                        )
+                    })
+                })
                 .pointer_events(PointerEvents::BoxNone)
                 .child(when(move || ui.back_controls(), move || back(ui)))
                 .child(bar(ui))
@@ -254,6 +264,11 @@ fn button(
     act: impl Fn() + 'static,
 ) -> View {
     view()
+        .role(AccessibilityRole::Button)
+        .accessibility_state(move || AccessibilityState {
+            disabled: !enabled(),
+            ..Default::default()
+        })
         .w(px(size))
         .h(px(size))
         .rounded(px(size / 2.0))

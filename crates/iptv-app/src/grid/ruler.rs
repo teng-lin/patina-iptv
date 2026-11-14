@@ -34,6 +34,7 @@ pub(super) fn ruler(
 ) -> impl IntoElement {
     let button = move |label: &'static str| {
         text(label)
+            .role(AccessibilityRole::Button)
             .px(move || size.px(10.0))
             .rounded(move || size.px(4.0))
             .bg(tint(WHITE, RESTING_ALPHA))
@@ -53,18 +54,29 @@ pub(super) fn ruler(
         move || pan.away(),
         move || button("Now").on_press(move || pan.to_now()),
     );
-    // The half hours across the band.
-    let first = move || pan.band().base.div_euclid(STEP) * STEP + STEP;
+    // Enlarged text needs room for localized 12-hour labels (including
+    // the day period). Use hourly ticks rather than ellipsizing minutes.
+    let tick_step = move || {
+        if crate::settings::font_factor() > 1.0 {
+            STEP * 2
+        } else {
+            STEP
+        }
+    };
+    let first = move || {
+        let step = tick_step();
+        pan.band().base.div_euclid(step) * step + step
+    };
     let tick = move |i: i32| {
         // The epoch comes with the data; now decides which day is "today".
         text(move || {
             ui.guide_data();
             ui.focus.with(|f| f.now);
-            clock(first() + i * STEP)
+            clock(first() + i * tick_step())
         })
         .absolute()
         .left(move || {
-            let at = (first() + i * STEP - pan.band().base) as f32;
+            let at = (first() + i * tick_step() - pan.band().base) as f32;
             px(at * pan.scale() + size.of(TICK_INSET))
         })
         // Its slot's width, not its text's: sized to its text it would be
@@ -72,7 +84,7 @@ pub(super) fn ruler(
         // which the slide does not move, and a time near the edge came out
         // as "2" or "…" (CoreText, Pango) though it showed on screen. The
         // strip's clip cuts what passes its edge, as the cells' titles.
-        .w(move || px((STEP as f32 * pan.scale() - size.of(TICK_INSET)).max(0.0)))
+        .w(move || px((tick_step() as f32 * pan.scale() - size.of(TICK_INSET)).max(0.0)))
         .number_of_lines(1)
         .font_family(SANS)
         .text_size(move || size.text_px(RULER))
@@ -171,7 +183,11 @@ fn date_time(ui: Ui, size: Scale, pan: Pan) -> Text {
         let unix = crate::guide::unix_of(&*crate::schedule(), shown);
         format!(
             "{}  {}",
-            iptv_core::clock::date(unix, crate::time::offset_minutes(unix)),
+            iptv_core::clock::date(
+                unix,
+                crate::time::offset_minutes(unix),
+                crate::i18n::clock_style()
+            ),
             clock(now)
         )
     })
