@@ -203,6 +203,7 @@ pub fn start_import(ui: Ui, job: Job, on_update: impl Fn(Update) + 'static) -> C
 fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(Update) + 'static) {
     let purpose = job.purpose;
     let mut import_source = job.stored;
+    let had_check = import_source.is_some_and(|source| crate::runtime().has_guide_check(source));
     let completion = library::import_completion(cancel.clone());
     if let Some(source) = import_source {
         library::track_import(source, &completion);
@@ -267,6 +268,7 @@ fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(U
     };
     spawn_in_app(async move {
         let mut finished = false;
+        let mut failed = false;
         loop {
             let mut progress = None;
             let mut open = true;
@@ -303,6 +305,7 @@ fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(U
                             }
                             Err(error) => Err(error),
                         };
+                        failed = result.is_err();
                         on_update(Update::Done(result));
                     }
                     Ok(Msg::Guide(imported)) => {
@@ -333,6 +336,7 @@ fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(U
             }
             if !open {
                 if !finished {
+                    failed = true;
                     log::warn!("iptv data: import thread ended without a result");
                     on_update(Update::Done(Err(ImportFailure::new(FailureKind::Network))));
                 }
@@ -348,6 +352,8 @@ fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(U
         // A failed refresh may exit before producing NextCheck. Keep a bounded
         // retry for a retained source instead of losing its guide timer forever.
         if let Some(source) = import_source
+            && failed
+            && had_check
             && library::import_is_current(source, &completion)
             && !completion.cancel.is_cancelled()
             && !crate::runtime().has_guide_check(source)
@@ -568,12 +574,23 @@ async fn read_guide(
     } else {
         read
     };
-    let (ticket, cancel) = crate::runtime().replace_guide_check(source);
+    let had_check = crate::runtime().has_guide_check(source);
+    let Some((ticket, cancel)) = crate::runtime().schedule_guide_check(source, generation) else {
+        return;
+    };
     let (tx, mut rx) = unbounded_channel();
     if !workers::submit(source_is_visible(ui, source), move || {
         with_runtime(|| guide_pipeline(source, &tx, read, &cancel));
     }) {
         crate::runtime().cancel_guide_check(source);
+        if had_check {
+            schedule_check(
+                ui,
+                source,
+                now_unix() + MIN_WAIT.as_secs() as i64,
+                generation,
+            );
+        }
         crate::runtime().emit(crate::runtime::RuntimeEvent::Notify(
             "Too many playlists are updating. Try again shortly.",
         ));

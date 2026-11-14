@@ -116,16 +116,35 @@ impl Store {
         id: &GroupId,
         target: crate::MoveTarget,
     ) -> Result<()> {
-        let mut ids: Vec<_> = self
-            .library_groups(source)?
-            .into_iter()
-            .map(|g| g.group.id)
+        let groups = self.library_groups(source)?;
+        let Some(kind) = groups
+            .iter()
+            .find(|g| &g.group.id == id)
+            .map(|g| g.group.kind)
+        else {
+            return Ok(());
+        };
+        let mut ids: Vec<_> = groups
+            .iter()
+            .filter(|g| g.group.kind == kind)
+            .map(|g| g.group.id.clone())
             .collect();
         if let Some(at) = ids.iter().position(|g| g == id) {
             let index = target.resolve(at);
             let id = ids.remove(at);
             ids.insert(index.min(ids.len()), id);
         }
+        let mut reordered = ids.into_iter();
+        let ids: Vec<_> = groups
+            .into_iter()
+            .map(|g| {
+                if g.group.kind == kind {
+                    reordered.next().expect("same-kind positions retained")
+                } else {
+                    g.group.id
+                }
+            })
+            .collect();
         let tx = self.conn.transaction()?;
         for (position, id) in ids.iter().enumerate() {
             tx.execute(

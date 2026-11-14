@@ -250,6 +250,25 @@ pub fn next_check(
     )
 }
 
+/// Retain automatic checks after a transient storage/worker failure.
+pub(crate) fn retry_check(
+    tx: &Sender<Msg>,
+    source: SourceId,
+    configs: &[EpgSourceConfig],
+    now: UnixTime,
+) {
+    if !configs.is_empty()
+        && RefreshPolicy::from_settings(&super::settings::get(), &Target::Global)
+            .interval
+            .is_some()
+    {
+        let _ = tx.send(Msg::NextCheck {
+            source,
+            at: now + RETRY_DUE,
+        });
+    }
+}
+
 /// The time a guide check is due after `decision`.
 pub fn check_at(decision: Decision, now: UnixTime) -> Option<UnixTime> {
     match decision {
@@ -344,7 +363,6 @@ pub fn discard(source: SourceId) {
 pub async fn download_now(
     source: SourceId,
     guides: Vec<EpgSourceConfig>,
-    restart_checks: bool,
     tx: &Sender<Msg>,
     cancel: &CancelToken,
 ) {
@@ -353,6 +371,7 @@ pub async fn download_now(
         Ok(catalog) => catalog,
         Err(e) => {
             log::warn!("iptv data: stored catalog: {e}");
+            retry_check(tx, source, &guides, now);
             return;
         }
     };
@@ -396,9 +415,7 @@ pub async fn download_now(
         }
         Err(e) => log::warn!("iptv data: network client setup failed: {e}"),
     }
-    if restart_checks {
-        super::imports::send_next_check(tx, source, &guides, matching);
-    }
+    super::imports::send_next_check(tx, source, &guides, matching);
 }
 
 /// The stored kind of a failed import (kind only: no URL, no body).

@@ -217,16 +217,23 @@ pub fn update_source(ui: Ui, source: SourceId, done: impl FnOnce(bool) + 'static
         let cancel = CancelToken::new();
         let completion = super::library::import_completion(cancel.clone());
         completion.playlist_done(); // This worker owns guide work only.
+        let had_check = crate::runtime().has_guide_check(source);
         super::library::track_import(source, &completion);
-        // Without a stored guide the periodic checks stopped: start them again.
-        let restart_checks = stored.is_none();
 
         let generation = crate::runtime().generation().with(Cell::get);
         let (tx, mut rx) = unbounded_channel();
         let accepted = super::workers::submit(super::source_is_visible(ui, source), move || {
-            super::with_runtime(|| download_now(source, guides, restart_checks, &tx, &cancel));
+            super::with_runtime(|| download_now(source, guides, &tx, &cancel));
         });
         if !accepted {
+            if had_check {
+                super::schedule_check(
+                    ui,
+                    source,
+                    super::now_unix() + super::MIN_WAIT.as_secs() as i64,
+                    generation,
+                );
+            }
             crate::runtime().emit(crate::runtime::RuntimeEvent::Notify(
                 "Too many playlists are updating. Try again shortly.",
             ));
