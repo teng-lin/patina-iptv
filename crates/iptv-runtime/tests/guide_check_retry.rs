@@ -232,3 +232,54 @@ fn an_unreadable_guide_state_makes_up_no_check_when_guide_updates_are_manual() {
         owner.drain_services();
     });
 }
+
+/// Guide work that was superseded writes nothing more: neither a failure
+/// (which would note an error on a guide just deleted) nor a discard
+/// (decided from guide sources that have changed since). The stop is
+/// looked at on the store's writer, in order with the writes of what
+/// superseded the work.
+#[test]
+fn superseded_guide_work_writes_neither_a_failure_nor_a_discard() {
+    let directory = tempfile::tempdir().unwrap();
+    let (owner, source) = stored(directory.path());
+    with_runtime(owner.clone(), || {
+        owner.start_services();
+        // What the store notes of the guide: whether, and its last error.
+        let noted = || -> (i64, Option<String>) {
+            raw(directory.path())
+                .query_row(
+                    "SELECT count(*), max(last_error_kind) FROM epg_guides",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap()
+        };
+        // One failure and one discard by work that is stopped or not.
+        let write = |stopped: bool, discard: bool| {
+            let worker = owner.scope_worker(move || {
+                let stop = CancelToken::new();
+                if stopped {
+                    stop.cancel();
+                }
+                if discard {
+                    iptv_runtime::stored::discard(source, &[&stop]);
+                } else {
+                    let error = iptv_import::ImportError::Storage("synthetic".into());
+                    iptv_runtime::stored::record_failure(source, &error, &[], &[&stop]);
+                }
+            });
+            std::thread::spawn(worker).join().unwrap();
+        };
+        assert_eq!(noted(), (1, Some("network".into())), "as stored");
+        write(true, false);
+        assert_eq!(noted(), (1, Some("network".into())), "no failure noted");
+        write(true, true);
+        assert_eq!(noted(), (1, Some("network".into())), "nothing discarded");
+        // Work that still owns the guide writes both.
+        write(false, false);
+        assert_eq!(noted(), (1, Some("other".into())));
+        write(false, true);
+        assert_eq!(noted(), (0, None));
+        owner.drain_services();
+    });
+}

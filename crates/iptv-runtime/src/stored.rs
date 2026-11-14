@@ -347,11 +347,7 @@ pub const RETRY_DUE: i64 = 3600;
 /// is recorded, so automatic refreshes back off; each feed's result is
 /// kept for the guide sources screen.
 ///
-/// Not when one of `stops` was cancelled: the work was superseded (a
-/// guide action revoked it, newer work replaced it). The check runs on
-/// the store's writer, in order with the superseding action's own writes,
-/// so a download that finished as it was superseded cannot put back a
-/// guide that action deleted or matched anew.
+/// Not when one of `stops` was cancelled ([`Stops`]).
 pub(crate) fn replace(
     source: SourceId,
     mut guide: Downloaded,
@@ -363,9 +359,9 @@ pub(crate) fn replace(
     let feeds = EpgFeedMeta::from_import(&guide.import, configs, now);
     let fingerprint = matching.fingerprint();
     let keep = keep_past_days(&super::settings::get());
-    let stops: Vec<CancelToken> = stops.iter().map(|stop| (*stop).clone()).collect();
+    let stops = Stops::of(stops);
     super::store_service::blocking(move |store| {
-        if stops.iter().any(CancelToken::is_cancelled) {
+        if stops.superseded() {
             return Err(StoreError::Unavailable("the guide download was superseded"));
         }
         let import = &guide.import;
@@ -397,23 +393,61 @@ pub(crate) fn replace(
     })
 }
 
+/// What ends guide work's right to write its result: the tokens that stop
+/// it, looked at again on the store's writer. Work is superseded when a
+/// guide action revoked it or newer work replaced it; the writer runs its
+/// write in order with those of what superseded it (a deletion, a new
+/// match, a newer guide), so a result that was still wanted when its
+/// worker last looked cannot land after them: a download cannot put back
+/// a deleted guide, a failure cannot note an error on it, and a discard
+/// decided from older guide sources cannot delete a newer guide.
+struct Stops(Vec<CancelToken>);
+
+impl Stops {
+    fn of(stops: &[&CancelToken]) -> Self {
+        Self(stops.iter().map(|stop| (*stop).clone()).collect())
+    }
+
+    fn superseded(&self) -> bool {
+        self.0.iter().any(CancelToken::is_cancelled)
+    }
+}
+
 /// Notes a failed guide download (every source in `configs` failed); the
-/// stored guide stays.
-pub fn record_failure(source: SourceId, error: &ImportError, configs: &[EpgSourceConfig]) {
-    record_failure_kind(source, error_kind(error), configs);
+/// stored guide stays. Not when one of `stops` was cancelled ([`Stops`]).
+pub fn record_failure(
+    source: SourceId,
+    error: &ImportError,
+    configs: &[EpgSourceConfig],
+    stops: &[&CancelToken],
+) {
+    record_failure_kind(source, error_kind(error), configs, stops);
 }
 
 /// Notes that the guide could not be downloaded because the network
 /// client could not be set up: no source in `configs` was reached, which
 /// the refresh policy treats as a network failure of each (it backs off
 /// and tries again, as after a failed download).
-pub fn record_client_failure(source: SourceId, configs: &[EpgSourceConfig]) {
-    record_failure_kind(source, ImportErrorKind::Network, configs);
+pub fn record_client_failure(
+    source: SourceId,
+    configs: &[EpgSourceConfig],
+    stops: &[&CancelToken],
+) {
+    record_failure_kind(source, ImportErrorKind::Network, configs, stops);
 }
 
-fn record_failure_kind(source: SourceId, kind: ImportErrorKind, configs: &[EpgSourceConfig]) {
+fn record_failure_kind(
+    source: SourceId,
+    kind: ImportErrorKind,
+    configs: &[EpgSourceConfig],
+    stops: &[&CancelToken],
+) {
     let results: Vec<_> = configs.iter().map(|c| (c.id, Some(kind))).collect();
+    let stops = Stops::of(stops);
     let recorded = super::store_service::blocking(move |s| {
+        if stops.superseded() {
+            return Ok(());
+        }
         s.record_epg_failure(source, kind)?;
         s.record_epg_feed_results(source, &results)
     });
@@ -422,9 +456,17 @@ fn record_failure_kind(source: SourceId, kind: ImportErrorKind, configs: &[EpgSo
     }
 }
 
-/// Deletes `source`'s stored guide (no guide is configured any more).
-pub fn discard(source: SourceId) {
-    match super::store_service::blocking(move |store| store.delete_epg(source)) {
+/// Deletes `source`'s stored guide (no guide is configured any more). Not
+/// when one of `stops` was cancelled ([`Stops`]).
+pub fn discard(source: SourceId, stops: &[&CancelToken]) {
+    let stops = Stops::of(stops);
+    let deleted = super::store_service::blocking(move |store| {
+        if stops.superseded() {
+            return Ok(false);
+        }
+        store.delete_epg(source)
+    });
+    match deleted {
         Ok(true) => log::info!("iptv data: no guide configured; deleted the stored one"),
         Ok(false) => {}
         Err(e) => log::warn!("iptv data: could not delete the stored guide: {e}"),
@@ -482,7 +524,7 @@ pub async fn download_now(
                 Err(_) if cancel.is_cancelled() => {}
                 Err(e) => {
                     log::warn!("iptv data: guide: {e}");
-                    record_failure(source, &e, &guides);
+                    record_failure(source, &e, &guides, &[cancel]);
                 }
             }
         }

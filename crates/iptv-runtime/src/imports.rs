@@ -240,7 +240,7 @@ pub async fn guide_pipeline(
                                 return;
                             }
                             log::warn!("iptv data: guide: {e}");
-                            stored::record_failure(source, &e, &guides);
+                            stored::record_failure(source, &e, &guides, &[cancel]);
                         }
                     }
                 }
@@ -248,7 +248,7 @@ pub async fn guide_pipeline(
             }
         }
         Decision::Discard => {
-            stored::discard(source);
+            stored::discard(source, &[cancel]);
             // Its programmes went: the guide on screen shows none.
             let _ = tx.send(Msg::Guide(Box::new(Imported {
                 groups,
@@ -380,7 +380,7 @@ pub(crate) async fn pipeline(
                         }
                         Err(ImportError::Cancelled) => {}
                         Err(_) if stops.iter().any(|stop| stop.is_cancelled()) => {}
-                        Err(e) => stored::record_failure(id, &e, &guides),
+                        Err(e) => stored::record_failure(id, &e, &guides, &stops),
                     }
                 }
                 // Without a client no guide source was tried. Noted as the
@@ -389,11 +389,11 @@ pub(crate) async fn pipeline(
                 // the guide due again at every check.
                 Err(e) => {
                     log::warn!("iptv data: network client setup failed: {e}");
-                    stored::record_client_failure(id, &guides);
+                    stored::record_client_failure(id, &guides, &stops);
                 }
             },
             Decision::Discard => {
-                stored::discard(id);
+                stored::discard(id, &stops);
                 let _ = tx.send(Msg::Guide(Box::new(Imported {
                     groups,
                     channels: channels.clone(),
@@ -602,12 +602,12 @@ pub(crate) async fn pipeline(
                 Err(_) if stops.iter().any(|stop| stop.is_cancelled()) => {}
                 Err(e) => {
                     log::warn!("iptv data: guide: {e}");
-                    stored::record_failure(id, &e, &guides);
+                    stored::record_failure(id, &e, &guides, &stops);
                 }
             }
         }
         Decision::Discard => {
-            stored::discard(id);
+            stored::discard(id, &stops);
             report(GuideStore::default());
         }
         decision => {
