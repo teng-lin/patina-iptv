@@ -658,6 +658,9 @@ mod staged {
     }
     impl Mock {
         fn new() -> Self {
+            Self::with_xml(XML.to_owned())
+        }
+        fn with_xml(xml: String) -> Self {
             let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
             let address = listener.local_addr().unwrap();
             let stop = Arc::new(AtomicBool::new(false));
@@ -687,8 +690,8 @@ mod staged {
                     let _ = write!(
                         connection,
                         "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/xml\r\nConnection: close\r\n\r\n{}",
-                        XML.len(),
-                        XML
+                        xml.len(),
+                        xml
                     );
                 }
             });
@@ -844,6 +847,74 @@ mod staged {
             server.requests.load(Ordering::SeqCst),
             2,
             "one probe plus one coalesced import"
+        );
+    }
+    #[test]
+    fn one_stage_repairs_500_channels_with_one_bounded_evidence_batch() {
+        let fixture = Fixture::new();
+        let mut generated = Vec::new();
+        let mut xml = String::from("<tv>");
+        for index in 0..500 {
+            let mut row = channels().remove(0);
+            row.id = ContentId::from_stored(format!("synthetic-{index:03}"));
+            row.name = format!("Synthetic {index:03}");
+            row.epg_id = Some(format!("synthetic.{index:03}"));
+            xml.push_str(&format!("<channel id=\"synthetic.{index:03}\"><display-name>Synthetic {index:03}</display-name></channel><programme channel=\"synthetic.{index:03}\" start=\"20261114120000 +0000\" stop=\"20261114140000 +0000\"><title>Synthetic segment {index:03}</title></programme>"));
+            generated.push(row);
+        }
+        xml.push_str("</tv>");
+        fixture
+            .store()
+            .replace_catalog(fixture.source, &[], &generated, &[], &[])
+            .unwrap();
+        let server = Mock::with_xml(xml);
+        let (mut request, evidence) = proposal(&fixture, &server);
+        request.mappings = generated
+            .iter()
+            .enumerate()
+            .map(|(index, row)| MappingRequest {
+                channel: ChannelRef {
+                    source: fixture.source,
+                    content: row.id.clone(),
+                },
+                target: Target::Staged {
+                    evidence: evidence.clone(),
+                    epg_channel: format!("synthetic.{index:03}"),
+                    addition: Some(0),
+                },
+                replace_explicit: false,
+            })
+            .collect();
+        let start = Instant::now();
+        let preview = fixture.preview(request);
+        assert_eq!(preview.mapping_count, 500);
+        assert!(
+            fixture
+                .store()
+                .epg_overrides(fixture.source)
+                .unwrap()
+                .is_empty()
+        );
+        let saved = fixture.apply(&preview);
+        assert!(start.elapsed() < Duration::from_secs(10));
+        assert_eq!(saved.commit.added_feeds.len(), 1);
+        let feed = saved.commit.added_feeds[0];
+        for (index, row) in generated.iter().enumerate() {
+            assert_eq!(
+                fixture
+                    .store()
+                    .repair_mapping(fixture.source, &row.id)
+                    .unwrap(),
+                Some(Some(EpgOverride::for_feed(
+                    feed,
+                    format!("synthetic.{index:03}")
+                )))
+            );
+        }
+        assert_eq!(
+            server.requests.load(Ordering::SeqCst),
+            1,
+            "private stage is reused without a second download"
         );
     }
     #[test]
