@@ -157,7 +157,8 @@ pub(super) fn prepare(
         );
     }
     let configs = storage(store.guide_sources(source))?;
-    let listed = storage(store.guide_channels(source))?;
+    let listed =
+        storage(store.guide_repair_listed(source))?.ok_or(InspectionError::LimitExceeded)?;
     if listed.len() > 100_000 {
         return Err(InspectionError::LimitExceeded.into());
     }
@@ -187,7 +188,7 @@ pub(super) fn prepare(
             fresh_feeds.insert(feed);
         }
     }
-    let inputs = storage(store.guide_repair_inputs(source))?;
+    let inputs = storage(store.guide_repair_inputs(source))?.ok_or(InspectionError::LimitExceeded)?;
     let rows = inputs.channels;
     let actual: HashMap<_, _> = inputs
         .bindings

@@ -97,6 +97,7 @@ The current foundation limits are:
 | Probe XML | Finite record/text/nesting and item limits; external entities disabled |
 | Staging | At most 512 MiB aggregate, including reserved work and indexes |
 | Evidence / uncommitted plan lifetime | At most 24 hours; plans cannot outlive prerequisite stages |
+| Repair matching metadata | At most 100k playlist rows and 100k listed guide rows; at most 64 MiB text in each snapshot |
 | Repair batch | At most 500 explicit mappings and 64 feed changes/additions |
 | Live preview / transient operation state | At most 32 previews, 200k total preview items and 128 operation/admitted-command identities per owner |
 | Undo eligibility | Seven days after durable commit, subject to affected-row preconditions |
@@ -115,6 +116,12 @@ check cancellation/deadline before mutation, then preserve/report committed
 results or reconcile through the same commit/operation identity after a lost
 reply. `Error::CompletionUnknown { operation }` identifies such an uncertain effect.
 A caller must not create a new repair to retry an uncertain old effect.
+Recovery returns the durable receipt and leaves effective state pending when
+post-commit publication was never observed. It does not replay the mutation or
+promise background work after the caller/owner disappeared. In that case,
+request a normal guide refresh (Guide sources → Update the guide now in the UI,
+or the host's normal refresh path), then verify again. Durable undo remains
+available subject to its affected-row preconditions and retention window.
 
 ## Repair lifecycle and completion
 

@@ -256,9 +256,52 @@ pub struct RepairInputs {
     pub available: Vec<(iptv_epg::FeedId, String)>,
 }
 impl Store {
+    /// Bounded channel metadata; do not materialize a full legacy feed index
+    /// before checking its size. None means the explicit analysis limit.
+    pub fn guide_repair_listed(
+        &self,
+        source: SourceId,
+    ) -> Result<Option<Vec<crate::GuideChannel>>> {
+        let mut statement = self.conn.prepare_cached(
+            "SELECT feed_id,epg_channel,MAX(name) FROM (
+            SELECT feed_id,epg_channel,name FROM epg_feed_channels WHERE source_id=?1
+            UNION ALL SELECT feed_id,epg_channel,NULL FROM epg_channels WHERE source_id=?1)
+            GROUP BY feed_id,epg_channel ORDER BY feed_id,epg_channel LIMIT 100001",
+        )?;
+        let mut query = statement.query([source.0])?;
+        let mut listed = Vec::new();
+        let mut bytes = 0usize;
+        while let Some(row) = query.next()? {
+            for column in [1, 2] {
+                if let rusqlite::types::ValueRef::Text(value) = row.get_ref(column)? {
+                    bytes = bytes.saturating_add(value.len());
+                }
+            }
+            if listed.len() >= 100_000 || bytes > 64 * 1024 * 1024 {
+                return Ok(None);
+            }
+            listed.push(crate::GuideChannel {
+                feed: iptv_epg::FeedId(row.get(0)?),
+                epg_channel: row.get(1)?,
+                name: row.get(2)?,
+                assigned: false,
+            });
+        }
+        Ok(Some(listed))
+    }
+
     /// Only matching metadata: stream URLs, headers, logos and large membership
     /// arrays never enter the repair analysis snapshot.
-    pub fn guide_repair_inputs(&self, source: SourceId) -> Result<RepairInputs> {
+    pub fn guide_repair_inputs(&self, source: SourceId) -> Result<Option<RepairInputs>> {
+        let bytes:i64=self.conn.query_row("SELECT COALESCE(SUM(bytes),0) FROM (
+            SELECT length(CAST(c.id AS BLOB))+length(CAST(c.name AS BLOB))+
+            COALESCE(length(CAST(o.custom_name AS BLOB)),0)+COALESCE(length(CAST(c.epg_id AS BLOB)),0)+
+            COALESCE(length(CAST(c.epg_name AS BLOB)),0)+COALESCE(length(CAST(o.epg_channel AS BLOB)),0) AS bytes
+            FROM channels c LEFT JOIN channel_overlays o ON o.source_id=c.source_id AND o.channel_id=c.id
+            WHERE c.source_id=?1 LIMIT 100001)",[source.0],|r|r.get(0))?;
+        if bytes > 64 * 1024 * 1024 {
+            return Ok(None);
+        }
         let mut statement = self.conn.prepare_cached(
             "SELECT c.id,COALESCE(o.custom_name,c.name),
             c.name,c.epg_id,c.epg_name,COALESCE(o.blocked,0),o.epg_mode,o.epg_source,o.epg_channel
@@ -311,11 +354,11 @@ impl Store {
         let available = statement
             .query_map([source.0], |r| Ok((iptv_epg::FeedId(r.get(0)?), r.get(1)?)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(RepairInputs {
+        Ok(Some(RepairInputs {
             channels,
             bindings,
             available,
-        })
+        }))
     }
 }
 
