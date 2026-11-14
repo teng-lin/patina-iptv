@@ -1,10 +1,11 @@
 # Foundation validation record — 2026-11-14
 
-**Draft; final integration closure pending.** The earlier validated feature source is
-[`6f5829c597de9f24e6b2fde7e7b134157ec828d6`](https://github.com/teng-lin/patina-iptv/commit/6f5829c597de9f24e6b2fde7e7b134157ec828d6).
-This records executed evidence separately from pending gates. The internal API
-remains a **candidate** until the integration owner closes the host, CI and
-review rows below; this document does not declare Stage 1 complete.
+**Foundation acceptance passed; internal service contract v1 declared.** The combined source is
+[`a235e648ad87bb6ff0e2d94df27bd6801ca9cd75`](https://github.com/teng-lin/patina-iptv/commit/a235e648ad87bb6ff0e2d94df27bd6801ca9cd75),
+including master `9d682cb`, both peer-review fixes and the native initialization
+integration. All mandatory FND-01–26, host and CI gates passed. Finalization
+changes only documentation; the final merge head must retain this production
+source and pass required checks. Stage 2 MCP support remains deferred.
 
 The requirements are the [FND-01–26 acceptance inventory](2026-11-14-foundation-acceptance.md)
 and [delivery plan](2026-11-14-mcp-plan.md). Semantics and compatibility are in
@@ -16,27 +17,26 @@ entry points and detailed checks are documented in
 All evidence uses generated playlists, XMLTV and media, local mock servers,
 and synthetic credentials/keys. No real provider compatibility is inferred.
 
-## Executed host evidence and pending gates
+## Executed host evidence
 
 | Gate | Source | Recorded result and limits |
 |---|---|---|
-| Pinned Linux full repository gate | `6f5829c` | **PASS.** Complete `tools/check.sh`, required native-player path and strict linters enabled: core/native tests, nine portable wasm builds, app build, 113 app unit tests, 108 app scenarios, both unchanged latency gates and CI/helper regressions. NSH uses the repository pin. |
-| Direct Mac native checks | `6f5829c` | **PASS, 27 checks.** Includes 13 probe tests, 15 inspection tests, default-feature `--tests` compilation, independent contract consumer, 25 repair tests, nine atomic-store repair tests, three fence/recovery tests, generated 100k scale cases, all portable wasm builds, app units, playback scenarios, latency checks and strict Clippy. This is native application/test evidence, not a universal decoder or provider certification. |
-| iPad simulator repair workflow | `6f5829c` | **PASS, 51.8 seconds.** Fresh isolated simulator target; two-channel inspect/preview/apply/verify/undo, settled inverse verification and status. Synthetic injected key only. No Keychain, physical iPad or real decoder claim. Exact state oracle is below. |
-| Android API 36 tablet and TV smoke plus live inspection | `9c36e46` | **PASS on both emulator targets.** Stable layer IDs/focus; seven observed opens were accounted for by generated fixture endings; zero unexplained opens/errors. This earlier-source evidence does not replace the final repair-workflow gate. |
-| Android live repair UI | `6f5829c` | **PASS for the tablet repair workflow.** Exact CI APK: No guide preview/apply/verify, undo and restored coverage; focused channel and primary SurfaceView/BLAST identities remained unchanged. Eleven opens were accounted for by finite generated fixture endings; zero unexplained opens, errors or crashes. This run exposed a viewport reveal defect, fixed separately in `33e5710`; final visible keyboard-navigation evidence remains pending. |
-| PR 55 CI and review | `386631f` | **PASS; merged as `d2da140`.** All 21 checks passed after retrying the tablet smoke. Review threads were fixed and resolved. The initial tablet failure was a smoke-driver race: it sent navigation before the asynchronous menu close and could mistake an EOF reconnect for a channel change. `33e5710` adds causal menu-close and guide-key barriers without increasing timeouts. |
-| PR 57 CI and review | `6f5829c` | **PENDING closure.** Seventeen checks passed; Android tablet/TV smoke checks remain pending. Required CI and review of the final retargeted PR must be closed before declaring v1 stable. |
+| Pinned Linux full repository gate | `a235e64` | **PASS.** Complete `tools/check.sh`, required native-player path and strict linters: core/native tests, nine portable wasm builds, app build, 113 app units, 110 app scenarios, both unchanged latency gates and CI/helper regressions. NSH `9ed782cb`, Rust 1.99.1, isolated target and the updated checksum-verified native runtime. |
+| Direct Mac native checks | `a235e64` | **PASS, 30 checks plus 34 native player tests.** Includes 13 probes, 15 inspection cases, default-feature test compilation, independent contract consumer, 30 runtime repair tests, 14 atomic-store repair tests, three HTTP fence/recovery cases, 100k scale, all portable wasm builds, headless keyboard viewport oracle, playback scenarios, latency checks and strict Clippy. |
+| iPad simulator repair workflow | `a235e64` | **PASS, 49.3 seconds UI / 2m59s including build.** Isolated target and the updated checksum-verified Libavformat guard; two-channel inspect/preview/apply/verify/undo, settled inverse verification and status. Eight external read-only state checkpoints. Synthetic injected key only; no Keychain or physical iPad claim. |
+| Android API 36 tablet and TV smoke plus live inspection | `9c36e46` | **PASS on both emulator targets.** Stable primary layer IDs and focus; seven observed opens were accounted for by generated fixture endings; zero unexplained opens or errors. |
+| Android live repair UI | `6f5829c` | **PASS for tablet repair.** Exact CI APK: No guide preview/apply/verify, undo and restored coverage; focused channel and primary SurfaceView/BLAST identities unchanged. Eleven opens were accounted for by finite fixture endings; zero unexplained opens, errors or crashes. This run exposed the keyboard viewport issue fixed in `33e5710`. |
+| Android final visible keyboard and repair acceptance | `a235e64` | **PASS.** Exact CI APK SHA256 `db9fb24e1ecfc935fa331e1ea9b7d85344bf542443d70c2a54027ece271de2c8`. Hardware D-pad revealed Next and No guide data within the physical viewport. Live preview/apply/verify 0/1, undo and inverse verify restored 1/1. Focused content, process and primary SurfaceView/BLAST identities stayed unchanged across five checkpoints. Zero errors, crashes or unexplained opens; two opens followed finite fixture endings. |
+| PR 55 CI and review | `386631f` | **PASS; merged as `d2da140`.** All 21 checks passed after retrying tablet smoke. All review threads were fixed and resolved. The initial tablet failure was a driver race; `33e5710` adds causal menu-close and guide-key barriers without increasing timeouts. |
+| PR 57 CI and review | `a235e64` | **PASS, all 21 checks.** Linux/macOS/Windows tests, coverage, fuzz, Android packaging and tablet/TV smoke, and Linux/macOS desktop packaging passed. Native peer review of the actual master-based production diff found no remaining blocker after the projection/allocation fixes. CodeRabbit attempted the diff but was rate-limited, so its neutral status is not represented as a completed review. The final documentation-only head must pass required checks before merge. |
 
-After merging PR 55 and the native initialization baseline (`d2da140`),
-`0e5d94f` passed all 29 native Mac checks against the new checksum-verified
-runtime, including the cold first-probe initialization test. Linux's first
-full run stopped in the generated 100k-channel fixture: syscall tracing showed
-`pwrite64` returning `EDQUOT` on `/tmp` (a tmpfs with user quotas). The unchanged
-isolated scale test passed after assigning a private scratch directory under
-`/home/blackmyth/tmp`. This is a host scratch-space correction, not a relaxed
-assertion. Final checks must also cover the subsequent peer-review fixes for
-automatic projection freshness and feed-ID allocation.
+Linux's initial `0e5d94f` gate stopped while writing the 100k fixture. Syscall
+tracing showed `pwrite64` returning `EDQUOT` on `/tmp` (tmpfs with user quotas).
+The unchanged isolated case passed with a private scratch directory under
+`/home/blackmyth/tmp`, and the complete final `a235e64` gate passed there.
+No assertion or latency threshold changed. Mac's additional native-player run
+sets the library path inside its launcher because macOS strips `DYLD_*` from
+protected executable launches; the recorded test process exited successfully.
 
 The simulator measured durable and effective state separately:
 
@@ -50,14 +50,14 @@ The simulator measured durable and effective state separately:
 
 The earlier `994be71` simulator run proved saved choices, verification and saved
 undo, but did not establish the settled-zero-binding checkpoint. The fresh
-`6f5829c` run above supplies that oracle. It still does not test real Keychain
+`6f5829c` and final `a235e64` runs supply that oracle. It still does not test real Keychain
 access, a physical iPad or hardware video decoding.
 
 ## Evidence map for FND-01–26
 
-The original evidence map below records tests present at `6f5829c`; later integration checks also cover the `33e5710` viewport/harness fixes and native initialization after master `d2da140`. The complete pinned Linux gate executes
+The final `a235e64` suites execute the evidence map below, including the keyboard, native initialization, automatic-projection and reserved-identity regressions added during integration. The complete pinned Linux gate executes
 the relevant native/app suites; the Mac checks execute the stated subset above.
-Host-specific acceptance remains subject to the explicit pending rows.
+Host-specific limits remain explicit in the table above.
 
 Test-file abbreviations keep the map readable:
 
@@ -87,18 +87,18 @@ Test-file abbreviations keep the map readable:
 | FND-12: network/parser/resource failures and cleanup | P cancellation/deadline, malformed XML/entities, three-redirect/download budgets, cross-origin private-address refusal, supplied credential isolation, crash cleanup, shared 16-read admission and two-feed admission tests; [strict XML tests](../../crates/iptv-epg/src/strict.rs) include compressed/chunk/expanded-record limits. |
 | FND-13: UTC, offsets and time-shift provenance | [EPG time tests](../../crates/iptv-epg/src/time.rs) `full_form_with_offsets` and `missing_offset_uses_policy_and_shift_applies_on_top`; I half-open/shifted alternatives; P configured shift applied once to staged samples. Display formatting is separate from stored Unix instants. |
 | FND-14: expired/evicted or superseded evidence | R `staged::evicted_stage_cannot_be_applied_and_never_adds_a_live_feed`, `bad_digest_expired_plan_and_blocked_known_id_make_no_changes`; P changed-config/forged-evidence/feed-reuse tests; S reused feed identity refusal. |
-| FND-15: atomic bulk conflict and staged feed allocation | R `bulk_500_preview_paginates_and_one_affected_conflict_prevents_every_change`, `staged::one_stage_repairs_500_channels_with_one_bounded_evidence_batch`; S explicit-choice protection, addition allocation and conflict tests. |
+| FND-15: atomic bulk conflict and staged feed allocation | R `bulk_500_preview_paginates_and_one_affected_conflict_prevents_every_change`, `staged::one_stage_repairs_500_channels_with_one_bounded_evidence_batch`; S explicit-choice protection, reserved manual/journal identity and same-batch remove/add inverse tests; canonical, zero-padded and plus-prefixed numeric choices; bounded history seeding and zero-mutation exhaustion. R `staged::staged_preview_cannot_alias_an_unresolved_manual_feed_identity`. |
 | FND-16: no-op refresh preserves valid repair authority | R `no_op_refresh_apply_and_unrelated_edit_undo_preserve_identity`; S `no_op_import_and_unrelated_edit_do_not_invalidate_apply_or_undo`; J no-op semantic revision tests. |
 | FND-17: stale import/download/publication fences | F holds an actual old refresh report and an actual old HTTP guide download across a committed repair, then checks saved choice, stored programmes, effective schedule and request count. Existing [guide-check recovery](../../crates/iptv-app/tests/app/guide_check_recovery.rs) and [combined guide handoff](../../crates/iptv-app/tests/app/combined_playlists.rs) retain deletion/late-report/download regressions. Writer-side stop checks and final install revision checks remain in place. |
-| FND-18: saved/effective/verified distinction and real recovery | F `a_failed_postcommit_refresh_recovers_without_repeating_the_saved_mutation`: generated HTTP 404 produces `Failed` / `Effective::Failed`; a later explicit source refresh plus verification produces installed/verified state with exactly one durable repair record. |
-| FND-19: stale verification cannot certify or replace newer work | R mapping-edit and same-configuration programme-refresh barriers; `verification_from_before_undo_cannot_overwrite_the_new_undo_operation`, `no_op_inverse_direction_also_fences_older_verification`, and cancellation-admission regression. Commit revisions, programme evidence, inverse direction and later cancellation markers are fenced. |
+| FND-18: saved/effective/verified distinction and real recovery | R `automatic_verification_waits_for_full_projection_after_no_guide_undo`, `automatic_verification_rejects_stale_binding_and_partial_fingerprint_renewal` and `feed_only_verification_requires_current_full_projection_configuration`; F `a_failed_postcommit_refresh_recovers_without_repeating_the_saved_mutation`: generated HTTP 404 produces `Failed` / `Effective::Failed`; a later explicit source refresh plus verification produces installed/verified state with exactly one durable repair record. |
+| FND-19: stale verification cannot certify or replace newer work | R `held_verification_detects_catalogue_change_without_mapping_or_config_edit`, mapping-edit and same-configuration programme-refresh barriers; `verification_from_before_undo_cannot_overwrite_the_new_undo_operation`, `no_op_inverse_direction_also_fences_older_verification`, and cancellation-admission regression. Commit revisions, programme evidence, inverse direction and later cancellation markers are fenced. |
 | FND-20: conditional inverse preserves unrelated edits | S `conflicting_undo_never_reverts_a_subset`, no-op/unrelated-edit inverse test, removed-feed position restoration and external use of a newly added feed; R unrelated edit survives undo. |
 | FND-21: restart, restore, expiry and lost reply | R owner restart expires previews but retains inverse; `durable_inverse_receipt_reconciles_a_stale_original_operation_cache`; S restart/restore/expiry tests; J `restore_preserves_stale_transport_provenance_and_retags_only_authoritative_cache`. |
-| FND-22: one facade for existing UI and headless workflow | R `headless_preview_apply_verify_undo_uses_real_domain_services`; UI-R two-channel shared-stage workflow; fresh iPad simulator checkpoint oracle above. The native runtime consumer links no NSH, view, player or daemon. The tablet live repair workflow passed; final keyboard-visibility evidence remains pending. |
+| FND-22: one facade for existing UI and headless workflow | R `headless_preview_apply_verify_undo_uses_real_domain_services`; UI-R two-channel shared-stage workflow; fresh iPad simulator checkpoint oracle above. The native runtime consumer links no NSH, view, player or daemon. The final combined-source Android visible keyboard and live repair workflow passed. |
 | FND-23: real analysis overlap, bounds and responsiveness | I `a_hundred_thousand_channel_analysis_keeps_display_reads_responsive` holds an actual SQLite progress callback during the scan; R 100k-channel/1k-group repair with display reads, 500-row stage batch, held analysis/writer deadlines, preview/operation capacity tests; unchanged [store-latency gates](../../crates/iptv-app/tests/app/store_latency.rs) and full pinned gate. |
-| FND-24: repair during playback without surface/focus disruption | UI-R `inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_playback` captures native-protocol player commands, opens, primary surface/ancestor lifetime and focused viewer identity across preview/verify/undo. Android live inspection and repair retained primary surface and focus identity; final keyboard-visibility evidence and physical decoder claims remain limited as stated above. |
+| FND-24: repair during playback without surface/focus disruption | UI-R `inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_playback` captures native-protocol player commands, opens, primary surface/ancestor lifetime and focused viewer identity across preview/verify/undo. Final Android visible keyboard and live repair retained primary surface and focus identity; physical decoder claims remain limited as stated above. |
 | FND-25: declared facade and independent consumer | C `independent_consumer_compiles_against_the_declared_service_types`; [runtime architecture checks](../../crates/iptv-runtime/tests/architecture.rs); core/library wasm and app builds. The declared facade exposes portable values, not store connections, NSH objects or implicit shown-source inputs. |
-| FND-26: compatibility and honest capability states | C exact signature/field constructions and exhaustive error/status/capability matches; `Runtime::foundation_capabilities()` and the v1 compatibility policy. This verifies the candidate contract; final stable declaration awaits the remaining host/CI/review closure. |
+| FND-26: compatibility and honest capability states | C exact signature/field constructions and exhaustive error/status/capability matches; `Runtime::foundation_capabilities()` and the v1 compatibility policy. This supports the declared internal v1 contract; it establishes no external SDK or MCP wire contract. |
 
 ## Bounds and latency interpretation
 
@@ -112,8 +112,8 @@ fixture process, not a claim about incremental allocation or all host workloads.
 Two preliminary Linux wall-clock input runs measured 57.96 ms and 55.68 ms while
 both owned Android emulator fixture apps were playing. After stopping only those
 synthetic app instances, the isolated gate measured 35.14 ms. The original
-50 ms assertion and workload were unchanged. The final complete pinned
-`6f5829c` gate passed with competing fixture playback stopped. This records the
+50 ms assertion and workload were unchanged. The complete pinned
+`6f5829c` and final `a235e64` gates passed with competing fixture playback stopped. This records the
 resource condition rather than weakening the input budget or treating a loaded
 host result as an application fix.
 
@@ -134,8 +134,10 @@ cargo test -p iptv-app --features test-support --test app foundation_inspection
 cargo test -p iptv-app --features test-support --test app foundation_repair
 ```
 
-Before committing a final acceptance record or changing the API status, fill
-in the final Android repair result, remaining Android/package CI results and
-review/merge outcomes for both PRs. Preserve the explicit simulator, synthetic
-key, Keychain, physical-device and decoder limitations. Later test-only/harness
-commits must identify whether production source remains equivalent to `6f5829c`.
+FND-01–26 and affected host gates passed on `a235e64`, including all 21 CI
+checks. PR 55 merged as `d2da140`; [PR 57](https://github.com/teng-lin/patina-iptv/pull/57)
+contains the second foundation delivery and its final merge/check record.
+The final documentation commit retains the same production source. Required
+checks on that final head remain merge gates. Preserve the explicit simulator,
+synthetic-key, Keychain, physical-device and decoder limits; new production
+changes require relevant validation again.

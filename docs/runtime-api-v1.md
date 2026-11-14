@@ -1,9 +1,10 @@
 # Internal application service contract v1
 
-Status: candidate during Stage 1 implementation. Declare this stable only after
-F5's integrated acceptance and platform gates pass; a public Rust item alone
-is insufficient. This document versions application semantics independently
-of the package version. It describes the boundary used by Patina's UI and an
+Status: **stable internal service contract v1**. The
+[foundation acceptance record](plans/2026-11-14-foundation-validation.md)
+records FND-01–26, independent and UI consumers, platform checks and CI on the
+integrated implementation. This document versions application semantics
+independently of the package version. It describes the boundary used by Patina's UI and an
 independent native test consumer. It establishes no binary ABI, external SDK
 or MCP wire-schema promise.
 
@@ -221,8 +222,9 @@ and required trait methods are not automatically nonbreaking Rust changes.
 Error meanings, identity lifetime, ordering, bounds, cursor invalidation,
 completion, cancellation and publication guarantees also require review.
 
-Before declaring v1 stable, record the integrated commit and evidence for all
-FND-01–26, UI and independent headless consumers, architecture/signature checks,
-portable builds, full repository checks, contention/scale budgets and affected
-host/device tests. A missing, skipped or narrow test cannot establish a broader
-capability. Keep platform/provider gaps explicit in release evidence.
+The acceptance record identifies the integrated source and executed evidence
+for FND-01–26, UI and independent headless consumers, architecture/signature
+checks, portable builds, full repository checks, contention/scale budgets and
+affected host/device tests. Keep these compatibility gates and the explicit
+platform/provider limits when extending v1. A missing, skipped or narrow test
+cannot establish a broader capability.

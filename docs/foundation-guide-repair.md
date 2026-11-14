@@ -1,9 +1,12 @@
 # Guide repair foundation validation
 
-The repair boundary is the candidate [internal application service contract v1](runtime-api-v1.md).
+The repair boundary is the declared [internal application service contract v1](runtime-api-v1.md).
 It uses portable `iptv_library::guide_repair` values and explicit-owner runtime
 methods. There is no MCP transport, daemon, embedded agent, recording scheduler
 or new player controller in this stage.
+
+The [acceptance record](plans/2026-11-14-foundation-validation.md) identifies
+the integrated source, platform results and limits.
 
 ## Product entry points
 
