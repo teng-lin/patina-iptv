@@ -1,0 +1,373 @@
+//! Proposed guides are inspected without changing configured sources, mappings
+//! or the viewed schedule. Every endpoint and programme in these tests is generated.
+mod support;
+use iptv_epg::FeedId;
+use iptv_library::{GuideSource, SourceId};
+use iptv_providers::{
+    SecretUrl,
+    model::{M3uSourceConfig, Source, SourceConfig},
+};
+use iptv_runtime::{Ports, Runtime, inspection::*};
+use iptv_store_sqlite::{DatabaseKey, Store};
+use std::{
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc,
+    },
+    thread,
+    time::Duration,
+};
+
+const XML: &str = "<tv><channel id='amber.main'><display-name>Synthetic Amber</display-name></channel><channel id='amber.alt'><display-name>Synthetic Amber East</display-name><display-name>Synthetic Alternate</display-name></channel><programme channel='amber.alt' start='20261114120000 +0000' stop='20261114130000 +0000'><title>Synthetic Segment 01</title></programme><programme channel='amber.alt' start='20261114140000 +0200' stop='20261114150000 +0200'><title>Synthetic Segment 02</title></programme></tv>";
+struct Mock {
+    address: String,
+    stopped: Arc<AtomicBool>,
+    requests: Arc<AtomicUsize>,
+    headers: Arc<Mutex<Vec<String>>>,
+    seen: mpsc::Receiver<()>,
+    release: Option<mpsc::Sender<()>>,
+    task: Option<thread::JoinHandle<()>>,
+}
+impl Mock {
+    fn new(body: Vec<u8>, hold: bool) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let stop = stopped.clone();
+        let requests = Arc::new(AtomicUsize::new(0));
+        let count = requests.clone();
+        let headers = Arc::new(Mutex::new(Vec::new()));
+        let captured = headers.clone();
+        let (seen_tx, seen) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let mut wait = hold.then_some(wait);
+        let task = thread::spawn(move || {
+            for connection in listener.incoming() {
+                if stop.load(Ordering::SeqCst) {
+                    break;
+                }
+                let Ok(mut stream) = connection else {
+                    break;
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut bytes = Vec::new();
+                let mut buffer = [0; 1024];
+                while !bytes.windows(4).any(|p| p == b"\r\n\r\n") {
+                    let Ok(n) = stream.read(&mut buffer) else {
+                        break;
+                    };
+                    if n == 0 {
+                        break;
+                    }
+                    bytes.extend_from_slice(&buffer[..n]);
+                }
+                count.fetch_add(1, Ordering::SeqCst);
+                captured
+                    .lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&bytes).into_owned());
+                let _ = seen_tx.send(());
+                if let Some(wait) = wait.take() {
+                    let _ = wait.recv();
+                }
+                if stop.load(Ordering::SeqCst) {
+                    break;
+                }
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(header.as_bytes());
+                let _ = stream.write_all(&body);
+            }
+        });
+        Self {
+            address,
+            stopped,
+            requests,
+            headers,
+            seen,
+            release: Some(release),
+            task: Some(task),
+        }
+    }
+    fn url(&self) -> SecretUrl {
+        SecretUrl::new(format!("http://{}/synthetic.xml", self.address))
+    }
+}
+impl Drop for Mock {
+    fn drop(&mut self) {
+        self.stopped.store(true, Ordering::SeqCst);
+        self.release.take();
+        let _ = TcpStream::connect(&self.address);
+        if let Some(task) = self.task.take() {
+            task.join().unwrap();
+        }
+    }
+}
+fn seed(directory: &std::path::Path, url: SecretUrl, shift: i32) -> SourceId {
+    std::fs::create_dir_all(directory).unwrap();
+    let mut store = Store::open_encrypted(
+        directory.join("iptv.sqlite"),
+        &DatabaseKey::from_bytes([0x71; 32]),
+    )
+    .unwrap();
+    let source = store
+        .add_source(&Source {
+            name: "Synthetic catalogue".into(),
+            config: SourceConfig::M3u(M3uSourceConfig {
+                location: SecretUrl::new("https://synthetic.invalid/generated.m3u"),
+                user_agent: Some("Synthetic-Private-Agent".into()),
+                referrer: None,
+            }),
+        })
+        .unwrap();
+    store
+        .set_guide_sources(
+            source,
+            &[GuideSource {
+                feed: FeedId(1),
+                provider_index: None,
+                url,
+                name: Some("Synthetic guide".into()),
+                enabled: true,
+                shift_minutes: shift,
+            }],
+        )
+        .unwrap();
+    source
+}
+fn owner(directory: &std::path::Path) -> Runtime {
+    let runtime = Runtime::new(Ports::new(directory.to_owned(), |_| {
+        Ok(DatabaseKey::from_bytes([0x71; 32]))
+    }));
+    runtime.start_services();
+    runtime
+}
+fn control() -> InspectionControl {
+    InspectionControl {
+        timeout: Duration::from_secs(60),
+        ..Default::default()
+    }
+}
+fn probe(runtime: &Runtime, source: SourceId) -> InspectionResult<ProbeSummary> {
+    support::block_on(runtime.probe_feed(
+        ProbeRequest {
+            source,
+            target: ProbeTarget::Configured(FeedId(1)),
+        },
+        control(),
+    ))
+}
+fn window() -> TimeWindow {
+    TimeWindow {
+        from: iptv_epg::parse_xmltv_time("20261114120000 +0000", iptv_epg::TimePolicy::UTC)
+            .unwrap(),
+        to: iptv_epg::parse_xmltv_time("20261114160000 +0000", iptv_epg::TimePolicy::UTC).unwrap(),
+    }
+}
+
+#[test]
+fn unmatched_candidates_have_samples_from_the_exact_encrypted_snapshot_without_live_mutation() {
+    let server = Mock::new(XML.as_bytes().to_vec(), false);
+    let directory = tempfile::tempdir().unwrap();
+    let source = seed(directory.path(), server.url(), 60);
+    let runtime = owner(directory.path());
+    let before = runtime.browser_generation();
+    let summary = probe(&runtime, source).unwrap();
+    assert_eq!((summary.channels, summary.programmes), (2, 2));
+    let candidates = support::block_on(runtime.probe_candidates(
+        summary.evidence.clone(),
+        String::new(),
+        None,
+        200,
+        control(),
+    ))
+    .unwrap();
+    assert_eq!(candidates.items.len(), 2);
+    let candidate = candidates
+        .items
+        .iter()
+        .find(|c| c.key.epg_channel == "amber.alt")
+        .unwrap();
+    assert_eq!(
+        candidate.names,
+        ["Synthetic Amber East", "Synthetic Alternate"]
+    );
+    let samples = support::block_on(runtime.probe_schedule(
+        summary.evidence.clone(),
+        candidate.key.clone(),
+        window(),
+        control(),
+    ))
+    .unwrap();
+    assert_eq!(samples.len(), 2);
+    assert_eq!(samples[0].start, window().from + 3600);
+    assert_eq!(
+        samples[0].start, samples[1].start,
+        "equivalent offsets; shift exactly once"
+    );
+    assert_eq!(
+        server.requests.load(Ordering::SeqCst),
+        1,
+        "sample inspection cannot refetch changed bytes"
+    );
+    assert_eq!(runtime.browser_generation(), before);
+    assert!(server.headers.lock().unwrap()[0].contains("Synthetic-Private-Agent"));
+    let store = Store::open_encrypted(
+        directory.path().join("iptv.sqlite"),
+        &DatabaseKey::from_bytes([0x71; 32]),
+    )
+    .unwrap();
+    assert_eq!(store.guide_sources(source).unwrap().len(), 1);
+    assert!(store.guide_channels(source).unwrap().is_empty());
+    let files: Vec<_> = std::fs::read_dir(directory.path().join("guide-probes"))
+        .unwrap()
+        .flatten()
+        .flat_map(|e| {
+            std::fs::read_dir(e.path())
+                .unwrap()
+                .flatten()
+                .map(|f| f.path())
+                .collect::<Vec<_>>()
+        })
+        .filter(|p| p.extension().is_some_and(|e| e == "sqlite"))
+        .collect();
+    assert_eq!(files.len(), 1);
+    let bytes = std::fs::read(&files[0]).unwrap();
+    assert!(!bytes.starts_with(b"SQLite format 3"));
+    assert!(
+        !bytes
+            .windows(b"Synthetic Amber".len())
+            .any(|p| p == b"Synthetic Amber")
+    );
+    let lease = runtime.lease_probe(&summary.evidence).unwrap();
+    runtime.drain_services();
+    assert_eq!(lease.validate_alive(), Err(InspectionError::OwnerClosed));
+    assert!(
+        files[0].exists(),
+        "lease pins bytes until in-flight readers finish"
+    );
+    drop(lease);
+    assert!(!files[0].exists());
+}
+
+#[test]
+fn cancellation_and_deadline_end_held_requests_and_remove_partial_stages() {
+    for cancel_request in [false, true] {
+        let server = Mock::new(XML.as_bytes().to_vec(), true);
+        let directory = tempfile::tempdir().unwrap();
+        let source = seed(directory.path(), server.url(), 0);
+        let runtime = owner(directory.path());
+        let mut options = control();
+        options.timeout = Duration::from_millis(250);
+        let cancel = options.cancel.clone();
+        let request = runtime.probe_feed(
+            ProbeRequest {
+                source,
+                target: ProbeTarget::Configured(FeedId(1)),
+            },
+            options,
+        );
+        server.seen.recv_timeout(Duration::from_secs(5)).unwrap();
+        if cancel_request {
+            cancel.cancel();
+        }
+        let result = support::block_on(request);
+        assert_eq!(
+            result,
+            Err(if cancel_request {
+                InspectionError::Cancelled
+            } else {
+                InspectionError::Deadline
+            })
+        );
+        runtime.drain_services();
+    }
+}
+
+#[test]
+fn malformed_html_entities_and_truncated_xml_never_become_probe_evidence() {
+    for body in [
+        "<html><channel id='a'/></html>",
+        "<tv><channel id='a'>",
+        "<!DOCTYPE tv [<!ENTITY local SYSTEM 'file:///synthetic-secret'>]><tv/>",
+        "<tv><channel id='a'/><channel id='a'/></tv>",
+    ] {
+        let server = Mock::new(body.as_bytes().to_vec(), false);
+        let directory = tempfile::tempdir().unwrap();
+        let source = seed(directory.path(), server.url(), 0);
+        let runtime = owner(directory.path());
+        assert_eq!(
+            probe(&runtime, source),
+            Err(InspectionError::InvalidFeed),
+            "{body}"
+        );
+        runtime.drain_services();
+    }
+}
+
+#[test]
+fn changed_config_and_forged_evidence_cannot_reuse_a_stage() {
+    let server = Mock::new(XML.as_bytes().to_vec(), false);
+    let directory = tempfile::tempdir().unwrap();
+    let source = seed(directory.path(), server.url(), 0);
+    let runtime = owner(directory.path());
+    let summary = probe(&runtime, source).unwrap();
+    let mut forged = summary.evidence.clone();
+    forged.digest[0] ^= 1;
+    assert!(matches!(
+        runtime.lease_probe(&forged),
+        Err(InspectionError::StaleEvidence)
+    ));
+    let mut store = Store::open_encrypted(
+        directory.path().join("iptv.sqlite"),
+        &DatabaseKey::from_bytes([0x71; 32]),
+    )
+    .unwrap();
+    let mut guides = store.guide_sources(source).unwrap();
+    guides[0].shift_minutes = 60;
+    store.set_guide_sources(source, &guides).unwrap();
+    assert_eq!(
+        support::block_on(runtime.probe_candidates(
+            summary.evidence,
+            String::new(),
+            None,
+            50,
+            control()
+        )),
+        Err(InspectionError::StaleEvidence)
+    );
+    runtime.drain_services();
+}
+
+#[test]
+fn abandoned_crash_cache_is_cleaned_without_deleting_an_active_owner() {
+    let server = Mock::new(XML.as_bytes().to_vec(), false);
+    let directory = tempfile::tempdir().unwrap();
+    let source = seed(directory.path(), server.url(), 0);
+    let base = directory.path().join("guide-probes");
+    let dead = base.join("a".repeat(32));
+    let active = base.join("b".repeat(32));
+    for path in [&dead, &active] {
+        std::fs::create_dir_all(path).unwrap();
+        std::fs::write(path.join("owner.lock"), b"").unwrap();
+        std::fs::write(path.join("unreadable.sqlite"), b"generated crash artifact").unwrap();
+    }
+    let live_lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(active.join("owner.lock"))
+        .unwrap();
+    live_lock.lock().unwrap();
+    let runtime = owner(directory.path());
+    probe(&runtime, source).unwrap();
+    assert!(!dead.exists());
+    assert!(active.exists());
+    runtime.drain_services();
+}

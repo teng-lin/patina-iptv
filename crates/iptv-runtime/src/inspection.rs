@@ -69,6 +69,45 @@ pub(crate) async fn guarded<T>(
     result
 }
 
+pub(crate) fn query_with_deadline<T: Send + 'static, F>(
+    owner: &Runtime,
+    control: InspectionControl,
+    maximum: Duration,
+    operation: F,
+) -> impl Future<Output = InspectionResult<T>> + use<T, F>
+where
+    F: FnOnce(&iptv_store_sqlite::Store) -> iptv_store_sqlite::Result<InspectionResult<T>>
+        + Send
+        + 'static,
+{
+    let ready = owner.inspection.ready();
+    let services = owner.services();
+    let deadline = Instant::now() + control.timeout.min(maximum);
+    let token = CancelToken::new();
+    let operation_cancel = token.clone();
+    let read = services.analyze(move |store| store.inspection_read(token, deadline, operation));
+    let accepted = services.clone();
+    let cancel_on_drop = operation_cancel.clone();
+    let task = services.spawn(async move {
+        let result = guarded(&accepted, &control, deadline, async move {
+            if !ready {
+                return Err(InspectionError::Storage);
+            }
+            read.await.map_err(|_| InspectionError::Storage)?
+        })
+        .await;
+        if result.is_err() {
+            operation_cancel.cancel();
+        }
+        result
+    });
+    let guard = CancelOnDrop(cancel_on_drop);
+    async move {
+        let _guard = guard;
+        task.await.map_err(|_| InspectionError::OwnerClosed)?
+    }
+}
+
 fn query<T: Send + 'static, F>(
     owner: &Runtime,
     control: InspectionControl,
@@ -79,23 +118,7 @@ where
         + Send
         + 'static,
 {
-    let services = owner.services();
-    let deadline = Instant::now() + control.timeout.min(QUERY_DEADLINE);
-    let token = control.cancel.clone();
-    let read = services.analyze(move |store| store.inspection_read(token, deadline, operation));
-    let accepted = services.clone();
-    let cancel_on_drop = control.cancel.clone();
-    let task = services.spawn(async move {
-        guarded(&accepted, &control, deadline, async move {
-            read.await.map_err(|_| InspectionError::Storage)?
-        })
-        .await
-    });
-    let guard = CancelOnDrop(cancel_on_drop);
-    async move {
-        let _guard = guard;
-        task.await.map_err(|_| InspectionError::OwnerClosed)?
-    }
+    query_with_deadline(owner, control, QUERY_DEADLINE, operation)
 }
 
 impl Runtime {

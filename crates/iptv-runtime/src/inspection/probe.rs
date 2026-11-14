@@ -65,8 +65,8 @@ fn check(services: &Services, cancel: &CancelToken, deadline: Instant) -> Inspec
 }
 
 pub(crate) struct Vault {
-    nonce: String,
-    key: Option<DatabaseKey>,
+    nonce: Mutex<String>,
+    key: Mutex<Option<DatabaseKey>>,
     stages: Arc<Mutex<Space>>,
     directory: Arc<Mutex<Option<Arc<Directory>>>>,
     running: Arc<AtomicUsize>,
@@ -75,15 +75,33 @@ impl Vault {
     pub(crate) fn new() -> Self {
         let key = random().ok().map(DatabaseKey::from_bytes);
         Self {
-            nonce: random::<16>().map(|b| hex(&b)).unwrap_or_default(),
-            key,
+            nonce: Mutex::new(random::<16>().map(|b| hex(&b)).unwrap_or_default()),
+            key: Mutex::new(key),
             stages: Arc::new(Mutex::new(Space::default())),
             directory: Arc::new(Mutex::new(None)),
             running: Arc::new(AtomicUsize::new(0)),
         }
     }
     pub(crate) fn context(&self, epoch: u64) -> String {
-        format!("{}:{epoch}", self.nonce)
+        format!(
+            "{}:{epoch}",
+            self.nonce.lock().unwrap_or_else(|e| e.into_inner())
+        )
+    }
+    pub(crate) fn ready(&self) -> bool {
+        self.key.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+            && !self
+                .nonce
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+    }
+    pub(crate) fn renew(&self) {
+        self.clear();
+        *self.nonce.lock().unwrap_or_else(|e| e.into_inner()) =
+            random::<16>().map(|b| hex(&b)).unwrap_or_default();
+        *self.key.lock().unwrap_or_else(|e| e.into_inner()) =
+            random().ok().map(DatabaseKey::from_bytes);
     }
     pub(crate) fn clear(&self) {
         self.stages
@@ -91,6 +109,8 @@ impl Vault {
             .unwrap_or_else(|e| e.into_inner())
             .stages
             .clear();
+        self.key.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self.nonce.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.directory
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -449,14 +469,19 @@ fn await_worker<T: Send + 'static>(
     control: InspectionControl,
     deadline: Instant,
     task: tokio::task::JoinHandle<InspectionResult<T>>,
+    cancel: CancelToken,
 ) -> impl Future<Output = InspectionResult<T>> + use<T> {
-    let guard = super::CancelOnDrop(control.cancel.clone());
+    let guard = super::CancelOnDrop(cancel.clone());
     let accepted = services.clone();
     let reply = services.spawn(async move {
-        guarded(&accepted, &control, deadline, async move {
+        let result = guarded(&accepted, &control, deadline, async move {
             task.await.map_err(|_| InspectionError::OwnerClosed)?
         })
-        .await
+        .await;
+        if result.is_err() {
+            cancel.cancel();
+        }
+        result
     });
     async move {
         let _guard = guard;
@@ -474,14 +499,27 @@ impl Runtime {
         let config = configuration(self, request);
         let services = self.services();
         let stages = self.inspection.stages.clone();
-        let key = self.inspection.key.clone();
+        let key = self
+            .inspection
+            .key
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let directory = self.inspection.directory.clone();
-        let nonce = self.inspection.nonce.clone();
+        let nonce = self
+            .inspection
+            .nonce
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let running = self.inspection.running.clone();
         let deadline = Instant::now() + control.timeout.min(PROBE_DEADLINE);
         let accepted = services.clone();
-        let cancel = control.cancel.clone();
-        let worker_control = control.clone();
+
+        let mut worker_control = control.clone();
+        worker_control.cancel = CancelToken::new();
+        let operation_cancel = worker_control.cancel.clone();
+        let cancel = operation_cancel.clone();
         let task = services.spawn_blocking(move || {
             if running.fetch_add(1, Ordering::SeqCst) >= 2 {
                 running.fetch_sub(1, Ordering::SeqCst);
@@ -595,6 +633,9 @@ impl Runtime {
             if let Some(error) = error {
                 return Err(error);
             }
+            if channels > 100_000 {
+                return Err(InspectionError::LimitExceeded);
+            }
             if channels == 0 {
                 return Err(InspectionError::InvalidFeed);
             }
@@ -641,7 +682,7 @@ impl Runtime {
             drop(reservation);
             Ok(summary)
         });
-        await_worker(services, control, deadline, task)
+        await_worker(services, control, deadline, task, operation_cancel)
     }
 
     pub fn lease_probe(&self, evidence: &ProbeEvidence) -> InspectionResult<ProbeLease> {
@@ -666,14 +707,16 @@ impl Runtime {
         &self,
         evidence: ProbeEvidence,
         text: String,
-        after: Option<String>,
+        after: Option<Cursor>,
         limit: u32,
         control: InspectionControl,
     ) -> impl Future<Output = InspectionResult<Page<Candidate>>> + use<> {
         let lease = self.lease_probe(&evidence);
         let services = self.services();
         let deadline = Instant::now() + control.timeout.min(super::QUERY_DEADLINE);
-        let worker_control = control.clone();
+        let mut worker_control = control.clone();
+        worker_control.cancel = CancelToken::new();
+        let operation_cancel = worker_control.cancel.clone();
         let task = services.spawn_blocking(move || {
             let lease = lease?;
             lease.current_configuration()?;
@@ -681,18 +724,35 @@ impl Runtime {
             if limit == 0 || limit > MAX_PAGE || text.len() > MAX_QUERY_BYTES {
                 return Err(InspectionError::InvalidRequest);
             }
+            let context = hex(&Sha256::digest(
+                format!("{}:{text}", evidence.stage.0).as_bytes(),
+            ));
+            let snapshot = hex(&evidence.digest);
+            if after.as_ref().is_some_and(|c| {
+                c.context != context
+                    || c.snapshot != snapshot
+                    || c.after.len() != 1
+                    || c.after[0].len() > 4096
+            }) {
+                return Err(InspectionError::StaleCursor);
+            }
             let mut stage = storage(InspectionStage::open(&lease.0.path, &lease.0.key))?;
-            let mut channels = storage(stage.bounded(
-                worker_control.cancel.clone(),
-                deadline,
-                |stage| stage.channels(after.as_deref().unwrap_or(""), &text, limit + 1),
-            ))?;
+            let mut channels =
+                storage(
+                    stage.bounded(worker_control.cancel.clone(), deadline, |stage| {
+                        stage.channels(
+                            after.as_ref().map(|c| c.after[0].as_str()).unwrap_or(""),
+                            &text,
+                            limit + 1,
+                        )
+                    }),
+                )?;
             check(&lease.0.services, &worker_control.cancel, deadline)?;
             let more = channels.len() > limit as usize;
             channels.truncate(limit as usize);
             let next = more.then(|| Cursor {
-                context: evidence.stage.0.clone(),
-                snapshot: hex(&evidence.digest),
+                context,
+                snapshot,
                 after: vec![channels.last().expect("nonzero page").id.clone()],
             });
             Ok(Page {
@@ -716,7 +776,7 @@ impl Runtime {
                 next,
             })
         });
-        await_worker(services, control, deadline, task)
+        await_worker(services, control, deadline, task, operation_cancel)
     }
 
     pub fn probe_schedule(
@@ -729,7 +789,9 @@ impl Runtime {
         let lease = self.lease_probe(&evidence);
         let services = self.services();
         let deadline = Instant::now() + control.timeout.min(PROBE_DEADLINE);
-        let worker_control = control.clone();
+        let mut worker_control = control.clone();
+        worker_control.cancel = CancelToken::new();
+        let operation_cancel = worker_control.cancel.clone();
         let task = services.spawn_blocking(move || {
             if !window.valid() {
                 return Err(InspectionError::InvalidRequest);
@@ -794,6 +856,6 @@ impl Runtime {
             programmes.sort_by_key(|p| p.start);
             Ok(programmes)
         });
-        await_worker(services, control, deadline, task)
+        await_worker(services, control, deadline, task, operation_cancel)
     }
 }
