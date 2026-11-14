@@ -281,22 +281,39 @@ impl ProbeLease {
         self.check()
     }
     pub fn listed_channels(&self) -> InspectionResult<Vec<iptv_epg::XmltvChannel>> {
+        self.listed_channels_with_control(&CancelToken::new(), Instant::now() + PROBE_DEADLINE)
+    }
+    pub fn listed_channels_with_control(
+        &self,
+        cancel: &CancelToken,
+        deadline: Instant,
+    ) -> InspectionResult<Vec<iptv_epg::XmltvChannel>> {
+        check(&self.0.services, cancel, deadline)?;
         self.check()?;
-        let stage = storage(InspectionStage::open(&self.0.path, &self.0.key))?;
-        let mut channels = Vec::new();
-        let mut after = String::new();
-        loop {
-            let page = storage(stage.channels(&after, "", MAX_PAGE))?;
-            if page.is_empty() {
-                break;
+        let mut stage = storage(InspectionStage::open(&self.0.path, &self.0.key))?;
+        let result = stage.bounded(cancel.clone(), deadline, |stage| {
+            let mut channels = Vec::new();
+            let mut after = String::new();
+            loop {
+                check(&self.0.services, cancel, deadline).map_err(|_| {
+                    iptv_store_sqlite::StoreError::Unavailable("probe channel inspection stopped")
+                })?;
+                let page = stage.channels(&after, "", MAX_PAGE)?;
+                if page.is_empty() {
+                    break;
+                }
+                after = page.last().expect("nonempty page").id.clone();
+                channels.extend(page);
+                if channels.len() > 100_000 {
+                    return Err(iptv_store_sqlite::StoreError::Unavailable(
+                        "probe channel limit exceeded",
+                    ));
+                }
             }
-            after = page.last().expect("nonempty page").id.clone();
-            channels.extend(page);
-            if channels.len() > 100_000 {
-                return Err(InspectionError::LimitExceeded);
-            }
-        }
-        Ok(channels)
+            Ok(channels)
+        });
+        check(&self.0.services, cancel, deadline)?;
+        storage(result)
     }
     pub fn evidence(&self) -> &ProbeEvidence {
         &self.0.evidence
@@ -304,20 +321,23 @@ impl ProbeLease {
     pub fn source_incarnation(&self) -> &str {
         &self.0.source_incarnation
     }
-    fn integrity(&self) -> InspectionResult<()> {
+    fn integrity(
+        &self,
+        stage: &InspectionStage,
+        cancel: &CancelToken,
+        deadline: Instant,
+    ) -> InspectionResult<()> {
         self.check()?;
-        let stage = storage(InspectionStage::open(&self.0.path, &self.0.key))?;
         let mut hash = Sha256::new();
-        let deadline = Instant::now() + super::QUERY_DEADLINE;
-        storage(stage.for_each_chunk(|bytes| {
-            if Instant::now() >= deadline {
-                return Err(iptv_store_sqlite::StoreError::Unavailable(
-                    "probe integrity deadline",
-                ));
-            }
+        let result = stage.for_each_chunk(|bytes| {
+            check(&self.0.services, cancel, deadline).map_err(|_| {
+                iptv_store_sqlite::StoreError::Unavailable("probe integrity inspection stopped")
+            })?;
             hash.update(bytes);
             Ok(())
-        }))?;
+        });
+        check(&self.0.services, cancel, deadline)?;
+        storage(result)?;
         let actual: [u8; 32] = hash.finalize().into();
         if actual != self.0.evidence.digest {
             return Err(InspectionError::StaleEvidence);
@@ -352,18 +372,55 @@ impl ProbeLease {
     }
 
     pub fn validate_candidate(&self, candidate: &CandidateRef) -> InspectionResult<()> {
-        self.integrity()?;
-        if candidate.source != self.0.evidence.source
-            || self.0.evidence.feed.is_some_and(|f| f != candidate.feed)
-            || candidate.incarnation != self.0.evidence.incarnation
-        {
+        self.validate_candidates_with_control(
+            std::slice::from_ref(candidate),
+            &CancelToken::new(),
+            Instant::now() + PROBE_DEADLINE,
+        )
+    }
+    /// Validate a repair batch with one encrypted open and one integrity scan.
+    pub fn validate_candidates_with_control(
+        &self,
+        candidates: &[CandidateRef],
+        cancel: &CancelToken,
+        deadline: Instant,
+    ) -> InspectionResult<()> {
+        self.check()?;
+        check(&self.0.services, cancel, deadline)?;
+        if candidates.len() > 500 {
+            return Err(InspectionError::LimitExceeded);
+        }
+        for candidate in candidates {
+            if candidate.source != self.0.evidence.source
+                || self
+                    .0
+                    .evidence
+                    .feed
+                    .is_some_and(|feed| feed != candidate.feed)
+                || candidate.incarnation != self.0.evidence.incarnation
+            {
+                return Err(InspectionError::StaleEvidence);
+            }
+        }
+        let mut stage = storage(InspectionStage::open(&self.0.path, &self.0.key))?;
+        let mut failure = None;
+        let result = stage.bounded(cancel.clone(), deadline, |stage| {
+            self.integrity(stage, cancel, deadline).map_err(|error| {
+                failure = Some(error);
+                iptv_store_sqlite::StoreError::Unavailable("probe integrity failed")
+            })?;
+            for candidate in candidates {
+                if !stage.has_channel(&candidate.epg_channel)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        });
+        check(&self.0.services, cancel, deadline)?;
+        if !storage(result).map_err(|error| failure.unwrap_or(error))? {
             return Err(InspectionError::StaleEvidence);
         }
-        let stage = storage(InspectionStage::open(&self.0.path, &self.0.key))?;
-        if !storage(stage.has_channel(&candidate.epg_channel))? {
-            return Err(InspectionError::StaleEvidence);
-        }
-        Ok(())
+        self.check()
     }
     pub fn check(&self) -> InspectionResult<()> {
         if !self.0.services.is_current() {
@@ -425,6 +482,10 @@ fn configuration(
                 )
             }
             ProbeTarget::Supplied(url) => {
+                if iptv_providers::content_url::validate_uncredentialed_http(url.expose()).is_err()
+                {
+                    return Ok(Err(InspectionError::AddressPolicy));
+                }
                 let incarnation = hex(&random::<16>().map_err(|_| {
                     iptv_store_sqlite::StoreError::Unavailable("probe identity unavailable")
                 })?);
