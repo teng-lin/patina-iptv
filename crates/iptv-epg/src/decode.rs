@@ -65,6 +65,7 @@ pub(crate) struct InputDecoder {
     stage: Stage,
     nested: Option<Box<InputDecoder>>,
     allow_nested: bool,
+    pending: std::collections::VecDeque<(Vec<u8>, usize)>,
     limits: ImportLimits,
     decoded: u64,
     mode: Compression,
@@ -90,6 +91,7 @@ impl InputDecoder {
             stage: Stage::Detect,
             nested: None,
             allow_nested: true,
+            pending: Default::default(),
             limits,
             decoded: 0,
             mode,
@@ -146,6 +148,12 @@ impl InputDecoder {
 
     /// Flushes everything held back. Call once at end of input.
     pub(crate) fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), DecodeError> {
+        self.finish_input(out)?;
+        while self.drain(out)? {}
+        self.finish_text(out)
+    }
+
+    pub(crate) fn finish_input(&mut self, out: &mut Vec<u8>) -> Result<(), DecodeError> {
         if let Stage::Detect = self.stage {
             self.start_stage();
             let head = std::mem::take(&mut self.head);
@@ -165,6 +173,10 @@ impl InputDecoder {
             let decoded = gz.get_mut().take();
             self.inflated(&decoded, out)?;
         }
+        Ok(())
+    }
+
+    pub(crate) fn finish_text(&mut self, out: &mut Vec<u8>) -> Result<(), DecodeError> {
         if let Some(nested) = &mut self.nested {
             nested.finish(out)?;
             self.invalid_utf8 = nested.invalid_utf8;
@@ -207,16 +219,35 @@ impl InputDecoder {
     }
 
     fn inflated(&mut self, bytes: &[u8], out: &mut Vec<u8>) -> Result<(), DecodeError> {
-        if let Some(nested) = &mut self.nested {
-            for chunk in bytes.chunks(GZIP_SLICE) {
-                nested.push(chunk, out)?;
+        if self.nested.is_some() {
+            if !bytes.is_empty() {
+                self.pending.push_back((bytes.to_vec(), 0));
             }
-            self.invalid_utf8 = nested.invalid_utf8;
-            self.unknown_charset = nested.unknown_charset;
-            Ok(())
+            self.drain(out).map(|_| ())
         } else {
             self.text(bytes, out)
         }
+    }
+
+    /// Decode one inner compressed slice, allowing the XML parser to consume
+    /// records and enforce its record budget between inflation steps.
+    pub(crate) fn drain(&mut self, out: &mut Vec<u8>) -> Result<bool, DecodeError> {
+        let Some((bytes, offset)) = self.pending.front_mut() else {
+            return Ok(false);
+        };
+        let end = (*offset + GZIP_SLICE).min(bytes.len());
+        let nested = self
+            .nested
+            .as_mut()
+            .expect("pending bytes have an inner decoder");
+        nested.push(&bytes[*offset..end], out)?;
+        *offset = end;
+        if end == bytes.len() {
+            self.pending.pop_front();
+        }
+        self.invalid_utf8 = nested.invalid_utf8;
+        self.unknown_charset = nested.unknown_charset;
+        Ok(true)
     }
 
     /// Decompressed bytes: settle the charset, then convert.
@@ -473,6 +504,26 @@ mod tests {
             Err(DecodeError::Limit(_))
         ));
         assert!(out.len() <= 1024);
+    }
+
+    #[test]
+    fn nested_gzip_yields_between_inner_slices_before_total_budget() {
+        let gzip = |bytes: &[u8]| {
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+            encoder.write_all(bytes).unwrap();
+            encoder.finish().unwrap()
+        };
+        let bytes = gzip(&gzip(&vec![b'x'; 20 * 1024 * 1024]));
+        assert!(bytes.len() < GZIP_SLICE);
+        let mut decoder = InputDecoder::new(Compression::Auto);
+        let mut output = Vec::new();
+        decoder.push(&bytes, &mut output).unwrap();
+        assert!(output.len() < 10 * 1024 * 1024);
+        assert!(
+            !decoder.pending.is_empty(),
+            "parser must regain control before the next inner slice"
+        );
     }
 
     #[test]

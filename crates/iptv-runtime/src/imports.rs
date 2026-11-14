@@ -170,6 +170,7 @@ pub async fn guide_pipeline(
         Ok(catalog) => catalog,
         Err(e) => {
             log::warn!("iptv data: stored catalog: {e}");
+            stored::retry_check(tx, source, &guides, now);
             return;
         }
     };
