@@ -14,8 +14,8 @@
 //! `video.rs`):
 //! - props `source` `{url, headers, token, live, reconnect}` or null (a new
 //!   url or token reopens; `live` streams are bridged across connections
-//!   the server closes, see [`worker`]), `paused`, `userAgent` (fallback
-//!   when the source sends none), `pictureSize` (see [`map::picture`]);
+//!   the server closes, see [`worker`]), `paused`, `pictureSize` (see
+//!   [`map::picture`]);
 //!   `videoTrack` / `audioTrack` (`auto` or a track id: mpv's `vid` /
 //!   `aid`), `textTrack` (`off` or an id: `sid`), each starting again from
 //!   the default with a new source;
@@ -28,6 +28,11 @@
 //!   {ms} once a second while playing (from where the source opened),
 //!   `tracks` (from mpv's `track-list`, [`map::tracks`]) and `format`
 //!   {fps?, channels?}.
+//!
+//! The props' names come from the contract's one declaration
+//! ([`crate::PlayerProp`], [`crate::SourceProps`], [`crate::PipProps`]) and
+//! the events are its [`crate::PlayerEvent`]. A stream whose source names
+//! no `User-Agent` goes out as [`DEFAULT_UA`].
 //!
 //! The picture is black from a new source until the stream plays; a
 //! reopen of the same stream (`reconnect`, or a new token for the same
@@ -95,8 +100,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::TryRecvError;
 
-use serde_json::{Value, json};
+use iptv_core::playback::PlayerState;
+use serde_json::Value;
 
+use crate::{PlayerEvent, PlayerProp, SourceProps};
 use handle::Mpv;
 /// Supplies transport settings for each new load, including current trust roots.
 pub type Policy = fn(bool) -> iptv_net::playback::PlaybackPolicy;
@@ -132,7 +139,8 @@ use platform::{ComponentContext, Video};
 use worker::{Cmd, Note, Worker};
 
 #[cfg_attr(test, allow(dead_code))] // GTK's (`test_host` registers nothing)
-pub const NAME: &str = "tv.player";
+pub const NAME: &str = crate::PLAYER_VIEW;
+/// The `User-Agent` of a stream whose source names none.
 pub(crate) const DEFAULT_UA: &str = "iptv-rs/0.1 (mpv)";
 
 thread_local! {
@@ -183,7 +191,6 @@ struct State {
     live: bool,
     headers: Vec<(String, String)>,
     public_only: bool,
-    user_agent: String,
     picture: String,
     aspect: Option<f64>,
     width: i64,
@@ -203,7 +210,7 @@ struct State {
     /// The current file started playing (later buffering is a rebuffer).
     playing: bool,
     buffering: bool,
-    last_state: &'static str,
+    last_state: PlayerState,
     clues: map::Clues,
     /// A source that waits for the GL context.
     deferred: bool,
@@ -253,23 +260,19 @@ type Out = Vec<(&'static str, Value)>;
 impl State {
     /// `format` with what changed since it was last sent.
     fn format(&mut self, out: &mut Out) {
-        let mut format = serde_json::Map::new();
-        if self.fps > 0.0 && self.fps != self.format_sent.0 {
-            format.insert("fps".into(), json!(self.fps));
-        }
-        if self.channels > 0 && self.channels != self.format_sent.1 {
-            format.insert("channels".into(), json!(self.channels));
-        }
+        let fps = (self.fps > 0.0 && self.fps != self.format_sent.0).then_some(self.fps);
+        let channels = (self.channels > 0 && self.channels != self.format_sent.1)
+            .then(|| u32::try_from(self.channels).unwrap_or(0));
         self.format_sent = (self.fps, self.channels);
-        if !format.is_empty() {
-            out.push(("format", Value::Object(format)));
+        if fps.is_some() || channels.is_some() {
+            out.push(PlayerEvent::Format { fps, channels }.wire());
         }
     }
 
-    fn state(&mut self, out: &mut Out, name: &'static str) {
-        if self.last_state != name {
-            self.last_state = name;
-            out.push(("state", json!({ "state": name })));
+    fn state(&mut self, out: &mut Out, state: PlayerState) {
+        if self.last_state != state {
+            self.last_state = state;
+            out.push(PlayerEvent::State(state).wire());
         }
     }
 }
@@ -311,7 +314,6 @@ impl Inner {
                 live: false,
                 headers: Vec::new(),
                 public_only: true,
-                user_agent: DEFAULT_UA.to_owned(),
                 picture: "normal".to_owned(),
                 aspect: None,
                 width: 0,
@@ -323,7 +325,7 @@ impl Inner {
                 entry: None,
                 playing: false,
                 buffering: false,
-                last_state: "idle",
+                last_state: PlayerState::Idle,
                 clues: map::Clues::default(),
                 deferred: false,
                 audio_out: None,
@@ -370,59 +372,55 @@ impl Inner {
         }
     }
 
+    /// Prop `name` of the contract changed; any other name is ignored.
     fn set_prop(&self, name: &str, value: Option<&Value>) {
-        match name {
-            "source" => self.set_source(value),
-            "paused" => {
+        let Some(prop) = PlayerProp::from_wire(name) else {
+            return;
+        };
+        match prop {
+            PlayerProp::Source => self.set_source(value),
+            PlayerProp::Paused => {
                 let paused = value.and_then(Value::as_bool).unwrap_or(false);
                 self.state.borrow_mut().paused = paused;
                 self.send(Cmd::Set("pause", if paused { "yes" } else { "no" }.into()));
             }
-            "pictureSize" => {
+            PlayerProp::PictureSize => {
                 let mode = value.and_then(Value::as_str).unwrap_or("normal");
                 self.state.borrow_mut().picture = mode.to_owned();
                 self.apply_picture();
             }
-            "userAgent" => {
-                let ua = value
-                    .and_then(Value::as_str)
-                    .filter(|s| !s.trim().is_empty());
-                self.state.borrow_mut().user_agent = ua.unwrap_or(DEFAULT_UA).to_owned();
-                self.apply_http();
-            }
-            "videoTrack" => {
+            PlayerProp::VideoTrack => {
                 let vid = map::track_choice(value.and_then(Value::as_str));
                 self.state.borrow_mut().video_auto = vid == "auto";
                 self.send(Cmd::Set("vid", vid));
             }
-            "audioTrack" => {
+            PlayerProp::AudioTrack => {
                 let aid = map::track_choice(value.and_then(Value::as_str));
                 self.send(Cmd::Set("aid", aid));
             }
-            "textTrack" => {
+            PlayerProp::TextTrack => {
                 let sid = map::text_choice(value.and_then(Value::as_str));
                 self.send(Cmd::Set("sid", sid));
             }
-            "volume" => {
+            PlayerProp::Volume => {
                 let level = value.and_then(Value::as_f64).unwrap_or(100.0);
                 self.send(Cmd::Set(
                     "volume",
                     format!("{:.0}", level.clamp(0.0, 100.0)),
                 ));
             }
-            "muted" => {
+            PlayerProp::Muted => {
                 let muted = value.and_then(Value::as_bool).unwrap_or(false);
                 log::info!("iptv mpv {}: muted {muted}", self.id);
                 self.send(Cmd::Set("mute", if muted { "yes" } else { "no" }.into()));
             }
-            "audioDelay" => {
+            PlayerProp::AudioDelay => {
                 let ms = value.and_then(Value::as_f64).unwrap_or(0.0);
                 let secs = ms.clamp(-10_000.0, 10_000.0) / 1000.0;
                 self.send(Cmd::Set("audio-delay", format!("{secs:.3}")));
             }
             // The desktops' picture-in-picture window shows this player.
-            "pip" => pip::set_prop(self.id, value),
-            _ => {}
+            PlayerProp::Pip => pip::set_prop(self.id, value),
         }
     }
 
@@ -470,19 +468,23 @@ impl Inner {
     fn set_source(&self, value: Option<&Value>) {
         let source = value.filter(|v| v.is_object());
         let url = source
-            .and_then(|s| s["url"].as_str())
+            .and_then(|s| s[SourceProps::URL].as_str())
             .map(str::to_owned)
             .filter(|u| !u.is_empty());
         let public_only = source
-            .and_then(|s| s["publicOnly"].as_bool())
+            .and_then(|s| s[SourceProps::PUBLIC_ONLY].as_bool())
             .unwrap_or(true);
-        let token = source.and_then(|s| s["token"].as_i64()).unwrap_or(0);
-        let live = source.and_then(|s| s["live"].as_bool()).unwrap_or(false);
+        let token = source
+            .and_then(|s| s[SourceProps::TOKEN].as_i64())
+            .unwrap_or(0);
+        let live = source
+            .and_then(|s| s[SourceProps::LIVE].as_bool())
+            .unwrap_or(false);
         let reconnect = source
-            .and_then(|s| s["reconnect"].as_bool())
+            .and_then(|s| s[SourceProps::RECONNECT].as_bool())
             .unwrap_or(false);
         let headers = source
-            .and_then(|s| s["headers"].as_object())
+            .and_then(|s| s[SourceProps::HEADERS].as_object())
             .map(|h| {
                 h.iter()
                     .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
@@ -534,7 +536,7 @@ impl Inner {
         match (url, &self.mpv) {
             (None, Some(_)) => {
                 self.send(Cmd::Stop);
-                self.state.borrow_mut().state(&mut out, "idle");
+                self.state.borrow_mut().state(&mut out, PlayerState::Idle);
             }
             (None, None) => {}
             (Some(_), None) => fail(&self.state, &mut out, map::DECODER_INIT_FAILED, None),
@@ -549,7 +551,7 @@ impl Inner {
             (Some(url), Some(_)) => {
                 let mut st = self.state.borrow_mut();
                 st.loads += 1;
-                st.state(&mut out, "buffering");
+                st.state(&mut out, PlayerState::Buffering);
                 let live = st.live;
                 let public_only = st.public_only;
                 drop(st);
@@ -568,7 +570,7 @@ impl Inner {
     fn apply_http(&self) {
         let (source, http) = {
             let st = self.state.borrow();
-            (st.url.clone(), map::http(&st.headers, &st.user_agent))
+            (st.url.clone(), map::http(&st.headers))
         };
         self.send(Cmd::Http {
             source,
@@ -805,7 +807,14 @@ impl Inner {
                 let mut st = self.state.borrow_mut();
                 st.buffering = on;
                 if st.playing && self.current(&st) {
-                    st.state(out, if on { "buffering" } else { "ready" });
+                    st.state(
+                        out,
+                        if on {
+                            PlayerState::Buffering
+                        } else {
+                            PlayerState::Ready
+                        },
+                    );
                 }
             }
             Note::Width(v) | Note::Height(v) => {
@@ -818,7 +827,13 @@ impl Inner {
                 let size = (st.width, st.height);
                 if size.0 > 0 && size.1 > 0 && size != st.reported {
                     st.reported = size;
-                    out.push(("size", json!({ "width": size.0, "height": size.1 })));
+                    out.push(
+                        PlayerEvent::Size {
+                            width: size.0 as u64,
+                            height: size.1 as u64,
+                        }
+                        .wire(),
+                    );
                 }
             }
             Note::Aspect(a) => {
@@ -847,7 +862,9 @@ impl Inner {
                     return; // a file the viewer left
                 }
                 if let Some(tracks) = map::tracks(&json, st.video_auto) {
-                    out.push(("tracks", tracks));
+                    // The typed event of what the shell read from that
+                    // JSON all along, so it reads the same tracks from it.
+                    out.push(PlayerEvent::Tracks(crate::parse_tracks(&tracks)).wire());
                 }
             }
             Note::Fps(fps) => {
@@ -872,7 +889,7 @@ impl Inner {
                 if self.playing() {
                     let ms = (seconds.max(0.0) * 1000.0).round() as u64;
                     log::debug!("iptv mpv: position {ms} ms");
-                    out.push(("position", json!({ "ms": ms })));
+                    out.push(PlayerEvent::Position { ms }.wire());
                 }
             }
         }
@@ -903,7 +920,7 @@ impl Inner {
         }
         st.playing = false;
         match reason {
-            ffi::MPV_END_FILE_REASON_EOF => st.state(out, "ended"),
+            ffi::MPV_END_FILE_REASON_EOF => st.state(out, PlayerState::Ended),
             // Reported once the queue is empty: mpv's log messages come
             // apart from its events and may follow this one.
             ffi::MPV_END_FILE_REASON_ERROR => st.failed = Some(error),
@@ -919,7 +936,7 @@ impl Inner {
         st.playing = true;
         st.shutter = false;
         if !st.buffering {
-            st.state(out, "ready");
+            st.state(out, PlayerState::Ready);
         }
         // What the file plays: seen before it started (kept, not sent), or
         // unchanged from the last file (not observed again): ask.
@@ -942,12 +959,9 @@ fn fail(state: &RefCell<State>, out: &mut Out, code: &'static str, http: Option<
         st.shutter = true;
     }
     st.playing = false;
-    let mut data = json!({ "code": code });
-    if let Some(status) = http {
-        data["http"] = json!(status);
-    }
-    out.push(("error", data));
-    st.state(out, "idle");
+    let code = code.to_owned();
+    out.push(PlayerEvent::Error { code, http }.wire());
+    st.state(out, PlayerState::Idle);
 }
 
 fn param<T>(type_: c_int, data: *mut T) -> ffi::mpv_render_param {

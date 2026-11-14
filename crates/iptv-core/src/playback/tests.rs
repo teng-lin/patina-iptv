@@ -503,3 +503,18 @@ fn buffering_failures_and_new_streams_end_a_reconnect() {
     assert_eq!(h.on_state(PlayerState::Ended, 30_000), None);
     assert!(!h.reconnecting());
 }
+
+#[test]
+fn a_player_state_reads_back_from_its_host_name() {
+    let all = [
+        PlayerState::Idle,
+        PlayerState::Buffering,
+        PlayerState::Ready,
+        PlayerState::Ended,
+    ];
+    for state in all {
+        assert_eq!(PlayerState::parse(state.name()), Some(state));
+    }
+    assert_eq!(PlayerState::parse("unknown"), None);
+    assert_eq!(PlayerState::parse("Ready"), None, "names are lower case");
+}

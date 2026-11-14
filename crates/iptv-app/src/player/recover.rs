@@ -125,10 +125,7 @@ pub(super) fn watch_stall(ui: Ui, surface: usize) {
 }
 
 /// The host's `state` event from `surface`.
-pub fn on_state(ui: Ui, surface: usize, name: &str) {
-    let Some(state) = PlayerState::parse(name) else {
-        return;
-    };
+pub fn on_state(ui: Ui, surface: usize, state: PlayerState) {
     let health = ui.player.stream(surface).health;
     let now = ui.now_ms();
     let before = health.with_untracked(|h| h.stall_deadline());

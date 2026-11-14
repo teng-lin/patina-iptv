@@ -567,7 +567,7 @@ fn rig() -> Option<(tempfile::TempDir, Gpu)> {
 /// picture; `position` once a second while it plays (not paused); a retry
 /// of the same stream keeps the last frame, a new channel goes black; the
 /// end is `ended`, no source `idle`. The stream's requests carry the
-/// headers and user agent.
+/// source's headers, and its user agent or else the player's own.
 #[test]
 fn a_source_plays_through_the_render_api() {
     let _serial = serial();
@@ -582,10 +582,10 @@ fn a_source_plays_through_the_render_api() {
         ("/blue.ts", Answer::Body(blue_ts)),
     ]);
     let mut p = Player::new();
-    p.set("userAgent", json!("SyntheticAgent/1.0"));
+    let headers = json!({ "User-Agent": "SyntheticAgent/1.0", "X-Synthetic": "one" });
     p.set(
         "source",
-        json!({ "url": server.url("/red.ts"), "headers": { "X-Synthetic": "one" } }),
+        json!({ "url": server.url("/red.ts"), "headers": headers }),
     );
     p.idle(None, 200);
     assert!(p.states().is_empty(), "no load before the render context");
@@ -649,16 +649,14 @@ fn a_source_plays_through_the_render_api() {
         "source",
         json!({ "url": server.url("/red.ts"), "token": 1 }),
     );
-    assert_eq!(p.inner.state.borrow().last_state, "buffering");
+    assert_eq!(p.inner.state.borrow().last_state, PlayerState::Buffering);
     assert!(!p.inner.state.borrow().shutter, "the last frame stays");
     assert!(red(p.draw(&gpu)), "the last frame stays");
     p.wait_state(Some(&gpu), "ready");
+    // This source names no agent: the player's own, not the last source's.
     let head = server.heads("/red.ts").pop().unwrap();
-    assert!(
-        head.to_ascii_lowercase()
-            .contains("user-agent: syntheticagent/1.0"),
-        "{head}"
-    );
+    let own = format!("user-agent: {}", DEFAULT_UA.to_ascii_lowercase());
+    assert!(head.to_ascii_lowercase().contains(&own), "{head}");
     assert!(
         !head.to_ascii_lowercase().contains("x-synthetic"),
         "headers are the source's: {head}"
@@ -996,10 +994,7 @@ fn props_set_mpvs_properties() {
     });
     p.note(Note::Aspect(4.0 / 3.0)); // unchanged
 
-    p.set("userAgent", json!("SyntheticAgent/2.0"));
-    p.wait_prop(c"user-agent", "SyntheticAgent/2.0");
-    p.set("userAgent", json!("  "));
-    p.wait_prop(c"user-agent", DEFAULT_UA);
+    // The user agent is the source's.
     p.set(
         "source",
         json!({
@@ -1015,7 +1010,63 @@ fn props_set_mpvs_properties() {
         [json!({ "code": map::UNSUPPORTED_SCHEME })]
     );
     assert!(p.states().is_empty(), "it was idle");
-    p.set("someOtherProp", json!(1)); // ignored
+    // A source that names none, or a blank one, goes out as the player's own.
+    p.set(
+        "source",
+        json!({
+            "url": "file:///synthetic/clip.ts",
+            "token": 1,
+            "headers": { "User-Agent": "  " },
+        }),
+    );
+    p.wait_prop(c"user-agent", DEFAULT_UA);
+
+    // Names outside the contract are ignored, the `userAgent` prop the
+    // players once had among them. The control thread runs its commands in
+    // order: once the pause shows, anything sent before it has run too.
+    p.set("userAgent", json!("SyntheticAgent/2.0"));
+    p.set("someOtherProp", json!(1));
+    p.set("paused", json!(false));
+    p.wait_prop(c"pause", "no");
+    assert_eq!(p.prop(c"user-agent").as_deref(), Some(DEFAULT_UA));
+}
+
+/// Every prop of the contract's shared fixture is one the player takes:
+/// each sets what it names, none is skipped as unknown.
+#[test]
+fn the_contracts_fixture_props_are_all_taken() {
+    let _serial = serial();
+    let fixture: Value =
+        serde_json::from_str(include_str!("../../fixtures/player-props.json")).unwrap();
+    let mut p = Player::new();
+    for (name, value) in fixture.as_object().unwrap() {
+        assert!(PlayerProp::from_wire(name).is_some(), "unknown prop {name}");
+        p.set(name, value.clone());
+    }
+    {
+        let st = p.inner.state.borrow();
+        assert_eq!(
+            st.url.as_deref(),
+            Some("http://127.0.0.1:18080/synthetic/index.m3u8")
+        );
+        assert_eq!((st.token, st.live, st.public_only), (37, true, false));
+        assert_eq!(
+            st.headers,
+            [("X-Synthetic".to_owned(), "fixture".to_owned())]
+        );
+        assert!(st.paused);
+        assert_eq!(st.picture, "zoom");
+        assert!(!st.video_auto, "a video track was chosen");
+    }
+    let f = |p: &Player, name: &CStr| -> f64 { p.prop(name).unwrap().parse().unwrap() };
+    p.wait_prop(c"pause", "yes");
+    p.wait_prop(c"mute", "yes");
+    p.wait_prop(c"vid", "1");
+    p.wait_prop(c"aid", "2");
+    p.wait_prop(c"sid", "3");
+    p.wait(None, "volume", |p| f(p, c"volume") == 80.0);
+    p.wait(None, "audio-delay", |p| f(p, c"audio-delay") == 0.125);
+    assert_eq!(pip::wanted(), Some(p.inner.id), "the window shows it");
 }
 
 /// The window's picture-in-picture view shows the player whose `pip` says
@@ -1115,11 +1166,24 @@ fn notes_of_the_current_file_become_events() {
         [("size", json!({ "width": 640, "height": 360 }))]
     );
     assert!(p.note(Note::Height(360)).is_empty(), "unchanged");
+    let wide = (1_i64 << 32) + 1280;
+    assert_eq!(
+        p.note(Note::Width(wide)),
+        [("size", json!({ "width": wide, "height": 360 }))]
+    );
 
     let tracks = r#"[{"id":1,"type":"video","selected":true,"demux-w":640,"demux-h":360}]"#;
     let out = p.note(Note::Tracks(tracks.into()));
+    // The typed event's own data: whole numbers, not mpv's floats, and
+    // the same tracks as the shell read from mpv's.
+    let read = crate::parse_tracks(&out[0].1);
+    assert_eq!(out, [crate::PlayerEvent::Tracks(read.clone()).wire()]);
     assert_eq!(out[0].0, "tracks");
-    assert_eq!(out[0].1["video"][0]["width"], 640.0);
+    assert_eq!(out[0].1["video"][0]["width"], 640);
+    let auto = p.inner.state.borrow().video_auto;
+    let mpvs = map::tracks(tracks, auto).unwrap();
+    assert_eq!(read, crate::parse_tracks(&mpvs));
+    assert_eq!(mpvs["video"][0]["width"], 640.0);
     assert!(p.note(Note::Tracks("not json".into())).is_empty());
 
     // Output formats are logged; warnings are read for clues.
@@ -1214,7 +1278,7 @@ fn an_error_end_reports_what_the_log_said() {
         st.live = true;
         st.shutter = false;
         st.playing = true;
-        st.last_state = "ready";
+        st.last_state = PlayerState::Ready;
     }
     p.note(Note::Log {
         warn: true,
