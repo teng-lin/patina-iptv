@@ -9,19 +9,28 @@ is below 1.0, a minor release may change behaviour.
 
 ### Added
 
+- Headless application runtime extracted into dedicated `iptv-runtime` crate behind explicit platform ports, owning background workers, scheduling, lanes, favourites, search, and backup orchestration.
+- Portable channel organisation and guide state machine extracted into dedicated `iptv-library` crate.
+- Native libmpv desktop and iPad player extracted into dedicated `iptv-player-mpv` crate with typed playback contracts.
+- Android host hardening and CI smoke testing: emulator test harness for tablet (`tab36`) and TV (`tv36`) profiles testing boot, playback, refresh, activity recreation, and kill/recovery scenarios; JVM unit tests for playback transport and credential keys; and rejection of un-relayed video playback URLs.
+- Accessibility descriptions for icon-only controls in the interface language.
 - Releases publish the source of the media libraries bundled in the macOS disk
   image and the Linux AppImage (`Patina-<version>-<platform>-native-sources.tar`
   with a manifest), and the packages say where to find it.
 - Releases carry build provenance attestations for every file and for
-  `SHA256SUMS`, and a CycloneDX SBOM of the Rust dependencies.
-- `docs/architecture.md`, `CONTRIBUTING.md`, `SECURITY.md` and this changelog.
-
+  `SHA256SUMS`, and CycloneDX SBOMs for Rust dependencies, bundled media runtimes, and the Android release classpath.
+- Release workflow includes end-to-end dry-run rehearsal mode on disposable tags and draft retry body updates.
+- Coverage floors enforced per library crate in CI, split fuzz targets with persistent corpus storage, and scaled scenario wait timeouts for slow CI runners.
+- `docs/architecture.md`, `CONTRIBUTING.md`, `SECURITY.md`, issue/PR templates, CODEOWNERS, and audit documentation.
 - Unsigned macOS and Windows packages are announced as previews in the release
   notes. The Windows installer is signed through Azure Trusted Signing and the
   macOS app notarized when their credentials are configured.
 
 ### Changed
 
+- Storage threading: UI reads use a dedicated read-only SQLite connection to bypass writer queues; custom group reordering runs in a single atomic transaction; and large guide schedules are built off the UI thread.
+- Shared network runtime: single shared client across playback and imports, with cancellation of abandoned stream link resolutions and background small file writes.
+- Transport and privacy hardening: only allowlisted headers are forwarded across foreign redirect origins; secrets and tokens are zeroed on drop; and private Stalker portals only access streams from their host.
 - The Linux AppImage and the macOS disk image bundle Patina's own libmpv,
   built from pinned sources with an LGPL-only FFmpeg (`tools/mpv-runtime-unix`),
   instead of the build machine's Ubuntu or Homebrew libmpv and FFmpeg. Each
@@ -32,13 +41,21 @@ is below 1.0, a minor release may change behaviour.
   `tools/check.sh` refuses another one unless `IPTV_ALLOW_NSH_DRIFT=1` is set.
 - The minimum supported Rust version is the pinned toolchain, 1.99.1.
 - Package scripts work without `rustup`, using the Cargo on `PATH`.
+- Strict Gradle dependency verification enabled for the Android host.
+- All tracked lines under `crates/` wrapped to under 200 bytes and the check exemption list eliminated.
 
 ### Fixed
 
+- Backup manifest parser rejects Windows reserved device names and trailing dots/spaces to prevent directory traversal.
+- Guide imports track per-source budgets and retry transient network failures with exponential backoff.
+- HLS rewriter correctly parses line endings with bare carriage returns.
+- Overlay state tracking unified across back navigation to prevent stuck screens.
+- Picked playlist and guide files are opened asynchronously without blocking UI interactions.
 - A release that is already public can no longer have its files replaced by
   rerunning the release workflow.
 - Pull requests that change only Rust sources are compiled for Android.
 - The Windows check runs the tests of every library crate.
+- Scenario test race conditions addressed with settled back-press transitions and explicit fixture storage synchronization.
 
 ## [0.1.1] - 2026-11-13
 
