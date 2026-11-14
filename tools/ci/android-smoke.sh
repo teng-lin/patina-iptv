@@ -209,7 +209,11 @@ expect 'key=menu .*mode=Fullscreen' 10
 shot 05-fullscreen-controls
 
 step "multiview with a second player"
-keys KEYCODE_DPAD_CENTER
+# Capturing the controls can exceed their auto-hide timeout on a hosted
+# emulator. Long OK opens them without toggling; clamp the prior focus (0–3)
+# to the first control, then select Multiview in one ADB round trip.
+$adb shell 'input keyevent --longpress KEYCODE_DPAD_CENTER
+  input keyevent KEYCODE_DPAD_LEFT KEYCODE_DPAD_LEFT KEYCODE_DPAD_LEFT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_CENTER'
 expect 'iptv multiview: open' 10
 pause 2
 keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER          # another channel for tile 2
