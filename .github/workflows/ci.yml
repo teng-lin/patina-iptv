@@ -26,3 +26,4 @@ jobs:
       - run: bash tools/check.sh
         env:
           IPTV_REQUIRE_PLAYER_TESTS: '1'
+          IPTV_TEST_WAIT_SCALE: ${{ matrix.os == 'macos-15' && '2' || '1' }}

@@ -20,15 +20,64 @@ iptv-epg = { path = "../crates/iptv-epg" }
 iptv-net = { path = "../crates/iptv-net", features = ["fuzzing"] }
 
 [[bin]]
-name = "imports"
-path = "fuzz_targets/imports.rs"
+name = "m3u"
+path = "fuzz_targets/m3u.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "manifests"
-path = "fuzz_targets/manifests.rs"
+name = "xmltv"
+path = "fuzz_targets/xmltv.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "xtream"
+path = "fuzz_targets/xtream.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "stalker"
+path = "fuzz_targets/stalker.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "catchup"
+path = "fuzz_targets/catchup.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "backup_manifest"
+path = "fuzz_targets/backup_manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gzip"
+path = "fuzz_targets/gzip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hls"
+path = "fuzz_targets/hls.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dash"
+path = "fuzz_targets/dash.rs"
 test = false
 doc = false
 bench = false

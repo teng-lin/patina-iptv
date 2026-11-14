@@ -31,6 +31,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Runtime packaging tests failed.' }
       - name: Test and build Windows app
         shell: pwsh
+        env:
+          IPTV_TEST_WAIT_SCALE: '2'
         run: |
           ./tools/build-windows.ps1 -Check
           python tools/ci/check-windows-icon.py target/debug/iptv-app.exe

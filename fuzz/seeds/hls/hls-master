@@ -1,4 +1,4 @@
-#EXTM3U
+#EXTM3U
 #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="Synthetic",URI="audio/en.m3u8"
 #EXT-X-STREAM-INF:BANDWIDTH=800000,AUDIO="aud"
 low/index.m3u8

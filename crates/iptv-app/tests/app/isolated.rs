@@ -69,6 +69,20 @@ impl Home {
     }
 }
 
+/// Factor scaling scenario waits and timeouts (default 1).
+pub fn wait_scale() -> u32 {
+    std::env::var("IPTV_TEST_WAIT_SCALE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1)
+        .max(1)
+}
+
+/// Scales duration `d` by [`wait_scale`].
+pub fn scaled_duration(d: std::time::Duration) -> std::time::Duration {
+    d.saturating_mul(wait_scale())
+}
+
 /// Native app storage under an isolated scenario's home.
 pub fn data_dir(home: &Path) -> PathBuf {
     if cfg!(windows) {
@@ -122,8 +136,8 @@ pub fn run(here: &str) -> Option<Home> {
     let ran = dir.path().join("ran");
     std::fs::create_dir(&home).unwrap();
     let exe = std::env::current_exe().unwrap();
-    let out = Command::new(&exe)
-        .args([name, "--exact", "--nocapture", "--test-threads=1"])
+    let mut cmd = Command::new(&exe);
+    cmd.args([name, "--exact", "--nocapture", "--test-threads=1"])
         .arg("--include-ignored")
         .env(CHILD, name)
         .env(RAN, &ran)
@@ -134,8 +148,11 @@ pub fn run(here: &str) -> Option<Home> {
         .env(
             "IPTV_TEST_UTC_OFFSET_MINUTES",
             test_offset_minutes().to_string(),
-        )
-        .output()
+        );
+    if let Ok(scale) = std::env::var("IPTV_TEST_WAIT_SCALE") {
+        cmd.env("IPTV_TEST_WAIT_SCALE", scale);
+    }
+    let out = cmd.output()
         .unwrap_or_else(|e| panic!("{name}: cannot run {}: {e}", exe.display()));
     // Through the test harness: shown when this test fails, or with
     // --nocapture.

@@ -77,17 +77,22 @@ impl T {
         }
     }
 
+    /// Timeout scaled by `IPTV_TEST_WAIT_SCALE`.
+    pub fn wait_timeout(secs: u64) -> Duration {
+        Duration::from_secs(secs.saturating_mul(crate::isolated::wait_scale() as u64))
+    }
+
     /// Presses `sel` once it is on screen. A step is done when the app
     /// rendered nothing for a moment, which a loaded machine can reach
     /// before the screen the last step opened is drawn: the press waits
     /// for its target instead of failing on the old screen.
     pub fn press(&mut self, sel: &str) {
-        let r = self.app.wait_for(sel).and_then(|()| self.app.press(sel));
+        let r = self.app.wait_for_within(sel, Self::wait_timeout(10)).and_then(|()| self.app.press(sel));
         self.ok(&format!("press {sel}"), r);
     }
 
     pub fn wait(&mut self, sel: &str, secs: u64) {
-        let r = self.app.wait_for_within(sel, Duration::from_secs(secs));
+        let r = self.app.wait_for_within(sel, Self::wait_timeout(secs));
         self.ok(&format!("wait {sel}"), r);
     }
 
@@ -98,20 +103,21 @@ impl T {
     }
 
     pub fn gone(&mut self, sel: &str, secs: u64) {
-        let r = self.app.wait_for_gone(sel, Duration::from_secs(secs));
+        let r = self.app.wait_for_gone(sel, Self::wait_timeout(secs));
         self.ok(&format!("gone {sel}"), r);
     }
 
     /// Waits until `sel` matches `n` views (within `secs`).
     pub fn count(&mut self, sel: &str, n: usize, secs: u64) {
         let start = std::time::Instant::now();
+        let timeout = Self::wait_timeout(secs);
         loop {
             self.app.catch_up();
             let found = self.app.screen().count(sel).unwrap();
             if found == n {
                 return;
             }
-            if start.elapsed() > Duration::from_secs(secs) {
+            if start.elapsed() > timeout {
                 self.ok(sel, Err(format!("{found} views, not {n}")));
                 return;
             }

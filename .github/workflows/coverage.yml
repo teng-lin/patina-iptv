@@ -20,9 +20,6 @@ permissions:
   contents: read
 jobs:
   coverage:
-    # A measurement, not a gate: it is path-filtered and allowed to fail, so it
-    # must not be made a required check. The Tests workflow decides merges.
-    continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
