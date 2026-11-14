@@ -142,9 +142,7 @@ mod tests {
         for tag in ["es", "it", "pt"] {
             assert_eq!(of(tag, &[0, 1, 2, 21]), [Other, One, Other, Other]);
         }
-        for tag in ["fr"] {
-            assert_eq!(of(tag, &[0, 1, 2, 21]), [One, One, Other, Other]);
-        }
+        assert_eq!(of("fr", &[0, 1, 2, 21]), [One, One, Other, Other]);
         for tag in ["es", "it", "fr", "pt"] {
             assert_eq!(
                 of(tag, &[1_000_000, 3_000_000, 1_500_000, 999_999]),
