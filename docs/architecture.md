@@ -236,7 +236,8 @@ local task executor and timers are installed separately through `bind_tasks`.
 The shell retains one strong handle; local context selection uses weak handles
 and restores the accepting owner on every poll, including nested callbacks and
 unwinding. Local controllers use explicit state accessors; store connections,
-writer queues and native service handles remain private.
+writer queues and native service handles remain private. Restore startup outcomes
+and process locks are retained per storage directory until the process exits.
 
 Run `cargo test --locked -p iptv-runtime` to test application services without
 linking a display toolkit or reaching an OS credential broker. Public-API tests

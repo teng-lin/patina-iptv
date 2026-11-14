@@ -10,11 +10,11 @@ use std::{
 };
 
 pub struct ImportWork {
-    pub finished: Cell<bool>,
-    pub catalog_done: Cell<bool>,
+    pub(crate) finished: Cell<bool>,
+    pub(crate) catalog_done: Cell<bool>,
     pub cancel: CancelToken,
     /// Tasks waiting for [`Self::finish`].
-    pub waiting: RefCell<Vec<futures_channel::oneshot::Sender<()>>>,
+    pub(crate) waiting: RefCell<Vec<futures_channel::oneshot::Sender<()>>>,
 }
 impl ImportWork {
     pub fn finished(&self) -> bool {
