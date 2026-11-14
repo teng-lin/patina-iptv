@@ -21,6 +21,12 @@ class CoverageFloors(unittest.TestCase):
         self.assertEqual(totals["iptv-core"], [100, 5])
         self.assertEqual(totals["iptv-nav"], [100, 1])
 
+    def test_shortened_and_windows_paths_keep_the_same_totals(self):
+        shortened = "\n".join(line.split("crates/")[-1] for line in SYNTHETIC_SUMMARY.splitlines())
+        expected = checker.parse_summary(SYNTHETIC_SUMMARY)
+        self.assertEqual(checker.parse_summary(shortened), expected)
+        self.assertEqual(checker.parse_summary(shortened.replace("/", "\\")), expected)
+
     def test_evaluate_passes_when_above_floor(self):
         totals = {"iptv-core": [100, 5]}  # 95%
         results, failed = checker.evaluate(totals, {"iptv-core": 94.0})

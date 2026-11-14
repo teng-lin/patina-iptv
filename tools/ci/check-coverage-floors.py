@@ -25,7 +25,9 @@ FLOORS = {
 def parse_summary(summary_text):
     totals = defaultdict(lambda: [0, 0])
     for line in summary_text.splitlines():
-        m = re.search(r"crates/([a-z0-9_-]+)/", line)
+        # llvm-cov shortens paths to their common root; hosted output can
+        # start at the crate name rather than include the workspace's crates/.
+        m = re.search(r"(?:^|[/\\])([a-z0-9_-]+)[/\\]src[/\\]", line)
         if not m:
             continue
         crate = m.group(1)
