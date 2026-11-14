@@ -1340,3 +1340,122 @@ fn repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive(
         .release_guide_repair_plan(&preview.id, preview.digest)
         .unwrap();
 }
+
+fn retained_guide(directory: &std::path::Path, source: SourceId, title: &str) {
+    use iptv_epg::{ChannelKey, FeedId, MatchKind, ProgrammeData, StoreOptions};
+    use iptv_import::{EpgImport, EpgSourceConfig, GuideSink, ListedChannel};
+    use iptv_store_sqlite::{EpgFeedMeta, EpgStage, GuideSource};
+    let mut store = Store::open_encrypted(
+        directory.join("iptv.sqlite"),
+        &DatabaseKey::from_bytes([0x71; 32]),
+    )
+    .unwrap();
+    let config = GuideSource {
+        feed: FeedId(1),
+        provider_index: None,
+        url: SecretUrl::new("https://synthetic.invalid/retained.xml"),
+        name: None,
+        enabled: true,
+        shift_minutes: 0,
+    };
+    store
+        .set_guide_sources(source, std::slice::from_ref(&config))
+        .unwrap();
+    let mut stage = EpgStage::create_in_store(&store, directory).unwrap();
+    stage
+        .begin_feed(config.feed, 0, StoreOptions::default(), 0)
+        .unwrap();
+    stage
+        .programme(
+            "amber.main",
+            &ProgrammeData {
+                start: 1_794_657_600,
+                stop: Some(1_794_664_800),
+                title,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    stage.finish_feed().unwrap();
+    let import = EpgImport {
+        bindings: vec![(
+            ChannelKey::new("amber"),
+            iptv_epg::EpgRef {
+                source: config.feed,
+                epg_id: "amber.main".into(),
+                kind: MatchKind::TvgId,
+            },
+        )],
+        listed: vec![(
+            config.feed,
+            vec![ListedChannel {
+                id: "amber.main".into(),
+                name: Some("Synthetic amber".into()),
+            }],
+        )],
+        ..Default::default()
+    };
+    store
+        .replace_epg(
+            source,
+            &mut stage,
+            &import,
+            &[EpgFeedMeta {
+                config: EpgSourceConfig::new(config.feed, config.url),
+                fetched_at: 1_794_657_600,
+                etag: None,
+                last_modified: None,
+                bytes: 10,
+            }],
+            0,
+        )
+        .unwrap();
+}
+
+#[test]
+fn held_verification_cannot_certify_later_programmes_with_unchanged_mapping_and_configuration() {
+    let fixture = Fixture::new();
+    retained_guide(
+        fixture.dir.path(),
+        fixture.source,
+        "Synthetic first observation",
+    );
+    let request = fixture.request("amber", Target::Automatic);
+    let preview = fixture.preview(request.clone());
+    let saved = fixture.apply(&preview);
+    let before = fixture
+        .drive(fixture.owner.verify_guide_repair(
+            saved.commit.id.clone(),
+            request.window,
+            InspectionControl::default(),
+        ))
+        .unwrap();
+    assert!(before.verified_coverage);
+    // Creation queues the actual first verification snapshot. This FIFO
+    // barrier runs after it and holds the final revalidation behind a refresh.
+    let verification = fixture.owner.verify_guide_repair(
+        saved.commit.id,
+        request.window,
+        InspectionControl::default(),
+    );
+    let (entered, ready) = mpsc::sync_channel(1);
+    let (release, wait) = mpsc::sync_channel(1);
+    let _barrier = fixture.owner.services().analyze(move |_| {
+        entered.send(()).unwrap();
+        wait.recv_timeout(Duration::from_secs(5)).unwrap();
+        Ok(())
+    });
+    let path = fixture.dir.path().to_owned();
+    let source = fixture.source;
+    let worker = std::thread::spawn(move || {
+        ready.recv_timeout(Duration::from_secs(5)).unwrap();
+        retained_guide(&path, source, "Synthetic refreshed observation");
+        release.send(()).unwrap();
+    });
+    let result = fixture.drive(verification).unwrap();
+    worker.join().unwrap();
+    assert_eq!(result.examined, result.current);
+    assert_eq!(result.expected, result.current);
+    assert_ne!(result.evidence_revision, result.current_evidence_revision);
+    assert!(!result.current_revision && !result.verified_coverage);
+}
