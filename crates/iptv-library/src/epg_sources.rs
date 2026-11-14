@@ -21,6 +21,7 @@ pub enum Item {
     Source(Feed),
     Add,
     Update,
+    Inspect,
 }
 
 /// What can be done to one source.
@@ -94,6 +95,7 @@ pub enum Key {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
     Edit(Edit),
+    Inspect,
     /// Download the playlist's guide now.
     Update,
     Close,
@@ -159,7 +161,7 @@ impl Screen {
             .iter()
             .map(|l| Item::Source(l.source.feed))
             .collect();
-        items.extend([Item::Add, Item::Update]);
+        items.extend([Item::Add, Item::Update, Item::Inspect]);
         items
     }
 
@@ -246,6 +248,7 @@ impl Screen {
             (Key::Down, _) => self.focus = items[(at + 1).min(items.len() - 1)],
             (Key::Ok, Item::Add) => self.start_add(),
             (Key::Ok, Item::Update) => return Some(Effect::Update),
+            (Key::Ok, Item::Inspect) => return Some(Effect::Inspect),
             (Key::Ok | Key::Menu, Item::Source(feed)) => {
                 self.layer = Layer::Actions {
                     feed,
