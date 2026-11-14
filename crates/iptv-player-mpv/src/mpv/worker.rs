@@ -735,9 +735,9 @@ mod tests {
         forbidden.set_nonblocking(true).unwrap();
         let playlist = format!(
             "#EXTM3U\n#EXT-X-TARGETDURATION:1\n\
-             #EXT-X-KEY:METHOD=AES-128,URI=http://{}/synthetic.key\n\
-             #EXTINF:1,\nsegment.ts\n#EXT-X-ENDLIST\n",
-            forbidden.local_addr().unwrap()
+             #EXT-X-KEY:METHOD=AES-128,URI=http://{blocked}/synthetic.key\n\
+             #EXTINF:1,\nhttp://{blocked}/segment.ts\n#EXT-X-ENDLIST\n",
+            blocked = forbidden.local_addr().unwrap()
         );
         let stop = Arc::new(AtomicBool::new(false));
         let stop_server = stop.clone();
