@@ -21,6 +21,7 @@ Usage (with GH_TOKEN and GH_REPO in the environment for checksums/publish):
 """
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -139,12 +140,14 @@ def release_notes(directory):
     return "\n".join(lines)
 
 
-def publish(directory, tag, notes=None):
+def publish(directory, tag, notes=None, rehearsal=False):
     state = refuse_public(tag)
     verify_checksums(directory)
     if state == "absent":
         extra = ["--notes-file", str(notes)] if notes is not None and notes.read_text().strip() else []
         must("release", "create", tag, "--verify-tag", "--draft", "--generate-notes", *extra)
+    elif notes is not None:
+        must("release", "edit", tag, "--notes-file", str(notes))
     # Replacing is safe only here: the release was just seen to be a draft.
     files = [*assets(directory), directory / CHECKSUMS]
     must("release", "upload", tag, *(str(path) for path in files), "--clobber")
@@ -155,10 +158,18 @@ def publish(directory, tag, notes=None):
     # in neither SHA256SUMS nor the attestations, so they must not go public.
     for name in sorted(set(present) - {path.name for path in files}):
         must("release", "delete-asset", tag, name, "--yes")
-    must("release", "edit", tag, "--draft=false")
+    if not rehearsal:
+        must("release", "edit", tag, "--draft=false")
 
 
 def main(arguments):
+    rehearsal = False
+    if "--rehearsal" in arguments:
+        rehearsal = True
+        arguments = [a for a in arguments if a != "--rehearsal"]
+    if os.environ.get("IPTV_RELEASE_REHEARSAL") == "1":
+        rehearsal = True
+
     command = arguments[0] if arguments else None
     if command == "signing" and len(arguments) == 4:
         record_signing(arguments[1], arguments[2], Path(arguments[3]))
@@ -175,8 +186,8 @@ def main(arguments):
         refuse_public(tag)
         sys.stdout.writelines(write_checksums(directory))
     else:
-        publish(directory, tag, Path(arguments[3]) if len(arguments) == 4 else None)
-        print(f"published {tag}")
+        publish(directory, tag, Path(arguments[3]) if len(arguments) == 4 else None, rehearsal=rehearsal)
+        print(f"{'rehearsed' if rehearsal else 'published'} {tag}")
 
 
 if __name__ == "__main__":

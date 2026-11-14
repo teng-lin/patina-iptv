@@ -9,6 +9,10 @@ on:
         type: choice
         default: android-desktop
         options: [android-desktop, android, desktop, all]
+      rehearsal:
+        description: Rehearsal mode (draft release and cleanup on throwaway tag)
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -22,7 +26,7 @@ jobs:
       signing_matrix: ${{ steps.platforms.outputs.signing_matrix }}
     steps:
       - name: Refuse manual releases outside master
-        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/master'
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/master' && !inputs.rehearsal
         run: exit 1
       - id: platforms
         env:
@@ -397,7 +401,7 @@ jobs:
           path: dist/*
           if-no-files-found: error
   publish:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.rehearsal)
     needs: [tests, package, sign, windows-package, windows-sign, sbom]
     runs-on: ubuntu-24.04
     permissions:
@@ -409,11 +413,16 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      TAG: ${{ github.ref_name }}
+      TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('rehearsal-{0}', github.run_id) }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: Create throwaway tag for rehearsal
+        if: github.event_name == 'workflow_dispatch' && inputs.rehearsal
+        run: |
+          git tag "$TAG"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git" "$TAG"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: packages-*
@@ -442,4 +451,14 @@ jobs:
       - name: Release notes from the signing records
         run: python3 tools/ci/publish-release.py notes signing-status release-notes.md
       - name: Upload to a draft and publish it once
-        run: python3 tools/ci/publish-release.py publish dist "$TAG" release-notes.md
+        run: |
+          rehearsal_flag=""
+          if [ "${{ github.event_name == 'workflow_dispatch' && inputs.rehearsal }}" = "true" ]; then
+            rehearsal_flag="--rehearsal"
+          fi
+          python3 tools/ci/publish-release.py publish $rehearsal_flag dist "$TAG" release-notes.md
+      - name: Clean up rehearsal release and tag
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.rehearsal
+        run: |
+          gh release delete "$TAG" --yes || true
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git" --delete "$TAG" || true
