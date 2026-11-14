@@ -127,10 +127,19 @@ that `tr` shows as written.
 the core, the guide and library crates and the settings catalogue, and fails
 on:
 
-- a literal given to `tr`, `trf` or `key` (or to a helper or message type it
-  knows) that has no catalogue row;
-- `tr(something)` where `something` is not a literal and not a listed carrier
-  of checked messages;
+- a literal given to `tr`, `trf` or `key`, to the core's `translate` or
+  `format`, or to a helper or message type it knows, that has no catalogue
+  row. `concat!("…", "…")` is the literal it makes;
+- a message given as a name (`tr(label)`, `button(ui, size, label, act)`)
+  that is not a listed carrier of checked messages;
+- a message given in a way the lint cannot follow. It follows a literal, a
+  name with its path, fields and calls, and a parenthesis, a block, an
+  `if`/`else` or a `match` whose every outcome is one of these. Everything
+  else is refused, not guessed at: `tr(a + b)`, `tr(&format!(…))`,
+  `tr(if x { "On" })`, `.map(tr)`, `use crate::i18n::tr as t`;
+- a literal message whose placeholders are not the values beside it:
+  `trf("{count} items", &[("cnt", n.into())])`, or `tr` of a message with a
+  placeholder;
 - a literal that reads as text for a person and is neither a message nor on
   `catalogue_allowlist.txt`;
 - an allowlist line that matches no literal any more, or an `[untranslated]`
@@ -141,6 +150,28 @@ shrinks. To translate a listed literal: wrap it in `tr` or `trf`, add its row
 with all eleven columns, delete its allowlist line and lower `UNTRANSLATED`.
 A literal that never reaches the screen (a log line, an internal reason,
 markup) goes under `[not-shown]`, in the group that says why.
+
+When the lint refuses a message call, write it plainly: give the call the
+literal, or choose between literals with an `if`/`else` or a `match` inside
+the call. A function that translates a label it is given is listed in
+`TRANSLATING_HELPERS`, and the name it gives to `tr` in `CARRIED_MESSAGES`.
+
+The lint reads tokens: it resolves no names and knows no types. It does not
+catch:
+
+- one word in a call it does not know to show text: `Button::new("OK")`,
+  `"EPG"` in a struct field. Outside the calls listed in `TEXT_SINKS`, only
+  a capitalised word (`Cancel`) or several words read as text;
+- text assembled from pieces that are not literals;
+- a listed carrier name reused for another variable in the same file: a
+  carrier is a file and a name, not a binding;
+- a new function that translates its argument, until its `tr(label)` asks
+  for a carrier line and a person lists the helper;
+- a message call behind a macro, or a helper reached through a `use` or a
+  module path other than its file's;
+- values for `trf` that are made outside the function that calls it.
+
+These are for review. The lint's header lists them with the reasons.
 
 Adding a language also requires adding its tag to
 `iptv_settings::catalogue::choices::LANGUAGE`, its plural forms to `plural.rs`
