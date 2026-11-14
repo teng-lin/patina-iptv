@@ -216,6 +216,14 @@ pub fn edit_organization(
         Kind::Groups => Ok(StoredKind::Groups),
         Kind::GroupChannels(group) => Ok(StoredKind::GroupChannels(group)),
         Kind::CustomChannels(group) => Ok(StoredKind::CustomChannels(group)),
+        Kind::Favorites
+            if !matches!(
+                edit,
+                Edit::Earlier | Edit::Later | Edit::First | Edit::Last | Edit::ResetOrder
+            ) =>
+        {
+            Ok(StoredKind::Channels)
+        }
         Kind::Favorites => Err(StoreError::Unavailable(
             "favourites use their ordered writer",
         )),
@@ -224,47 +232,11 @@ pub fn edit_organization(
         let kind = kind?;
         let id = ContentId::from_stored(&item.id);
         let group = GroupId::from_stored(&item.id);
-        // Resolve a relative move against the writer's current committed order,
-        // so two rapid Later presses compose even before the view reloads.
-        let current: Vec<String> =
-            if matches!(edit, Edit::Earlier | Edit::Later | Edit::First | Edit::Last) {
-                match &kind {
-                    StoredKind::Groups => store
-                        .library_groups(source)?
-                        .into_iter()
-                        .filter(|row| row.group.kind == iptv_providers::model::ContentKind::Live)
-                        .map(|row| row.group.id.as_str().to_owned())
-                        .collect(),
-                    _ => {
-                        let scope = match &kind {
-                            StoredKind::GroupChannels(group) => ChannelScope::Group(group.clone()),
-                            StoredKind::CustomChannels(group) => ChannelScope::Custom(*group),
-                            _ => ChannelScope::All,
-                        };
-                        store
-                            .load_channels(
-                                source,
-                                &ChannelQuery {
-                                    scope,
-                                    include_hidden: true,
-                                    ..Default::default()
-                                },
-                            )?
-                            .into_iter()
-                            .map(|row| row.channel.id.as_str().to_owned())
-                            .collect()
-                    }
-                }
-            } else {
-                Vec::new()
-            };
-        let at = current.iter().position(|id| id == &item.id).unwrap_or(0);
         let to = match edit {
-            Edit::Earlier => at.saturating_sub(1),
-            Edit::Later => (at + 1).min(current.len().saturating_sub(1)),
-            Edit::First => 0,
-            Edit::Last => current.len().saturating_sub(1),
-            _ => at,
+            Edit::Earlier => iptv_store_sqlite::MoveTarget::Step(-1),
+            Edit::Later => iptv_store_sqlite::MoveTarget::Step(1),
+            Edit::Last => iptv_store_sqlite::MoveTarget::Index(usize::MAX),
+            _ => iptv_store_sqlite::MoveTarget::Index(0),
         };
         match edit {
             Edit::Visibility => match &kind {
@@ -277,15 +249,15 @@ pub fn edit_organization(
             },
             Edit::Earlier | Edit::Later | Edit::First | Edit::Last => match &kind {
                 StoredKind::Channels => {
-                    store.move_channel(source, &OrderScope::All, &id, to)?;
+                    store.move_channel_to(source, &OrderScope::All, &id, to)?;
                 }
                 StoredKind::GroupChannels(g) => {
-                    store.move_channel(source, &OrderScope::Group(g.clone()), &id, to)?;
+                    store.move_channel_to(source, &OrderScope::Group(g.clone()), &id, to)?;
                 }
                 StoredKind::CustomChannels(g) => {
-                    store.move_in_custom_group(*g, &id, to)?;
+                    store.move_in_custom_group_to(*g, &id, to)?;
                 }
-                StoredKind::Groups => store.move_group(source, &group, to)?,
+                StoredKind::Groups => store.move_group_to(source, &group, to)?,
             },
             Edit::ResetOrder => match &kind {
                 StoredKind::Channels => store.reset_manual_order(source, &OrderScope::All)?,

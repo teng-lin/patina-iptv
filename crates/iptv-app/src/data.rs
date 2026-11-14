@@ -205,7 +205,6 @@ fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(U
     let mut import_source = job.stored;
     let completion = library::import_completion(cancel.clone());
     if let Some(source) = import_source {
-        crate::runtime().cancel_guide_check(source);
         library::track_import(source, &completion);
     }
     let previous = Cell::new(
@@ -313,7 +312,8 @@ fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(U
                     }
                     Ok(Msg::FirstScreen(imported, held)) => show(imported, Some(held)).await,
                     Ok(Msg::NextCheck { source, at })
-                        if shows || combined::includes(ui, source) =>
+                        if (shows || combined::includes(ui, source))
+                            && library::import_is_current(source, &completion) =>
                     {
                         schedule_check(ui, source, at, generation);
                     }
@@ -345,6 +345,21 @@ fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(U
             }
         }
         completion.finish();
+        // A failed refresh may exit before producing NextCheck. Keep a bounded
+        // retry for a retained source instead of losing its guide timer forever.
+        if let Some(source) = import_source
+            && library::import_is_current(source, &completion)
+            && !completion.cancel.is_cancelled()
+            && !crate::runtime().has_guide_check(source)
+            && (shows || combined::includes(ui, source))
+        {
+            schedule_check(
+                ui,
+                source,
+                now_unix() + MIN_WAIT.as_secs() as i64,
+                generation,
+            );
+        }
     });
 }
 
@@ -479,10 +494,12 @@ fn show_nothing(ui: Ui) {
 /// Looks at `source`'s guide again at `at` (unix time), unless a newer
 /// import started meanwhile.
 fn schedule_check(ui: Ui, source: SourceId, at: i64, generation: u64) {
+    let Some((ticket, cancel)) = crate::runtime().schedule_guide_check(source, generation) else {
+        return;
+    };
     let wait =
         Duration::from_secs(u64::try_from(at - now_unix()).unwrap_or(0)).clamp(MIN_WAIT, MAX_WAIT);
     log::info!("iptv data: next guide check in {} min", wait.as_secs() / 60);
-    let (ticket, cancel) = crate::runtime().replace_guide_check(source);
     spawn_in_app(async move {
         let mut elapsed = std::pin::pin!(timer(wait));
         let mut cancelled = std::pin::pin!(cancel.cancelled());

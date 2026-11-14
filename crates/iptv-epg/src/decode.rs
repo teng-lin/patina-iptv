@@ -63,6 +63,8 @@ const DECL_PROBE: usize = 512;
 
 pub(crate) struct InputDecoder {
     stage: Stage,
+    nested: Option<Box<InputDecoder>>,
+    allow_nested: bool,
     limits: ImportLimits,
     decoded: u64,
     mode: Compression,
@@ -86,6 +88,8 @@ impl InputDecoder {
     pub(crate) fn with_limits(mode: Compression, limits: ImportLimits) -> Self {
         InputDecoder {
             stage: Stage::Detect,
+            nested: None,
+            allow_nested: true,
             limits,
             decoded: 0,
             mode,
@@ -135,7 +139,7 @@ impl InputDecoder {
                     return Err(error);
                 }
                 let decoded = gz.get_mut().take();
-                self.text(&decoded, out)
+                self.inflated(&decoded, out)
             }
         }
     }
@@ -159,7 +163,13 @@ impl InputDecoder {
                 return Err(error);
             }
             let decoded = gz.get_mut().take();
-            self.text(&decoded, out)?;
+            self.inflated(&decoded, out)?;
+        }
+        if let Some(nested) = &mut self.nested {
+            nested.finish(out)?;
+            self.invalid_utf8 = nested.invalid_utf8;
+            self.unknown_charset = nested.unknown_charset;
+            return Ok(());
         }
         if self.charset.is_none() {
             self.charset = Some(Charset::Utf8);
@@ -180,6 +190,13 @@ impl InputDecoder {
             Compression::Plain => false,
             Compression::Gzip => true,
         };
+        if gzip && self.allow_nested {
+            // HTTP gzip can wrap a gzip file. Bound decoding to these two
+            // layers, with the decoded-byte budget enforced on each layer.
+            let mut nested = Self::with_limits(Compression::Auto, self.limits);
+            nested.allow_nested = false;
+            self.nested = Some(Box::new(nested));
+        }
         self.stage = if gzip {
             Stage::Gzip(Box::new(MultiGzDecoder::new(DecodeBuffer::new(
                 self.limits.decoded_bytes,
@@ -187,6 +204,19 @@ impl InputDecoder {
         } else {
             Stage::Plain
         };
+    }
+
+    fn inflated(&mut self, bytes: &[u8], out: &mut Vec<u8>) -> Result<(), DecodeError> {
+        if let Some(nested) = &mut self.nested {
+            for chunk in bytes.chunks(GZIP_SLICE) {
+                nested.push(chunk, out)?;
+            }
+            self.invalid_utf8 = nested.invalid_utf8;
+            self.unknown_charset = nested.unknown_charset;
+            Ok(())
+        } else {
+            self.text(bytes, out)
+        }
     }
 
     /// Decompressed bytes: settle the charset, then convert.
@@ -414,6 +444,35 @@ mod tests {
         let (out, d) = run(&chunks, Compression::Auto);
         assert_eq!(out, "<tv>one two</tv>");
         assert!(d.is_gzip());
+    }
+
+    #[test]
+    fn http_gzip_wrapping_gzip_file_is_bounded_and_chunk_safe() {
+        let gzip = |bytes: &[u8]| {
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+            encoder.write_all(bytes).unwrap();
+            encoder.finish().unwrap()
+        };
+        let xml = b"<?xml encoding='iso-8859-1'?><tv>Caf\xe9</tv>";
+        let bytes = gzip(&gzip(xml));
+        let chunks: Vec<_> = bytes.chunks(1).collect();
+        let (out, _) = run(&chunks, Compression::Auto);
+        assert!(out.ends_with("<tv>Café</tv>"));
+        let bomb = gzip(&gzip(&vec![b'x'; 100_000]));
+        let mut decoder = InputDecoder::with_limits(
+            Compression::Auto,
+            ImportLimits {
+                decoded_bytes: 1024,
+                ..Default::default()
+            },
+        );
+        let mut out = Vec::new();
+        assert!(matches!(
+            decoder.push(&bomb, &mut out),
+            Err(DecodeError::Limit(_))
+        ));
+        assert!(out.len() <= 1024);
     }
 
     #[test]

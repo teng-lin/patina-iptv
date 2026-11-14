@@ -108,12 +108,21 @@ impl Store {
         Ok(())
     }
     pub fn move_group(&mut self, source: SourceId, id: &GroupId, index: usize) -> Result<()> {
+        self.move_group_to(source, id, crate::MoveTarget::Index(index))
+    }
+    pub fn move_group_to(
+        &mut self,
+        source: SourceId,
+        id: &GroupId,
+        target: crate::MoveTarget,
+    ) -> Result<()> {
         let mut ids: Vec<_> = self
             .library_groups(source)?
             .into_iter()
             .map(|g| g.group.id)
             .collect();
         if let Some(at) = ids.iter().position(|g| g == id) {
+            let index = target.resolve(at);
             let id = ids.remove(at);
             ids.insert(index.min(ids.len()), id);
         }

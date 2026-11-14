@@ -82,9 +82,3 @@ pub struct OrganizationSnapshot {
     pub organization: iptv_guide::Organization,
     pub lists: Vec<(String, String, Vec<String>)>,
 }
-impl OrganizationSnapshot {
-    pub fn install(self, schedule: &EpgSchedule) {
-        schedule.set_organization(self.organization);
-        schedule.set_group_lists(self.lists);
-    }
-}

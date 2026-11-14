@@ -16,7 +16,7 @@ fn two_later_presses_from_one_view_snapshot_move_twice() {
     let source = store
         .add_source(&common::m3u_source("Generated moves"))
         .unwrap();
-    let catalogue = common::catalog(4, 1, common::XT_PASSWORD);
+    let catalogue = common::catalog(100_000, 1_000, common::XT_PASSWORD);
     common::replace(&mut store, source, &catalogue);
     drop(store);
     let runtime = Rc::new(Runtime::new(Ports::new(
@@ -56,6 +56,23 @@ fn two_later_presses_from_one_view_snapshot_move_twice() {
         ))
         .unwrap();
         assert_eq!(changed[2].id, item.id);
+        // Favorites still expose visibility and name edits, even though their
+        // ordering uses a separate write queue.
+        block_on(commands::edit_organization(
+            source,
+            OrganizationScope::Favorites,
+            Editor::new(changed, Some(item.id.clone())),
+            item.clone(),
+            Action::Visibility,
+        ))
+        .unwrap();
+        let changed = block_on(commands::organization_items(
+            source,
+            OrganizationScope::Channels,
+            Vec::new(),
+        ))
+        .unwrap();
+        assert!(changed.iter().find(|row| row.id == item.id).unwrap().hidden);
         assert!(runtime.drain_services());
     });
 }

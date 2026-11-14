@@ -33,6 +33,7 @@ pub fn import_completion(cancel: CancelToken) -> ImportCompletion {
     })
 }
 pub fn track_import(source: SourceId, completion: &ImportCompletion) {
+    crate::current().cancel_guide_check(source);
     crate::current()
         .completions
         .with(|jobs| jobs.borrow_mut().insert(source, Rc::downgrade(completion)));

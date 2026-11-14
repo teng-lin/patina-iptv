@@ -53,9 +53,9 @@ async fn server() -> TestServer {
             "/iptv/playlist.m3u.gz" => Resp::ok(synth::gzip(
                 synth::m3u(CHANNELS, 24, None, &base).as_bytes(),
             )),
-            "/iptv/guide.xml.gz" | "/xmltv.php" => {
-                Resp::ok(guide.clone()).header("Content-Type", "application/gzip")
-            }
+            "/iptv/guide.xml.gz" | "/xmltv.php" => Resp::ok(synth::gzip(&guide))
+                .header("Content-Type", "application/gzip")
+                .header("Content-Encoding", "gzip"),
             "/moved.m3u" => Resp::redirect(302, "/iptv/playlist.m3u"),
             "/player_api.php" => xtream.handle(req).into(),
             p if p.starts_with("/stalker_portal/") => stalker.lock().unwrap().handle(req).into(),

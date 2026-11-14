@@ -18,6 +18,32 @@ use crate::{SourceId, Store};
 
 pub use iptv_library::{CustomGroupId, OrderScope};
 
+/// A position resolved on the writer, against the same IDs it rewrites.
+#[derive(Clone, Copy, Debug)]
+pub enum MoveTarget {
+    Index(usize),
+    Step(isize),
+}
+impl MoveTarget {
+    pub(crate) fn resolve(self, current: usize) -> usize {
+        match self {
+            Self::Index(index) => index,
+            Self::Step(step) => current.saturating_add_signed(step),
+        }
+    }
+    fn in_list(self, list: &[String], present: &HashSet<String>, id: &str) -> usize {
+        match self {
+            Self::Index(index) => index,
+            Self::Step(_) => self.resolve(
+                list.iter()
+                    .filter(|key| present.contains(*key))
+                    .position(|key| key == id)
+                    .unwrap_or(0),
+            ),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CustomGroup {
     pub id: CustomGroupId,
@@ -202,6 +228,15 @@ impl Store {
         id: &ContentId,
         index: usize,
     ) -> Result<bool> {
+        self.move_channel_to(source, scope, id, MoveTarget::Index(index))
+    }
+    pub fn move_channel_to(
+        &mut self,
+        source: SourceId,
+        scope: &OrderScope,
+        id: &ContentId,
+        target: MoveTarget,
+    ) -> Result<bool> {
         let tx = self.conn.transaction()?;
         ensure_source(&tx, source)?;
         let current = scope_channels(&tx, source, scope)?;
@@ -209,6 +244,7 @@ impl Store {
         let mut list = stored_order(&tx, source, scope)?;
         let listed: HashSet<String> = list.iter().cloned().collect();
         list.extend(current.into_iter().filter(|c| !listed.contains(c)));
+        let index = target.in_list(&list, &present, id.as_str());
         if !move_to(&mut list, &present, id.as_str(), index) {
             return Ok(false);
         }
@@ -519,10 +555,19 @@ impl Store {
         id: &ContentId,
         index: usize,
     ) -> Result<bool> {
+        self.move_in_custom_group_to(group, id, MoveTarget::Index(index))
+    }
+    pub fn move_in_custom_group_to(
+        &mut self,
+        group: CustomGroupId,
+        id: &ContentId,
+        target: MoveTarget,
+    ) -> Result<bool> {
         let tx = self.conn.transaction()?;
         let source = group_source(&tx, group)?;
         let mut list = members(&tx, group)?;
         let present = present_ids(&tx, source)?;
+        let index = target.in_list(&list, &present, id.as_str());
         if !move_to(&mut list, &present, id.as_str(), index) {
             return Ok(false);
         }

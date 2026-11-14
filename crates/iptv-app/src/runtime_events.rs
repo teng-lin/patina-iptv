@@ -49,9 +49,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
                 .is_some_and(|(before, now)| before.same_catalogue(now));
             if same_catalogue && crate::runtime().organization_edit_current(source, ticket) {
                 let kept = crate::lists::keep(ui);
-                if let Some(source) = ui.library.shown.get_untracked() {
-                    crate::data::combined::remember_single(source, replacement.clone());
-                }
+                crate::data::combined::remember_single(source, replacement.clone());
                 crate::runtime().set_schedule(replacement);
                 crate::lists::restore(ui, kept);
                 ui.data_version.update(|version| *version += 1);

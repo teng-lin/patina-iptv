@@ -38,11 +38,23 @@ impl Drop for GuideChecks {
     }
 }
 impl crate::Runtime {
+    /// Register only while this browser generation still owns the guide.
+    pub fn schedule_guide_check(
+        &self,
+        source: SourceId,
+        generation: u64,
+    ) -> Option<(u64, CancelToken)> {
+        (self.generation().with(std::cell::Cell::get) == generation)
+            .then(|| self.replace_guide_check(source))
+    }
     pub fn replace_guide_check(&self, source: SourceId) -> (u64, CancelToken) {
         self.guide_checks.borrow_mut().replace(source)
     }
     pub fn guide_check_current(&self, source: SourceId, ticket: u64) -> bool {
         self.guide_checks.borrow().current(source, ticket)
+    }
+    pub fn has_guide_check(&self, source: SourceId) -> bool {
+        self.guide_checks.borrow().entries.contains_key(&source)
     }
     pub fn cancel_guide_check(&self, source: SourceId) {
         self.guide_checks.borrow_mut().cancel(source);

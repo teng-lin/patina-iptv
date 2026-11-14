@@ -435,10 +435,9 @@ fn resolve_link(
             {
                 return;
             }
-            // Keep a refreshed token for the next link, if the data is the same.
-            if Rc::ptr_eq(&schedule, &crate::schedule())
-                && let Some(ctx) = context
-            {
+            // This resolve still owns the player's session. Organization copies
+            // share its playback context even though their schedule pointers differ.
+            if let Some(ctx) = context {
                 ctx.update_stalker_session(portal.clone());
             }
             match result {

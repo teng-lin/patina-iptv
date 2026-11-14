@@ -70,7 +70,7 @@ pub use guide_sources::GuideSource;
 pub use history::{HISTORY_LIMIT, HistoryEntry, PRUNE_SLACK};
 pub use library_preferences::{GroupRow, SourcePolicy};
 pub use migrate::SCHEMA_VERSION;
-pub use organise::{CustomGroup, CustomGroupId, OrderScope};
+pub use organise::{CustomGroup, CustomGroupId, MoveTarget, OrderScope};
 pub use overlay::{EpgOverride, OrphanedOverlay};
 pub use search::SearchBackend;
 pub use sources::{CatalogCounts, ImportErrorKind, ImportStatus, SourceSummary, StoredSource};
