@@ -33,19 +33,6 @@ runs:
         else
           brew install mpv pkg-config ffmpeg
         fi
-    - name: Install the checksum-pinned guarded player
-      shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: |
-        case "$RUNNER_OS" in Linux) platform=linux ;; macOS) platform=macos ;; esac
-        archive=$(python3 tools/ci/native_candidates.py "$platform")
-        destination="$PWD/target/mpv-runtime-$platform"
-        python3 tools/mpv-runtime-unix/runtime.py fetch --platform "$platform" --archive "$archive" --destination "$destination"
-        echo "LIBRARY_PATH=$destination/lib" >> "$GITHUB_ENV"
-        echo "LD_LIBRARY_PATH=$destination/lib" >> "$GITHUB_ENV"
-        echo "IPTV_RS_MPV_LIB_DIR=$destination/lib" >> "$GITHUB_ENV"
-        echo "DYLD_LIBRARY_PATH=$destination/lib" >> "$GITHUB_ENV"
     - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       with:
         toolchain: ${{ steps.pins.outputs.toolchain }}
@@ -65,5 +52,18 @@ runs:
         workspaces: |
           .
           ../nsh
+    - name: Install the checksum-pinned guarded player
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        case "$RUNNER_OS" in Linux) platform=linux ;; macOS) platform=macos ;; esac
+        archive=$(python3 tools/ci/native_candidates.py "$platform")
+        destination="$RUNNER_TEMP/patina-mpv-runtime-$platform"
+        python3 tools/mpv-runtime-unix/runtime.py fetch --platform "$platform" --archive "$archive" --destination "$destination"
+        echo "LIBRARY_PATH=$destination/lib" >> "$GITHUB_ENV"
+        echo "LD_LIBRARY_PATH=$destination/lib" >> "$GITHUB_ENV"
+        echo "IPTV_RS_MPV_LIB_DIR=$destination/lib" >> "$GITHUB_ENV"
+        echo "DYLD_LIBRARY_PATH=$destination/lib" >> "$GITHUB_ENV"
     - shell: bash
       run: cargo install cargo-deny --version 0.20.2 --locked

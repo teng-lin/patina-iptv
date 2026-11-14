@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -217,7 +218,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("platform", choices=sorted(SPECS))
     parser.add_argument("--kind", choices=("runtime", "sources"), default="runtime")
-    parser.add_argument("--cache", type=Path, default=ROOT / "target/native-candidates")
+    parser.add_argument("--cache", type=Path, default=Path(os.environ["RUNNER_TEMP"]) / "patina-native-candidates" if os.environ.get("RUNNER_TEMP") else ROOT / "target/native-candidates")
     args = parser.parse_args()
     print(fetch(args.platform, args.kind, args.cache.resolve()))
 
