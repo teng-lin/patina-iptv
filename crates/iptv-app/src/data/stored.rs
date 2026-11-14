@@ -286,6 +286,12 @@ pub fn guides_changed(ui: Ui, source: SourceId) {
     let generation = crate::runtime().generation().with(Cell::get);
     super::spawn_in_app(async move {
         timer(SETTLE).await;
+        // A refresh may still be installing its old guide configuration. Wait
+        // for that handoff before checking the edited feeds, rather than turning
+        // this check into a cache-only read and losing the edit's refresh.
+        while let Some(pending) = super::library::pending_import(source) {
+            pending.until_finished().await;
+        }
         let current = crate::runtime().generation().with(Cell::get) == generation
             && guide_edit_is_current(source, edit);
         if current && !updating(source) {

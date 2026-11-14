@@ -572,9 +572,11 @@ fn stored_playlists_switch_refresh_and_go() {
         .as_str()
         .to_owned();
     std::fs::write(data.join(format!("last_channel-{}", first_id.0)), &one).unwrap();
-    store(&data)
-        .set_combined_last_channel(&format!("source:{}:{one}", first_id.0))
-        .unwrap();
+    std::fs::write(
+        data.join("last_channel_combined"),
+        format!("source:{}:{one}", first_id.0),
+    )
+    .unwrap();
     let mut app = start();
     step(app.wait_for_within("id:player-banner >> text:/Alpha One · first$/", IMPORT));
     assert!(iptv_app::player_has_source(0), "Alpha One plays");
