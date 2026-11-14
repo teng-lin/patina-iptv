@@ -709,8 +709,10 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
     let fullscreen = move || ui.mode.get() == ViewMode::Fullscreen;
     let shown = move || pip::ui_shown(ui);
     view()
+        .test_id("app-ui")
         .absolute()
         .inset_0()
+        .accessibility_elements_hidden(move || !shown())
         .opacity(move || if shown() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {
             if shown() {
@@ -721,7 +723,9 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         })
         .child(
             view()
+                .test_id("guide-ui")
                 .flex_1()
+                .accessibility_elements_hidden(move || fullscreen() || ui.any_overlay_open())
                 .opacity(move || if fullscreen() { 0.0_f32 } else { 1.0 })
                 .pointer_events(move || {
                     if fullscreen() {
@@ -745,6 +749,9 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
             // there is no pointer).
             view()
                 .test_id("video")
+                .accessibility_elements_hidden(move || {
+                    !fullscreen() || ui.any_overlay_open() || multiview::is_open(ui)
+                })
                 .absolute()
                 .inset_0()
                 .pointer_events(move || {

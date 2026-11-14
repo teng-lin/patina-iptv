@@ -221,6 +221,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     };
     let groups_column = view()
         .test_id("channel-list-groups")
+        .accessibility_elements_hidden(move || !groups())
         .w(move || px(if groups() { size.whole(GROUPS_W) } else { 0.0 }))
         .opacity(move || if groups() { 1.0_f32 } else { 0.0 })
         .overflow_hidden()
@@ -281,9 +282,13 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     // through the closed layer's `None`); in the open layer's `BoxNone`
     // they take presses by default.
     view()
+        .test_id("channel-list-layer")
         .absolute()
         .inset_0()
         .flex_row()
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::ChannelList.accessibility_hidden(ui)
+        })
         .opacity(move || if open() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {
             if open() {

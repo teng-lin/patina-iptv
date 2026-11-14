@@ -76,6 +76,7 @@ pub fn status(ui: Ui) -> impl IntoElement {
     let card = move || matches!(status.get(), Status::Failed { .. } | Status::Over);
     let secondary = move || tint(WHITE, TEXT_SECONDARY_ALPHA);
     view()
+        .accessibility_elements_hidden(move || ui.any_overlay_open())
         .absolute()
         .left(move || px(crate::video::rect(ui).0))
         .top(move || px(crate::video::rect(ui).1))

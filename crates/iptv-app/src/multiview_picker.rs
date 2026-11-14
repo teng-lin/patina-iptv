@@ -250,6 +250,9 @@ fn screen(ui: Ui) -> impl IntoElement {
         groups.scroll_to_index(entry.get() as u32, percentage(0.5), px(0.0), false);
     });
     ui_kit::screen(ui, size)
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::ChannelPicker.accessibility_covered(ui)
+        })
         .test_id("multiview-picker")
         .child(header(ui, size))
         .child(ui_kit::caption(size, move || {

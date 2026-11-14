@@ -326,6 +326,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 40.0
             })
         })
+        .test_id("chooser-layer")
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::Chooser.accessibility_hidden(ui)
+        })
         .opacity(move || if open() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {
             if open() {

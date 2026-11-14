@@ -58,16 +58,20 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             Editor::Confirm { .. } => Kind::Confirm,
         })
     });
-    view().absolute().inset_0().child(dynamic(move || {
-        let shown = kind.get();
-        untracked(move || match shown {
-            Some(Kind::Choice) => choice(ui).into_element(),
-            Some(Kind::Number) => stepper(ui).into_element(),
-            Some(Kind::Text) => text_sheet(ui).into_element(),
-            Some(Kind::Confirm) => confirm(ui).into_element(),
-            None => view().into_element(),
-        })
-    }))
+    view()
+        .test_id("settings-editor")
+        .absolute()
+        .inset_0()
+        .child(dynamic(move || {
+            let shown = kind.get();
+            untracked(move || match shown {
+                Some(Kind::Choice) => choice(ui).into_element(),
+                Some(Kind::Number) => stepper(ui).into_element(),
+                Some(Kind::Text) => text_sheet(ui).into_element(),
+                Some(Kind::Confirm) => confirm(ui).into_element(),
+                None => view().into_element(),
+            })
+        }))
 }
 
 fn cancel(ui: Ui) {

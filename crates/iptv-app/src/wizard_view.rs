@@ -466,6 +466,8 @@ fn form(ui: Ui, kind: PlaylistKind) -> impl IntoElement {
     };
     let size = Scale::new();
     card(ui, size)
+        .test_id("wizard-form")
+        .accessibility_elements_hidden(move || entry::is_editing(ui))
         .gap(move || size.px(4.0))
         .child(ui_kit::title(size, move || words::kind_title(kind)))
         .child(

@@ -21,6 +21,7 @@ mod personalization;
 /// What the guide sources scenarios share.
 mod support;
 
+mod accessibility_visibility;
 mod architecture;
 mod backup_restore;
 mod cold_start;

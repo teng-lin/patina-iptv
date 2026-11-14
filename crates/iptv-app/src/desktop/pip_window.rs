@@ -271,6 +271,7 @@ pub fn placeholder(ui: Ui) -> impl IntoElement {
             let size = crate::scale::Scale::new();
             view()
                 .test_id("pip-placeholder")
+                .accessibility_elements_hidden(move || ui.any_overlay_open())
                 .absolute()
                 .left(move || px(rect().0))
                 .top(move || px(rect().1))

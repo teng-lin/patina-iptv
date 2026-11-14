@@ -161,6 +161,16 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             view()
                 .absolute()
                 .inset_0()
+                .test_id("play-bar-layer")
+                .accessibility_elements_hidden(move || {
+                    ui.overlay_open(|overlay| {
+                        !matches!(
+                            overlay,
+                            crate::overlays::Overlay::Chooser
+                                | crate::overlays::Overlay::Description
+                        )
+                    })
+                })
                 .pointer_events(PointerEvents::BoxNone)
                 .child(when(move || ui.back_controls(), move || back(ui)))
                 .child(bar(ui))

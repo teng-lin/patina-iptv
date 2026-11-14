@@ -126,6 +126,7 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
         .child(
             text(move || label(item))
                 .number_of_lines(1)
+                .accessibility_elements_hidden(move || !open())
                 .opacity(move || if open() { 1.0_f32 } else { 0.0 })
                 .text_size(px(TEXT_SIZE))
                 .text_color(colour),

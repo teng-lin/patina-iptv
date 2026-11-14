@@ -341,6 +341,9 @@ fn actions_sheet(ui: Ui, size: Scale) -> impl IntoElement {
             .unwrap_or_default()
     };
     view()
+        .accessibility_elements_hidden(move || {
+            state(ui, |screen| screen.editor.text.is_some()).unwrap_or(false)
+        })
         .absolute()
         .inset_0()
         .items_center()
@@ -406,6 +409,13 @@ fn name_sheet() -> TextSheet {
     }
 }
 
+fn contents_hidden(ui: Ui) -> bool {
+    state(ui, |screen| {
+        screen.editor.action.is_some() || screen.editor.text.is_some()
+    })
+    .unwrap_or(false)
+}
+
 pub fn layer(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     effect(move || {
@@ -439,18 +449,32 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             });
             ui_kit::screen(ui, size)
                 .test_id("organization-screen")
-                .child(ui_kit::header(
-                    ui,
-                    size,
-                    move || state(ui, |s| screen_title(&s.kind)).unwrap_or(tr("Organize channels")),
-                    close,
-                ))
-                .child(ui_kit::caption(size, move || {
-                    state(ui, |s| screen_caption(&s.kind)).unwrap_or("")
-                }))
+                .accessibility_elements_hidden(move || {
+                    crate::overlays::Overlay::Organization.accessibility_covered(ui)
+                })
+                .child(
+                    ui_kit::header(
+                        ui,
+                        size,
+                        move || {
+                            state(ui, |s| screen_title(&s.kind)).unwrap_or(tr("Organize channels"))
+                        },
+                        close,
+                    )
+                    .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
+                .child(
+                    ui_kit::caption(size, move || {
+                        state(ui, |s| screen_caption(&s.kind)).unwrap_or("")
+                    })
+                    .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
                 .child(when(
                     move || state(ui, |s| s.editor.items.is_empty()).unwrap_or(true),
-                    move || ui_kit::body(size, tr("This playlist has no items to organize.")),
+                    move || {
+                        ui_kit::body(size, tr("This playlist has no items to organize."))
+                            .accessibility_elements_hidden(move || contents_hidden(ui))
+                    },
                 ))
                 .child(
                     virtual_list(
@@ -459,6 +483,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     )
                     .estimated_item_size(list_rows::pitch(size, ROW))
                     .element_ref(&rows)
+                    .accessibility_elements_hidden(move || contents_hidden(ui))
                     .flex_1(),
                 )
                 .child(when(

@@ -78,6 +78,22 @@ impl Overlay {
         }
     }
 
+    /// Whether a higher UI layer currently covers this one's controls.
+    /// This follows the existing paint order only; it changes neither the
+    /// input owner nor any screen's state. Screen readers must not activate
+    /// controls through a modal backdrop.
+    pub(crate) fn accessibility_covered(self, ui: Ui) -> bool {
+        Self::ALL
+            .into_iter()
+            .take_while(|overlay| *overlay != self)
+            .any(|overlay| overlay.is_open(ui))
+    }
+
+    /// A persistent UI subtree is exposed only while open and unobscured.
+    pub(crate) fn accessibility_hidden(self, ui: Ui) -> bool {
+        !self.is_open(ui) || self.accessibility_covered(ui)
+    }
+
     /// Whether it is a screen of its own that covers the video, as
     /// opposed to a popup or a list shown over the picture. A tap that
     /// falls through such a screen's background is not a tap on the video.

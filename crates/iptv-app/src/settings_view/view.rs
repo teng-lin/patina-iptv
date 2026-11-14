@@ -29,6 +29,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     NOTICE.with(|n| n.set(Some(notice)));
     let size = Scale::new();
     view()
+        .test_id("settings-layer")
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::Settings.accessibility_covered(ui)
+        })
         .absolute()
         .inset_0()
         .pointer_events(PointerEvents::BoxNone)
@@ -74,12 +78,20 @@ fn screen(ui: Ui, size: Scale) -> impl IntoElement {
         .inset_0()
         .flex_row()
         // The guide (or video) stays visible, dimmed; a tap there closes.
-        .child(view().flex_1().bg(tint(0x000000, 0x90)).on_press(move || {
-            ui.touched();
-            close(ui);
-        }))
         .child(
             view()
+                .flex_1()
+                .accessibility_elements_hidden(move || editing.get())
+                .bg(tint(0x000000, 0x90))
+                .on_press(move || {
+                    ui.touched();
+                    close(ui);
+                }),
+        )
+        .child(
+            view()
+                .test_id("settings-content")
+                .accessibility_elements_hidden(move || editing.get())
                 .w(move || size.px(PANEL_W))
                 .max_w(percentage(0.92))
                 .pt_safe_area()

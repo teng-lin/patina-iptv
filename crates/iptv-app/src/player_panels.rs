@@ -161,10 +161,17 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .pt_safe_area()
         .px(px(32.0))
         .pb(px(24.0))
+        .test_id("player-panels")
+        .accessibility_elements_hidden(move || hidden() || ui.any_overlay_open())
         .opacity(move || if hidden() { 0.0_f32 } else { 1.0 })
         .pointer_events(move || events(hidden(), PointerEvents::BoxNone))
         // The banner is compact: no top bar over it.
-        .child(top_bar(ui, panel).opacity(move || if banner() { 0.0_f32 } else { 1.0 }))
+        .child(
+            top_bar(ui, panel)
+                .test_id("player-top-bar")
+                .accessibility_elements_hidden(banner)
+                .opacity(move || if banner() { 0.0_f32 } else { 1.0 }),
+        )
         .child(view().flex_1().pointer_events(PointerEvents::None))
         .child(
             view()
@@ -180,6 +187,8 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         .py(move || px(if controls() { 6.0 } else { 0.0 }))
                         .rounded(px(RADIUS_LARGE))
                         .bg(panel)
+                        .test_id("player-controls")
+                        .accessibility_elements_hidden(move || !controls())
                         .opacity(move || if controls() { 1.0_f32 } else { 0.0 })
                         .pointer_events(move || events(!controls(), PointerEvents::Auto))
                         .child(
@@ -362,6 +371,7 @@ fn hint_line(ui: Ui, shown: Memo<Shown>) -> impl IntoElement {
         .bg(move || tint(ui.theme.with(|t| t.background.panel), PANEL_ALPHA))
         .text_size(px(OSD_DETAIL))
         .text_color(tint(WHITE, TEXT_SECONDARY_ALPHA))
+        .accessibility_elements_hidden(move || words().is_empty())
         .opacity(move || if words().is_empty() { 0.0_f32 } else { 1.0 })
         .pointer_events(PointerEvents::None)
 }

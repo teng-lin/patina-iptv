@@ -241,6 +241,13 @@ fn mark(ui: Ui, focused: bool) -> Mark {
     Mark::of(focused && ui.keys_shown(), false)
 }
 
+fn contents_hidden(ui: Ui) -> bool {
+    state(ui, |screen| {
+        screen.layer() != Layer::List || screen.editing().is_some()
+    })
+    .unwrap_or(false)
+}
+
 pub fn layer(ui: Ui) -> impl IntoElement {
     // What is stored changed (refreshed, renamed, deleted, added): reload.
     effect(move || {
@@ -285,8 +292,18 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         move || is_open(ui),
         move || {
             ui_kit::screen(ui, size)
-                .child(ui_kit::header(ui, size, move || tr("Playlists"), close))
-                .child(ui_kit::caption(size, move || hint(ui)))
+                .test_id("playlists-screen")
+                .accessibility_elements_hidden(move || {
+                    crate::overlays::Overlay::Playlists.accessibility_covered(ui)
+                })
+                .child(
+                    ui_kit::header(ui, size, move || tr("Playlists"), close)
+                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
+                .child(
+                    ui_kit::caption(size, move || hint(ui))
+                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
                 .child(list(ui, size))
                 .child(sheet(ui, size))
                 .child(dynamic(move || {
@@ -330,6 +347,8 @@ fn list(ui: Ui, size: Scale) -> impl IntoElement {
         }
     });
     virtual_list(count, move |at| row(ui, size, at.index(), focused_index))
+        .test_id("playlists-list")
+        .accessibility_elements_hidden(move || contents_hidden(ui))
         .estimated_item_size(list_rows::pitch(size, ROW_THREE))
         .element_ref(&rows)
         .flex_1()
@@ -464,6 +483,9 @@ enum Sheet {
 
 fn backdrop(ui: Ui, card: AnyElement) -> View {
     view()
+        .accessibility_elements_hidden(move || {
+            state(ui, |screen| screen.editing().is_some()).unwrap_or(false)
+        })
         .absolute()
         .inset_0()
         .items_center()

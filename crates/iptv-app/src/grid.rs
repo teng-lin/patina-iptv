@@ -188,6 +188,7 @@ fn empty_state(ui: Ui) -> impl IntoElement {
         .items_center()
         .justify_center()
         .px(px(40.0))
+        .accessibility_elements_hidden(move || !empty())
         .opacity(move || if empty() { 1.0_f32 } else { 0.0 })
         .pointer_events(PointerEvents::None)
         .child(
@@ -210,6 +211,7 @@ fn hint_card(ui: Ui) -> impl IntoElement {
         .gap(px(4.0))
         .rounded(px(RADIUS))
         .bg(move || tint(ui.theme.with(|t| t.background.alt), 0xF0))
+        .accessibility_elements_hidden(move || !shown())
         .opacity(move || if shown() { 1.0_f32 } else { 0.0 })
         .pointer_events(PointerEvents::None)
         .children(hint_lines().map(|line| text(line).text_size(px(13.0)).text_color(rgb(WHITE))))

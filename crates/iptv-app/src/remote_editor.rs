@@ -270,6 +270,7 @@ fn field_row(ui: Ui, size: Scale, field: Field) -> impl IntoElement {
         move || activate(ui, field),
     )
     .test_id(&format!("remote-{field:?}"))
+    .accessibility_elements_hidden(move || contents_hidden(ui))
 }
 
 /// The question before a binding replaces another or all are restored.
@@ -318,6 +319,10 @@ fn confirm_sheet(ui: Ui, size: Scale) -> impl IntoElement {
         )
 }
 
+fn contents_hidden(ui: Ui) -> bool {
+    state(ui, |screen| screen.confirm.is_some()).unwrap_or(false)
+}
+
 pub fn layer(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     when(
@@ -325,9 +330,21 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         move || {
             ui_kit::screen(ui, size)
                 .test_id("remote-editor-screen")
-                .child(ui_kit::header(ui, size, tr("Remote bindings"), close))
-                .child(ui_kit::caption(size, tr(CAPTION)))
-                .child(ui_kit::body(size, move || status(ui)))
+                .accessibility_elements_hidden(move || {
+                    crate::overlays::Overlay::RemoteEditor.accessibility_covered(ui)
+                })
+                .child(
+                    ui_kit::header(ui, size, tr("Remote bindings"), close)
+                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
+                .child(
+                    ui_kit::caption(size, tr(CAPTION))
+                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
+                .child(
+                    ui_kit::body(size, move || status(ui))
+                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
                 .children(
                     FIELDS
                         .iter()
