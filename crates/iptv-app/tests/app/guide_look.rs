@@ -13,11 +13,11 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
 use nsh_core::picker::PickedFile;
 use nsh_core::{ImageData, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
 const IMPORT: Duration = Duration::from_secs(30);
 /// The rows of the playlist.
@@ -204,7 +204,9 @@ fn styles_when(
         // The screen moves only as its batches are applied.
         app.catch_up();
         let found = styles(app, text);
-        if ok(&found) || start.elapsed() > std::time::Duration::from_secs(3) {
+        if ok(&found)
+            || start.elapsed() > crate::isolated::scaled_duration(std::time::Duration::from_secs(3))
+        {
             return found;
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -306,7 +308,9 @@ fn number_y_when(app: &mut Headless, row: usize, ok: impl Fn(f32) -> bool) -> Op
     loop {
         app.catch_up();
         let y = number_y(app, row);
-        if y.is_some_and(&ok) || start.elapsed() > std::time::Duration::from_secs(3) {
+        if y.is_some_and(&ok)
+            || start.elapsed() > crate::isolated::scaled_duration(std::time::Duration::from_secs(3))
+        {
             return y;
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
