@@ -374,7 +374,9 @@ fn settings(app: &mut Headless, home: &Path) {
     std::fs::create_dir(&blocked).unwrap();
     row_value(app, "Play the last channel on start", "On");
     step(app.press_key("enter"));
-    step(app.wait_for("text:/Could not save settings/"));
+    step(
+        app.wait_for("text:Settings could not be saved. Check storage permissions and try again."),
+    );
     row_value(app, "Play the last channel on start", "On");
     std::fs::remove_dir(&blocked).unwrap();
     // Retrying persists the setting once the write failure is removed.

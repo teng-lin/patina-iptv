@@ -424,3 +424,66 @@ fn backup_remote_keys_and_the_clock_speak_the_interface_language() {
     );
     assert!(!app.shows("Press: Hold"));
 }
+
+/// A real failed settings publication rolls the live value back and reports
+/// one localized notice through the runtime event, without replacing the row.
+#[test]
+fn a_settings_write_failure_is_localized_once_and_keeps_the_previous_value() {
+    let Some(home) = isolated!() else { return };
+    let de = Words::of("de");
+    let mut fixture = start_in(home, "de", "auto");
+    let path = fixture.path.parent().unwrap().join("settings.json");
+    let saved = std::fs::read(&path).unwrap();
+    // A directory in the temporary file's place makes publication fail on
+    // every host, including root and Windows, without touching the old file.
+    std::fs::create_dir(path.with_extension("json.tmp")).unwrap();
+    let app = &mut fixture.app;
+    rail(app);
+    step(app.press(&format!("label:{}", de.t("Settings"))));
+    let row = de.t("Play the last channel on start");
+    shown(app, &row);
+    let selector = format!("role:switch[/{}/]", pattern(&row));
+    let before = app.screen().accessibility_state(&selector).unwrap().checked;
+    let row_node = |app: &Headless| {
+        app.screen()
+            .layout_nodes()
+            .into_iter()
+            .find(|node| node.text.as_ref().is_some_and(|text| text.text.text == row))
+            .expect("the settings row's label")
+            .id
+    };
+    let original_row = row_node(app);
+    let announcements = Arc::new(Mutex::new(Vec::<String>::new()));
+    let heard = announcements.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let nsh_core::MountItem::Command {
+                command: nsh_core::Command::Announce(text),
+                ..
+            } = item
+            {
+                heard.lock().unwrap().push(text.clone());
+            }
+        }
+    });
+    step(app.press(&format!("text:{row}")));
+    let notice = de.t("Settings could not be saved. Check storage permissions and try again.");
+    shown(app, &notice);
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        saved,
+        "the previous settings file survives"
+    );
+    assert_eq!(
+        app.screen().accessibility_state(&selector).unwrap().checked,
+        before,
+        "the failed optimistic setting is rolled back"
+    );
+    assert_eq!(row_node(app), original_row, "the active row stays mounted");
+    assert_eq!(
+        *announcements.lock().unwrap(),
+        [notice],
+        "one localized announcement"
+    );
+    assert!(!app.shows("Could not save settings"));
+}
