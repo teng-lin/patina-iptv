@@ -160,6 +160,19 @@ fn snapshot(store: &Store, ids: &[SourceId]) -> crate::Result<String> {
     Ok(hash.finish())
 }
 
+fn name_keys(subject: &ChannelInfo) -> Vec<String> {
+    let mut keys = Vec::new();
+    for name in std::iter::once(subject.name.as_str()).chain(subject.epg_name.as_deref()) {
+        for name in std::iter::once(name).chain(iptv_epg::strip_tag_prefix(name)) {
+            let normalized = iptv_epg::normalize_name(name);
+            if !normalized.is_empty() && !keys.contains(&normalized) {
+                keys.push(normalized);
+            }
+        }
+    }
+    keys
+}
+
 fn check_cursor(query: &Query, context: &str, snapshot: &str, columns: usize) -> bool {
     query.cursor.as_ref().is_none_or(|c| {
         c.context == context
@@ -377,7 +390,7 @@ impl Store {
             ])?;
             while let Some(row) = rows.next()? {
                 let key: String = row.get(0)?;
-                if channel.is_some_and(|ch| ch.content.as_str() != key) {
+                if channel.is_some_and(|ch| ch.source != *source || ch.content.as_str() != key) {
                     continue;
                 }
                 let title: String = row.get(5)?;
@@ -479,19 +492,14 @@ impl Store {
                 evidence.push(Evidence::Manual);
             }
             if let Some(id) = &subject.epg_id {
-                if id == &channel.epg_channel {
+                if id.trim() == channel.epg_channel {
                     evidence.push(Evidence::ExactId);
-                } else if id.eq_ignore_ascii_case(&channel.epg_channel) {
+                } else if id.trim().to_lowercase() == channel.epg_channel.to_lowercase() {
                     evidence.push(Evidence::CaseInsensitiveId);
                 }
             }
             if let Some(name) = &channel.name
-                && [
-                    &subject.name,
-                    subject.epg_name.as_ref().unwrap_or(&subject.name),
-                ]
-                .iter()
-                .any(|subject| iptv_epg::normalize_name(subject) == iptv_epg::normalize_name(name))
+                && name_keys(&subject).contains(&iptv_epg::normalize_name(name))
             {
                 evidence.push(Evidence::NormalizedName);
             }
@@ -558,14 +566,34 @@ impl Store {
         };
         let tx = self.conn.unchecked_transaction()?;
         let context = query_context(query, &format!("audit:{window:?}"));
-        let mut hash = Sha256::new();
-        hash.update(snapshot(self, &ids)?.as_bytes());
+        let channel_snapshot = snapshot(self, &ids)?;
+        let mut hash = SemanticHash::new();
+        hash.bytes(3, channel_snapshot.as_bytes());
         let mut name_counts = std::collections::HashMap::new();
         let mut suspicious = std::collections::HashSet::new();
+        let mut failed_feeds = std::collections::HashSet::new();
         for source in &ids {
             let revisions = self.guide_revisions(*source)?;
-            hash.update(format!("{source:?}:{revisions:?}").as_bytes());
+            hash.bytes(1, &source.0.to_le_bytes());
+            hash.bytes(1, &revisions.mapping.to_le_bytes());
+            hash.bytes(1, &revisions.configuration.to_le_bytes());
+            let results = self.epg_feed_results(*source)?;
             for guide in self.guide_sources(*source)? {
+                if guide.enabled
+                    && results
+                        .iter()
+                        .any(|r| r.feed == guide.feed && r.error.is_some())
+                {
+                    failed_feeds.insert((*source, guide.feed));
+                }
+                hash.bytes(1, &guide.feed.0.to_le_bytes());
+                hash.bytes(
+                    3,
+                    self.feed_incarnation(*source, guide.feed)?
+                        .as_deref()
+                        .unwrap_or("")
+                        .as_bytes(),
+                );
                 if guide.shift_minutes.unsigned_abs() > 24 * 60 {
                     suspicious.insert((*source, guide.feed));
                 }
@@ -577,26 +605,39 @@ impl Store {
                 {
                     continue;
                 }
+                hash.bytes(1, &channel.feed.0.to_le_bytes());
+                hash.bytes(3, channel.epg_channel.as_bytes());
                 if let Some(name) = channel.name {
+                    hash.bytes(3, name.as_bytes());
                     *name_counts
                         .entry((*source, channel.feed, iptv_epg::normalize_name(&name)))
                         .or_insert(0usize) += 1;
                 }
             }
+            for (sql,columns) in [
+                ("SELECT last_error_kind FROM epg_guides WHERE source_id=?1",1),
+                ("SELECT feed_id,error_kind FROM epg_feed_results WHERE source_id=?1 ORDER BY feed_id",2),
+                ("SELECT b.channel_key,c.feed_id,c.epg_channel,b.match_kind FROM epg_bindings b
+                   JOIN epg_channels c ON c.id=b.epg_channel_id WHERE b.source_id=?1 ORDER BY b.channel_key",4),
+                ("SELECT c.feed_id,c.epg_channel,MIN(p.start),MAX(p.stop) FROM epg_programmes p
+                   JOIN epg_channels c ON c.id=p.channel_id WHERE c.source_id=?1
+                   GROUP BY c.feed_id,c.epg_channel ORDER BY c.feed_id,c.epg_channel",4),
+            ] {
+                let mut statement=self.conn.prepare_cached(sql)?;
+                let mut rows=statement.query([source.0])?;
+                while let Some(row)=rows.next()?{hash.row(row,columns)?;}
+            }
             let mut statement = self.conn.prepare_cached(
-                "SELECT c.feed_id,c.epg_channel,p.start,p.stop,p.title
-                 FROM epg_programmes p JOIN epg_channels c ON c.id=p.channel_id
-                 WHERE c.source_id=?1 ORDER BY c.feed_id,c.epg_channel,p.start",
+                "SELECT c.feed_id,c.epg_channel,p.start,p.stop,p.title FROM epg_programmes p
+                 JOIN epg_channels c ON c.id=p.channel_id WHERE c.source_id=?1
+                 AND p.start<?3 AND p.stop>?2 ORDER BY c.feed_id,c.epg_channel,p.start",
             )?;
-            let mut rows = statement.query([source.0])?;
+            let mut rows = statement.query(params![source.0, window.from, window.to])?;
             while let Some(row) = rows.next()? {
-                for at in 0..5 {
-                    hash.update(format!("{:?};", row.get::<_, Value>(at)?).as_bytes());
-                }
+                hash.row(row, 5)?;
             }
         }
-        let channel_snapshot = snapshot(self, &ids)?;
-        let snapshot = format!("{:x}", hash.finalize());
+        let snapshot = hash.finish();
         if !check_cursor(query, &context, &snapshot, 2) {
             return Ok(Err(InspectionError::StaleCursor));
         }
@@ -656,30 +697,44 @@ impl Store {
             }
             let ambiguous = binding.as_ref().is_some_and(|(feed, _, kind)| {
                 *kind == iptv_epg::MatchKind::Name
-                    && name_counts
-                        .get(&(
-                            channel.key.source,
-                            *feed,
-                            iptv_epg::normalize_name(
-                                channel.epg_name.as_deref().unwrap_or(&channel.name),
-                            ),
-                        ))
-                        .copied()
-                        .unwrap_or(0)
-                        > 1
+                    && name_keys(&channel).iter().any(|name| {
+                        name_counts
+                            .get(&(channel.key.source, *feed, name.clone()))
+                            .copied()
+                            .unwrap_or(0)
+                            > 1
+                    })
             });
+            let failed = match &binding {
+                Some((feed, _, _)) => failed_feeds.contains(&(channel.key.source, *feed)),
+                None => failed_feeds
+                    .iter()
+                    .any(|(source, _)| *source == channel.key.source),
+            };
             let timing = binding
                 .as_ref()
                 .is_some_and(|(feed, _, _)| suspicious.contains(&(channel.key.source, *feed)))
                 || earliest.is_some_and(|start| start > window.to.saturating_add(7 * 86_400));
             let diagnosis = if channel.choice == Choice::NoGuide {
                 Diagnosis::Disabled
-            } else if guide_error.is_some() {
+            } else if guide_error.is_some() || failed {
                 Diagnosis::InputFailure
             } else if stale_binding {
                 Diagnosis::Stale
             } else if binding.is_none() && matches!(channel.choice, Choice::Channel { .. }) {
                 Diagnosis::UnresolvedOverride
+            } else if binding.is_none()
+                && channel.name.trim().is_empty()
+                && channel
+                    .epg_id
+                    .as_deref()
+                    .is_none_or(|id| id.trim().is_empty())
+                && channel
+                    .epg_name
+                    .as_deref()
+                    .is_none_or(|name| name.trim().is_empty())
+            {
+                Diagnosis::MissingMetadata
             } else if binding.is_none() {
                 Diagnosis::Unmatched
             } else if ambiguous {

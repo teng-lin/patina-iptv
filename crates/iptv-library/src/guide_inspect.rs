@@ -26,6 +26,13 @@ pub enum Row {
     Back,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct ParentPage {
+    mode: Mode,
+    next: Option<Cursor>,
+    focus: Row,
+    query: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Screen {
     pub source: SourceId,
     pub window: TimeWindow,
@@ -48,6 +55,7 @@ pub struct Screen {
     pub stage: Option<ProbeSummary>,
     pub retained_stage: Option<ProbeSummary>,
     pub next: Option<Cursor>,
+    parents: Vec<ParentPage>,
 }
 impl Screen {
     pub fn new(source: SourceId, window: TimeWindow) -> Self {
@@ -73,7 +81,18 @@ impl Screen {
             stage: None,
             retained_stage: None,
             next: None,
+            parents: Vec::new(),
         }
+    }
+    pub fn enter(&mut self, mode: Mode) {
+        self.parents.push(ParentPage {
+            mode: self.mode,
+            next: self.next.take(),
+            focus: self.focus.clone(),
+            query: self.query.clone(),
+        });
+        self.mode = mode;
+        self.restore_focus();
     }
     pub fn begin(&mut self) -> u64 {
         self.request += 1;
@@ -146,12 +165,18 @@ impl Screen {
         self.request += 1;
         self.busy = false;
         self.error = None;
-        self.next = None;
-        self.mode = match self.mode {
-            Mode::Audit => return false,
-            Mode::Samples => self.samples_back,
-            _ => Mode::Audit,
-        };
+        if let Some(parent) = self.parents.pop() {
+            self.mode = parent.mode;
+            self.next = parent.next;
+            self.focus = parent.focus;
+            self.query = parent.query;
+        } else {
+            if self.mode == Mode::Audit {
+                return false;
+            }
+            self.mode = Mode::Audit;
+            self.next = None;
+        }
         self.restore_focus();
         true
     }
@@ -190,5 +215,29 @@ mod tests {
         let pending = screen.begin();
         assert!(screen.back());
         assert!(!screen.finish(pending));
+    }
+    #[test]
+    fn returning_from_samples_restores_each_parent_page_cursor_and_filter() {
+        let mut screen = Screen::new(SourceId(1), TimeWindow { from: 1, to: 2 });
+        let cursor = |value: &str| Cursor {
+            context: value.into(),
+            snapshot: value.into(),
+            after: vec![value.into()],
+        };
+        screen.next = Some(cursor("audit"));
+        screen.query = "Amber".into();
+        screen.enter(Mode::Candidates);
+        screen.next = Some(cursor("candidates"));
+        screen.query = "East".into();
+        screen.enter(Mode::Samples);
+        assert!(screen.next.is_none());
+        assert!(screen.back());
+        assert_eq!(screen.mode, Mode::Candidates);
+        assert_eq!(screen.next, Some(cursor("candidates")));
+        assert_eq!(screen.query, "East");
+        assert!(screen.back());
+        assert_eq!(screen.mode, Mode::Audit);
+        assert_eq!(screen.next, Some(cursor("audit")));
+        assert_eq!(screen.query, "Amber");
     }
 }

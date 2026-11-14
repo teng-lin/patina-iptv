@@ -214,7 +214,7 @@ fn inspect_link(ui: Ui) {
                         update(ui, |s| {
                             s.retained_stage = Some(stage.clone());
                             s.stage = Some(stage);
-                            s.mode = Mode::ProbeCandidates;
+                            s.enter(Mode::ProbeCandidates);
                             s.candidates = page.items;
                             s.next = page.next;
                         });
@@ -259,10 +259,10 @@ fn samples(ui: Ui, candidate: CandidateRef) {
         return;
     };
     crate::data::spawn_in_app(async move {
-        let stage = if let Some(stage) = screen
-            .stage
-            .filter(|s| s.evidence.feed.unwrap_or(iptv_epg::FeedId(0)) == candidate.feed)
-        {
+        let stage = if let Some(stage) = screen.stage.filter(|s| {
+            s.evidence.feed.unwrap_or(iptv_epg::FeedId(0)) == candidate.feed
+                && s.evidence.incarnation == candidate.incarnation
+        }) {
             Ok(stage)
         } else {
             crate::runtime()
@@ -285,8 +285,6 @@ fn samples(ui: Ui, candidate: CandidateRef) {
                 return;
             }
         };
-        let mut candidate = candidate;
-        candidate.incarnation = stage.evidence.incarnation.clone();
         let selected = candidate.clone();
         let result = crate::runtime()
             .probe_schedule(
@@ -305,7 +303,7 @@ fn samples(ui: Ui, candidate: CandidateRef) {
                     s.retained_stage = Some(stage.clone());
                     s.stage = Some(stage);
                     s.samples_back = screen.mode;
-                    s.mode = Mode::Samples;
+                    s.enter(Mode::Samples);
                     s.samples = programmes;
                     s.selected = Some(selected);
                     s.next = None;
@@ -332,7 +330,10 @@ fn activate(ui: Ui, row: Row) {
     match row {
         Row::Channel(subject) => {
             update(ui, |s| {
+                s.enter(Mode::Candidates);
                 s.query.clear();
+                s.candidates.clear();
+                s.subject = Some(subject.clone());
                 s.stage = None;
             });
             candidates(ui, subject, false);
@@ -384,11 +385,9 @@ fn activate(ui: Ui, row: Row) {
         Row::Search => update(ui, |s| s.typing = true),
         Row::InspectLink => inspect_link(ui),
         Row::NewLink => update(ui, |s| {
-            if s.mode == Mode::Audit {
-                s.subject = None;
-            }
-            s.mode = Mode::Link;
-            s.next = None;
+            s.enter(Mode::Link);
+            s.query.clear();
+            s.stage = None;
             s.typing = true;
             s.restore_focus();
         }),
@@ -409,6 +408,7 @@ fn diagnosis(value: Diagnosis) -> &'static str {
         Diagnosis::Disabled => tr("No guide data"),
         Diagnosis::UnresolvedOverride => tr("Saved guide channel is unavailable"),
         Diagnosis::Unmatched => tr("No matching guide channel"),
+        Diagnosis::MissingMetadata => tr("Missing guide identity metadata"),
         Diagnosis::Ambiguous => tr("Several guide channels match"),
         Diagnosis::Empty => tr("No programmes in this interval"),
         Diagnosis::Stale => tr("Guide data is out of date"),

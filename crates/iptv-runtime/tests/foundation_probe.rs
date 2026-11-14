@@ -397,9 +397,11 @@ fn a_reused_feed_id_cannot_borrow_its_previous_cached_channel_list() {
         &DatabaseKey::from_bytes([0x71; 32]),
     )
     .unwrap();
-    let parsed = iptv_providers::m3u::parse_m3u(
+    let mut parsed = iptv_providers::m3u::parse_m3u(
         "#EXTM3U\n#EXTINF:-1 tvg-id=\"amber.main\",Synthetic Amber\nhttp://stream.example.test/a\n",
     );
+    parsed.channels.items[0].name = "ZZ: Synthetic Amber HD".into();
+    parsed.channels.items[0].epg_id = None;
     store
         .replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
         .unwrap();
@@ -442,6 +444,7 @@ fn a_reused_feed_id_cannot_borrow_its_previous_cached_channel_list() {
         support::block_on(runtime.epg_candidates(key.clone(), Query::source(source), control()))
             .unwrap();
     assert_eq!(first.items.len(), 1);
+    assert!(first.items[0].evidence.contains(&Evidence::NormalizedName));
     let old = first.items[0].key.incarnation.clone();
     let original = store.guide_sources(source).unwrap();
     store.set_guide_sources(source, &[]).unwrap();
@@ -563,5 +566,94 @@ fn configured_local_feed_redirects_cannot_reach_another_private_origin() {
     let runtime = owner(directory.path());
     assert_eq!(probe(&runtime, source), Err(InspectionError::AddressPolicy));
     assert_eq!(destination.requests.load(Ordering::SeqCst), 0);
+    runtime.drain_services();
+}
+
+#[test]
+fn owner_shutdown_cancels_a_held_probe_before_the_transport_idle_timeout() {
+    let server = Mock::new(XML.as_bytes().to_vec(), true);
+    let directory = tempfile::tempdir().unwrap();
+    let source = seed(directory.path(), server.url(), 0);
+    let runtime = owner(directory.path());
+    let request = runtime.probe_feed(
+        ProbeRequest {
+            source,
+            target: ProbeTarget::Configured(FeedId(1)),
+        },
+        control(),
+    );
+    server.seen.recv_timeout(Duration::from_secs(5)).unwrap();
+    let start = std::time::Instant::now();
+    runtime.drain_services();
+    assert_eq!(
+        support::block_on(request),
+        Err(InspectionError::OwnerClosed)
+    );
+    assert!(
+        start.elapsed() < Duration::from_secs(3),
+        "shutdown waited for the15second transport idle timeout"
+    );
+}
+
+#[test]
+fn missing_identity_and_a_failed_feed_are_distinct_and_invalidate_audit_pages() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = seed(
+        directory.path(),
+        SecretUrl::new("https://synthetic.invalid/guide.xml"),
+        0,
+    );
+    let mut store = Store::open_encrypted(
+        directory.path().join("iptv.sqlite"),
+        &DatabaseKey::from_bytes([0x71; 32]),
+    )
+    .unwrap();
+    let mut parsed = iptv_providers::m3u::parse_m3u(concat!(
+        "#EXTM3U\n#EXTINF:-1,Synthetic Amber\nhttp://stream.example.test/a\n",
+        "#EXTINF:-1,Synthetic Birch\nhttp://stream.example.test/b\n"
+    ));
+    parsed.channels.items[0].name.clear();
+    parsed.channels.items[0].epg_id = None;
+    parsed.channels.items[0].epg_name = None;
+    store
+        .replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
+        .unwrap();
+    let runtime = owner(directory.path());
+    let first =
+        support::block_on(runtime.epg_audit(Query::source(source), window(), control())).unwrap();
+    assert_eq!(
+        first
+            .items
+            .iter()
+            .find(|c| c.channel.key.content == parsed.channels.items[0].id)
+            .unwrap()
+            .diagnosis,
+        Diagnosis::MissingMetadata
+    );
+    let mut paged = Query::source(source);
+    paged.limit = 1;
+    let cursor = support::block_on(runtime.epg_audit(paged.clone(), window(), control()))
+        .unwrap()
+        .next
+        .unwrap();
+    store
+        .record_epg_feed_results(
+            source,
+            &[(FeedId(1), Some(iptv_library::ImportErrorKind::Network))],
+        )
+        .unwrap();
+    paged.cursor = Some(cursor);
+    assert_eq!(
+        support::block_on(runtime.epg_audit(paged, window(), control())),
+        Err(InspectionError::StaleCursor)
+    );
+    let failed =
+        support::block_on(runtime.epg_audit(Query::source(source), window(), control())).unwrap();
+    assert!(
+        failed
+            .items
+            .iter()
+            .all(|c| c.diagnosis == Diagnosis::InputFailure)
+    );
     runtime.drain_services();
 }

@@ -172,10 +172,16 @@ impl Service {
     /// Root teardown only, after the favourites writer has submitted its last
     /// work. Accepted requests already belong to their workers, independent
     /// of UI futures.
+    #[cfg(test)]
     pub(crate) fn drain_on_shutdown(self: &Arc<Self>) -> bool {
+        self.drain_on_shutdown_with(|| {})
+    }
+
+    pub(crate) fn drain_on_shutdown_with(self: &Arc<Self>, after_writer: impl FnOnce()) -> bool {
         let epoch = self.epochs.active.load(Ordering::SeqCst);
         if self.writer.jobs.get().is_none() {
             self.epochs.close(epoch);
+            after_writer();
             return true;
         }
         let limit = std::time::Duration::from_secs(10);
@@ -190,6 +196,8 @@ impl Service {
             // FIFO barrier still retires the connection held by preceding work.
             *connection = Connection::default();
         });
+        // Queued writes have acknowledged before transient read/probe cancellation.
+        after_writer();
         let reader = self.reader.barrier(limit, |connection| {
             *connection = Connection::default();
         });

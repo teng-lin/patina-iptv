@@ -262,7 +262,9 @@ impl Runtime {
     }
     pub fn drain_services(&self) -> bool {
         self.cancel_guide_checks();
-        let drained = self.store.drain_on_shutdown();
+        let drained = self
+            .store
+            .drain_on_shutdown_with(|| self.inspection.cancel_requests());
         // Detached local tasks can retain this Runtime after the root closes.
         // Retire services now, rather than waiting for its last Rc to drop.
         self.store.retire();
