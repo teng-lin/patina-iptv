@@ -726,6 +726,97 @@ mod tests {
     }
 
     #[test]
+    fn unquoted_hls_key_cannot_reach_a_second_loopback_server() {
+        use std::io::{Read, Write};
+        let origin = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin_address = origin.local_addr().unwrap();
+        origin.set_nonblocking(true).unwrap();
+        let forbidden = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        forbidden.set_nonblocking(true).unwrap();
+        let playlist = format!(
+            "#EXTM3U\n#EXT-X-TARGETDURATION:1\n\
+             #EXT-X-KEY:METHOD=AES-128,URI=http://{}/synthetic.key\n\
+             #EXTINF:1,\nsegment.ts\n#EXT-X-ENDLIST\n",
+            forbidden.local_addr().unwrap()
+        );
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_server = stop.clone();
+        let seen = Arc::new(AtomicBool::new(false));
+        let seen_server = seen.clone();
+        let server = std::thread::spawn(move || {
+            while !stop_server.load(Ordering::Acquire) {
+                let Ok((mut stream, _)) = origin.accept() else {
+                    std::thread::sleep(Duration::from_millis(5));
+                    continue;
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let _ = stream.read(&mut [0; 4096]);
+                seen_server.store(true, Ordering::Release);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                    playlist.len(),
+                    playlist
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        fn actual_policy(public_only: bool) -> iptv_net::playback::PlaybackPolicy {
+            iptv_net::playback::PlaybackPolicy {
+                public_only,
+                ..Default::default()
+            }
+        }
+        let previous = super::super::POLICY.replace(actual_policy);
+        let mpv = mpv();
+        // Exercise FFmpeg's nested HLS loads, not mpv's plain-playlist fallback.
+        mpv.set("demuxer", "lavf");
+        mpv.set("demuxer-lavf-format", "hls");
+        let worker = Worker::spawn(mpv.clone(), || {});
+        super::super::POLICY.set(previous);
+        worker.send(Cmd::Load {
+            public_only: false,
+            url: format!("http://{origin_address}/list.m3u8"),
+            live: false,
+            options: super::super::map::load_options(false, false),
+        });
+        let mut notes = notes_until(&worker, ended);
+        wait_until("player to finish refusing the playlist", || {
+            mpv.get(c"idle-active").as_deref() == Some("yes")
+        });
+        notes.extend(worker.notes.try_iter());
+        stop.store(true, Ordering::Release);
+        server.join().unwrap();
+        assert!(
+            seen.load(Ordering::Acquire),
+            "the player fetched the synthetic playlist"
+        );
+        assert!(
+            !notes
+                .iter()
+                .any(|note| matches!(note, Note::Restarted { .. }))
+        );
+        assert!(
+            notes
+                .iter()
+                .any(|note| matches!(note, Note::TransportError("ERROR_CODE_IO_UNSPECIFIED"))),
+            "the nested key reached the relay and was refused by its address policy"
+        );
+        assert_eq!(
+            forbidden.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        assert!(notes.iter().any(|note| matches!(
+            note,
+            Note::Ended {
+                reason: ffi::MPV_END_FILE_REASON_ERROR,
+                ..
+            }
+        )));
+    }
+
+    #[test]
     fn changing_source_retires_transport_before_new_identity_is_applied() {
         let mut bridge = Bridge::new();
         bridge.transport = Some(
