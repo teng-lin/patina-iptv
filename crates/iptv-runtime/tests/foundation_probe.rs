@@ -458,3 +458,65 @@ fn a_reused_feed_id_cannot_borrow_its_previous_cached_channel_list() {
     );
     runtime.drain_services();
 }
+
+#[test]
+fn supplied_urls_do_not_borrow_provider_credentials_or_accept_url_userinfo() {
+    let server = Mock::new(XML.as_bytes().to_vec(), false);
+    let directory = tempfile::tempdir().unwrap();
+    let source = seed(directory.path(), server.url(), 0);
+    let runtime = owner(directory.path());
+    let url = SecretUrl::new(format!(
+        "http://synthetic-user:synthetic-password@{}/guide.xml",
+        server.address
+    ));
+    assert_eq!(
+        support::block_on(runtime.probe_feed(
+            ProbeRequest {
+                source,
+                target: ProbeTarget::Supplied(url)
+            },
+            control()
+        )),
+        Err(InspectionError::AddressPolicy)
+    );
+    assert_eq!(server.requests.load(Ordering::SeqCst), 0);
+    #[cfg(feature = "test-support")]
+    {
+        let summary = support::block_on(runtime.probe_feed(
+            ProbeRequest {
+                source,
+                target: ProbeTarget::Supplied(server.url()),
+            },
+            control(),
+        ))
+        .unwrap();
+        let headers = server.headers.lock().unwrap();
+        assert!(!headers[0].contains("Synthetic-Private-Agent"));
+        drop(headers);
+        let lease = runtime.lease_probe(&summary.evidence).unwrap();
+        let candidate = CandidateRef {
+            source,
+            feed: FeedId(0),
+            incarnation: summary.evidence.incarnation.clone(),
+            epg_channel: "amber.alt".into(),
+        };
+        let cancel = iptv_import::CancelToken::new();
+        cancel.cancel();
+        assert_eq!(
+            lease.validate_candidates_with_control(
+                &[candidate],
+                &cancel,
+                std::time::Instant::now() + Duration::from_secs(3)
+            ),
+            Err(InspectionError::Cancelled)
+        );
+        assert_eq!(
+            lease.listed_channels_with_control(
+                &cancel,
+                std::time::Instant::now() + Duration::from_secs(3)
+            ),
+            Err(InspectionError::Cancelled)
+        );
+    }
+    runtime.drain_services();
+}

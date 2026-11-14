@@ -8,6 +8,20 @@ use std::path::Path;
 /// Includes raw chunks, channel indexes and SQLite page overhead.
 pub const INSPECTION_STAGE_BYTES: u64 = 128 << 20;
 
+fn page_bytes(conn: &Connection) -> Result<u64> {
+    let value: rusqlite::types::Value =
+        conn.pragma_query_value(None, "page_size", |row| row.get(0))?;
+    let bytes = match value {
+        rusqlite::types::Value::Integer(value) => u64::try_from(value).ok(),
+        // SQLCipher exposes its cipher_page_size alias as text.
+        rusqlite::types::Value::Text(value) => value.parse().ok(),
+        _ => None,
+    };
+    bytes
+        .filter(|bytes| *bytes >= 512 && *bytes <= 65536)
+        .ok_or_else(|| StoreError::InvalidData("probe page size".into()))
+}
+
 pub struct InspectionStage {
     conn: Connection,
     next: i64,
@@ -29,8 +43,7 @@ impl InspectionStage {
         );
         let conn = Connection::open(path)?;
         key.apply(&conn)?;
-        let page_size: u64 =
-            conn.pragma_query_value(None, "page_size", |row| row.get::<_, i64>(0))? as u64;
+        let page_size = page_bytes(&conn)?;
         conn.pragma_update(
             None,
             "max_page_count",
@@ -144,5 +157,34 @@ impl InspectionStage {
             read(&bytes)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn encrypted_stage_has_a_physical_page_ceiling_and_round_trips_raw_chunks() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("probe.sqlite");
+        let key = DatabaseKey::from_bytes([0x37; 32]);
+        let mut stage = InspectionStage::create(&path, &key).unwrap();
+        let pages: i64 = stage
+            .conn
+            .pragma_query_value(None, "max_page_count", |r| r.get(0))
+            .unwrap();
+        let size = page_bytes(&stage.conn).unwrap();
+        assert!((pages as u64) * size <= INSPECTION_STAGE_BYTES);
+        stage.chunk(b"generated snapshot").unwrap();
+        stage.finish().unwrap();
+        let stage = InspectionStage::open(&path, &key).unwrap();
+        let mut actual = Vec::new();
+        stage
+            .for_each_chunk(|bytes| {
+                actual.extend_from_slice(bytes);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(actual, b"generated snapshot");
     }
 }

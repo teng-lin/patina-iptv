@@ -30,6 +30,21 @@ pub fn validate(value: &str) -> Result<(), ContentUrlError> {
     if valid { Ok(()) } else { Err(ContentUrlError) }
 }
 
+/// A newly supplied guide location has no authority to forward credentials.
+/// Address/DNS policy remains the transport's responsibility (including its
+/// explicit debug-only synthetic-fixture policy).
+pub fn validate_uncredentialed_http(value: &str) -> Result<(), ContentUrlError> {
+    let url = url::Url::parse(value.trim()).map_err(|_| ContentUrlError)?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err(ContentUrlError);
+    }
+    Ok(())
+}
+
 /// Explicitly selected sources may name LAN servers, but still need HTTP(S).
 pub fn validate_picked(value: &str) -> Result<(), ContentUrlError> {
     let url = url::Url::parse(value.trim()).map_err(|_| ContentUrlError)?;
