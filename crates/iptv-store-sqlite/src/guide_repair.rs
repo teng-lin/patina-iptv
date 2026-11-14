@@ -16,6 +16,9 @@ use crate::{EpgOverride, GuideSource, Result, SourceId, Store, StoreError};
 
 pub const MAX_REPAIR_MAPPINGS: usize = 500;
 pub const REPAIR_UNDO_SECONDS: i64 = 7 * 86_400;
+const MAX_IDENTITY_HISTORY_ROWS: i64 = 4096;
+const MAX_IDENTITY_HISTORY_BYTES: u64 = 32 << 20;
+const MAX_IDENTITY_HISTORY_RECORD_BYTES: u64 = 8 << 20;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RepairChoice {
@@ -230,6 +233,139 @@ fn feeds(conn: &Connection, source: SourceId) -> Result<Vec<GuideSource>> {
         })?
         .collect::<rusqlite::Result<_>>()?)
 }
+fn allocation_key(source: SourceId, incarnation: &str) -> String {
+    format!("guide.repair.feed_high_water.{}.{incarnation}", source.0)
+}
+
+/// Retained choices and inverses reserve their numeric feed identities even
+/// when no current configuration row uses them. Seed older journals once; all
+/// subsequent successful repairs persist the monotonic high-water atomically.
+fn feed_high_water(
+    conn: &Connection,
+    source: SourceId,
+    incarnation: &str,
+    now: i64,
+) -> Result<u32> {
+    let saved: Option<String> = conn
+        .query_row(
+            "SELECT value FROM store_meta WHERE key=?1",
+            [allocation_key(source, incarnation)],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let mut highest = match &saved {
+        Some(value) => value.parse::<u32>().map_err(|_| invalid())?,
+        None => 0,
+    };
+    for table in [
+        "guide_sources",
+        "guide_feed_incarnations",
+        "epg_feeds",
+        "epg_feed_channels",
+        "epg_channels",
+        "epg_feed_results",
+    ] {
+        let value: Option<u32> = conn.query_row(
+            &format!("SELECT MAX(feed_id) FROM {table} WHERE source_id=?1"),
+            [source.0],
+            |row| row.get(0),
+        )?;
+        highest = highest.max(value.unwrap_or(0));
+    }
+    let manual: Option<u32> = conn.query_row(
+        "SELECT MAX(CAST(value AS INTEGER)) FROM (
+            SELECT CASE WHEN substr(epg_source,1,1)='+' THEN substr(epg_source,2)
+                ELSE epg_source END AS value FROM channel_overlays
+            WHERE source_id=?1 AND epg_mode='xmltv' AND epg_source IS NOT NULL)
+        WHERE value!='' AND value NOT GLOB '*[^0-9]*'
+            AND CAST(value AS INTEGER) BETWEEN 0 AND 4294967295",
+        [source.0],
+        |row| row.get(0),
+    )?;
+    highest = highest.max(manual.unwrap_or(0));
+    let prefix = format!("inspection.feed.{}.", source.0);
+    let provenance: Option<u32> = conn.query_row(
+        "SELECT MAX(CAST(value AS INTEGER)) FROM (
+            SELECT substr(key,?3) AS value FROM store_meta WHERE key>=?1 AND key<?2)
+        WHERE value!='' AND value NOT GLOB '*[^0-9]*'
+            AND CAST(value AS INTEGER) BETWEEN 0 AND 4294967295",
+        params![prefix, format!("{prefix}:"), prefix.len() as i64 + 1],
+        |row| row.get(0),
+    )?;
+    highest = highest.max(provenance.unwrap_or(0));
+    if saved.is_none() {
+        let mut statement = conn.prepare_cached(
+            "SELECT length(CAST(payload AS BLOB)),payload FROM guide_repair_commits
+             WHERE source_id=?1 AND source_incarnation=?2 AND expires_at>?3
+             ORDER BY created_at DESC,id DESC LIMIT ?4",
+        )?;
+        let mut rows = statement.query(params![
+            source.0,
+            incarnation,
+            now,
+            MAX_IDENTITY_HISTORY_ROWS + 1
+        ])?;
+        let mut count = 0;
+        let mut bytes = 0_u64;
+        while let Some(row) = rows.next()? {
+            count += 1;
+            let record = u64::try_from(row.get::<_, i64>(0)?).map_err(|_| invalid())?;
+            bytes = bytes.saturating_add(record);
+            if count > MAX_IDENTITY_HISTORY_ROWS
+                || record > MAX_IDENTITY_HISTORY_RECORD_BYTES
+                || bytes > MAX_IDENTITY_HISTORY_BYTES
+            {
+                return Err(invalid());
+            }
+            let payload: Value =
+                serde_json::from_str(&row.get::<_, String>(1)?).map_err(|_| invalid())?;
+            for patch in payload["feeds"].as_array().ok_or_else(invalid)? {
+                for key in ["before", "after"] {
+                    if !patch[key].is_null() {
+                        let feed = patch[key]["feed"]
+                            .as_u64()
+                            .and_then(|value| u32::try_from(value).ok())
+                            .ok_or_else(invalid)?;
+                        highest = highest.max(feed);
+                    }
+                }
+            }
+            for patch in payload["rows"].as_array().ok_or_else(invalid)? {
+                for key in ["before", "after"] {
+                    if let Some(value) = patch[key]
+                        .get("feed")
+                        .and_then(Value::as_str)
+                        .and_then(|value| value.parse::<u32>().ok())
+                    {
+                        highest = highest.max(value);
+                    }
+                }
+            }
+            for value in payload["added"].as_array().ok_or_else(invalid)? {
+                highest = highest.max(
+                    value
+                        .as_u64()
+                        .and_then(|value| u32::try_from(value).ok())
+                        .ok_or_else(invalid)?,
+                );
+            }
+            if !payload["order"].is_null() {
+                for order in payload["order"].as_array().ok_or_else(invalid)? {
+                    for value in order.as_array().ok_or_else(invalid)? {
+                        highest = highest.max(
+                            value
+                                .as_u64()
+                                .and_then(|value| u32::try_from(value).ok())
+                                .ok_or_else(invalid)?,
+                        );
+                    }
+                }
+            }
+        }
+    }
+    Ok(highest)
+}
+
 fn revisions(conn: &Connection, source: SourceId) -> Result<(u64, u64)> {
     Ok(conn.query_row(
         "SELECT mapping_revision,configuration_revision FROM guide_revisions
@@ -351,6 +487,19 @@ fn reorder(feeds: &mut [GuideSource], order: &[FeedId]) -> bool {
 }
 
 impl Store {
+    /// Adapter-only identity reservation for immutable preview construction.
+    /// Legacy seeding reads only this incarnation's unexpired inverses, at most
+    /// 4096 receipts / 32 MiB total / 8 MiB each. Larger seeds fail closed;
+    /// successful commits cache the monotonic reservation for subsequent reads.
+    pub fn guide_repair_feed_high_water(&self, source: SourceId) -> Result<u32> {
+        feed_high_water(
+            &self.conn,
+            source,
+            &self.source_incarnation(source)?,
+            self.now(),
+        )
+    }
+
     /// Fallible current mapping read, including missing-channel detection.
     pub fn repair_mapping(
         &self,
@@ -547,7 +696,10 @@ impl Store {
                 current.push(after.clone());
             }
         }
-        let mut next = current.iter().map(|f| f.feed.0).max().unwrap_or(0);
+        let mut next = feed_high_water(&tx, batch.source, &batch.source_incarnation, now)?;
+        if next.checked_add(batch.additions.len() as u32).is_none() {
+            return Ok(RepairResult::Invalid);
+        }
         let mut additions = Vec::new();
         for config in &batch.additions {
             let Some(id) = next.checked_add(1) else {
@@ -606,6 +758,14 @@ impl Store {
                 now,
             )?;
         }
+        tx.execute(
+            "INSERT INTO store_meta(key,value) VALUES(?1,?2)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            params![
+                allocation_key(batch.source, &batch.source_incarnation),
+                next.to_string()
+            ],
+        )?;
         let (mapping_revision, configuration_revision) = revisions(&tx, batch.source)?;
         let payload = json!({"digest":digest,"rows":mapping_payload,"feeds":feed_payload,
             "added":additions.iter().map(|f|f.0).collect::<Vec<_>>(),
@@ -1115,6 +1275,247 @@ mod tests {
             Some(None)
         );
     }
+    #[test]
+    fn allocated_feeds_never_retarget_old_manual_choices_and_history_survives_counter_reseeding() {
+        let mut store = Store::open_in_memory().unwrap();
+        let id = source(&mut store);
+        let configs: Vec<_> = [1, 2]
+            .into_iter()
+            .map(|id| GuideSource {
+                feed: FeedId(id),
+                ..feed()
+            })
+            .collect();
+        store.set_guide_sources(id, &configs).unwrap();
+        let old_choice = EpgOverride::for_feed(FeedId(2), "synthetic.shared");
+        store
+            .set_epg_override(id, &ContentId::from_stored("cedar"), Some(&old_choice))
+            .unwrap();
+        store.set_guide_sources(id, &configs[..1]).unwrap();
+        let mut prepared = batch(&store, id);
+        prepared.additions.push(feed());
+        for mapping in &mut prepared.mappings {
+            mapping.after = RepairChoice::Addition {
+                index: 0,
+                epg_channel: "synthetic.shared".into(),
+            };
+        }
+        let applied = committed(
+            store
+                .apply_guide_repair("new", "digest", &prepared)
+                .unwrap(),
+        );
+        assert_eq!(
+            applied.added_feeds,
+            [FeedId(3)],
+            "feed 2 remains reserved by the untouched old choice"
+        );
+        assert_eq!(
+            store
+                .repair_mapping(id, &ContentId::from_stored("cedar"))
+                .unwrap(),
+            Some(Some(old_choice.clone()))
+        );
+        assert!(
+            !store
+                .guide_sources(id)
+                .unwrap()
+                .iter()
+                .any(|feed| feed.feed == FeedId(2)),
+            "the untouched old manual choice stays unresolved even if the new feed lists the same channel ID"
+        );
+        assert!(
+            committed(store.undo_guide_repair("new").unwrap()).undone,
+            "an old unresolved choice cannot manufacture a new feed-in-use conflict"
+        );
+        // An older version may have journals without this cache. Reconstruct
+        // their reservations, including the added feed of an undone commit.
+        store
+            .conn
+            .execute(
+                "DELETE FROM store_meta WHERE key LIKE 'guide.repair.feed_high_water.%'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(store.guide_repair_feed_high_water(id).unwrap(), 3);
+        let applied = committed(
+            store
+                .apply_guide_repair("newer", "digest", &prepared)
+                .unwrap(),
+        );
+        assert_eq!(applied.added_feeds, [FeedId(4)]);
+        assert!(committed(store.undo_guide_repair("newer").unwrap()).undone);
+        assert_eq!(
+            store
+                .repair_mapping(id, &ContentId::from_stored("cedar"))
+                .unwrap(),
+            Some(Some(old_choice))
+        );
+    }
+
+    #[test]
+    fn every_numeric_manual_feed_spelling_reserves_the_matching_identity() {
+        for spelling in ["2", "0002", "+0002"] {
+            let mut store = Store::open_in_memory().unwrap();
+            let id = source(&mut store);
+            store
+                .set_guide_sources(
+                    id,
+                    &[GuideSource {
+                        feed: FeedId(1),
+                        ..feed()
+                    }],
+                )
+                .unwrap();
+            let choice = EpgOverride::Xmltv {
+                epg_source: spelling.into(),
+                epg_channel: "synthetic.shared".into(),
+            };
+            assert_eq!(choice.feed(), Some(FeedId(2)));
+            store
+                .set_epg_override(id, &ContentId::from_stored("cedar"), Some(&choice))
+                .unwrap();
+            assert_eq!(store.guide_repair_feed_high_water(id).unwrap(), 2);
+            let mut prepared = batch(&store, id);
+            prepared.additions.push(feed());
+            assert_eq!(
+                committed(
+                    store
+                        .apply_guide_repair("numeric", "digest", &prepared)
+                        .unwrap()
+                )
+                .added_feeds,
+                [FeedId(3)]
+            );
+        }
+    }
+
+    #[test]
+    fn removing_a_maximum_feed_and_adding_another_in_one_batch_has_a_valid_inverse() {
+        let mut store = Store::open_in_memory().unwrap();
+        let id = source(&mut store);
+        let original = GuideSource {
+            feed: FeedId(1),
+            ..feed()
+        };
+        store
+            .set_guide_sources(id, std::slice::from_ref(&original))
+            .unwrap();
+        let mut prepared = batch(&store, id);
+        prepared.feeds.push(RepairFeed {
+            before: Some(original.clone()),
+            after: None,
+        });
+        prepared.additions.push(feed());
+        let applied = committed(
+            store
+                .apply_guide_repair("replace", "digest", &prepared)
+                .unwrap(),
+        );
+        assert_eq!(applied.added_feeds, [FeedId(2)]);
+        assert_eq!(store.guide_sources(id).unwrap()[0].feed, FeedId(2));
+        assert!(committed(store.undo_guide_repair("replace").unwrap()).undone);
+        assert!(equal_feed(
+            store.guide_sources(id).unwrap().first(),
+            Some(&original)
+        ));
+    }
+
+    #[test]
+    fn legacy_identity_history_seeding_is_bounded_and_ignores_expired_authority() {
+        let mut store = Store::open_in_memory().unwrap();
+        store.set_clock(|| 100);
+        let id = source(&mut store);
+        let incarnation = store.source_incarnation(id).unwrap();
+        let payload = json!({"digest":"synthetic","rows":[],"feeds":[],"added":[],"revisions":[0,0],"order":null}).to_string();
+        // Invalid expired/other-incarnation histories have no current authority.
+        for (key, origin, expires) in [
+            ("expired", incarnation.as_str(), 100),
+            ("retired", "retired", 101),
+        ] {
+            store.conn.execute("INSERT INTO guide_repair_commits
+                (id,source_id,source_incarnation,created_at,expires_at,payload) VALUES(?1,?2,?3,0,?4,'invalid legacy payload')",
+                params![key,id.0,origin,expires]).unwrap();
+        }
+        assert_eq!(store.guide_repair_feed_high_water(id).unwrap(), 0);
+        let tx = store.conn.unchecked_transaction().unwrap();
+        for index in 0..=MAX_IDENTITY_HISTORY_ROWS {
+            tx.execute("INSERT INTO guide_repair_commits
+                (id,source_id,source_incarnation,created_at,expires_at,payload) VALUES(?1,?2,?3,0,101,?4)",
+                params![format!("synthetic-{index}"),id.0,incarnation,payload]).unwrap();
+        }
+        tx.commit().unwrap();
+        let mut prepared = batch(&store, id);
+        prepared.additions.push(feed());
+        assert!(store.guide_repair_feed_high_water(id).is_err());
+        assert!(
+            store
+                .apply_guide_repair("refused-history", "digest", &prepared)
+                .is_err()
+        );
+        assert!(store.guide_sources(id).unwrap().is_empty());
+        assert_eq!(
+            store
+                .repair_mapping(id, &ContentId::from_stored("amber"))
+                .unwrap(),
+            Some(None)
+        );
+        store
+            .conn
+            .execute("DELETE FROM guide_repair_commits", [])
+            .unwrap();
+        let huge = json!({"digest":"synthetic","rows":[],"feeds":[],"added":[],"revisions":[0,0],"order":null,
+            "legacy_padding":"x".repeat(MAX_IDENTITY_HISTORY_RECORD_BYTES as usize)}).to_string();
+        store.conn.execute("INSERT INTO guide_repair_commits
+            (id,source_id,source_incarnation,created_at,expires_at,payload) VALUES('huge',?1,?2,0,101,?3)",
+            params![id.0,incarnation,huge]).unwrap();
+        assert!(
+            store.guide_repair_feed_high_water(id).is_err(),
+            "payload cap is checked before deserializing a valid oversized receipt"
+        );
+    }
+
+    #[test]
+    fn exhausted_reserved_feed_identity_space_rejects_before_any_live_mutation() {
+        let mut store = Store::open_in_memory().unwrap();
+        let id = source(&mut store);
+        store
+            .set_epg_override(
+                id,
+                &ContentId::from_stored("cedar"),
+                Some(&EpgOverride::for_feed(FeedId(u32::MAX), "synthetic.shared")),
+            )
+            .unwrap();
+        let mut prepared = batch(&store, id);
+        prepared.additions.push(feed());
+        assert_eq!(
+            store
+                .apply_guide_repair("exhausted", "digest", &prepared)
+                .unwrap(),
+            RepairResult::Invalid
+        );
+        assert!(store.guide_sources(id).unwrap().is_empty());
+        assert_eq!(
+            store
+                .repair_mapping(id, &ContentId::from_stored("amber"))
+                .unwrap(),
+            Some(None)
+        );
+        assert!(store.guide_repair_commit("exhausted").unwrap().is_none());
+        assert!(
+            store
+                .conn
+                .query_row(
+                    "SELECT value FROM store_meta WHERE key=?1",
+                    [allocation_key(id, &store.source_incarnation(id).unwrap())],
+                    |row| row.get::<_, String>(0)
+                )
+                .optional()
+                .unwrap()
+                .is_none()
+        );
+    }
+
     #[test]
     fn replaced_feed_identity_and_deleted_channels_are_rejected() {
         let mut store = Store::open_in_memory().unwrap();
