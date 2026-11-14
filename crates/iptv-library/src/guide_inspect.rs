@@ -17,6 +17,7 @@ pub enum Row {
     Next,
     NewLink,
     InspectLink,
+    ReuseInspected,
     UseCandidate,
     AutomaticRepair,
     NoGuideRepair,
@@ -45,6 +46,7 @@ pub struct Screen {
     pub selected: Option<CandidateRef>,
     pub pending_repairs: usize,
     pub stage: Option<ProbeSummary>,
+    pub retained_stage: Option<ProbeSummary>,
     pub next: Option<Cursor>,
 }
 impl Screen {
@@ -69,6 +71,7 @@ impl Screen {
             selected: None,
             pending_repairs: 0,
             stage: None,
+            retained_stage: None,
             next: None,
         }
     }
@@ -113,6 +116,9 @@ impl Screen {
             rows.push(Row::NewLink);
         }
         if self.mode == Mode::Candidates && self.subject.is_some() {
+            if self.retained_stage.is_some() {
+                rows.push(Row::ReuseInspected);
+            }
             rows.extend([Row::AutomaticRepair, Row::NoGuideRepair]);
         }
         if self.mode == Mode::Samples && self.selected.is_some() && self.subject.is_some() {

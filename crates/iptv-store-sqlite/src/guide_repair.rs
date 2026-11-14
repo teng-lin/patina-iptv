@@ -518,6 +518,11 @@ impl Store {
                 return Ok(RepairResult::Conflict(vec!["feed_order".into()]));
             }
         }
+        let original_positions: HashMap<_, _> = current
+            .iter()
+            .enumerate()
+            .map(|(at, config)| (config.feed, at))
+            .collect();
         let mut feed_payload = Vec::new();
         for patch in &batch.feeds {
             let feed = patch
@@ -526,7 +531,7 @@ impl Store {
                 .or(patch.after.as_ref())
                 .ok_or_else(invalid)?
                 .feed;
-            let before_position = current.iter().position(|f| f.feed == feed);
+            let before_position = original_positions.get(&feed).copied();
             feed_payload.push(json!({"before":feed_json(patch.before.as_ref()),
                 "after":feed_json(patch.after.as_ref()),"position_before":before_position}));
             if let Some(position) = current.iter().position(|f| f.feed == feed) {
@@ -716,7 +721,7 @@ impl Store {
             }
             Some(before)
         };
-        let mut before_feeds = HashMap::new();
+        let mut before_feeds = Vec::new();
         for patch in patches {
             let before = feed_from(&patch["before"])?;
             let after = feed_from(&patch["after"])?;
@@ -738,12 +743,17 @@ impl Store {
                     conflicts.push(format!("feed_in_use:{}", feed.0));
                 }
             }
-            before_feeds.insert(feed, before);
+            let position = patch["position_before"]
+                .as_u64()
+                .and_then(|v| usize::try_from(v).ok())
+                .unwrap_or(current.len());
+            before_feeds.push((position, feed, before));
         }
         if !conflicts.is_empty() {
             return Ok(RepairResult::Conflict(conflicts));
         }
-        for (feed, before) in before_feeds {
+        before_feeds.sort_by_key(|(position, _, _)| *position);
+        for (position, feed, before) in before_feeds {
             if let Some(at) = current.iter().position(|f| f.feed == feed) {
                 match before {
                     Some(v) => current[at] = v,
@@ -752,7 +762,7 @@ impl Store {
                     }
                 }
             } else if let Some(v) = before {
-                current.push(v);
+                current.insert(position.min(current.len()), v);
             }
         }
         if let Some(before) = original_order {
@@ -867,6 +877,48 @@ mod tests {
             enabled: true,
             shift_minutes: 0,
         }
+    }
+    #[test]
+    fn undo_restores_removed_feed_positions_and_preserves_unrelated_new_feed() {
+        let mut store = Store::open_in_memory().unwrap();
+        let source = source(&mut store);
+        let configs: Vec<_> = (1..=4)
+            .map(|id| GuideSource {
+                feed: FeedId(id),
+                ..feed()
+            })
+            .collect();
+        store.set_guide_sources(source, &configs).unwrap();
+        let mut prepared = batch(&store, source);
+        prepared.mappings.clear();
+        prepared.feeds = [0, 2]
+            .into_iter()
+            .map(|index| RepairFeed {
+                before: Some(configs[index].clone()),
+                after: None,
+            })
+            .collect();
+        committed(
+            store
+                .apply_guide_repair("remove", "digest", &prepared)
+                .unwrap(),
+        );
+        let mut later = store.guide_sources(source).unwrap();
+        later.push(GuideSource {
+            feed: FeedId(5),
+            ..feed()
+        });
+        store.set_guide_sources(source, &later).unwrap();
+        committed(store.undo_guide_repair("remove").unwrap());
+        assert_eq!(
+            store
+                .guide_sources(source)
+                .unwrap()
+                .iter()
+                .map(|f| f.feed.0)
+                .collect::<Vec<_>>(),
+            [1, 2, 3, 4, 5]
+        );
     }
     #[test]
     fn affected_conflict_and_explicit_protection_commit_nothing() {

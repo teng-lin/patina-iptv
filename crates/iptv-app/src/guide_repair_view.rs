@@ -99,7 +99,16 @@ pub fn back(ui: Ui) -> bool {
     close(ui);
     true
 }
+fn dismiss_inspection_input(ui: Ui) {
+    ui.guide_inspect.update(|s| {
+        if let Some(s) = s {
+            s.typing = false;
+        }
+    });
+    dismiss_keyboard();
+}
 pub fn reopen(ui: Ui) {
+    dismiss_inspection_input(ui);
     update(ui, |s| {
         s.open = true;
         s.restore_focus();
@@ -107,6 +116,7 @@ pub fn reopen(ui: Ui) {
 }
 
 pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindow) {
+    dismiss_inspection_input(ui);
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
         let info = match owner
@@ -167,6 +177,7 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
     });
 }
 pub fn history(ui: Ui, source: SourceId, window: TimeWindow) {
+    dismiss_inspection_input(ui);
     if state(ui, |s| {
         s.outcome.is_none() && !s.request.mappings.is_empty()
     })

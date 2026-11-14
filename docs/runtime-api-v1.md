@@ -136,7 +136,10 @@ never silently applies a subset. Manual choices and intentional no-guide are
 protected by default. Overriding them requires explicit opt-in for those rows.
 Preview shows added feeds, settings/order changes and indirect automatic-match
 effects, including effects outside the mapped batch. Incomplete impact evidence
-is labelled; it is not represented as a complete preview.
+is labelled; it is not represented as a complete preview. Indirect effects use
+actual retained before-bindings. `availability_unknown` distinguishes an
+unproven after-binding from a known absence; channel metadata alone cannot
+prove the fallback chain has retained programmes.
 
 A staged target carries exact staged evidence, not a guessed future feed ID.
 Apply pins/validates its stage, allocates any new feed IDs in the writer
@@ -156,7 +159,10 @@ bindings, available programmes, pending verification and verified coverage.
 A saved choice can require refresh; cache/refresh failure preserves the saved
 choice and reports the incomplete effective outcome. Old import/cache/verification
 work cannot overwrite a newer commit or certify a revision it never examined.
-Durable commit revisions remain exact after later edits.
+Durable commit revisions remain exact after later edits. Verification exposes
+`evidence_revision` and `current_evidence_revision` in addition to configuration
+and mapping revisions: a later programme or binding refresh with identical
+configuration cannot certify an observation from an earlier snapshot.
 
 Ordinary restart retains committed choices and eligible inverses, reconstructs
 operation observations and expires uncommitted previews. Restore invalidates

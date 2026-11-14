@@ -212,6 +212,7 @@ fn inspect_link(ui: Ui) {
                 match page {
                     Ok(page) => {
                         update(ui, |s| {
+                            s.retained_stage = Some(stage.clone());
                             s.stage = Some(stage);
                             s.mode = Mode::ProbeCandidates;
                             s.candidates = page.items;
@@ -301,6 +302,7 @@ fn samples(ui: Ui, candidate: CandidateRef) {
         match result {
             Ok(programmes) => {
                 update(ui, |s| {
+                    s.retained_stage = Some(stage.clone());
                     s.stage = Some(stage);
                     s.samples_back = screen.mode;
                     s.mode = Mode::Samples;
@@ -336,6 +338,13 @@ fn activate(ui: Ui, row: Row) {
             candidates(ui, subject, false);
         }
         Row::Candidate(candidate) => samples(ui, candidate),
+        Row::ReuseInspected => {
+            update(ui, |s| {
+                s.stage = s.retained_stage.clone();
+                s.query.clear();
+            });
+            staged_candidates(ui);
+        }
         Row::UseCandidate => {
             if let Some((Some(channel), Some(candidate), stage, window)) = state(ui, |s| {
                 (
@@ -458,6 +467,7 @@ fn title(ui: Ui, row: &Row) -> String {
         Row::Search => tr("Search").to_owned(),
         Row::Next => tr("Next").to_owned(),
         Row::NewLink => tr("Inspect a guide link").to_owned(),
+        Row::ReuseInspected => tr("Reuse inspected guide").into(),
         Row::InspectLink => tr("Inspect guide coverage").to_owned(),
         Row::Back => tr("Back").to_owned(),
     }

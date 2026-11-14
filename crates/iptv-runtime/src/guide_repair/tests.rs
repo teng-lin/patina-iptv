@@ -1158,3 +1158,112 @@ fn changed_transport_or_disabled_policy_or_new_block_refuses_a_prepared_edit() {
         Err(Error::Inspection(InspectionError::PermissionDenied))
     );
 }
+
+#[test]
+fn indirect_preview_uses_actual_low_feed_binding_when_high_feed_only_lists_channel() {
+    use iptv_epg::{ChannelKey, FeedId, MatchKind, ProgrammeData, StoreOptions};
+    use iptv_import::{EpgImport, EpgSourceConfig, GuideSink, ListedChannel};
+    use iptv_store_sqlite::{EpgFeedMeta, EpgStage, GuideSource};
+    let fixture = Fixture::new();
+    let configs: Vec<_> = [1, 2]
+        .into_iter()
+        .map(|id| GuideSource {
+            feed: FeedId(id),
+            provider_index: None,
+            url: SecretUrl::new(format!("https://synthetic.invalid/{id}.xml")),
+            name: None,
+            enabled: true,
+            shift_minutes: 0,
+        })
+        .collect();
+    let mut store = fixture.store();
+    store.set_guide_sources(fixture.source, &configs).unwrap();
+    let mut stage = EpgStage::create_in(fixture.dir.path()).unwrap();
+    for id in [1, 2] {
+        stage
+            .begin_feed(FeedId(id), 3 - id as i32, StoreOptions::default(), 0)
+            .unwrap();
+        if id == 2 {
+            stage
+                .programme(
+                    "amber.main",
+                    &ProgrammeData {
+                        start: 1_794_657_600,
+                        stop: Some(1_794_664_800),
+                        title: "Synthetic lower priority programme",
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        }
+        stage.finish_feed().unwrap();
+    }
+    let import = EpgImport {
+        bindings: vec![(
+            ChannelKey::new("amber"),
+            iptv_epg::EpgRef {
+                source: FeedId(2),
+                epg_id: "amber.main".into(),
+                kind: MatchKind::TvgId,
+            },
+        )],
+        listed: [1, 2]
+            .into_iter()
+            .map(|id| {
+                (
+                    FeedId(id),
+                    vec![ListedChannel {
+                        id: "amber.main".into(),
+                        name: Some("Synthetic amber".into()),
+                    }],
+                )
+            })
+            .collect(),
+        ..Default::default()
+    };
+    let feeds: Vec<_> = configs
+        .iter()
+        .map(|config| EpgFeedMeta {
+            config: EpgSourceConfig::new(config.feed, config.url.clone()),
+            fetched_at: 1_794_657_600,
+            etag: None,
+            last_modified: None,
+            bytes: 10,
+        })
+        .collect();
+    store
+        .replace_epg(fixture.source, &mut stage, &import, &feeds, 0)
+        .unwrap();
+    let mut request = fixture.request("amber", Target::Automatic);
+    request.mappings.clear();
+    request.feeds.push(FeedEdit {
+        feed: FeedId(2),
+        enabled: Some(false),
+        shift_minutes: None,
+        remove: false,
+    });
+    let preview = fixture.preview(request);
+    let effect = preview
+        .indirect
+        .iter()
+        .find(|effect| effect.channel.content.as_str() == "amber")
+        .unwrap();
+    assert!(
+        matches!(&effect.before,Some(Target::Configured(candidate)) if candidate.feed==FeedId(2))
+    );
+    assert!(effect.after.is_none() && effect.availability_unknown);
+    assert!(!preview.indirect_complete);
+    let saved = fixture.apply(&preview);
+    // A write alone must not certify the disabled feed's still-stored binding.
+    let verified = fixture
+        .drive(fixture.owner.verify_guide_repair(
+            saved.commit.id,
+            TimeWindow {
+                from: 1_794_657_600,
+                to: 1_794_664_800,
+            },
+            InspectionControl::default(),
+        ))
+        .unwrap();
+    assert!(!verified.configuration_effective && !verified.verified_coverage);
+}

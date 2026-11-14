@@ -326,14 +326,14 @@ impl Store {
         let mut digest = Sha256::new();
         digest.update(self.source_incarnation(source)?.as_bytes());
         let mut statement=self.conn.prepare_cached("SELECT b.channel_key,c.feed_id,c.epg_channel,
-            m.value,p.start,p.stop,p.title FROM epg_bindings b
+            m.value,p.start,p.stop,p.title,b.match_kind FROM epg_bindings b
             JOIN epg_channels c ON c.id=b.epg_channel_id
             LEFT JOIN store_meta m ON m.key='inspection.feed.' || c.source_id || '.' || c.feed_id
             LEFT JOIN epg_programmes p ON p.channel_id=c.id AND p.start<?3 AND p.stop>?2
             WHERE b.source_id=?1 ORDER BY b.channel_key,c.feed_id,c.epg_channel,p.start,p.stop,p.title")?;
         let mut rows = statement.query(params![source.0, from, to])?;
         while let Some(row) = rows.next()? {
-            for column in 0..7 {
+            for column in 0..8 {
                 use rusqlite::types::ValueRef;
                 match row.get_ref(column)? {
                     ValueRef::Null => digest.update([0]),
