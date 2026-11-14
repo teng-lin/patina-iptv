@@ -19,6 +19,7 @@ const SHELL_MAY_NAME: &[&str] = &[
     "backup",
     // Named library operations, each given the owner.
     "commands",
+    "inspection",
     // Import, library, combined-browser and guide orchestration.
     "data",
     // Guide-source list edits (pure).
