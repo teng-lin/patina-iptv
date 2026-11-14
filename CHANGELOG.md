@@ -63,6 +63,8 @@ is below 1.0, a minor release may change behaviour.
 
 ### Fixed
 
+- Refuse ambiguous mixed-case HLS URI attributes when quoting their rewritten
+  values would create another URI marker for a player.
 - Backup manifest parser rejects Windows reserved device names and trailing dots/spaces to prevent directory traversal.
 - Guide imports track per-source budgets and retry transient network failures with exponential backoff.
 - HLS rewriter correctly parses line endings with bare carriage returns.
