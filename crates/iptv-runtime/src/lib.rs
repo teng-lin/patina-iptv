@@ -5,6 +5,23 @@
 //! platform ports) is reached through the handle the caller passes; nothing
 //! in this crate looks an owner up through a thread-local or a process-wide
 //! registry. The shell keeps the one handle and passes it in.
+//!
+//! Native library snapshots and store jobs are implementation details. External
+//! callers use named commands and portable values instead:
+//!
+//! ```compile_fail
+//! use iptv_runtime::library::Snapshot;
+//! ```
+//!
+//! Stored feed configurations likewise stay behind the runtime boundary:
+//!
+//! ```compile_fail
+//! use iptv_runtime::stored::plan_with;
+//! ```
+//!
+//! ```compile_fail
+//! use iptv_runtime::stored::configs_from_sources;
+//! ```
 pub mod data;
 mod error;
 mod events;
@@ -444,7 +461,7 @@ pub mod wizard_map;
 
 pub(crate) mod private_files;
 
-pub mod library;
+mod library;
 
 pub(crate) mod favorites;
 

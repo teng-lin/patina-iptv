@@ -1,6 +1,6 @@
-//! Exercise refresh registration and generation guards through the runtime API.
+//! Refresh registration uses private import completions, not shell-facing records.
+use crate::{Ports, Runtime, library, model::SourceId};
 use iptv_import::CancelToken;
-use iptv_runtime::{Ports, Runtime, library, model::SourceId};
 use std::rc::Rc;
 
 #[test]
@@ -8,7 +8,7 @@ fn combined_refreshes_replace_one_check_without_disturbing_other_sources() {
     let directory = tempfile::tempdir().unwrap();
     let runtime = Rc::new(Runtime::new(Ports::new(
         directory.path().to_owned(),
-        |_| Ok(iptv_runtime::model::DatabaseKey::from_bytes([0x73; 32])),
+        |_| Ok(crate::model::DatabaseKey::from_bytes([0x73; 32])),
     )));
     {
         let source = SourceId(1);

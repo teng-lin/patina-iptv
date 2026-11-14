@@ -176,7 +176,7 @@ pub(crate) fn current_configs(
     )
 }
 
-pub fn configs_from_sources(
+pub(crate) fn configs_from_sources(
     settings: &Settings,
     sources: &[GuideSource],
     state: Option<&StoredGuide>,
@@ -221,7 +221,7 @@ impl Matching<'_> {
     }
 }
 
-pub fn plan_with(
+pub(crate) fn plan_with(
     settings: &Settings,
     trigger: Trigger,
     configs: &[EpgSourceConfig],

@@ -19,10 +19,10 @@ fn display_snapshot_and_catalogue_do_not_queue_behind_a_busy_writer() {
     owner.start_services();
     // Open the reader before holding the writer: opening a reader itself
     // requires the writer to provide its already-validated database key.
-    block_on(iptv_runtime::library::snapshot(&owner)).unwrap();
+    block_on(owner.read_library_metadata()).unwrap();
     owner.occupy_writer(Duration::from_secs(3));
     let started = Instant::now();
-    block_on(iptv_runtime::library::snapshot(&owner)).unwrap();
+    block_on(owner.read_library_metadata()).unwrap();
     let worker = owner.worker_catalog_size(iptv_runtime::model::SourceId(1));
     let (groups, channels) = std::thread::spawn(worker).join().unwrap().unwrap();
     assert_eq!((groups, channels), (0, 0));

@@ -114,8 +114,15 @@ fn channel_native(
     services: &Services,
     source: SourceId,
     channel: ContentId,
-) -> impl Future<Output = Result<Option<iptv_store_sqlite::ChannelRow>, StoreError>> + use<> {
-    services.read(move |store| store.channel(source, &channel))
+) -> impl Future<Output = Result<Option<crate::model::PlaybackChannel>, StoreError>> + use<> {
+    services.read(move |store| {
+        Ok(store
+            .channel(source, &channel)?
+            .map(|row| crate::model::PlaybackChannel {
+                channel: row.channel,
+                blocked: row.blocked,
+            }))
+    })
 }
 
 fn save_search_history_native(
@@ -744,7 +751,7 @@ pub fn channel(
     owner: &crate::Runtime,
     source: SourceId,
     channel: ContentId,
-) -> impl Future<Output = Result<Option<iptv_store_sqlite::ChannelRow>, crate::Error>> + use<> {
+) -> impl Future<Output = Result<Option<crate::model::PlaybackChannel>, crate::Error>> + use<> {
     let services = owner.services();
     async move {
         channel_native(&services, source, channel)

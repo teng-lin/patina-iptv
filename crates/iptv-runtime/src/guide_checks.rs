@@ -83,3 +83,6 @@ mod tests {
         assert!(other.is_cancelled());
     }
 }
+
+#[cfg(test)]
+mod refresh_tickets;

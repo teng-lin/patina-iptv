@@ -295,4 +295,13 @@ impl Runtime {
             Ok((groups.len(), channels.len()))
         }
     }
+
+    /// Reads a display snapshot without exposing its native metadata records.
+    /// The read-lane contention test warms the reader before occupying the writer.
+    pub async fn read_library_metadata(&self) -> Result<(), crate::Error> {
+        crate::library::snapshot(self)
+            .await
+            .map(|_| ())
+            .map_err(Into::into)
+    }
 }

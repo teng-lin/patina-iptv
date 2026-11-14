@@ -194,7 +194,15 @@ NSH or the player. The shell holds one `Rc<Runtime>` and installs a task host, t
 and an event sink. Runtime events enter the shell at
 `runtime_events::apply`; views issue named commands rather than closures
 that can reach a `Store`. `iptv-runtime/src/model.rs` exposes command values, without
-exposing the connection or worker API.
+exposing the connection or worker API. Early playback receives a runtime-owned
+`PlaybackChannel` containing the provider channel and its parental block, rather
+than a storage row. Native library snapshots, import metadata, store errors and
+stored feed configuration remain behind private implementation surfaces.
+`DatabaseKey` is the one adapter-owned boundary exception: the platform credential
+broker supplies this opaque, redacting key through `Ports`; commands return no
+adapter-owned values. Compile-checked contracts cover every public command result,
+including inferred values and aliases, and compile-fail examples keep native
+snapshot and planning helpers private.
 
 Runtime owns the current schedule, library snapshot, refresh tickets and
 attempts, combined-source parts, guide status, favourites, search indexes,
