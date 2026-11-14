@@ -1408,7 +1408,15 @@ fn retained_guide(directory: &std::path::Path, source: SourceId, title: &str) {
                 last_modified: None,
                 bytes: 10,
             }],
-            0,
+            iptv_import::matching_fingerprint(
+                &channels(),
+                &store
+                    .epg_overrides(source)
+                    .unwrap()
+                    .into_iter()
+                    .map(|(id, value)| (ChannelKey::new(id.as_str()), value.to_override()))
+                    .collect(),
+            ),
         )
         .unwrap();
 }
@@ -1673,4 +1681,228 @@ fn durable_inverse_receipt_reconciles_a_stale_original_operation_cache() {
             .unwrap()
             .undone
     );
+}
+
+#[test]
+fn automatic_verification_waits_for_full_projection_after_no_guide_undo() {
+    let fixture = Fixture::new();
+    retained_guide(
+        fixture.dir.path(),
+        fixture.source,
+        "Synthetic automatic before",
+    );
+    let request = fixture.request("amber", Target::NoGuide);
+    let saved = fixture.apply(&fixture.preview(request.clone()));
+    fixture.drive(std::future::poll_fn(|_| {
+        if fixture
+            .store()
+            .epg_binding(fixture.source, &iptv_epg::ChannelKey::new("amber"))
+            .unwrap()
+            .is_none()
+        {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    }));
+    let off = fixture
+        .drive(fixture.owner.verify_guide_repair(
+            saved.commit.id.clone(),
+            request.window,
+            InspectionControl::default(),
+        ))
+        .unwrap();
+    assert!(off.configuration_effective);
+    assert!(
+        fixture
+            .store()
+            .epg_binding(fixture.source, &iptv_epg::ChannelKey::new("amber"))
+            .unwrap()
+            .is_none()
+    );
+    fixture
+        .drive(
+            fixture
+                .owner
+                .undo_guide_repair(saved.commit.id.clone(), InspectionControl::default()),
+        )
+        .unwrap();
+    let pending = fixture
+        .drive(fixture.owner.verify_guide_repair(
+            saved.commit.id.clone(),
+            request.window,
+            InspectionControl::default(),
+        ))
+        .unwrap();
+    assert!(!pending.configuration_effective && !pending.verified_coverage);
+    assert_eq!(pending.programmes_available, 0);
+    // The injected host keeps the coalesced refresh delayed. A complete normal
+    // import installs the automatic projection and provides the missing proof.
+    retained_guide(
+        fixture.dir.path(),
+        fixture.source,
+        "Synthetic automatic restored",
+    );
+    let settled = fixture
+        .drive(fixture.owner.verify_guide_repair(
+            saved.commit.id,
+            request.window,
+            InspectionControl::default(),
+        ))
+        .unwrap();
+    assert!(settled.configuration_effective && settled.verified_coverage);
+    assert_eq!(settled.programmes_available, 1);
+}
+
+#[test]
+fn automatic_verification_rejects_stale_binding_and_partial_fingerprint_renewal() {
+    let fixture = Fixture::new();
+    retained_guide(
+        fixture.dir.path(),
+        fixture.source,
+        "Synthetic old catalogue",
+    );
+    let mut changed = channels();
+    changed[0].epg_id = Some("amber.other".into());
+    fixture
+        .store()
+        .replace_catalog(fixture.source, &[], &changed, &[], &[])
+        .unwrap();
+    let request = fixture.request("amber", Target::Automatic);
+    let saved = fixture.apply(&fixture.preview(request.clone()));
+    let stale = fixture
+        .drive(fixture.owner.verify_guide_repair(
+            saved.commit.id.clone(),
+            request.window,
+            InspectionControl::default(),
+        ))
+        .unwrap();
+    assert!(!stale.configuration_effective && !stale.verified_coverage);
+    // An unrelated one-row publication may update the legacy whole-source
+    // refresh fingerprint, but cannot certify amber's stale automatic binding.
+    let fp = iptv_import::matching_fingerprint(&changed, &Default::default());
+    assert!(
+        fixture
+            .store()
+            .rebind_epg(
+                fixture.source,
+                &iptv_epg::ChannelKey::new("birch"),
+                None,
+                fp
+            )
+            .unwrap()
+    );
+    let result = fixture
+        .drive(fixture.owner.verify_guide_repair(
+            saved.commit.id,
+            request.window,
+            InspectionControl::default(),
+        ))
+        .unwrap();
+    assert_eq!(
+        result.programmes_available, 1,
+        "old real programmes remain visible"
+    );
+    assert!(!result.configuration_effective && !result.verified_coverage);
+}
+
+#[test]
+fn feed_only_verification_requires_current_full_projection_configuration() {
+    let fixture = Fixture::new();
+    retained_guide(
+        fixture.dir.path(),
+        fixture.source,
+        "Synthetic cached enabled feed",
+    );
+    let original = fixture.store().guide_sources(fixture.source).unwrap();
+    let mut disabled = original.clone();
+    disabled[0].enabled = false;
+    fixture
+        .store()
+        .set_guide_sources(fixture.source, &disabled)
+        .unwrap();
+    // Preserve the current transport bytes and binding while changing only the
+    // requested enabled state. Re-enabling must await a full current projection.
+    let mut request = fixture.request("amber", Target::Automatic);
+    request.mappings.clear();
+    request.feeds.push(FeedEdit {
+        feed: iptv_epg::FeedId(1),
+        enabled: Some(true),
+        shift_minutes: None,
+        remove: false,
+    });
+    let saved = fixture.apply(&fixture.preview(request.clone()));
+    // Simulate independently authenticated retained transport metadata. Its
+    // current feed origin does not establish the automatic match projection.
+    let conn = rusqlite::Connection::open(fixture.dir.path().join("iptv.sqlite")).unwrap();
+    conn.pragma_update(None, "key", format!("x'{}'", "71".repeat(32)))
+        .unwrap();
+    conn.execute(
+        "UPDATE store_meta SET value=(SELECT incarnation FROM guide_feed_incarnations
+        WHERE source_id=?1 AND feed_id=1) WHERE key='inspection.feed.' || ?1 || '.1'",
+        [fixture.source.0],
+    )
+    .unwrap();
+    drop(conn);
+    assert!(
+        fixture
+            .store()
+            .inspection_stored_feed_incarnation(fixture.source, iptv_epg::FeedId(1))
+            .unwrap()
+            .is_some()
+    );
+    let result = fixture
+        .drive(fixture.owner.verify_guide_repair(
+            saved.commit.id,
+            request.window,
+            InspectionControl::default(),
+        ))
+        .unwrap();
+    assert!(!result.configuration_effective && !result.verified_coverage);
+}
+
+#[test]
+fn held_verification_detects_catalogue_change_without_mapping_or_config_edit() {
+    let fixture = Fixture::new();
+    retained_guide(
+        fixture.dir.path(),
+        fixture.source,
+        "Synthetic before catalogue change",
+    );
+    let request = fixture.request("amber", Target::Automatic);
+    let saved = fixture.apply(&fixture.preview(request.clone()));
+    let verification = fixture.owner.verify_guide_repair(
+        saved.commit.id,
+        request.window,
+        InspectionControl::default(),
+    );
+    let (entered, ready) = mpsc::sync_channel(1);
+    let (release, wait) = mpsc::sync_channel(1);
+    let _barrier = fixture.owner.services().analyze(move |_| {
+        entered.send(()).unwrap();
+        wait.recv_timeout(Duration::from_secs(5)).unwrap();
+        Ok(())
+    });
+    let path = fixture.dir.path().to_owned();
+    let source = fixture.source;
+    let worker = std::thread::spawn(move || {
+        ready.recv_timeout(Duration::from_secs(5)).unwrap();
+        let mut store = Store::open_encrypted(
+            path.join("iptv.sqlite"),
+            &DatabaseKey::from_bytes([0x71; 32]),
+        )
+        .unwrap();
+        let mut changed = channels();
+        changed[0].epg_id = Some("amber.other".into());
+        store
+            .replace_catalog(source, &[], &changed, &[], &[])
+            .unwrap();
+        release.send(()).unwrap();
+    });
+    let result = fixture.drive(verification).unwrap();
+    worker.join().unwrap();
+    assert_eq!(result.examined, result.current);
+    assert_eq!(result.expected, result.current);
+    assert_ne!(result.evidence_revision, result.current_evidence_revision);
+    assert!(!result.current_revision && !result.verified_coverage);
 }

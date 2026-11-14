@@ -67,6 +67,9 @@ impl Store {
             WHERE b.source_id=?1 AND (g.feed_id IS NULL OR g.enabled=0
             OR f.url IS NOT g.url OR f.shift_minutes IS NOT g.shift_minutes OR m.value IS NOT i.incarnation))",
             [commit.source.0],|r|r.get(0))?;
+        let automatic_current = self
+            .guide_repair_automatic_projection_current(commit.source, examined_configuration)?
+            .0;
         let mut totals = tx.prepare_cached(
             "SELECT COUNT(*),COALESCE(SUM(
             MAX(0,MIN(stop,?3)-MAX(start,?2))),0) FROM epg_programmes
@@ -135,9 +138,9 @@ impl Store {
                         && *config
                 }
                 (None, Some((_, _, _, kind, config))) => {
-                    kind != "override" && *config && inputs_current
+                    kind != "override" && *config && inputs_current && automatic_current
                 }
-                (None, None) => inputs_current,
+                (None, None) => inputs_current && automatic_current,
                 _ => false,
             };
             effective &= correct;
@@ -153,7 +156,7 @@ impl Store {
         // Feed-only repairs have indirect effects; certify inputs, not invented
         // programme availability for channels never selected in the batch.
         if rows.is_empty() {
-            effective &= inputs_current && bindings_current;
+            effective &= inputs_current && bindings_current && automatic_current;
         }
         let evidence_revision = self.guide_repair_coverage_revision(commit.source, from, to)?;
         let result = RepairVerification {
@@ -381,6 +384,15 @@ impl Store {
         use sha2::{Digest, Sha256};
         let mut digest = Sha256::new();
         digest.update(self.source_incarnation(source)?.as_bytes());
+        // Effective automatic proof is part of the examined evidence, including
+        // catalogue changes that leave mapping/configuration revisions intact.
+        let (_, configuration) = revisions(&self.conn, source)?;
+        let (current, fingerprint) =
+            self.guide_repair_automatic_projection_current(source, configuration)?;
+        digest.update([u8::from(current)]);
+        if let Some(fingerprint) = fingerprint {
+            digest.update(fingerprint.to_le_bytes());
+        }
         let mut statement=self.conn.prepare_cached("SELECT b.channel_key,c.feed_id,c.epg_channel,
             m.value,p.start,p.stop,p.title,b.match_kind FROM epg_bindings b
             JOIN epg_channels c ON c.id=b.epg_channel_id
@@ -407,5 +419,99 @@ impl Store {
             }
         }
         Ok(format!("{:x}", digest.finalize()))
+    }
+}
+
+impl Store {
+    // Recompute the existing portable matching hash from bounded metadata only.
+    // Stream locators, headers and group membership never enter this read.
+    fn guide_repair_automatic_projection_current(
+        &self,
+        source: SourceId,
+        configuration: u64,
+    ) -> Result<(bool, Option<u64>)> {
+        let enabled: bool = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM guide_sources WHERE source_id=?1 AND enabled=1)",
+            [source.0],
+            |r| r.get(0),
+        )?;
+        let empty: bool = self.conn.query_row(
+            "SELECT NOT EXISTS(SELECT 1 FROM epg_bindings WHERE source_id=?1)",
+            [source.0],
+            |r| r.get(0),
+        )?;
+        let stamp: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM store_meta WHERE key=?1",
+                [crate::epg::matching_projection_key(source)],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let mut bytes = 0usize;
+        let mut channels = Vec::new();
+        let mut statement = self.conn.prepare_cached(
+            "SELECT id,name,epg_id,epg_name FROM channels WHERE source_id=?1 ORDER BY id LIMIT 100001")?;
+        let mut rows = statement.query([source.0])?;
+        while let Some(row) = rows.next()? {
+            for column in 0..4 {
+                if let rusqlite::types::ValueRef::Text(value) = row.get_ref(column)? {
+                    bytes = bytes.saturating_add(value.len());
+                }
+            }
+            if channels.len() >= 100_000 || bytes > 64 * 1024 * 1024 {
+                return Ok((false, None));
+            }
+            channels.push(iptv_providers::model::Channel {
+                id: ContentId::from_stored(row.get::<_, String>(0)?),
+                provider_id: None,
+                name: row.get(1)?,
+                number: None,
+                logo: None,
+                groups: vec![],
+                stream: iptv_providers::model::StreamLocator::Url {
+                    url: String::new(),
+                    headers: vec![],
+                    properties: vec![],
+                },
+                epg_id: row.get(2)?,
+                epg_name: row.get(3)?,
+                epg_shift_minutes: None,
+                catch_up: None,
+                radio: false,
+            });
+        }
+        let mut overrides = iptv_epg::Overrides::default();
+        let mut statement = self.conn.prepare_cached(
+            "SELECT channel_id,epg_mode,epg_source,epg_channel FROM channel_overlays
+             WHERE source_id=?1 AND epg_mode IS NOT NULL ORDER BY channel_id LIMIT 100001",
+        )?;
+        let mut rows = statement.query([source.0])?;
+        let mut count = 0usize;
+        while let Some(row) = rows.next()? {
+            for column in 0..4 {
+                if let rusqlite::types::ValueRef::Text(value) = row.get_ref(column)? {
+                    bytes = bytes.saturating_add(value.len());
+                }
+            }
+            count += 1;
+            if count > 100_000 || bytes > 64 * 1024 * 1024 {
+                return Ok((false, None));
+            }
+            if let Some(value) = EpgOverride::from_columns(row.get(1)?, row.get(2)?, row.get(3)?) {
+                overrides.insert(
+                    iptv_epg::ChannelKey::new(row.get::<_, String>(0)?),
+                    value.to_override(),
+                );
+            }
+        }
+        let fingerprint = iptv_import::matching_fingerprint(&channels, &overrides);
+        Ok((
+            (!enabled && empty)
+                || (enabled
+                    && stamp.as_deref()
+                        == Some(format!("{fingerprint:016x}:{configuration}").as_str())),
+            Some(fingerprint),
+        ))
     }
 }
