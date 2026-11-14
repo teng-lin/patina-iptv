@@ -1,5 +1,7 @@
 //! A real refresh is held after reading its guide, then released after repair.
 //! Public native APIs and generated HTTP fixtures exercise the publication fence.
+#![cfg(feature = "test-support")]
+
 use iptv_library::{
     Choice,
     guide_repair::{Effective, FeedEdit, OperationPhase, Request, Target},

@@ -64,6 +64,12 @@ numeric IDs. Programme references preserve channel/feed provenance, source
 incarnation, evidence revision and observed interval; provider event IDs are
 optional and scoped evidence rather than global identity.
 
+Supplied-link candidates are scoped to the exact `ProbeEvidence` whose feed is
+`None`. Their candidate feed field is a probe-local placeholder, with no
+durability or allocation authority. Keep it paired with that evidence for
+samples and use `Target::Staged` for repair, never `Target::Configured`.
+Atomic apply allocates any new durable feed identity.
+
 All timestamps use Unix seconds. Query intervals are half-open `[from, to)` in
 UTC: a programme ending exactly at `from`, or starting exactly at `to`, is out.
 Parse supplied XMLTV offsets and apply configured shifts once. Display timezone
@@ -97,7 +103,7 @@ The current foundation limits are:
 | Probe XML | Finite record/text/nesting and item limits; external entities disabled |
 | Staging | At most 512 MiB aggregate, including reserved work and indexes |
 | Evidence / uncommitted plan lifetime | At most 24 hours; plans cannot outlive prerequisite stages |
-| Repair matching metadata | At most 100k playlist rows and 100k listed guide rows; at most 64 MiB text in each snapshot |
+| Repair matching metadata | At most 100k playlist rows and 100k listed guide rows; 64 MiB checked playlist matching text and 64 MiB listed guide-index text |
 | Repair batch | At most 500 explicit mappings and 64 feed changes/additions |
 | Live preview / transient operation state | At most 32 previews, 200k total preview items and 128 operation/admitted-command identities per owner |
 | Undo eligibility | Seven days after durable commit, subject to affected-row preconditions |
