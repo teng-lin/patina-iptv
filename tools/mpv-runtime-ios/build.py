@@ -1,6 +1,9 @@
 """Build the guarded iOS Libavformat and test it with MPVKit's pinned player."""
 
 import argparse
+import gzip
+import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -8,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import zipfile
 
 HERE = Path(__file__).resolve().parent
@@ -67,6 +71,8 @@ def build_archive(work, arch, simulator):
             "--disable-doc",
             "--disable-debug",
             "--disable-avdevice",
+            # The stock MPVKit libavcodec omits FITS' private parser helpers.
+            "--disable-demuxer=fits",
         ],
         cwd=directory,
     )
@@ -159,8 +165,43 @@ def zip_bundle(directory, destination):
                 archive.writestr(info, path.read_bytes())
 
 
+def recipe_files():
+    paths = [HERE / "build.py", HERE / "sources.lock.json", BASE / "prepare.py", BASE / "relay_guard.py", BASE / "relay_guard_probe.c",
+             ROOT / "tools/mpv-runtime-unix/macos/xcode-version", ROOT / "tools/ci/mpvkit-licenses.json"]
+    return paths + sorted((BASE / "patches").glob("*.patch"))
+
+
+def recipe_digest():
+    value = hashlib.sha256()
+    entries = [(path.relative_to(ROOT).as_posix(), path.read_bytes().replace(b"\r\n", b"\n")) for path in recipe_files()]
+    entries.append(("mpvkit-link-constants", json.dumps(constants(), sort_keys=True).encode()))
+    for name, content in sorted(entries):
+        value.update(name.encode() + b"\0" + str(len(content)).encode() + b"\0" + content)
+    return value.hexdigest()
+
+
+def source_bundle(work, destination):
+    prepared = work / "prepared-sources.tar.gz"
+    prepare.bundle(HERE / "sources.lock.json", work, prepared)
+    extra = {path.relative_to(ROOT).as_posix(): path.read_bytes() for path in recipe_files()}
+    for path in [ROOT / "tools/fetch-mpvkit.sh", ROOT / "crates/iptv-player-mpv/build.rs"]:
+        extra[path.relative_to(ROOT).as_posix()] = path.read_bytes()
+    for path in sorted((work / "build").glob("*/config*.h")):
+        extra["build-config/" + path.relative_to(work / "build").as_posix()] = path.read_bytes()
+    extra["REBUILD.txt"] = b"Run tools/mpv-runtime-ios/build.py with Xcode 16.4. The original verified FFmpeg archive is in archives/; prepare.py restores it offline with --source-bundle. Common patches and exact configure flags accompany the builder. Other frameworks remain the pinned MPVKit inputs.\n"
+    with destination.open("wb") as raw, gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as compressed, tarfile.open(fileobj=compressed, mode="w") as archive:
+        with tarfile.open(prepared) as incoming:
+            for member in incoming:
+                archive.addfile(member, incoming.extractfile(member))
+        for name, data in sorted(extra.items()):
+            member = tarfile.TarInfo(name)
+            member.size, member.mode = len(data), 0o644
+            archive.addfile(member, io.BytesIO(data))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repository", default="teng-lin/patina-iptv")
     parser.add_argument("--work", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
@@ -172,7 +213,7 @@ def main():
         raise ValueError("Select the pinned Xcode before building the iOS runtime")
     os.environ["ZERO_AR_DATE"] = "1"
     prepare.prepare(HERE / "sources.lock.json", work)
-    run(["bash", ROOT / "tools/fetch-mpvkit.sh", work / "mpvkit"])
+    run(["bash", ROOT / "tools/fetch-mpvkit.sh", work / "mpvkit"], env={**os.environ, "PATINA_MPVKIT_BASE_ONLY": "1"})
     baseline = work / "baseline-probe"
     compile_probe(work, baseline)
     device = build_archive(work, "arm64", False)
@@ -192,17 +233,27 @@ def main():
     smoke(work, baseline, guarded)
     archive = destination / "Libavformat.xcframework.zip"
     zip_bundle(bundle, archive)
+    source = destination / "mpv-runtime-ios-sources.tar.gz"
+    source_bundle(work, source)
+    tag = "mpv-runtime-ios-" + recipe_digest()
+    base = f"https://github.com/{args.repository}/releases/download/{tag}/"
     record = {
         "schema": 1,
         "platform": "ios",
         "ffmpeg": "8.1.2",
         "relay_guard": "patina-relay-guard-v1",
+        "url": base + archive.name,
         "sha256": prepare.digest(archive),
+        "source_url": base + source.name,
+        "source_sha256": prepare.digest(source),
+        "tag": tag,
         "xcode": expected,
         "simulator_tested": "arm64",
         "device_tested": False,
     }
-    (destination / "candidate.json").write_text(json.dumps(record, indent=2) + "\n")
+    manifest = destination / "runtime-ios.json"
+    manifest.write_text(json.dumps(record, indent=2) + "\n")
+    (destination / "SHA256SUMS").write_text("".join(f"{prepare.digest(path)}  {path.name}\n" for path in (archive, source, manifest)))
     print(json.dumps(record, indent=2))
 
 
