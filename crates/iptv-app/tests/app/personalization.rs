@@ -10,8 +10,8 @@ use iptv_store_sqlite::{SourceId, SourcePolicy};
 use nsh_core::{Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
 use std::{
-    path::PathBuf,
-    time::{Duration, SystemTime},
+    path::{Path, PathBuf},
+    time::{Duration, Instant, SystemTime},
 };
 pub const M3U: &str = "#EXTM3U\n\
                        #EXTINF:-1 group-title=\"News\" tvg-logo=\"http://example.test/logo.svg\",Local A\n\
@@ -30,6 +30,30 @@ pub struct Fixture {
 pub fn step(r: Result<(), String>) {
     if let Err(error) = r {
         panic!("{error}");
+    }
+}
+/// UI changes are optimistic; observe the settings file's atomic publication
+/// separately when a scenario checks persistence.
+#[track_caller]
+pub fn saved_settings(
+    app: &mut Headless,
+    path: &Path,
+    expected: impl Fn(&Settings) -> bool,
+) -> Settings {
+    let deadline = Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(10));
+    loop {
+        if let Ok(text) = std::fs::read_to_string(path)
+            && let Ok((settings, report)) = Settings::from_json(&text)
+            && report.is_clean()
+            && expected(&settings)
+        {
+            return settings;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "settings did not reach the expected durable state"
+        );
+        step(app.wait(Duration::from_millis(10)));
     }
 }
 /// `home`: the scenario's own (`isolated!()`).

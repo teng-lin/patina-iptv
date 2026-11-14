@@ -98,8 +98,12 @@ fn appearance_controls_apply_live_persist_and_change_actual_guide_geometry() {
     step(app.press_key("enter"));
     close(app);
     let dir = f.path.parent().unwrap();
-    let (s, _) =
-        Settings::from_json(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+    let s = personalization::saved_settings(app, &dir.join("settings.json"), |settings| {
+        settings.get("guide.visible_minutes").unwrap() == iptv_settings::Value::Int(240)
+            && settings.get("guide.show_logos").unwrap() == iptv_settings::Value::Bool(false)
+            && settings.get("guide.show_channel_numbers").unwrap()
+                == iptv_settings::Value::Bool(false)
+    });
     assert_eq!(
         s.get("guide.visible_minutes").unwrap(),
         iptv_settings::Value::Int(240)

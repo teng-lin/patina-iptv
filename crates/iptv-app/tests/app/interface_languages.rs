@@ -55,8 +55,9 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     step(app.wait_for("text:啟動時播放上次頻道"));
     step(app.wait_for("label:關閉選擇器"));
     let path = fixture.path.parent().unwrap().join("settings.json");
-    let (stored, report) = Settings::from_json(&std::fs::read_to_string(path).unwrap()).unwrap();
-    assert!(report.is_clean());
+    let stored = personalization::saved_settings(app, &path, |settings| {
+        settings.text(keys::LANGUAGE, &Target::Global) == "zh-Hant"
+    });
     assert_eq!(stored.text(keys::LANGUAGE, &Target::Global), "zh-Hant");
     step(app.press("text:語言"));
     for _ in 0..12 {
