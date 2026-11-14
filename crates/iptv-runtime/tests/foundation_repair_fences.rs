@@ -2,7 +2,7 @@
 //! Public native APIs and generated HTTP fixtures exercise the publication fence.
 use iptv_library::{
     Choice,
-    guide_repair::{Effective, Request, Target},
+    guide_repair::{Effective, FeedEdit, OperationPhase, Request, Target},
     inspection::{ChannelRef, Query, TimeWindow},
 };
 use iptv_providers::{
@@ -37,6 +37,7 @@ struct Server {
     address: String,
     stopped: Arc<AtomicBool>,
     guides: Arc<AtomicUsize>,
+    fail_guides: Arc<AtomicBool>,
     barrier: Arc<Mutex<Option<GuideBarrier>>>,
     task: Option<thread::JoinHandle<()>>,
 }
@@ -48,6 +49,8 @@ impl Server {
         let stop = stopped.clone();
         let guides = Arc::new(AtomicUsize::new(0));
         let count = guides.clone();
+        let fail_guides = Arc::new(AtomicBool::new(false));
+        let failed = fail_guides.clone();
         let barrier: Arc<Mutex<Option<GuideBarrier>>> = Arc::default();
         let held = barrier.clone();
         let xml = format!(
@@ -86,8 +89,14 @@ impl Server {
                     "#EXTM3U\n#EXTINF:-1 tvg-id=\"amber.main\",Synthetic Amber\n\
                      https://synthetic.invalid/amber.ts\n"
                 };
+                let status =
+                    if request.starts_with(b"GET /guide.xml ") && failed.load(Ordering::SeqCst) {
+                        "404 Synthetic unavailable"
+                    } else {
+                        "200 OK"
+                    };
                 let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
                 let _ = stream.write_all(response.as_bytes());
@@ -97,6 +106,7 @@ impl Server {
             address,
             stopped,
             guides,
+            fail_guides,
             barrier,
             task: Some(task),
         }
@@ -243,41 +253,8 @@ fn repair_during_old_work(hold_report: bool) {
             weak.upgrade().unwrap().set_schedule(schedule);
         }
     });
-    let source = Source {
-        name: "Synthetic repair fence".into(),
-        config: SourceConfig::M3u(M3uSourceConfig {
-            location: server.url("/playlist.m3u"),
-            user_agent: None,
-            referrer: None,
-        }),
-    };
-    data::start_import(
-        owner,
-        data::Job {
-            source: source.clone(),
-            epg_url: Some(server.url("/guide.xml")),
-            stored: None,
-            purpose: data::Purpose::Add,
-            edit: false,
-        },
-        |_| {},
-    );
-    host.until(|| {
-        let schedule = owner.schedule();
-        if schedule.channel_count() != 1 {
-            return false;
-        }
-        let minute = ((now - schedule.epoch_unix()) / 60) as i32;
-        schedule.title(0, schedule.program_at(0, minute)) == TITLE
-    });
-    let source_id = owner.shown_source().unwrap();
-    if let Some(initial) = owner.pending_import_completion(source_id) {
-        host.drive(initial);
-    }
-    let before = host
-        .drive(owner.query_channels(Query::source(source_id), InspectionControl::default()))
-        .unwrap();
-    let channel: ChannelRef = before.items[0].key.clone();
+    let (source, channel) = import_fixture(&host, &server, now);
+    let source_id = channel.source;
     let handle = owner.host_handle();
     let download = (!hold_report).then(|| server.hold_next_guide());
     handle.hold_reports(hold_report);
@@ -362,4 +339,151 @@ fn repair_during_old_work(hold_report: bool) {
         seen.borrow().iter().all(|title| title != TITLE),
         "the old in-memory schedule bypassed the newer stored mapping"
     );
+}
+
+fn import_fixture(host: &Host, server: &Server, now: i64) -> (Source, ChannelRef) {
+    let owner = &host.owner;
+    let source = Source {
+        name: "Synthetic repair fence".into(),
+        config: SourceConfig::M3u(M3uSourceConfig {
+            location: server.url("/playlist.m3u"),
+            user_agent: None,
+            referrer: None,
+        }),
+    };
+    data::start_import(
+        owner,
+        data::Job {
+            source: source.clone(),
+            epg_url: Some(server.url("/guide.xml")),
+            stored: None,
+            purpose: data::Purpose::Add,
+            edit: false,
+        },
+        |_| {},
+    );
+    host.until(|| {
+        let schedule = owner.schedule();
+        if schedule.channel_count() != 1 {
+            return false;
+        }
+        let minute = ((now - schedule.epoch_unix()) / 60) as i32;
+        schedule.title(0, schedule.program_at(0, minute)) == TITLE
+    });
+    let source_id = owner.shown_source().unwrap();
+    if let Some(initial) = owner.pending_import_completion(source_id) {
+        host.drive(initial);
+    }
+    let before = host
+        .drive(owner.query_channels(Query::source(source_id), InspectionControl::default()))
+        .unwrap();
+    let channel: ChannelRef = before.items[0].key.clone();
+    (source, channel)
+}
+
+#[test]
+fn a_failed_postcommit_refresh_recovers_without_repeating_the_saved_mutation() {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let server = Server::new(now);
+    let host = Host::new();
+    let owner = &host.owner;
+    let weak = Rc::downgrade(owner);
+    owner.bind(move |event| {
+        if let RuntimeEvent::ScheduleReady(schedule) = event {
+            weak.upgrade().unwrap().set_schedule(schedule);
+        }
+    });
+    let (_, channel) = import_fixture(&host, &server, now);
+    let source = channel.source;
+    let initial = TimeWindow {
+        from: now - 60,
+        to: now + 3600,
+    };
+    let programmes = host
+        .drive(owner.query_programmes(
+            Query::source(source),
+            initial,
+            Some(channel.clone()),
+            InspectionControl::default(),
+        ))
+        .unwrap();
+    let feed = programmes.items[0].candidate.feed;
+    let shifted = TimeWindow {
+        from: now + 3540,
+        to: now + 7200,
+    };
+    let mut request = Request::mapping(channel, Target::Automatic, shifted);
+    request.feeds.push(FeedEdit {
+        feed,
+        enabled: None,
+        shift_minutes: Some(60),
+        remove: false,
+    });
+    let plan = host
+        .drive(owner.preview_guide_repair(request, InspectionControl::default()))
+        .unwrap();
+    server.fail_guides.store(true, Ordering::SeqCst);
+    let saved = host
+        .drive(owner.apply_guide_repair(plan.id, plan.digest, InspectionControl::default()))
+        .unwrap();
+    assert!(saved.mapping_saved && saved.configuration_committed);
+    assert_eq!(saved.effective, Effective::Pending);
+    host.until(|| {
+        let operation = host
+            .drive(owner.guide_repair_operation(saved.operation.clone()))
+            .unwrap();
+        operation.phase == OperationPhase::ReadyToVerify
+            && server.guides.load(Ordering::SeqCst) >= 2
+    });
+    let failed = host
+        .drive(owner.verify_guide_repair(
+            saved.operation.clone(),
+            shifted,
+            InspectionControl::default(),
+        ))
+        .unwrap();
+    assert!(
+        failed.current_revision,
+        "the saved mutation survives download failure"
+    );
+    assert!(!failed.configuration_effective && !failed.verified_coverage);
+    server.fail_guides.store(false, Ordering::SeqCst);
+    data::stored::refresh_status(owner);
+    host.until(|| !owner.source_lines(source).is_empty());
+    let done = Rc::new(Cell::new(false));
+    let completed = done.clone();
+    assert!(data::stored::update_source(
+        owner,
+        source,
+        move |accepted| {
+            assert!(accepted);
+            completed.set(true);
+        }
+    ));
+    host.until(|| done.get());
+    let recovered = host
+        .drive(owner.verify_guide_repair(
+            saved.operation.clone(),
+            shifted,
+            InspectionControl::default(),
+        ))
+        .unwrap();
+    assert!(
+        recovered.current_revision
+            && recovered.configuration_effective
+            && recovered.verified_coverage
+    );
+    assert_eq!(recovered.programmes_available, 1);
+    let history = host
+        .drive(owner.recent_guide_repairs(source, 10, InspectionControl::default()))
+        .unwrap();
+    assert_eq!(
+        history.len(),
+        1,
+        "recovery refresh must not create another saved repair"
+    );
+    assert_eq!(history[0].id, saved.commit.id);
 }
