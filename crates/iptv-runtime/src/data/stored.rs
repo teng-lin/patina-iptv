@@ -269,6 +269,8 @@ use crate::stored::download_now;
 /// settle (the refresh policy downloads changed feeds). Only for the
 /// source on screen; another one is checked when it is shown.
 pub fn guides_changed(source: SourceId) {
+    let previous = super::library::pending_import(source);
+    super::library::revoke_import_handoff(source);
     if crate::current().shown().with(Cell::get) != Some(source)
         && !super::combined::includes(source)
     {
@@ -281,6 +283,9 @@ pub fn guides_changed(source: SourceId) {
         // A refresh may still be installing its old guide configuration. Wait
         // for that handoff before checking the edited feeds, rather than turning
         // this check into a cache-only read and losing the edit's refresh.
+        if let Some(previous) = previous {
+            previous.until_finished().await;
+        }
         while let Some(pending) = super::library::pending_import(source) {
             pending.until_finished().await;
         }
