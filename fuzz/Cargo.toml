@@ -16,7 +16,7 @@ iptv-import = { path = "../crates/iptv-import" }
 iptv-providers = { path = "../crates/iptv-providers" }
 iptv-epg = { path = "../crates/iptv-epg" }
 # The manifest rewriters are private to the playback relay; this feature
-# exposes them to the `manifests` target only.
+# exposes them to the HLS and DASH targets only.
 iptv-net = { path = "../crates/iptv-net", features = ["fuzzing"] }
 
 [[bin]]
