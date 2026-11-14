@@ -35,6 +35,7 @@ pub fn round_back(
          stroke-linejoin='round'><path d='M15 4.5L7.5 12l7.5 7.5'/></svg>",
     );
     view()
+        .role(AccessibilityRole::Button)
         .size(px(side))
         .flex_shrink_0()
         .items_center()
@@ -172,6 +173,7 @@ fn pill(
     on_press: impl Fn() + 'static,
 ) -> View {
     view()
+        .role(AccessibilityRole::Button)
         .min_h(move || px(size.whole(TOUCH)))
         .px(move || size.px(20.0))
         .items_center()
@@ -202,6 +204,11 @@ pub fn tab(
 ) -> View {
     let pill = move || focused() && ui.keys_shown();
     view()
+        .role(AccessibilityRole::Tab)
+        .accessibility_state(move || AccessibilityState {
+            selected: selected(),
+            ..Default::default()
+        })
         .min_h(move || px(size.whole(TOUCH)))
         .px(move || size.px(18.0))
         .justify_center()
@@ -247,6 +254,7 @@ pub fn action(
 ) -> View {
     let mark = move || Mark::of(focused() && ui.keys_shown(), false);
     list_rows::row(size, ROW, mark)
+        .role(AccessibilityRole::Button)
         .on_press(move || {
             ui.touched();
             on_press();

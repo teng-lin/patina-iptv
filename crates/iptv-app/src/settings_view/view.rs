@@ -4,7 +4,7 @@
 //! below, the editors over it (`editors`), and the notice line. In the
 //! lists' type and pitch with their focus pill (`ui_kit`, `list_rows`).
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 use super::*;
 use crate::fonts::{LIST_ITEM, SANS, SECTION};
@@ -12,6 +12,7 @@ use crate::list_rows::{self, Mark, ROW, ROW_TWO};
 use crate::scale::Scale;
 use crate::theme::LIST_TEXT;
 use crate::ui_kit::{self, HEADING_ROW};
+use nsh_core::Checked;
 
 const PANEL_W: f32 = 860.0;
 const PAGES_W: f32 = 230.0;
@@ -28,6 +29,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     NOTICE.with(|n| n.set(Some(notice)));
     let size = Scale::new();
     view()
+        .test_id("settings-layer")
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::Settings.accessibility_covered(ui)
+        })
         .absolute()
         .inset_0()
         .pointer_events(PointerEvents::BoxNone)
@@ -36,6 +41,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             move || notice.with(Option::is_some),
             move || {
                 view()
+                    .role(AccessibilityRole::Alert)
                     .absolute()
                     .left(px(0.0))
                     .w_full()
@@ -72,12 +78,20 @@ fn screen(ui: Ui, size: Scale) -> impl IntoElement {
         .inset_0()
         .flex_row()
         // The guide (or video) stays visible, dimmed; a tap there closes.
-        .child(view().flex_1().bg(tint(0x000000, 0x90)).on_press(move || {
-            ui.touched();
-            close(ui);
-        }))
         .child(
             view()
+                .flex_1()
+                .accessibility_elements_hidden(move || editing.get())
+                .bg(tint(0x000000, 0x90))
+                .on_press(move || {
+                    ui.touched();
+                    close(ui);
+                }),
+        )
+        .child(
+            view()
+                .test_id("settings-content")
+                .accessibility_elements_hidden(move || editing.get())
                 .w(move || size.px(PANEL_W))
                 .max_w(percentage(0.92))
                 .pt_safe_area()
@@ -149,6 +163,11 @@ fn pages(ui: Ui, size: Scale) -> impl IntoElement {
         };
         let mark = move || Mark::of(focused(), is_chosen());
         list_rows::row(size, ROW, mark)
+            .role(AccessibilityRole::Tab)
+            .accessibility_state(move || AccessibilityState {
+                selected: is_chosen(),
+                ..Default::default()
+            })
             .on_press(move || {
                 ui.touched();
                 let i = at.index();
@@ -277,7 +296,50 @@ fn row_view(
         (false, true) => ROW,
         (false, false) => ROW_TWO,
     };
+    let is_toggle = move || match row() {
+        Some(Row::Setting(s)) => matches!(s.ty, ValueType::Bool { .. }),
+        _ => false,
+    };
+    let bool_val = move || {
+        let settings = crate::settings::read(ui);
+        match row() {
+            Some(Row::Setting(s)) => match s.ty {
+                ValueType::Bool { .. } => settings.get(s.key) == Ok(Value::Bool(true)),
+                _ => false,
+            },
+            _ => false,
+        }
+    };
     list_rows::row_with(size, pitch, mark)
+        .role(move || {
+            if heading() {
+                AccessibilityRole::Header
+            } else if is_toggle() {
+                AccessibilityRole::Switch
+            } else {
+                AccessibilityRole::Button
+            }
+        })
+        .accessibility_state(move || {
+            if heading() {
+                AccessibilityState::default()
+            } else if is_toggle() {
+                AccessibilityState {
+                    disabled: !lit(),
+                    checked: Some(if bool_val() {
+                        Checked::True
+                    } else {
+                        Checked::False
+                    }),
+                    ..Default::default()
+                }
+            } else {
+                AccessibilityState {
+                    disabled: !lit(),
+                    ..Default::default()
+                }
+            }
+        })
         .flex_row()
         .items_center()
         .justify_start()
@@ -344,8 +406,15 @@ fn footer(ui: Ui, size: Scale) -> impl IntoElement {
             Some(Row::Command(c)) => words::description(c.key).unwrap_or(c.summary).to_owned(),
             _ => match counts(s.page()) {
                 (_, 0) | (0, 1) => String::new(),
-                (0, all) => format!("{all} settings here, none available yet"),
-                (active, all) => format!("{active} of {all} settings here can be changed now"),
+                (0, all) => trf(
+                    "{count, plural, one {# setting here, not available yet} \
+                     other {# settings here, none available yet}}",
+                    &[("count", all.into())],
+                ),
+                (active, all) => trf(
+                    "{active} of {all} settings here can be changed now",
+                    &[("active", active.into()), ("all", all.into())],
+                ),
             },
         })
         .unwrap_or_default()

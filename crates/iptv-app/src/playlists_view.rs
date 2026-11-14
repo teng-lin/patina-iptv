@@ -13,7 +13,7 @@
 //! action is tappable; a tap beside a sheet closes it. Text entry uses the
 //! wizard's sheet (`wizard_view::entry`). Wording is iptv-rs's own.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 use iptv_library::details;
 mod details_card;
@@ -241,6 +241,13 @@ fn mark(ui: Ui, focused: bool) -> Mark {
     Mark::of(focused && ui.keys_shown(), false)
 }
 
+fn contents_hidden(ui: Ui) -> bool {
+    state(ui, |screen| {
+        screen.layer() != Layer::List || screen.editing().is_some()
+    })
+    .unwrap_or(false)
+}
+
 pub fn layer(ui: Ui) -> impl IntoElement {
     // What is stored changed (refreshed, renamed, deleted, added): reload.
     effect(move || {
@@ -285,8 +292,18 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         move || is_open(ui),
         move || {
             ui_kit::screen(ui, size)
-                .child(ui_kit::header(ui, size, move || tr("Playlists"), close))
-                .child(ui_kit::caption(size, move || hint(ui)))
+                .test_id("playlists-screen")
+                .accessibility_elements_hidden(move || {
+                    crate::overlays::Overlay::Playlists.accessibility_covered(ui)
+                })
+                .child(
+                    ui_kit::header(ui, size, move || tr("Playlists"), close)
+                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
+                .child(
+                    ui_kit::caption(size, move || hint(ui))
+                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
                 .child(list(ui, size))
                 .child(sheet(ui, size))
                 .child(dynamic(move || {
@@ -300,14 +317,20 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     )
 }
 
+fn yes_no(yes: bool) -> &'static str {
+    if yes { tr("Yes") } else { tr("No") }
+}
+
 fn hint(ui: Ui) -> &'static str {
     let layer = state(ui, Screen::layer).unwrap_or(Layer::List);
     match (ui.keys_shown(), layer) {
-        (true, Layer::List) => "▲▼ choose   OK actions   Back close",
-        (true, Layer::Actions { .. }) => "▲▼ choose   OK do it   Back close the sheet",
-        (true, Layer::Confirm { .. }) => "▲▼ choose   OK confirm   Back keep it",
-        (true, Layer::Details { .. }) => "▲▼ choose   OK change or check   Back leave unchanged",
-        (false, _) => "Tap a playlist for what you can do with it",
+        (true, Layer::List) => tr("▲▼ choose   OK actions   Back close"),
+        (true, Layer::Actions { .. }) => tr("▲▼ choose   OK do it   Back close the sheet"),
+        (true, Layer::Confirm { .. }) => tr("▲▼ choose   OK confirm   Back keep it"),
+        (true, Layer::Details { .. }) => {
+            tr("▲▼ choose   OK change or check   Back leave unchanged")
+        }
+        (false, _) => tr("Tap a playlist for what you can do with it"),
     }
 }
 
@@ -324,6 +347,8 @@ fn list(ui: Ui, size: Scale) -> impl IntoElement {
         }
     });
     virtual_list(count, move |at| row(ui, size, at.index(), focused_index))
+        .test_id("playlists-list")
+        .accessibility_elements_hidden(move || contents_hidden(ui))
         .estimated_item_size(list_rows::pitch(size, ROW_THREE))
         .element_ref(&rows)
         .flex_1()
@@ -351,17 +376,17 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
     };
     let title = move || match (playlist(), item()) {
         (Some(p), _) => p.name,
-        (None, Some(Item::RefreshAll)) => "Refresh all playlists".to_owned(),
-        (None, Some(Item::AllPlaylists)) => "All playlists".to_owned(),
-        _ => "+ Add playlist".to_owned(),
+        (None, Some(Item::RefreshAll)) => tr("Refresh all playlists").to_owned(),
+        (None, Some(Item::AllPlaylists)) => tr("All playlists").to_owned(),
+        _ => tr("+ Add playlist").to_owned(),
     };
     let summary = move || match (playlist(), item()) {
         (Some(p), _) => words::summary(&p),
         (None, Some(Item::RefreshAll)) => {
-            "Each one downloads again; the one on screen updates in place".to_owned()
+            tr("Each one downloads again; the one on screen updates in place").to_owned()
         }
-        (None, Some(Item::AllPlaylists)) => "Browse enabled playlists together".to_owned(),
-        _ => "M3U link or file, Xtream Codes login, Stalker portal".to_owned(),
+        (None, Some(Item::AllPlaylists)) => tr("Browse enabled playlists together").to_owned(),
+        _ => tr("M3U link or file, Xtream Codes login, Stalker portal").to_owned(),
     };
     let mark = move || mark(ui, focused_index.get() == Some(index));
     list_rows::row(size, ROW_THREE, mark)
@@ -417,7 +442,7 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
                 ),
         )
         .child(
-            ui_kit::caption(size, move || if shown() { "On screen" } else { "" }).text_color(
+            ui_kit::caption(size, move || if shown() { tr("On screen") } else { "" }).text_color(
                 move || match mark() {
                     Mark::Focused => Mark::Focused.text(),
                     _ => rgb(ui.theme.with(|t| t.accent.light)),
@@ -458,6 +483,9 @@ enum Sheet {
 
 fn backdrop(ui: Ui, card: AnyElement) -> View {
     view()
+        .accessibility_elements_hidden(move || {
+            state(ui, |screen| screen.editing().is_some()).unwrap_or(false)
+        })
         .absolute()
         .inset_0()
         .items_center()
@@ -501,24 +529,26 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
             let shown = ui.library.shown.get() == Some(id);
             let kind = playlist().map(|p| p.kind);
             match (act, playlist()) {
-                (Act::Enabled, Some(p)) => format!(
-                    "Playlist enabled: {}",
-                    if p.policy.enabled { "Yes" } else { "No" }
+                (Act::Enabled, Some(p)) => trf(
+                    "Playlist enabled: {answer}",
+                    &[("answer", yes_no(p.policy.enabled).into())],
                 ),
-                (Act::RefreshInterval, Some(p)) => format!(
-                    "Automatic refresh: {}",
-                    match p.policy.refresh_seconds {
+                (Act::RefreshInterval, Some(p)) => {
+                    let every = match p.policy.refresh_seconds {
                         0 => tr("Off").to_owned(),
-                        n => format!("every {} hours", n / 3600),
-                    }
-                ),
-                (Act::RefreshOnStart, Some(p)) => format!(
-                    "Refresh on startup: {}",
-                    if p.policy.refresh_on_start {
-                        "Yes"
-                    } else {
-                        "No"
-                    }
+                        n => trf(
+                            "{count, plural, one {every hour} other {every # hours}}",
+                            &[("count", (n / 3600).into())],
+                        ),
+                    };
+                    trf(
+                        "Automatic refresh: {interval}",
+                        &[("interval", (&every).into())],
+                    )
+                }
+                (Act::RefreshOnStart, Some(p)) => trf(
+                    "Refresh on startup: {answer}",
+                    &[("answer", yes_no(p.policy.refresh_on_start).into())],
                 ),
                 _ => words::act(act, kind, shown, running()).to_owned(),
             }
@@ -581,7 +611,7 @@ fn confirm_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
             .map(|r| r.name.as_str());
         let shown = ui.library.shown.get_untracked() == Some(id);
         (
-            format!("Delete “{}”?", p.name),
+            trf("Delete “{name}”?", &[("name", (&p.name).into())]),
             words::delete_consequences(p, next, shown),
         )
     })
@@ -596,7 +626,7 @@ fn confirm_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
         .child(ui_kit::action(
             ui,
             size,
-            "Keep it",
+            tr("Keep it"),
             focused(false),
             WHITE,
             move || {
@@ -634,10 +664,10 @@ fn set_edit_text(ui: Ui, text: &str) {
 fn edit_sheet(ui: Ui, kind: EditKind, prefilled: bool) -> View {
     let mut masked = false;
     let (label, placeholder, url) = match kind {
-        EditKind::Rename => ("Playlist name", "How the playlist is listed", false),
+        EditKind::Rename => (tr("Playlist name"), tr("How the playlist is listed"), false),
         EditKind::UserAgent => (
-            "User-Agent",
-            "Empty: the app's own; some providers ask for a particular one",
+            tr("User-Agent"),
+            tr("Empty: the app's own; some providers ask for a particular one"),
             false,
         ),
         EditKind::Param(p) => {

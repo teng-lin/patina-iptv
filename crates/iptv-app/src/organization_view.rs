@@ -1,4 +1,5 @@
 //! Channel and provider-group organization, including hidden-item recovery.
+use crate::i18n::{tr, trf};
 use crate::list_rows::{self, Mark, ROW};
 use crate::runtime::model::{SourceId, StoreError};
 use crate::scale::Scale;
@@ -232,33 +233,33 @@ fn label(edit: Edit, hidden: bool) -> &'static str {
     match edit {
         Edit::Visibility => {
             if hidden {
-                "Show item"
+                tr("Show item")
             } else {
-                "Hide item"
+                tr("Hide item")
             }
         }
-        Edit::Rename => "Rename",
-        Edit::ResetName => "Use provider name",
-        Edit::Earlier => "Move earlier",
-        Edit::Later => "Move later",
-        Edit::First => "Move to first",
-        Edit::Last => "Move to last",
-        Edit::ResetOrder => "Restore provider order",
-        Edit::Select => "Select / deselect for bulk visibility",
-        Edit::HideSelected => "Hide selected",
-        Edit::ShowSelected => "Show selected",
-        Edit::HideAll => "Hide all",
-        Edit::ShowAll => "Show all",
+        Edit::Rename => tr("Rename"),
+        Edit::ResetName => tr("Use provider name"),
+        Edit::Earlier => tr("Move earlier"),
+        Edit::Later => tr("Move later"),
+        Edit::First => tr("Move to first"),
+        Edit::Last => tr("Move to last"),
+        Edit::ResetOrder => tr("Restore provider order"),
+        Edit::Select => tr("Select / deselect for bulk visibility"),
+        Edit::HideSelected => tr("Hide selected"),
+        Edit::ShowSelected => tr("Show selected"),
+        Edit::HideAll => tr("Hide all"),
+        Edit::ShowAll => tr("Show all"),
     }
 }
 /// The screen's title for what it arranges.
 fn screen_title(kind: &Kind) -> &'static str {
     match kind {
-        Kind::Groups => "Organize groups",
-        Kind::Favorites => "Order favourites",
-        Kind::GroupChannels(_) => "Organize group channels",
-        Kind::CustomChannels(_) => "Order custom-group members",
-        Kind::Channels => "Organize channels",
+        Kind::Groups => tr("Organize groups"),
+        Kind::Favorites => tr("Order favourites"),
+        Kind::GroupChannels(_) => tr("Organize group channels"),
+        Kind::CustomChannels(_) => tr("Order custom-group members"),
+        Kind::Channels => tr("Organize channels"),
     }
 }
 
@@ -266,19 +267,15 @@ fn screen_title(kind: &Kind) -> &'static str {
 fn screen_caption(kind: &Kind) -> &'static str {
     match kind {
         Kind::Favorites => {
-            "Order applies to favourites. Names and visibility apply across this playlist."
+            tr("Order applies to favourites. Names and visibility apply across this playlist.")
         }
-        Kind::GroupChannels(_) => {
-            "Order applies only to this group. \
-             Names and visibility apply across this playlist."
-        }
+        Kind::GroupChannels(_) => tr("Order applies only to this group. \
+                Names and visibility apply across this playlist."),
         Kind::CustomChannels(_) => {
-            "Order applies only to these members. Edit membership in Custom groups."
+            tr("Order applies only to these members. Edit membership in Custom groups.")
         }
-        _ => {
-            "Includes hidden items. OK opens actions; \
-             select items for bulk hide/show. Back returns."
-        }
+        _ => tr("Includes hidden items. OK opens actions; \
+                select items for bulk hide/show. Back returns."),
     }
 }
 
@@ -297,16 +294,32 @@ fn item_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
         item()
             .map(|i| {
                 let selected = state(ui, |s| s.editor.selected.contains(&i.id)).unwrap_or(false);
-                format!(
-                    "{}{}",
-                    if selected { "Selected · " } else { "" },
-                    if i.hidden { "Hidden" } else { "Visible" }
-                )
+                let shown = if i.hidden {
+                    tr("Hidden")
+                } else {
+                    tr("Visible")
+                };
+                if selected {
+                    trf("Selected · {state}", &[("state", shown.into())])
+                } else {
+                    shown.to_owned()
+                }
             })
             .unwrap_or_default()
     };
+    let is_selected = move || {
+        state(ui, |s| {
+            item().is_some_and(|i| s.editor.selected.contains(&i.id))
+        })
+        .unwrap_or(false)
+    };
     list_rows::row(size, ROW, mark)
         .test_id(&format!("organization-row-{}", at.index()))
+        .role(AccessibilityRole::Row)
+        .accessibility_state(move || AccessibilityState {
+            selected: is_selected(),
+            ..Default::default()
+        })
         .flex_row()
         .items_center()
         .on_press(move || {
@@ -332,6 +345,9 @@ fn actions_sheet(ui: Ui, size: Scale) -> impl IntoElement {
             .unwrap_or_default()
     };
     view()
+        .accessibility_elements_hidden(move || {
+            state(ui, |screen| screen.editor.text.is_some()).unwrap_or(false)
+        })
         .absolute()
         .inset_0()
         .items_center()
@@ -386,8 +402,8 @@ fn action_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
 /// The sheet that edits an item's display name.
 fn name_sheet() -> TextSheet {
     TextSheet {
-        label: "Display name",
-        placeholder: "Empty restores the provider name",
+        label: tr("Display name"),
+        placeholder: tr("Empty restores the provider name"),
         url: false,
         masked: false,
         text: text_value,
@@ -395,6 +411,13 @@ fn name_sheet() -> TextSheet {
         commit,
         cancel,
     }
+}
+
+fn contents_hidden(ui: Ui) -> bool {
+    state(ui, |screen| {
+        screen.editor.action.is_some() || screen.editor.text.is_some()
+    })
+    .unwrap_or(false)
 }
 
 pub fn layer(ui: Ui) -> impl IntoElement {
@@ -430,18 +453,32 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             });
             ui_kit::screen(ui, size)
                 .test_id("organization-screen")
-                .child(ui_kit::header(
-                    ui,
-                    size,
-                    move || state(ui, |s| screen_title(&s.kind)).unwrap_or("Organize channels"),
-                    close,
-                ))
-                .child(ui_kit::caption(size, move || {
-                    state(ui, |s| screen_caption(&s.kind)).unwrap_or("")
-                }))
+                .accessibility_elements_hidden(move || {
+                    crate::overlays::Overlay::Organization.accessibility_covered(ui)
+                })
+                .child(
+                    ui_kit::header(
+                        ui,
+                        size,
+                        move || {
+                            state(ui, |s| screen_title(&s.kind)).unwrap_or(tr("Organize channels"))
+                        },
+                        close,
+                    )
+                    .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
+                .child(
+                    ui_kit::caption(size, move || {
+                        state(ui, |s| screen_caption(&s.kind)).unwrap_or("")
+                    })
+                    .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
                 .child(when(
                     move || state(ui, |s| s.editor.items.is_empty()).unwrap_or(true),
-                    move || ui_kit::body(size, "This playlist has no items to organize."),
+                    move || {
+                        ui_kit::body(size, tr("This playlist has no items to organize."))
+                            .accessibility_elements_hidden(move || contents_hidden(ui))
+                    },
                 ))
                 .child(
                     virtual_list(
@@ -450,6 +487,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     )
                     .estimated_item_size(list_rows::pitch(size, ROW))
                     .element_ref(&rows)
+                    .accessibility_elements_hidden(move || contents_hidden(ui))
                     .flex_1(),
                 )
                 .child(when(

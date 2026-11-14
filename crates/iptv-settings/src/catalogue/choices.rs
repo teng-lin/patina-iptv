@@ -195,6 +195,12 @@ pub static KEYBOARD: Choices = Choices {
     variants: &["system", "built_in"],
 };
 
+/// The clock times are written on: the locale's own, or one fixed.
+pub static CLOCK: Choices = Choices {
+    family: "clock",
+    variants: &["auto", "h12", "h24"],
+};
+
 pub static PLAYLIST_OPENS: Choices = Choices {
     family: "playlist_opens",
     variants: &["all_channels", "favorites"],
@@ -234,6 +240,7 @@ pub static ALL: &[&Choices] = &[
     &UNLOCK_WINDOW,
     &PIN_INPUT,
     &KEYBOARD,
+    &CLOCK,
     &PLAYLIST_OPENS,
     &CARD_STYLE,
 ];

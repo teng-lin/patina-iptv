@@ -62,7 +62,18 @@ pub(super) fn cell(
             .and_then(|ch| crate::schedule().channel_logo(ch))
             .unwrap_or_else(no_logo)
     };
+    let is_selected = move || ui.focus.with(|f| f.channel == at.index());
     view()
+        .accessible(true)
+        .label(move || {
+            ui.guide_data();
+            channel.get().map(channel_name).unwrap_or_default()
+        })
+        .role(AccessibilityRole::Button)
+        .accessibility_state(move || AccessibilityState {
+            selected: is_selected(),
+            ..Default::default()
+        })
         .w(move || px(column()))
         .px(move || size.px(PAD))
         .flex_row()

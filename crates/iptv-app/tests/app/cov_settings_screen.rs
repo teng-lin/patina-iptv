@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
+use nsh_core::Checked;
 use nsh_core::picker::PickedFile;
 use nsh_core::{ImageData, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
@@ -157,6 +158,7 @@ fn menu(app: &mut Headless) {
     // The menu names the programme, the channel and the list; items the
     // app cannot do yet do nothing.
     open_menu(app);
+    assert!(app.screen().matches("role:menuitem").unwrap());
     step(app.wait_for("text:/^Quiet Harbour · /"));
     step(app.wait_for("text:Test Channel One >> nth=1"));
     step(app.press("text:Block channel"));
@@ -234,6 +236,7 @@ fn favourites(app: &mut Headless) {
     step(app.press("text:Manage favourites…"));
     step(app.wait_for("text:/^Favourites · .* · 1 of 2$/"));
     step(app.wait_for("text:Tap a channel to add or remove it"));
+    assert!(app.screen().matches("role:checkbox").unwrap());
     // Keys: Left removes all, Right adds all, OK toggles the focused one.
     step(app.press_key("left"));
     step(app.wait_for("text:/ · 0 of 2$/"));
@@ -340,6 +343,14 @@ fn settings(app: &mut Headless, home: &Path) {
     open_menu(app);
     step(app.press(MENU_SETTINGS));
     step(app.wait_for("text:Play the last channel on start"));
+    assert!(app.screen().matches("role:tab").unwrap());
+    assert!(app.screen().matches("role:switch").unwrap());
+    assert!(
+        !app.screen()
+            .accessibility_state("role:switch[/Play the last channel on start/]")
+            .unwrap()
+            .selected
+    );
     // The pages, by keys: the hint, and what the page offers.
     step(app.press_key("down"));
     step(app.press_key("up"));
@@ -364,7 +375,9 @@ fn settings(app: &mut Headless, home: &Path) {
     std::fs::create_dir(&blocked).unwrap();
     row_value(app, "Play the last channel on start", "On");
     step(app.press_key("enter"));
-    step(app.wait_for("text:/Could not save settings/"));
+    step(
+        app.wait_for("text:Settings could not be saved. Check storage permissions and try again."),
+    );
     row_value(app, "Play the last channel on start", "On");
     std::fs::remove_dir(&blocked).unwrap();
     // Retrying persists the setting once the write failure is removed.
@@ -432,6 +445,7 @@ fn appearance(app: &mut Headless, home: &Path) {
     row_value(app, "Accent colour", "Blue");
     step(app.press("text:Accent colour >> nth=0"));
     step(app.wait_for("text:✓  Blue"));
+    assert!(app.screen().matches("role:option").unwrap());
     step(app.press("text:Red"));
     step(app.wait_for_gone("text:✓  Blue", GONE));
     row_value(app, "Accent colour", "Red");
@@ -580,6 +594,7 @@ fn leaving(app: &mut Headless) {
     step(app.press_key("left"));
     step(app.press_key("backspace"));
     step(app.wait_for("text:Press Back again to leave"));
+    assert!(app.screen().matches("role:alert").unwrap());
     step(app.press_key("backspace"));
     step(app.wait_for_gone("text:Press Back again to leave", Duration::from_secs(6)));
 
@@ -591,8 +606,20 @@ fn leaving(app: &mut Headless) {
     step(app.wait_for("text:General >> nth=0"));
     step(app.press("text:General >> nth=0"));
     step(app.wait_for("text:Press Back twice to leave"));
+    let switch = app
+        .screen()
+        .accessibility_state("role:switch[/Press Back twice to leave/]")
+        .unwrap();
+    assert_eq!(switch.checked, Some(Checked::True));
+    assert!(!switch.selected);
     step(app.press("text:Press Back twice to leave"));
     row_value(app, "Press Back twice to leave", "Off");
+    let switch = app
+        .screen()
+        .accessibility_state("role:switch[/Press Back twice to leave/]")
+        .unwrap();
+    assert_eq!(switch.checked, Some(Checked::False));
+    assert!(!switch.selected);
     // A key the screen has no use for changes nothing.
     step(app.press_key("space"));
     row_value(app, "Press Back twice to leave", "Off");

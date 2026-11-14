@@ -6,13 +6,14 @@
 //! wording is ours. Entries are taken when a chooser
 //! opens; Up/Down move, OK (or a tap) picks and closes, Back closes.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 use std::time::Duration;
 
 use iptv_core::player_options::{Chooser, PictureSize, SLEEP_MINUTES};
 use iptv_core::sound::{audio_delays, delay_label};
 use iptv_core::tracks::Kind as Track;
+use nsh_core::Checked;
 use nsh_core::prelude::*;
 
 use crate::list_rows::{self, Mark, ROW};
@@ -66,13 +67,13 @@ pub fn picture_name(ui: Ui) -> &'static str {
 
 fn title(kind: Kind) -> &'static str {
     match kind {
-        Kind::Picture => "Picture size",
+        Kind::Picture => tr("Picture size"),
         Kind::Sleep => tr("Sleep timer"),
         Kind::Track(Track::Video) => tr("Video"),
         Kind::Track(Track::Audio) => tr("Audio"),
         Kind::Track(Track::Text) => tr("Subtitles"),
         Kind::AudioDelay => tr("Audio delay"),
-        Kind::History => "Recently watched",
+        Kind::History => tr("Recently watched"),
     }
 }
 
@@ -93,7 +94,12 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
         Kind::Sleep => {
             let labels = [tr("Off").to_owned()]
                 .into_iter()
-                .chain(SLEEP_MINUTES.iter().map(|m| format!("{m} minutes")))
+                .chain(SLEEP_MINUTES.iter().map(|m| {
+                    trf(
+                        "{count, plural, one {# minute} other {# minutes}}",
+                        &[("count", (*m).into())],
+                    )
+                }))
                 .collect();
             let at = ui
                 .sleep
@@ -112,7 +118,10 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
         Kind::AudioDelay => {
             let now = ui.media.delay_ms.get_untracked();
             let delays = audio_delays();
-            let labels = delays.iter().map(|d| delay_label(*d)).collect();
+            let labels = delays
+                .iter()
+                .map(|d| delay_label(crate::i18n::language(), *d))
+                .collect();
             let at = delays.iter().position(|d| *d >= now);
             (labels, Vec::new(), at.unwrap_or(delays.len() / 2))
         }
@@ -272,8 +281,19 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 })
             })
         };
+        let selected = move || entry().is_some_and(|(_, checked, _)| checked);
         let mark = move || Mark::of(ui.keys_shown() && entry().is_some_and(|(_, _, f)| f), false);
         list_rows::row(size, ROW, mark)
+            .role(AccessibilityRole::Option)
+            .accessibility_state(move || AccessibilityState {
+                selected: selected(),
+                checked: Some(if selected() {
+                    Checked::True
+                } else {
+                    Checked::False
+                }),
+                ..Default::default()
+            })
             .on_press(move || {
                 ui.touched();
                 pick(ui, at.index());
@@ -305,6 +325,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             } else {
                 40.0
             })
+        })
+        .test_id("chooser-layer")
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::Chooser.accessibility_hidden(ui)
         })
         .opacity(move || if open() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {

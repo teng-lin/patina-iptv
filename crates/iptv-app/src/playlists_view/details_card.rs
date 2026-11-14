@@ -1,5 +1,5 @@
 //! The provider details form on screen: one row per detail (logins and MAC
-//! addresses hidden), "Check and save", and what the check is doing or why
+//! addresses hidden), tr("Check and save"), and what the check is doing or why
 //! it refused the new details.
 
 use crate::runtime::model::SourceId;
@@ -8,6 +8,7 @@ use nsh_core::prelude::*;
 use super::details::Param;
 use super::{ERROR, WHITE, mark, state, update, words};
 use crate::data::Activity;
+use crate::i18n::{tr, trf};
 use crate::list_rows::{self, ROW_TWO};
 use crate::scale::Scale;
 use crate::ui_kit;
@@ -26,7 +27,13 @@ pub(super) fn card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
         }
         match ui.library.activity.with(|a| a.get(&id).cloned()) {
             Some(Activity::Checking(progress)) if checking() => (
-                format!("Checking: {}", crate::wizard_view::words::stage(progress)),
+                trf(
+                    "Checking: {stage}",
+                    &[(
+                        "stage",
+                        (&crate::wizard_view::words::stage(progress)).into(),
+                    )],
+                ),
                 false,
             ),
             Some(Activity::Rejected(f)) if !checking() => (words::rejected(f), true),
@@ -69,9 +76,9 @@ pub(super) fn card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
         move || state(ui, |s| s.details().is_some_and(|f| f.focus.is_none())).unwrap_or(false);
     let check_label = move || {
         if checking() {
-            "Checking…"
+            tr("Checking…")
         } else {
-            "Check and save"
+            tr("Check and save")
         }
         .to_owned()
     };
@@ -79,7 +86,7 @@ pub(super) fn card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
         .child(ui_kit::title(size, words::details_title(kind)))
         .child(ui_kit::body(
             size,
-            "New details are tried first: the playlist keeps its old ones and its channels unless the new ones work.",
+            tr("New details are tried first: the playlist keeps its old ones and its channels unless the new ones work."),
         ))
         .child(view().h(move || size.px(4.0)))
         .children(params.iter().copied().map(row))
@@ -87,7 +94,7 @@ pub(super) fn card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
             move || state(ui, |s| s.details().is_some_and(|f| {
                 f.params().iter().any(|p| p.is_link() && f.value(*p).trim().to_ascii_lowercase().starts_with("http://"))
             })).unwrap_or(false),
-            move || ui_kit::caption(size, "Not encrypted: HTTP can expose your login and viewing activity."),
+            move || ui_kit::caption(size, tr("Not encrypted: HTTP can expose your login and viewing activity.")),
         ))
         .child(ui_kit::action(ui, size, check_label, check_focused, WHITE, move || {
             update(ui, |s| s.check());

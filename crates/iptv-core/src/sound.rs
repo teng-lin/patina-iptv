@@ -50,13 +50,14 @@ pub fn audio_delays() -> Vec<i32> {
     (-20..=20).map(|i| i * 50).collect()
 }
 
-/// "+150 ms", "0 ms", "−200 ms".
-pub fn delay_label(ms: i32) -> String {
-    match ms {
-        0 => "0 ms".to_owned(),
-        ms if ms > 0 => format!("+{ms} ms"),
-        ms => format!("−{} ms", ms.unsigned_abs()),
-    }
+/// "+150 ms", "0 ms", "−200 ms", with the unit as `language` writes it.
+pub fn delay_label(language: &crate::i18n::Language, ms: i32) -> String {
+    let value = match ms {
+        0 => "0".to_owned(),
+        ms if ms > 0 => format!("+{ms}"),
+        ms => format!("−{}", ms.unsigned_abs()),
+    };
+    crate::i18n::format(language, "{value} ms", &[("value", (&value).into())])
 }
 
 #[cfg(test)]
@@ -83,8 +84,16 @@ mod tests {
     fn delays_are_symmetric_around_zero() {
         let d = audio_delays();
         assert_eq!((d.len(), d[0], d[20], d[40]), (41, -1000, 0, 1000));
-        assert_eq!(delay_label(150), "+150 ms");
-        assert_eq!(delay_label(0), "0 ms");
-        assert_eq!(delay_label(-200), "−200 ms");
+        let english = crate::i18n::resolve("en", None);
+        assert_eq!(delay_label(english, 150), "+150 ms");
+        assert_eq!(delay_label(english, 0), "0 ms");
+        assert_eq!(delay_label(english, -200), "−200 ms");
+        // The unit is the language's own.
+        let russian = crate::i18n::resolve("ru", None);
+        assert_eq!(delay_label(russian, 150), "+150 мс");
+        assert_eq!(
+            delay_label(crate::i18n::resolve("ja", None), -200),
+            "−200ミリ秒"
+        );
     }
 }

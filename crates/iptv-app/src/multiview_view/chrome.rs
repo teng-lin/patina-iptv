@@ -47,6 +47,7 @@ pub fn toolbar(ui: Ui) -> impl IntoElement {
     let limit = move || with_state(ui, device_limit).flatten();
     let pill = move |words: &'static str, name: &'static str, act: fn(Ui)| {
         view()
+            .role(AccessibilityRole::Button)
             .px(px(16.0))
             .py(px(8.0))
             .rounded(px(RADIUS_LARGE))
@@ -64,6 +65,9 @@ pub fn toolbar(ui: Ui) -> impl IntoElement {
         move || shown.get(),
         move || {
             view()
+                .accessibility_elements_hidden(move || {
+                    with_state(ui, |state| state.dialog().is_some()).unwrap_or(false)
+                })
                 .absolute()
                 .top(px(12.0))
                 .left(px(0.0))
@@ -137,6 +141,7 @@ pub fn tile_buttons(ui: Ui, index: usize) -> impl IntoElement {
     };
     let button = move |icon: Box<dyn Fn() -> Icon>, act: fn(Ui, usize)| {
         view()
+            .role(AccessibilityRole::Button)
             .w(px(size))
             .h(px(size))
             .rounded(px(size / 2.0))

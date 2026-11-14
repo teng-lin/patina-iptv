@@ -137,6 +137,25 @@ pub enum SaveError {
     Durability(std::io::ErrorKind),
 }
 
+/// What the UI must distinguish after an asynchronous save failure.
+/// Detailed OS errors remain in diagnostics, outside user-facing messages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SaveFailure {
+    /// The write did not publish a replacement settings file.
+    NotPublished,
+    /// The replacement is live, but its directory synchronization failed.
+    DurabilityUnconfirmed,
+}
+
+impl From<WriteError> for SaveFailure {
+    fn from(error: WriteError) -> Self {
+        match error {
+            WriteError::Storage(_) => Self::NotPublished,
+            WriteError::Durability(_) => Self::DurabilityUnconfirmed,
+        }
+    }
+}
+
 impl From<WriteError> for SaveError {
     fn from(error: WriteError) -> Self {
         match error {
@@ -206,9 +225,8 @@ pub fn set(key: &str, value: Value) -> Result<(), SaveError> {
             Settled::Failed => {}
         }
         if let Err(error) = result {
-            let error = SaveError::from(error);
-            log::warn!("iptv settings: {error}");
-            crate::current().emit(super::RuntimeEvent::Message(error.to_string()));
+            log::warn!("iptv settings: {}", SaveError::from(error));
+            crate::current().emit(super::RuntimeEvent::SettingsSaveFailed(error.into()));
         }
     });
     Ok(())
@@ -328,6 +346,11 @@ mod persistence_tests {
             result.map_err(SaveError::from),
             Err(SaveError::Durability(_))
         ));
+        assert_eq!(
+            SaveFailure::from(result.unwrap_err()),
+            SaveFailure::DurabilityUnconfirmed,
+            "a published value must not be reported as unsaved"
+        );
         assert_eq!(settle(result), Settled::Saved, "the live settings stay");
         assert_eq!(read_file(&path), next, "restart must read the live setting");
         assert!(!path.with_extension("json.tmp").exists());
@@ -347,6 +370,10 @@ mod persistence_tests {
             .unwrap();
         let result = write_file(&path, &changed);
         assert!(result.is_err());
+        assert_eq!(
+            SaveFailure::from(result.unwrap_err()),
+            SaveFailure::NotPublished
+        );
         assert_eq!(settle(result), Settled::Failed, "the live settings go back");
         assert_eq!(read_file(&path), saved);
         std::fs::remove_dir(path.with_extension("json.tmp")).unwrap();

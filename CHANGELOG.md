@@ -24,6 +24,16 @@ is below 1.0, a minor release may change behaviour.
   throwaway key made for the run, macOS and Windows as unsigned previews.
 - Coverage floors enforced per library crate in CI, split fuzz targets with persistent corpus storage, and scaled scenario wait timeouts for slow CI runners.
 - `docs/architecture.md`, `CONTRIBUTING.md`, `SECURITY.md`, issue/PR templates, CODEOWNERS, and audit documentation.
+- Counts, dates and times follow the interface language: plural forms by
+  each language's rules (`1 канал`, `2 канала`, `5 каналов`), weekday and
+  month names in the language, and a 12-hour or 24-hour clock
+  (**Settings → General → Clock**; by default the language's own convention).
+- Adding and refreshing playlists and guide sources with their failures,
+  backup and restore, organising channels and groups, custom groups, choosing
+  a channel's guide data and the remote-key editor are translated in all
+  eleven languages. Translation of the rest is still partial; see
+  `docs/localization.md`.
+
 - Unsigned macOS and Windows packages are announced as previews in the release
   notes. The Windows installer is signed through Azure Trusted Signing and the
   macOS app notarized when their credentials are configured.
@@ -42,6 +52,11 @@ is below 1.0, a minor release may change behaviour.
 - The NSH fork commit is recorded in `nsh.rev`. Clone that exact commit;
   `tools/check.sh` refuses another one unless `IPTV_ALLOW_NSH_DRIFT=1` is set.
 - The minimum supported Rust version is the pinned toolchain, 1.99.1.
+- Automatic clock format follows CLDR 49 regional conventions (including
+  Spanish in Mexico and numeric Latin America locales), with Unicode
+  hour-cycle extensions and **Settings → General → Clock** overrides.
+- The remote-key editor names the screen a binding applies in (`Guide`,
+  `Player controls`) where it showed an internal name (`guide`, `controls`).
 - Package scripts work without `rustup`, using the Cargo on `PATH`.
 - Strict Gradle dependency verification enabled for the Android host.
 - All tracked lines under `crates/` wrapped to under 200 bytes and the check exemption list eliminated.

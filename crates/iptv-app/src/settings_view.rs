@@ -15,7 +15,7 @@
 //! own (`words`). Also the short notices of the app (`notify`), such as
 //! the second Back that leaves (`may_leave`).
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 mod editors;
 pub(crate) mod remote_keys;
@@ -220,7 +220,7 @@ fn run(ui: Ui, key: &'static str) {
             if stored::update_now(move || refresh(ui)) {
                 refresh(ui);
             } else {
-                notify("This playlist has no guide source switched on");
+                notify(tr("This playlist has no guide source switched on"));
             }
         }
         // The playlist on screen's guide sources, over the settings screen.
@@ -231,21 +231,21 @@ fn run(ui: Ui, key: &'static str) {
             Some(playlist) => crate::epg_sources_view::open(ui, playlist),
             None if crate::data::combined::active() => {
                 crate::playlists_view::open(ui);
-                notify("Choose a playlist to manage its guide sources");
+                notify(tr("Choose a playlist to manage its guide sources"));
             }
-            None => notify("No playlist on screen"),
+            None => notify(tr("No playlist on screen")),
         },
         "epg.clear" => {
             let cleared = stored::clear(move |deleted| {
                 notify(if deleted {
-                    "Guide data deleted"
+                    tr("Guide data deleted")
                 } else {
-                    "The guide data could not be deleted"
+                    tr("The guide data could not be deleted")
                 });
                 refresh(ui);
             });
             if !cleared {
-                notify("No playlist on screen");
+                notify(tr("No playlist on screen"));
             }
         }
         "remote.customize" => crate::remote_editor::open(ui),
@@ -277,7 +277,7 @@ fn note(settings: &Settings, row: &Row) -> String {
     match (status(settings, row), row) {
         (Status::NotYet, _) => tr("Not available yet").to_owned(),
         (Status::Later, _) => tr("In a later version").to_owned(),
-        (Status::Active, _) if restart => "Takes effect after a restart".to_owned(),
+        (Status::Active, _) if restart => tr("Takes effect after a restart").to_owned(),
         _ => String::new(),
     }
 }
@@ -307,15 +307,24 @@ fn lit_page(page: &Page) -> bool {
 /// What a command row shows on its right.
 fn command_value(key: &str) -> String {
     match key {
-        "general.restore" if crate::backup::is_pending() => "Scheduled for next launch".to_owned(),
+        "general.restore" if crate::backup::is_pending() => {
+            tr("Scheduled for next launch").to_owned()
+        }
         "epg.update_now" => match stored::guide_status() {
-            GuideStatus::NoSource => "No playlist".to_owned(),
-            GuideStatus::Updating => "Updating…".to_owned(),
-            GuideStatus::Empty => "Not downloaded".to_owned(),
-            GuideStatus::Updated { at, channels } => {
-                format!("Updated {} · {channels} channels", time_label(at))
+            GuideStatus::NoSource => tr("No playlist").to_owned(),
+            GuideStatus::Updating => tr("Updating…").to_owned(),
+            GuideStatus::Empty => tr("Not downloaded").to_owned(),
+            GuideStatus::Updated { at, channels } => trf(
+                "{count, plural, one {Updated {when} · # channel} \
+                 other {Updated {when} · # channels}}",
+                &[
+                    ("when", (&time_label(at)).into()),
+                    ("count", channels.into()),
+                ],
+            ),
+            GuideStatus::Failed { at, .. } => {
+                trf("Failed {when}", &[("when", (&time_label(at)).into())])
             }
-            GuideStatus::Failed { at, .. } => format!("Failed {}", time_label(at)),
         },
         "epg.manage_sources" => sources_value(),
         "general.about" => format!("v{}({})", env!("CARGO_PKG_VERSION"), env!("IPTV_GIT_HASH")),
@@ -328,7 +337,7 @@ fn command_value(key: &str) -> String {
 fn sources_value() -> String {
     let sources = stored::shown_sources();
     if sources.is_empty() {
-        return "No enabled playlist".to_owned();
+        return tr("No enabled playlist").to_owned();
     }
     let lines: Vec<_> = sources.into_iter().flat_map(stored::source_lines).collect();
     let on = lines.iter().filter(|l| l.source.enabled).count();
@@ -338,23 +347,36 @@ fn sources_value() -> String {
         .count();
     let mut value = match (lines.len(), on) {
         (0, _) => tr("None").to_owned(),
-        (1, 1) => "1 source".to_owned(),
-        (all, on) if on == all => format!("{all} sources"),
-        (all, on) => format!("{on} of {all} on"),
+        (all, on) if on == all => trf(
+            "{count, plural, one {# source} other {# sources}}",
+            &[("count", all.into())],
+        ),
+        (all, on) => trf(
+            "{on} of {all} on",
+            &[("on", on.into()), ("all", all.into())],
+        ),
     };
     if failed > 0 {
-        value += &format!(" · {failed} failed");
+        let failed = trf("{count} failed", &[("count", failed.into())]);
+        value = format!("{value} · {failed}");
     }
     value
 }
 
 /// A past time as the guide writes it (`14:05`, `Tue 10 · 14:05`).
 fn time_label(unix: i64) -> String {
-    iptv_core::clock::label(unix, crate::time::wall_unix(), crate::time::offset_minutes)
+    crate::time::label(unix, crate::time::wall_unix())
+}
+
+/// The runtime reports publication semantics; the shell chooses the wording
+/// in the current interface language, including changes made since the save.
+pub(crate) fn save_failed(failure: crate::runtime::settings::SaveFailure) {
+    notify(words::save_failure(failure));
 }
 
 /// Shows `text` briefly at the bottom of the screen.
 pub fn notify(text: &str) {
+    announce_for_accessibility(text);
     let Some(notice) = NOTICE.with(Cell::get) else {
         return;
     };

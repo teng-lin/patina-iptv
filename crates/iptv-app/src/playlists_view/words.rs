@@ -1,6 +1,6 @@
 //! The playlists screen's wording (iptv-rs's own).
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 use crate::runtime::model::ImportErrorKind;
 use iptv_core::wizard::{FailureKind, ImportFailure};
@@ -12,79 +12,88 @@ use crate::data::{Activity, Playlist};
 
 pub fn kind(kind: SourceKind) -> &'static str {
     match kind {
-        SourceKind::M3u => "M3U playlist",
-        SourceKind::Xtream => "Xtream Codes",
-        SourceKind::Stalker => "Stalker portal",
+        SourceKind::M3u => tr("M3U playlist"),
+        SourceKind::Xtream => tr("Xtream Codes"),
+        SourceKind::Stalker => tr("Stalker portal"),
     }
 }
 
-fn plural(n: u32, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
-}
-
 pub fn channels(n: u32) -> String {
-    plural(n, "channel", "channels")
+    trf(
+        "{count, plural, one {# channel} other {# channels}}",
+        &[("count", n.into())],
+    )
 }
 
 /// A time as the guide shows it: today's as `14:05`, others with the day.
 fn when(at: i64, now: i64) -> String {
-    iptv_core::clock::label(at, now, crate::time::offset_minutes)
+    crate::time::label(at, now)
 }
 
 /// Why a refresh recorded in the store failed (kind only).
 pub fn stored_failure(kind: ImportErrorKind) -> &'static str {
     match kind {
-        ImportErrorKind::Network => "no answer from the server",
-        ImportErrorKind::Timeout => "the server took too long to answer",
-        ImportErrorKind::HttpStatus => "the server turned the request down",
-        ImportErrorKind::InvalidBody => "the answer was not a playlist",
-        ImportErrorKind::InvalidConfig => "the playlist's details are incomplete",
-        ImportErrorKind::AccountRejected => "the provider refused the login",
-        ImportErrorKind::AuthFailed => "the portal ended the session",
-        ImportErrorKind::Blocked => "the portal does not accept this device",
-        ImportErrorKind::Cancelled => "it was stopped",
-        _ => "something went wrong",
+        ImportErrorKind::Network => tr("no answer from the server"),
+        ImportErrorKind::Timeout => tr("the server took too long to answer"),
+        ImportErrorKind::HttpStatus => tr("the server turned the request down"),
+        ImportErrorKind::InvalidBody => tr("the answer was not a playlist"),
+        ImportErrorKind::InvalidConfig => tr("the playlist's details are incomplete"),
+        ImportErrorKind::AccountRejected => tr("the provider refused the login"),
+        ImportErrorKind::AuthFailed => tr("the portal ended the session"),
+        ImportErrorKind::Blocked => tr("the portal does not accept this device"),
+        ImportErrorKind::Cancelled => tr("it was stopped"),
+        _ => tr("something went wrong"),
     }
 }
 
 /// Why this session's refresh failed.
 pub fn failure(failure: ImportFailure) -> &'static str {
     match failure.kind {
-        FailureKind::Storage => "local storage could not be opened or updated",
-        FailureKind::Network => "no answer from the server",
-        FailureKind::Auth => "access was refused",
-        FailureKind::Parse => "the answer was not a playlist",
-        FailureKind::EmptyPlaylist => "the playlist had nothing to watch in it",
-        FailureKind::Unsupported => "the server is not a service of this type",
-        FailureKind::Busy => "too many playlists are updating; try again shortly",
-        FailureKind::Cancelled => "it was stopped",
+        FailureKind::Storage => tr("local storage could not be opened or updated"),
+        FailureKind::Network => tr("no answer from the server"),
+        FailureKind::Auth => tr("access was refused"),
+        FailureKind::Parse => tr("the answer was not a playlist"),
+        FailureKind::EmptyPlaylist => tr("the playlist had nothing to watch in it"),
+        FailureKind::Unsupported => tr("the server is not a service of this type"),
+        FailureKind::Busy => tr("too many playlists are updating; try again shortly"),
+        FailureKind::Cancelled => tr("it was stopped"),
     }
 }
 
 /// The row's second line: type and channels.
 pub fn summary(p: &Playlist) -> String {
-    format!(
-        "{} · {}{}",
-        kind(p.kind),
-        channels(p.channels),
-        if p.policy.enabled { "" } else { " · Disabled" }
-    )
+    let mut parts = vec![kind(p.kind).to_owned(), channels(p.channels)];
+    if !p.policy.enabled {
+        parts.push(tr("Disabled").to_owned());
+    }
+    parts.join(" · ")
 }
 
 /// The row's status: a refresh running or just finished, else what the
 /// store has. A failure keeps the channels from the last success.
 pub fn status(p: &Playlist, activity: Option<&Activity>, now: i64) -> (String, bool) {
-    let kept = || {
-        p.updated_at
-            .map(|at| format!(" · showing the channels from {}", when(at, now)))
-            .unwrap_or_default()
+    // A failure, and since when the channels still shown are.
+    let failed = |failure: String| {
+        let kept = p.updated_at.map(|at| {
+            trf(
+                "showing the channels from {when}",
+                &[("when", (&when(at, now)).into())],
+            )
+        });
+        match kept {
+            Some(kept) => format!("{failure} · {kept}"),
+            None => failure,
+        }
     };
     match activity {
         Some(Activity::Running(progress)) => (crate::wizard_view::words::stage(*progress), false),
         Some(Activity::Checking(progress)) => (
-            format!(
-                "Checking the new details: {}",
-                crate::wizard_view::words::stage(*progress)
+            trf(
+                "Checking the new details: {stage}",
+                &[(
+                    "stage",
+                    (&crate::wizard_view::words::stage(*progress)).into(),
+                )],
             ),
             false,
         ),
@@ -95,14 +104,23 @@ pub fn status(p: &Playlist, activity: Option<&Activity>, now: i64) -> (String, b
                 Some((kind, _)) if kind != ImportErrorKind::Other => stored_failure(kind),
                 _ => failure(*f),
             };
-            (format!("Refresh failed: {why}{}", kept()), true)
+            (
+                failed(trf("Refresh failed: {reason}", &[("reason", why.into())])),
+                true,
+            )
         }
         _ => match (p.failed, p.updated_at) {
             (Some((kind, _)), _) => (
-                format!("Last refresh failed: {}{}", stored_failure(kind), kept()),
+                failed(trf(
+                    "Last refresh failed: {reason}",
+                    &[("reason", stored_failure(kind).into())],
+                )),
                 true,
             ),
-            (None, Some(at)) => (format!("Updated {}", when(at, now)), false),
+            (None, Some(at)) => (
+                trf("Updated {when}", &[("when", (&when(at, now)).into())]),
+                false,
+            ),
             (None, None) => (String::new(), false),
         },
     }
@@ -142,53 +160,62 @@ pub fn masked_link(link: &str) -> String {
 pub fn guide_line(p: &Playlist) -> String {
     let on: Vec<_> = p.guides.iter().filter(|g| g.enabled).collect();
     let from = match (on.as_slice(), p.guides.len()) {
-        (_, 0) => "none".to_owned(),
-        ([], _) => "all sources switched off".to_owned(),
-        ([one], 1) if one.is_provider() => "the provider's own".to_owned(),
+        (_, 0) => tr("none").to_owned(),
+        ([], _) => tr("all sources switched off").to_owned(),
+        ([one], 1) if one.is_provider() => tr("the provider's own").to_owned(),
         ([one], _) => one
             .name
             .clone()
             .unwrap_or_else(|| masked_link(one.url.expose())),
-        (on, all) if on.len() == all => format!("{all} sources"),
-        (on, all) => format!("{} of {all} sources", on.len()),
+        (on, all) if on.len() == all => trf(
+            "{count, plural, one {# source} other {# sources}}",
+            &[("count", all.into())],
+        ),
+        (on, all) => trf(
+            "{on} of {all} sources",
+            &[("on", on.len().into()), ("all", all.into())],
+        ),
     };
-    let failed = if p.guide_failed {
-        " · did not load last time"
+    let guide = trf("Guide: {source}", &[("source", (&from).into())]);
+    if p.guide_failed {
+        format!("{guide} · {}", tr("did not load last time"))
     } else {
-        ""
-    };
-    format!("Guide: {from}{failed}")
+        guide
+    }
 }
 
 /// New details that did not import.
 pub fn rejected(f: ImportFailure) -> String {
-    format!("New details not saved: {}. The old ones stay.", failure(f))
+    trf(
+        "New details not saved: {reason}. The old ones stay.",
+        &[("reason", failure(f).into())],
+    )
 }
 
 pub fn act(act: Act, kind: Option<SourceKind>, shown: bool, running: bool) -> &'static str {
     match act {
-        Act::Enabled => "Enable / disable playlist",
-        Act::RefreshInterval => "Automatic refresh",
-        Act::RefreshOnStart => "Refresh on startup",
-        Act::Channels => "Organize channels",
-        Act::CustomGroups => "Custom groups",
-        Act::Groups => "Organize groups",
-        Act::Show if shown => "On screen now: back to the guide",
-        Act::Show => "Show this playlist",
-        Act::Refresh if running => "Refreshing…",
-        Act::Refresh => "Refresh now",
-        Act::Rename => "Rename",
-        Act::Details => kind.map_or("Provider details", details_title),
-        Act::UserAgent => "User-Agent",
-        Act::Guides => "Guide sources",
+        Act::Enabled => tr("Enable / disable playlist"),
+        Act::RefreshInterval => tr("Automatic refresh"),
+        Act::RefreshOnStart => tr("Refresh on startup"),
+        Act::Channels => tr("Organize channels"),
+        Act::CustomGroups => tr("Custom groups"),
+        Act::Groups => tr("Organize groups"),
+        Act::Show if shown => tr("On screen now: back to the guide"),
+        Act::Show => tr("Show this playlist"),
+        Act::Refresh if running => tr("Refreshing…"),
+        Act::Refresh => tr("Refresh now"),
+        Act::Rename => tr("Rename"),
+        Act::Details => kind.map_or(tr("Provider details"), details_title),
+        Act::UserAgent => tr("User-Agent"),
+        Act::Guides => tr("Guide sources"),
         Act::Delete => tr("Delete"),
     }
 }
 
 pub fn notice(notice: Notice) -> &'static str {
     match notice {
-        Notice::NameEmpty => "A playlist needs a name. The old one is kept.",
-        Notice::Unchanged => "Nothing was changed.",
+        Notice::NameEmpty => tr("A playlist needs a name. The old one is kept."),
+        Notice::Unchanged => tr("Nothing was changed."),
     }
 }
 
@@ -196,8 +223,10 @@ pub fn notice(notice: Notice) -> &'static str {
 pub fn refreshing(running: usize) -> String {
     match running {
         0 => String::new(),
-        1 => "Refreshing 1 playlist…".to_owned(),
-        n => format!("Refreshing {n} playlists…"),
+        n => trf(
+            "{count, plural, one {Refreshing # playlist…} other {Refreshing # playlists…}}",
+            &[("count", n.into())],
+        ),
     }
 }
 
@@ -205,8 +234,8 @@ pub fn refreshing(running: usize) -> String {
 pub fn details_title(kind: SourceKind) -> &'static str {
     match kind {
         SourceKind::M3u => tr("Playlist link"),
-        SourceKind::Xtream => "Server and login",
-        SourceKind::Stalker => "Portal and MAC address",
+        SourceKind::Xtream => tr("Server and login"),
+        SourceKind::Stalker => tr("Portal and MAC address"),
     }
 }
 
@@ -220,7 +249,7 @@ pub fn param_placeholder(p: Param, prefilled: bool) -> &'static str {
     if prefilled {
         crate::wizard_view::words::placeholder(p.field())
     } else {
-        "Type the new value; left empty, the current one stays"
+        tr("Type the new value; left empty, the current one stays")
     }
 }
 
@@ -239,17 +268,22 @@ pub fn param_value(form: &Form, p: Param) -> String {
 
 /// What deleting `p` takes away, and what the guide does next.
 pub fn delete_consequences(p: &Playlist, next: Option<&str>, shown: bool) -> String {
-    let mut text = format!(
-        "Its {}, its guide and your favourites from it will be gone from the app. \
-         The playlist at your provider is not affected.",
-        channels(p.channels)
+    let gone = trf(
+        "{count, plural, \
+         one {Its # channel, its guide and your favourites from it will be gone from the app. \
+         The playlist at your provider is not affected.} \
+         other {Its # channels, its guide and your favourites from it will be gone from the app. \
+         The playlist at your provider is not affected.}}",
+        &[("count", p.channels.into())],
     );
     match (shown, next) {
-        (true, Some(next)) => text += &format!(" The guide switches to “{next}”."),
-        (_, None) => text += " No playlists will be left.",
-        (false, Some(_)) => {}
+        (true, Some(next)) => {
+            let switches = trf("The guide switches to “{name}”.", &[("name", next.into())]);
+            format!("{gone} {switches}")
+        }
+        (_, None) => format!("{gone} {}", tr("No playlists will be left.")),
+        (false, Some(_)) => gone,
     }
-    text
 }
 
 #[cfg(test)]
@@ -476,5 +510,131 @@ mod tests {
         assert!(text.contains("switches to “Other”"));
         assert!(delete_consequences(&p, None, true).contains("No playlists will be left"));
         assert!(!delete_consequences(&p, Some("Other"), false).contains("switches"));
+    }
+
+    #[test]
+    fn rows_and_refresh_failures_follow_the_language() {
+        use crate::i18n::in_language;
+        let mut p = playlist();
+        p.kind = SourceKind::M3u;
+        p.channels = 3;
+        p.policy.enabled = false;
+        assert_eq!(summary(&p), "M3U playlist · 3 channels · Disabled");
+        assert_eq!(
+            in_language("de", || summary(&p)),
+            "M3U-Wiedergabeliste · 3 Sender · Deaktiviert"
+        );
+        assert_eq!(
+            in_language("ru", || summary(&p)),
+            "Плейлист M3U · 3 канала · Выключен"
+        );
+        let done = Activity::Done(Err(ImportFailure::new(FailureKind::Network)));
+        assert_eq!(
+            in_language("de", || status(&p, Some(&done), 0)),
+            (
+                "Aktualisierung fehlgeschlagen: keine Antwort vom Server".to_owned(),
+                true
+            )
+        );
+        assert_eq!(
+            in_language("ja", || status(&p, Some(&done), 0).0),
+            "更新に失敗しました：サーバーから応答がありません"
+        );
+        p.failed = Some((ImportErrorKind::HttpStatus, Some(5)));
+        assert_eq!(
+            in_language("ru", || status(&p, None, 0).0),
+            "Последнее обновление не удалось: сервер отклонил запрос"
+        );
+        assert_eq!(refreshing(0), "");
+        assert_eq!(refreshing(1), "Refreshing 1 playlist…");
+        assert_eq!(refreshing(4), "Refreshing 4 playlists…");
+        assert_eq!(
+            in_language("de", || refreshing(1)),
+            "1 Wiedergabeliste wird aktualisiert…"
+        );
+        assert_eq!(
+            in_language("de", || refreshing(4)),
+            "4 Wiedergabelisten werden aktualisiert…"
+        );
+        assert_eq!(
+            in_language("fr", || guide_line(&p)),
+            "Guide : aucune source"
+        );
+        assert_eq!(
+            in_language("de", || delete_consequences(&p, None, true)),
+            in_language("de", || {
+                format!(
+                    "{} {}",
+                    delete_consequences(&p, Some("Other"), false),
+                    tr("No playlists will be left.")
+                )
+            })
+        );
+        assert!(
+            in_language("de", || delete_consequences(&p, Some("Other"), true))
+                .ends_with("Das Programm wechselt zu „Other“.")
+        );
+    }
+
+    /// Why a refresh failed is told in the interface language, each kind
+    /// in its own words.
+    #[test]
+    fn every_refresh_failure_is_told_in_every_language() {
+        use crate::i18n::in_language;
+        use ImportErrorKind as K;
+        let stored = [
+            K::Network,
+            K::Timeout,
+            K::HttpStatus,
+            K::InvalidBody,
+            K::InvalidConfig,
+            K::AccountRejected,
+            K::AuthFailed,
+            K::Blocked,
+            K::Cancelled,
+            K::Other,
+        ];
+        let session = [
+            FailureKind::Storage,
+            FailureKind::Network,
+            FailureKind::Auth,
+            FailureKind::Parse,
+            FailureKind::EmptyPlaylist,
+            FailureKind::Unsupported,
+            FailureKind::Busy,
+            FailureKind::Cancelled,
+        ];
+        let told = || -> Vec<&'static str> {
+            let stored = stored.iter().map(|kind| stored_failure(*kind));
+            let session = session
+                .iter()
+                .map(|kind| failure(ImportFailure::new(*kind)));
+            stored.chain(session).collect()
+        };
+        let english = told();
+        for language in iptv_core::i18n::LANGUAGES.iter().skip(1) {
+            let texts = in_language(language.tag, told);
+            for (text, source) in texts.iter().zip(&english) {
+                assert_ne!(text, source, "{}: not translated", language.tag);
+            }
+            let distinct = |texts: &[&str]| {
+                texts
+                    .iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
+            };
+            assert_eq!(
+                distinct(&texts[..stored.len()]),
+                stored.len(),
+                "{}",
+                language.tag
+            );
+            assert_eq!(
+                distinct(&texts[stored.len()..]),
+                session.len(),
+                "{}",
+                language.tag
+            );
+        }
     }
 }

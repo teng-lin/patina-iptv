@@ -83,6 +83,13 @@ pub static GENERAL: &[Setting] = &[
     // default: ours
     general(
         "language",
+        "general.clock",
+        choice(&CLOCK, "auto"),
+        "Clock for times of day: `auto` follows the language's convention, or 12-hour, or 24-hour.",
+    ),
+    // default: ours
+    general(
+        "language",
         "general.keyboard",
         choice(&KEYBOARD, "system"),
         "Which on-screen keyboard text fields open: the platform's or the app's own.",

@@ -4,9 +4,10 @@
 //! a tap per row plus "Add all" / "Remove all" buttons. Changes are saved
 //! by channel key (`favorites.rs`) at once.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 use iptv_core::editor::FavoritesEditor;
+use nsh_core::Checked;
 use nsh_core::prelude::*;
 
 use crate::Ui;
@@ -74,10 +75,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         ui.editor.with(|e| {
             e.as_ref().map_or(String::new(), |e| {
                 let starred = ui.favorites.with(|f| e.starred(f));
-                format!(
-                    "Favourites · {} · {starred} of {}",
-                    crate::lists::entry_name(e.group, &*crate::schedule()),
-                    e.len()
+                let group = crate::lists::entry_name(e.group, &*crate::schedule());
+                trf(
+                    "Favourites · {group} · {starred} of {total}",
+                    &[
+                        ("group", (&group).into()),
+                        ("starred", starred.into()),
+                        ("total", e.len().into()),
+                    ],
                 )
             })
         })
@@ -94,6 +99,15 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         let focused = move || ui.keys_shown() && focus.get() == Some(at.index());
         let mark = move || Mark::of(focused(), false);
         list_rows::row(size, ROW, mark)
+            .role(AccessibilityRole::Checkbox)
+            .accessibility_state(move || AccessibilityState {
+                checked: Some(if starred() {
+                    Checked::True
+                } else {
+                    Checked::False
+                }),
+                ..Default::default()
+            })
             .flex_row()
             .items_center()
             .justify_start()
@@ -133,6 +147,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .py(px(24.0))
         .gap(px(12.0))
         .bg(move || rgb(ui.theme.with(|t| t.background.window)))
+        .test_id("favorites-editor")
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::FavoritesEditor.accessibility_hidden(ui)
+        })
         .opacity(move || if open() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {
             if open() {

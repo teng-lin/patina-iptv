@@ -31,6 +31,7 @@ use crate::{Ui, ViewMode};
 pub(super) struct RowFocus {
     pub start: Memo<Option<i32>>,
     pub lit: Memo<bool>,
+    pub selected: Memo<Option<i32>>,
 }
 
 /// How a cell looks, from the focus.
@@ -133,8 +134,27 @@ pub(super) fn cell(
         let (g, window) = ui.theme.with(|t| (t.guide(), t.background.window));
         colours(look.get(), dim.get(), &g, window, overlay)
     });
+    let title_text = move || {
+        // Equal programme minutes on new data still re-read the title.
+        ui.guide_data();
+        match (channel.get(), program()) {
+            (Some(ch), Some(p)) => crate::schedule().title(ch, p),
+            _ => String::new(),
+        }
+    };
+    let is_selected = move || match program() {
+        Some(p) => focus.selected.get() == Some(p.start),
+        None => false,
+    };
     view()
         .test_id("guide-programme")
+        .accessible(true)
+        .role(AccessibilityRole::Cell)
+        .accessibility_state(move || AccessibilityState {
+            selected: is_selected(),
+            ..Default::default()
+        })
+        .label(title_text)
         .absolute()
         .top(move || px(((size.whole(ROW_H) - size.whole(CELL_H)) / 2.0).floor()))
         .h(move || px(size.whole(CELL_H)))
@@ -158,19 +178,12 @@ pub(super) fn cell(
             ui.watch();
         })
         .child(
-            text(move || {
-                // Equal programme minutes on new data still re-read the title.
-                ui.guide_data();
-                match (channel.get(), program()) {
-                    (Some(ch), Some(p)) => crate::schedule().title(ch, p),
-                    _ => String::new(),
-                }
-            })
-            .number_of_lines(1)
-            .text_overflow(nsh_core::EllipsizeMode::Clip)
-            .font_family(CONDENSED)
-            .text_size(move || size.text_px(CELL_TITLE))
-            .text_color(move || rgba(colours.get().1)),
+            text(title_text)
+                .number_of_lines(1)
+                .text_overflow(nsh_core::EllipsizeMode::Tail)
+                .font_family(CONDENSED)
+                .text_size(move || size.text_px(CELL_TITLE))
+                .text_color(move || rgba(colours.get().1)),
         )
 }
 

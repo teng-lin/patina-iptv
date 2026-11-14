@@ -23,6 +23,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("guide_assign_view.rs", "REQUEST"), // Discard stale dialog replies.
     ("header.rs", "ON"),                // Debug overlay environment flag cache.
     ("i18n.rs", "SYSTEM"),              // System locale cache.
+    ("i18n.rs", "WORDING_SETTINGS"),    // cfg(test)-only scoped wording preferences.
     ("lib.rs", "RUNTIME"),              // The shell's single application handle.
     ("lists.rs", "HINT_SHOWN"),         // Visible navigation hint revision.
     ("organization_view.rs", "OPEN_GENERATION"), // Discard stale dialog replies.

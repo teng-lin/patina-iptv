@@ -1,8 +1,8 @@
 //! Live, validated remote overrides. Editor/menu input stays at defaults.
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 use crate::scale::Scale;
-use crate::settings_view::remote_keys::{KEYBOARD_KEYS, KEYS, action_name, key_name};
+use crate::settings_view::remote_keys::{KEYBOARD_KEYS, KEYS, action_name, context_name, key_name};
 use crate::{Ui, settings, ui_kit};
 use iptv_nav::remap::{self, Confirm, Editor, FIELDS, Field};
 use iptv_nav::{Action, Binding, Context, Keymap, Press, RemoteKey};
@@ -202,32 +202,40 @@ pub fn key(ui: Ui, action: Action) {
 }
 fn field_label(s: &Editor, field: Field) -> String {
     match field {
-        Field::Context => format!("Context: {}", s.context.token()),
-        Field::Key => format!("Key: {}", key_name(s.key)),
-        Field::Press => format!(
-            "Press: {}",
-            if s.press == Press::Long {
-                "Hold"
-            } else {
-                "Short"
-            }
+        Field::Context => trf(
+            "Context: {context}",
+            &[("context", context_name(s.context).into())],
         ),
-        Field::Action => format!("Action: {}", action_name(s.action)),
-        Field::Capture => "Capture next remote key".into(),
+        Field::Key => trf("Key: {key}", &[("key", (&key_name(s.key)).into())]),
+        Field::Press => {
+            let press = if s.press == Press::Long {
+                tr("Hold")
+            } else {
+                tr("Short")
+            };
+            trf("Press: {press}", &[("press", press.into())])
+        }
+        Field::Action => trf(
+            "Action: {action}",
+            &[("action", action_name(s.action).into())],
+        ),
+        Field::Capture => tr("Capture next remote key").into(),
         Field::Save => {
             if s.binding().is_some() {
-                "Save binding".into()
+                tr("Save binding").into()
             } else {
-                "Choose an allowed action (short Back is reserved)".into()
+                tr("Choose an allowed action (short Back is reserved)").into()
             }
         }
-        Field::Clear => "Clear this override / use default".into(),
-        Field::Reset => "Restore all default bindings".into(),
+        Field::Clear => tr("Clear this override / use default").into(),
+        Field::Reset => tr("Restore all default bindings").into(),
     }
 }
 /// Under the screen's title: how the rows are used.
-const CAPTION: &str = "Up/Down chooses a row; Left/Right or tap changes it. \
-                       Save applies immediately. Back remains available.";
+const CAPTION: &str = crate::i18n::key(
+    "Up/Down chooses a row; Left/Right or tap changes it. \
+     Save applies immediately. Back remains available.",
+);
 
 /// What the chosen key does now and whether that is the user's binding;
 /// while a key is being captured, what the editor waits for.
@@ -235,20 +243,18 @@ fn status(ui: Ui) -> String {
     ui.settings.get();
     state(ui, |s| {
         if s.capturing {
-            return "Press a key now. Back cancels capture.".into();
+            return tr("Press a key now. Back cancels capture.").into();
         }
         let effective = keymap()
             .resolve(s.context, s.key, s.press)
-            .map_or("Nothing", action_name);
+            .map_or(tr("Nothing"), action_name);
         let custom = saved().iter().any(|b| same(s, b));
-        format!(
-            "Currently: {effective} · {}",
-            if custom {
-                "custom binding"
-            } else {
-                "default binding"
-            }
-        )
+        let action = [("action", effective.into())];
+        if custom {
+            trf("Currently: {action} · custom binding", &action)
+        } else {
+            trf("Currently: {action} · default binding", &action)
+        }
     })
     .unwrap_or_default()
 }
@@ -264,15 +270,16 @@ fn field_row(ui: Ui, size: Scale, field: Field) -> impl IntoElement {
         move || activate(ui, field),
     )
     .test_id(&format!("remote-{field:?}"))
+    .accessibility_elements_hidden(move || contents_hidden(ui))
 }
 
 /// The question before a binding replaces another or all are restored.
 fn confirm_sheet(ui: Ui, size: Scale) -> impl IntoElement {
     let question = move || {
         if state(ui, |s| s.confirm) == Some(Some(Confirm::Replace)) {
-            "Replace the existing binding?"
+            tr("Replace the existing binding?")
         } else {
-            "Restore all defaults?"
+            tr("Restore all defaults?")
         }
     };
     let cancel = move || {
@@ -312,6 +319,10 @@ fn confirm_sheet(ui: Ui, size: Scale) -> impl IntoElement {
         )
 }
 
+fn contents_hidden(ui: Ui) -> bool {
+    state(ui, |screen| screen.confirm.is_some()).unwrap_or(false)
+}
+
 pub fn layer(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     when(
@@ -319,9 +330,21 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         move || {
             ui_kit::screen(ui, size)
                 .test_id("remote-editor-screen")
-                .child(ui_kit::header(ui, size, "Remote bindings", close))
-                .child(ui_kit::caption(size, CAPTION))
-                .child(ui_kit::body(size, move || status(ui)))
+                .accessibility_elements_hidden(move || {
+                    crate::overlays::Overlay::RemoteEditor.accessibility_covered(ui)
+                })
+                .child(
+                    ui_kit::header(ui, size, tr("Remote bindings"), close)
+                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
+                .child(
+                    ui_kit::caption(size, tr(CAPTION))
+                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
+                .child(
+                    ui_kit::body(size, move || status(ui))
+                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
                 .children(
                     FIELDS
                         .iter()

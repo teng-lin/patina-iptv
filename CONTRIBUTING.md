@@ -126,3 +126,40 @@ By contributing you agree that your contribution is licensed under
 ## Reporting security problems
 
 Do not open a public issue. See [SECURITY.md](SECURITY.md).
+
+## Screen readers and large text
+
+For changes to controls, focus, notices or typography, run this checklist on
+both `tab36` and `tv36`, using generated playlists and EPG only. Record the
+emulator profile, APK commit, Android font scale, TalkBack version, observed
+results and screenshot paths in the PR. An unchecked item is pending, not a
+pass. Restore the device's accessibility settings afterwards.
+
+- Enable TalkBack in Android Accessibility settings. Navigate with touch on
+  the tablet and D-pad on the TV. Confirm each actionable control has a
+  meaningful name and role; decorative images must not become extra stops.
+- Open the guide, channel/group lists, settings and choice editors. Confirm
+  the currently selected item is announced, toggles announce checked state,
+  and state changes are heard without leaving and revisiting the control.
+- Trigger a synthetic import failure and an ordinary settings notice. Verify
+  the notice is spoken once and focus stays at the initiating control.
+- Open and close a chooser and a modal; verify focus returns to the same
+  content item, including after a list reorder.
+- Set Patina's Appearance → Font size to Extra large. Also try Android's
+  largest system font size and record whether it affects the app (currently
+  Patina uses its own text-size preference). Verify settings,
+  backup/restore, organisation, custom groups and guide assignment remain
+  operable, labels do not overlap, and long guide titles ellipsize while
+  retaining the full accessible text.
+- For each of `zh`, `zh-Hant`, `ja` and `ko`, select the interface language,
+  open the guide and settings, and save a screenshot using synthetic CJK
+  channel and programme names. Check for missing-glyph boxes and clipping.
+- Return the interface language and Android font/accessibility settings to
+  their initial values. Include any unresolved failures in the PR.
+
+`tools/ci/android-cjk-screenshots.py emulator-5554 --out target/cjk-tab36`
+captures the four CJK startup/guide scenarios from a debug APK built with the
+synthetic development playlist. Start the mock server first as described in
+`tools/ci/android-smoke.sh`. The script clears app data on its dedicated
+emulator. Repeat on `tv36`; inspect every capture for missing glyphs and
+clipping, then use the checklist above for settings and TalkBack.

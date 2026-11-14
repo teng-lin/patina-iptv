@@ -1,10 +1,10 @@
 //! The guide sources screen of one playlist (playlists screen → a
-//! playlist → "Guide sources", or Settings → TV guide data → "Guide
+//! playlist → tr("Guide sources"), or Settings → TV guide data → "Guide
 //! sources" / "Add a guide source" for the playlist on screen): its
 //! sources in priority order (the first one that has a channel wins), each
 //! with where it comes from, whether it is on, its time shift and how its
 //! last download went; "Add a guide source" (a link, then an optional
-//! name; a duplicate is refused) and "Update the guide now".
+//! name; a duplicate is refused) and tr("Update the guide now").
 //!
 //! OK (or a tap) on a source opens its actions: switch it on or off, move
 //! it up or down, shift its times (Left/Right, or − and +), name it, and
@@ -19,13 +19,14 @@
 //! tappable; a tap beside a sheet closes it. Links are shown with their
 //! accounts hidden. State: `state.rs`; wording: `words.rs`.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 
 use iptv_library::epg_sources as state;
 mod words;
 
 use crate::runtime::model::SourceId;
 use iptv_nav::Action;
+use nsh_core::Checked;
 use nsh_core::prelude::*;
 
 pub use state::Screen as Open;
@@ -142,14 +143,14 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
         Effect::Update => {
             let started = stored::update_source(playlist, move |completed| {
                 if completed {
-                    crate::settings_view::notify("Guide updated");
+                    crate::settings_view::notify(tr("Guide updated"));
                 }
             });
             if started {
-                // Shows "Updating…".
+                // Shows tr("Updating…").
                 ui.library.version.update(|v| *v += 1);
             } else {
-                crate::settings_view::notify("No guide source is switched on");
+                crate::settings_view::notify(tr("No guide source is switched on"));
             }
         }
         Effect::Close => close(ui),
@@ -183,7 +184,11 @@ fn mark(ui: Ui, focused: bool) -> Mark {
 }
 
 fn time_label(at: i64) -> String {
-    iptv_core::clock::label(at, crate::time::wall_unix(), crate::time::offset_minutes)
+    crate::time::label(at, crate::time::wall_unix())
+}
+
+fn contents_hidden(ui: Ui) -> bool {
+    editing(ui) || state(ui, |screen| screen.layer() != Layer::List).unwrap_or(false)
 }
 
 pub fn layer(ui: Ui) -> impl IntoElement {
@@ -210,8 +215,15 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         move || is_open(ui),
         move || {
             ui_kit::screen(ui, size)
-                .child(header(ui, size))
-                .child(ui_kit::caption(size, move || hint(ui)))
+                .test_id("guide-sources-screen")
+                .accessibility_elements_hidden(move || {
+                    crate::overlays::Overlay::GuideSources.accessibility_covered(ui)
+                })
+                .child(header(ui, size).accessibility_elements_hidden(move || contents_hidden(ui)))
+                .child(
+                    ui_kit::caption(size, move || hint(ui))
+                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
                 .child(when(
                     move || state(ui, |s| s.notice().is_some()).unwrap_or(false),
                     move || {
@@ -220,6 +232,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                 .flatten()
                                 .unwrap_or_default()
                         })
+                        .accessibility_elements_hidden(move || contents_hidden(ui))
                         .text_color(rgb(ERROR))
                     },
                 ))
@@ -234,19 +247,19 @@ fn hint(ui: Ui) -> &'static str {
     let layer = state(ui, Screen::layer).unwrap_or(Layer::List);
     match (ui.keys_shown(), layer) {
         (true, Layer::List) => {
-            "▲▼ choose   OK actions   Back close   The first source with a channel wins"
+            tr("▲▼ choose   OK actions   Back close   The first source with a channel wins")
         }
         (true, Layer::Actions { .. }) => {
-            "▲▼ choose   OK do it   ◀▶ shift times   Back close the sheet"
+            tr("▲▼ choose   OK do it   ◀▶ shift times   Back close the sheet")
         }
-        (true, Layer::Confirm { .. }) => "▲▼ choose   OK confirm   Back keep it",
+        (true, Layer::Confirm { .. }) => tr("▲▼ choose   OK confirm   Back keep it"),
         (false, _) => {
-            "Tap a source for what you can do with it. The first source with a channel wins"
+            tr("Tap a source for what you can do with it. The first source with a channel wins")
         }
     }
 }
 
-fn header(ui: Ui, size: Scale) -> impl IntoElement {
+fn header(ui: Ui, size: Scale) -> View {
     let name = move || {
         let playlist = state(ui, Screen::playlist);
         ui.library.version.get();
@@ -258,8 +271,8 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
                 .map(|p| p.name)
         });
         name.map_or_else(
-            || "Guide sources".to_owned(),
-            |n| format!("Guide sources · {n}"),
+            || tr("Guide sources").to_owned(),
+            |n| trf("Guide sources · {playlist}", &[("playlist", (&n).into())]),
         )
     };
     ui_kit::header(ui, size, name, close)
@@ -278,29 +291,34 @@ fn list(ui: Ui, size: Scale) -> impl IntoElement {
         }
     });
     virtual_list(count, move |at| row(ui, size, at.index(), focused_index))
+        .accessibility_elements_hidden(move || contents_hidden(ui))
         .estimated_item_size(list_rows::pitch(size, ROW_THREE))
         .element_ref(&rows)
         .flex_1()
 }
 
-/// The "Update the guide now" row's status.
+/// The tr("Update the guide now") row's status.
 fn update_status(playlist: SourceId) -> (String, bool) {
     if stored::updating(playlist) {
-        return ("Updating…".to_owned(), false);
+        return (tr("Updating…").to_owned(), false);
     }
     let state = stored::cached_guide_state(playlist);
     match stored::status_of(state.as_ref()) {
         GuideStatus::Updated { at, channels } => (
-            format!(
-                "Last update {} · {channels} channels with a guide",
-                time_label(at)
+            trf(
+                "{count, plural, one {Last update {when} · # channel with a guide} \
+                 other {Last update {when} · # channels with a guide}}",
+                &[
+                    ("when", (&time_label(at)).into()),
+                    ("count", channels.into()),
+                ],
             ),
             false,
         ),
         GuideStatus::Failed { at, .. } => (
-            format!(
-                "The last update {} did not load every source",
-                time_label(at)
+            trf(
+                "The last update {when} did not load every source",
+                &[("when", (&time_label(at)).into())],
             ),
             true,
         ),
@@ -320,14 +338,14 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
     let playlist = move || state(ui, Screen::playlist);
     let title = move || match (line(), item()) {
         (Some(l), _) => format!("{}.  {}", index + 1, words::title(&l.source)),
-        (None, Some(Item::Add)) => "+ Add a guide source".to_owned(),
-        (None, Some(Item::Update)) => "Update the guide now".to_owned(),
+        (None, Some(Item::Add)) => tr("+ Add a guide source").to_owned(),
+        (None, Some(Item::Update)) => tr("Update the guide now").to_owned(),
         _ => String::new(),
     };
     let summary = move || match (line(), item()) {
         (Some(l), _) => words::origin(&l.source),
-        (None, Some(Item::Add)) => "An XMLTV link (.xml or .xml.gz)".to_owned(),
-        (None, Some(Item::Update)) => "Downloads every source switched on".to_owned(),
+        (None, Some(Item::Add)) => tr("An XMLTV link (.xml or .xml.gz)").to_owned(),
+        (None, Some(Item::Update)) => tr("Downloads every source switched on").to_owned(),
         _ => String::new(),
     };
     let status = move || match (line(), item(), playlist()) {
@@ -342,7 +360,28 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
     };
     let enabled = move || line().is_none_or(|l| l.source.enabled);
     let mark = move || mark(ui, focused_index.get() == Some(index));
+    let is_source = move || line().is_some();
+    let is_on = move || line().is_some_and(|l| l.source.enabled);
     list_rows::row(size, ROW_THREE, mark)
+        .role(move || {
+            if is_source() {
+                AccessibilityRole::Switch
+            } else {
+                AccessibilityRole::Button
+            }
+        })
+        .accessibility_state(move || AccessibilityState {
+            checked: if is_source() {
+                Some(if is_on() {
+                    Checked::True
+                } else {
+                    Checked::False
+                })
+            } else {
+                None
+            },
+            ..Default::default()
+        })
         .flex_row()
         .items_center()
         .justify_start()
@@ -415,6 +454,7 @@ fn sheet(ui: Ui, size: Scale) -> impl IntoElement {
 
 fn backdrop(ui: Ui, card: AnyElement) -> View {
     view()
+        .accessibility_elements_hidden(move || editing(ui))
         .absolute()
         .inset_0()
         .items_center()
@@ -515,7 +555,10 @@ fn confirm_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement
     let (title, body) = state(ui, |s| {
         s.line(feed).map(|l| {
             (
-                format!("Remove “{}”?", words::title(&l.source)),
+                trf(
+                    "Remove “{name}”?",
+                    &[("name", (&words::title(&l.source)).into())],
+                ),
                 words::remove_consequences(&l.source),
             )
         })
@@ -532,7 +575,7 @@ fn confirm_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement
         .child(ui_kit::action(
             ui,
             size,
-            "Keep it",
+            tr("Keep it"),
             focused(false),
             WHITE,
             move || {
