@@ -14,24 +14,82 @@ pub enum HourCycle {
 }
 
 impl HourCycle {
-    /// What a locale's own convention is, by the Unicode CLDR's defaults
-    /// for the catalogue's languages: 12-hour for English outside the
-    /// United Kingdom, Ireland and South Africa, for Korean and for
-    /// Traditional Chinese; 24-hour for the rest, and for a locale whose
-    /// language the catalogue lacks (its interface is English, its habits
-    /// are not). `locale` is a tag as the platform or the language setting
-    /// gives it (`en_GB.UTF-8`, `ko`).
+    /// The locale's 12/24-hour family, from CLDR 49 `timeData`.
+    /// Explicit regions (including numeric regions) override the supported
+    /// language's default region. Unicode `u-hc` overrides that convention;
+    /// the app offers two families, so h11/h12 map to H12 and h23/h24 to H24.
+    /// POSIX encoding/modifier suffixes are ignored.
     pub fn of_locale(locale: &str) -> Self {
         let normalized = locale.trim().replace('_', "-").to_ascii_lowercase();
         let tag = normalized.split(['.', '@']).next().unwrap_or("");
-        let mut parts = tag.split('-');
-        let base = parts.next().unwrap_or("");
-        let region = parts.find(|part| part.len() == 2);
-        match base {
-            "en" if !matches!(region, Some("gb" | "ie" | "za")) => Self::H12,
-            "ko" => Self::H12,
-            "zh" if i18n::resolve(locale, None).tag == "zh-Hant" => Self::H12,
-            _ => Self::H24,
+        let parts: Vec<_> = tag.split('-').collect();
+        let language = parts.first().copied().unwrap_or("");
+        let mut region = None;
+        let mut i = 1;
+        while i < parts.len() {
+            let part = parts[i];
+            if part.len() == 1 {
+                if part == "x" {
+                    break;
+                }
+                let start = i + 1;
+                i = start;
+                while i < parts.len() && parts[i].len() != 1 {
+                    i += 1;
+                }
+                if part == "u" {
+                    for pair in parts[start..i].windows(2) {
+                        if pair[0] == "hc" {
+                            match pair[1] {
+                                "h11" | "h12" => return Self::H12,
+                                "h23" | "h24" => return Self::H24,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            if region.is_none()
+                && ((part.len() == 2 && part.bytes().all(|b| b.is_ascii_alphabetic()))
+                    || (part.len() == 3 && part.bytes().all(|b| b.is_ascii_digit())))
+            {
+                region = Some(part);
+            }
+            i += 1;
+        }
+        let region = region.unwrap_or_else(|| match language {
+            "en" => "us",
+            "es" => "es",
+            "fr" => "fr",
+            "de" => "de",
+            "it" => "it",
+            "pt" => "br",
+            "ru" => "ru",
+            "ja" => "jp",
+            "ko" => "kr",
+            "zh" if i18n::resolve(locale, None).tag == "zh-Hant" => "tw",
+            "zh" => "cn",
+            _ => "001",
+        });
+        // Language-specific exceptions to a territory's preferred family.
+        match (language, region) {
+            ("en", "il") | ("fr", "ca") => return Self::H24,
+            ("en", "001") => return Self::H12,
+            _ => {}
+        }
+        // https://github.com/unicode-org/cldr/blob/release-49/common/supplemental/supplementalData.xml
+        const TWELVE_HOUR_REGIONS: &str = "419 AE AG AL AS AU BB BD BH BM BN BO BS BT CA CO CR CU CY \
+            DJ DM DO DZ EC EG EH ER ET FJ FM GD GH GM GR GT GU GY HK HN IN IQ JM JO KH KI KN KP KR \
+            KW KY LB LC LR LS LY MH MO MP MR MW MX MY NA NI NZ OM PA PE PG PH PK PR PS PW QA SA SB \
+            SD SG SL SO SS SV SY SZ TC TD TN TO TT TW UM US VC VE VG VI VU WS YE";
+        if TWELVE_HOUR_REGIONS
+            .split_ascii_whitespace()
+            .any(|candidate| candidate.eq_ignore_ascii_case(region))
+        {
+            Self::H12
+        } else {
+            Self::H24
         }
     }
 
@@ -328,7 +386,22 @@ mod tests {
             ("zh-CN", H24),
             ("zh", H24),
             ("ja-JP", H24),
-            ("es-MX", H24),
+            ("es-MX", H12),
+            ("es-419", H12),
+            ("es-ES", H24),
+            ("es-AR", H24),
+            ("pt-PT", H24),
+            ("fr-CA", H24),
+            ("en-CA", H12),
+            ("en-IL", H24),
+            ("en-001", H12),
+            ("en-150", H24),
+            ("en-US-u-hc-h23", H24),
+            ("es-MX-u-hc-h24", H24),
+            ("de-DE-u-hc-h12", H12),
+            ("en-u-ca-gregory", H12),
+            ("en-x-gb", H12),
+            ("en-x-u-hc-h24", H12),
             ("fr", H24),
             ("de-DE", H24),
             ("it", H24),
