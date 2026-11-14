@@ -16,6 +16,23 @@ fn inspect_offscreen_source_and_unmatched_samples_without_changing_saved_choices
     };
     let directory = crate::isolated::data_dir(home.path());
     std::fs::create_dir_all(&directory).unwrap();
+    let extra_names: Vec<_> = (0..60)
+        .map(|index| {
+            (
+                format!("extra.{index:03}"),
+                format!("Synthetic Extra {index:03}"),
+            )
+        })
+        .collect();
+    let mut extra: Vec<_> = extra_names
+        .iter()
+        .map(|(id, name)| (id.as_str(), name.as_str(), "Synthetic Extra Page Programme"))
+        .collect();
+    extra.push((
+        "extra.north",
+        "Synthetic Extra",
+        "Synthetic Extra Programme",
+    ));
     let server = Server::start(&[
         (
             "/guide.xml",
@@ -31,17 +48,7 @@ fn inspect_offscreen_source_and_unmatched_samples_without_changing_saved_choices
                 ],
             ),
         ),
-        (
-            "/extra.xml",
-            support::guide(
-                support::now(),
-                &[(
-                    "extra.north",
-                    "Synthetic Extra",
-                    "Synthetic Extra Programme",
-                )],
-            ),
-        ),
+        ("/extra.xml", support::guide(support::now(), &extra)),
     ]);
     let mut store = crate::isolated::open_database(directory.join("iptv.sqlite")).unwrap();
     let mut sources = Vec::new();
@@ -149,10 +156,22 @@ fn inspect_offscreen_source_and_unmatched_samples_without_changing_saved_choices
     t.gone("id:guide-inspection-screen", 5);
     t.press("text:Inspect guide coverage");
     t.wait("text:Inspect a guide link", 10);
+    t.enter("Amber");
+    t.wait("text:Synthetic Amber", 10);
     t.press("text:Inspect a guide link");
     t.enter(&server.url("/extra.xml"));
-    t.wait("text:Synthetic Extra", 10);
-    t.press("text:Synthetic Extra");
+    t.wait("text:Synthetic Extra 000", 10);
+    // The previous audit's filter must not poison the staged continuation cursor.
+    for _ in 0..6 {
+        t.key("pagedown");
+    }
+    for _ in 0..3 {
+        t.key("down");
+    }
+    t.key("return");
+    t.wait("text:Synthetic Extra 050", 10);
+    assert!(!t.shows("text:Guide evidence changed; inspect again"));
+    t.press("text:Synthetic Extra >> nth=0");
     t.wait("text:/Synthetic Extra Programme/", 10);
     let store = crate::isolated::open_database(directory.join("iptv.sqlite")).unwrap();
     assert_eq!(store.active_source().unwrap(), Some(sources[0]));
