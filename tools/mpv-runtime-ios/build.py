@@ -109,7 +109,7 @@ def compile_probe(work, destination, replacement=None):
         bundle = replacement if name == "Libavformat" and replacement else work / "mpvkit" / (name + ".xcframework")
         command += ["-F", bundle / slice_name, "-framework", name]
     command += ["-L", work / "mpvkit/MoltenVK.xcframework" / slice_name, "-lMoltenVK"]
-    for name in [*values["SYSTEM_FRAMEWORKS"], "Foundation", "Security"]:
+    for name in [*values["SYSTEM_FRAMEWORKS"], "Foundation", "Security", "CoreGraphics", "CoreText"]:
         command += ["-framework", name]
     command += ["-l" + name for name in [*values["SYSTEM_LIBS"], "objc"]]
     run(command)
