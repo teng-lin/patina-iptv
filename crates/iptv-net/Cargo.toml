@@ -28,6 +28,7 @@ tokio = { version = "1", default-features = false, features = ["fs", "io-util", 
 cookie_store = { version = "0.22", default-features = false }
 getrandom = "0.4"
 quick-xml = "0.42"
+subtle = "2.6"
 
 [target.'cfg(unix)'.dependencies]
 # Only the `O_NONBLOCK` constant, for opening a picked file (`file.rs`).

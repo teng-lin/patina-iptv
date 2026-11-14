@@ -4,6 +4,13 @@
 //! allows. Players receive no identity headers. Media bodies stream; only
 //! manifests are buffered (at most 2 MiB). Dropping the owner cancels every
 //! open fetch.
+//!
+//! The relay serves only requests that name its capability, a random path.
+//! A peer has a second to send it ([`UNAUTHENTICATED`]) and is cut off as
+//! soon as its first bytes cannot become such a request ([`admit`]). A
+//! player may also use the relay as its HTTP proxy ([`PlaybackRelay::proxy`]):
+//! requests for the capability arrive the same, and everything else the
+//! player tries to load by itself ends here, refused.
 
 use std::{
     io,
@@ -30,6 +37,12 @@ use crate::{
 const MAX_MANIFEST: usize = 2 * 1024 * 1024;
 const MAX_REQUEST: usize = 16 * 1024;
 const MAX_CONNECTIONS: usize = 12;
+/// How long a connection may hold one of the [`MAX_CONNECTIONS`] slots
+/// before it has shown the capability. The player is on this machine and
+/// sends its request at once; any other local process gets no more.
+const UNAUTHENTICATED: Duration = Duration::from_secs(1);
+/// How long the player has for the whole request head.
+const REQUEST_HEAD: Duration = Duration::from_secs(15);
 
 /// Provenance of the original playable URL. A trusted URL authorizes only its
 /// exact origin; derived or redirected resources still require public hosts.
@@ -60,6 +73,7 @@ impl Default for PlaybackPolicy {
 pub struct PlaybackRelay {
     url: String,
     prefix: String,
+    proxy: String,
     source_url: String,
     url_auth: Option<HeaderValue>,
     cookies: Arc<OriginCookies>,
@@ -70,6 +84,11 @@ pub struct PlaybackRelay {
 
 struct Session {
     prefix: String,
+    /// `http://127.0.0.1:<port>`: how a request names this relay when the
+    /// player uses it as its proxy.
+    proxy: String,
+    /// `/<token>/`: the capability, as a request names it.
+    path: String,
     root: Url,
     headers: Arc<Mutex<HeaderMap>>,
     error: Arc<Mutex<Option<FetchErrorKind>>>,
@@ -211,10 +230,9 @@ impl PlaybackRelay {
         let token: String = random.iter().map(|b| format!("{b:02x}")).collect();
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).map_err(io_error)?;
         listener.set_nonblocking(true).map_err(io_error)?;
-        let prefix = format!(
-            "http://{}/{token}/",
-            listener.local_addr().map_err(io_error)?
-        );
+        let proxy = format!("http://{}", listener.local_addr().map_err(io_error)?);
+        let path = format!("/{token}/");
+        let prefix = format!("{proxy}{path}");
         let cookies = Arc::new(OriginCookies {
             origin: root.origin(),
             jar: Mutex::new(cookie_store::CookieStore::default()),
@@ -254,6 +272,8 @@ impl PlaybackRelay {
         let error = Arc::new(Mutex::new(None));
         let session = Arc::new(Session {
             prefix,
+            proxy: proxy.clone(),
+            path,
             root,
             headers: fields.clone(),
             client,
@@ -298,6 +318,7 @@ impl PlaybackRelay {
             .map_err(io_error)?;
         Ok(Self {
             prefix,
+            proxy,
             url,
             source_url,
             url_auth,
@@ -320,6 +341,17 @@ impl PlaybackRelay {
     /// A native player's top-level load must stay inside this capability.
     pub fn owns_url(&self, url: &str) -> bool {
         url.starts_with(&self.prefix)
+    }
+
+    /// This relay as an HTTP proxy, `http://127.0.0.1:<port>`, for a player
+    /// that loads the resources a manifest names by itself. Set as the
+    /// player's proxy, the relay receives every such load: one for
+    /// [`Self::url`] or an address a rewritten manifest names is served as
+    /// ever, and any other is refused before a connection to its host
+    /// exists. That is the player's second guard, should a manifest ever
+    /// leave the rewriter with an address the relay did not put there.
+    pub fn proxy(&self) -> &str {
+        &self.proxy
     }
 
     pub fn source_url(&self) -> &str {
@@ -385,18 +417,15 @@ fn map_url(prefix: &str, url: &Url) -> Result<String, FetchError> {
 }
 
 async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
-    let request =
-        tokio::time::timeout(Duration::from_secs(15), read_request(&mut socket)).await??;
+    let request = read_request(&mut socket, session).await?;
     let mut lines = request.split("\r\n");
     let mut first = lines.next().unwrap_or_default().split_whitespace();
     let method = first.next().unwrap_or_default();
     let path = first.next().unwrap_or_default();
-    let prefix_path = Url::parse(&session.prefix)
-        .expect("constructed URL")
-        .path()
-        .to_owned();
-    let Some(target) = path.strip_prefix(&prefix_path) else {
-        return answer(&mut socket, 403, b"Forbidden").await;
+    // `admit` has compared the capability; this only takes it off.
+    let path = path.strip_prefix(&session.proxy).unwrap_or(path);
+    let Some(target) = path.strip_prefix(&session.path) else {
+        return Err(io::Error::other("Invalid local request"));
     };
     let (raw_key, target) = target
         .strip_prefix("key/")
@@ -747,13 +776,99 @@ async fn send_bytes(socket: &mut TcpStream, bytes: &[u8]) -> io::Result<()> {
     tokio::time::timeout(Duration::from_secs(15), socket.write_all(bytes)).await?
 }
 
-async fn read_request(socket: &mut TcpStream) -> io::Result<String> {
+/// What the bytes received so far say about a connection.
+#[derive(Debug, PartialEq)]
+enum Admission {
+    /// A request for this relay's capability.
+    Admitted,
+    /// Too few bytes to tell.
+    Undecided,
+    /// These bytes cannot become such a request.
+    Refused,
+}
+
+/// `bytes` after `literal`; `Err(true)` when `bytes` is still a beginning
+/// of `literal`, `Err(false)` when it differs.
+fn after<'a>(bytes: &'a [u8], literal: &[u8]) -> Result<&'a [u8], bool> {
+    match bytes.strip_prefix(literal) {
+        Some(rest) => Ok(rest),
+        None => Err(literal.starts_with(bytes)),
+    }
+}
+
+/// Whether `a` equals `b`, in a time that depends on their length alone.
+fn same(a: &[u8], b: &[u8]) -> bool {
+    use subtle::ConstantTimeEq;
+    bool::from(a.ct_eq(b))
+}
+
+/// Whether `head`, the first bytes of a connection, begins a request for
+/// the capability: `GET` or `HEAD`, then the capability path `capability`
+/// (`/<token>/`), alone or behind this relay's own address `proxy`
+/// (`http://127.0.0.1:<port>`: a player using it as its proxy).
+///
+/// Nothing but the capability is secret, so everything before it is
+/// compared as it arrives and a connection that starts otherwise (another
+/// method, another host, a TLS handshake) is refused at once. The
+/// capability is compared in one piece once all of it is there and in
+/// constant time: neither a partial token nor the time of a refusal says
+/// how much of a guess was right.
+fn admit(head: &[u8], proxy: &str, capability: &str) -> Admission {
+    let target = match (after(head, b"GET "), after(head, b"HEAD ")) {
+        (Ok(target), _) | (_, Ok(target)) => target,
+        (Err(true), _) | (_, Err(true)) => return Admission::Undecided,
+        _ => return Admission::Refused,
+    };
+    let path = if target.first().is_none_or(|byte| *byte == b'/') {
+        target
+    } else {
+        match after(target, proxy.as_bytes()) {
+            Ok(path) => path,
+            Err(true) => return Admission::Undecided,
+            Err(false) => return Admission::Refused,
+        }
+    };
+    // After the address comes a path (`:43210` is another port).
+    if path.first().is_some_and(|byte| *byte != b'/') {
+        return Admission::Refused;
+    }
+    let capability = capability.as_bytes();
+    match path.get(..capability.len()) {
+        Some(shown) if same(shown, capability) => Admission::Admitted,
+        Some(_) => Admission::Refused,
+        // A request line that ends before the capability could.
+        None if path.iter().any(|byte| b" \r\n".contains(byte)) => Admission::Refused,
+        None => Admission::Undecided,
+    }
+}
+
+/// The request head of a connection that asks for the capability
+/// ([`admit`]); an error for every other, which closes it unanswered.
+async fn read_request(socket: &mut TcpStream, session: &Session) -> io::Result<String> {
+    let refused = || io::Error::other("Invalid local request");
+    let accepted = tokio::time::Instant::now();
+    let mut admitted = false;
     let mut bytes = Vec::new();
     let mut buf = [0; 1024];
-    while !bytes.windows(4).any(|v| v == b"\r\n\r\n") {
-        let n = socket.read(&mut buf).await?;
+    loop {
+        if !admitted {
+            match admit(&bytes, &session.proxy, &session.path) {
+                Admission::Admitted => admitted = true,
+                Admission::Undecided => {}
+                Admission::Refused => return Err(refused()),
+            }
+        }
+        if admitted && bytes.windows(4).any(|v| v == b"\r\n\r\n") {
+            break;
+        }
+        let allowed = if admitted {
+            REQUEST_HEAD
+        } else {
+            UNAUTHENTICATED
+        };
+        let n = tokio::time::timeout_at(accepted + allowed, socket.read(&mut buf)).await??;
         if n == 0 || bytes.len() + n > MAX_REQUEST {
-            return Err(io::Error::other("Invalid local request"));
+            return Err(refused());
         }
         bytes.extend_from_slice(&buf[..n]);
     }
@@ -783,45 +898,8 @@ fn resolve(prefix: &str, base: &Url, value: &str) -> Result<String, FetchError> 
     map_url(prefix, &target)
 }
 
-fn rewrite_hls(body: &[u8], base: &Url, prefix: &str) -> Result<Vec<u8>, FetchError> {
-    let text = std::str::from_utf8(body).map_err(|_| invalid("Invalid manifest text"))?;
-    let mut out = String::new();
-    // A lone carriage return ends a line too. Some players read lines that
-    // way (Java's `readLine`, behind the Android player): a URI hidden after
-    // a CR inside a tag line would pass here as part of the tag and be
-    // fetched by the player directly, outside this relay and its checks.
-    for line in text.lines().flat_map(|line| line.split('\r')) {
-        let line = line.trim();
-        if !line.is_empty() && !line.starts_with('#') {
-            out.push_str(&resolve(prefix, base, line)?);
-        } else {
-            let mut rest = line;
-            while let Some(at) = rest.find("URI=\"") {
-                let (before, tail) = rest.split_at(at + 5);
-                out.push_str(before);
-                let end = tail
-                    .find('"')
-                    .ok_or_else(|| invalid("Invalid manifest URI"))?;
-                let key_prefix;
-                let resource_prefix =
-                    if line.starts_with("#EXT-X-KEY:") || line.starts_with("#EXT-X-SESSION-KEY:") {
-                        key_prefix = format!("{prefix}key/");
-                        key_prefix.as_str()
-                    } else {
-                        prefix
-                    };
-                out.push_str(&resolve(resource_prefix, base, &tail[..end])?);
-                rest = &tail[end..];
-            }
-            out.push_str(rest);
-        }
-        out.push('\n');
-        if out.len() > MAX_MANIFEST * 8 {
-            return Err(invalid("Rewritten manifest exceeds limit"));
-        }
-    }
-    Ok(out.into_bytes())
-}
+mod hls;
+use hls::rewrite_hls;
 
 mod dash;
 use dash::rewrite_dash;
@@ -889,26 +967,85 @@ mod tests {
             .is_err()
         );
     }
+    const PROXY: &str = "http://127.0.0.1:4321";
+    const CAPABILITY: &str = "/0123456789abcdef0123456789abcdef0123456789abcdef/";
+
+    fn admitted(head: &str) -> Admission {
+        admit(head.as_bytes(), PROXY, CAPABILITY)
+    }
+
     #[test]
-    fn a_lone_carriage_return_cannot_hide_a_uri_inside_a_tag_line() {
-        let base = Url::parse("http://synthetic.example.test/live/main.m3u8").unwrap();
-        let prefix = "http://127.0.0.1:1/cap/";
-        let body = "#EXTM3U\r\n#EXTINF:2,\rhttp://192.0.2.7/direct.ts\n\
-                    #EXT-X-DISCONTINUITY\r#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin\"\rnext.ts\r\n";
-        let out = String::from_utf8(rewrite_hls(body.as_bytes(), &base, prefix).unwrap()).unwrap();
-        assert!(!out.contains('\r'), "{out:?}");
-        let lines: Vec<&str> = out.lines().collect();
-        assert_eq!(
-            lines,
-            [
-                "#EXTM3U",
-                "#EXTINF:2,",
-                "http://127.0.0.1:1/cap/http://192.0.2.7/direct.ts",
-                "#EXT-X-DISCONTINUITY",
-                "#EXT-X-KEY:METHOD=AES-128,URI=\"http://127.0.0.1:1/cap/key/http://synthetic.example.test/live/key.bin\"",
-                "http://127.0.0.1:1/cap/http://synthetic.example.test/live/next.ts",
-            ]
-        );
+    fn only_a_request_for_the_capability_is_admitted() {
+        for method in ["GET", "HEAD"] {
+            // As a player asks, and as one that uses the relay as its proxy.
+            for target in [CAPABILITY.to_owned(), format!("{PROXY}{CAPABILITY}")] {
+                let line = format!("{method} {target}http://media.example.test/a.ts HTTP/1.1\r\n");
+                assert_eq!(admitted(&line), Admission::Admitted, "{line}");
+                // Decided with the capability's last byte, not before.
+                let shown = format!("{method} {target}");
+                assert_eq!(admitted(&shown), Admission::Admitted);
+                for cut in 0..shown.len() {
+                    assert_eq!(admitted(&shown[..cut]), Admission::Undecided, "{cut}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn first_bytes_that_cannot_ask_for_the_capability_are_refused_at_once() {
+        for head in [
+            // Another method, a proxy tunnel, a TLS handshake, noise.
+            "P",
+            "POST /",
+            "GET\t",
+            "get /",
+            "CONNECT 192.0.2.7:443 HTTP/1.1\r\n",
+            "\u{16}\u{3}\u{1}",
+            "\r\n",
+            // A proxy request for another host, port or scheme.
+            "GET http://192.0.2.7/key.bin HTTP/1.1\r\n",
+            "GET http://127.0.0.1:4322/",
+            "GET http://127.0.0.1:43210/",
+            "GET https://127.0.0.1:4321/",
+            "GET h2",
+            "GET *",
+            // A request line that ends before the capability could.
+            "GET / HTTP/1.1\r\n",
+            "GET /0123456789abcdef HTTP/1.1\r\n",
+            "GET /0123456789abcdef\n",
+            "GET http://127.0.0.1:4321/ HTTP/1.1\r\n",
+            "GET http://127.0.0.1:4321 HTTP/1.1\r\n",
+        ] {
+            assert_eq!(admitted(head), Admission::Refused, "{head:?}");
+        }
+    }
+
+    /// A guess is answered the same whatever part of it is right: nothing
+    /// while it is shorter than the capability, a refusal once it is as
+    /// long. So the capability cannot be found a character at a time.
+    #[test]
+    fn a_wrong_capability_is_judged_whole() {
+        let right = CAPABILITY.as_bytes();
+        // From the token's first character: the slash before it is no secret.
+        for position in 1..right.len() {
+            let mut guess = right.to_vec();
+            guess[position] = if guess[position] == b'f' { b'0' } else { b'f' };
+            let mut head = b"GET ".to_vec();
+            head.extend_from_slice(&guess);
+            assert_eq!(admit(&head, PROXY, CAPABILITY), Admission::Refused);
+            for cut in 4..head.len() {
+                assert_eq!(
+                    admit(&head[..cut], PROXY, CAPABILITY),
+                    Admission::Undecided,
+                    "a partial guess wrong at {position} was judged at {cut}"
+                );
+            }
+        }
+        assert!(same(b"", b""));
+        assert!(same(b"synthetic", b"synthetic"));
+        assert!(!same(b"synthetic", b"synthetid"));
+        assert!(!same(b"xynthetic", b"synthetic"));
+        assert!(!same(b"synthetic", b"synthetic "));
     }
 
     #[test]
