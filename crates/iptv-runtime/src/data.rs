@@ -162,7 +162,7 @@ fn start_import_with(job: Job, cancel: CancelToken, on_update: impl Fn(Update) +
     {
         let cancel = cancel.clone();
         let revoked = completion.guide.clone();
-        let visible = job.stored.is_some_and(|source| source_is_visible(source))
+        let visible = job.stored.is_some_and(source_is_visible)
             || matches!(
                 purpose,
                 Purpose::Add | Purpose::Startup | Purpose::Switch | Purpose::Refresh
