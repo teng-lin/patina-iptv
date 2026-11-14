@@ -1,13 +1,12 @@
 //! Apply user organization to the guide without replacing playback channels.
-use crate::Ui;
-use crate::runtime::model::SourceId;
+use crate::model::SourceId;
 use iptv_guide::EpgSchedule;
 
 pub fn revision() -> u64 {
-    crate::runtime().organization_revision().get()
+    crate::current().organization_revision().get()
 }
 
-use crate::runtime::commands::load_organization as load;
+use crate::commands::load_organization as load;
 
 /// The schedule of an imported catalog with `source`'s organisation, built
 /// off the UI thread.
@@ -63,7 +62,7 @@ pub async fn apply(schedule: &EpgSchedule, source: SourceId) -> Option<EpgSchedu
         Ok(snapshot) => snapshot,
         Err(error) => {
             log::warn!("iptv organization: store unavailable: {error}");
-            crate::runtime().emit(crate::runtime::RuntimeEvent::Notify(
+            crate::current().emit(crate::RuntimeEvent::Notify(
                 "The list could not be reloaded. Reopen it and try again.",
             ));
             return None;
@@ -77,30 +76,30 @@ pub async fn apply(schedule: &EpgSchedule, source: SourceId) -> Option<EpgSchedu
     .ok()?;
     Some(schedule.with_prepared_organization(prepared))
 }
-pub fn changed(ui: Ui, source: SourceId) {
-    crate::runtime().organization_revision().set(
-        crate::runtime()
+pub fn changed(source: SourceId) {
+    crate::current().organization_revision().set(
+        crate::current()
             .organization_revision()
             .get()
             .wrapping_add(1),
     );
-    let ticket = crate::runtime().begin_organization_edit(source);
-    crate::runtime().emit(crate::runtime::RuntimeEvent::LibraryChanged);
-    if super::combined::active(ui) {
-        super::combined::organization_changed(ui, source, ticket);
+    let ticket = crate::current().begin_organization_edit(source);
+    crate::current().emit(crate::RuntimeEvent::LibraryChanged);
+    if super::combined::active() {
+        super::combined::organization_changed(source, ticket);
         return;
     }
-    if ui.library.shown.get_untracked() != Some(source) {
+    if crate::current().shown.get() != Some(source) {
         return;
     }
-    let schedule = crate::schedule();
+    let schedule = crate::current().schedule();
     super::spawn_in_app(async move {
         if let Some(epg) = schedule
             .as_any()
             .and_then(|s| s.downcast_ref::<EpgSchedule>())
             && let Some(replacement) = apply(epg, source).await
         {
-            crate::runtime().emit(crate::runtime::RuntimeEvent::OrganizationReady {
+            crate::current().emit(crate::RuntimeEvent::OrganizationReady {
                 source,
                 ticket,
                 schedule,

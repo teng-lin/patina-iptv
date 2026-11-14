@@ -2224,8 +2224,12 @@ fn extracted_runtime_messages_and_shell_failures_remain_checked() {
             "The list could not be reloaded. Reopen it and try again.",
         ),
         (
-            "iptv-app/src/data/organization.rs",
+            "iptv-runtime/src/data/organization.rs",
             "The list could not be reloaded. Reopen it and try again.",
+        ),
+        (
+            "iptv-app/src/organization_view.rs",
+            "The change could not be saved. Reopen the list and try again.",
         ),
         (
             "iptv-runtime/src/backup.rs",
@@ -2251,6 +2255,14 @@ fn extracted_runtime_messages_and_shell_failures_remain_checked() {
             "{file}: message is no longer checked: {message}"
         );
     }
+    // Moving orchestration retains the notices as checked catalogue messages.
+    let (messages, carried, unproven) = followed(
+        "iptv-runtime/src/data/organization.rs",
+        "fn f() { emit(RuntimeEvent::Notify(\"Synthetic uncatalogued guide failure\")); }",
+    );
+    assert_eq!(messages, ["Synthetic uncatalogued guide failure"]);
+    assert!(!is_catalogued(&messages[0]));
+    assert!(carried.is_empty() && unproven.is_empty());
     // The moved data path rejects a missing catalogue row as before.
     let file = "iptv-runtime/src/backup.rs";
     let literal = literals(

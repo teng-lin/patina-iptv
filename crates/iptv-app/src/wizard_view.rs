@@ -147,7 +147,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
                 purpose: Purpose::Add,
                 edit: false,
             };
-            let token = data::start_import(ui, job, move |update| {
+            let token = data::start_import(job, move |update| {
                 send(
                     ui,
                     match update {

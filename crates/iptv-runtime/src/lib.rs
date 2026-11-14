@@ -1,5 +1,15 @@
 //! Application-owned state and events. This module has no UI toolkit imports.
+pub mod data;
 mod events;
+
+/// Shell observations needed to prioritize reads and avoid replacing active playback.
+#[derive(Default)]
+pub struct BrowserState {
+    pub focused_key: Option<String>,
+    pub playing: bool,
+    pub has_vod: bool,
+}
+
 mod guide_checks;
 pub mod state;
 pub use events::RuntimeEvent;
@@ -39,6 +49,7 @@ struct TaskHost {
 }
 
 type EventSink = Rc<dyn Fn(RuntimeEvent)>;
+type BrowserObserver = Rc<dyn Fn() -> BrowserState>;
 type PageWaiters = RefCell<Vec<Box<dyn FnOnce()>>>;
 type Resolves = RefCell<[Option<(u64, CancelToken)>; iptv_core::multiview::MAX_SURFACES]>;
 /// The guide updates asked for by hand that have not ended, each with its work.
@@ -89,6 +100,8 @@ pub struct Runtime {
     pub(crate) foreground: Cell<bool>,
     pub(crate) scheduler_started: Cell<bool>,
     guide_checks: RefCell<guide_checks::GuideChecks>,
+    status_revision: Cell<u64>,
+    browser: RefCell<Option<BrowserObserver>>,
     organization_edits: RefCell<HashMap<SourceId, u64>>,
     /// Each source's last show, which the next one waits for.
     shows: RefCell<HashMap<SourceId, futures_channel::oneshot::Receiver<()>>>,
@@ -145,6 +158,8 @@ impl Runtime {
             )),
             #[cfg(not(feature = "test-support"))]
             guide_checks: RefCell::default(),
+            status_revision: Cell::new(0),
+            browser: RefCell::default(),
             organization_edits: RefCell::default(),
             shows: RefCell::default(),
         }
@@ -221,6 +236,17 @@ impl Runtime {
         // Retire services now, rather than waiting for its last Rc to drop.
         self.store.retire();
         drained
+    }
+
+    pub fn bind_browser(&self, observe: impl Fn() -> BrowserState + 'static) {
+        *self.browser.borrow_mut() = Some(Rc::new(observe));
+    }
+    pub(crate) fn browser(&self) -> BrowserState {
+        self.browser
+            .borrow()
+            .as_ref()
+            .map(|observe| observe())
+            .unwrap_or_default()
     }
 
     pub fn bind(&self, sink: impl Fn(RuntimeEvent) + 'static) {

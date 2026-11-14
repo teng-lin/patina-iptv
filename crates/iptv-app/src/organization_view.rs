@@ -169,7 +169,7 @@ fn perform(ui: Ui, edit: Edit) {
 fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), StoreError>) {
     if let Err(e) = result {
         log::warn!("iptv organization: change refused: {e}");
-        crate::runtime().emit(crate::runtime::RuntimeEvent::Notify(
+        crate::settings_view::notify(tr(
             "The change could not be saved. Reopen the list and try again.",
         ));
         return;
@@ -189,7 +189,7 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), StoreError>) {
                 }
             });
         }
-        data::organization::changed(ui, expected.source);
+        data::organization::changed(expected.source);
     });
 }
 

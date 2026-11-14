@@ -381,7 +381,7 @@ pub fn start_scheduler() {
                         if policy.due(super::imports::now_unix(), attempted, startup)
                             && !running(source.id)
                         {
-                            crate::current().emit(super::RuntimeEvent::RefreshDue(source.id));
+                            crate::data::refresh(source.id);
                         }
                     }
                 }

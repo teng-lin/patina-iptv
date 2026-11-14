@@ -190,7 +190,7 @@ pub fn navigate(ui: Ui, m: Move) {
 /// OK on the guide screen.
 pub fn ok(ui: Ui) {
     if ui.focus.with_untracked(|f| f.pane) == Pane::Groups
-        && toggle_playlist(ui, ui.focus.with_untracked(|f| f.group))
+        && toggle_playlist(ui.focus.with_untracked(|f| f.group))
     {
         return;
     }
@@ -224,7 +224,7 @@ pub fn tap_entry(ui: Ui, entry: usize) {
     let o = step(ui, |f, cols, _| f.tap_entry(entry, cols));
     follow(ui, o);
     // A parent previews its source before changing section visibility.
-    toggle_playlist(ui, entry);
+    toggle_playlist(entry);
 }
 
 /// The player's channel list chose groups column `entry`: the guide shows
@@ -285,9 +285,9 @@ pub fn columns_shown(ui: Ui) -> bool {
     ui.focus.with(|f| f.pane) != Pane::Guide
 }
 
-fn toggle_playlist(ui: Ui, entry: usize) -> bool {
+fn toggle_playlist(entry: usize) -> bool {
     match Entry::at(entry) {
-        Entry::Group(group) => crate::data::combined::toggle_playlist(ui, group),
+        Entry::Group(group) => crate::data::combined::toggle_playlist(group),
         _ => false,
     }
 }

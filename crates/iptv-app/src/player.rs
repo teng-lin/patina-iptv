@@ -190,8 +190,8 @@ pub fn start(ui: &Ui, channel: usize) {
             .with_untracked(|h| h.current() != Some(&key));
         ui.player.history.update(|h| h.played(&key));
         if changed {
-            if crate::data::combined::active(ui) {
-                if let Some((source, local)) = crate::data::combined::owner(ui, &key) {
+            if crate::data::combined::active() {
+                if let Some((source, local)) = crate::data::combined::owner(&key) {
                     save_last_channel(Some(source), &local);
                 }
                 crate::runtime::playback::save_combined_channel(&key);
