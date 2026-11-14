@@ -2391,6 +2391,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "iptv-sqlcipher-init"
+version = "0.1.1"
+dependencies = [
+ "rusqlite",
+]
+
+[[package]]
 name = "iptv-store-sqlite"
 version = "0.1.1"
 dependencies = [
@@ -2400,6 +2407,7 @@ dependencies = [
  "iptv-library",
  "iptv-net",
  "iptv-providers",
+ "iptv-sqlcipher-init",
  "rusqlite",
  "serde_json",
  "tempfile",

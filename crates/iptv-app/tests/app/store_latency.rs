@@ -3,6 +3,7 @@
 use crate::headless::Headless;
 use nsh_core::{ImageData, Size, element::Root, picker::PickedFile, prelude::*};
 use nsh_engine::EngineConfig;
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -93,17 +94,32 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
         .query_row("SELECT count(*) FROM favourites", [], |row| row.get(0))
         .unwrap();
     assert_eq!(before, 0, "the pending write cannot pass the held lock");
-    let timing = Arc::new(Mutex::new((None::<Instant>, None::<Duration>)));
+    let empty_cells: HashSet<_> = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .filter(|node| node.hidden && node.test_id.as_deref() == Some("guide-programme"))
+        .map(|node| node.id)
+        .collect();
+    assert!(!empty_cells.is_empty(), "the sparse guide has unused slots");
+    let timing = Arc::new(Mutex::new((None::<Instant>, None::<Duration>, 0_usize)));
     let observed = timing.clone();
     app.observe(move |step, batch| {
+        if step.contains("keyboard.press(down)") {
+            let restyled = batch.items.iter().filter(|item| matches!(item,
+                nsh_core::MountItem::ViewStyle { id, style } if style.hidden && empty_cells.contains(id)
+            )).count();
+            observed.lock().unwrap().2 += restyled;
+        }
         if step.contains("keyboard.press(down)") && batch.items.iter().any(|item| matches!(item, nsh_core::MountItem::Text { text, .. } if text.text.starts_with("keys "))) {
             let mut timing = observed.lock().unwrap();
             if timing.1.is_none() { timing.1 = timing.0.map(|start| start.elapsed()); }
         }
     });
     let mut maximum = Duration::ZERO;
+    let mut restyled_empty = 0;
     for _ in 0..24 {
-        *timing.lock().unwrap() = (Some(Instant::now()), None);
+        *timing.lock().unwrap() = (Some(Instant::now()), None, 0);
         app.press_key("down").unwrap();
         let elapsed = timing
             .lock()
@@ -111,10 +127,16 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
             .1
             .expect("navigation produced a mounted frame");
         maximum = maximum.max(elapsed);
+        restyled_empty += timing.lock().unwrap().2;
     }
     lock.execute_batch("ROLLBACK").unwrap();
     eprintln!(
-        "10k channels / 7 days, held SQLite writer: maximum key-to-mounted-frame {maximum:?}"
+        "10k channels / 7 days, held SQLite writer: maximum key-to-mounted-frame {maximum:?}; \
+         unused programme slots restyled {restyled_empty}"
+    );
+    assert_eq!(
+        restyled_empty, 0,
+        "navigation must not restyle unused slots"
     );
     assert!(
         maximum < Duration::from_millis(50),

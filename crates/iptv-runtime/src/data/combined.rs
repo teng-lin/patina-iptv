@@ -459,14 +459,23 @@ pub fn toggle_playlist(owner: &Rc<crate::Runtime>, group: usize) -> bool {
     let Some(collapsed) = all.toggle_playlist(group) else {
         return false;
     };
+    let projection = Rc::new(all.with_browser_expansion(collapsed.clone()));
     let saved = crate::library::save_collapsed(owner, collapsed);
-    owner.emit(crate::RuntimeEvent::CatalogChanged);
+    // A following key must see the new rows, even while persistence waits.
+    // Invalidate assemblies that began before this projection was chosen.
+    owner.rebuild.set(owner.rebuild.get().wrapping_add(1));
+    owner.emit(crate::RuntimeEvent::ScheduleReady(projection));
     owner.spawn({
         let owner = owner.clone();
         async move {
-            match saved.await {
-                Ok(()) => rebuild(&owner),
-                Err(error) => log::warn!("iptv browser: could not save expansion: {error}"),
+            if let Err(error) = saved.await {
+                log::warn!("iptv browser: could not save expansion: {error}");
+                owner.emit(crate::RuntimeEvent::Notify(
+                    "The change could not be saved. Reopen the list and try again.",
+                ));
+                // Restore persisted expansion on failure. This read follows all
+                // newer queued choices, and later choices invalidate its revision.
+                rebuild(&owner);
             }
         }
     });

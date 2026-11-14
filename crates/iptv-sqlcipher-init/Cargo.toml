@@ -1,0 +1,17 @@
+[package]
+name = "iptv-sqlcipher-init"
+description = "Native SQLCipher initialization barrier; no keys, paths, or application owner state."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+rusqlite.workspace = true
+
+[target.'cfg(not(target_vendor = "apple"))'.dependencies]
+rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"] }
+
+[lints]
+workspace = true

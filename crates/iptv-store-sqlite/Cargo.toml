@@ -9,6 +9,7 @@ license.workspace = true
 
 [dependencies]
 iptv-library.workspace = true
+iptv-sqlcipher-init.workspace = true
 iptv-providers.workspace = true
 iptv-epg.workspace = true
 iptv-import.workspace = true
