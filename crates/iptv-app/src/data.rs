@@ -237,7 +237,7 @@ fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(U
         spawn_in_app(async move {
             if job.purpose.shows_stored_first()
                 && let Some(id) = job.stored
-                && opening::send_stored(&job, id, now_unix(), &tx).await
+                && opening::send_stored(&job, id, now_unix(), &tx, &cancel, &revoked).await
             {
                 return;
             }

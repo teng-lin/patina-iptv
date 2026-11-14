@@ -20,6 +20,7 @@ use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender as Sender;
 
 use iptv_epg::{ChannelKey, GuideStore, UnixTime};
+use iptv_import::CancelToken;
 use iptv_providers::model::Channel;
 use iptv_store_sqlite::{EpgWindow, SourceId};
 
@@ -64,7 +65,27 @@ pub fn first_rows(channels: &[Channel], focus: Option<&str>) -> Vec<ChannelKey> 
 
 /// Sends `id`'s stored channels with the first screen's programmes, then
 /// with the whole guide window. Nothing when it has no channels.
-pub async fn send_stored(job: &Job, id: SourceId, now: UnixTime, tx: &Sender<Msg>) -> bool {
+pub async fn send_stored(
+    job: &Job,
+    id: SourceId,
+    now: UnixTime,
+    tx: &Sender<Msg>,
+    cancel: &CancelToken,
+    revoked: &CancelToken,
+) -> bool {
+    send_stored_after(job, id, now, tx, &[cancel, revoked], async {}).await
+}
+
+// The continuation is normally ready immediately. A unit test can hold this
+// one opening after its metadata read without changing any other owner/task.
+async fn send_stored_after(
+    job: &Job,
+    id: SourceId,
+    now: UnixTime,
+    tx: &Sender<Msg>,
+    stops: &[&CancelToken],
+    metadata_read: impl std::future::Future<Output = ()>,
+) -> bool {
     let started = Instant::now();
     let ms = |t: Instant| t.elapsed().as_millis();
     let (groups, channels) =
@@ -152,6 +173,7 @@ pub async fn send_stored(job: &Job, id: SourceId, now: UnixTime, tx: &Sender<Msg
         ))
     })
     .await;
+    metadata_read.await;
     if let Ok((policy, status, state, sources, overrides)) = metadata {
         let playlist_due = status.last_success_at.is_none()
             || policy.due(
@@ -182,10 +204,18 @@ pub async fn send_stored(job: &Job, id: SourceId, now: UnixTime, tx: &Sender<Msg
             );
             if !matches!(decision, iptv_import::Decision::Refresh(_)) {
                 let guide = if matches!(decision, iptv_import::Decision::Discard) {
-                    if super::store_service::call(move |store| store.delete_epg(id))
-                        .await
-                        .is_err()
-                    {
+                    let stops = stored::Stops::of(stops);
+                    let discarded = super::store_service::call(move |store| {
+                        if stops.superseded() {
+                            return Ok(None);
+                        }
+                        store.delete_epg(id).map(Some)
+                    })
+                    .await;
+                    if !matches!(discarded, Ok(Some(_))) {
+                        // A superseded opening has no authoritative policy
+                        // answer. Let its caller's cancelled/current work
+                        // decide what follows, just as after a store error.
                         let _ = tx.send(Msg::Guide(imported(groups, channels, guide)));
                         return false;
                     }
@@ -224,6 +254,12 @@ pub async fn send_stored(job: &Job, id: SourceId, now: UnixTime, tx: &Sender<Msg
     let _ = tx.send(Msg::Guide(imported(groups, channels, guide)));
     false
 }
+
+#[cfg(test)]
+#[path = "../../iptv-store-sqlite/tests/common/mod.rs"]
+mod common;
+#[cfg(test)]
+mod revocation;
 
 #[cfg(test)]
 mod tests {

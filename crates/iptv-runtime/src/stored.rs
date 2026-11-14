@@ -401,14 +401,14 @@ pub(crate) fn replace(
 /// worker last looked cannot land after them: a download cannot put back
 /// a deleted guide, a failure cannot note an error on it, and a discard
 /// decided from older guide sources cannot delete a newer guide.
-struct Stops(Vec<CancelToken>);
+pub(crate) struct Stops(Vec<CancelToken>);
 
 impl Stops {
-    fn of(stops: &[&CancelToken]) -> Self {
+    pub(crate) fn of(stops: &[&CancelToken]) -> Self {
         Self(stops.iter().map(|stop| (*stop).clone()).collect())
     }
 
-    fn superseded(&self) -> bool {
+    pub(crate) fn superseded(&self) -> bool {
         self.0.iter().any(CancelToken::is_cancelled)
     }
 }
