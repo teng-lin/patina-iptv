@@ -13,6 +13,15 @@ pub struct ImportWork {
     pub(crate) finished: Cell<bool>,
     pub(crate) catalog_done: Cell<bool>,
     pub cancel: CancelToken,
+    /// Stops the guide phase alone, at once, also while the playlist is
+    /// still being fetched (which goes on): the worker then downloads and
+    /// stores no guide, whenever it gets there.
+    pub guide: CancelToken,
+    /// Newer work for the source replaced this (another import, an update
+    /// asked for): that work sets the next guide check, or keeps the owed
+    /// one when it fails. Not set by a guide action, which revokes the
+    /// handoff and leaves the source without such work.
+    pub superseded: Cell<bool>,
     /// Tasks waiting for [`Self::finish`].
     pub(crate) waiting: RefCell<Vec<futures_channel::oneshot::Sender<()>>>,
 }
@@ -43,6 +52,7 @@ impl ImportWork {
         self.catalog_done.set(true);
     }
     pub fn cancel_guide(&self) {
+        self.guide.cancel();
         if self.catalog_done.get() {
             self.cancel.cancel();
         }
@@ -81,10 +91,4 @@ pub struct StatusSnapshot {
 pub struct OrganizationSnapshot {
     pub organization: iptv_guide::Organization,
     pub lists: Vec<(String, String, Vec<String>)>,
-}
-impl OrganizationSnapshot {
-    pub fn install(self, schedule: &EpgSchedule) {
-        schedule.set_organization(self.organization);
-        schedule.set_group_lists(self.lists);
-    }
 }

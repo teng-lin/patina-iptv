@@ -119,6 +119,12 @@ pub enum Msg {
         source: SourceId,
         at: i64,
     },
+    /// The refresh policy asks for no further check of `source`'s guide:
+    /// only a request or a restart looks at it again. Work that cannot
+    /// tell (it failed, or could not read the store) sends neither.
+    NoCheck {
+        source: SourceId,
+    },
     Playlist(Result<(ImportCounts, Box<Imported>), ImportFailure>),
     /// What the store has (before the playlist), or the source's guide
     /// loaded after the playlist was reported.
@@ -147,35 +153,55 @@ pub fn with_runtime<F: Future<Output = ()>>(future: impl FnOnce() -> F) -> bool 
 }
 
 /// The import itself, on its own thread with a small tokio runtime.
-pub fn run(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
-    if !with_runtime(|| pipeline(job, tx, cancel)) {
+/// `cancel` stops all of it; `revoked` its guide phase alone (a guide
+/// action replaced what it would download, `ImportWork::guide`).
+pub fn run(job: Job, tx: &Sender<Msg>, cancel: &CancelToken, revoked: &CancelToken) {
+    if !with_runtime(|| pipeline(job, tx, cancel, revoked)) {
         let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(FailureKind::Network))));
     }
 }
 
 /// The timer's guide check: the stored feeds for the stored channels.
-pub async fn guide_pipeline(source: SourceId, tx: &Sender<Msg>, read: GuideRead) {
+pub async fn guide_pipeline(
+    source: SourceId,
+    tx: &Sender<Msg>,
+    read: GuideRead,
+    cancel: &CancelToken,
+) {
+    if cancel.is_cancelled() {
+        return;
+    }
     let now = now_unix();
-    let state = stored::guide_state(source);
-    let guides = stored::current_configs(source, state.as_ref());
-    let (groups, channels) = match stored::catalog(source) {
-        Ok(catalog) => catalog,
+    let stored::GuideInputs {
+        state,
+        guides,
+        groups,
+        channels,
+        overrides,
+    } = match stored::guide_inputs(source) {
+        Ok(inputs) => inputs,
         Err(e) => {
-            log::warn!("iptv data: stored catalog: {e}");
+            stored::unreadable(tx, source, now, &e);
             return;
         }
     };
-    let overrides = stored::overrides(source);
     let matching = stored::Matching {
         channels: &channels,
         overrides: &overrides,
     };
     if !matches!(read, GuideRead::Check) {
+        let guide = match stored::try_load_guide(source, now) {
+            Ok(guide) => guide,
+            Err(e) => {
+                stored::unreadable(tx, source, now, &e);
+                return;
+            }
+        };
         let _ = tx.send(Msg::Guide(Box::new(Imported {
             groups: groups.clone(),
             channels: channels.clone(),
             playback: Streams::Current,
-            guide: stored::load_guide(source, now).unwrap_or_default(),
+            guide,
             now,
             source,
             resume: false,
@@ -189,20 +215,16 @@ pub async fn guide_pipeline(source: SourceId, tx: &Sender<Msg>, read: GuideRead)
             log::info!("iptv data: downloading the guide ({reason:?})");
             match NetClient::new(super::settings::net_config()) {
                 Ok(net) => {
-                    let cancel = CancelToken::new();
-                    let result = download_guide(
-                        &net,
-                        &guides,
-                        matching,
-                        now,
-                        &mut NoProgress,
-                        &cancel,
-                        None,
-                    )
-                    .await;
+                    let result =
+                        download_guide(&net, &guides, matching, now, &mut NoProgress, cancel, None)
+                            .await;
                     match result {
                         Ok(import) => {
-                            let guide = keep_guide(source, import, &guides, matching, now);
+                            if cancel.is_cancelled() {
+                                return;
+                            }
+                            let guide =
+                                keep_guide(source, import, &guides, matching, now, &[cancel]);
                             let _ = tx.send(Msg::Guide(Box::new(Imported {
                                 groups,
                                 channels: channels.clone(),
@@ -214,8 +236,11 @@ pub async fn guide_pipeline(source: SourceId, tx: &Sender<Msg>, read: GuideRead)
                             })));
                         }
                         Err(e) => {
+                            if cancel.is_cancelled() {
+                                return;
+                            }
                             log::warn!("iptv data: guide: {e}");
-                            stored::record_failure(source, &e, &guides);
+                            stored::record_failure(source, &e, &guides, &[cancel]);
                         }
                     }
                 }
@@ -223,7 +248,7 @@ pub async fn guide_pipeline(source: SourceId, tx: &Sender<Msg>, read: GuideRead)
             }
         }
         Decision::Discard => {
-            stored::discard(source);
+            stored::discard(source, &[cancel]);
             // Its programmes went: the guide on screen shows none.
             let _ = tx.send(Msg::Guide(Box::new(Imported {
                 groups,
@@ -240,16 +265,20 @@ pub async fn guide_pipeline(source: SourceId, tx: &Sender<Msg>, read: GuideRead)
     send_next_check(tx, source, &guides, matching);
 }
 
-/// Tells the UI when to look at the guide again, if ever.
+/// Tells the UI when to look at the guide again, or that the policy asks
+/// for no check; when the store cannot say, see [`stored::unreadable`].
 pub(crate) fn send_next_check(
     tx: &Sender<Msg>,
     source: SourceId,
     guides: &[EpgSourceConfig],
     matching: stored::Matching<'_>,
 ) {
-    if let Some(at) = stored::next_check(source, guides, matching, now_unix()) {
-        let _ = tx.send(Msg::NextCheck { source, at });
-    }
+    let now = now_unix();
+    let _ = match stored::next_check(source, guides, matching, now) {
+        Ok(Some(at)) => tx.send(Msg::NextCheck { source, at }),
+        Ok(None) => tx.send(Msg::NoCheck { source }),
+        Err(e) => return stored::unreadable(tx, source, now, &e),
+    };
 }
 
 /// Reports to the UI as the wizard's progress.
@@ -263,7 +292,14 @@ impl ProgressSink for Forward<'_> {
     }
 }
 
-pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
+pub(crate) async fn pipeline(
+    job: Job,
+    tx: &Sender<Msg>,
+    cancel: &CancelToken,
+    revoked: &CancelToken,
+) {
+    // What keeps a downloaded guide out of the store.
+    let stops = [cancel, revoked];
     let fail = |failure: ImportFailure| {
         let _ = tx.send(Msg::Playlist(Err(failure)));
     };
@@ -292,13 +328,22 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
                 playback: Streams::New(context, None),
             }),
         ))));
-        let overrides = stored::overrides(id);
+        // The guide's own inputs, read again as one: an unreadable part
+        // must not be taken for "no guide configured".
+        let stored::GuideInputs {
+            state,
+            guides,
+            groups,
+            channels,
+            overrides,
+        } = match stored::guide_inputs(id) {
+            Ok(inputs) => inputs,
+            Err(e) => return stored::unreadable(tx, id, now, &e),
+        };
         let matching = stored::Matching {
             channels: &channels,
             overrides: &overrides,
         };
-        let guides = stored::current_configs(id, stored::guide_state(id).as_ref());
-        let state = stored::guide_state(id);
         match stored::plan(
             job.purpose.trigger(),
             &guides,
@@ -306,6 +351,8 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
             state.as_ref(),
             now,
         ) {
+            // Revoked while the stored channels were read: no download.
+            Decision::Refresh(_) if revoked.is_cancelled() => {}
             Decision::Refresh(_) => match NetClient::new(super::settings::net_config()) {
                 Ok(net) => {
                     match download_guide(
@@ -320,7 +367,7 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
                     .await
                     {
                         Ok(import) => {
-                            let guide = keep_guide(id, import, &guides, matching, now);
+                            let guide = keep_guide(id, import, &guides, matching, now, &stops);
                             let _ = tx.send(Msg::Guide(Box::new(Imported {
                                 groups,
                                 channels: channels.clone(),
@@ -332,7 +379,8 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
                             })));
                         }
                         Err(ImportError::Cancelled) => {}
-                        Err(e) => stored::record_failure(id, &e, &guides),
+                        Err(_) if stops.iter().any(|stop| stop.is_cancelled()) => {}
+                        Err(e) => stored::record_failure(id, &e, &guides, &stops),
                     }
                 }
                 // Without a client no guide source was tried. Noted as the
@@ -341,11 +389,11 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
                 // the guide due again at every check.
                 Err(e) => {
                     log::warn!("iptv data: network client setup failed: {e}");
-                    stored::record_client_failure(id, &guides);
+                    stored::record_client_failure(id, &guides, &stops);
                 }
             },
             Decision::Discard => {
-                stored::discard(id);
+                stored::discard(id, &stops);
                 let _ = tx.send(Msg::Guide(Box::new(Imported {
                     groups,
                     channels: channels.clone(),
@@ -406,16 +454,11 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
                 record_failure(job.stored, stored::error_kind(&e));
             }
             // The stored guide stays on screen: keep it current.
-            if let (Some(id), Some(state)) = (job.stored, stored_guide.as_ref())
-                && let Ok((_, channels)) = stored::catalog(id)
-            {
-                let overrides = stored::overrides(id);
-                let matching = stored::Matching {
-                    channels: &channels,
-                    overrides: &overrides,
-                };
-                let guides = stored::current_configs(id, Some(state));
-                send_next_check(tx, id, &guides, matching);
+            if let Some(id) = job.stored.filter(|_| stored_guide.is_some()) {
+                match stored::guide_inputs(id) {
+                    Ok(inputs) => send_next_check(tx, id, &inputs.guides, inputs.matching()),
+                    Err(e) => stored::unreadable(tx, id, now, &e),
+                }
             }
             return fail(wizard_map::failure_of(&e));
         }
@@ -443,7 +486,15 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
     // The guide sources: the stored source's as the user arranged them (a
     // new source: the guide just typed), with the provider's guides of now.
     let planned = guides::sync_provider(&planned_guides(&job), &catalog.guide_urls());
-    let overrides = job.stored.map(stored::overrides).unwrap_or_default();
+    // The user's guide choices: unreadable ones are not "none", which
+    // would match and store the guide without them.
+    let overrides = match job.stored.map(stored::overrides).transpose() {
+        Ok(overrides) => overrides.unwrap_or_default(),
+        Err(e) => {
+            log::warn!("iptv data: guide choices: {e}");
+            return fail(ImportFailure::new(FailureKind::Storage));
+        }
+    };
     let matching = stored::Matching {
         channels: &catalog.channels,
         overrides: &overrides,
@@ -516,11 +567,13 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
         })
     };
     let report = |guide| {
+        #[cfg(feature = "test-support")]
+        super::workers::before_report();
         let _ = tx.send(Msg::Playlist(Ok((counts, imported(guide)))));
     };
     let guides = stored::configs_for(&sources, &job.source.config);
     if let Some(import) = typed_guide {
-        report(keep_guide(id, import, &guides, matching, now));
+        report(keep_guide(id, import, &guides, matching, now, &stops));
         return send_next_check(tx, id, &guides, matching);
     }
     match stored::plan(
@@ -533,22 +586,28 @@ pub(crate) async fn pipeline(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
         Decision::Refresh(reason) => {
             log::info!("iptv data: downloading the guide ({reason:?})");
             report(stored::load_guide(id, now).unwrap_or_default());
-            // The guide loads after the channels are on screen.
-            match download_guide(&net, &guides, matching, now, &mut NoProgress, cancel, None).await
-            {
+            // The guide loads after the channels are on screen, unless a
+            // guide action revoked it while the playlist was fetched.
+            let downloaded = if revoked.is_cancelled() {
+                Err(ImportError::Cancelled)
+            } else {
+                download_guide(&net, &guides, matching, now, &mut NoProgress, cancel, None).await
+            };
+            match downloaded {
                 Ok(import) => {
-                    let guide = keep_guide(id, import, &guides, matching, now);
+                    let guide = keep_guide(id, import, &guides, matching, now, &stops);
                     let _ = tx.send(Msg::Guide(imported(guide)));
                 }
                 Err(ImportError::Cancelled) => {}
+                Err(_) if stops.iter().any(|stop| stop.is_cancelled()) => {}
                 Err(e) => {
                     log::warn!("iptv data: guide: {e}");
-                    stored::record_failure(id, &e, &guides);
+                    stored::record_failure(id, &e, &guides, &stops);
                 }
             }
         }
         Decision::Discard => {
-            stored::discard(id);
+            stored::discard(id, &stops);
             report(GuideStore::default());
         }
         decision => {
@@ -582,15 +641,17 @@ pub(crate) struct Downloaded {
 }
 
 /// Stores a downloaded guide and reads it back without descriptions (the
-/// stored one, if any, when the store fails).
+/// stored one, if any, when the store fails or one of `stops` superseded
+/// the download: `stored::replace`).
 pub(crate) fn keep_guide(
     id: SourceId,
     guide: Downloaded,
     guides: &[EpgSourceConfig],
     matching: stored::Matching<'_>,
     now: i64,
+    stops: &[&CancelToken],
 ) -> GuideStore {
-    if let Err(e) = stored::replace(id, guide, guides, matching, now) {
+    if let Err(e) = stored::replace(id, guide, guides, matching, now, stops) {
         log::warn!("iptv data: could not store the guide: {e}");
     }
     stored::load_guide(id, now).unwrap_or_default()

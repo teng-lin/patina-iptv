@@ -126,14 +126,15 @@ fn perform(ui: Ui, edit: Edit) {
     if s.kind == Kind::Favorites
         && matches!(edit, Edit::Earlier | Edit::Later | Edit::First | Edit::Last)
     {
-        let Some(at) = s.editor.items.iter().position(|entry| entry.id == item.id) else {
+        let keys = crate::favorites::ordered_keys();
+        let Some(at) = keys.iter().position(|key| key == &item.id) else {
             return;
         };
         let to = match edit {
             Edit::Earlier => at.saturating_sub(1),
-            Edit::Later => (at + 1).min(s.editor.items.len().saturating_sub(1)),
+            Edit::Later => (at + 1).min(keys.len().saturating_sub(1)),
             Edit::First => 0,
-            _ => s.editor.items.len().saturating_sub(1),
+            _ => keys.len().saturating_sub(1),
         };
         crate::favorites::reorder(ui, &item.id, to);
         finish(ui, &s, generation, Ok(()));
@@ -167,6 +168,9 @@ fn perform(ui: Ui, edit: Edit) {
 fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), StoreError>) {
     if let Err(e) = result {
         log::warn!("iptv organization: change refused: {e}");
+        crate::runtime().emit(crate::runtime::RuntimeEvent::Notify(
+            "The change could not be saved. Reopen the list and try again.",
+        ));
         return;
     }
     let expected = s.clone();

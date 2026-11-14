@@ -47,6 +47,7 @@ fn path() -> PathBuf {
 
 /// Loads the saved settings (startup).
 pub fn load() {
+    crate::current().settings_read_only.set(None);
     let settings = Arc::new(read_file(&path()));
     crate::current().settings_saved.with(|saved| {
         *saved.borrow_mut() = Some((crate::current().settings_changed.get(), settings.clone()))
@@ -69,7 +70,7 @@ fn read_file(path: &Path) -> Settings {
         None if !path.exists() => return Settings::new(),
         _ => {
             log::warn!("iptv settings: cannot read the settings; using defaults");
-            return Settings::new();
+            return preserve_unreadable(path);
         }
     };
     match Settings::from_json(&text) {
@@ -92,8 +93,21 @@ fn read_file(path: &Path) -> Settings {
 }
 
 fn preserve_unreadable(path: &Path) -> Settings {
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::rename(path, dir.join(UNREADABLE));
+    if !path.is_file() {
+        if let Some(runtime) = crate::try_current() {
+            runtime
+                .settings_read_only
+                .set(Some(std::io::ErrorKind::InvalidInput));
+        }
+        return Settings::new();
+    }
+    if let Some(dir) = path.parent()
+        && let Err(error) = std::fs::rename(path, dir.join(UNREADABLE))
+    {
+        log::warn!("iptv settings: could not preserve unreadable file; saving disabled: {error}");
+        if let Some(runtime) = crate::try_current() {
+            runtime.settings_read_only.set(Some(error.kind()));
+        }
     }
     Settings::new()
 }
@@ -152,6 +166,9 @@ impl std::error::Error for SaveError {}
 /// later is reported, and the settings go back to the saved ones unless a
 /// newer change is on its way to the file.
 pub fn set(key: &str, value: Value) -> Result<(), SaveError> {
+    if let Some(error) = crate::current().settings_read_only.get() {
+        return Err(SaveError::Storage(error));
+    }
     let mut next = (*get()).clone();
     let changes = next.set(key, value).map_err(SaveError::Invalid)?;
     let json = next.to_json_string();

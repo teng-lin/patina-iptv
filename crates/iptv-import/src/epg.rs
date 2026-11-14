@@ -374,7 +374,8 @@ async fn load_source<F: Fetch, S: GuideSink, P: ProgressSink>(
     if url.is_empty() {
         return Err(ImportError::InvalidConfig("EPG address is required".into()));
     }
-    let mut req = HttpRequest::get(url);
+    let mut req = HttpRequest::get(url).with_header("Accept-Encoding", "gzip");
+    req.preserve_gzip = true;
     req.public_only = cfg.content_supplied;
     req.picked_file = !cfg.content_supplied;
     if let Some(ua) = cfg

@@ -1,6 +1,6 @@
 //! Filtered bulk selection by stable channel identity. A filter changes
 //! visibility, never the selection; select-filtered adds to the selection.
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Member {
@@ -74,8 +74,8 @@ impl Membership {
     }
     pub fn reload(&mut self, rows: Vec<Member>) {
         self.rows = rows;
-        self.selected
-            .retain(|id| self.rows.iter().any(|r| &r.id == id));
+        let present: HashSet<&str> = self.rows.iter().map(|r| r.id.as_str()).collect();
+        self.selected.retain(|id| present.contains(id.as_str()));
         self.match_rows();
         self.restore();
     }

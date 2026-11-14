@@ -102,7 +102,82 @@ impl Drop for Pool {
     }
 }
 
+/// Synthetic conditions of one owner's workers, for the headless tests: a
+/// queue that refuses work, and an import held just before it reports.
+#[cfg(feature = "test-support")]
+#[derive(Default)]
+pub(crate) struct Hooks {
+    refusals: std::sync::atomic::AtomicUsize,
+    reports: Mutex<(bool, usize)>,
+    released: Condvar,
+}
+#[cfg(feature = "test-support")]
+impl Hooks {
+    fn refuse(&self) -> bool {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.refusals
+            .try_update(SeqCst, SeqCst, |left| left.checked_sub(1))
+            .is_ok()
+    }
+    fn reports(&self) -> std::sync::MutexGuard<'_, (bool, usize)> {
+        self.reports
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    pub(crate) fn release(&self) {
+        self.reports().0 = false;
+        self.released.notify_all();
+    }
+}
+
+/// The next `count` submissions are refused, as by a full queue.
+#[cfg(feature = "test-support")]
+pub fn refuse_work(count: usize) {
+    super::store_service::service()
+        .hooks
+        .refusals
+        .store(count, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Imports wait just before they report their catalog (`held`), or go on.
+#[cfg(feature = "test-support")]
+pub fn hold_reports(held: bool) {
+    let owner = super::store_service::service();
+    if held {
+        owner.hooks.reports().0 = true;
+    } else {
+        owner.hooks.release();
+    }
+}
+
+/// How many imports wait to report ([`hold_reports`]).
+#[cfg(feature = "test-support")]
+pub fn reports_waiting() -> usize {
+    super::store_service::service().hooks.reports().1
+}
+
+/// On an import's worker, with its catalog saved and its stored guide
+/// read, just before it reports them ([`hold_reports`]).
+#[cfg(feature = "test-support")]
+pub(crate) fn before_report() {
+    let owner = super::store_service::service();
+    let mut reports = owner.hooks.reports();
+    reports.1 += 1;
+    while reports.0 {
+        reports = owner
+            .hooks
+            .released
+            .wait(reports)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+    }
+    reports.1 -= 1;
+}
+
 pub fn submit(visible: bool, work: impl FnOnce() + Send + 'static) -> bool {
+    #[cfg(feature = "test-support")]
+    if super::store_service::service().hooks.refuse() {
+        return false;
+    }
     let work = super::store_service::scoped(move || {
         // Retired queued refreshes must not spend a new app's network budget.
         // Running work remains guarded again at every store operation.

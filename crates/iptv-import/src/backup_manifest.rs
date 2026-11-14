@@ -21,7 +21,11 @@ pub struct EntryLimit;
 pub fn entry_limit(name: &str, bytes: u64) -> Result<(), EntryLimit> {
     let max = match name {
         "settings.json" | "search-history.json" => 1 << 20,
-        n if n == "last_channel" || n.starts_with("last_channel-") => 64 << 10,
+        n if matches!(n, "last_channel" | "last_channel_combined")
+            || n.starts_with("last_channel-") =>
+        {
+            64 << 10
+        }
         _ => MAX_BYTES,
     };
     if bytes > max { Err(EntryLimit) } else { Ok(()) }
@@ -64,7 +68,11 @@ pub fn allowed(name: &str) -> bool {
             .all(|c| !c.is_empty() && c != "." && c != ".." && portable_component(c))
         && (matches!(
             name,
-            "iptv.sqlite" | "settings.json" | "search-history.json" | "last_channel"
+            "iptv.sqlite"
+                | "settings.json"
+                | "search-history.json"
+                | "last_channel"
+                | "last_channel_combined"
         ) || name
             .strip_prefix("last_channel-")
             .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
@@ -257,6 +265,7 @@ mod windows_tests {
             "settings.json",
             "search-history.json",
             "last_channel",
+            "last_channel_combined",
             "last_channel-12",
             "playlists/0123456789abcdef/list.m3u",
             "playlists/console.m3u",
