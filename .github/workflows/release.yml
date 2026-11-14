@@ -86,7 +86,8 @@ jobs:
         shell: pwsh
         run: |
           $output = "target/media-sbom/Patina-${env:VERSION}-windows-media-runtime-sbom.cdx.json"
-          python tools/ci/sbom.py media-runtime target/mpv/components.json $output "$env:VERSION"
+          python tools/ci/sbom.py media-runtime target/mpv/components.json $output "$env:VERSION" `
+            --platform windows --manifest tools/mpv-runtime/runtime.json
           if ($LASTEXITCODE -ne 0) { throw 'Media runtime SBOM failed.' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -270,7 +271,8 @@ jobs:
             macos) inventory=target/package/Patina.app/Contents/Resources/notices/mpv-runtime/components.json ;;
           esac
           python3 tools/ci/sbom.py media-runtime "$inventory" \
-            "target/media-sbom/Patina-$VERSION-$PLATFORM-media-runtime-sbom.cdx.json" "$VERSION"
+            "target/media-sbom/Patina-$VERSION-$PLATFORM-media-runtime-sbom.cdx.json" "$VERSION" \
+            --platform "$PLATFORM" --manifest "tools/mpv-runtime-unix/runtime-$PLATFORM.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: matrix.platform == 'linux' || matrix.platform == 'macos'
         with:

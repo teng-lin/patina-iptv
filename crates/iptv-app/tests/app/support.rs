@@ -87,7 +87,10 @@ impl T {
     /// before the screen the last step opened is drawn: the press waits
     /// for its target instead of failing on the old screen.
     pub fn press(&mut self, sel: &str) {
-        let r = self.app.wait_for_within(sel, Self::wait_timeout(10)).and_then(|()| self.app.press(sel));
+        let r = self
+            .app
+            .wait_for_within(sel, Self::wait_timeout(10))
+            .and_then(|()| self.app.press(sel));
         self.ok(&format!("press {sel}"), r);
     }
 

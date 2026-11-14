@@ -131,7 +131,7 @@ def write(document, output_path):
     if output_path is not None:
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(result, encoding="utf-8")
+        out.write_text(result, encoding="utf-8", newline="\n")  # the same bytes on every runner
     return result
 
 

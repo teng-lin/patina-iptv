@@ -152,7 +152,8 @@ pub fn run(here: &str) -> Option<Home> {
     if let Ok(scale) = std::env::var("IPTV_TEST_WAIT_SCALE") {
         cmd.env("IPTV_TEST_WAIT_SCALE", scale);
     }
-    let out = cmd.output()
+    let out = cmd
+        .output()
         .unwrap_or_else(|e| panic!("{name}: cannot run {}: {e}", exe.display()));
     // Through the test harness: shown when this test fails, or with
     // --nocapture.

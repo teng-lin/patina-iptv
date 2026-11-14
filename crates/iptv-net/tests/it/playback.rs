@@ -45,7 +45,8 @@ async fn hls_redirect_segments_keys_and_maps_scope_headers_by_exact_origin() {
         "/path/redirect.ts" => Resp::redirect(302, &to),
         "/path/iframes.m3u8" => Resp::ok("#EXTM3U\n"),
         _ => Resp::ok(vec![0x47, 0, 1, 2, 3, 4]),
-    }).await;
+    })
+    .await;
     let relay = fixture_relay(&origin.url("/start.m3u8"), &identity());
     let text = reqwest::get(relay.url())
         .await
