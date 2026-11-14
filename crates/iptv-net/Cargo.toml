@@ -11,6 +11,8 @@ license.workspace = true
 # Exposes the HLS and DASH manifest rewriters to the fuzz crate
 # (`playback::fuzzing`). Nothing else enables it.
 fuzzing = []
+# Exposes in-memory key-request counters to the player integration tests.
+test-support = []
 
 [dependencies]
 iptv-providers.workspace = true

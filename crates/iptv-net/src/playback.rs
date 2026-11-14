@@ -365,7 +365,27 @@ impl PlaybackRelay {
         *self.headers.lock().map_err(|_| io_error("lock"))? = fields;
         Ok(())
     }
+
+    #[cfg(feature = "test-support")]
+    /// Key requests for relays whose source has this exact origin. Tests must
+    /// retain their listening socket so another test cannot reuse its port.
+    pub fn key_requests_for(source: &str) -> usize {
+        let origin = Url::parse(source)
+            .expect("valid synthetic source URL")
+            .origin();
+        TEST_KEY_REQUESTS
+            .lock()
+            .expect("test counters")
+            .get(&origin)
+            .copied()
+            .unwrap_or(0)
+    }
 }
+
+#[cfg(feature = "test-support")]
+static TEST_KEY_REQUESTS: std::sync::LazyLock<
+    Mutex<std::collections::HashMap<url::Origin, usize>>,
+> = std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
 impl Drop for PlaybackRelay {
     fn drop(&mut self) {
@@ -417,6 +437,14 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
     let (raw_key, target) = target
         .strip_prefix("key/")
         .map_or((false, target), |url| (true, url));
+    #[cfg(feature = "test-support")]
+    if raw_key {
+        *TEST_KEY_REQUESTS
+            .lock()
+            .expect("test counters")
+            .entry(session.root.origin())
+            .or_default() += 1;
+    }
     let Ok(target) = Url::parse(target) else {
         return answer(&mut socket, 400, b"Invalid target").await;
     };
