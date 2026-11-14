@@ -565,6 +565,7 @@ impl Runtime {
         control: InspectionControl,
     ) -> impl Future<Output = Result<Verification>> + use<> {
         let owner = self.clone();
+        let phase_at_start = self.repairs.borrow().operations.get(&id).map(|op| op.phase);
         let services = self.services();
         let read_id = id.clone();
         let deadline = Instant::now() + control.timeout.min(PREVIEW_DEADLINE);
@@ -589,6 +590,8 @@ impl Runtime {
                 return Err(InspectionError::PermissionDenied.into());
             }
             let source = verified.commit.source;
+            let expected_undone = verified.commit.undone;
+            let current_id = id.clone();
             let remaining = InspectionControl {
                 cancel: again.cancel,
                 timeout: deadline.saturating_duration_since(Instant::now()),
@@ -602,6 +605,9 @@ impl Runtime {
                         Ok((
                             store.guide_revisions(source)?,
                             store.guide_repair_coverage_revision(source, window.from, window.to)?,
+                            store
+                                .guide_repair_commit(&current_id)?
+                                .map(|commit| commit.undone),
                         ))
                     })?))
                 },
@@ -615,7 +621,7 @@ impl Runtime {
                 mapping: verified.commit.mapping_revision,
                 configuration: verified.commit.configuration_revision,
             };
-            let (current, current_evidence_revision) = current;
+            let (current, current_evidence_revision, current_undone) = current;
             let current = Revisions {
                 mapping: current.mapping,
                 configuration: current.configuration,
@@ -623,6 +629,7 @@ impl Runtime {
             let same = examined == current
                 && examined == expected
                 && services.is_current()
+                && current_undone == Some(expected_undone)
                 && verified.evidence_revision == current_evidence_revision;
             let result = Verification {
                 commit: id.clone(),
@@ -641,7 +648,14 @@ impl Runtime {
                 configuration_effective: verified.configuration_effective,
                 verified_coverage: same && verified.configuration_effective,
             };
-            if let Some(operation) = owner.repairs.borrow_mut().operations.get_mut(&id) {
+            if let Some(operation) = owner.repairs.borrow_mut().operations.get_mut(&id)
+                && operation.commit.revisions == expected
+                && operation.commit.undone == expected_undone
+                && (!matches!(
+                    operation.phase,
+                    OperationPhase::Cancelled | OperationPhase::Superseded
+                ) || Some(operation.phase) == phase_at_start)
+            {
                 operation.phase = if result.verified_coverage {
                     operation.effective = Effective::Installed;
                     OperationPhase::Verified
@@ -689,13 +703,9 @@ impl Runtime {
         id: String,
     ) -> impl Future<Output = Result<Operation>> + use<> {
         let owner = self.clone();
-        let cached = self.repairs.borrow().operations.get(&id).cloned();
         async move {
             if !owner.services().is_current() {
                 return Err(InspectionError::OwnerClosed.into());
-            }
-            if let Some(operation) = cached {
-                return Ok(operation);
             }
             let read = id.clone();
             let stored = crate::inspection::query_with_deadline(
@@ -706,13 +716,56 @@ impl Runtime {
             )
             .await?
             .ok_or(Error::CommitMissing)?;
-            Ok(Operation {
-                id,
-                commit: commit(stored),
+            let durable = commit(stored);
+            let mut state = owner.repairs.borrow_mut();
+            if let Some(cached) = state.operations.get(&id)
+                && cached.commit == durable
+            {
+                return Ok(cached.clone());
+            }
+            let operation = Operation {
+                id: id.clone(),
+                commit: durable,
                 phase: OperationPhase::ReadyToVerify,
                 effective: Effective::Pending,
                 verification: None,
-            })
+            };
+            // Recovered observations use the same finite transient budget as
+            // live commands. When every slot is active, return the receipt
+            // without retaining another state entry or restarting any work.
+            let occupied: HashSet<_> = state
+                .operations
+                .keys()
+                .chain(state.applying.iter())
+                .collect();
+            let needs_room = !occupied.contains(&id);
+            let at_capacity = occupied.len() >= MAX_OPERATIONS;
+            drop(occupied);
+            let retain = if needs_room && at_capacity {
+                let old = state
+                    .operations
+                    .iter()
+                    .find(|(key, op)| {
+                        !state.applying.contains(*key)
+                            && !matches!(
+                                op.phase,
+                                OperationPhase::Pending | OperationPhase::Refreshing
+                            )
+                    })
+                    .map(|(key, _)| key.clone());
+                if let Some(old) = old {
+                    state.operations.remove(&old);
+                    true
+                } else {
+                    false
+                }
+            } else {
+                true
+            };
+            if retain {
+                state.operations.insert(id, operation.clone());
+            }
+            Ok(operation)
         }
     }
 

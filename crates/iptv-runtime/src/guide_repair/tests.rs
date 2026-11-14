@@ -1273,6 +1273,7 @@ fn indirect_preview_uses_actual_low_feed_binding_when_high_feed_only_lists_chann
 }
 
 #[test]
+#[cfg(feature = "test-support")]
 fn repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive() {
     use iptv_providers::{
         GroupId,
@@ -1485,5 +1486,191 @@ fn verification_observes_current_disabled_source_policy() {
         Err(Error::Inspection(InspectionError::SourceDisabled(
             fixture.source
         )))
+    );
+}
+
+#[test]
+fn verification_from_before_undo_cannot_overwrite_the_new_undo_operation() {
+    verification_across_inverse(Target::NoGuide);
+}
+#[test]
+fn no_op_inverse_direction_also_fences_older_verification() {
+    verification_across_inverse(Target::Automatic);
+}
+fn verification_across_inverse(target: Target) {
+    let fixture = Fixture::new();
+    let request = fixture.request("amber", target);
+    let plan = fixture.preview(request.clone());
+    let saved = fixture.apply(&plan);
+    let verification = fixture.owner.verify_guide_repair(
+        saved.commit.id.clone(),
+        request.window,
+        InspectionControl::default(),
+    );
+    let (entered, ready) = mpsc::sync_channel(1);
+    let (release, wait) = mpsc::sync_channel(1);
+    let _barrier = fixture.owner.services().analyze(move |_| {
+        entered.send(()).unwrap();
+        wait.recv_timeout(Duration::from_secs(5)).unwrap();
+        Ok(())
+    });
+    ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    // The first snapshot has completed. Persist and publish the real inverse
+    // while its final revalidation waits, retaining the shared durable id.
+    let inverse = committed(fixture.store().undo_guide_repair(&saved.commit.id).unwrap()).unwrap();
+    let edit = crate::stored::next_guide_edit(&fixture.owner, fixture.source);
+    fixture.drive(publication::after_commit(
+        &fixture.owner,
+        inverse,
+        edit,
+        None,
+    ));
+    release.send(()).unwrap();
+    let stale = fixture.drive(verification).unwrap();
+    assert!(!stale.current_revision);
+    let current = fixture
+        .drive(fixture.owner.guide_repair_operation(saved.commit.id))
+        .unwrap();
+    assert!(current.commit.undone);
+    assert_ne!(current.phase, OperationPhase::Superseded);
+    assert!(
+        current.verification.is_none(),
+        "old observation belongs to the original direction"
+    );
+}
+
+#[test]
+fn a_verification_accepted_before_cancel_does_not_clear_the_later_cancelled_status() {
+    let fixture = Fixture::new();
+    let request = fixture.request("amber", Target::NoGuide);
+    let plan = fixture.preview(request.clone());
+    let saved = fixture.apply(&plan);
+    let verification = fixture.owner.verify_guide_repair(
+        saved.commit.id.clone(),
+        request.window,
+        InspectionControl::default(),
+    );
+    fixture
+        .owner
+        .cancel_guide_repair_operation(&saved.commit.id)
+        .unwrap();
+    let observed = fixture.drive(verification).unwrap();
+    assert!(
+        observed.verified_coverage,
+        "saved choice may still be observed after work cancellation"
+    );
+    assert_eq!(
+        fixture
+            .drive(
+                fixture
+                    .owner
+                    .guide_repair_operation(saved.commit.id.clone())
+            )
+            .unwrap()
+            .phase,
+        OperationPhase::Cancelled
+    );
+    // A new explicit verification after cancellation may describe the actual
+    // saved result and is not an old completion clearing a later marker.
+    fixture
+        .drive(fixture.owner.verify_guide_repair(
+            saved.commit.id.clone(),
+            request.window,
+            InspectionControl::default(),
+        ))
+        .unwrap();
+    assert_eq!(
+        fixture
+            .drive(fixture.owner.guide_repair_operation(saved.commit.id))
+            .unwrap()
+            .phase,
+        OperationPhase::Verified
+    );
+}
+
+#[test]
+fn durable_inverse_receipt_reconciles_a_stale_original_operation_cache() {
+    let fixture = Fixture::new();
+    let plan = fixture.preview(fixture.request("amber", Target::NoGuide));
+    let saved = fixture.apply(&plan);
+    let original = fixture
+        .drive(
+            fixture
+                .owner
+                .guide_repair_operation(saved.commit.id.clone()),
+        )
+        .unwrap();
+    assert!(!original.commit.undone);
+    let phase = Arc::new(std::sync::atomic::AtomicU8::new(0));
+    let writer_phase = phase.clone();
+    let child = CancelToken::new();
+    let token = child.clone();
+    let services = fixture.owner.services();
+    let (entered, ready) = mpsc::sync_channel(1);
+    let (release, wait) = mpsc::sync_channel(1);
+    let id = saved.commit.id.clone();
+    let write = services.call(move |store| {
+        write::begin(
+            &writer_phase,
+            &token,
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        entered.send(()).unwrap();
+        wait.recv_timeout(Duration::from_secs(5)).unwrap();
+        let result = committed(store.undo_guide_repair(&id)?);
+        writer_phase.store(2, std::sync::atomic::Ordering::SeqCst);
+        Ok(result)
+    });
+    ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    let result = fixture.drive(write::wait(
+        &services,
+        write::Wait {
+            control: InspectionControl::default(),
+            deadline: Instant::now() + Duration::from_millis(30),
+            id: saved.commit.id.clone(),
+            phase,
+            child,
+        },
+        write,
+    ));
+    assert_eq!(
+        result,
+        Err(Error::CompletionUnknown {
+            operation: saved.commit.id.clone()
+        })
+    );
+    release.send(()).unwrap();
+    fixture.drive(services.call(|_| Ok(()))).unwrap();
+    let recovered = fixture
+        .drive(
+            fixture
+                .owner
+                .guide_repair_operation(saved.commit.id.clone()),
+        )
+        .unwrap();
+    assert!(recovered.commit.undone);
+    assert_eq!(recovered.effective, Effective::Pending);
+    assert!(recovered.verification.is_none());
+    assert_eq!(
+        fixture
+            .drive(fixture.owner.recent_guide_repairs(
+                fixture.source,
+                10,
+                InspectionControl::default()
+            ))
+            .unwrap()
+            .len(),
+        1
+    );
+    // Status lookup reconciles state; it neither replays the inverse nor starts
+    // a refresh on behalf of the abandoned caller.
+    assert!(
+        fixture
+            .store()
+            .guide_repair_commit(&saved.commit.id)
+            .unwrap()
+            .unwrap()
+            .undone
     );
 }

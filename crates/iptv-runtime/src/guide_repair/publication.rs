@@ -206,6 +206,7 @@ fn refresh_observed(
     id: String,
     source: SourceId,
     expected: Revisions,
+    undone: bool,
     accepted: bool,
 ) {
     let read = crate::inspection::query_with_deadline(
@@ -231,6 +232,7 @@ fn refresh_observed(
             return;
         };
         if status.commit.revisions != expected
+            || status.commit.undone != undone
             || matches!(
                 status.phase,
                 OperationPhase::Superseded | OperationPhase::Cancelled
@@ -263,6 +265,7 @@ fn schedule(owner: &Rc<Runtime>, commit: &Commit, after: Option<crate::library::
     let id = commit.id.clone();
     let source = commit.source;
     let expected = commit.revisions;
+    let undone = commit.undone;
     {
         let mut state = owner.repairs.borrow_mut();
         state.revoke(source);
@@ -287,7 +290,7 @@ fn schedule(owner: &Rc<Runtime>, commit: &Commit, after: Option<crate::library::
         let finished = owner.clone();
         let operation = id.clone();
         if !crate::data::stored::restart_repair_update(&owner, source, after, move |accepted| {
-            refresh_observed(&finished, operation, source, expected, accepted);
+            refresh_observed(&finished, operation, source, expected, undone, accepted);
         }) && let Some(status) = owner.repairs.borrow_mut().operations.get_mut(&id)
         {
             status.phase = OperationPhase::Failed;

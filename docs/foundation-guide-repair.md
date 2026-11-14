@@ -56,9 +56,9 @@ not prove physical decoder or Keychain behavior.
 | FND-16 | `no_op_refresh_apply_and_unrelated_edit_undo_preserve_identity`; store `no_op_import_and_unrelated_edit_do_not_invalidate_apply_or_undo` |
 | FND-17 | `foundation_repair_fences` holds an actual old refresh report and an actual old HTTP guide download across a repair, then checks stored and effective programmes |
 | FND-18 | Saved outcomes remain pending until observed publication/verification; actual failed-refresh/recovery regression belongs to `foundation_repair_fences` |
-| FND-19 | `late_verification_cannot_certify_a_later_edit_and_retry_keeps_original_revision`; `held_verification_cannot_certify_later_programmes_with_unchanged_mapping_and_configuration` |
+| FND-19 | `late_verification_cannot_certify_a_later_edit_and_retry_keeps_original_revision`; `held_verification_cannot_certify_later_programmes_with_unchanged_mapping_and_configuration`; no-op inverse and late-cancellation regressions |
 | FND-20 | Store `conflicting_undo_never_reverts_a_subset`, `no_op_import_and_unrelated_edit_do_not_invalidate_apply_or_undo`, `undo_restores_removed_feed_positions_and_preserves_unrelated_new_feed` |
-| FND-21 | Runtime `closing_owner_expires_previews_but_committed_inverse_survives_restart`; store `durable_inverse_survives_restart_but_restore_invalidates_authority`, `expired_inverse_is_explicit_and_duplicate_commit_does_not_reapply`; provenance restore regression |
+| FND-21 | Runtime `closing_owner_expires_previews_but_committed_inverse_survives_restart`, `durable_inverse_receipt_reconciles_a_stale_original_operation_cache`; store `durable_inverse_survives_restart_but_restore_invalidates_authority`, `expired_inverse_is_explicit_and_duplicate_commit_does_not_reapply`; provenance restore regression |
 | FND-22 | Runtime `headless_preview_apply_verify_undo_uses_real_domain_services`; app `foundation_repair` performs two-channel comparison, shared probe reuse, preview, apply, actual binding refresh, verification and undo |
 | FND-23 | `repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive`; held-analysis and queued/inflight-writer deadline tests; preview and operation capacity regressions; existing unchanged guide-input/store-latency gates |
 | FND-24 | App `foundation_repair` observes the persistent primary surface, player commands and selected content while repair operates on another playlist; native Mac/iPad simulator validation is a separate platform gate |
@@ -77,7 +77,9 @@ row/text/staging/admission limits are enforced explicitly.
 A received durable receipt identifies the exact committed revisions. A lost
 reply after the writer begins can return `CompletionUnknown` with the operation
 identity; querying history/status or retrying the same plan identity reconciles
-it without applying a second mutation. Read-only recovery does not promise to
+it without applying a second mutation. Status compares the exact durable
+commit and inverse direction before using a cached observation, including
+when an undo committed after a lost reply. Read-only recovery does not promise to
 restart publication work that never ran. The effective result remains pending;
 request the existing source refresh and verify again. That existing native
 refresh entry point remains experimental outside the declared v1 method set.
