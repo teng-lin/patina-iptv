@@ -152,6 +152,28 @@ mod tests {
     }
 
     #[test]
+    fn a_replacement_can_exchange_two_provider_indices() {
+        let mut store = Store::open_in_memory().unwrap();
+        let source = source(&mut store);
+        let mut a = feed();
+        a.provider_index = Some(0);
+        let mut b = feed();
+        b.feed = FeedId(2);
+        b.provider_index = Some(1);
+        store
+            .set_guide_sources(source, &[a.clone(), b.clone()])
+            .unwrap();
+        a.provider_index = Some(1);
+        b.provider_index = Some(0);
+        store
+            .set_guide_sources(source, &[a.clone(), b.clone()])
+            .unwrap();
+        let stored = store.guide_sources(source).unwrap();
+        assert_eq!(stored[0].provider_index, a.provider_index);
+        assert_eq!(stored[1].provider_index, b.provider_index);
+    }
+
+    #[test]
     fn feed_and_source_reuse_never_revive_old_identity() {
         let mut store = Store::open_in_memory().unwrap();
         let id = source(&mut store);
