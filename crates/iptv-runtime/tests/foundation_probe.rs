@@ -683,3 +683,219 @@ fn missing_identity_and_a_failed_feed_are_distinct_and_invalidate_audit_pages() 
     );
     runtime.drain_services();
 }
+
+#[test]
+fn prewindow_successors_settle_missing_stops_before_filtering_in_any_document_order() {
+    let from = window().from;
+    let mut rows: Vec<_> = (0..300)
+        .map(|i| {
+            (
+                from - 100_000 - i * 60,
+                Some(from - 99_980 - i * 60),
+                "Synthetic Past",
+            )
+        })
+        .collect();
+    rows.extend([
+        (from - 600, None, "Synthetic A must not reach the window"),
+        (from - 300, None, "Synthetic shorter duplicate"),
+        (from - 300, Some(from - 60), "Synthetic B boundary"),
+        (from - 120, Some(from - 180), "Synthetic invalid boundary"),
+        (from + 600, Some(from + 1200), "Synthetic C visible"),
+        (from + 1500, None, "Synthetic D inferred stop"),
+        (from + 2400, Some(from + 3000), "Synthetic later lookahead"),
+        (
+            from + 2100,
+            Some(from + 2200),
+            "Synthetic nearest lookahead",
+        ),
+    ]);
+    for order in 0..3 {
+        let mut ordered = rows.clone();
+        if order == 1 {
+            ordered.reverse();
+        } else if order == 2 {
+            ordered.sort_by_key(|row| (row.0 % 7, row.0));
+        }
+        let mut xml = String::from(
+            "<tv><channel id='amber.alt'><display-name>Synthetic Boundary</display-name></channel>",
+        );
+        for (start, stop, title) in ordered {
+            let start = iptv_epg::format_xmltv_time(start);
+            let stop = stop
+                .map(|time| format!(" stop='{}'", iptv_epg::format_xmltv_time(time)))
+                .unwrap_or_default();
+            xml.push_str(&format!("<programme channel='amber.alt' start='{start}'{stop}><title>{title}</title></programme>"));
+        }
+        xml.push_str("</tv>");
+        let server = Mock::new(xml.into_bytes(), false);
+        let directory = tempfile::tempdir().unwrap();
+        let source = seed(directory.path(), server.url(), 0);
+        let runtime = owner(directory.path());
+        let summary = probe(&runtime, source).unwrap();
+        let candidate = CandidateRef {
+            source,
+            feed: FeedId(1),
+            incarnation: summary.evidence.incarnation.clone(),
+            epg_channel: "amber.alt".into(),
+        };
+        let samples = support::block_on(runtime.probe_schedule(
+            summary.evidence,
+            candidate,
+            TimeWindow {
+                from,
+                to: from + 1800,
+            },
+            control(),
+        ))
+        .unwrap();
+        let actual: Vec<_> = samples
+            .iter()
+            .map(|row| (row.title.as_str(), row.start, row.stop))
+            .collect();
+        assert_eq!(
+            actual,
+            [
+                ("Synthetic C visible", from + 600, from + 1200),
+                ("Synthetic D inferred stop", from + 1500, from + 2100),
+            ],
+            "document order {order}; hundreds of past rows cannot exhaust the sample bound"
+        );
+        assert_eq!(server.requests.load(Ordering::SeqCst), 1);
+        runtime.drain_services();
+    }
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn staged_reads_share_query_admission_until_the_actual_blocking_workers_exit() {
+    use std::{future::Future, pin::Pin, time::Instant};
+    let server = Mock::new(XML.as_bytes().to_vec(), false);
+    let directory = tempfile::tempdir().unwrap();
+    let source = seed(directory.path(), server.url(), 0);
+    let runtime = owner(directory.path());
+    let summary = probe(&runtime, source).unwrap();
+    let candidate = CandidateRef {
+        source,
+        feed: FeedId(1),
+        incarnation: summary.evidence.incarnation.clone(),
+        epg_channel: "amber.alt".into(),
+    };
+    let (entered, release) = runtime.hold_analysis();
+    entered.recv_timeout(Duration::from_secs(2)).unwrap();
+    let mut pending: Vec<Pin<Box<dyn Future<Output = InspectionResult<()>>>>> = Vec::new();
+    for _ in 0..8 {
+        let candidates =
+            runtime.probe_candidates(summary.evidence.clone(), String::new(), None, 50, control());
+        pending.push(Box::pin(async move { candidates.await.map(|_| ()) }));
+        let samples = runtime.probe_schedule(
+            summary.evidence.clone(),
+            candidate.clone(),
+            window(),
+            control(),
+        );
+        pending.push(Box::pin(async move { samples.await.map(|_| ()) }));
+    }
+    let started = Instant::now();
+    assert_eq!(
+        support::block_on(runtime.probe_candidates(
+            summary.evidence.clone(),
+            String::new(),
+            None,
+            50,
+            control(),
+        )),
+        Err(InspectionError::Busy)
+    );
+    assert_eq!(
+        support::block_on(runtime.probe_schedule(
+            summary.evidence.clone(),
+            candidate,
+            window(),
+            control(),
+        )),
+        Err(InspectionError::Busy)
+    );
+    assert_eq!(
+        support::block_on(runtime.query_channels(Query::source(source), control())),
+        Err(InspectionError::Busy)
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "admission rejection cannot wait behind held analysis"
+    );
+    drop(pending);
+    assert_eq!(
+        support::block_on(runtime.probe_candidates(
+            summary.evidence.clone(),
+            String::new(),
+            None,
+            50,
+            control(),
+        )),
+        Err(InspectionError::Busy),
+        "dropping replies cannot release slots held by live workers"
+    );
+    release.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        match support::block_on(runtime.probe_candidates(
+            summary.evidence.clone(),
+            String::new(),
+            None,
+            50,
+            control(),
+        )) {
+            Err(InspectionError::Busy) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(10))
+            }
+            result => {
+                assert_eq!(result.unwrap().items.len(), 2);
+                break;
+            }
+        }
+    }
+    assert_eq!(
+        server.requests.load(Ordering::SeqCst),
+        1,
+        "all inspection uses the retained snapshot"
+    );
+    runtime.drain_services();
+}
+
+#[test]
+fn two_held_feed_downloads_refuse_more_work_until_heavy_workers_finish() {
+    let mut servers = [
+        Mock::new(XML.as_bytes().to_vec(), true),
+        Mock::new(XML.as_bytes().to_vec(), true),
+    ];
+    let directory = tempfile::tempdir().unwrap();
+    let sources = servers
+        .each_ref()
+        .map(|server| seed(directory.path(), server.url(), 0));
+    let runtime = owner(directory.path());
+    let requests = sources.map(|source| {
+        runtime.probe_feed(
+            ProbeRequest {
+                source,
+                target: ProbeTarget::Configured(FeedId(1)),
+            },
+            control(),
+        )
+    });
+    for server in &servers {
+        server.seen.recv_timeout(Duration::from_secs(2)).unwrap();
+    }
+    assert_eq!(probe(&runtime, sources[0]), Err(InspectionError::Busy));
+    assert_eq!(probe(&runtime, sources[1]), Err(InspectionError::Busy));
+    for server in &mut servers {
+        server.release.take().unwrap().send(()).unwrap();
+    }
+    for request in requests {
+        assert_eq!(support::block_on(request).unwrap().channels, 2);
+    }
+    assert_eq!(probe(&runtime, sources[0]).unwrap().channels, 2);
+    assert_eq!(servers[0].requests.load(Ordering::SeqCst), 2);
+    assert_eq!(servers[1].requests.load(Ordering::SeqCst), 1);
+    runtime.drain_services();
+}
