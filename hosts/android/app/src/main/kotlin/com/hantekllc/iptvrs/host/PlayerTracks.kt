@@ -23,14 +23,22 @@ internal object PlayerTracks {
     const val OFF = "off"
 
     /** What the viewer chose for the open stream. */
-    data class Choice(val video: String = AUTO, val audio: String = AUTO, val text: String = OFF)
+    data class Choice(
+        val video: String = AUTO,
+        val audio: String = AUTO,
+        val text: String = OFF,
+    )
 
     private fun positive(v: Int): Int? = v.takeIf { it > 0 }
+
     private fun positive(v: Float): Float? = v.takeIf { it > 0f && it.isFinite() }
 
     /** The `tracks` event: supported tracks of each kind and what plays. */
     @OptIn(UnstableApi::class)
-    fun event(tracks: Tracks, choice: Choice): PlayerEvent.Tracks {
+    fun event(
+        tracks: Tracks,
+        choice: Choice,
+    ): PlayerEvent.Tracks {
         val video = mutableListOf<PlayerEvent.Tracks.Video>()
         val audio = mutableListOf<PlayerEvent.Tracks.Audio>()
         val text = mutableListOf<PlayerEvent.Tracks.Text>()
@@ -42,30 +50,34 @@ internal object PlayerTracks {
                 val f = group.getTrackFormat(t)
                 val id = "$g:$t"
                 when (group.type) {
-                    C.TRACK_TYPE_VIDEO -> video += PlayerEvent.Tracks.Video(
-                        id = id,
-                        label = f.label ?: "",
-                        width = positive(f.width),
-                        height = positive(f.height),
-                        fps = positive(f.frameRate),
-                        bitrate = positive(f.bitrate),
-                    )
+                    C.TRACK_TYPE_VIDEO ->
+                        video +=
+                            PlayerEvent.Tracks.Video(
+                                id = id,
+                                label = f.label ?: "",
+                                width = positive(f.width),
+                                height = positive(f.height),
+                                fps = positive(f.frameRate),
+                                bitrate = positive(f.bitrate),
+                            )
                     C.TRACK_TYPE_AUDIO -> {
-                        audio += PlayerEvent.Tracks.Audio(
-                            id = id,
-                            label = f.label ?: "",
-                            language = f.language ?: "",
-                            channels = positive(f.channelCount),
-                            codec = f.sampleMimeType ?: "",
-                        )
+                        audio +=
+                            PlayerEvent.Tracks.Audio(
+                                id = id,
+                                label = f.label ?: "",
+                                language = f.language ?: "",
+                                channels = positive(f.channelCount),
+                                codec = f.sampleMimeType ?: "",
+                            )
                         if (group.isTrackSelected(t) && audioSelected == null) audioSelected = id
                     }
                     C.TRACK_TYPE_TEXT -> {
-                        text += PlayerEvent.Tracks.Text(
-                            id = id,
-                            label = f.label ?: "",
-                            language = f.language ?: "",
-                        )
+                        text +=
+                            PlayerEvent.Tracks.Text(
+                                id = id,
+                                label = f.label ?: "",
+                                language = f.language ?: "",
+                            )
                         if (group.isTrackSelected(t) && textSelected == null) textSelected = id
                     }
                 }
@@ -85,7 +97,11 @@ internal object PlayerTracks {
     }
 
     /** The override for track [id] of [type], if the stream has it. */
-    fun find(tracks: Tracks, type: Int, id: String): TrackSelectionOverride? {
+    fun find(
+        tracks: Tracks,
+        type: Int,
+        id: String,
+    ): TrackSelectionOverride? {
         val parts = id.split(':')
         if (parts.size != 2) return null
         val g = parts[0].toIntOrNull() ?: return null
@@ -96,11 +112,17 @@ internal object PlayerTracks {
     }
 
     /** [base] with [choice] applied to the stream's [tracks]. */
-    fun parameters(base: TrackSelectionParameters, tracks: Tracks, choice: Choice): TrackSelectionParameters {
-        val b = base.buildUpon()
-            .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
-            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
-            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+    fun parameters(
+        base: TrackSelectionParameters,
+        tracks: Tracks,
+        choice: Choice,
+    ): TrackSelectionParameters {
+        val b =
+            base
+                .buildUpon()
+                .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+                .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
         find(tracks, C.TRACK_TYPE_VIDEO, choice.video)?.let { b.setOverrideForType(it) }
         find(tracks, C.TRACK_TYPE_AUDIO, choice.audio)?.let { b.setOverrideForType(it) }
         val text = find(tracks, C.TRACK_TYPE_TEXT, choice.text)
@@ -110,10 +132,14 @@ internal object PlayerTracks {
     }
 
     /** The `format` event's fields Media3 knows for [video] and [audio]. */
-    fun format(video: Format?, audio: Format?): PlayerEvent.Format = PlayerEvent.Format(
-        fps = video?.frameRate?.let { positive(it) },
-        channels = audio?.channelCount?.let { positive(it) },
-    )
+    fun format(
+        video: Format?,
+        audio: Format?,
+    ): PlayerEvent.Format =
+        PlayerEvent.Format(
+            fps = video?.frameRate?.let { positive(it) },
+            channels = audio?.channelCount?.let { positive(it) },
+        )
 }
 
 /**
@@ -124,7 +150,9 @@ internal object PlayerTracks {
  * (frames are dropped, or wait, until they meet it again).
  */
 @OptIn(UnstableApi::class)
-internal class DelayedAudioSink(sink: AudioSink) : ForwardingAudioSink(sink) {
+internal class DelayedAudioSink(
+    sink: AudioSink,
+) : ForwardingAudioSink(sink) {
     @Volatile var delayUs = 0L
 
     override fun getCurrentPositionUs(sourceEnded: Boolean): Long {

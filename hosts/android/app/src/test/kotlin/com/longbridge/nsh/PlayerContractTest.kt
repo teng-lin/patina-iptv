@@ -7,9 +7,13 @@ import com.hantekllc.iptvrs.host.PlayerPip
 import com.hantekllc.iptvrs.host.PlayerProps
 import com.hantekllc.iptvrs.host.PlayerSource
 import com.hantekllc.iptvrs.host.PlayerState
-import java.io.File
-import org.junit.Assert.*
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 /**
  * This host's side of the `tv.player` contract against the fixtures the Rust
@@ -18,8 +22,7 @@ import org.junit.Test
  * `PlayerComponent.setProp`, and through the `setProp` it delegates to.
  */
 class PlayerContractTest {
-    private fun fixture(name: String): Any? =
-        Json.parse(File("../../../crates/iptv-player-mpv/fixtures/$name").readText())
+    private fun fixture(name: String): Any? = Json.parse(File("../../../crates/iptv-player-mpv/fixtures/$name").readText())
 
     private fun props() = fixture("player-props.json") as Map<*, *>
 
@@ -27,43 +30,57 @@ class PlayerContractTest {
     private class Seen : PlayerProps {
         val props = linkedMapOf<String, Any?>()
 
-        private fun put(prop: String, value: Any?) {
+        private fun put(
+            prop: String,
+            value: Any?,
+        ) {
             assertFalse("$prop was set twice", prop in props)
             props[prop] = value
         }
 
         override fun source(source: PlayerSource?) = put("source", source)
+
         override fun paused(paused: Boolean) = put("paused", paused)
+
         override fun pictureSize(mode: String) = put("pictureSize", mode)
+
         override fun videoTrack(id: String) = put("videoTrack", id)
+
         override fun audioTrack(id: String) = put("audioTrack", id)
+
         override fun textTrack(id: String) = put("textTrack", id)
+
         override fun volume(level: Int) = put("volume", level)
+
         override fun muted(muted: Boolean) = put("muted", muted)
+
         override fun audioDelay(ms: Long) = put("audioDelay", ms)
+
         override fun pip(pip: PlayerPip?) = put("pip", pip)
     }
 
     /** The fixture's props as the setters must receive them. */
-    private val expected = mapOf<String, Any?>(
-        "source" to PlayerSource(
-            url = "http://127.0.0.1:18080/synthetic/index.m3u8",
-            publicOnly = false,
-            headers = mapOf("X-Synthetic" to "fixture"),
-            token = 37L,
-            live = true,
-            reconnect = true,
-        ),
-        "paused" to true,
-        "pictureSize" to "zoom",
-        "videoTrack" to "1",
-        "audioTrack" to "2",
-        "textTrack" to "3",
-        "volume" to 80,
-        "muted" to true,
-        "audioDelay" to 125L,
-        "pip" to PlayerPip(auto = true, enter = 3L, window = true),
-    )
+    private val expected =
+        mapOf<String, Any?>(
+            "source" to
+                PlayerSource(
+                    url = "http://127.0.0.1:18080/synthetic/index.m3u8",
+                    publicOnly = false,
+                    headers = mapOf("X-Synthetic" to "fixture"),
+                    token = 37L,
+                    live = true,
+                    reconnect = true,
+                ),
+            "paused" to true,
+            "pictureSize" to "zoom",
+            "videoTrack" to "1",
+            "audioTrack" to "2",
+            "textTrack" to "3",
+            "volume" to 80,
+            "muted" to true,
+            "audioDelay" to 125L,
+            "pip" to PlayerPip(auto = true, enter = 3L, window = true),
+        )
 
     /**
      * Every key of the fixture is a prop `setProp` knows (a prop Rust gains
@@ -116,18 +133,19 @@ class PlayerContractTest {
 
     /** A removed prop (null) and a value of another type read as the default. */
     @Test fun aRemovedOrMistypedPropIsItsDefault() {
-        val defaults = mapOf<String, Any?>(
-            "source" to null,
-            "paused" to false,
-            "pictureSize" to "normal",
-            "videoTrack" to "auto",
-            "audioTrack" to "auto",
-            "textTrack" to "off",
-            "volume" to 100,
-            "muted" to false,
-            "audioDelay" to 0L,
-            "pip" to null,
-        )
+        val defaults =
+            mapOf<String, Any?>(
+                "source" to null,
+                "paused" to false,
+                "pictureSize" to "normal",
+                "videoTrack" to "auto",
+                "audioTrack" to "auto",
+                "textTrack" to "off",
+                "volume" to 100,
+                "muted" to false,
+                "audioDelay" to 0L,
+                "pip" to null,
+            )
         val removed = Seen()
         for (name in defaults.keys) assertTrue(removed.setProp(name, null))
         assertEquals(defaults, removed.props)
@@ -151,13 +169,14 @@ class PlayerContractTest {
      * Only JSON null, or a value that is no object, is no source.
      */
     @Test fun aSourceWithoutAnAddressKeepsItsOtherFields() {
-        val fields = mapOf(
-            "publicOnly" to false,
-            "headers" to mapOf("X-Synthetic" to "fixture"),
-            "token" to 37,
-            "live" to true,
-            "reconnect" to true,
-        )
+        val fields =
+            mapOf(
+                "publicOnly" to false,
+                "headers" to mapOf("X-Synthetic" to "fixture"),
+                "token" to 37,
+                "live" to true,
+                "reconnect" to true,
+            )
         val kept = PlayerSource(null, false, mapOf("X-Synthetic" to "fixture"), 37L, true, true)
         for (source in listOf(fields, fields + ("url" to null), fields + ("url" to 7))) {
             val seen = Seen()
@@ -191,10 +210,11 @@ class PlayerContractTest {
         val event = PlayerEvent.State(PlayerState.UNKNOWN)
         assertEquals("state", event.name)
         assertEquals(mapOf<String, Any?>("state" to "unknown"), event.data())
-        val states = (fixture("player-events.json") as List<*>)
-            .map { it as Map<*, *> }
-            .filter { it["name"] == "state" }
-            .map { (it["data"] as Map<*, *>)["state"] }
+        val states =
+            (fixture("player-events.json") as List<*>)
+                .map { it as Map<*, *> }
+                .filter { it["name"] == "state" }
+                .map { (it["data"] as Map<*, *>)["state"] }
         assertFalse(PlayerState.UNKNOWN.wire in states)
     }
 
@@ -211,12 +231,13 @@ class PlayerContractTest {
      * JSON as the Rust decoder tells it apart: a number is a number whatever
      * Java type carries it, and a null field is a missing one.
      */
-    private fun canon(value: Any?): Any? = when (value) {
-        is Map<*, *> -> value.filterValues { it != null }.mapValues { canon(it.value) }
-        is List<*> -> value.map { canon(it) }
-        is Number -> value.toDouble()
-        else -> value
-    }
+    private fun canon(value: Any?): Any? =
+        when (value) {
+            is Map<*, *> -> value.filterValues { it != null }.mapValues { canon(it.value) }
+            is List<*> -> value.map { canon(it) }
+            is Number -> value.toDouble()
+            else -> value
+        }
 
     /**
      * Each event of the fixture, which Rust decodes into its typed event, is
@@ -224,40 +245,44 @@ class PlayerContractTest {
      * and the same data, in the fixture's order.
      */
     @Test fun everyFixtureEventIsWhatTheHostEmits() {
-        val tracks = PlayerEvent.Tracks(
-            video = listOf(
-                PlayerEvent.Tracks.Video("0:0", "HD", 1280, 720, 50f, 2_500_000),
-                PlayerEvent.Tracks.Video("0:1", "", null, null, null, null),
-            ),
-            audio = listOf(
-                PlayerEvent.Tracks.Audio("1:0", "Commentary", "eng", 2, "audio/mp4a-latm"),
-                PlayerEvent.Tracks.Audio("1:1", "", "", null, ""),
-            ),
-            text = listOf(PlayerEvent.Tracks.Text("2:0", "Synthetic", "fre")),
-            selectedVideo = "0:1",
-            selectedAudio = "1:0",
-            selectedText = "2:0",
-        )
-        val events: List<PlayerEvent> = listOf(
-            PlayerEvent.State(PlayerState.IDLE),
-            PlayerEvent.State(PlayerState.BUFFERING),
-            PlayerEvent.State(PlayerState.READY),
-            PlayerEvent.State(PlayerState.ENDED),
-            PlayerEvent.Size(1280, 720),
-            PlayerEvent.Error("ERROR_CODE_IO_BAD_HTTP_STATUS", 404),
-            PlayerEvent.Error("ERROR_CODE_IO_NETWORK_CONNECTION_FAILED"),
-            PlayerEvent.Position(4000L),
-            tracks,
-            PlayerEvent.Tracks(emptyList(), emptyList(), emptyList(), "auto", null, "off"),
-            PlayerEvent.Format(25f, 2),
-            PlayerEvent.Format(50f, null),
-            PlayerEvent.Format(null, 6),
-            PlayerEvent.Pip(supported = true, tv = false, active = true),
-            PlayerEvent.PipAction(PipButton.PLAY),
-            PlayerEvent.PipAction(PipButton.PAUSE),
-            PlayerEvent.PipAction(PipButton.NEXT),
-            PlayerEvent.PipAction(PipButton.PREVIOUS),
-        )
+        val tracks =
+            PlayerEvent.Tracks(
+                video =
+                    listOf(
+                        PlayerEvent.Tracks.Video("0:0", "HD", 1280, 720, 50f, 2_500_000),
+                        PlayerEvent.Tracks.Video("0:1", "", null, null, null, null),
+                    ),
+                audio =
+                    listOf(
+                        PlayerEvent.Tracks.Audio("1:0", "Commentary", "eng", 2, "audio/mp4a-latm"),
+                        PlayerEvent.Tracks.Audio("1:1", "", "", null, ""),
+                    ),
+                text = listOf(PlayerEvent.Tracks.Text("2:0", "Synthetic", "fre")),
+                selectedVideo = "0:1",
+                selectedAudio = "1:0",
+                selectedText = "2:0",
+            )
+        val events: List<PlayerEvent> =
+            listOf(
+                PlayerEvent.State(PlayerState.IDLE),
+                PlayerEvent.State(PlayerState.BUFFERING),
+                PlayerEvent.State(PlayerState.READY),
+                PlayerEvent.State(PlayerState.ENDED),
+                PlayerEvent.Size(1280, 720),
+                PlayerEvent.Error("ERROR_CODE_IO_BAD_HTTP_STATUS", 404),
+                PlayerEvent.Error("ERROR_CODE_IO_NETWORK_CONNECTION_FAILED"),
+                PlayerEvent.Position(4000L),
+                tracks,
+                PlayerEvent.Tracks(emptyList(), emptyList(), emptyList(), "auto", null, "off"),
+                PlayerEvent.Format(25f, 2),
+                PlayerEvent.Format(50f, null),
+                PlayerEvent.Format(null, 6),
+                PlayerEvent.Pip(supported = true, tv = false, active = true),
+                PlayerEvent.PipAction(PipButton.PLAY),
+                PlayerEvent.PipAction(PipButton.PAUSE),
+                PlayerEvent.PipAction(PipButton.NEXT),
+                PlayerEvent.PipAction(PipButton.PREVIOUS),
+            )
         val fixture = fixture("player-events.json") as List<*>
         assertEquals(fixture.size, events.size)
         for ((index, event) in events.withIndex()) {
