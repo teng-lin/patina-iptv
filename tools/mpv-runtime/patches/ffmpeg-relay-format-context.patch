@@ -1,0 +1,52 @@
+--- a/libavformat/internal.h
++++ b/libavformat/internal.h
+@@ -118,6 +118,7 @@
+     AVDictionary *id3v2_meta;
+ 
+     int missing_streams;
++    char *patina_http_prefix; /**< Private per-demuxer relay capability. */
+ } FFFormatContext;
+ 
+ static av_always_inline FFFormatContext *ffformatcontext(AVFormatContext *s)
+--- a/libavformat/options.c
++++ b/libavformat/options.c
+@@ -141,6 +141,29 @@
+                            const char *url, int flags, AVDictionary **options)
+ {
+     int loglevel;
++    const char *prefix = ffformatcontext(s)->patina_http_prefix;
++
++    if (prefix && prefix[0]) {
++        // Some demuxers (including MOV external references) pass NULL instead
++        // of an option dictionary. Keep their IO inside the same capability.
++        const char *target = url;
++        if (!strncmp(target, "crypto+", 7) ||
++            !strncmp(target, "crypto:", 7))
++            target += 7;
++        if (strncmp(target, prefix, strlen(prefix))) {
++            av_log(s, AV_LOG_ERROR, "Relay capability refused a nested address\n");
++            return AVERROR(EACCES);
++        }
++        AVDictionary *temporary = NULL;
++        AVDictionary **guarded = options ? options : &temporary;
++        int ret = av_dict_set(guarded, "patina_http_prefix", prefix, 0);
++        if (ret >= 0)
++            ret = ffio_open_whitelist(pb, url, flags, &s->interrupt_callback,
++                                      guarded, s->protocol_whitelist,
++                                      s->protocol_blacklist);
++        av_dict_free(&temporary);
++        return ret;
++    }
+ 
+     if (!strcmp(url, s->url) ||
+         s->iformat && !strcmp(s->iformat->name, "image2") ||
+--- a/libavformat/options_table.h
++++ b/libavformat/options_table.h
+@@ -34,6 +34,7 @@
+ #define D AV_OPT_FLAG_DECODING_PARAM
+ 
+ static const AVOption avformat_options[] = {
++{"patina_http_prefix", "Required nested HTTP relay prefix", offsetof(FFFormatContext, patina_http_prefix), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, D},
+ {"avioflags", NULL, OFFSET(avio_flags), AV_OPT_TYPE_FLAGS, {.i64 = DEFAULT }, INT_MIN, INT_MAX, D|E, .unit = "avioflags"},
+ {"direct", "reduce buffering", 0, AV_OPT_TYPE_CONST, {.i64 = AVIO_FLAG_DIRECT }, INT_MIN, INT_MAX, D|E, .unit = "avioflags"},
+ {"probesize", "set probing size", OFFSET(probesize), AV_OPT_TYPE_INT64, {.i64 = 5000000 }, 32, (double)INT64_MAX, D},

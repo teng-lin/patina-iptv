@@ -82,7 +82,11 @@ fn native_initialization_finishes_before_concurrent_key_attachment() {
                     unsafe {
                         ffi::sqlite3_exec(
                             connection,
-                            c"CREATE TABLE generated(value); INSERT INTO generated VALUES(1); ATTACH DATABASE ':memory:' AS generated_export KEY ''; SELECT sqlcipher_export('generated_export');".as_ptr(),
+                            c"CREATE TABLE generated(value); \
+                              INSERT INTO generated VALUES(1); \
+                              ATTACH DATABASE ':memory:' AS generated_export KEY ''; \
+                              SELECT sqlcipher_export('generated_export');"
+                                .as_ptr(),
                             None,
                             std::ptr::null_mut(),
                             std::ptr::null_mut(),
@@ -94,7 +98,11 @@ fn native_initialization_finishes_before_concurrent_key_attachment() {
                 // SAFETY: no statements or other references retain this connection.
                 let closed = unsafe { ffi::sqlite3_close(connection) };
                 assert_eq!(keyed, ffi::SQLITE_OK, "SQLCipher was not ready after open");
-                assert_eq!(exported, ffi::SQLITE_OK, "SQLCipher export was not registered");
+                assert_eq!(
+                    exported,
+                    ffi::SQLITE_OK,
+                    "SQLCipher export was not registered"
+                );
                 assert_eq!(closed, ffi::SQLITE_OK);
             });
         }

@@ -3,23 +3,27 @@ on:
   workflow_dispatch:
     inputs:
       platform:
-        description: Runtime to build, test and publish
+        description: Runtime to build and test
         type: choice
         default: windows
         options: [windows, linux, macos]
+      publish:
+        description: Publish the tested runtime (master only)
+        type: boolean
+        default: true
 permissions:
   contents: read
 concurrency:
-  group: mpv-runtime-dependency-${{ inputs.platform }}
+  group: mpv-runtime-dependency-${{ inputs.platform }}-${{ inputs.publish }}
   cancel-in-progress: false
 jobs:
   guard:
     runs-on: ubuntu-24.04
     steps:
-      - name: Refuse runtime dispatch outside master
-        if: github.ref != 'refs/heads/master'
+      - name: Refuse runtime publication outside master
+        if: inputs.publish && github.ref != 'refs/heads/master'
         run: |
-          echo "Runtime-publish workflows can be dispatched on master only" >&2
+          echo "Runtime publication requires master; use publish=false for branch candidates" >&2
           exit 1
 
   # Windows: tools/mpv-runtime. Linux and macOS: tools/mpv-runtime-unix, from
@@ -99,8 +103,10 @@ jobs:
           if ((Get-FileHash "$dist/test-tools/ffmpeg.exe" -Algorithm SHA256).Hash.ToLowerInvariant() -ne $components.build.ffmpeg_sha256) { throw 'Synthetic media generator hash mismatch' }
           python tools/mpv-runtime/smoke.py --dll "$dist/runtime/libmpv-2.dll" --ffmpeg "$dist/test-tools/ffmpeg.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Synthetic TS/HLS runtime smoke failed' }
+          python tools/mpv-runtime/relay_guard.py --library "$dist/runtime/libmpv-2.dll" --ffmpeg "$dist/test-tools/ffmpeg.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Native relay guard failed' }
   publish:
-    if: inputs.platform == 'windows'
+    if: inputs.platform == 'windows' && inputs.publish
     needs: [build, smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -209,6 +215,8 @@ jobs:
           tar -xzf "$dist/test-tools-linux-x86_64.tar.gz" -C target/mpv-runtime-linux-tools
           python3 tools/mpv-runtime-unix/smoke.py --library target/mpv-runtime-linux/lib/libmpv.so.2 \
             --ffmpeg target/mpv-runtime-linux-tools/bin/ffmpeg
+          python3 tools/mpv-runtime/relay_guard.py --library target/mpv-runtime-linux/lib/libmpv.so.2 \
+            --ffmpeg target/mpv-runtime-linux-tools/bin/ffmpeg
       - name: App player tests against the candidate
         env:
           IPTV_REQUIRE_PLAYER_TESTS: '1'
@@ -217,6 +225,7 @@ jobs:
           export PATH="$PWD/target/mpv-runtime-linux-tools/bin:$PATH"
           cargo test --locked -p iptv-app --lib --features test-support mpv::
   linux-publish:
+    if: inputs.platform == 'linux' && inputs.publish
     needs: [linux-build, linux-smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -318,7 +327,10 @@ jobs:
           tar -xzf "$dist/test-tools-macos-arm64.tar.gz" -C target/mpv-runtime-macos-tools
           /usr/bin/python3 tools/mpv-runtime-unix/smoke.py --library target/mpv-runtime-macos/lib/libmpv.2.dylib \
             --ffmpeg target/mpv-runtime-macos-tools/bin/ffmpeg
+          /usr/bin/python3 tools/mpv-runtime/relay_guard.py --library target/mpv-runtime-macos/lib/libmpv.2.dylib \
+            --ffmpeg target/mpv-runtime-macos-tools/bin/ffmpeg
   macos-publish:
+    if: inputs.platform == 'macos' && inputs.publish
     needs: [macos-build, macos-smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 20

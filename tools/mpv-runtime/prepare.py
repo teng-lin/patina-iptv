@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import stat
+import subprocess
 import tarfile
 import tempfile
 import urllib.request
@@ -196,6 +197,26 @@ def restore_cache(lock_path, work, source_bundle):
                 staged.unlink(missing_ok=True)
 
 
+def apply_patches(component, directory):
+    """Apply the retained local changes to a fresh, checksum-verified source."""
+    applied = []
+    for patch in sorted((Path(__file__).resolve().parent / "patches").glob(f"{component}-*.patch")):
+        subprocess.run(
+            ["patch", "-t", "-N", "-F", "0", "-p", "1", "-i", str(patch)],
+            cwd=directory,
+            check=True,
+        )
+        applied.append({"path": "patches/" + patch.name, "sha256": digest(patch)})
+    return applied
+
+
+def patch_inventory(component):
+    return [
+        {"path": "patches/" + patch.name, "sha256": digest(patch)}
+        for patch in sorted((Path(__file__).resolve().parent / "patches").glob(f"{component}-*.patch"))
+    ]
+
+
 def prepare(lock_path, work, source_bundle=None):
     lock, components = read_lock(lock_path)
     work = Path(work).resolve()
@@ -213,6 +234,7 @@ def prepare(lock_path, work, source_bundle=None):
         with tempfile.TemporaryDirectory(dir=work) as temporary:
             extracted = Path(temporary) / "source"
             extract(archive, extracted)
+            patches = apply_patches(item["name"], extracted)
             licenses = []
             for name in item["license_files"]:
                 license_path = extracted.joinpath(*relative_path(name).parts)
@@ -226,7 +248,7 @@ def prepare(lock_path, work, source_bundle=None):
             if destination.exists():
                 shutil.rmtree(destination)
             shutil.move(str(extracted), destination)
-        inventory.append({**item, "role": role, "licenses": licenses})
+        inventory.append({**item, "role": role, "licenses": licenses, "patches": patches})
     (work / "sources.lock.json").write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
     (work / "components.json").write_text(json.dumps({"schema": 1, "components": inventory}, indent=2) + "\n", encoding="utf-8")
 
@@ -249,6 +271,8 @@ def bundle(lock_path, work, output):
         record = next(row for row in inventory["components"] if row["name"] == item["name"])
         if record.get("role") != role or any(record.get(key) != value for key, value in item.items()):
             raise ValueError(f"Component inventory changed: {item['name']}")
+        if record.get("patches", []) != patch_inventory(item["name"]):
+            raise ValueError(f"Native patches changed after source preparation: {item['name']}")
         if [entry["path"] for entry in record["licenses"]] != item["license_files"]:
             raise ValueError(f"License inventory differs from lock: {item['name']}")
         for license_info in record["licenses"]:
@@ -260,7 +284,7 @@ def bundle(lock_path, work, output):
             files.append((path, f"licenses/{item['name']}/{license_info['path']}"))
     scripts = Path(__file__).resolve().parent
     for path in sorted(scripts.rglob("*")):
-        if path.is_file() and "__pycache__" not in path.parts and path.name != "runtime.json" and (path.suffix in {".py", ".sh", ".ps1", ".json", ".cmake", ".patch", ".md", ".txt"} or path.name in {"Dockerfile", "Makefile"}):
+        if path.is_file() and "__pycache__" not in path.parts and path.name != "runtime.json" and (path.suffix in {".py", ".sh", ".ps1", ".json", ".cmake", ".patch", ".md", ".txt", ".c", ".h"} or path.name in {"Dockerfile", "Makefile"}):
             files.append((path, "build-scripts/" + path.relative_to(scripts).as_posix()))
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("wb") as raw, gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as compressed, tarfile.open(fileobj=compressed, mode="w") as archive:

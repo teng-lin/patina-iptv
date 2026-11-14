@@ -120,7 +120,7 @@ meson_build mpv -Ddefault_library=shared -Dauto_features=disabled \
     "-Dc_link_args=['-Wl,--exclude-libs,ALL', '-Wl,--no-undefined', '-Wl,--as-needed', '-Wl,--push-state,--no-as-needed,-lstdc++,--pop-state']" \
     -Dgpl=false -Dcplayer=false -Dlibmpv=true -Dbuild-date=false -Dgl=enabled -Dplain-gl=enabled \
     -Dpipewire=enabled -Dpulse=enabled -Dalsa=enabled -Diconv=enabled \
-    -Dlibavdevice=enabled -Dzlib=enabled -Dlua=disabled -Djavascript=disabled
+    -Dlibavdevice=enabled -Dzlib=enabled -Dlua=disabled -Djavascript=disabled -Dlibcurl=disabled
 cp "$build/mpv/config.h" "$output/logs/mpv-config.h"
 verify mpv "$output/logs/mpv-config.h"
 

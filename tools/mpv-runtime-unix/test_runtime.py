@@ -124,12 +124,23 @@ class LockTests(Fixture):
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_native_guard_requires_its_protocol_and_the_lavf_backend(self):
+        configured = runtime.config_defines(defines(MPV_ON, runtime.REQUIRED_OFF["mpv"]))
+        self.assertEqual(runtime.check_features("linux", "mpv", configured), [])
+        configured["HAVE_LIBCURL"] = "1"
+        self.assertEqual(runtime.check_features("linux", "mpv", configured),
+                         ["HAVE_LIBCURL: expected 0, got 1"])
+        configured = runtime.config_defines(defines(FFMPEG_ON, runtime.REQUIRED_OFF["ffmpeg"]))
+        del configured["CONFIG_PATINA_RELAY_GUARD_V1_PROTOCOL"]
+        self.assertEqual(runtime.check_features("linux", "ffmpeg", configured),
+                         ["CONFIG_PATINA_RELAY_GUARD_V1_PROTOCOL: expected 1, got missing"])
+
     def test_licence_switches_must_be_off(self):
-        on = runtime.config_defines(defines(FFMPEG_ON, runtime.LICENCE_OFF["ffmpeg"]))
+        on = runtime.config_defines(defines(FFMPEG_ON, runtime.REQUIRED_OFF["ffmpeg"]))
         self.assertEqual(runtime.check_features("linux", "ffmpeg", on), [])
         gpl = runtime.config_defines(defines(FFMPEG_ON + ["CONFIG_GPL"], ["CONFIG_VERSION3", "CONFIG_NONFREE"]))
         self.assertEqual(runtime.check_features("linux", "ffmpeg", gpl), ["CONFIG_GPL: expected 0, got 1"])
-        missing = runtime.config_defines(defines(FFMPEG_ON[1:], runtime.LICENCE_OFF["ffmpeg"]))
+        missing = runtime.config_defines(defines(FFMPEG_ON[1:], runtime.REQUIRED_OFF["ffmpeg"]))
         self.assertEqual(runtime.check_features("linux", "ffmpeg", missing), [f"{FFMPEG_ON[0]}: expected 1, got missing"])
 
     def test_elf_parsers(self):
@@ -160,10 +171,10 @@ class BuildFixture(Fixture):
         for header in runtime.HEADERS:
             (build / "include/mpv" / header).write_text("/* synthetic */\n")
         evidence = {
-            "ffmpeg-config.h": defines(runtime.EXPECTED[self.platform]["ffmpeg"], runtime.LICENCE_OFF["ffmpeg"])
+            "ffmpeg-config.h": defines(runtime.EXPECTED[self.platform]["ffmpeg"], runtime.REQUIRED_OFF["ffmpeg"])
             + '#define FFMPEG_LICENSE "LGPL version 2.1 or later"\n',
             "ffmpeg-config_components.h": "",
-            "mpv-config.h": defines(runtime.EXPECTED[self.platform]["mpv"], runtime.LICENCE_OFF["mpv"]),
+            "mpv-config.h": defines(runtime.EXPECTED[self.platform]["mpv"], runtime.REQUIRED_OFF["mpv"]),
             "smoke.txt": "PASS generated.ts: {}\nPASS generated.m3u8: {}\n",
         }
         if self.platform == "linux":
@@ -195,7 +206,7 @@ class ValidateTests(BuildFixture):
             "CONFIG_NONFREE: expected 0": {"ffmpeg-config_components.h": "#define CONFIG_NONFREE 1\n"},
             "HAVE_GPL: expected 0": {"mpv-config.h": defines(MPV_ON) + "#define HAVE_GPL 1\n"},
             "playback smoke test": {"smoke.txt": "PASS generated.ts: {}\n"},
-            "FFmpeg licence is GPL version 2 or later": {"ffmpeg-config.h": defines(FFMPEG_ON, runtime.LICENCE_OFF["ffmpeg"])
+            "FFmpeg licence is GPL version 2 or later": {"ffmpeg-config.h": defines(FFMPEG_ON, runtime.REQUIRED_OFF["ffmpeg"])
                                                          + '#define FFMPEG_LICENSE "GPL version 2 or later"\n'},
             "RPATH/RUNPATH": {"libmpv-dynamic.txt": READELF + " 0x1d (RUNPATH) Library runpath: [/work/prefix/lib]\n"},
         }

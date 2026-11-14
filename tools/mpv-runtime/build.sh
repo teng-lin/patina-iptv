@@ -89,7 +89,7 @@ if name == 'ffmpeg':
     enabled = '''SCHANNEL NETWORK W32THREADS ZLIB LIBDAV1D
         AVCODEC AVFORMAT AVFILTER AVUTIL SWRESAMPLE SWSCALE
         HLS_DEMUXER MPEGTS_DEMUXER MOV_DEMUXER MATROSKA_DEMUXER RTSP_DEMUXER
-        HTTP_PROTOCOL HTTPS_PROTOCOL TCP_PROTOCOL TLS_PROTOCOL CRYPTO_PROTOCOL
+        HTTP_PROTOCOL HTTPS_PROTOCOL TCP_PROTOCOL TLS_PROTOCOL CRYPTO_PROTOCOL PATINA_RELAY_GUARD_V1_PROTOCOL
         H264_DECODER HEVC_DECODER MPEG2VIDEO_DECODER LIBDAV1D_DECODER
         AAC_DECODER MP2_DECODER AC3_DECODER EAC3_DECODER
         SUBRIP_DECODER WEBVTT_DECODER ASS_DECODER
@@ -99,7 +99,7 @@ if name == 'ffmpeg':
     prefix = 'CONFIG_'
 else:
     enabled = ['WASAPI', 'WIN32_THREADS', 'LIBASS', 'LIBPLACEBO', 'FFMPEG', 'LIBAVDEVICE', 'ZLIB']
-    disabled = ['GPL']
+    disabled = ['GPL', 'LIBCURL']
     prefix = 'HAVE_'
 errors = []
 for expected, names in [('1', enabled), ('0', disabled)]:
@@ -189,7 +189,7 @@ mkdir -p "$build/ffmpeg"
 meson_build mpv -Ddefault_library=shared -Dauto_features=disabled \
     "-Dc_link_args=['-static', '-lc++']" \
     -Dgpl=false -Dcplayer=false -Dlibmpv=true -Dgl=disabled -Dwasapi=enabled \
-    -Dwin32-threads=enabled -Dlibavdevice=enabled -Dzlib=enabled -Dlua=disabled
+    -Dwin32-threads=enabled -Dlibavdevice=enabled -Dzlib=enabled -Dlua=disabled -Dlibcurl=disabled
 
 install -m 644 "$prefix/bin/libmpv-2.dll" "$output/libmpv-2.dll"
 install -m 755 "$prefix/bin/ffmpeg.exe" "$output/ffmpeg.exe"

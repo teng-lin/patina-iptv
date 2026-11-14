@@ -76,10 +76,10 @@ _FFMPEG_COMMON = """
     CONFIG_AAC_DECODER CONFIG_MP2_DECODER CONFIG_AC3_DECODER CONFIG_EAC3_DECODER
     CONFIG_SUBRIP_DECODER CONFIG_WEBVTT_DECODER CONFIG_ASS_DECODER
     CONFIG_MPEG2VIDEO_ENCODER CONFIG_MP2_ENCODER CONFIG_RAWVIDEO_DEMUXER CONFIG_PCM_S16LE_DEMUXER
-    CONFIG_HLS_MUXER CONFIG_MPEGTS_MUXER HAVE_PTHREADS
+    CONFIG_HLS_MUXER CONFIG_MPEGTS_MUXER HAVE_PTHREADS CONFIG_PATINA_RELAY_GUARD_V1_PROTOCOL
 """.split()
 _MPV_COMMON = "HAVE_FFMPEG HAVE_GL HAVE_LIBASS HAVE_LIBPLACEBO HAVE_ZLIB HAVE_ICONV HAVE_LIBAVDEVICE".split()
-LICENCE_OFF = {"ffmpeg": ["CONFIG_GPL", "CONFIG_VERSION3", "CONFIG_NONFREE"], "mpv": ["HAVE_GPL"]}
+REQUIRED_OFF = {"ffmpeg": ["CONFIG_GPL", "CONFIG_VERSION3", "CONFIG_NONFREE"], "mpv": ["HAVE_GPL", "HAVE_LIBCURL"]}
 EXPECTED = {
     "linux": {
         "ffmpeg": _FFMPEG_COMMON + "CONFIG_OPENSSL CONFIG_VAAPI HAVE_VAAPI_DRM CONFIG_FFNVCODEC CONFIG_NVDEC".split(),
@@ -151,7 +151,10 @@ def write_lock(platform, output, selection_path=HERE / "sources.json"):
 
 def recipe_files(platform):
     """Every script that shapes a platform's runtime, by its name in the recipe."""
-    files = [("base/prepare.py", BASE / "prepare.py"), ("base/smoke.py", BASE / "smoke.py")]
+    files = [("base/" + name, BASE / name) for name in
+             ("prepare.py", "smoke.py", "relay_guard.py", "relay_guard_probe.c")]
+    for path in sorted((BASE / "patches").glob("*.patch")):
+        files.append(("base/patches/" + path.name, path))
     for path in sorted(HERE.glob("*.py")):
         if not path.name.startswith("test_"):
             files.append((path.name, path))
@@ -241,7 +244,7 @@ def config_defines(*texts):
 def check_features(platform, component, defines):
     """Errors for features that must be on (the app needs them) or off (licence)."""
     errors = []
-    for expected, keys in (("1", EXPECTED[platform][component]), ("0", LICENCE_OFF[component])):
+    for expected, keys in (("1", EXPECTED[platform][component]), ("0", REQUIRED_OFF[component])):
         for key in keys:
             if defines.get(key) != expected:
                 errors.append(f"{key}: expected {expected}, got {defines.get(key, 'missing')}")
@@ -577,7 +580,7 @@ def main(arguments=None):
     lock.add_argument("--output", type=Path, required=True)
     verify = commands.add_parser("verify")
     verify.add_argument("--platform", choices=PLATFORMS, required=True)
-    verify.add_argument("--component", choices=sorted(LICENCE_OFF), required=True)
+    verify.add_argument("--component", choices=sorted(REQUIRED_OFF), required=True)
     verify.add_argument("headers", type=Path, nargs="+")
     pack = commands.add_parser("package")
     pack.add_argument("--platform", choices=PLATFORMS, required=True)
