@@ -92,9 +92,46 @@ impl Screen {
         self.names
             .push((channel.key.clone(), channel.name, channel.choice));
         self.focus = Row::Mapping(channel.key);
+        self.prune_additions();
         self.open = true;
         self.invalidate();
         true
+    }
+    pub fn remove(&mut self, key: &ChannelRef) {
+        self.request.mappings.retain(|row| row.channel != *key);
+        self.names.retain(|(id, _, _)| id != key);
+        self.prune_additions();
+        self.restore_focus();
+    }
+    fn prune_additions(&mut self) {
+        let mut used: Vec<_> = self
+            .request
+            .mappings
+            .iter()
+            .filter_map(|row| match &row.target {
+                Target::Staged {
+                    addition: Some(index),
+                    ..
+                } => Some(*index),
+                _ => None,
+            })
+            .collect();
+        used.sort_unstable();
+        used.dedup();
+        self.request.additions = used
+            .iter()
+            .filter_map(|index| self.request.additions.get(*index).cloned())
+            .collect();
+        for row in &mut self.request.mappings {
+            if let Target::Staged {
+                addition: Some(index),
+                ..
+            } = &mut row.target
+                && let Ok(next) = used.binary_search(index)
+            {
+                *index = next;
+            }
+        }
     }
     pub fn invalidate(&mut self) -> Option<Preview> {
         self.generation += 1;
@@ -219,6 +256,45 @@ mod tests {
         let pending = editor.begin();
         editor.invalidate();
         assert!(!editor.finish(pending));
+    }
+    #[test]
+    fn removing_or_replacing_last_staged_mapping_drops_its_unneeded_feed_addition() {
+        use crate::inspection::{ProbeEvidence, ProbeId};
+        let mut editor = Screen::new(SourceId(1), TimeWindow { from: 1, to: 2 });
+        let evidence = |name: &str| ProbeEvidence {
+            stage: ProbeId(name.into()),
+            source: SourceId(1),
+            feed: None,
+            incarnation: name.into(),
+            digest: [0; 32],
+            expires_at: 100,
+        };
+        for (key, index) in [("amber", 0), ("birch", 1)] {
+            let evidence = evidence(key);
+            editor.request.additions.push(FeedAddition {
+                evidence: evidence.clone(),
+                name: None,
+            });
+            editor.add(
+                channel(key),
+                Target::Staged {
+                    evidence,
+                    epg_channel: key.into(),
+                    addition: Some(index),
+                },
+            );
+        }
+        editor.remove(&channel("amber").key);
+        assert_eq!(editor.request.additions.len(), 1);
+        assert!(matches!(
+            &editor.request.mappings[0].target,
+            Target::Staged {
+                addition: Some(0),
+                ..
+            }
+        ));
+        editor.add(channel("birch"), Target::Automatic);
+        assert!(editor.request.additions.is_empty());
     }
     #[test]
     fn replacement_opt_in_is_per_row() {

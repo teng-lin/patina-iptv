@@ -188,7 +188,8 @@ pub(super) fn prepare(
             fresh_feeds.insert(feed);
         }
     }
-    let inputs = storage(store.guide_repair_inputs(source))?.ok_or(InspectionError::LimitExceeded)?;
+    let inputs =
+        storage(store.guide_repair_inputs(source))?.ok_or(InspectionError::LimitExceeded)?;
     let rows = inputs.channels;
     let actual: HashMap<_, _> = inputs
         .bindings

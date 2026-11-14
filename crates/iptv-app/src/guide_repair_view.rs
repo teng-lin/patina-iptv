@@ -408,9 +408,7 @@ fn activate(ui: Ui, row: Row) {
         Row::Remove(key) => {
             invalidate(ui);
             update(ui, |s| {
-                s.request.mappings.retain(|r| r.channel != key);
-                s.names.retain(|(id, _, _)| *id != key);
-                s.restore_focus();
+                s.remove(&key);
             });
             count(ui);
         }
