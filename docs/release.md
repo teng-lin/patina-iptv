@@ -270,6 +270,31 @@ What it does differently from a release:
   be its own). Checksums, SBOMs, source archives and provenance attestations
   are produced as in a release.
 
+When rehearsing workflow changes before they reach the default branch, GitHub
+may refuse creation of the throwaway tag with `403 Resource not accessible by
+integration`. The publish job already requests `contents: write`; a commit with
+changed workflow files also needs workflow-write authority, which the built-in
+`GITHUB_TOKEN` cannot request. See [GitHub's token permission rules for release
+creation](https://docs.github.com/en/rest/releases/releases#create-a-release).
+Do not broaden repository permissions or relax release-tag protection.
+
+A maintainer whose GitHub CLI authentication can write workflows can seed the
+exact tag with the existing ownership-checking helper, then rerun only the failed
+publish job. Read the run's full `headSha` and the publish job's `databaseId` from
+`gh run view <run-id> --json headSha,jobs`, then run from that source checkout:
+
+```sh
+GH_REPO=teng-lin/patina-iptv python3 tools/ci/rehearsal.py create \
+  rehearsal-<run-id> <full-run-commit-sha>
+gh run rerun <run-id> --repo teng-lin/patina-iptv --job <publish-job-id>
+```
+
+This keeps the original run's package and signing artifacts. The helper refuses
+a tag at another commit; publication accepts the existing owned tag and performs
+the usual draft upload, verification and cleanup. The target must remain the
+original run's commit. Do not substitute the default-branch commit or rerun the
+packaging jobs just to recover publication.
+
 Limits:
 
 - A rehearsal covers `platforms=android-desktop` only (with the Windows
