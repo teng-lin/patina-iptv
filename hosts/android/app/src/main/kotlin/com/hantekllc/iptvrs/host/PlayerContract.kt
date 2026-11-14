@@ -36,11 +36,12 @@ internal data class PlayerSource(
         /** The prop's value; null for no source (JSON null, or no object). */
         fun from(value: Any?): PlayerSource? {
             val map = value as? Map<*, *> ?: return null
-            val headers = (map["headers"] as? Map<*, *>)
-                ?.entries
-                ?.mapNotNull { (k, v) -> (k as? String)?.let { key -> (v as? String)?.let { key to it } } }
-                ?.toMap()
-                ?: emptyMap()
+            val headers =
+                (map["headers"] as? Map<*, *>)
+                    ?.entries
+                    ?.mapNotNull { (k, v) -> (k as? String)?.let { key -> (v as? String)?.let { key to it } } }
+                    ?.toMap()
+                    ?: emptyMap()
             return PlayerSource(
                 url = map["url"] as? String,
                 publicOnly = map["publicOnly"] != false,
@@ -113,7 +114,10 @@ internal interface PlayerProps {
      * removed): decodes it and calls its setter. False for a name the
      * contract does not have; nothing is set then.
      */
-    fun setProp(name: String, value: Any?): Boolean {
+    fun setProp(
+        name: String,
+        value: Any?,
+    ): Boolean {
         when (name) {
             "source" -> source(PlayerSource.from(value))
             "paused" -> paused(value == true)
@@ -132,7 +136,9 @@ internal interface PlayerProps {
 }
 
 /** The `state` event's states. */
-internal enum class PlayerState(val wire: String) {
+internal enum class PlayerState(
+    val wire: String,
+) {
     IDLE("idle"),
     BUFFERING("buffering"),
     READY("ready"),
@@ -149,18 +155,21 @@ internal enum class PlayerState(val wire: String) {
 
     companion object {
         /** Media3's playback state ([Player.getPlaybackState]). */
-        fun of(media3: Int): PlayerState = when (media3) {
-            Player.STATE_IDLE -> IDLE
-            Player.STATE_BUFFERING -> BUFFERING
-            Player.STATE_READY -> READY
-            Player.STATE_ENDED -> ENDED
-            else -> UNKNOWN
-        }
+        fun of(media3: Int): PlayerState =
+            when (media3) {
+                Player.STATE_IDLE -> IDLE
+                Player.STATE_BUFFERING -> BUFFERING
+                Player.STATE_READY -> READY
+                Player.STATE_ENDED -> ENDED
+                else -> UNKNOWN
+            }
     }
 }
 
 /** One button of the picture-in-picture window (the `pipAction` event). */
-internal enum class PipButton(val wire: String) {
+internal enum class PipButton(
+    val wire: String,
+) {
     PLAY("play"),
     PAUSE("pause"),
     NEXT("next"),
@@ -176,20 +185,30 @@ internal enum class PipButton(val wire: String) {
  * One event of `tv.player`: its [name] on the wire and its [data] (JSON as
  * Java objects), as `PlayerEvent::decode` in the Rust contract reads them.
  */
-internal sealed class PlayerEvent(val name: String) {
+internal sealed class PlayerEvent(
+    val name: String,
+) {
     abstract fun data(): Map<String, Any?>
 
-    data class State(val state: PlayerState) : PlayerEvent("state") {
+    data class State(
+        val state: PlayerState,
+    ) : PlayerEvent("state") {
         override fun data(): Map<String, Any?> = mapOf("state" to state.wire)
     }
 
     /** The video's size in pixels. */
-    data class Size(val width: Int, val height: Int) : PlayerEvent("size") {
+    data class Size(
+        val width: Int,
+        val height: Int,
+    ) : PlayerEvent("size") {
         override fun data(): Map<String, Any?> = mapOf("width" to width, "height" to height)
     }
 
     /** Media3's error code name, and the HTTP status behind it if a server answered one. */
-    data class Error(val code: String, val http: Int? = null) : PlayerEvent("error") {
+    data class Error(
+        val code: String,
+        val http: Int? = null,
+    ) : PlayerEvent("error") {
         override fun data(): Map<String, Any?> {
             val data = mutableMapOf<String, Any?>("code" to code)
             http?.let { data["http"] = it }
@@ -198,7 +217,9 @@ internal sealed class PlayerEvent(val name: String) {
     }
 
     /** Where the stream is, from where it opened. */
-    data class Position(val ms: Long) : PlayerEvent("position") {
+    data class Position(
+        val ms: Long,
+    ) : PlayerEvent("position") {
         override fun data(): Map<String, Any?> = mapOf("ms" to ms)
     }
 
@@ -230,35 +251,45 @@ internal sealed class PlayerEvent(val name: String) {
             val codec: String,
         )
 
-        data class Text(val id: String, val label: String, val language: String)
-
-        override fun data(): Map<String, Any?> = mapOf(
-            "video" to video.map {
-                mapOf(
-                    "id" to it.id,
-                    "label" to it.label,
-                    "width" to it.width,
-                    "height" to it.height,
-                    "fps" to it.fps,
-                    "bitrate" to it.bitrate,
-                )
-            },
-            "audio" to audio.map {
-                mapOf(
-                    "id" to it.id,
-                    "label" to it.label,
-                    "language" to it.language,
-                    "channels" to it.channels,
-                    "codec" to it.codec,
-                )
-            },
-            "text" to text.map { mapOf("id" to it.id, "label" to it.label, "language" to it.language) },
-            "selected" to mapOf("video" to selectedVideo, "audio" to selectedAudio, "text" to selectedText),
+        data class Text(
+            val id: String,
+            val label: String,
+            val language: String,
         )
+
+        override fun data(): Map<String, Any?> =
+            mapOf(
+                "video" to
+                    video.map {
+                        mapOf(
+                            "id" to it.id,
+                            "label" to it.label,
+                            "width" to it.width,
+                            "height" to it.height,
+                            "fps" to it.fps,
+                            "bitrate" to it.bitrate,
+                        )
+                    },
+                "audio" to
+                    audio.map {
+                        mapOf(
+                            "id" to it.id,
+                            "label" to it.label,
+                            "language" to it.language,
+                            "channels" to it.channels,
+                            "codec" to it.codec,
+                        )
+                    },
+                "text" to text.map { mapOf("id" to it.id, "label" to it.label, "language" to it.language) },
+                "selected" to mapOf("video" to selectedVideo, "audio" to selectedAudio, "text" to selectedText),
+            )
     }
 
     /** What plays, as far as known: a null field is left out. */
-    data class Format(val fps: Float?, val channels: Int?) : PlayerEvent("format") {
+    data class Format(
+        val fps: Float?,
+        val channels: Int?,
+    ) : PlayerEvent("format") {
         /** Nothing is known: not worth an event. */
         val isEmpty: Boolean get() = fps == null && channels == null
 
@@ -271,12 +302,17 @@ internal sealed class PlayerEvent(val name: String) {
     }
 
     /** Picture in picture as the system has it. */
-    data class Pip(val supported: Boolean, val tv: Boolean, val active: Boolean) : PlayerEvent("pip") {
-        override fun data(): Map<String, Any?> =
-            mapOf("supported" to supported, "tv" to tv, "active" to active)
+    data class Pip(
+        val supported: Boolean,
+        val tv: Boolean,
+        val active: Boolean,
+    ) : PlayerEvent("pip") {
+        override fun data(): Map<String, Any?> = mapOf("supported" to supported, "tv" to tv, "active" to active)
     }
 
-    data class PipAction(val action: String) : PlayerEvent("pipAction") {
+    data class PipAction(
+        val action: String,
+    ) : PlayerEvent("pipAction") {
         constructor(button: PipButton) : this(button.wire)
 
         override fun data(): Map<String, Any?> = mapOf("action" to action)

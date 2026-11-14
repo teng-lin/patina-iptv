@@ -108,19 +108,23 @@ class PlayerComponent(
 ) : NshComponent {
     companion object {
         const val NAME = "tv.player"
+
         /** The `User-Agent` of a stream whose source names none. */
         private const val DEFAULT_UA = "iptv-rs/0.1 (Media3)"
+
         /**
          * A live item that played shorter than this before the server closed
          * it gets no further spare: its end goes to the app, which backs off.
          */
         private const val MIN_BRIDGED_MS = 5_000L
+
         /**
          * A live stream plays at least this far behind its live edge (HLS:
          * Media3's own offset, three segments, when that is more), so its
          * buffer rides out a short outage instead of stalling at once.
          */
         const val LIVE_MIN_OFFSET_MS = 10_000L
+
         /**
          * A live stream that played reopens itself after an error at most
          * once in this long ([quickReopen]); a second error in it goes to
@@ -135,50 +139,65 @@ class PlayerComponent(
     /** Headers for the current stream; read on loader threads. */
 
     private val surface = SurfaceView(context)
+
     /**
      * Black over the picture from a new source (or an error) until the
      * stream's first frame: the surface would keep the last channel's frame.
      */
-    private val shutter = View(context).apply {
-        setBackgroundColor(Color.BLACK)
-        visibility = View.GONE
-    }
+    private val shutter =
+        View(context).apply {
+            setBackgroundColor(Color.BLACK)
+            visibility = View.GONE
+        }
+
     /** The chosen text track's cues, over the picture. */
-    private val subtitles = SubtitleView(context).apply {
-        setUserDefaultStyle()
-        setUserDefaultTextSize()
-    }
-    private val root = PictureFrame(context).apply {
-        setBackgroundColor(Color.BLACK)
-        addView(surface, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
-        addView(subtitles, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
-        addView(shutter, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
-    }
+    private val subtitles =
+        SubtitleView(context).apply {
+            setUserDefaultStyle()
+            setUserDefaultTextSize()
+        }
+    private val root =
+        PictureFrame(context).apply {
+            setBackgroundColor(Color.BLACK)
+            addView(surface, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
+            addView(subtitles, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
+            addView(shutter, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
+        }
 
     private var url: String? = null
     private var token: Long = 0
+
     /** The source is a live channel ([start]'s spare items). */
     private var live = false
+
     /** When the playing item started (a spare that closes too soon gets none). */
     private var itemStartedAt = 0L
+
     /** The current source showed a frame (its errors keep it: [listener]). */
     private var rendered = false
+
     /** When [quickReopen] last reopened the stream. */
     private var quickReopenAt = 0L
     private var sourceHeaders: Map<String, String> = emptyMap()
     private val transport = PlaybackTransport()
     private var publicOnly = true
     private var headers: Map<String, String> = emptyMap()
+
     /** Set after the one format fallback (HLS or progressive) for the current stream. */
     private var triedOtherFormat = false
+
     /** The type [start] gave the current stream (null: from its address). */
     private var mime: String? = null
+
     /** The activity is stopped: the player is too ([background]). */
     private var away = false
+
     /** What [foreground] reopens: the stream that played, or a new one set while away. */
     private var reopen = Reopen.NONE
+
     /** The viewer's track choices for the open stream. */
     private var choice = PlayerTracks.Choice()
+
     /** This player's audio sink (made when the player is built). */
     private var sink: DelayedAudioSink? = null
     private var audioDelayUs = 0L
@@ -187,44 +206,50 @@ class PlayerComponent(
     private fun build(context: Context): ExoPlayer {
         // No factory User-Agent: it would override the per-stream one. Every
         // load goes through this player's relay, never straight out ([RelayGuard]).
-        val http = RelayOnlyDataSource.Factory(
-            DefaultHttpDataSource.Factory()
-                .setUserAgent(null)
-                .setAllowCrossProtocolRedirects(false)
-                .setConnectTimeoutMs(8_000)
-                .setReadTimeoutMs(15_000),
-        ) { transport.prefix }
+        val http =
+            RelayOnlyDataSource.Factory(
+                DefaultHttpDataSource
+                    .Factory()
+                    .setUserAgent(null)
+                    .setAllowCrossProtocolRedirects(false)
+                    .setConnectTimeoutMs(8_000)
+                    .setReadTimeoutMs(15_000),
+            ) { transport.prefix }
         // The audio sink carries the audio delay (one per player).
-        val renderers = object : DefaultRenderersFactory(context) {
-            override fun buildAudioSink(
-                context: Context,
-                enableFloatOutput: Boolean,
-                enableAudioTrackPlaybackParams: Boolean,
-            ): AudioSink? {
-                val base = super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
-                    ?: return null
-                return DelayedAudioSink(base).also {
-                    it.delayUs = audioDelayUs
-                    sink = it
+        val renderers =
+            object : DefaultRenderersFactory(context) {
+                override fun buildAudioSink(
+                    context: Context,
+                    enableFloatOutput: Boolean,
+                    enableAudioTrackPlaybackParams: Boolean,
+                ): AudioSink? {
+                    val base =
+                        super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
+                            ?: return null
+                    return DelayedAudioSink(base).also {
+                        it.delayUs = audioDelayUs
+                        sink = it
+                    }
                 }
             }
-        }
-        return ExoPlayer.Builder(context, renderers)
+        return ExoPlayer
+            .Builder(context, renderers)
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(context)
                     .setDataSourceFactory(http)
                     .setLoadErrorHandlingPolicy(LiveLoadPolicy()),
-            )
-            .build()
+            ).build()
             .also { p ->
                 p.setVideoSurfaceView(surface)
                 // Live streams that end are reconnected by the app.
                 p.repeatMode = Player.REPEAT_MODE_OFF
                 p.playWhenReady = true
                 // Subtitles only when the viewer picks a text track.
-                p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
-                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                    .build()
+                p.trackSelectionParameters =
+                    p.trackSelectionParameters
+                        .buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                        .build()
                 p.addListener(listener)
                 p.addAnalyticsListener(formats)
             }
@@ -236,25 +261,29 @@ class PlayerComponent(
         if (next != player.trackSelectionParameters) player.trackSelectionParameters = next
     }
 
-    private fun emitFormat(video: Format?, audio: Format?) {
+    private fun emitFormat(
+        video: Format?,
+        audio: Format?,
+    ) {
         val format = PlayerTracks.format(video, audio)
         if (!format.isEmpty) emit(format)
     }
 
     /** Frame rate and audio channels as the decoders get them. */
-    private val formats = object : AnalyticsListener {
-        override fun onVideoInputFormatChanged(
-            eventTime: AnalyticsListener.EventTime,
-            format: Format,
-            decoderReuseEvaluation: DecoderReuseEvaluation?,
-        ) = emitFormat(format, null)
+    private val formats =
+        object : AnalyticsListener {
+            override fun onVideoInputFormatChanged(
+                eventTime: AnalyticsListener.EventTime,
+                format: Format,
+                decoderReuseEvaluation: DecoderReuseEvaluation?,
+            ) = emitFormat(format, null)
 
-        override fun onAudioInputFormatChanged(
-            eventTime: AnalyticsListener.EventTime,
-            format: Format,
-            decoderReuseEvaluation: DecoderReuseEvaluation?,
-        ) = emitFormat(null, format)
-    }
+            override fun onAudioInputFormatChanged(
+                eventTime: AnalyticsListener.EventTime,
+                format: Format,
+                decoderReuseEvaluation: DecoderReuseEvaluation?,
+            ) = emitFormat(null, format)
+        }
 
     /**
      * The screen stays on while this player means to play: set to play and
@@ -270,94 +299,101 @@ class PlayerComponent(
             (state == Player.STATE_BUFFERING || state == Player.STATE_READY)
     }
 
-    private val listener = object : Player.Listener {
-        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = keepScreen()
+    private val listener =
+        object : Player.Listener {
+            override fun onPlayWhenReadyChanged(
+                playWhenReady: Boolean,
+                reason: Int,
+            ) = keepScreen()
 
-        override fun onPlaybackStateChanged(state: Int) {
-            keepScreen()
-            // The stop of [background]: the app sees the stream as it was.
-            if (away) return
-            emit(PlayerEvent.State(PlayerState.of(state)))
-        }
-
-        override fun onRenderedFirstFrame() {
-            transport.takeError()
-            shutter.visibility = View.GONE
-            rendered = true
-            // Again for each stream: the app forgets the last one's.
-            val size = player.videoSize
-            if (size.width > 0 && size.height > 0) {
-                emit(PlayerEvent.Size(size.width, size.height))
+            override fun onPlaybackStateChanged(state: Int) {
+                keepScreen()
+                // The stop of [background]: the app sees the stream as it was.
+                if (away) return
+                emit(PlayerEvent.State(PlayerState.of(state)))
             }
-            emitFormat(player.videoFormat, player.audioFormat)
-        }
 
-        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || mediaItem == null) return
-            // The server closed a live stream and the spare plays on: drop
-            // what played, and queue the next spare.
-            val now = SystemClock.elapsedRealtime()
-            val played = now - itemStartedAt
-            itemStartedAt = now
-            val index = player.currentMediaItemIndex
-            if (index > 0) player.removeMediaItems(0, index)
-            if (played >= MIN_BRIDGED_MS) player.addMediaItem(mediaItem)
-        }
-
-        override fun onTracksChanged(tracks: Tracks) {
-            // Stopped in the background: the tracks come back with the stream.
-            if (away) return
-            applyChoice()
-            emit(PlayerTracks.event(tracks, choice))
-        }
-
-        override fun onCues(cueGroup: CueGroup) {
-            subtitles.setCues(cueGroup.cues)
-        }
-
-        override fun onVideoSizeChanged(size: VideoSize) {
-            if (size.width > 0 && size.height > 0) {
-                root.videoAspect = size.width * size.pixelWidthHeightRatio / size.height
-                pip?.videoAspect(this@PlayerComponent, root.videoAspect)
-                emit(PlayerEvent.Size(size.width, size.height))
+            override fun onRenderedFirstFrame() {
+                transport.takeError()
+                shutter.visibility = View.GONE
+                rendered = true
+                // Again for each stream: the app forgets the last one's.
+                val size = player.videoSize
+                if (size.width > 0 && size.height > 0) {
+                    emit(PlayerEvent.Size(size.width, size.height))
+                }
+                emitFormat(player.videoFormat, player.audioFormat)
             }
-        }
 
-        override fun onPlayerError(error: PlaybackException) {
-            when {
-                error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW -> {
-                    player.seekToDefaultPosition()
-                    player.prepare()
-                    return
-                }
-                // The address's extension can lie (`.ts` serving HLS, `.m3u8`
-                // serving MP4): one retry per source with the other kind.
-                !triedOtherFormat && isContainerError(error.errorCode) -> {
-                    triedOtherFormat = true
-                    url?.let { start(it, MimeTypes.APPLICATION_M3U8) }
-                    return
-                }
-                !triedOtherFormat &&
-                    error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED -> {
-                    triedOtherFormat = true
-                    // Progressive: the extractors sniff the container.
-                    url?.let { start(it, MimeTypes.VIDEO_UNKNOWN) }
-                    return
+            override fun onMediaItemTransition(
+                mediaItem: MediaItem?,
+                reason: Int,
+            ) {
+                if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || mediaItem == null) return
+                // The server closed a live stream and the spare plays on: drop
+                // what played, and queue the next spare.
+                val now = SystemClock.elapsedRealtime()
+                val played = now - itemStartedAt
+                itemStartedAt = now
+                val index = player.currentMediaItemIndex
+                if (index > 0) player.removeMediaItems(0, index)
+                if (played >= MIN_BRIDGED_MS) player.addMediaItem(mediaItem)
+            }
+
+            override fun onTracksChanged(tracks: Tracks) {
+                // Stopped in the background: the tracks come back with the stream.
+                if (away) return
+                applyChoice()
+                emit(PlayerTracks.event(tracks, choice))
+            }
+
+            override fun onCues(cueGroup: CueGroup) {
+                subtitles.setCues(cueGroup.cues)
+            }
+
+            override fun onVideoSizeChanged(size: VideoSize) {
+                if (size.width > 0 && size.height > 0) {
+                    root.videoAspect = size.width * size.pixelWidthHeightRatio / size.height
+                    pip?.videoAspect(this@PlayerComponent, root.videoAspect)
+                    emit(PlayerEvent.Size(size.width, size.height))
                 }
             }
-            val transportError = transport.takeError()
-            // A load outside the relay: as the desktops' players report an
-            // address they may not open (no retry, no reopen).
-            val refused = RelayGuard.refusedIn(error)
-            val status = if (transportError == null && !refused) httpStatus(error) else null
-            if (!refused && quickReopen(error, status)) return
-            // A live stream keeps its last frame: the app reconnects it,
-            // with "Reconnecting…" or its card over the frame.
-            if (!live || !rendered) shutter.visibility = View.VISIBLE
-            val code = if (refused) "ERROR_CODE_UNSUPPORTED_SCHEME" else transportError ?: error.errorCodeName
-            emit(PlayerEvent.Error(code, status))
+
+            override fun onPlayerError(error: PlaybackException) {
+                when {
+                    error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW -> {
+                        player.seekToDefaultPosition()
+                        player.prepare()
+                        return
+                    }
+                    // The address's extension can lie (`.ts` serving HLS, `.m3u8`
+                    // serving MP4): one retry per source with the other kind.
+                    !triedOtherFormat && isContainerError(error.errorCode) -> {
+                        triedOtherFormat = true
+                        url?.let { start(it, MimeTypes.APPLICATION_M3U8) }
+                        return
+                    }
+                    !triedOtherFormat &&
+                        error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED -> {
+                        triedOtherFormat = true
+                        // Progressive: the extractors sniff the container.
+                        url?.let { start(it, MimeTypes.VIDEO_UNKNOWN) }
+                        return
+                    }
+                }
+                val transportError = transport.takeError()
+                // A load outside the relay: as the desktops' players report an
+                // address they may not open (no retry, no reopen).
+                val refused = RelayGuard.refusedIn(error)
+                val status = if (transportError == null && !refused) httpStatus(error) else null
+                if (!refused && quickReopen(error, status)) return
+                // A live stream keeps its last frame: the app reconnects it,
+                // with "Reconnecting…" or its card over the frame.
+                if (!live || !rendered) shutter.visibility = View.VISIBLE
+                val code = if (refused) "ERROR_CODE_UNSUPPORTED_SCHEME" else transportError ?: error.errorCodeName
+                emit(PlayerEvent.Error(code, status))
+            }
         }
-    }
 
     /**
      * A live stream that played and fails on the network or with a refusal
@@ -365,7 +401,10 @@ class PlayerComponent(
      * address at once, keeping its last frame, without telling the app; at
      * most once per [QUICK_REOPEN_EVERY_MS]. Whether it did.
      */
-    private fun quickReopen(error: PlaybackException, status: Int?): Boolean {
+    private fun quickReopen(
+        error: PlaybackException,
+        status: Int?,
+    ): Boolean {
         val io = error.errorCode in 2000..2999
         val now = SystemClock.elapsedRealtime()
         if (!live || !rendered || !(io || LiveLoadPolicy.refused(status))) return false
@@ -380,14 +419,15 @@ class PlayerComponent(
 
     /** Reports where the stream is once a second while it plays (catch-up seeking). */
     private val ticker = Handler(Looper.getMainLooper())
-    private val tick = object : Runnable {
-        override fun run() {
-            if (player.isPlaying) {
-                emit(PlayerEvent.Position(player.currentPosition.coerceAtLeast(0)))
+    private val tick =
+        object : Runnable {
+            override fun run() {
+                if (player.isPlaying) {
+                    emit(PlayerEvent.Position(player.currentPosition.coerceAtLeast(0)))
+                }
+                ticker.postDelayed(this, 1_000)
             }
-            ticker.postDelayed(this, 1_000)
         }
-    }
 
     // After `listener` is initialised: build() registers it.
     init {
@@ -404,43 +444,47 @@ class PlayerComponent(
     internal fun emit(event: PlayerEvent) = nsh.emit(event.name, event.data())
 
     /** What each prop of the contract does on this player. */
-    private val props = object : PlayerProps {
-        override fun source(source: PlayerSource?) = setSource(source)
+    private val props =
+        object : PlayerProps {
+            override fun source(source: PlayerSource?) = setSource(source)
 
-        override fun paused(paused: Boolean) {
-            player.playWhenReady = !paused
-            this@PlayerComponent.pip?.paused(this@PlayerComponent, paused)
+            override fun paused(paused: Boolean) {
+                player.playWhenReady = !paused
+                this@PlayerComponent.pip?.paused(this@PlayerComponent, paused)
+            }
+
+            override fun pictureSize(mode: String) {
+                root.mode = mode
+            }
+
+            override fun videoTrack(id: String) = choose(choice.copy(video = id))
+
+            override fun audioTrack(id: String) = choose(choice.copy(audio = id))
+
+            override fun textTrack(id: String) = choose(choice.copy(text = id))
+
+            /** The volume is the system's here: the app's is the desktops'. */
+            override fun volume(level: Int) {}
+
+            override fun muted(muted: Boolean) {
+                player.volume = if (muted) 0f else 1f
+            }
+
+            override fun audioDelay(ms: Long) {
+                audioDelayUs = ms.coerceIn(-10_000L, 10_000L) * 1000
+                sink?.delayUs = audioDelayUs
+            }
+
+            override fun pip(pip: PlayerPip?) {
+                this@PlayerComponent.pip?.setProp(this@PlayerComponent, pip)
+            }
         }
-
-        override fun pictureSize(mode: String) {
-            root.mode = mode
-        }
-
-        override fun videoTrack(id: String) = choose(choice.copy(video = id))
-
-        override fun audioTrack(id: String) = choose(choice.copy(audio = id))
-
-        override fun textTrack(id: String) = choose(choice.copy(text = id))
-
-        /** The volume is the system's here: the app's is the desktops'. */
-        override fun volume(level: Int) {}
-
-        override fun muted(muted: Boolean) {
-            player.volume = if (muted) 0f else 1f
-        }
-
-        override fun audioDelay(ms: Long) {
-            audioDelayUs = ms.coerceIn(-10_000L, 10_000L) * 1000
-            sink?.delayUs = audioDelayUs
-        }
-
-        override fun pip(pip: PlayerPip?) {
-            this@PlayerComponent.pip?.setProp(this@PlayerComponent, pip)
-        }
-    }
 
     /** A name outside the contract sets nothing ([PlayerProps.setProp]). */
-    override fun setProp(name: String, value: Any?) {
+    override fun setProp(
+        name: String,
+        value: Any?,
+    ) {
         props.setProp(name, value)
     }
 
@@ -494,8 +538,9 @@ class PlayerComponent(
         if (away) return
         away = true
         ticker.removeCallbacks(tick)
-        val active = player.playbackState == Player.STATE_BUFFERING ||
-            player.playbackState == Player.STATE_READY
+        val active =
+            player.playbackState == Player.STATE_BUFFERING ||
+                player.playbackState == Player.STATE_READY
         // A failed or finished stream stays as it is: the app owns its retry.
         if (reopen == Reopen.NONE && active) reopen = Reopen.SAME
         player.stop()
@@ -543,21 +588,28 @@ class PlayerComponent(
      * then switches without a gap ([listener]'s `onMediaItemTransition`
      * queues the next spare).
      */
-    private fun start(target: String, mime: String?) {
-        val local = try {
-            transport.open(target, headers, publicOnly)
-        } catch (_: java.io.IOException) {
-            player.stop()
-            emit(PlayerEvent.Error("ERROR_CODE_IO_UNSPECIFIED"))
-            return
-        }
+    private fun start(
+        target: String,
+        mime: String?,
+    ) {
+        val local =
+            try {
+                transport.open(target, headers, publicOnly)
+            } catch (_: java.io.IOException) {
+                player.stop()
+                emit(PlayerEvent.Error("ERROR_CODE_IO_UNSPECIFIED"))
+                return
+            }
         val builder = MediaItem.Builder().setUri(local)
         if (mime != null) builder.setMimeType(mime)
         if (live) {
             // Behind live, never at the edge ([LIVE_MIN_OFFSET_MS]); the
             // first frame still comes from the first segment loaded.
             builder.setLiveConfiguration(
-                MediaItem.LiveConfiguration.Builder().setMinOffsetMs(LIVE_MIN_OFFSET_MS).build(),
+                MediaItem.LiveConfiguration
+                    .Builder()
+                    .setMinOffsetMs(LIVE_MIN_OFFSET_MS)
+                    .build(),
             )
         }
         val item = builder.build()
