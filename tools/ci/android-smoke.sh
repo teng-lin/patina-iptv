@@ -8,6 +8,7 @@
 #
 #   tools/ci/android-smoke.sh [serial] [apk]
 #
+# Requires a JDK with javac (Java 11 target) and Android SDK build-tools d8.
 # The APK must be a debug build of a library made with the development
 # playlist, which also needs debug assertions for private fixture addresses:
 #
@@ -94,6 +95,22 @@ fi
 # emulator's system server die. Let it settle first (IPTV_SMOKE_SETTLE s).
 pause "${IPTV_SMOKE_SETTLE:-0}"
 
+# The developer option also updates ActivityManager's in-memory flag.
+# A settings write alone cannot exercise activity destruction.
+command -v javac >/dev/null || fail "javac is required for the lifecycle probe"
+mkdir -p "$out/always-finish"
+d8=
+for candidate in "${ANDROID_HOME:-$HOME/Android/Sdk}"/build-tools/*/d8; do
+  [ ! -x "$candidate" ] || d8=$candidate
+done
+[ -n "$d8" ] || fail "Android d8 is required for the lifecycle probe"
+javac --release 11 -d "$out/always-finish" "$(dirname "$0")/android/AlwaysFinish.java"
+"$d8" --output "$out/always-finish" "$out/always-finish/AlwaysFinish.class"
+probe=/data/local/tmp/patina-smoke-always-finish.dex
+set_always_finish() {
+  $adb shell "CLASSPATH=$probe app_process /system/bin AlwaysFinish $1"
+}
+
 step "install and first start"
 if [ -n "$apk" ]; then
   $adb uninstall $pkg >/dev/null 2>&1 || true
@@ -101,21 +118,6 @@ if [ -n "$apk" ]; then
 else
   $adb shell pm clear $pkg >/dev/null
 fi
-# The developer option also updates ActivityManager's in-memory flag.
-# A settings write alone cannot exercise activity destruction.
-mkdir -p "$out/always-finish"
-d8=
-for candidate in "${ANDROID_HOME:-$HOME/Android/Sdk}"/build-tools/*/d8; do
-  [ ! -x "$candidate" ] || d8=$candidate
-done
-[ -n "$d8" ] || fail "Android d8 is required for the lifecycle probe"
-javac -d "$out/always-finish" "$(dirname "$0")/android/AlwaysFinish.java"
-"$d8" --output "$out/always-finish" "$out/always-finish/AlwaysFinish.class"
-probe=/data/local/tmp/patina-smoke-always-finish.dex
-$adb push "$out/always-finish/classes.dex" "$probe" >/dev/null
-set_always_finish() {
-  $adb shell "CLASSPATH=$probe app_process /system/bin AlwaysFinish $1"
-}
 # Restore only the device settings this smoke changes, including failure paths.
 restore_setting() {
   if [ "$3" = null ] || [ -z "$3" ]; then
@@ -144,6 +146,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+$adb push "$out/always-finish/classes.dex" "$probe" >/dev/null
 # Ensure background/resume runs with ordinary activity lifetime first.
 set_always_finish false
 # No first-use hint over the immersive app, no picture in picture: Home
