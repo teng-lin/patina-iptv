@@ -101,6 +101,21 @@ if [ -n "$apk" ]; then
 else
   $adb shell pm clear $pkg >/dev/null
 fi
+# The developer option also updates ActivityManager's in-memory flag.
+# A settings write alone cannot exercise activity destruction.
+mkdir -p "$out/always-finish"
+d8=
+for candidate in "${ANDROID_HOME:-$HOME/Android/Sdk}"/build-tools/*/d8; do
+  [ ! -x "$candidate" ] || d8=$candidate
+done
+[ -n "$d8" ] || fail "Android d8 is required for the lifecycle probe"
+javac -d "$out/always-finish" "$(dirname "$0")/android/AlwaysFinish.java"
+"$d8" --output "$out/always-finish" "$out/always-finish/AlwaysFinish.class"
+probe=/data/local/tmp/patina-smoke-always-finish.dex
+$adb push "$out/always-finish/classes.dex" "$probe" >/dev/null
+set_always_finish() {
+  $adb shell "CLASSPATH=$probe app_process /system/bin AlwaysFinish $1"
+}
 # Restore only the device settings this smoke changes, including failure paths.
 restore_setting() {
   if [ "$3" = null ] || [ -z "$3" ]; then
@@ -118,7 +133,9 @@ cleanup() {
   local status=$?
   trap - EXIT
   set +e
+  if [ "$saved_finish" = 1 ]; then set_always_finish true; else set_always_finish false; fi
   restore_setting global always_finish_activities "$saved_finish"
+  $adb shell rm -f "$probe" >/dev/null
   restore_setting system font_scale "$saved_font"
   restore_setting secure immersive_mode_confirmations "$saved_immersive"
   $adb shell appops set "$pkg" PICTURE_IN_PICTURE "$saved_pip" >/dev/null
@@ -128,7 +145,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 # Ensure background/resume runs with ordinary activity lifetime first.
-$adb shell settings put global always_finish_activities 0
+set_always_finish false
 # No first-use hint over the immersive app, no picture in picture: Home
 # must stop the activity (picture in picture only pauses it).
 $adb shell settings put secure immersive_mode_confirmations confirmed
@@ -264,7 +281,8 @@ wait_destroyed() {
   for _ in $(seq 1 60); do
     activities=$($adb shell dumpsys activity -p "$pkg" activities) ||
       fail "cannot inspect activity destruction"
-    if ! printf '%s\n' "$activities" | grep -E "ActivityRecord.*${pkg//./\\.}" >/dev/null; then
+    if ! printf '%s\n' "$activities" | grep -E "ActivityRecord.*${pkg//./\\.}" >/dev/null ||
+      printf '%s\n' "$activities" | grep -E 'state=DESTROYED' >/dev/null; then
       return 0
     fi
     pause 0.5
@@ -335,7 +353,7 @@ orig_pid=$($adb shell pidof "$pkg" | tr -d '\r')
 [ -n "$orig_pid" ] || fail "app is not running before activity recreation"
 # fontScale/orientation are handled by configChanges and do not recreate this
 # Activity. Don't-keep-activities destroys it on background, retaining its process.
-$adb shell settings put global always_finish_activities 1
+set_always_finish true
 keys KEYCODE_HOME
 wait_destroyed
 [ "$orig_pid" = "$($adb shell pidof "$pkg" | tr -d '\r')" ] || fail "process died before recreation"
@@ -344,7 +362,7 @@ reopen_and_expect_resume
 [ "$orig_pid" = "$($adb shell pidof "$pkg" | tr -d '\r')" ] || fail "recreation replaced the process"
 assert_resume "$changed_identity" "activity recreation"
 # Keep ordinary lifecycle for the final recovery case; the trap restores the original.
-$adb shell settings put global always_finish_activities 0
+set_always_finish false
 shot 11-recreated
 
 step "interrupt then recover a restore"
