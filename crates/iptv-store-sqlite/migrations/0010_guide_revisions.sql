@@ -17,6 +17,14 @@ CREATE TABLE guide_feed_incarnations (
 ) WITHOUT ROWID;
 INSERT INTO guide_feed_incarnations (source_id, feed_id, incarnation)
 SELECT source_id, feed_id, lower(hex(randomblob(16))) FROM guide_sources;
+-- Existing cached rows acquire provenance only if their captured configuration
+-- matches the configured feed. Later publications stamp within their transaction.
+INSERT OR REPLACE INTO store_meta(key,value)
+SELECT 'inspection.feed.' || g.source_id || '.' || g.feed_id, i.incarnation
+FROM guide_sources g JOIN guide_feed_incarnations i
+    ON i.source_id=g.source_id AND i.feed_id=g.feed_id
+JOIN epg_feeds f ON f.source_id=g.source_id AND f.feed_id=g.feed_id
+WHERE f.url=g.url AND f.shift_minutes=g.shift_minutes;
 CREATE TRIGGER guide_source_created AFTER INSERT ON sources BEGIN
     INSERT INTO guide_revisions (source_id, incarnation)
     VALUES (NEW.id, lower(hex(randomblob(16))));

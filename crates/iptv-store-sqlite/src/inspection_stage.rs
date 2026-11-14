@@ -5,6 +5,9 @@ use iptv_epg::XmltvChannel;
 use rusqlite::{Connection, OpenFlags, params};
 use std::path::Path;
 
+/// Includes raw chunks, channel indexes and SQLite page overhead.
+pub const INSPECTION_STAGE_BYTES: u64 = 128 << 20;
+
 pub struct InspectionStage {
     conn: Connection,
     next: i64,
@@ -26,6 +29,13 @@ impl InspectionStage {
         );
         let conn = Connection::open(path)?;
         key.apply(&conn)?;
+        let page_size: u64 =
+            conn.pragma_query_value(None, "page_size", |row| row.get::<_, i64>(0))? as u64;
+        conn.pragma_update(
+            None,
+            "max_page_count",
+            (INSPECTION_STAGE_BYTES / page_size) as i64,
+        )?;
         conn.execute_batch(
             "PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF;
             PRAGMA cache_size=-2048; BEGIN;

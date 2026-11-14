@@ -21,7 +21,16 @@ use std::{
     time::Duration,
 };
 
-const XML: &str = "<tv><channel id='amber.main'><display-name>Synthetic Amber</display-name></channel><channel id='amber.alt'><display-name>Synthetic Amber East</display-name><display-name>Synthetic Alternate</display-name></channel><programme channel='amber.alt' start='20261114120000 +0000' stop='20261114130000 +0000'><title>Synthetic Segment 01</title></programme><programme channel='amber.alt' start='20261114140000 +0200' stop='20261114150000 +0200'><title>Synthetic Segment 02</title></programme></tv>";
+const XML: &str = concat!(
+    "<tv><channel id='amber.main'><display-name>Synthetic Amber</display-name></channel>",
+    "<channel id='amber.alt'><display-name>Synthetic Amber East</display-name>",
+    "<display-name>Synthetic Alternate</display-name></channel>",
+    "<programme channel='amber.alt' start='20261114120000 +0000' stop='20261114130000 +0000'>",
+    "<title>Synthetic Segment 01</title></programme>",
+    "<programme channel='amber.alt' start='20261114140000 +0200' stop='20261114150000 +0200'>",
+    "<title>Synthetic Segment 02</title></programme></tv>",
+);
+
 struct Mock {
     address: String,
     stopped: Arc<AtomicBool>,
@@ -206,11 +215,11 @@ fn unmatched_candidates_have_samples_from_the_exact_encrypted_snapshot_without_l
         control(),
     ))
     .unwrap();
-    assert_eq!(samples.len(), 2);
+    assert_eq!(samples.len(), 1);
     assert_eq!(samples[0].start, window().from + 3600);
     assert_eq!(
-        samples[0].start, samples[1].start,
-        "equivalent offsets; shift exactly once"
+        samples[0].title, "Synthetic Segment 01",
+        "equivalent-offset duplicates follow shared schedule settlement"
     );
     assert_eq!(
         server.requests.load(Ordering::SeqCst),
@@ -369,5 +378,83 @@ fn abandoned_crash_cache_is_cleaned_without_deleting_an_active_owner() {
     probe(&runtime, source).unwrap();
     assert!(!dead.exists());
     assert!(active.exists());
+    runtime.drain_services();
+}
+
+#[test]
+fn a_reused_feed_id_cannot_borrow_its_previous_cached_channel_list() {
+    use iptv_import::{EpgImport, EpgSourceConfig, GuideSink, ListedChannel};
+    use iptv_store_sqlite::{EpgFeedMeta, EpgStage};
+    let directory = tempfile::tempdir().unwrap();
+    let url = SecretUrl::new("https://synthetic.invalid/generated-guide.xml");
+    let source = seed(directory.path(), url.clone(), 0);
+    let mut store = Store::open_encrypted(
+        directory.path().join("iptv.sqlite"),
+        &DatabaseKey::from_bytes([0x71; 32]),
+    )
+    .unwrap();
+    let parsed = iptv_providers::m3u::parse_m3u(
+        "#EXTM3U\n#EXTINF:-1 tvg-id=\"amber.main\",Synthetic Amber\nhttp://stream.example.test/a\n",
+    );
+    store
+        .replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
+        .unwrap();
+    let mut stage = EpgStage::create_in_store(&store, directory.path()).unwrap();
+    stage
+        .begin_feed(FeedId(1), 0, iptv_epg::StoreOptions::default(), 0)
+        .unwrap();
+    stage.finish_feed().unwrap();
+    let listing = EpgImport {
+        listed: vec![(
+            FeedId(1),
+            vec![ListedChannel {
+                id: "amber.main".into(),
+                name: Some("Synthetic Amber".into()),
+            }],
+        )],
+        ..Default::default()
+    };
+    store
+        .replace_epg(
+            source,
+            &mut stage,
+            &listing,
+            &[EpgFeedMeta {
+                config: EpgSourceConfig::new(FeedId(1), url),
+                fetched_at: 0,
+                etag: None,
+                last_modified: None,
+                bytes: 128,
+            }],
+            0,
+        )
+        .unwrap();
+    let runtime = owner(directory.path());
+    let key = ChannelRef {
+        source,
+        content: parsed.channels.items[0].id.clone(),
+    };
+    let first =
+        support::block_on(runtime.epg_candidates(key.clone(), Query::source(source), control()))
+            .unwrap();
+    assert_eq!(first.items.len(), 1);
+    let old = first.items[0].key.incarnation.clone();
+    let original = store.guide_sources(source).unwrap();
+    store.set_guide_sources(source, &[]).unwrap();
+    store.set_guide_sources(source, &original).unwrap();
+    assert_ne!(
+        store.feed_incarnation(source, FeedId(1)).unwrap(),
+        Some(old)
+    );
+    assert!(
+        !store.guide_channels(source).unwrap().is_empty(),
+        "old cached rows deliberately remain"
+    );
+    let second =
+        support::block_on(runtime.epg_candidates(key, Query::source(source), control())).unwrap();
+    assert!(
+        second.items.is_empty(),
+        "new feed incarnation cannot borrow old listing evidence"
+    );
     runtime.drain_services();
 }

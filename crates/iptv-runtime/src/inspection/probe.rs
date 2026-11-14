@@ -24,7 +24,7 @@ pub const PROBE_EXPANDED_BYTES: u64 = 256 << 20;
 pub const PROBE_DEADLINE: Duration = Duration::from_secs(60);
 pub const STAGE_BUDGET: u64 = 512 << 20;
 pub const STAGE_TTL: i64 = 24 * 60 * 60;
-const RESERVATION: u64 = 128 << 20;
+const RESERVATION: u64 = iptv_store_sqlite::INSPECTION_STAGE_BYTES;
 
 #[derive(Clone, Debug)]
 pub enum ProbeTarget {
@@ -70,6 +70,7 @@ pub(crate) struct Vault {
     stages: Arc<Mutex<Space>>,
     directory: Arc<Mutex<Option<Arc<Directory>>>>,
     running: Arc<AtomicUsize>,
+    queries: Arc<AtomicUsize>,
 }
 impl Vault {
     pub(crate) fn new() -> Self {
@@ -80,6 +81,7 @@ impl Vault {
             stages: Arc::new(Mutex::new(Space::default())),
             directory: Arc::new(Mutex::new(None)),
             running: Arc::new(AtomicUsize::new(0)),
+            queries: Arc::new(AtomicUsize::new(0)),
         }
     }
     pub(crate) fn context(&self, epoch: u64) -> String {
@@ -87,6 +89,15 @@ impl Vault {
             "{}:{epoch}",
             self.nonce.lock().unwrap_or_else(|e| e.into_inner())
         )
+    }
+    pub(super) fn admit(&self) -> Option<QuerySlot> {
+        let previous = self.queries.fetch_add(1, Ordering::SeqCst);
+        if previous >= 16 {
+            self.queries.fetch_sub(1, Ordering::SeqCst);
+            None
+        } else {
+            Some(QuerySlot(self.queries.clone()))
+        }
     }
     pub(crate) fn ready(&self) -> bool {
         self.key.lock().unwrap_or_else(|e| e.into_inner()).is_some()
@@ -115,6 +126,13 @@ impl Vault {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take();
+    }
+}
+
+pub(super) struct QuerySlot(Arc<AtomicUsize>);
+impl Drop for QuerySlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -162,7 +180,7 @@ impl Drop for Reservation {
 }
 struct Directory {
     path: PathBuf,
-    _lock: File,
+    lock: Option<File>,
 }
 impl Directory {
     fn create(services: &Services, nonce: &str) -> InspectionResult<Arc<Self>> {
@@ -195,10 +213,10 @@ impl Directory {
                 .read(true)
                 .write(true)
                 .open(entry.path().join("owner.lock"))
+                && file.try_lock().is_ok()
             {
-                if file.try_lock().is_ok() {
-                    let _ = std::fs::remove_dir_all(entry.path());
-                }
+                drop(file);
+                let _ = std::fs::remove_dir_all(entry.path());
             }
         }
         let path = base.join(nonce);
@@ -214,11 +232,15 @@ impl Directory {
             .open(path.join("owner.lock"))
             .map_err(|_| InspectionError::Storage)?;
         lock.try_lock().map_err(|_| InspectionError::Busy)?;
-        Ok(Arc::new(Self { path, _lock: lock }))
+        Ok(Arc::new(Self {
+            path,
+            lock: Some(lock),
+        }))
     }
 }
 impl Drop for Directory {
     fn drop(&mut self) {
+        self.lock.take();
         let _ = std::fs::remove_dir_all(&self.path);
     }
 }
@@ -805,26 +827,62 @@ impl Runtime {
             // The probe parser already applied this feed's configured shift.
             // Reparse with the same policy, captured independently of current config.
             let mut parser = StrictXmltvParser::new(parse_options(lease.0.time));
-            let mut programmes = Vec::new();
+            let mut raw = BTreeMap::<i64, iptv_epg::XmltvProgramme>::new();
+            let mut overflow = false;
             let mut failure = None;
             let mut sink = |item| {
-                if let XmltvItem::Programme(p) = item {
-                    if p.channel == candidate.epg_channel && p.start < window.to {
-                        if let Some(stop) =
-                            p.stop.filter(|stop| *stop > p.start && *stop > window.from)
-                        {
-                            if programmes.len() <= MAX_PAGE as usize {
-                                programmes.push(CandidateProgramme {
-                                    candidate: candidate.clone(),
-                                    evidence_revision: hex(&evidence.digest),
-                                    provider_event_id: None,
-                                    start: p.start,
-                                    stop,
-                                    title: p.title,
-                                });
-                            }
+                if overflow {
+                    return;
+                }
+                let XmltvItem::Programme(programme) = item else {
+                    return;
+                };
+                if programme.channel != candidate.epg_channel
+                    || programme
+                        .stop
+                        .is_some_and(|stop| stop <= programme.start || stop <= window.from)
+                {
+                    return;
+                }
+                // Retain one look-ahead event to infer the final visible stop.
+                if programme.start >= window.to {
+                    if raw
+                        .range(window.to..)
+                        .next()
+                        .is_some_and(|(&start, _)| start <= programme.start)
+                    {
+                        return;
+                    }
+                    if let Some((&start, _)) = raw.range(window.to..).next() {
+                        raw.remove(&start);
+                    }
+                }
+                if programme.start < window.from && programme.stop.is_none() {
+                    if raw
+                        .range(..window.from)
+                        .next_back()
+                        .is_some_and(|(&start, _)| start > programme.start)
+                    {
+                        return;
+                    }
+                    if let Some((&start, entry)) = raw.range(..window.from).next_back()
+                        && entry.stop.is_none()
+                    {
+                        raw.remove(&start);
+                    }
+                }
+                match raw.entry(programme.start) {
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        entry.insert(programme);
+                    }
+                    std::collections::btree_map::Entry::Occupied(mut entry) => {
+                        if iptv_epg::ScheduleRules::replaces(programme.stop, entry.get().stop) {
+                            entry.insert(programme);
                         }
                     }
+                }
+                if raw.len() > MAX_PAGE as usize + 2 {
+                    overflow = true;
                 }
             };
             storage(stage.for_each_chunk(|bytes| {
@@ -843,17 +901,49 @@ impl Runtime {
                 }
                 Ok(())
             }))
-            .or_else(|error| Err(failure.take().unwrap_or(error)))?;
+            .map_err(|error| failure.take().unwrap_or(error))?;
             parser.finish(&mut sink).map_err(strict_error)?;
             let actual: [u8; 32] = hash.finalize().into();
             if actual != evidence.digest {
                 return Err(InspectionError::StaleEvidence);
             }
             check(&lease.0.services, &worker_control.cancel, deadline)?;
+            if overflow {
+                return Err(InspectionError::LimitExceeded);
+            }
+            let raw: Vec<_> = raw.into_values().collect();
+            let intervals: Vec<_> = raw.iter().map(|p| (p.start, p.stop)).collect();
+            let mut programmes = Vec::new();
+            iptv_epg::ScheduleRules::new(
+                iptv_epg::StoreOptions {
+                    past_days_to_keep: None,
+                    ..Default::default()
+                },
+                window.from,
+            )
+            .settle(
+                &intervals,
+                &mut iptv_epg::IngestReport::default(),
+                |at, fate| {
+                    let p = &raw[at];
+                    if let iptv_epg::Settled::Keep { stop } = fate
+                        && p.start < window.to
+                        && stop > window.from
+                    {
+                        programmes.push(CandidateProgramme {
+                            candidate: candidate.clone(),
+                            evidence_revision: hex(&evidence.digest),
+                            provider_event_id: None,
+                            start: p.start,
+                            stop,
+                            title: p.title.clone(),
+                        });
+                    }
+                },
+            );
             if programmes.len() > MAX_PAGE as usize {
                 return Err(InspectionError::LimitExceeded);
             }
-            programmes.sort_by_key(|p| p.start);
             Ok(programmes)
         });
         await_worker(services, control, deadline, task, operation_cancel)

@@ -6,7 +6,10 @@ use iptv_import::CancelToken;
 use iptv_library::inspection::*;
 use iptv_library::{Choice, SourceId};
 use iptv_providers::ContentId;
-use rusqlite::{OptionalExtension, params, params_from_iter, types::Value};
+use rusqlite::{
+    OptionalExtension, params, params_from_iter,
+    types::{Value, ValueRef},
+};
 use sha2::{Digest, Sha256};
 
 use crate::{EpgOverride, Store};
@@ -93,11 +96,54 @@ fn query_context(query: &Query, mode: &str) -> String {
     ])
 }
 
+/// Canonical typed fields are borrowed directly from SQLite and batched into
+/// the digest. Formatting/allocating twelve owned Values per channel made a
+/// 100k-channel page exceed the deadline on Apple debug builds.
+struct SemanticHash {
+    hash: Sha256,
+    buffer: Vec<u8>,
+}
+impl SemanticHash {
+    fn new() -> Self {
+        Self {
+            hash: Sha256::new(),
+            buffer: Vec::with_capacity(64 * 1024),
+        }
+    }
+    fn bytes(&mut self, tag: u8, bytes: &[u8]) {
+        self.buffer.push(tag);
+        self.buffer
+            .extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+        if self.buffer.len() + bytes.len() > 64 * 1024 {
+            self.hash.update(&self.buffer);
+            self.buffer.clear();
+            self.hash.update(bytes);
+        } else {
+            self.buffer.extend_from_slice(bytes);
+        }
+    }
+    fn row(&mut self, row: &rusqlite::Row<'_>, columns: usize) -> crate::Result<()> {
+        for column in 0..columns {
+            match row.get_ref(column)? {
+                ValueRef::Null => self.bytes(0, &[]),
+                ValueRef::Integer(value) => self.bytes(1, &value.to_le_bytes()),
+                ValueRef::Real(value) => self.bytes(2, &value.to_bits().to_le_bytes()),
+                ValueRef::Text(value) => self.bytes(3, value),
+                ValueRef::Blob(value) => self.bytes(4, value),
+            }
+        }
+        Ok(())
+    }
+    fn finish(mut self) -> String {
+        self.hash.update(&self.buffer);
+        format!("{:x}", self.hash.finalize())
+    }
+}
 fn snapshot(store: &Store, ids: &[SourceId]) -> crate::Result<String> {
-    let mut hash = Sha256::new();
+    let mut hash = SemanticHash::new();
     for id in ids {
-        hash.update(id.0.to_le_bytes());
-        hash.update(store.source_incarnation(*id)?.as_bytes());
+        hash.bytes(1, &id.0.to_le_bytes());
+        hash.bytes(3, store.source_incarnation(*id)?.as_bytes());
         let mut statement = store.conn.prepare_cached(
             "SELECT c.id,c.name,c.epg_id,c.epg_name,c.number,
                 o.custom_name,o.custom_number,COALESCE(o.hidden,0),COALESCE(o.blocked,0),
@@ -108,15 +154,10 @@ fn snapshot(store: &Store, ids: &[SourceId]) -> crate::Result<String> {
         )?;
         let mut rows = statement.query([id.0])?;
         while let Some(row) = rows.next()? {
-            for i in 0..12 {
-                let value: Value = row.get(i)?;
-                let bytes = format!("{value:?}");
-                hash.update((bytes.len() as u64).to_le_bytes());
-                hash.update(bytes.as_bytes());
-            }
+            hash.row(row, 12)?;
         }
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(hash.finish())
 }
 
 fn check_cursor(query: &Query, context: &str, snapshot: &str, columns: usize) -> bool {
@@ -146,6 +187,28 @@ fn page<T>(
 }
 
 impl Store {
+    /// Incarnation of the cached evidence, only while it still describes the
+    /// current enabled configured feed. A reused ID cannot borrow old rows.
+    pub fn inspection_stored_feed_incarnation(
+        &self,
+        source: SourceId,
+        feed: FeedId,
+    ) -> crate::Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT i.incarnation FROM guide_feed_incarnations i JOIN guide_sources g
+             ON g.source_id=i.source_id AND g.feed_id=i.feed_id
+             JOIN epg_feeds f ON f.source_id=g.source_id AND f.feed_id=g.feed_id
+             JOIN store_meta m ON m.key='inspection.feed.' || g.source_id || '.' || g.feed_id
+             WHERE g.source_id=?1 AND g.feed_id=?2 AND g.enabled=1
+             AND m.value=i.incarnation AND f.url=g.url AND f.shift_minutes=g.shift_minutes",
+                params![source.0, feed.0],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     /// Install an effective SQLite instruction deadline/cancellation handler for
     /// this one analysis job, including sorts and semantic-fingerprint scans.
     pub fn inspection_read<T>(
@@ -285,10 +348,10 @@ impl Store {
         if channel.is_some_and(|c| !ids.contains(&c.source)) {
             return Ok(Err(InspectionError::InvalidRequest));
         }
-        if let Some(channel) = channel {
-            if let Err(e) = self.inspection_channel(channel)? {
-                return Ok(Err(e));
-            }
+        if let Some(channel) = channel
+            && let Err(e) = self.inspection_channel(channel)?
+        {
+            return Ok(Err(e));
         }
         let tx = self.conn.unchecked_transaction()?;
         let context = query_context(query, &format!("programmes:{window:?}:{channel:?}"));
@@ -326,7 +389,9 @@ impl Store {
                     continue;
                 }
                 let feed = FeedId(row.get(1)?);
-                let Some(feed_incarnation) = self.feed_incarnation(*source, feed)? else {
+                let Some(feed_incarnation) =
+                    self.inspection_stored_feed_incarnation(*source, feed)?
+                else {
                     continue;
                 };
                 let candidate = CandidateRef {
@@ -402,7 +467,9 @@ impl Store {
         let channels = self.guide_channels(key.source)?;
         let mut rows = Vec::new();
         for channel in channels {
-            let Some(incarnation) = self.feed_incarnation(key.source, channel.feed)? else {
+            let Some(incarnation) =
+                self.inspection_stored_feed_incarnation(key.source, channel.feed)?
+            else {
                 continue;
             };
             let mut evidence = Vec::new();
@@ -418,16 +485,15 @@ impl Store {
                     evidence.push(Evidence::CaseInsensitiveId);
                 }
             }
-            if let Some(name) = &channel.name {
-                if [
+            if let Some(name) = &channel.name
+                && [
                     &subject.name,
                     subject.epg_name.as_ref().unwrap_or(&subject.name),
                 ]
                 .iter()
                 .any(|subject| iptv_epg::normalize_name(subject) == iptv_epg::normalize_name(name))
-                {
-                    evidence.push(Evidence::NormalizedName);
-                }
+            {
+                evidence.push(Evidence::NormalizedName);
             }
             if !query.text.split_whitespace().all(|w| {
                 channel
@@ -505,7 +571,10 @@ impl Store {
                 }
             }
             for channel in self.guide_channels(*source)? {
-                if self.feed_incarnation(*source, channel.feed)?.is_none() {
+                if self
+                    .inspection_stored_feed_incarnation(*source, channel.feed)?
+                    .is_none()
+                {
                     continue;
                 }
                 if let Some(name) = channel.name {
@@ -546,10 +615,15 @@ impl Store {
                 channel.key.source,
                 &ChannelKey::new(channel.key.content.as_str()),
             )?;
-            if let Some((feed, _, _)) = &binding {
-                if self.feed_incarnation(channel.key.source, *feed)?.is_none() {
-                    binding = None;
-                }
+            let stale_binding = binding
+                .as_ref()
+                .map(|(feed, _, _)| {
+                    self.inspection_stored_feed_incarnation(channel.key.source, *feed)
+                })
+                .transpose()?
+                .is_some_and(|incarnation| incarnation.is_none());
+            if stale_binding {
+                binding = None;
             }
             let guide_error: Option<String> = self
                 .conn
@@ -602,6 +676,8 @@ impl Store {
                 Diagnosis::Disabled
             } else if guide_error.is_some() {
                 Diagnosis::InputFailure
+            } else if stale_binding {
+                Diagnosis::Stale
             } else if binding.is_none() && matches!(channel.choice, Choice::Channel { .. }) {
                 Diagnosis::UnresolvedOverride
             } else if binding.is_none() {
@@ -625,7 +701,7 @@ impl Store {
                         source: channel.key.source,
                         feed,
                         incarnation: self
-                            .feed_incarnation(channel.key.source, feed)?
+                            .inspection_stored_feed_incarnation(channel.key.source, feed)?
                             .expect("validated incarnation"),
                         epg_channel,
                     })

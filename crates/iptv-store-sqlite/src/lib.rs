@@ -55,7 +55,7 @@ pub use guide_revisions::GuideRevisions;
 mod history;
 mod inspection;
 mod inspection_stage;
-pub use inspection_stage::InspectionStage;
+pub use inspection_stage::{INSPECTION_STAGE_BYTES, InspectionStage};
 mod library_preferences;
 pub mod migrate;
 mod order;
