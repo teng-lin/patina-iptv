@@ -67,7 +67,7 @@ pub fn is_open(ui: Ui) -> bool {
 }
 
 fn load() -> Vec<Playlist> {
-    data::playlists().unwrap_or_else(|e| {
+    crate::runtime().playlists().unwrap_or_else(|e| {
         log::warn!("iptv playlists: the store is unavailable: {e}");
         Vec::new()
     })
@@ -139,7 +139,7 @@ fn perform(ui: Ui, effect: Effect) {
         let result = match effect {
             Effect::AllPlaylists => {
                 close(ui);
-                data::switch_all();
+                data::switch_all(&crate::runtime());
                 Ok(())
             }
             Effect::Add => {
@@ -148,14 +148,14 @@ fn perform(ui: Ui, effect: Effect) {
             }
             Effect::Show(id) => {
                 close(ui);
-                data::switch_to(id);
+                data::switch_to(&crate::runtime(), id);
                 Ok(())
             }
             Effect::Refresh(id) => {
-                data::refresh(id);
+                data::refresh(&crate::runtime(), id);
                 Ok(())
             }
-            Effect::Policy(id, policy) => data::set_policy(id, policy).await,
+            Effect::Policy(id, policy) => data::set_policy(&crate::runtime(), id, policy).await,
             Effect::CustomGroups(id) => {
                 crate::custom_groups::open(ui, id, false);
                 Ok(())
@@ -173,18 +173,18 @@ fn perform(ui: Ui, effect: Effect) {
                 );
                 Ok(())
             }
-            Effect::Rename(id, name) => data::rename(id, &name).await,
+            Effect::Rename(id, name) => data::rename(&crate::runtime(), id, &name).await,
             Effect::Guides(id) => {
                 crate::epg_sources_view::open(ui, id);
                 Ok(())
             }
-            Effect::Delete(id) => data::delete(id).await,
+            Effect::Delete(id) => data::delete(&crate::runtime(), id).await,
             Effect::RefreshAll => {
-                data::refresh_all();
+                data::refresh_all(&crate::runtime());
                 Ok(())
             }
             Effect::OpenDetails(id) => {
-                if let Some(source) = data::source_details(id) {
+                if let Some(source) = crate::runtime().source_details(id) {
                     update(ui, |s| {
                         s.open_details(source);
                         None
@@ -193,11 +193,11 @@ fn perform(ui: Ui, effect: Effect) {
                 Ok(())
             }
             Effect::TryDetails(id, source) => {
-                data::try_details(id, *source);
+                data::try_details(&crate::runtime(), id, *source);
                 Ok(())
             }
             Effect::SetUserAgent(id, agent) => {
-                data::set_user_agent(id, agent);
+                data::set_user_agent(&crate::runtime(), id, agent);
                 Ok(())
             }
             Effect::Close => {

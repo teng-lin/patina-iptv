@@ -6,9 +6,9 @@ pub(crate) mod pages;
 pub(crate) mod stored;
 use crate::Ui;
 pub use crate::runtime::data::{
-    Activity, DEV_PLAYLIST, Job, Playlist, Purpose, Update, delete, edit_guides, generation,
-    keep_picked_file, playlists, refresh, refresh_all, rename, set_policy, set_user_agent,
-    source_details, source_from_draft, start_import, switch_all, switch_to, try_details,
+    Activity, DEV_PLAYLIST, Job, Playlist, Purpose, Update, delete, edit_guides, refresh,
+    refresh_all, rename, set_policy, set_user_agent, source_from_draft, start_import, switch_all,
+    switch_to, try_details,
 };
 pub use crate::runtime::data::{assign, combined, organization};
 pub use crate::runtime::guides;
@@ -74,7 +74,7 @@ pub fn start(ui: Ui) {
     // also waits for them in `onStop` (`TvActivity.flushPendingWrites`).
     effect(|| {
         let background = lifecycle() == nsh_core::platform::Lifecycle::Background;
-        crate::runtime().foreground().set(!background);
+        crate::runtime().set_foreground(!background);
         if background && !crate::runtime().flush_files(Duration::from_secs(2)) {
             log::warn!("iptv persistence: queued file writes did not finish in the background");
         }
@@ -89,5 +89,5 @@ pub fn start(ui: Ui) {
         playing: ui.playing.get_untracked().is_some(),
         has_vod: ui.has_vod.get_untracked(),
     });
-    crate::runtime::data::start();
+    crate::runtime::data::start(&crate::runtime());
 }

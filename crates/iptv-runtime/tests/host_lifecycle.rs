@@ -1,11 +1,9 @@
 //! The native host can flush accepted writes while the local UI executor is stopped.
-use iptv_runtime::{Ports, Runtime, flush_pending_writes, with_runtime};
+use iptv_runtime::{HostHandle, Ports, Runtime};
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 #[test]
 fn stopping_the_host_flushes_settings_without_polling_the_local_reply() {
-    assert!(flush_pending_writes(Duration::ZERO));
-    assert!(iptv_runtime::try_current().is_none());
     let directory = tempfile::tempdir().unwrap();
     let owner = Rc::new(Runtime::new(Ports::new(
         directory.path().to_owned(),
@@ -15,21 +13,29 @@ fn stopping_the_host_flushes_settings_without_polling_the_local_reply() {
     let pending = Rc::new(RefCell::new(Vec::new()));
     let queued = pending.clone();
     owner.bind_tasks(
-        move |task| queued.borrow_mut().push(iptv_runtime::in_runtime(task)),
+        move |task| queued.borrow_mut().push(task),
         |_| Box::pin(async {}),
     );
-    with_runtime(owner.clone(), || {
-        owner.activate();
-        owner.start_services();
-        iptv_runtime::settings::set(
+    // The host keeps this for its off-thread stop callback.
+    let flusher: HostHandle = owner.host_handle();
+    // Nothing accepted yet: nothing to wait for.
+    assert!(flusher.flush_files(Duration::ZERO));
+    owner.start_services();
+    owner
+        .set_setting(
             "general.user_agent",
             iptv_settings::Value::Text("SyntheticAgent/1".into()),
         )
         .unwrap();
-    });
     assert_eq!(pending.borrow().len(), 1);
+    // Another owner constructed meanwhile does not become the one flushed.
+    let other = tempfile::tempdir().unwrap();
+    let _newer = Runtime::new(Ports::new(other.path().to_owned(), |_| {
+        panic!("an unused owner must not open the credential broker")
+    }));
+    let stop = flusher.clone();
     assert!(
-        std::thread::spawn(|| flush_pending_writes(Duration::from_secs(1)))
+        std::thread::spawn(move || stop.flush_files(Duration::from_secs(1)))
             .join()
             .unwrap()
     );
@@ -43,9 +49,10 @@ fn stopping_the_host_flushes_settings_without_polling_the_local_reply() {
         ),
         "SyntheticAgent/1"
     );
-    with_runtime(owner.clone(), || assert!(owner.drain_services()));
+    assert!(!other.path().join("settings.json").exists());
+    assert!(owner.drain_services());
     pending.borrow_mut().clear();
     drop(owner);
     assert!(weak.upgrade().is_none());
-    assert!(flush_pending_writes(Duration::ZERO));
+    assert!(flusher.flush_files(Duration::ZERO));
 }

@@ -89,7 +89,7 @@ pub fn open(ui: Ui) {
         now,
         |item| {
             implemented(item)
-                && (!crate::data::combined::active()
+                && (!crate::data::combined::active(&crate::runtime())
                     || matches!(
                         item,
                         MenuItem::Search
@@ -167,10 +167,10 @@ pub fn perform(ui: Ui, item: MenuItem) {
                 ui.library.shown.get_untracked(),
                 crate::schedule().channel_key(origin.channel),
             ) {
-                let saved = crate::runtime::commands::hide_channel(source, id);
+                let saved = crate::runtime::commands::hide_channel(&crate::runtime(), source, id);
                 crate::data::spawn_in_app(async move {
                     match saved.await {
-                        Ok(()) => crate::data::organization::changed(source),
+                        Ok(()) => crate::data::organization::changed(&crate::runtime(), source),
                         Err(e) => log::warn!("iptv organization: {e}"),
                     }
                 });

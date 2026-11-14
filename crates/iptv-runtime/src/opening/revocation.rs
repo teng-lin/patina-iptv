@@ -129,32 +129,39 @@ fn write_guide(
         .map(|_| ())
 }
 
-async fn title(source: SourceId, key: ChannelKey) -> Option<String> {
-    crate::store_service::call(move |store| {
-        let guide = store.load_epg(source, &EpgWindow::from(NOW, 1))?;
-        Ok(guide.programme_at(&key, NOW).map(|p| p.title().to_owned()))
-    })
-    .await
-    .unwrap()
+async fn title(
+    services: &crate::store_service::Services,
+    source: SourceId,
+    key: ChannelKey,
+) -> Option<String> {
+    services
+        .call(move |store| {
+            let guide = store.load_epg(source, &EpgWindow::from(NOW, 1))?;
+            Ok(guide.programme_at(&key, NOW).map(|p| p.title().to_owned()))
+        })
+        .await
+        .unwrap()
 }
 
 #[test]
 fn revoked_cached_metadata_cannot_discard_a_newer_guide() {
     for cancel_all in [false, true] {
         let (_directory, owner, job, key) = fixture();
-        crate::with_runtime(owner.clone(), || {
+        {
             owner.start_services();
-            crate::executor::block_on(async {
+            let services = owner.services();
+            support::block_on(async {
                 let source = job.stored.unwrap();
                 let cancel = CancelToken::new();
                 let work = crate::library::import_completion(cancel.clone());
-                crate::library::track_import(source, &work);
+                crate::library::track_import(&owner, source, &work);
                 let (resume, held) = futures_channel::oneshot::channel();
                 let reached = Rc::new(Cell::new(false));
                 let paused = reached.clone();
                 let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
                 let stops = [&cancel, &work.guide];
                 let mut opening = Box::pin(send_stored_after(
+                    &services,
                     &job,
                     source,
                     NOW,
@@ -179,19 +186,20 @@ fn revoked_cached_metadata_cannot_discard_a_newer_guide() {
                     cancel.cancel();
                     assert!(!work.guide.is_cancelled());
                 } else {
-                    crate::library::revoke_import_handoff(source);
+                    crate::library::revoke_import_handoff(&owner, source);
                     assert!(work.guide.is_cancelled() && !cancel.is_cancelled());
                 }
                 let channel = key.clone();
-                crate::store_service::call(move |store| {
-                    write_guide(store, source, &channel, "Fresh generated programme")
-                })
-                .await
-                .unwrap();
+                services
+                    .call(move |store| {
+                        write_guide(store, source, &channel, "Fresh generated programme")
+                    })
+                    .await
+                    .unwrap();
                 resume.send(()).unwrap();
                 let cached = opening.await;
                 assert_eq!(
-                    title(source, key.clone()).await.as_deref(),
+                    title(&services, source, key.clone()).await.as_deref(),
                     Some("Fresh generated programme")
                 );
                 assert!(!cached, "a superseded discard is no cached policy answer");
@@ -204,51 +212,66 @@ fn revoked_cached_metadata_cannot_discard_a_newer_guide() {
                 }
             });
             assert!(owner.drain_services());
-        });
+        };
     }
 }
 
 #[test]
 fn a_superseded_download_cannot_replace_a_newer_guide() {
     let (_directory, owner, job, key) = fixture();
-    crate::with_runtime(owner.clone(), || {
+    {
         owner.start_services();
-        crate::executor::block_on(async {
+        let services = owner.services();
+        support::block_on(async {
             let source = job.stored.unwrap();
             let channel = key.clone();
-            crate::store_service::call(move |store| {
-                write_guide(store, source, &channel, "New generated programme")
-            })
-            .await
-            .unwrap();
-            let channel = key.clone();
-            let worker = owner.scope_worker(move || {
-                let (downloaded, _scratch, meta) = crate::store_service::blocking(move |store| {
-                    Ok(staged_guide(
-                        store,
-                        &channel,
-                        "Obsolete generated programme",
-                    ))
-                })
+            services
+                .call(move |store| write_guide(store, source, &channel, "New generated programme"))
+                .await
                 .unwrap();
-                let stop = CancelToken::new();
-                stop.cancel();
-                let overrides = iptv_epg::Overrides::default();
-                let matching = stored::Matching {
-                    channels: &[],
-                    overrides: &overrides,
-                };
-                assert!(
-                    stored::replace(source, downloaded, &[meta.config], matching, NOW, &[&stop])
+            let channel = key.clone();
+            let worker = {
+                let services = owner.services();
+                move || {
+                    let (downloaded, _scratch, meta) = services
+                        .blocking(move |store| {
+                            Ok(staged_guide(
+                                store,
+                                &channel,
+                                "Obsolete generated programme",
+                            ))
+                        })
+                        .unwrap();
+                    let stop = CancelToken::new();
+                    stop.cancel();
+                    let overrides = iptv_epg::Overrides::default();
+                    let matching = stored::Matching {
+                        channels: &[],
+                        overrides: &overrides,
+                    };
+                    assert!(
+                        stored::replace(
+                            &services,
+                            source,
+                            downloaded,
+                            &[meta.config],
+                            matching,
+                            NOW,
+                            &[&stop]
+                        )
                         .is_err()
-                );
-            });
+                    );
+                }
+            };
             std::thread::spawn(worker).join().unwrap();
             assert_eq!(
-                title(source, key).await.as_deref(),
+                title(&services, source, key).await.as_deref(),
                 Some("New generated programme")
             );
         });
         assert!(owner.drain_services());
-    });
+    };
 }
+
+#[path = "../../tests/support/mod.rs"]
+mod support;

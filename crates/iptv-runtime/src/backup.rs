@@ -4,12 +4,14 @@
 
 pub mod error;
 mod instance;
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+
+use super::store_service::Services;
 
 use iptv_settings::Settings;
 use iptv_store_sqlite::Store;
@@ -25,9 +27,11 @@ pub fn next_document_request() -> String {
     SEQUENCE.fetch_add(1, Ordering::Relaxed).to_string()
 }
 use error::{Context, Error, Result};
-type StartupResult = std::result::Result<(), StartupError>;
-static STARTED: Mutex<BTreeMap<PathBuf, Arc<OnceLock<StartupResult>>>> =
-    Mutex::new(BTreeMap::new());
+type Started = Arc<OnceLock<std::result::Result<(), StartupError>>>;
+/// The first activation outcome of each storage root in this process. A
+/// process-lifetime fact about a directory, not owner state: every owner of
+/// the same root shares it, and an owner of another root has its own.
+static STARTED: Mutex<Option<HashMap<PathBuf, Started>>> = Mutex::new(None);
 
 /// Why activating or recovering a restore failed at startup; `error` is
 /// logged by the caller, its message shown when the failure is `fatal`.
@@ -50,21 +54,21 @@ pub enum Progress {
     Working,
 }
 
-fn progress(phase: Progress) {
-    crate::current().backup_progress.set(phase);
-    crate::current().emit(super::RuntimeEvent::BackupProgress(phase));
+fn progress(runtime: &super::Runtime, phase: Progress) {
+    runtime.backup_progress.set(phase);
+    runtime.emit(super::RuntimeEvent::BackupProgress(phase));
 }
+/// One backup operation at a time per owner; ends when dropped.
 pub struct Busy(std::rc::Rc<super::Runtime>);
 impl Busy {
-    pub fn begin() -> Option<Self> {
-        let runtime = crate::current();
+    pub(crate) fn begin(runtime: std::rc::Rc<super::Runtime>) -> Option<Self> {
         if runtime.backup_busy.replace(true) {
             runtime.emit(super::RuntimeEvent::Notify(
                 "A backup operation is already running",
             ));
             None
         } else {
-            progress(Progress::Selecting);
+            progress(&runtime, Progress::Selecting);
             Some(Self(runtime))
         }
     }
@@ -78,8 +82,51 @@ impl Drop for Busy {
     }
 }
 
-pub fn is_pending() -> bool {
-    sibling(&super::paths::data_dir(), "restore-pending").exists()
+impl Busy {
+    /// Runs `job` off the UI thread with this owner's storage.
+    pub async fn worker<T: Send + 'static>(
+        &self,
+        job: impl FnOnce(&Archive) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        let (tx, rx) = futures_channel::oneshot::channel();
+        progress(&self.0, Progress::Working);
+        let archive = Archive {
+            services: self.0.services(),
+        };
+        drop(archive.services.clone().spawn_blocking(move || {
+            let _ = tx.send(job(&archive));
+        }));
+        rx.await.context("The backup task stopped")?
+    }
+}
+
+/// The storage of the owner a backup operation was started for.
+pub struct Archive {
+    services: Services,
+}
+impl Archive {
+    /// The owner's private storage directory.
+    pub fn root(&self) -> &Path {
+        self.services.directory()
+    }
+    /// Writes a whole-app backup of this owner to `destination`.
+    pub fn export(&self, destination: &Path, settings: &str) -> Result<()> {
+        export(&self.services, destination, settings)
+    }
+    /// Validates the backup read from `input` and schedules it for the
+    /// next launch.
+    pub fn stage(&self, input: &mut impl Read) -> Result<()> {
+        stage(&self.services, input)
+    }
+    /// Calls a scheduled restore off.
+    pub fn cancel(&self) -> Result<()> {
+        cancel(self.root())
+    }
+}
+
+/// A restore is scheduled for the next launch of `root`.
+pub(crate) fn is_pending(root: &Path) -> bool {
+    sibling(root, "restore-pending").exists()
 }
 
 struct Scratch(PathBuf);
@@ -96,19 +143,19 @@ pub fn sibling(root: &Path, suffix: &str) -> PathBuf {
         suffix
     ))
 }
-fn scratch(root: &Path) -> Result<Scratch> {
+fn scratch(services: &Services) -> Result<Scratch> {
     let path = sibling(
-        root,
+        services.directory(),
         &format!(
             "backup-work-{}-{}",
             std::process::id(),
             SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ),
     );
-    private_dir(&path).context("Could not create temporary backup storage")?;
+    private_dir(services, &path).context("Could not create temporary backup storage")?;
     Ok(Scratch(path))
 }
-fn private_dir(path: &Path) -> io::Result<()> {
+fn private_dir(services: &Services, path: &Path) -> io::Result<()> {
     let builder = fs::DirBuilder::new();
     #[cfg(unix)]
     let mut builder = builder;
@@ -118,7 +165,7 @@ fn private_dir(path: &Path) -> io::Result<()> {
         builder.mode(0o700);
     }
     builder.create(path)?;
-    crate::ports::exclude_from_backup(path)
+    (services.ports().exclude_from_backup)(path)
 }
 fn private_file(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
@@ -183,28 +230,26 @@ fn collect(root: &Path, directory: &Path, names: &mut Vec<String>) -> Result<()>
 
 /// An online SQLite snapshot includes committed WAL data. The caller first
 /// drains queued favorite/history writes and captures settings on the UI thread.
-/// Unit tests own independent synthetic roots; they must never reach the
-/// process-wide production service or the operating-system credential broker.
+/// Unit tests own independent synthetic plaintext roots; they must never
+/// reach an encrypted store lane or the operating-system credential broker.
 #[cfg(test)]
-fn snapshot_library(root: &Path, snapshot: &Path) -> Result<()> {
-    Store::open(root.join("iptv.sqlite"))
+fn snapshot_library(services: &Services, snapshot: &Path) -> Result<()> {
+    Store::open(services.directory().join("iptv.sqlite"))
         .and_then(|store| store.snapshot_to(snapshot))
         .context("Could not snapshot the library")
 }
 #[cfg(not(test))]
-fn snapshot_library(root: &Path, snapshot: &Path) -> Result<()> {
-    if root != super::paths::data_dir() {
-        return Err("Backup root does not match application storage".into());
-    }
+fn snapshot_library(services: &Services, snapshot: &Path) -> Result<()> {
     let snapshot = snapshot.to_owned();
-    super::store_service::blocking(move |store| store.snapshot_to(&snapshot))
+    services
+        .blocking(move |store| store.snapshot_to(&snapshot))
         .context("Could not snapshot the library")
 }
 
 // Backup unit tests own independent plaintext roots. Production exports stream
 // decrypted private chunks directly into the explicitly requested v1 archive.
 #[cfg(test)]
-fn document_reader(_: &Path, path: &Path) -> Result<(u64, Box<dyn Read>)> {
+fn document_reader(_: &Services, path: &Path) -> Result<(u64, Box<dyn Read>)> {
     let file = File::open(path).context("Could not read backup document")?;
     let len = file
         .metadata()
@@ -213,12 +258,10 @@ fn document_reader(_: &Path, path: &Path) -> Result<(u64, Box<dyn Read>)> {
     Ok((len, Box::new(file)))
 }
 #[cfg(not(test))]
-fn document_reader(root: &Path, path: &Path) -> Result<(u64, Box<dyn Read>)> {
-    if root != super::paths::data_dir() {
-        return Err("Backup root does not match application storage".into());
-    }
+fn document_reader(services: &Services, path: &Path) -> Result<(u64, Box<dyn Read>)> {
     let path = path.to_owned();
-    let reader = super::store_service::blocking(move |store| store.read_private_file(&path))
+    let reader = services
+        .blocking(move |store| store.read_private_file(&path))
         .context("Could not decrypt backup document")?;
     Ok((reader.len(), Box::new(reader)))
 }
@@ -231,22 +274,29 @@ fn seal_restore_with_store(
     store.seal_snapshot(&directory.join("iptv.sqlite"))
 }
 #[cfg(test)]
-fn seal_restore(_: &Path) -> Result<()> {
+fn seal_restore(_: &Services, _: &Path) -> Result<()> {
     Ok(())
 }
 #[cfg(not(test))]
-fn seal_restore(directory: &Path) -> Result<()> {
+fn seal_restore(services: &Services, directory: &Path) -> Result<()> {
     let directory = directory.to_owned();
-    super::store_service::blocking(move |store| seal_restore_with_store(store, &directory))
+    services
+        .blocking(move |store| seal_restore_with_store(store, &directory))
         .context("Could not encrypt the pending restore")
 }
 #[cfg(test)]
-fn validate_pending(path: &Path) -> std::result::Result<(), iptv_store_sqlite::StoreError> {
+fn validate_pending(
+    _: &crate::Ports,
+    path: &Path,
+) -> std::result::Result<(), iptv_store_sqlite::StoreError> {
     Store::validate_snapshot(path)
 }
 #[cfg(not(test))]
-fn validate_pending(path: &Path) -> std::result::Result<(), iptv_store_sqlite::StoreError> {
-    super::credential_store::validate_staged_database(path)
+fn validate_pending(
+    ports: &crate::Ports,
+    path: &Path,
+) -> std::result::Result<(), iptv_store_sqlite::StoreError> {
+    super::credential_store::validate_staged_database(ports, path)
 }
 
 fn remove_stale_work(root: &Path) -> Result<()> {
@@ -277,11 +327,12 @@ fn remove_stale_work(root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn export(root: &Path, destination: &Path, settings: &str) -> Result<()> {
+fn export(services: &Services, destination: &Path, settings: &str) -> Result<()> {
+    let root = services.directory();
     validate_settings(settings)?;
     // Small files written in the background (a last channel) reach the disk
     // before they are copied.
-    if !super::file_writer::flush(std::time::Duration::from_secs(5)) {
+    if !services.files().flush(std::time::Duration::from_secs(5)) {
         log::warn!("iptv backup: queued file writes did not finish; copying what is on disk");
     }
     let absolute_destination = if destination.is_absolute() {
@@ -313,9 +364,9 @@ pub fn export(root: &Path, destination: &Path, settings: &str) -> Result<()> {
         return Err("Choose a backup destination outside application storage".into());
     }
     let destination = absolute_destination.as_path();
-    let work = scratch(root)?;
+    let work = scratch(services)?;
     let snapshot = work.0.join("iptv.sqlite");
-    snapshot_library(root, &snapshot)?;
+    snapshot_library(services, &snapshot)?;
     let mut names = vec!["iptv.sqlite".to_owned(), "settings.json".to_owned()];
     collect(root, &root.join("playlists"), &mut names)?;
     if let Ok(entries) = fs::read_dir(root) {
@@ -362,7 +413,7 @@ pub fn export(root: &Path, destination: &Path, settings: &str) -> Result<()> {
         let len = if name == "settings.json" {
             settings.len() as u64
         } else if name.starts_with("playlists/") {
-            document_reader(root, &root.join(name))?.0
+            document_reader(services, &root.join(name))?.0
         } else {
             fs::metadata(if name == "iptv.sqlite" {
                 work.0.join(name)
@@ -415,7 +466,7 @@ pub fn export(root: &Path, destination: &Path, settings: &str) -> Result<()> {
                 };
                 let expected = entry["length"].as_u64().unwrap();
                 let (length, reader): (u64, Box<dyn Read>) = if name.starts_with("playlists/") {
-                    document_reader(root, &path)?
+                    document_reader(services, &path)?
                 } else {
                     let file = File::open(path).context("Could not read backup files")?;
                     let length = file
@@ -488,8 +539,9 @@ fn validate_settings(text: &str) -> Result<()> {
 
 /// Validates all content before replacing an existing pending restore. No
 /// running database or settings file is changed by staging or cancellation.
-pub fn stage(root: &Path, input: &mut impl Read) -> Result<()> {
-    let work = scratch(root)?;
+fn stage(services: &Services, input: &mut impl Read) -> Result<()> {
+    let root = services.directory();
+    let work = scratch(services)?;
     let mut magic = [0; 9];
     input
         .read_exact(&mut magic)
@@ -583,7 +635,7 @@ pub fn stage(root: &Path, input: &mut impl Read) -> Result<()> {
     drop(store);
     // All archive validation and reference rewriting succeeded. Encrypt the
     // persistent pending tree before its rename can make it survive restart.
-    seal_restore(&work.0)?;
+    seal_restore(services, &work.0)?;
     // Close/checkpoint WAL before directory swap; SQLite open on next launch
     // sees a complete database, and no staging handles remain.
     recover_replacement(root)?;
@@ -620,7 +672,7 @@ fn recover_replacement(root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn cancel(root: &Path) -> Result<()> {
+fn cancel(root: &Path) -> Result<()> {
     // Remove fallback first, so a crash during cancellation cannot resurrect
     // a superseded scheduled restore on the next launch.
     let replaced = sibling(root, "restore-replaced");
@@ -634,33 +686,37 @@ pub fn cancel(root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Called before opening any file under `root`. If a crash happened after
-/// moving the original aside, finish the validated restore, or recover it.
-pub fn lock() -> std::result::Result<(), Error> {
-    instance::acquire(&super::paths::data_dir()).inspect_err(|error| {
+/// Called before opening any file under `root`: this process holds the
+/// storage for as long as it lives.
+pub(crate) fn lock(root: &Path) -> std::result::Result<(), Error> {
+    instance::acquire(root).inspect_err(|error| {
         log::warn!("iptv backup: locking application storage failed: {error}");
     })
 }
 
-pub fn startup() -> std::result::Result<(), StartupError> {
-    // Keep the first outcome, including a fatal recovery failure. Recreating
-    // an engine must neither rerun activation nor bypass failed recovery.
-    let root = super::paths::data_dir();
+/// Called before opening any file under the owner's storage. If a crash
+/// happened after moving the original aside, finish the validated restore,
+/// or recover it.
+pub(crate) fn startup(ports: &crate::Ports) -> std::result::Result<(), StartupError> {
+    let root = &ports.directory;
     let started = STARTED
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_or_insert_default()
         .entry(root.clone())
         .or_default()
         .clone();
+    // Keep the first outcome, including a fatal recovery failure. Recreating
+    // an engine must neither rerun activation nor bypass failed recovery.
     *started.get_or_init(|| {
-        activate(&root).map_err(|error| StartupError {
+        activate(ports, root).map_err(|error| StartupError {
             error,
             fatal: !root.exists(),
         })
     })
 }
 
-fn activate(root: &Path) -> Result<()> {
+fn activate(ports: &crate::Ports, root: &Path) -> Result<()> {
     remove_stale_work(root)?;
     recover_replacement(root)?;
     // No native export is active before App starts. A killed process can leave
@@ -711,7 +767,7 @@ fn activate(root: &Path) -> Result<()> {
             .context("Backup structured entry is too large")?;
         }
     }
-    validate_pending(&pending.join("iptv.sqlite"))
+    validate_pending(ports, &pending.join("iptv.sqlite"))
         .context("The pending backup library is invalid; current data was kept")?;
     validate_settings(&read_small_file(
         &pending.join("settings.json"),
@@ -736,19 +792,6 @@ fn activate(root: &Path) -> Result<()> {
             .context("Restore succeeded; could not remove the previous private copy")?;
     }
     Ok(())
-}
-
-pub async fn worker<T: Send + 'static>(
-    job: impl FnOnce() -> Result<T> + Send + 'static,
-) -> Result<T> {
-    let (tx, rx) = futures_channel::oneshot::channel();
-    progress(Progress::Working);
-    drop(super::executor::spawn_blocking(
-        super::store_service::scoped(move || {
-            let _ = tx.send(job());
-        }),
-    ));
-    rx.await.context("The backup task stopped")?
 }
 
 #[cfg(test)]

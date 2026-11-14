@@ -1,5 +1,5 @@
 //! Android host unwraps the database key with its non-exportable Keystore key.
-use crate::runtime::model::{DatabaseKey, StoreError};
+use crate::runtime::{Error, model::DatabaseKey};
 use jni::{
     JNIEnv,
     objects::{JByteArray, JClass},
@@ -10,10 +10,10 @@ use zeroize::Zeroizing;
 
 static KEY: OnceLock<Zeroizing<[u8; 32]>> = OnceLock::new();
 
-pub(super) fn database_key() -> Result<DatabaseKey, StoreError> {
+pub(super) fn database_key() -> Result<DatabaseKey, Error> {
     KEY.get()
         .map(|key| DatabaseKey::from_bytes(**key))
-        .ok_or(StoreError::Unavailable("Android Keystore is unavailable"))
+        .ok_or(Error::unavailable("Android Keystore is unavailable"))
 }
 
 // SAFETY: Android calls this symbol using the matching static JNI declaration;

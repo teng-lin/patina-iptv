@@ -202,7 +202,15 @@ NSH or the player. The shell holds one `Rc<Runtime>` and installs a task host, t
 and an event sink. Runtime events enter the shell at
 `runtime_events::apply`; views issue named commands rather than closures
 that can reach a `Store`. `iptv-runtime/src/model.rs` exposes command values, without
-exposing the connection or worker API.
+exposing the connection or worker API. Early playback receives a runtime-owned
+`PlaybackChannel` containing the provider channel and its parental block, rather
+than a storage row. Native library snapshots, import metadata, store errors and
+stored feed configuration remain behind private implementation surfaces.
+`DatabaseKey` is the one adapter-owned boundary exception: the platform credential
+broker supplies this opaque, redacting key through `Ports`; commands return no
+adapter-owned values. Compile-checked contracts cover every public command result,
+including inferred values and aliases, and compile-fail examples keep native
+snapshot and planning helpers private.
 
 Runtime owns the current schedule, library snapshot, refresh tickets and
 attempts, combined-source parts, guide status, favourites, search indexes,
@@ -211,23 +219,35 @@ refresh pool, file writer and shared two-worker Tokio executor. Refresh
 scheduling consumes foreground notifications and emits refresh requests;
 it does not wake a sleeping device. Platform handles, caches and UI gesture
 flags remain in the shell, with an explicit list in
-`iptv-app/tests/app/architecture.rs`. The shell guards SQLite references and
-statics; `iptv-runtime/tests/architecture.rs` guards toolkit and host dependencies.
+`iptv-app/tests/app/architecture.rs`. The boundary is a set of exact lists
+that only change on purpose: `iptv-runtime/tests/architecture.rs` lists the
+crates the runtime may name, the runtime modules that may name the store
+adapter, and its few process-lifetime statics (no thread-local);
+`iptv-runtime/tests/shell_boundary.rs` lists what the shell may name from the
+runtime, and keeps store types and the store dependency out of the shell.
 
-Every local future and worker captures the owner that accepted it. A late
-reply keeps that owner's settings, paths and epoch; it cannot adopt a newer
-application's state. Weak context registries select the owner without owning
-its data. Android's off-thread `onStop` callback uses a weak service registry
-to flush the active owner's accepted file writes. Teardown drains accepted
-writes, rejects later work and cancels imports and link resolves.
+The runtime has no ambient owner. Every operation is given the `Runtime` it
+acts for, and that owner's fields are private behind methods named for what
+they do. Work that leaves the UI thread carries a `Send` handle to its
+owner's services (store lanes, file writer, executor, refresh pool, settings,
+ports) taken when the work was accepted, with the application epoch of that
+moment. A late reply therefore keeps its owner's settings, paths and epoch;
+it cannot adopt a newer application's state, and constructing or starting
+another `Runtime` changes nothing an open owner can observe. Closures kept
+inside an owner's own state (a schedule's page loader and description
+lookup) hold it weakly. Android's off-thread `onStop` callback flushes
+through a `HostHandle` the application root registered in the shell; it
+does not keep the owner alive. Teardown drains accepted writes, rejects
+later work and cancels imports and link resolves.
 
 The private store service owns two long-lived connections to the encrypted
 catalogue. The writer serializes mutations, staging and reads that must
 follow queued writes. The read-only connection serves guide, search and
 organization queries without waiting behind a publish transaction. Both
 live on dedicated threads; no SQLite operation runs on the UI thread.
-Each request carries its application epoch. Recursive requests to the same
-worker and requests from a retired owner are rejected.
+Each owner has its own pair. Each request carries its application epoch.
+Recursive requests to the same worker and requests from a retired owner are
+rejected.
 
 Imports use the bounded refresh pool so their blocking store waits cannot
 hold Tokio's network workers. Channel indexing and organization preparation
@@ -241,16 +261,19 @@ credential-key callback, OS backup-exclusion hook and startup instrumentation.
 Native workers capture those inputs with their accepting service. JNI entry
 points and credential-broker implementations remain in the shell. The host's
 local task executor and timers are installed separately through `bind_tasks`.
-The shell retains one strong handle; local context selection uses weak handles
-and restores the accepting owner on every poll, including nested callbacks and
-unwinding. Local controllers use explicit state accessors; store connections,
-writer queues and native service handles remain private. Restore startup outcomes
-and process locks are retained per storage directory until the process exits.
+The shell retains the one handle (`crate::runtime()`) and passes it to every
+runtime call. A local task polls with the owner that accepted it, also after
+the root was recreated: that scoping, and its restoring on unwinding, live
+in the shell (`in_runtime`), not in the runtime. Local controllers use
+explicit state accessors; store connections, writer queues and native
+service handles remain private.
 
 Run `cargo test --locked -p iptv-runtime` to test application services without
 linking a display toolkit or reaching an OS credential broker. Public-API tests
-cover suspended task delivery, unwinding, weak owner lifetime, and native worker
-capture of the original private directory and key broker.
+cover suspended task delivery, a second owner constructed, started and closed
+beside an open one, per-owner settings and small files, owner lifetime, and
+requests keeping their accepting private directory and key broker on another
+thread.
 Scenario processes stay isolated because NSH and the player have their own
 platform globals.
 

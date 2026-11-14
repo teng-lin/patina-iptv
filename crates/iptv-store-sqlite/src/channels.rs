@@ -2,14 +2,13 @@
 
 use std::fmt;
 
+use iptv_providers::ContentId;
 use iptv_providers::model::Channel;
-use iptv_providers::{ContentId, GroupId};
 use rusqlite::params_from_iter;
 use rusqlite::types::Value;
 
 use crate::codec::{catch_up_from_json, group_ids_from_json, narrow, stream_from_json};
 use crate::error::Result;
-use crate::organise::CustomGroupId;
 use crate::overlay::EpgOverride;
 use crate::search::{fts_query, like_pattern, words};
 use crate::{SourceId, Store};
@@ -52,17 +51,7 @@ impl fmt::Debug for ChannelRow {
     }
 }
 
-/// Which channels to list.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ChannelScope {
-    #[default]
-    All,
-    /// One provider group.
-    Group(GroupId),
-    /// One custom group, in its own member order.
-    Custom(CustomGroupId),
-}
+pub use iptv_library::ChannelScope;
 
 /// Sort order of a channel list.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

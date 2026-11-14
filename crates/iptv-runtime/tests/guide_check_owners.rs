@@ -2,7 +2,7 @@
 //! two owners in one process do not see each other's checks.
 #![cfg(feature = "test-support")]
 
-use iptv_runtime::{GuideWork, Ports, Runtime, guide_check_registered, model::SourceId};
+use iptv_runtime::{GuideWork, Ports, Runtime, model::SourceId};
 use std::rc::Rc;
 
 fn owner(directory: &std::path::Path) -> Rc<Runtime> {
@@ -17,8 +17,8 @@ fn two_owners_do_not_share_registered_guide_checks() {
     let (first, second) = (owner(first_home.path()), owner(second_home.path()));
     // The same id in both libraries, as two installations have.
     let source = SourceId(1);
-    let registered = |owner: &Rc<Runtime>| owner.with_context(|| guide_check_registered(source));
-    let generation = |owner: &Rc<Runtime>| owner.generation().with(std::cell::Cell::get);
+    let registered = |owner: &Rc<Runtime>| owner.host_handle().guide_check_registered(source);
+    let generation = |owner: &Rc<Runtime>| owner.browser_generation();
 
     let timer = GuideWork::Timer(1_800_000_000);
     first
@@ -51,9 +51,9 @@ fn two_owners_do_not_share_registered_guide_checks() {
     assert!(registered(&first));
     // The active owner answers a thread without a context of its own
     // (the headless tests' thread).
-    first.activate();
+    let host = first.host_handle();
     assert!(
-        std::thread::spawn(move || guide_check_registered(source))
+        std::thread::spawn(move || host.guide_check_registered(source))
             .join()
             .unwrap()
     );

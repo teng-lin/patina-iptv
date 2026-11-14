@@ -28,7 +28,6 @@ use iptv_core::player_info::StreamFormat as Format;
 use iptv_core::tracks::{Choice, Tracks};
 use iptv_guide::EpgSchedule;
 use iptv_guide::playback::{Clock, Resolution, StalkerLink, Unavailable};
-use iptv_import::CancelToken;
 use nsh_core::platform::Lifecycle;
 use nsh_core::prelude::*;
 
@@ -190,11 +189,12 @@ pub fn start(ui: &Ui, channel: usize) {
             .with_untracked(|h| h.current() != Some(&key));
         ui.player.history.update(|h| h.played(&key));
         if changed {
-            if crate::data::combined::active() {
-                if let Some((source, local)) = crate::data::combined::owner(&key) {
+            if crate::data::combined::active(&crate::runtime()) {
+                if let Some((source, local)) = crate::data::combined::owner(&crate::runtime(), &key)
+                {
                     save_last_channel(Some(source), &local);
                 }
-                crate::runtime::playback::save_combined_channel(&key);
+                crate::runtime().save_combined_channel(&key);
             } else {
                 save_last_channel(ui.library.shown.get_untracked(), &key);
             }
@@ -268,6 +268,7 @@ fn open(ui: Ui, surface: usize, session: u64) {
     // An older day's programme: its real times once its day is paged in.
     if let Playback::CatchUp { start, .. } = playback
         && !crate::data::pages::ready(
+            &crate::runtime(),
             &schedule,
             channel,
             crate::guide::unix_of(&*schedule, start),
@@ -370,12 +371,7 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
 /// Cancels `surface`'s link request in flight, if any: the viewer zapped,
 /// the surface reopens or plays nothing.
 fn cancel_resolve(surface: usize) {
-    let running = crate::runtime()
-        .resolving()
-        .with(|r| r.borrow_mut().get_mut(surface).and_then(Option::take));
-    if let Some((_, cancel)) = running {
-        cancel.cancel();
-    }
+    crate::runtime().cancel_link_resolution(surface);
 }
 
 /// A Stalker `create_link` on the shared network runtime (`executor.rs`);
@@ -396,15 +392,9 @@ fn resolve_link(
         cmd,
         channel_headers,
     } = *link;
-    cancel_resolve(surface);
-    let cancel = CancelToken::new();
-    crate::runtime().resolving().with(|r| {
-        if let Some(slot) = r.borrow_mut().get_mut(surface) {
-            *slot = Some((session, cancel.clone()));
-        }
-    });
-    let client = crate::runtime::playback::link_client(crate::settings::net_config());
-    let request = crate::executor::spawn(async move {
+    let cancel = crate::runtime().begin_link_resolution(surface, session);
+    let client = crate::runtime().link_client(crate::settings::net_config());
+    let request = crate::runtime().spawn_network(async move {
         let result = match client.await {
             Ok(net) => iptv_import::stalker_link(&net, &mut portal, &cmd, false, &cancel)
                 .await
@@ -416,13 +406,7 @@ fn resolve_link(
     let _task = ui.player.owner.run(|| {
         spawn(crate::in_runtime(async move {
             let answered = request.await;
-            crate::runtime().resolving().with(|r| {
-                if let Some(slot) = r.borrow_mut().get_mut(surface)
-                    && slot.as_ref().is_some_and(|(s, _)| *s == session)
-                {
-                    *slot = None;
-                }
-            });
+            crate::runtime().finish_link_resolution(surface, session);
             let Ok((result, portal)) = answered else {
                 return;
             };
@@ -490,10 +474,20 @@ fn show_channel(ui: Ui, channel: usize) {
     crate::lists::show_channel(ui, channel);
 }
 
-pub use crate::runtime::playback::forget_source;
-/// The last channel's file of playlist `source` (the shared one of older
-/// builds for none).
-use crate::runtime::playback::{load_last_channel, save_last_channel};
+/// Playlist `source` was deleted: its last channel goes too (after any
+/// write still queued for it).
+pub fn forget_source(source: crate::runtime::model::SourceId) {
+    crate::runtime().forget_last_channel(source);
+}
+/// The last channel of playlist `source` (the shared one of older builds
+/// for none), a write still queued included.
+fn load_last_channel(source: Option<crate::runtime::model::SourceId>) -> Option<String> {
+    crate::runtime().load_last_channel(source)
+}
+/// Queues the write: a zap never waits for the disk.
+fn save_last_channel(source: Option<crate::runtime::model::SourceId>, key: &str) {
+    crate::runtime().save_last_channel(source, key);
+}
 
 /// Another playlist is about to be shown (`data.rs`): what plays and the
 /// channel history belong to the old one (channel keys are unique only

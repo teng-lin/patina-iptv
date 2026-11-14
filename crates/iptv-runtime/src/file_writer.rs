@@ -113,101 +113,109 @@ impl Drop for Files {
         self.close();
     }
 }
-fn writer() -> Arc<Writer> {
-    super::store_service::service().files.writer()
-}
-
 fn lock(writer: &Writer) -> MutexGuard<'_, Queue> {
     // Only this module's bookkeeping runs under the lock (no IO), so a
     // panic elsewhere cannot leave it half-updated.
     writer.queue.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Queues `bytes` for `path`; the future answers when they (or newer
-/// content for the same path) are on disk. Dropping it does not cancel
-/// the write.
-pub(crate) fn write(
-    path: PathBuf,
-    bytes: Vec<u8>,
-) -> impl Future<Output = Result<(), WriteError>> + 'static {
-    submit(path, Some(bytes))
-}
+impl Files {
+    /// Queues `bytes` for `path`; the future answers when they (or newer
+    /// content for the same path) are on disk. Dropping it does not cancel
+    /// the write.
+    pub(crate) fn write(
+        &self,
+        path: PathBuf,
+        bytes: Vec<u8>,
+    ) -> impl Future<Output = Result<(), WriteError>> + 'static {
+        self.submit(path, Some(bytes))
+    }
 
-/// Queues the removal of `path` behind any write queued for it.
-pub(crate) fn remove(path: PathBuf) -> impl Future<Output = Result<(), WriteError>> + 'static {
-    submit(path, None)
-}
+    /// Queues the removal of `path` behind any write queued for it.
+    pub(crate) fn remove(
+        &self,
+        path: PathBuf,
+    ) -> impl Future<Output = Result<(), WriteError>> + 'static {
+        self.submit(path, None)
+    }
 
-fn submit(path: PathBuf, content: Content) -> impl Future<Output = Result<(), WriteError>> {
-    let (reply, answer) = oneshot::channel();
-    let writer = writer();
-    {
-        let mut queue = lock(&writer);
-        if queue.closed {
-            let _ = reply.send(Err(WriteError::Storage(io::ErrorKind::Interrupted)));
-        } else if let Some(entry) = queue.entries.get_mut(&path) {
-            entry.content = content;
-            entry.waiters.push(reply);
-        } else {
-            queue.order.push_back(path.clone());
-            queue.entries.insert(
-                path,
-                Entry {
-                    content,
-                    waiters: vec![reply],
-                },
-            );
+    fn submit(
+        &self,
+        path: PathBuf,
+        content: Content,
+    ) -> impl Future<Output = Result<(), WriteError>> + 'static {
+        let (reply, answer) = oneshot::channel();
+        let writer = self.writer();
+        {
+            let mut queue = lock(&writer);
+            if queue.closed {
+                let _ = reply.send(Err(WriteError::Storage(io::ErrorKind::Interrupted)));
+            } else if let Some(entry) = queue.entries.get_mut(&path) {
+                entry.content = content;
+                entry.waiters.push(reply);
+            } else {
+                queue.order.push_back(path.clone());
+                queue.entries.insert(
+                    path,
+                    Entry {
+                        content,
+                        waiters: vec![reply],
+                    },
+                );
+            }
+        }
+        writer.ready.notify_one();
+        async move {
+            answer
+                .await
+                .unwrap_or(Err(WriteError::Storage(io::ErrorKind::Interrupted)))
         }
     }
-    writer.ready.notify_one();
-    async move {
-        answer
-            .await
-            .unwrap_or(Err(WriteError::Storage(io::ErrorKind::Interrupted)))
-    }
-}
 
-/// The content `path` will have: queued content first, else the file.
-/// `None` for no file (or one that cannot be read).
-pub(crate) fn read(path: &Path) -> Option<Vec<u8>> {
-    let queued = {
-        let writer = writer();
-        let queue = lock(&writer);
-        queue
-            .entries
-            .get(path)
-            .map(|entry| entry.content.clone())
-            .or_else(|| {
-                queue
-                    .writing
-                    .as_ref()
-                    .filter(|(writing, _)| writing == path)
-                    .map(|(_, content)| content.clone())
-            })
-    };
-    match queued {
-        Some(content) => content,
-        None => std::fs::read(path).ok(),
-    }
-}
-
-/// Waits, at most `limit`, until every write queued so far is done.
-pub(crate) fn flush(limit: Duration) -> bool {
-    let writer = writer();
-    let deadline = Instant::now() + limit;
-    let mut queue = lock(&writer);
-    while !queue.order.is_empty() || queue.writing.is_some() {
-        let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            return false;
+    /// The content `path` will have: queued content first, else the file.
+    /// `None` for no file (or one that cannot be read).
+    pub(crate) fn read(&self, path: &Path) -> Option<Vec<u8>> {
+        // Nothing was ever queued: no writer thread is started for a read.
+        let queued = self.writer.get().and_then(|writer| {
+            let queue = lock(writer);
+            queue
+                .entries
+                .get(path)
+                .map(|entry| entry.content.clone())
+                .or_else(|| {
+                    queue
+                        .writing
+                        .as_ref()
+                        .filter(|(writing, _)| writing == path)
+                        .map(|(_, content)| content.clone())
+                })
+        });
+        match queued {
+            Some(content) => content,
+            None => std::fs::read(path).ok(),
         }
-        queue = writer
-            .idle
-            .wait_timeout(queue, left)
-            .unwrap_or_else(PoisonError::into_inner)
-            .0;
     }
-    true
+
+    /// Waits, at most `limit`, until every write queued so far is done.
+    pub(crate) fn flush(&self, limit: Duration) -> bool {
+        let Some(writer) = self.writer.get() else {
+            return true;
+        };
+        let deadline = Instant::now() + limit;
+        let mut queue = lock(writer);
+        while !queue.order.is_empty() || queue.writing.is_some() {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            queue = writer
+                .idle
+                .wait_timeout(queue, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        true
+    }
 }
 
 fn run(writer: &Writer) {
@@ -322,13 +330,14 @@ mod tests {
     #[test]
     fn the_latest_content_wins_and_reads_see_it_before_the_disk() {
         let dir = tempfile::tempdir().unwrap();
+        let files = Files::default();
         let path = dir.path().join("nested").join("last_channel-1");
-        let first = write(path.clone(), b"synthetic:1".to_vec());
-        let second = write(path.clone(), b"synthetic:2".to_vec());
-        assert_eq!(read(&path).as_deref(), Some(&b"synthetic:2"[..]));
+        let first = files.write(path.clone(), b"synthetic:1".to_vec());
+        let second = files.write(path.clone(), b"synthetic:2".to_vec());
+        assert_eq!(files.read(&path).as_deref(), Some(&b"synthetic:2"[..]));
         assert_eq!(block_on(first), Ok(()));
         assert_eq!(block_on(second), Ok(()));
-        assert!(flush(Duration::from_secs(5)));
+        assert!(files.flush(Duration::from_secs(5)));
         assert_eq!(std::fs::read(&path).unwrap(), b"synthetic:2");
         assert!(!temporary(&path).exists());
         #[cfg(unix)]
@@ -339,24 +348,25 @@ mod tests {
                 0o600
             );
         }
-        let removed = remove(path.clone());
-        assert_eq!(read(&path), None, "a queued removal reads as no file");
+        let removed = files.remove(path.clone());
+        assert_eq!(files.read(&path), None, "a queued removal reads as no file");
         assert_eq!(block_on(removed), Ok(()));
         assert!(!path.exists());
-        assert_eq!(block_on(remove(path.clone())), Ok(()), "already gone");
+        assert_eq!(block_on(files.remove(path.clone())), Ok(()), "already gone");
     }
 
     #[test]
     fn a_failed_write_keeps_the_previous_file() {
         let dir = tempfile::tempdir().unwrap();
+        let files = Files::default();
         let path = dir.path().join("settings.json");
-        assert_eq!(block_on(write(path.clone(), b"{}".to_vec())), Ok(()));
+        assert_eq!(block_on(files.write(path.clone(), b"{}".to_vec())), Ok(()));
         // A directory where the temporary file goes: nothing is published.
         std::fs::create_dir(temporary(&path)).unwrap();
-        let failed = block_on(write(path.clone(), b"{\"next\":1}".to_vec()));
+        let failed = block_on(files.write(path.clone(), b"{\"next\":1}".to_vec()));
         assert!(matches!(failed, Err(WriteError::Storage(_))), "{failed:?}");
         assert_eq!(std::fs::read(&path).unwrap(), b"{}");
-        assert_eq!(read(&path).as_deref(), Some(&b"{}"[..]));
+        assert_eq!(files.read(&path).as_deref(), Some(&b"{}"[..]));
     }
 
     #[test]
@@ -379,15 +389,16 @@ mod tests {
     #[test]
     fn many_queued_writes_flush_in_order_per_file() {
         let dir = tempfile::tempdir().unwrap();
+        let files = Files::default();
         for round in 0..50 {
             for file in 0..4 {
-                drop(write(
+                drop(files.write(
                     dir.path().join(format!("file-{file}")),
                     format!("{round}").into_bytes(),
                 ));
             }
         }
-        assert!(flush(Duration::from_secs(10)));
+        assert!(files.flush(Duration::from_secs(10)));
         for file in 0..4 {
             assert_eq!(
                 std::fs::read_to_string(dir.path().join(format!("file-{file}"))).unwrap(),

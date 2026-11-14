@@ -217,26 +217,26 @@ fn run(ui: Ui, key: &'static str) {
         "general.backup" => crate::backup::export_ui(),
         "general.restore" => crate::backup::restore_ui(ui),
         "epg.update_now" => {
-            if stored::update_now(move || refresh(ui)) {
+            if stored::update_now(&crate::runtime(), move || refresh(ui)) {
                 refresh(ui);
             } else {
                 notify(tr("This playlist has no guide source switched on"));
             }
         }
         // The playlist on screen's guide sources, over the settings screen.
-        "epg.manage_sources" | "epg.add_source" => match stored::shown() {
+        "epg.manage_sources" | "epg.add_source" => match crate::runtime().shown_source() {
             Some(playlist) if key == "epg.add_source" => {
                 crate::epg_sources_view::open_add(ui, playlist);
             }
             Some(playlist) => crate::epg_sources_view::open(ui, playlist),
-            None if crate::data::combined::active() => {
+            None if crate::data::combined::active(&crate::runtime()) => {
                 crate::playlists_view::open(ui);
                 notify(tr("Choose a playlist to manage its guide sources"));
             }
             None => notify(tr("No playlist on screen")),
         },
         "epg.clear" => {
-            let cleared = stored::clear(move |deleted| {
+            let cleared = stored::clear(&crate::runtime(), move |deleted| {
                 notify(if deleted {
                     tr("Guide data deleted")
                 } else {
@@ -307,10 +307,10 @@ fn lit_page(page: &Page) -> bool {
 /// What a command row shows on its right.
 fn command_value(key: &str) -> String {
     match key {
-        "general.restore" if crate::backup::is_pending() => {
+        "general.restore" if crate::runtime().restore_is_pending() => {
             tr("Scheduled for next launch").to_owned()
         }
-        "epg.update_now" => match stored::guide_status() {
+        "epg.update_now" => match crate::runtime().guide_status() {
             GuideStatus::NoSource => tr("No playlist").to_owned(),
             GuideStatus::Updating => tr("Updating…").to_owned(),
             GuideStatus::Empty => tr("Not downloaded").to_owned(),
@@ -335,11 +335,14 @@ fn command_value(key: &str) -> String {
 /// The "Guide sources" row's value: how many, switched on, and failed at
 /// their last download.
 fn sources_value() -> String {
-    let sources = stored::shown_sources();
+    let sources = crate::runtime().shown_sources();
     if sources.is_empty() {
         return tr("No enabled playlist").to_owned();
     }
-    let lines: Vec<_> = sources.into_iter().flat_map(stored::source_lines).collect();
+    let lines: Vec<_> = sources
+        .into_iter()
+        .flat_map(|source| crate::runtime().source_lines(source))
+        .collect();
     let on = lines.iter().filter(|l| l.source.enabled).count();
     let failed = lines
         .iter()

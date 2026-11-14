@@ -590,3 +590,7 @@ iptv-app/src/playlists_view.rs	try new details of {}
 # translated generic edit failure; a superseded guide reply is never displayed.
 iptv-runtime/src/commands.rs	favourites use their ordered writer
 iptv-runtime/src/stored.rs	the guide download was superseded
+# Only the thread-affinity assertion uses these operation names; they never
+# enter a result, RuntimeEvent, or visible notice.
+iptv-runtime/src/store_service.rs	blocking store read
+iptv-runtime/src/store_service.rs	blocking store request

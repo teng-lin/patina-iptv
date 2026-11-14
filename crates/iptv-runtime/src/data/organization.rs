@@ -1,9 +1,10 @@
 //! Apply user organization to the guide without replacing playback channels.
 use crate::model::SourceId;
 use iptv_guide::EpgSchedule;
+use std::rc::Rc;
 
-pub fn revision() -> u64 {
-    crate::current().organization_revision().get()
+pub fn revision(owner: &Rc<crate::Runtime>) -> u64 {
+    owner.organization_revision.get()
 }
 
 use crate::commands::load_organization as load;
@@ -19,13 +20,14 @@ use crate::commands::load_organization as load;
 /// runtime's blocking threads (`EpgSchedule::prepare`) and only turned into
 /// the schedule here, which moves it.
 pub async fn build(
+    owner: &crate::Runtime,
     source: SourceId,
     groups: Vec<iptv_providers::model::Group>,
     channels: Vec<iptv_providers::model::Channel>,
     guide: iptv_epg::GuideStore,
     now: iptv_epg::UnixTime,
 ) -> EpgSchedule {
-    let organization = match load(source).await {
+    let organization = match load(owner, source).await {
         Ok(snapshot) => Some((snapshot.organization, snapshot.lists)),
         Err(error) => {
             log::warn!("iptv organization: store unavailable: {error}");
@@ -34,12 +36,14 @@ pub async fn build(
     };
     let count = channels.len();
     let started = std::time::Instant::now();
-    let prepared = crate::executor::spawn_blocking(move || {
-        let started = std::time::Instant::now();
-        let prepared = EpgSchedule::prepare(&groups, &channels, guide, now, organization);
-        (prepared, started.elapsed())
-    })
-    .await;
+    let prepared = owner
+        .services()
+        .spawn_blocking(move || {
+            let started = std::time::Instant::now();
+            let prepared = EpgSchedule::prepare(&groups, &channels, guide, now, organization);
+            (prepared, started.elapsed())
+        })
+        .await;
     match prepared {
         Ok((prepared, took)) => {
             let schedule = EpgSchedule::from_prepared(prepared);
@@ -57,54 +61,58 @@ pub async fn build(
         }
     }
 }
-pub async fn apply(schedule: &EpgSchedule, source: SourceId) -> Option<EpgSchedule> {
-    let snapshot = match load(source).await {
+pub async fn apply(
+    owner: &Rc<crate::Runtime>,
+    schedule: &EpgSchedule,
+    source: SourceId,
+) -> Option<EpgSchedule> {
+    let snapshot = match load(owner, source).await {
         Ok(snapshot) => snapshot,
         Err(error) => {
             log::warn!("iptv organization: store unavailable: {error}");
-            crate::current().emit(crate::RuntimeEvent::Notify(
+            owner.emit(crate::RuntimeEvent::Notify(
                 "The list could not be reloaded. Reopen it and try again.",
             ));
             return None;
         }
     };
     let input = schedule.organization_builder();
-    let prepared = crate::executor::spawn_blocking(move || {
-        input.prepare(snapshot.organization, snapshot.lists)
-    })
-    .await
-    .ok()?;
+    let prepared = owner
+        .services()
+        .spawn_blocking(move || input.prepare(snapshot.organization, snapshot.lists))
+        .await
+        .ok()?;
     Some(schedule.with_prepared_organization(prepared))
 }
-pub fn changed(source: SourceId) {
-    crate::current().organization_revision().set(
-        crate::current()
-            .organization_revision()
-            .get()
-            .wrapping_add(1),
-    );
-    let ticket = crate::current().begin_organization_edit(source);
-    crate::current().emit(crate::RuntimeEvent::LibraryChanged);
-    if super::combined::active() {
-        super::combined::organization_changed(source, ticket);
+pub fn changed(owner: &Rc<crate::Runtime>, source: SourceId) {
+    owner
+        .organization_revision
+        .set(owner.organization_revision.get().wrapping_add(1));
+    let ticket = owner.begin_organization_edit(source);
+    owner.emit(crate::RuntimeEvent::LibraryChanged);
+    if super::combined::active(owner) {
+        super::combined::organization_changed(owner, source, ticket);
         return;
     }
-    if crate::current().shown.get() != Some(source) {
+    if owner.shown.get() != Some(source) {
         return;
     }
-    let schedule = crate::current().schedule();
-    super::spawn_in_app(async move {
-        if let Some(epg) = schedule
-            .as_any()
-            .and_then(|s| s.downcast_ref::<EpgSchedule>())
-            && let Some(replacement) = apply(epg, source).await
-        {
-            crate::current().emit(crate::RuntimeEvent::OrganizationReady {
-                source,
-                ticket,
-                schedule,
-                replacement: std::rc::Rc::new(replacement),
-            });
+    let schedule = owner.schedule();
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            if let Some(epg) = schedule
+                .as_any()
+                .and_then(|s| s.downcast_ref::<EpgSchedule>())
+                && let Some(replacement) = apply(&owner, epg, source).await
+            {
+                owner.emit(crate::RuntimeEvent::OrganizationReady {
+                    source,
+                    ticket,
+                    schedule,
+                    replacement: Rc::new(replacement),
+                });
+            }
         }
     });
 }

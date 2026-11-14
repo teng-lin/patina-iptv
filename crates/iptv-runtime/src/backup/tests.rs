@@ -1,4 +1,15 @@
 use super::*;
+
+/// Each test owns an independent synthetic root with its own services.
+fn export(root: &Path, destination: &Path, settings: &str) -> Result<()> {
+    super::export(&Services::for_tests(root), destination, settings)
+}
+fn stage(root: &Path, input: &mut impl Read) -> Result<()> {
+    super::stage(&Services::for_tests(root), input)
+}
+fn activate(root: &Path) -> Result<()> {
+    super::activate(&crate::Ports::for_tests(), root)
+}
 use iptv_providers::{
     SecretUrl,
     model::{M3uSourceConfig, Source, SourceConfig},
@@ -21,7 +32,7 @@ fn startup_outcomes_and_replay_protection_are_independent_per_root() {
     let start = |root: &Path| {
         let mut ports = crate::Ports::for_tests();
         ports.directory = root.to_owned();
-        crate::with_runtime(std::rc::Rc::new(crate::Runtime::new(ports)), startup)
+        startup(&ports)
     };
     assert!(start(&alpha).is_ok());
     let pending_beta = sibling(&beta, "restore-pending");

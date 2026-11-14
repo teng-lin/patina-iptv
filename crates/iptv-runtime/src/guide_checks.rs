@@ -17,19 +17,6 @@ use std::collections::BTreeMap;
 #[cfg(feature = "test-support")]
 pub(crate) type Mirror = std::sync::Arc<std::sync::Mutex<std::collections::BTreeSet<SourceId>>>;
 
-/// Whether `source` has a guide timer or an in-flight guide read in the
-/// runtime of this context (off the app's thread: the active one).
-#[cfg(feature = "test-support")]
-pub fn guide_check_registered(source: SourceId) -> bool {
-    crate::store_service::try_service().is_some_and(|owner| {
-        owner
-            .guide_checks
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .contains(&source)
-    })
-}
-
 /// What a source's registered entry is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GuideWork {
@@ -198,7 +185,7 @@ impl crate::Runtime {
         generation: u64,
         work: GuideWork,
     ) -> Option<(u64, CancelToken)> {
-        (self.generation().with(std::cell::Cell::get) == generation)
+        (self.generation.get() == generation)
             .then(|| self.guide_checks.borrow_mut().replace(source, work))
     }
     pub fn replace_guide_check(&self, source: SourceId) -> (u64, CancelToken) {
@@ -358,3 +345,9 @@ mod tests {
         assert_eq!(checks.take_owed(source), Some(300));
     }
 }
+
+#[cfg(test)]
+mod refresh_tickets;
+
+#[cfg(test)]
+mod retry;

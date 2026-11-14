@@ -2,8 +2,13 @@
 use iptv_store_sqlite::{DatabaseKey, Store, StoreError};
 use std::path::Path;
 
-pub(crate) fn open_database(path: &Path) -> Result<Store, StoreError> {
-    let key = crate::ports::database_key(path)?;
+/// The owner's key broker answers for its own library file.
+fn database_key(ports: &crate::Ports, path: &Path) -> Result<DatabaseKey, StoreError> {
+    (ports.database_key)(path).map_err(Into::into)
+}
+
+pub(crate) fn open_database(ports: &crate::Ports, path: &Path) -> Result<Store, StoreError> {
+    let key = database_key(ports, path)?;
     let store = Store::open_encrypted(path, &key)?;
     seal_documents(store, path)
 }
@@ -14,7 +19,10 @@ mod test_support_tests {
     fn absent_synthetic_key_never_reaches_the_platform_broker() {
         // This unit-test process never installs the integration harness key.
         let directory = tempfile::tempdir().unwrap();
-        let result = super::open_database(&directory.path().join("synthetic.sqlite"));
+        let result = super::open_database(
+            &crate::Ports::for_tests(),
+            &directory.path().join("synthetic.sqlite"),
+        );
         assert!(matches!(
             result,
             Err(iptv_store_sqlite::StoreError::Unavailable(
@@ -41,8 +49,11 @@ fn seal_documents(store: Store, path: &Path) -> Result<Store, StoreError> {
 /// Revalidate an encrypted pending restore; strictly validate and seal legacy
 /// plaintext pending content before it can become active.
 #[cfg(not(test))]
-pub(crate) fn validate_staged_database(path: &Path) -> Result<(), StoreError> {
-    let key = crate::ports::database_key(path)?;
+pub(crate) fn validate_staged_database(
+    ports: &crate::Ports,
+    path: &Path,
+) -> Result<(), StoreError> {
+    let key = database_key(ports, path)?;
     validate_staged_with_key(path, &key)
 }
 

@@ -90,6 +90,9 @@ const NOT_READ: &[&str] = &[
     "iptv-core/src/i18n/",
     // Declared only by opening.rs's #[cfg(test)] mod revocation; synthetic fixtures.
     "iptv-runtime/src/opening/revocation.rs",
+    // Private unit modules declared only under #[cfg(test)]; synthetic fixtures.
+    "iptv-runtime/src/guide_checks/retry.rs",
+    "iptv-runtime/src/library/guide_work_supersession.rs",
 ];
 
 /// Calls whose literal is a message: it must be a catalogue row.

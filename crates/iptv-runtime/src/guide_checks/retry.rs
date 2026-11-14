@@ -6,15 +6,13 @@
 //! sources or its guide's state do not must not take the missing part for
 //! "no guide configured" (which deletes the stored guide) or for "never
 //! downloaded" (which downloads it and makes up a check).
-use iptv_import::CancelToken;
-use iptv_runtime::{
+use crate::{
     Ports, Runtime,
-    executor::block_on,
     imports::{GuideRead, Msg, guide_pipeline},
     model::{SourceId, StoreError},
     stored::download_now,
-    with_runtime,
 };
+use iptv_import::CancelToken;
 use std::{path::Path, rc::Rc};
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -22,29 +20,38 @@ use tokio::sync::mpsc::unbounded_channel;
 /// the device's credential storage is locked.
 fn locked(directory: &Path) -> Rc<Runtime> {
     Rc::new(Runtime::new(Ports::new(directory.to_owned(), |_| {
-        Err(StoreError::Unavailable("synthetic locked credential store"))
+        Err(StoreError::unavailable("synthetic locked credential store"))
     })))
 }
 
 /// The next checks one timer check and one requested download ask for.
 fn next_checks(owner: &Rc<Runtime>) -> Vec<(SourceId, i64)> {
     let source = SourceId(7);
-    let worker = owner.scope_worker(move || {
-        let (tx, mut rx) = unbounded_channel();
-        let cancel = CancelToken::new();
-        block_on(guide_pipeline(source, &tx, GuideRead::Check, &cancel));
-        // No configs could be read either: the retry must not depend on them.
-        block_on(download_now(source, Vec::new(), &tx, &cancel));
-        drop(tx);
-        let mut checks = Vec::new();
-        while let Some(message) = rx.blocking_recv() {
-            match message {
-                Msg::NextCheck { source, at } => checks.push((source, at)),
-                _ => panic!("an unreadable store produced guide data"),
+    let worker = {
+        let services = owner.services();
+        move || {
+            let (tx, mut rx) = unbounded_channel();
+            let cancel = CancelToken::new();
+            services.block_on(guide_pipeline(
+                &services,
+                source,
+                &tx,
+                GuideRead::Check,
+                &cancel,
+            ));
+            // No configs could be read either: the retry must not depend on them.
+            services.block_on(download_now(&services, source, Vec::new(), &tx, &cancel));
+            drop(tx);
+            let mut checks = Vec::new();
+            while let Some(message) = rx.blocking_recv() {
+                match message {
+                    Msg::NextCheck { source, at } => checks.push((source, at)),
+                    _ => panic!("an unreadable store produced guide data"),
+                }
             }
+            checks
         }
-        checks
-    });
+    };
     std::thread::spawn(worker).join().unwrap()
 }
 
@@ -52,15 +59,15 @@ fn next_checks(owner: &Rc<Runtime>) -> Vec<(SourceId, i64)> {
 fn an_unreadable_store_keeps_automatic_guide_checks() {
     let directory = tempfile::tempdir().unwrap();
     let owner = locked(directory.path());
-    with_runtime(owner.clone(), || {
+    {
         owner.start_services();
         let interval = iptv_import::RefreshPolicy::from_settings(
-            &iptv_runtime::settings::get(),
+            &owner.settings(),
             &iptv_settings::Target::Global,
         )
         .interval;
         assert!(interval.is_some(), "automatic guide updates are on");
-        let before = iptv_runtime::imports::now_unix();
+        let before = crate::imports::now_unix();
         let checks = next_checks(&owner);
         assert_eq!(
             checks.len(),
@@ -72,7 +79,7 @@ fn an_unreadable_store_keeps_automatic_guide_checks() {
             assert!(at > before, "the retry is in the future");
         }
         owner.drain_services();
-    });
+    };
 }
 
 #[test]
@@ -88,12 +95,12 @@ fn an_unreadable_store_arms_no_check_when_guide_updates_are_manual() {
     )
     .unwrap();
     let owner = locked(directory.path());
-    with_runtime(owner.clone(), || {
+    {
         owner.start_services();
-        iptv_runtime::settings::load();
+        owner.load_settings();
         assert!(next_checks(&owner).is_empty());
         owner.drain_services();
-    });
+    };
 }
 
 const KEY: [u8; 32] = [0x69; 32];
@@ -105,7 +112,7 @@ fn stored(directory: &Path) -> (Rc<Runtime>, SourceId) {
         SecretUrl,
         model::{M3uSourceConfig, Source, SourceConfig},
     };
-    let key = iptv_runtime::model::DatabaseKey::from_bytes(KEY);
+    let key = crate::model::DatabaseKey::from_bytes(KEY);
     let mut store =
         iptv_store_sqlite::Store::open_encrypted(directory.join("iptv.sqlite"), &key).unwrap();
     let source = store
@@ -118,19 +125,19 @@ fn stored(directory: &Path) -> (Rc<Runtime>, SourceId) {
             }),
         })
         .unwrap();
-    let guide = iptv_runtime::guides::user_source(
-        iptv_runtime::guides::FIRST_USER_FEED,
+    let guide = crate::guides::user_source(
+        crate::guides::FIRST_USER_FEED,
         // Nothing listens there: a download that is tried fails at once.
         SecretUrl::new("http://127.0.0.1:9/guide.xml"),
         None,
     );
     store.set_guide_sources(source, &[guide]).unwrap();
     store
-        .record_epg_failure(source, iptv_runtime::model::ImportErrorKind::Network)
+        .record_epg_failure(source, crate::model::ImportErrorKind::Network)
         .unwrap();
     drop(store);
     let owner = Rc::new(Runtime::new(Ports::new(directory.to_owned(), |_| {
-        Ok(iptv_runtime::model::DatabaseKey::from_bytes(KEY))
+        Ok(crate::model::DatabaseKey::from_bytes(KEY))
     })));
     (owner, source)
 }
@@ -148,24 +155,28 @@ fn raw(directory: &Path) -> rusqlite::Connection {
 /// What one timer check of `source` sends: its next checks, and how many
 /// other messages (guide data, "no check").
 fn timer_check(owner: &Rc<Runtime>, source: SourceId) -> (Vec<i64>, usize) {
-    let worker = owner.scope_worker(move || {
-        let (tx, mut rx) = unbounded_channel();
-        block_on(guide_pipeline(
-            source,
-            &tx,
-            GuideRead::Check,
-            &CancelToken::new(),
-        ));
-        drop(tx);
-        let (mut checks, mut others) = (Vec::new(), 0);
-        while let Some(message) = rx.blocking_recv() {
-            match message {
-                Msg::NextCheck { at, .. } => checks.push(at),
-                _ => others += 1,
+    let worker = {
+        let services = owner.services();
+        move || {
+            let (tx, mut rx) = unbounded_channel();
+            services.block_on(guide_pipeline(
+                &services,
+                source,
+                &tx,
+                GuideRead::Check,
+                &CancelToken::new(),
+            ));
+            drop(tx);
+            let (mut checks, mut others) = (Vec::new(), 0);
+            while let Some(message) = rx.blocking_recv() {
+                match message {
+                    Msg::NextCheck { at, .. } => checks.push(at),
+                    _ => others += 1,
+                }
             }
+            (checks, others)
         }
-        (checks, others)
-    });
+    };
     std::thread::spawn(worker).join().unwrap()
 }
 
@@ -173,9 +184,9 @@ fn timer_check(owner: &Rc<Runtime>, source: SourceId) -> (Vec<i64>, usize) {
 fn unreadable_guide_sources_are_not_taken_for_no_guide_configured() {
     let directory = tempfile::tempdir().unwrap();
     let (owner, source) = stored(directory.path());
-    with_runtime(owner.clone(), || {
+    {
         owner.start_services();
-        let before = iptv_runtime::imports::now_unix();
+        let before = crate::imports::now_unix();
         // Readable: the policy backs off after the failed download.
         let (checks, others) = timer_check(&owner, source);
         assert_eq!((checks.len(), others), (1, 0), "{checks:?}");
@@ -196,7 +207,7 @@ fn unreadable_guide_sources_are_not_taken_for_no_guide_configured() {
             .unwrap();
         assert_eq!(kept, 1, "the stored guide's state was not deleted");
         owner.drain_services();
-    });
+    };
 }
 
 #[test]
@@ -212,9 +223,9 @@ fn an_unreadable_guide_state_makes_up_no_check_when_guide_updates_are_manual() {
     )
     .unwrap();
     let (owner, source) = stored(directory.path());
-    with_runtime(owner.clone(), || {
+    {
         owner.start_services();
-        iptv_runtime::settings::load();
+        owner.load_settings();
         // Readable: the back-off is owed whatever the interval.
         let (checks, others) = timer_check(&owner, source);
         assert_eq!((checks.len(), others), (1, 0), "{checks:?}");
@@ -230,7 +241,7 @@ fn an_unreadable_guide_state_makes_up_no_check_when_guide_updates_are_manual() {
             "silent: no download and no check made up: {checks:?}"
         );
         owner.drain_services();
-    });
+    };
 }
 
 /// Guide work that was superseded writes nothing more: neither a failure
@@ -242,7 +253,7 @@ fn an_unreadable_guide_state_makes_up_no_check_when_guide_updates_are_manual() {
 fn superseded_guide_work_writes_neither_a_failure_nor_a_discard() {
     let directory = tempfile::tempdir().unwrap();
     let (owner, source) = stored(directory.path());
-    with_runtime(owner.clone(), || {
+    {
         owner.start_services();
         // What the store notes of the guide: whether, and its last error.
         let noted = || -> (i64, Option<String>) {
@@ -256,18 +267,21 @@ fn superseded_guide_work_writes_neither_a_failure_nor_a_discard() {
         };
         // One failure and one discard by work that is stopped or not.
         let write = |stopped: bool, discard: bool| {
-            let worker = owner.scope_worker(move || {
-                let stop = CancelToken::new();
-                if stopped {
-                    stop.cancel();
+            let worker = {
+                let services = owner.services();
+                move || {
+                    let stop = CancelToken::new();
+                    if stopped {
+                        stop.cancel();
+                    }
+                    if discard {
+                        crate::stored::discard(&services, source, &[&stop]);
+                    } else {
+                        let error = iptv_import::ImportError::Storage("synthetic".into());
+                        crate::stored::record_failure(&services, source, &error, &[], &[&stop]);
+                    }
                 }
-                if discard {
-                    iptv_runtime::stored::discard(source, &[&stop]);
-                } else {
-                    let error = iptv_import::ImportError::Storage("synthetic".into());
-                    iptv_runtime::stored::record_failure(source, &error, &[], &[&stop]);
-                }
-            });
+            };
             std::thread::spawn(worker).join().unwrap();
         };
         assert_eq!(noted(), (1, Some("network".into())), "as stored");
@@ -281,5 +295,5 @@ fn superseded_guide_work_writes_neither_a_failure_nor_a_discard() {
         write(false, true);
         assert_eq!(noted(), (0, None));
         owner.drain_services();
-    });
+    };
 }

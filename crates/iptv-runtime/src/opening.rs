@@ -65,7 +65,8 @@ pub fn first_rows(channels: &[Channel], focus: Option<&str>) -> Vec<ChannelKey> 
 
 /// Sends `id`'s stored channels with the first screen's programmes, then
 /// with the whole guide window. Nothing when it has no channels.
-pub async fn send_stored(
+pub(crate) async fn send_stored(
+    services: &super::store_service::Services,
     job: &Job,
     id: SourceId,
     now: UnixTime,
@@ -73,12 +74,13 @@ pub async fn send_stored(
     cancel: &CancelToken,
     revoked: &CancelToken,
 ) -> bool {
-    send_stored_after(job, id, now, tx, &[cancel, revoked], async {}).await
+    send_stored_after(services, job, id, now, tx, &[cancel, revoked], async {}).await
 }
 
 // The continuation is normally ready immediately. A unit test can hold this
 // one opening after its metadata read without changing any other owner/task.
 async fn send_stored_after(
+    services: &super::store_service::Services,
     job: &Job,
     id: SourceId,
     now: UnixTime,
@@ -86,22 +88,25 @@ async fn send_stored_after(
     stops: &[&CancelToken],
     metadata_read: impl std::future::Future<Output = ()>,
 ) -> bool {
+    let settings = services.settings();
     let started = Instant::now();
     let ms = |t: Instant| t.elapsed().as_millis();
-    let (groups, channels) =
-        match super::store_service::read(move |store| stored::catalog_in(store, id)).await {
-            Ok(catalog) => catalog,
-            Err(e) => {
-                log::warn!("iptv data: stored catalog: {e}");
-                return false;
-            }
-        };
+    let (groups, channels) = match services
+        .read(move |store| stored::catalog_in(store, id))
+        .await
+    {
+        Ok(catalog) => catalog,
+        Err(e) => {
+            log::warn!("iptv data: stored catalog: {e}");
+            return false;
+        }
+    };
     if channels.is_empty() {
         return false;
     }
     let n = channels.len();
     log::info!("iptv data: showing {n} stored channels before the refresh");
-    crate::ports::mark_with("channels read", format_args!("{n} in {} ms", ms(started)));
+    services.mark("channels read", format_args!("{n} in {} ms", ms(started)));
     let imported = |groups, channels, guide| {
         let context = super::playback::stored_context(&job.source.config);
         Box::new(Imported {
@@ -116,9 +121,11 @@ async fn send_stored_after(
     };
     let started = Instant::now();
     let (from, to) = first_screen(now);
-    let resumes = super::settings::flag(iptv_settings::keys::RESUME_LAST_CHANNEL);
+    let resumes = super::settings::flag(&settings, iptv_settings::keys::RESUME_LAST_CHANNEL);
     let focus = if resumes {
-        super::store_service::read(move |_| Ok(super::playback::load_last_channel(Some(id))))
+        let accepted = services.clone();
+        services
+            .read(move |_| Ok(super::playback::load_last_channel(&accepted, Some(id))))
             .await
             .ok()
             .flatten()
@@ -127,22 +134,23 @@ async fn send_stored_after(
     };
     let keys = first_rows(&channels, focus.as_deref());
     let query_keys = keys.clone();
-    if let Ok(guide) = super::store_service::read(move |store| {
-        store.load_epg(
-            id,
-            &EpgWindow {
-                from,
-                to,
-                keys: Some(&query_keys),
-                ..EpgWindow::from(now, 0)
-            },
-        )
-    })
-    .await
+    if let Ok(guide) = services
+        .read(move |store| {
+            store.load_epg(
+                id,
+                &EpgWindow {
+                    from,
+                    to,
+                    keys: Some(&query_keys),
+                    ..EpgWindow::from(now, 0)
+                },
+            )
+        })
+        .await
         && guide.bound_count() > 0
     {
         let kib = guide.heap_bytes() / 1024;
-        crate::ports::mark_with(
+        services.mark(
             "first screen read",
             format_args!("{} channels, {kib} KiB in {} ms", keys.len(), ms(started)),
         );
@@ -151,28 +159,28 @@ async fn send_stored_after(
         let _ = tx.send(Msg::FirstScreen(first, held));
     }
     let started = Instant::now();
-    let window = super::paging::window(now, stored::keep_past_days(&super::settings::get()));
-    let guide = super::store_service::read(move |store| {
-        store.load_epg(id, &super::paging::store_window(window))
-    })
-    .await
-    .unwrap_or_default();
+    let window = super::paging::window(now, stored::keep_past_days(&services.settings()));
+    let guide = services
+        .read(move |store| store.load_epg(id, &super::paging::store_window(window)))
+        .await
+        .unwrap_or_default();
     let (bound, kib) = (guide.bound_count(), guide.heap_bytes() / 1024);
-    crate::ports::mark_with(
+    services.mark(
         "guide window read",
         format_args!("{bound} channels, {kib} KiB in {} ms", ms(started)),
     );
     // A cached-only opening must complete without claiming a network slot.
-    let metadata = super::store_service::read(move |store| {
-        Ok((
-            store.source_policy(id)?,
-            store.import_status(id)?,
-            store.epg_guide(id)?,
-            store.guide_sources(id)?,
-            store.epg_overrides(id)?,
-        ))
-    })
-    .await;
+    let metadata = services
+        .read(move |store| {
+            Ok((
+                store.source_policy(id)?,
+                store.import_status(id)?,
+                store.epg_guide(id)?,
+                store.guide_sources(id)?,
+                store.epg_overrides(id)?,
+            ))
+        })
+        .await;
     metadata_read.await;
     if let Ok((policy, status, state, sources, overrides)) = metadata {
         let playlist_due = status.last_success_at.is_none()
@@ -185,8 +193,12 @@ async fn send_stored_after(
                 ),
             );
         if !playlist_due {
-            let configs =
-                stored::configs_from_sources(&sources, state.as_ref(), Some(&job.source.config));
+            let configs = stored::configs_from_sources(
+                &services.settings(),
+                &sources,
+                state.as_ref(),
+                Some(&job.source.config),
+            );
             let overrides = overrides
                 .into_iter()
                 .map(|(id, epg)| (ChannelKey::new(id.as_str()), epg.to_override()))
@@ -195,7 +207,8 @@ async fn send_stored_after(
                 channels: &channels,
                 overrides: &overrides,
             };
-            let decision = stored::plan(
+            let decision = stored::plan_with(
+                &services.settings(),
                 job.purpose.trigger(),
                 &configs,
                 matching,
@@ -205,13 +218,14 @@ async fn send_stored_after(
             if !matches!(decision, iptv_import::Decision::Refresh(_)) {
                 let guide = if matches!(decision, iptv_import::Decision::Discard) {
                     let stops = stored::Stops::of(stops);
-                    let discarded = super::store_service::call(move |store| {
-                        if stops.superseded() {
-                            return Ok(None);
-                        }
-                        store.delete_epg(id).map(Some)
-                    })
-                    .await;
+                    let discarded = services
+                        .call(move |store| {
+                            if stops.superseded() {
+                                return Ok(None);
+                            }
+                            store.delete_epg(id).map(Some)
+                        })
+                        .await;
                     if !matches!(discarded, Ok(Some(_))) {
                         // A superseded opening has no authoritative policy
                         // answer. Let its caller's cancelled/current work
@@ -230,7 +244,14 @@ async fn send_stored_after(
                 };
                 let _ = tx.send(
                     match stored::check_at(
-                        stored::plan(iptv_import::Trigger::Timer, &configs, matching, state, now),
+                        stored::plan_with(
+                            &services.settings(),
+                            iptv_import::Trigger::Timer,
+                            &configs,
+                            matching,
+                            state,
+                            now,
+                        ),
                         now,
                     ) {
                         Some(at) => Msg::NextCheck { source: id, at },

@@ -14,6 +14,7 @@ pub fn bind(ui: Ui) {
         untracked(|| {
             let schedule = crate::schedule();
             crate::runtime::data::pages::pin_archive(
+                &crate::runtime(),
                 archive.map(|(channel, minute)| {
                     (channel, iptv_core::guide::unix_of(&*schedule, minute))
                 }),
@@ -26,7 +27,7 @@ pub fn bind(ui: Ui) {
         let home = ui.focus.with(|f| f.window == home_window(f.now));
         if home && away.replace(false) {
             untracked(|| {
-                crate::runtime::data::pages::evict();
+                crate::runtime::data::pages::evict(&crate::runtime());
             });
         }
         away.set(!home);
