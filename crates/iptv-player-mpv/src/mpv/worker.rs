@@ -732,6 +732,8 @@ mod tests {
         let origin_address = origin.local_addr().unwrap();
         // Keep this unique source origin reserved through the counter assertion.
         let _origin_lifetime = origin.try_clone().unwrap();
+        let source_url = format!("http://{origin_address}/list.m3u8");
+        let keys_before = iptv_net::playback::PlaybackRelay::key_requests_for(&source_url);
         origin.set_nonblocking(true).unwrap();
         let forbidden = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         forbidden.set_nonblocking(true).unwrap();
@@ -795,9 +797,7 @@ mod tests {
             "the player fetched the synthetic playlist"
         );
         assert!(
-            iptv_net::playback::PlaybackRelay::key_requests_for(&format!(
-                "http://{origin_address}/list.m3u8"
-            )) >= 1,
+            iptv_net::playback::PlaybackRelay::key_requests_for(&source_url) > keys_before,
             "the player requested the encryption key through the relay"
         );
         assert!(
