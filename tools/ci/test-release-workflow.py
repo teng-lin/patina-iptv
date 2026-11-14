@@ -485,7 +485,7 @@ class NativeDependencyWorkflow(unittest.TestCase):
         native = jobs(ROOT / ".github/workflows/mpv-runtime.yml")
         publishers = {name: block for name, block in native.items()
                       if re.search(r"^      contents: write$", block, re.M)}
-        expected = {"windows": "publish", "linux": "linux-publish", "macos": "macos-publish"}
+        expected = {"windows": "publish", "linux": "linux-publish", "macos": "macos-publish", "ios": "ios-publish"}
         self.assertEqual(set(publishers), set(expected.values()))
         guard = re.search(r"^        if: (.+)$", native["guard"], re.M)[1]
         self.assertIn("exit 1", native["guard"])

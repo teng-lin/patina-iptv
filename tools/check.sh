@@ -48,6 +48,7 @@ python3 tools/ci/test-sign-android.py
 python3 tools/ci/test-sbom.py
 python3 tools/ci/test-coverage-floors.py
 python3 tools/ci/test-native-sources.py
+python3 tools/mpv-runtime-ios/test_build.py
 python3 tools/ci/test-check-parity.py
 python3 tools/ci/test-fuzz-targets.py
 echo "all checks passed"
