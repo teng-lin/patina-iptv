@@ -605,3 +605,7 @@ iptv-runtime/src/inspection/probe.rs	probe channel inspection stopped
 iptv-runtime/src/inspection/probe.rs	probe channel limit exceeded
 iptv-runtime/src/inspection/probe.rs	probe integrity failed
 iptv-runtime/src/inspection/probe.rs	probe integrity inspection stopped
+
+# Native repair cache adapter errors become portable Storage; never rendered verbatim.
+iptv-runtime/src/guide_repair/publication.rs	guide repair commit is missing
+iptv-runtime/src/guide_repair/publication.rs	guide repair was superseded

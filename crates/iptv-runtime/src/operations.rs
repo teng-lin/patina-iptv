@@ -277,6 +277,16 @@ impl Runtime {
 
 #[cfg(feature = "test-support")]
 impl Runtime {
+    /// Captures completion of the current synthetic import before it is revoked.
+    pub fn pending_import_completion(
+        &self,
+        source: SourceId,
+    ) -> Option<impl Future<Output = ()> + use<>> {
+        crate::library::pending_import(self, source).map(|job| async move {
+            job.until_finished().await;
+        })
+    }
+
     /// Occupies the store writer for `duration` after the work queued
     /// before it.
     pub fn occupy_writer(&self, duration: std::time::Duration) {
@@ -294,6 +304,20 @@ impl Runtime {
             let _ = entered.send(());
             let _ = resume.recv_timeout(std::time::Duration::from_secs(10));
             Ok(())
+        }));
+        (observed, release)
+    }
+
+    /// Pauses the next inspection after SQLite has actually executed scan work.
+    /// The bounded test barrier never changes a production build's behavior.
+    pub fn hold_inspection_scan(
+        &self,
+    ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (entered, observed) = std::sync::mpsc::channel();
+        let (release, resume) = std::sync::mpsc::channel();
+        *self.inspection_scan.borrow_mut() = Some(Box::new(move || {
+            let _ = entered.send(());
+            let _ = resume.recv_timeout(std::time::Duration::from_secs(10));
         }));
         (observed, release)
     }

@@ -36,6 +36,11 @@ const DEV_DEPENDENCIES: &[&str] = &["rusqlite", "tempfile"];
 /// named operations included, reaches the store through these.
 const STORE_ADAPTER_USERS: &[&str] = &[
     "assign.rs",
+    "guide_repair.rs",
+    "guide_repair/prepare.rs",
+    "guide_repair/publication.rs",
+    "guide_repair/tests.rs",
+    "guide_repair/write.rs",
     "backup.rs",
     "backup/error.rs",
     "backup/tests.rs",

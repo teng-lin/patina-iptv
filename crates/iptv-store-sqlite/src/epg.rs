@@ -490,6 +490,18 @@ impl Store {
             "UPDATE epg_guides SET bound_channels = ?2, ends_at = ?3 WHERE source_id = ?1",
             params![source.0, counts.bindings as i64, ends_at],
         )?;
+        // Only a complete binding replacement proves the whole automatic
+        // projection. A one-row cached rebind cannot renew this authority.
+        tx.execute(
+            "INSERT INTO store_meta(key,value)
+             SELECT ?1,?2 || ':' || configuration_revision FROM guide_revisions WHERE source_id=?3
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            params![
+                matching_projection_key(source),
+                format!("{match_fingerprint:016x}"),
+                source.0
+            ],
+        )?;
         tx.commit()?;
         Ok(counts)
     }
@@ -681,4 +693,9 @@ impl Store {
         tx.commit()?;
         Ok(n > 0)
     }
+}
+
+/// Authority for a complete projection, separate from the legacy refresh hash.
+pub(crate) fn matching_projection_key(source: SourceId) -> String {
+    format!("epg.match.projection.{}", source.0)
 }

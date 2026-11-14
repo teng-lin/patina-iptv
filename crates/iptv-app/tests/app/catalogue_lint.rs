@@ -92,6 +92,7 @@ const NOT_READ: &[&str] = &[
     "iptv-runtime/src/opening/revocation.rs",
     // Private unit modules declared only under #[cfg(test)]; synthetic fixtures.
     "iptv-runtime/src/guide_checks/retry.rs",
+    "iptv-runtime/src/guide_repair/tests.rs",
     "iptv-runtime/src/library/guide_work_supersession.rs",
 ];
 

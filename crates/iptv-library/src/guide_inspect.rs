@@ -17,6 +17,12 @@ pub enum Row {
     Next,
     NewLink,
     InspectLink,
+    ReuseInspected,
+    UseCandidate,
+    AutomaticRepair,
+    NoGuideRepair,
+    ReviewRepair,
+    RepairHistory,
     Back,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -44,7 +50,10 @@ pub struct Screen {
     pub samples: Vec<CandidateProgramme>,
     pub current: Vec<ProgrammeInfo>,
     pub subject: Option<ChannelRef>,
+    pub selected: Option<CandidateRef>,
+    pub pending_repairs: usize,
     pub stage: Option<ProbeSummary>,
+    pub retained_stage: Option<ProbeSummary>,
     pub next: Option<Cursor>,
     parents: Vec<ParentPage>,
 }
@@ -55,7 +64,7 @@ impl Screen {
             window,
             mode: Mode::Audit,
             samples_back: Mode::Candidates,
-            focus: Row::Search,
+            focus: Row::NewLink,
             request: 0,
             busy: false,
             typing: false,
@@ -67,7 +76,10 @@ impl Screen {
             samples: Vec::new(),
             current: Vec::new(),
             subject: None,
+            selected: None,
+            pending_repairs: 0,
             stage: None,
+            retained_stage: None,
             next: None,
             parents: Vec::new(),
         }
@@ -119,9 +131,22 @@ impl Screen {
         if self.next.is_some() {
             rows.push(Row::Next);
         }
-        if self.mode == Mode::Audit {
+        if matches!(self.mode, Mode::Audit | Mode::Candidates) {
             rows.push(Row::NewLink);
         }
+        if self.mode == Mode::Candidates && self.subject.is_some() {
+            if self.retained_stage.is_some() {
+                rows.push(Row::ReuseInspected);
+            }
+            rows.extend([Row::AutomaticRepair, Row::NoGuideRepair]);
+        }
+        if self.mode == Mode::Samples && self.selected.is_some() && self.subject.is_some() {
+            rows.push(Row::UseCandidate);
+        }
+        if self.pending_repairs > 0 {
+            rows.push(Row::ReviewRepair);
+        }
+        rows.push(Row::RepairHistory);
         rows.push(Row::Back);
         rows
     }

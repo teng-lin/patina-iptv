@@ -44,7 +44,13 @@ mod epg_stage;
 mod epg_titles;
 mod epg_window;
 mod error;
+mod guide_repair;
 mod guide_revisions;
+pub use guide_repair::{
+    MAX_REPAIR_MAPPINGS, REPAIR_UNDO_SECONDS, RepairBatch, RepairBinding, RepairCandidate,
+    RepairChannel, RepairChoice, RepairCommit, RepairFeed, RepairInputs, RepairMapping,
+    RepairPublication, RepairResult, RepairVerification,
+};
 mod guide_sources;
 pub use guide_revisions::GuideRevisions;
 mod history;

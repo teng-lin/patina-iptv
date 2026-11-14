@@ -90,6 +90,7 @@ pub fn import_is_current(
     })
 }
 pub fn revoke_import_handoff(owner: &super::Runtime, source: SourceId) {
+    owner.repairs.borrow_mut().revoke(source);
     if let Some(job) = owner.completions.with(|jobs| {
         jobs.borrow_mut()
             .remove(&source)

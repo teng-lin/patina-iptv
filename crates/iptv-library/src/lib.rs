@@ -239,5 +239,11 @@ pub enum OrganizationScope {
 /// Source-scoped application query and guide-inspection values.
 pub mod inspection;
 
+/// Transactional guide repair contract values.
+pub mod guide_repair;
+
 /// Portable state for inspecting guide coverage and candidate schedules.
 pub mod guide_inspect;
+
+/// Portable batch guide repair editor state.
+pub mod guide_repair_screen;

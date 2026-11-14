@@ -1,5 +1,8 @@
 //! Application-owned state and events. This module has no UI toolkit imports.
 //!
+//! The supported query/inspection/repair facade is specified in
+//! `docs/runtime-api-v1.md`; other public helpers remain experimental.
+//!
 //! A [`Runtime`] is one application owner. Everything it owns (its store
 //! connections, file writer, network executor, refresh pool, settings and
 //! platform ports) is reached through the handle the caller passes; nothing
@@ -25,6 +28,7 @@
 pub mod data;
 mod error;
 mod events;
+pub mod guide_repair;
 pub mod inspection;
 mod operations;
 pub use error::Error;
@@ -85,11 +89,14 @@ type Updates = Vec<(SourceId, Rc<ImportWork>)>;
 type SavedSettings = RefCell<Option<(u64, std::sync::Arc<iptv_settings::Settings>)>>;
 
 pub struct Runtime {
+    repairs: RefCell<guide_repair::State>,
     account_streams: Slot<Cell<Option<u32>>>,
     resolving: Slot<Resolves>,
     wizard_import: Slot<RefCell<Option<(iptv_core::wizard::ImportId, CancelToken)>>>,
     store: std::sync::Arc<store_service::Service>,
     inspection: inspection::Vault,
+    #[cfg(feature = "test-support")]
+    inspection_scan: RefCell<Option<inspection::ScanHook>>,
     settings_saved: Slot<SavedSettings>,
     settings_changed: Slot<Cell<u64>>,
     settings_read_only: Cell<Option<std::io::ErrorKind>>,
@@ -147,11 +154,14 @@ impl Runtime {
         #[cfg(not(feature = "test-support"))]
         let guide_checks = guide_checks::GuideChecks::default();
         Self {
+            repairs: RefCell::default(),
             account_streams: Slot::default(),
             resolving: Slot::default(),
             wizard_import: Slot::default(),
             store,
             inspection: inspection::Vault::new(),
+            #[cfg(feature = "test-support")]
+            inspection_scan: RefCell::default(),
             settings_saved: Slot::default(),
             settings_changed: Slot::default(),
             settings_read_only: Cell::new(None),
@@ -266,6 +276,7 @@ impl Runtime {
         // Retire services now, rather than waiting for its last Rc to drop.
         self.store.retire();
         self.inspection.clear();
+        self.repairs.borrow_mut().clear();
         drained
     }
 

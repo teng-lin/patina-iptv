@@ -15,6 +15,8 @@ use std::{
 };
 
 pub const QUERY_DEADLINE: Duration = Duration::from_secs(3);
+#[cfg(feature = "test-support")]
+pub(crate) type ScanHook = Box<dyn FnMut() + Send>;
 
 #[derive(Clone, Debug)]
 pub struct InspectionControl {
@@ -79,12 +81,30 @@ where
     let token = CancelToken::new();
     let operation_cancel = token.clone();
     let slot = owner.inspection.admit();
+    #[cfg(feature = "test-support")]
+    let mut scan = owner.inspection_scan.borrow_mut().take();
     let read: std::pin::Pin<
         Box<dyn Future<Output = iptv_store_sqlite::Result<InspectionResult<T>>> + Send>,
     > = match slot {
         Some(slot) => Box::pin(services.analyze(move |store| {
             let _slot = slot;
-            store.inspection_read(token, deadline, operation)
+            #[cfg(feature = "test-support")]
+            {
+                store.inspection_read_observed(
+                    token,
+                    deadline,
+                    move || {
+                        if let Some(mut hook) = scan.take() {
+                            hook();
+                        }
+                    },
+                    operation,
+                )
+            }
+            #[cfg(not(feature = "test-support"))]
+            {
+                store.inspection_read(token, deadline, operation)
+            }
         })),
         None => Box::pin(async { Ok(Err(InspectionError::Busy)) }),
     };

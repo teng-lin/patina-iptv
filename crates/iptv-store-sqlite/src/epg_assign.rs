@@ -217,6 +217,10 @@ impl Store {
              WHERE source_id = ?1",
             params![source.0, match_fingerprint as i64],
         )?;
+        tx.execute(
+            "DELETE FROM store_meta WHERE key=?1",
+            [crate::epg::matching_projection_key(source)],
+        )?;
         tx.commit()?;
         Ok(true)
     }
