@@ -10,6 +10,17 @@ pub struct GuideRevisions {
     pub configuration: u64,
 }
 
+pub(crate) fn revision(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
+    let value: i64 = row.get(index)?;
+    value.try_into().map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            index,
+            rusqlite::types::Type::Integer,
+            Box::new(error),
+        )
+    })
+}
+
 impl Store {
     /// Stable across ordinary owner restart; changes if a source row is reused.
     pub fn source_incarnation(&self, source: SourceId) -> Result<String> {
@@ -45,8 +56,8 @@ impl Store {
                 [source.0],
                 |row| {
                     Ok(GuideRevisions {
-                        mapping: row.get(0)?,
-                        configuration: row.get(1)?,
+                        mapping: revision(row, 0)?,
+                        configuration: revision(row, 1)?,
                     })
                 },
             )
