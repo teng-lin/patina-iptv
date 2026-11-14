@@ -757,6 +757,10 @@ fn guide_snapshot(guide: &StoredGuide) -> iptv_library::GuideSnapshot {
     }
 }
 
+pub(crate) fn guide_edit_revision(owner: &super::Runtime, source: SourceId) -> u64 {
+    owner.edits.borrow().get(&source).copied().unwrap_or(0)
+}
+
 pub fn next_guide_edit(owner: &super::Runtime, source: SourceId) -> u64 {
     owner.edits.with(|edits| {
         let mut edits = edits.borrow_mut();

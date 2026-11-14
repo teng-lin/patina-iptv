@@ -101,8 +101,8 @@ pub struct FeedPreview {
 pub struct IndirectEffect {
     pub channel: ChannelRef,
     pub name: String,
-    pub before: Option<(FeedId, String)>,
-    pub after: Option<(FeedId, String)>,
+    pub before: Option<Target>,
+    pub after: Option<Target>,
     /// Schedule shifts and feed changes can affect a binding that retains identity.
     pub timing_changed: bool,
 }
@@ -115,6 +115,7 @@ pub struct Preview {
     pub expires_at: i64,
     pub mapping_count: usize,
     pub indirect_count: usize,
+    pub indirect_complete: bool,
     pub mappings: Vec<MappingPreview>,
     pub feeds: Vec<FeedPreview>,
     pub indirect: Vec<IndirectEffect>,
@@ -188,6 +189,8 @@ pub struct Verification {
     pub covered_seconds: u64,
     pub identity_unresolved: bool,
     pub current_revision: bool,
+    pub configuration_effective: bool,
+    pub verified_coverage: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {

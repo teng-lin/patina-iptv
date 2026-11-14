@@ -271,10 +271,12 @@ pub(super) async fn show(
     let source = imported.source;
     let generation = owner.generation.with(Cell::get);
     let revision = library::import_revision(owner, source);
+    let guide_revision = crate::stored::guide_edit_revision(owner, source);
     let current = || {
         includes(owner, source)
             && owner.generation.with(Cell::get) == generation
             && library::import_revision_is_current(owner, source, &revision)
+            && crate::stored::guide_edit_revision(owner, source) == guide_revision
     };
     let Imported {
         groups,

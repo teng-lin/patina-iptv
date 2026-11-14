@@ -1,5 +1,8 @@
 //! Atomic, affected-row-conditional guide configuration edits and durable inverses.
 //! Network and staged evidence validation belong to the runtime accepting a batch.
+mod verification;
+pub use verification::RepairVerification;
+
 use std::collections::{HashMap, HashSet};
 
 use iptv_epg::FeedId;
@@ -384,10 +387,11 @@ impl Store {
         {
             return Ok(RepairResult::Invalid);
         }
-        let now = self.now();
+        let clock = self.clock;
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = clock();
         if let Some((commit, payload)) = commit_value(&tx, id)? {
             return Ok(if payload["digest"].as_str() == Some(digest) {
                 RepairResult::Committed(commit)
@@ -504,8 +508,9 @@ impl Store {
                 .or(patch.after.as_ref())
                 .ok_or_else(invalid)?
                 .feed;
+            let before_position = current.iter().position(|f| f.feed == feed);
             feed_payload.push(json!({"before":feed_json(patch.before.as_ref()),
-                "after":feed_json(patch.after.as_ref())}));
+                "after":feed_json(patch.after.as_ref()),"position_before":before_position}));
             if let Some(position) = current.iter().position(|f| f.feed == feed) {
                 match &patch.after {
                     Some(after) => current[position] = after.clone(),
@@ -608,10 +613,11 @@ impl Store {
     /// All-or-nothing inverse against affected after-values, preserving every
     /// unrelated overlay/config edit. Ordinary restart retains the journal.
     pub fn undo_guide_repair(&mut self, id: &str) -> Result<RepairResult> {
-        let now = self.now();
+        let clock = self.clock;
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = clock();
         let Some((commit, mut payload)) = commit_value(&tx, id)? else {
             return Ok(RepairResult::Missing);
         };

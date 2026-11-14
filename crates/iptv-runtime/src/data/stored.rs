@@ -163,12 +163,12 @@ pub fn update_now(owner: &Rc<crate::Runtime>, done: impl FnOnce() + 'static) -> 
 }
 
 /// Work cancelled by a guide action, until its writer guards unwind.
-pub(super) struct Superseded {
+pub(crate) struct Superseded {
     pub cancelled: Option<super::library::ImportCompletion>,
     pub read: Option<GuideWork>,
 }
 impl Superseded {
-    pub(super) fn keep_check(
+    pub(crate) fn keep_check(
         &self,
         owner: &Rc<crate::Runtime>,
         source: SourceId,
@@ -182,7 +182,8 @@ impl Superseded {
         }
     }
 }
-pub(super) fn supersede(owner: &Rc<crate::Runtime>, source: SourceId) -> Superseded {
+pub(crate) fn supersede(owner: &Rc<crate::Runtime>, source: SourceId) -> Superseded {
+    crate::stored::next_guide_edit(owner, source);
     Superseded {
         cancelled: super::library::supersede_import(owner, source),
         read: owner.interrupt_guide_read(source),
@@ -205,7 +206,7 @@ pub fn update_source(
     if update_current(owner, source) {
         return true;
     }
-    start_update(owner, source, None, done)
+    start_update(owner, source, None, false, done)
 }
 
 /// [`update_source`] for a change the download has to include (a
@@ -218,13 +219,23 @@ pub(super) fn restart_update(
     after: Option<super::library::ImportCompletion>,
     done: impl FnOnce(bool) + 'static,
 ) -> bool {
-    start_update(owner, source, after, done)
+    start_update(owner, source, after, false, done)
+}
+
+pub(crate) fn restart_repair_update(
+    owner: &Rc<crate::Runtime>,
+    source: SourceId,
+    after: Option<super::library::ImportCompletion>,
+    done: impl FnOnce(bool) + 'static,
+) -> bool {
+    start_update(owner, source, after, true, done)
 }
 
 fn start_update(
     owner: &std::rc::Rc<crate::Runtime>,
     source: SourceId,
     after: Option<super::library::ImportCompletion>,
+    force: bool,
     done: impl FnOnce(bool) + 'static,
 ) -> bool {
     let has_guides = owner.status.with(|status| {
@@ -237,7 +248,7 @@ fn start_update(
                 .is_some_and(|guide| !guide.configs().is_empty()),
         }
     });
-    if !has_guides {
+    if !has_guides && !force {
         return false;
     }
     // This update owns the source's guide from now on: work it replaces

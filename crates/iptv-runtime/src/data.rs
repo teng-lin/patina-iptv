@@ -344,6 +344,24 @@ fn start_import_with(
 }
 
 /// Puts `imported` on screen unless a newer import owns the guide.
+pub(crate) fn repair_source_shown(owner: &Rc<crate::Runtime>, source: SourceId) -> bool {
+    owner.shown.get() == Some(source) || combined::includes(owner, source)
+}
+
+pub(crate) async fn show_repair(
+    owner: &Rc<crate::Runtime>,
+    imported: Box<Imported>,
+    generation: u64,
+    edit: u64,
+) {
+    if !repair_source_shown(owner, imported.source)
+        || crate::stored::guide_edit_revision(owner, imported.source) != edit
+    {
+        return;
+    }
+    show(owner, imported, generation, false).await;
+}
+
 async fn show(
     owner: &std::rc::Rc<crate::Runtime>,
     imported: Box<Imported>,
@@ -375,7 +393,12 @@ async fn show_part(
     if owner.generation.with(Cell::get) != generation {
         return;
     }
+    let guide_source = imported.source;
+    let guide_revision = crate::stored::guide_edit_revision(owner, guide_source);
     let _turn = owner.show_turn(imported.source).await;
+    if crate::stored::guide_edit_revision(owner, guide_source) != guide_revision {
+        return;
+    }
     if owner.generation.with(Cell::get) != generation {
         return;
     }
@@ -394,6 +417,9 @@ async fn show_part(
         if owner.generation.with(Cell::get) != generation {
             return;
         }
+    }
+    if crate::stored::guide_edit_revision(owner, guide_source) != guide_revision {
+        return;
     }
     if combined::active(owner) {
         combined::show(owner, imported, held).await;
@@ -419,7 +445,10 @@ async fn show_part(
     } = *imported;
     let mut organization_revision = organization::revision(owner);
     let schedule = organization::build(owner, source, groups, catalog, guide, now).await;
-    if owner.generation.with(Cell::get) != generation || combined::active(owner) {
+    if owner.generation.with(Cell::get) != generation
+        || combined::active(owner)
+        || crate::stored::guide_edit_revision(owner, guide_source) != guide_revision
+    {
         return;
     }
     let built = started.elapsed();
@@ -448,7 +477,10 @@ async fn show_part(
             .held_channels(held.keys),
         None => pages::paged(owner, schedule, source, now).await,
     };
-    if owner.generation.with(Cell::get) != generation || combined::active(owner) {
+    if owner.generation.with(Cell::get) != generation
+        || combined::active(owner)
+        || crate::stored::guide_edit_revision(owner, guide_source) != guide_revision
+    {
         return;
     }
     let wrapped = started.elapsed();
@@ -463,7 +495,10 @@ async fn show_part(
             schedule = replacement;
         }
     }
-    if owner.generation.with(Cell::get) != generation || combined::active(owner) {
+    if owner.generation.with(Cell::get) != generation
+        || combined::active(owner)
+        || crate::stored::guide_edit_revision(owner, guide_source) != guide_revision
+    {
         return;
     }
     let favorites = started.elapsed();

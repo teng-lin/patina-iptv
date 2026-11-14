@@ -25,6 +25,7 @@
 pub mod data;
 mod error;
 mod events;
+pub mod guide_repair;
 pub mod inspection;
 mod operations;
 pub use error::Error;
@@ -85,6 +86,7 @@ type Updates = Vec<(SourceId, Rc<ImportWork>)>;
 type SavedSettings = RefCell<Option<(u64, std::sync::Arc<iptv_settings::Settings>)>>;
 
 pub struct Runtime {
+    repairs: RefCell<guide_repair::State>,
     account_streams: Slot<Cell<Option<u32>>>,
     resolving: Slot<Resolves>,
     wizard_import: Slot<RefCell<Option<(iptv_core::wizard::ImportId, CancelToken)>>>,
@@ -147,6 +149,7 @@ impl Runtime {
         #[cfg(not(feature = "test-support"))]
         let guide_checks = guide_checks::GuideChecks::default();
         Self {
+            repairs: RefCell::default(),
             account_streams: Slot::default(),
             resolving: Slot::default(),
             wizard_import: Slot::default(),
@@ -263,6 +266,7 @@ impl Runtime {
         // Retire services now, rather than waiting for its last Rc to drop.
         self.store.retire();
         self.inspection.clear();
+        self.repairs.borrow_mut().clear();
         drained
     }
 
