@@ -95,6 +95,8 @@ pub struct Runtime {
     wizard_import: Slot<RefCell<Option<(iptv_core::wizard::ImportId, CancelToken)>>>,
     store: std::sync::Arc<store_service::Service>,
     inspection: inspection::Vault,
+    #[cfg(feature = "test-support")]
+    inspection_scan: RefCell<Option<inspection::ScanHook>>,
     settings_saved: Slot<SavedSettings>,
     settings_changed: Slot<Cell<u64>>,
     settings_read_only: Cell<Option<std::io::ErrorKind>>,
@@ -158,6 +160,8 @@ impl Runtime {
             wizard_import: Slot::default(),
             store,
             inspection: inspection::Vault::new(),
+            #[cfg(feature = "test-support")]
+            inspection_scan: RefCell::default(),
             settings_saved: Slot::default(),
             settings_changed: Slot::default(),
             settings_read_only: Cell::new(None),

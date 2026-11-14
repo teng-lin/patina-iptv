@@ -308,6 +308,20 @@ impl Runtime {
         (observed, release)
     }
 
+    /// Pauses the next inspection after SQLite has actually executed scan work.
+    /// The bounded test barrier never changes a production build's behavior.
+    pub fn hold_inspection_scan(
+        &self,
+    ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (entered, observed) = std::sync::mpsc::channel();
+        let (release, resume) = std::sync::mpsc::channel();
+        *self.inspection_scan.borrow_mut() = Some(Box::new(move || {
+            let _ = entered.send(());
+            let _ = resume.recv_timeout(std::time::Duration::from_secs(10));
+        }));
+        (observed, release)
+    }
+
     /// A stored source's catalogue size as an import worker reads it (a
     /// blocking read on the reader lane), to run on another thread.
     pub fn worker_catalog_size(

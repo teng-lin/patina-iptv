@@ -230,6 +230,18 @@ impl Store {
         deadline: Instant,
         operation: impl FnOnce(&Self) -> crate::Result<InspectionResult<T>>,
     ) -> crate::Result<InspectionResult<T>> {
+        self.inspection_read_observed(cancel, deadline, || {}, operation)
+    }
+
+    /// Adapter instrumentation for an actual SQLite scan, not a queued-lane barrier.
+    #[doc(hidden)]
+    pub fn inspection_read_observed<T>(
+        &mut self,
+        cancel: CancelToken,
+        deadline: Instant,
+        mut progress: impl FnMut() + Send + 'static,
+        operation: impl FnOnce(&Self) -> crate::Result<InspectionResult<T>>,
+    ) -> crate::Result<InspectionResult<T>> {
         if cancel.is_cancelled() {
             return Ok(Err(InspectionError::Cancelled));
         }
@@ -239,7 +251,13 @@ impl Store {
         let flag = cancel.clone();
         self.conn.progress_handler(
             1000,
-            Some(move || flag.is_cancelled() || Instant::now() >= deadline),
+            Some(move || {
+                if flag.is_cancelled() || Instant::now() >= deadline {
+                    return true;
+                }
+                progress();
+                flag.is_cancelled() || Instant::now() >= deadline
+            }),
         )?;
         let result = operation(self);
         self.conn.progress_handler(0, None::<fn() -> bool>)?;
@@ -686,12 +704,15 @@ impl Store {
                     let (start, stop): (i64, i64) = (row.get(0)?, row.get(1)?);
                     earliest = Some(earliest.map_or(start, |old: i64| old.min(start)));
                     latest = Some(latest.map_or(stop, |old: i64| old.max(stop)));
-                    let from = start.max(window.from).max(previous);
+                    let from = start.max(window.from);
                     let to = stop.min(window.to);
+                    if to > from {
+                        count += 1;
+                    }
+                    let from = from.max(previous);
                     if to > from {
                         covered += (to - from) as u64;
                         previous = to;
-                        count += 1;
                     }
                 }
             }

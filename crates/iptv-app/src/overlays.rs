@@ -254,7 +254,7 @@ mod tests {
             | Overlay::ChannelList => Overlay::ALL.contains(&overlay),
         };
         assert!(Overlay::ALL.into_iter().all(listed));
-        assert_eq!(Overlay::ALL.len(), 16);
+        assert_eq!(Overlay::ALL.len(), 17);
     }
 
     #[test]

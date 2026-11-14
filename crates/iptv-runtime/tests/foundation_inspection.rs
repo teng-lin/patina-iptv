@@ -518,6 +518,39 @@ fn hidden_content_and_blocked_access_have_different_query_semantics() {
 }
 
 #[test]
+fn overlapping_stored_programmes_count_separately_from_union_coverage() {
+    let f = Fixture::new();
+    let source = f.sources[0];
+    // Model a retained/legacy cache with overlapping physical programme rows.
+    let raw = rusqlite::Connection::open(f._directory.path().join("iptv.sqlite")).unwrap();
+    raw.pragma_update(None, "key", format!("x'{}'", "71".repeat(32)))
+        .unwrap();
+    assert_eq!(
+        raw.execute(
+            "INSERT INTO epg_programmes(channel_id,start,stop,title)
+         SELECT id,?2,?3,'Synthetic overlapping segment' FROM epg_channels
+         WHERE source_id=?1 AND feed_id=1 AND epg_channel='synthetic.0'",
+            rusqlite::params![source.0, NOW + 100, NOW + 200],
+        )
+        .unwrap(),
+        1
+    );
+    let audit = block_on(f.owner.epg_audit(
+        Query::source(source),
+        window(),
+        InspectionControl::default(),
+    ))
+    .unwrap();
+    let amber = audit
+        .items
+        .iter()
+        .find(|row| row.channel.key == f.channel(source, 0))
+        .unwrap();
+    assert_eq!(amber.programme_count, 4);
+    assert_eq!(amber.covered_seconds, 2 * HOUR as u64);
+}
+
+#[test]
 fn audit_distinguishes_coverage_partial_stale_unmatched_disabled_and_input_failure() {
     let mut f = Fixture::new();
     let [a, b] = f.sources;
@@ -689,13 +722,13 @@ fn a_hundred_thousand_channel_analysis_keeps_display_reads_responsive() {
     block_on(f.owner.read_library_metadata()).unwrap();
     let mut query = Query::source(source);
     query.limit = MAX_PAGE;
-    let (entered, release) = f.owner.hold_analysis();
-    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    let (entered, release) = f.owner.hold_inspection_scan();
     let analysis = f.owner.query_channels(query, InspectionControl::default());
     let (done, result) = mpsc::sync_channel(1);
     let worker = std::thread::spawn(move || done.send(block_on(analysis)).unwrap());
-    // The query cannot complete while its real lane is held. Display reads
-    // must still finish; a broken shared lane is released by the watchdog.
+    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    // The query has executed SQLite scan instructions and holds its real
+    // snapshot. Display reads must still finish before that scan is released.
     let read = std::time::Instant::now();
     block_on(f.owner.read_library_metadata()).unwrap();
     let mut maximum = read.elapsed();
