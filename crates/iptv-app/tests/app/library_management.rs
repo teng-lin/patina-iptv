@@ -1,4 +1,5 @@
 //! Synthetic end-to-end editing; all storage is inside a temporary HOME.
+use crate::headless::Headless;
 use iptv_providers::{
     SecretUrl,
     model::{M3uSourceConfig, Source, SourceConfig},
@@ -6,7 +7,6 @@ use iptv_providers::{
 use iptv_store_sqlite::{ChannelQuery, SourcePolicy};
 use nsh_core::{Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 use std::time::{Duration, Instant};
 
 const PLAYLIST: &str = "#EXTM3U\n\
@@ -59,7 +59,7 @@ fn saved_bindings(
     dir: &std::path::Path,
     expected: impl Fn(&[iptv_settings::KeyBinding]) -> bool,
 ) -> Vec<iptv_settings::KeyBinding> {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(10));
     loop {
         // The UI edits optimistically; its custom/default marker is not a
         // durability acknowledgement. Observe the actual atomic publication.

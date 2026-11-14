@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use crate::headless::Headless;
 use iptv_providers::{
     HttpResponse,
     model::{ContentKind, MacAddress, Source, SourceConfig, StalkerCredentials},
@@ -17,7 +18,6 @@ use iptv_settings::{Settings, Value};
 use iptv_store_sqlite::SourcePolicy;
 use nsh_core::{Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
 const WAIT: Duration = Duration::from_secs(20);
 const GENRES: &str = r#"{"js":[{"id":"1","title":"News","censored":0}]}"#;

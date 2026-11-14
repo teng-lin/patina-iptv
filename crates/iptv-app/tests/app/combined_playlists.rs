@@ -6,6 +6,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use crate::headless::Headless;
 use iptv_providers::{
     SecretUrl,
     model::{M3uSourceConfig, Source, SourceConfig},
@@ -14,7 +15,6 @@ use iptv_settings::{Settings, Value};
 use iptv_store_sqlite::{ChannelQuery, GuideSource, SourceId, SourcePolicy, Store};
 use nsh_core::{MountItem, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
 #[track_caller]
 fn step(result: Result<(), String>) {
@@ -1250,7 +1250,8 @@ fn forty_cached_sources_open_while_both_network_workers_are_stalled() {
     // Every cached constituent must reach the combined guide independently
     // of the two blocked network requests, including sources beyond queue size.
     step(app.press_key("right"));
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let deadline =
+        std::time::Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(10));
     while app.screen().count("text:Cached 39 · Cached 39").unwrap() == 0
         && std::time::Instant::now() < deadline
     {

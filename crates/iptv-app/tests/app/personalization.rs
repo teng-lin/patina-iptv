@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use crate::headless::Headless;
 use crate::isolated::Home;
 use iptv_providers::{
     SecretUrl,
@@ -8,7 +9,6 @@ use iptv_settings::Settings;
 use iptv_store_sqlite::{SourceId, SourcePolicy};
 use nsh_core::{Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 use std::{
     path::PathBuf,
     time::{Duration, SystemTime},

@@ -1,5 +1,6 @@
 //! Synthetic whole-app export, schedule/cancel and next-launch restore.
 use super::personalization::step;
+use crate::headless::Headless;
 use iptv_providers::{
     SecretUrl,
     model::{M3uSourceConfig, Source, SourceConfig},
@@ -8,7 +9,7 @@ use iptv_settings::Settings;
 use iptv_store_sqlite::{ChannelQuery, OrderScope, SourcePolicy};
 use nsh_core::{Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::{DialogAnswer, Headless};
+use nsh_testing::DialogAnswer;
 use std::time::Duration;
 
 #[test]

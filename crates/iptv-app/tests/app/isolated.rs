@@ -69,18 +69,27 @@ impl Home {
     }
 }
 
+/// Parses a wait scale factor from an environment variable value or raw string.
+/// Returns 1 for missing, empty, invalid, non-positive, or overflow values.
+pub fn parse_wait_scale(raw: Option<&str>) -> u32 {
+    raw.and_then(|s| s.trim().parse::<u32>().ok())
+        .filter(|&v| v >= 1)
+        .unwrap_or(1)
+}
+
 /// Factor scaling scenario waits and timeouts (default 1).
 pub fn wait_scale() -> u32 {
-    std::env::var("IPTV_TEST_WAIT_SCALE")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1)
-        .max(1)
+    let var = std::env::var("IPTV_TEST_WAIT_SCALE").ok();
+    parse_wait_scale(var.as_deref())
 }
 
 /// Scales duration `d` by [`wait_scale`].
 pub fn scaled_duration(d: std::time::Duration) -> std::time::Duration {
-    d.saturating_mul(wait_scale())
+    scale_duration_by(d, wait_scale())
+}
+
+fn scale_duration_by(d: std::time::Duration, factor: u32) -> std::time::Duration {
+    d.saturating_mul(factor)
 }
 
 /// Native app storage under an isolated scenario's home.
@@ -288,20 +297,82 @@ pub fn open_database(
 /// idle guide), it would wait out the whole timeout. This looks every
 /// 50 ms instead.
 pub fn wait_outside(
-    app: &mut nsh_testing::Headless,
+    app: &mut crate::headless::Headless,
     what: &str,
     timeout: std::time::Duration,
     done: impl Fn() -> bool,
 ) -> Result<(), String> {
-    let deadline = std::time::Instant::now() + timeout;
+    let scaled = scaled_duration(timeout);
+    let deadline = std::time::Instant::now() + scaled;
     while !done() {
         if std::time::Instant::now() >= deadline {
             return Err(format!(
                 "{what} never happened in {} ms",
-                timeout.as_millis()
+                scaled.as_millis()
             ));
         }
         app.wait(std::time::Duration::from_millis(50))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn wait_scale_parsing_handles_defaults_invalid_and_overflow() {
+        assert_eq!(parse_wait_scale(None), 1);
+        assert_eq!(parse_wait_scale(Some("")), 1);
+        assert_eq!(parse_wait_scale(Some("   ")), 1);
+        assert_eq!(parse_wait_scale(Some("0")), 1);
+        assert_eq!(parse_wait_scale(Some("-1")), 1);
+        assert_eq!(parse_wait_scale(Some("-99")), 1);
+        assert_eq!(parse_wait_scale(Some("abc")), 1);
+        assert_eq!(parse_wait_scale(Some("1.5")), 1);
+        assert_eq!(parse_wait_scale(Some("NaN")), 1);
+        assert_eq!(parse_wait_scale(Some("999999999999999999999999999999")), 1);
+        assert_eq!(parse_wait_scale(Some("1")), 1);
+        assert_eq!(parse_wait_scale(Some("2")), 2);
+        assert_eq!(parse_wait_scale(Some("10")), 10);
+    }
+
+    #[test]
+    fn scaled_duration_handles_overflow_gracefully() {
+        assert_eq!(scale_duration_by(Duration::MAX, 2), Duration::MAX);
+        let huge = Duration::from_secs(u64::MAX);
+        assert_eq!(scale_duration_by(huge, u32::MAX), Duration::MAX);
+    }
+
+    #[test]
+    fn wait_scale_factor_2_integration_check() {
+        fn here() {}
+        let Some(_home) = run(std::any::type_name_of_val(&here)) else {
+            return;
+        };
+        // SAFETY: run isolates this test in a single-test process. No engine
+        // or worker has started; the override lasts only for this child.
+        unsafe {
+            std::env::set_var("IPTV_TEST_WAIT_SCALE", "2");
+        }
+        assert_eq!(wait_scale(), 2);
+        let d = Duration::from_millis(150);
+        assert_eq!(scaled_duration(d), Duration::from_millis(300));
+
+        let config = nsh_engine::EngineConfig::new(nsh_core::element::Root::of::<iptv_app::App>());
+        let mut app = crate::headless::Headless::start(config).unwrap();
+        let start = std::time::Instant::now();
+        let res = app.wait_for_within(
+            "text:DoesNotExistNonexistentElement",
+            Duration::from_millis(60),
+        );
+        let elapsed = start.elapsed();
+        assert!(res.is_err());
+        // With factor 2, 60ms is scaled to 120ms, so elapsed should be at least ~100ms.
+        assert!(
+            elapsed >= Duration::from_millis(90),
+            "expected scaled wait to take at least 90ms, took {elapsed:?}"
+        );
+    }
 }

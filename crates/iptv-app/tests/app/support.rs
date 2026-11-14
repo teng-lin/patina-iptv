@@ -9,10 +9,10 @@ use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::headless::Headless;
 use nsh_core::ViewKind;
 use nsh_core::geometry::{Point, Points};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
 /// The app, driven by steps that panic with the texts on screen (those
 /// not on it at [`T::rebase`]).
@@ -79,7 +79,7 @@ impl T {
 
     /// Timeout scaled by `IPTV_TEST_WAIT_SCALE`.
     pub fn wait_timeout(secs: u64) -> Duration {
-        Duration::from_secs(secs.saturating_mul(crate::isolated::wait_scale() as u64))
+        crate::isolated::scaled_duration(Duration::from_secs(secs))
     }
 
     /// Presses `sel` once it is on screen. A step is done when the app
@@ -89,13 +89,13 @@ impl T {
     pub fn press(&mut self, sel: &str) {
         let r = self
             .app
-            .wait_for_within(sel, Self::wait_timeout(10))
+            .wait_for_within(sel, Duration::from_secs(10))
             .and_then(|()| self.app.press(sel));
         self.ok(&format!("press {sel}"), r);
     }
 
     pub fn wait(&mut self, sel: &str, secs: u64) {
-        let r = self.app.wait_for_within(sel, Self::wait_timeout(secs));
+        let r = self.app.wait_for_within(sel, Duration::from_secs(secs));
         self.ok(&format!("wait {sel}"), r);
     }
 
@@ -106,7 +106,7 @@ impl T {
     }
 
     pub fn gone(&mut self, sel: &str, secs: u64) {
-        let r = self.app.wait_for_gone(sel, Self::wait_timeout(secs));
+        let r = self.app.wait_for_gone(sel, Duration::from_secs(secs));
         self.ok(&format!("gone {sel}"), r);
     }
 
