@@ -138,9 +138,7 @@ Windows uses the NSH fork's Win32/Direct2D backend. Install Visual Studio
 2022 Build Tools with **Desktop development with C++** and a Windows SDK,
 Rust's MSVC toolchain, and Strawberry Perl on `PATH` (for bundled OpenSSL).
 Keep the NSH checkout next to this repository at the `nsh.rev` commit as
-above; its CLI is not needed for the Windows build. The build script applies the small
-`tools/patches/nsh-windows-pointer-leave.patch` fix to that checkout; it keeps
-PiP controls visible when crossing from a drag region onto a button.
+above; its CLI is not needed for the Windows build.
 
 From PowerShell:
 

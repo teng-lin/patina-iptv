@@ -23,8 +23,6 @@ jobs:
       - name: Verify dependency packaging helpers
         shell: pwsh
         run: |
-          python tools/ci/test-windows-patch.py
-          if ($LASTEXITCODE -ne 0) { throw 'Windows patch regression tests failed.' }
           python tools/ci/test-check-parity.py
           if ($LASTEXITCODE -ne 0) { throw 'Windows check no longer covers the crates tools/check.sh covers.' }
           python tools/mpv-runtime/test_prepare.py

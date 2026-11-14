@@ -17,9 +17,6 @@ try {
     if (!(Get-Command perl -ErrorAction SilentlyContinue)) {
         throw 'Install Strawberry Perl and put its perl/bin directory on PATH (SQLCipher builds OpenSSL).'
     }
-    # NSH fix carried locally until upstreamed: drag-region crossings retain hover.
-    $pointerPatch = Join-Path $PSScriptRoot 'patches/nsh-windows-pointer-leave.patch'
-    & "$PSScriptRoot/ci/apply-windows-pointer-patch.ps1" -Repository ../nsh -Patch $pointerPatch
     & "$PSScriptRoot/fetch-mpv-windows.ps1"
     $env:PATH = "$(Join-Path $root 'target/mpv');$env:PATH"
     if ($Check) {
