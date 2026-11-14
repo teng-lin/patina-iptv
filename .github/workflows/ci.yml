@@ -23,6 +23,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      - name: Install linters
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          pip install ruff --break-system-packages 2>/dev/null || pip install ruff
+          sudo curl -sSL https://github.com/pinterest/ktlint/releases/download/1.3.1/ktlint -o /usr/local/bin/ktlint
+          sudo chmod +x /usr/local/bin/ktlint
       - run: bash tools/check.sh
         env:
           IPTV_REQUIRE_PLAYER_TESTS: '1'

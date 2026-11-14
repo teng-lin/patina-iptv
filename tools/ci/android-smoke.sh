@@ -37,7 +37,7 @@ act=$pkg/.host.TvActivity
 mkdir -p "$out"
 rm -f "$out"/*.png "$out"/*.log
 
-pause() { timeout "$1" tail -f /dev/null || true; }
+pause() { sleep "$1"; }
 fail() {
   echo "FAIL: $*" >&2
   $adb exec-out screencap -p > "$out/failure.png" 2>/dev/null || true
@@ -101,6 +101,34 @@ if [ -n "$apk" ]; then
 else
   $adb shell pm clear $pkg >/dev/null
 fi
+# Restore only the device settings this smoke changes, including failure paths.
+restore_setting() {
+  if [ "$3" = null ] || [ -z "$3" ]; then
+    $adb shell settings delete "$1" "$2" >/dev/null
+  else
+    $adb shell settings put "$1" "$2" "$3" >/dev/null
+  fi
+}
+saved_finish=$($adb shell settings get global always_finish_activities | tr -d '\r')
+saved_font=$($adb shell settings get system font_scale | tr -d '\r')
+saved_immersive=$($adb shell settings get secure immersive_mode_confirmations | tr -d '\r')
+saved_pip=$($adb shell appops get "$pkg" PICTURE_IN_PICTURE | sed -n 's/.*PICTURE_IN_PICTURE: \([^; ]*\).*/\1/p' | tr -d '\r')
+saved_pip=${saved_pip:-default}
+cleanup() {
+  local status=$?
+  trap - EXIT
+  set +e
+  restore_setting global always_finish_activities "$saved_finish"
+  restore_setting system font_scale "$saved_font"
+  restore_setting secure immersive_mode_confirmations "$saved_immersive"
+  $adb shell appops set "$pkg" PICTURE_IN_PICTURE "$saved_pip" >/dev/null
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+# Ensure background/resume runs with ordinary activity lifetime first.
+$adb shell settings put global always_finish_activities 0
 # No first-use hint over the immersive app, no picture in picture: Home
 # must stop the activity (picture in picture only pauses it).
 $adb shell settings put secure immersive_mode_confirmations confirmed
@@ -205,71 +233,135 @@ keys KEYCODE_DPAD_DOWN
 expect 'key=down .*ctx=Guide' 10
 shot 08-guide
 
+# The fixture starts from a clean installation and contains one playlist.
+# Its resume file stores content identity, not a list index. Keep identities
+# out of logs even though this script uses only generated input.
+resume_file=
+for _ in $(seq 1 60); do
+  resume_file=$($adb shell "run-as $pkg ls files" | tr -d '\r' | sed -n '/^last_channel-[0-9][0-9]*$/p' || true)
+  [[ "$resume_file" =~ ^last_channel-[0-9]+$ ]] && break
+  pause 0.5
+done
+[[ "$resume_file" =~ ^last_channel-[0-9]+$ ]] || fail "expected one persisted playlist resume file"
+source_id=${resume_file#last_channel-}
+resume_identity() { $adb exec-out run-as "$pkg" cat "files/$resume_file" 2>/dev/null | tr -d '\r\n'; }
+assert_resume() {
+  local expected=$1 label=$2 actual
+  actual=$(resume_identity) || fail "$label: cannot read persisted resume identity"
+  if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
+    fail "$label: persisted channel changed"
+  fi
+}
+wait_stopped() {
+  for _ in $(seq 1 40); do
+    $adb shell dumpsys activity -p "$pkg" activities | grep -E 'state=STOPPED|mAppStopped=true' >/dev/null && return 0
+    pause 0.5
+  done
+  fail "activity did not stop and flush its queued writes"
+}
+wait_destroyed() {
+  local activities
+  for _ in $(seq 1 60); do
+    activities=$($adb shell dumpsys activity -p "$pkg" activities) ||
+      fail "cannot inspect activity destruction"
+    if ! printf '%s\n' "$activities" | grep -E "ActivityRecord.*${pkg//./\\.}" >/dev/null; then
+      return 0
+    fi
+    pause 0.5
+  done
+  fail "activity was not destroyed with don't-keep-activities enabled"
+}
+reopen_and_expect_resume() {
+  $adb shell am start -W -n "$act" >/dev/null
+  expect 'iptv startup: activity created' 60
+  expect 'iptv pip: supported' 60
+  expect 'iptv player: resuming the last channel' 60
+  expect 'iptv player 0 state: ready' 60
+  expect 'iptv (data: guide switched to|startup: guide shown)' 60
+}
+
 step "refresh during playback"
+before_refresh=$(resume_identity)
+[ -n "$before_refresh" ] || fail "no persisted channel before refresh"
 mark
-# Guide preview is actively playing (player 0 is ready). Open Menu and navigate to Settings to trigger refresh.
-keys KEYCODE_MENU
+# From the confirmed Guide pane: Tab -> Groups, Left -> rail/Search.
+# Down clamps at Settings; Up is Playlists even when VOD rows are present.
+keys KEYCODE_TAB KEYCODE_DPAD_LEFT
+expect 'key=left .*ctx=Groups' 10
+keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN \
+  KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN
+keys KEYCODE_DPAD_UP KEYCODE_DPAD_CENTER
 pause 1
-keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
-expect 'key=ok .*ctx=Menu' 10 || true
-pause 2
-# In Settings, navigate to EPG / update guide or playlists
-keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
-pause 2
-# Verify player 0 continues playing through the refresh without entering error state
-expect 'iptv player 0 state: ready' 30
-# Return to guide
-keys KEYCODE_BACK KEYCODE_BACK
-pause 2
-# Assert persisted database state exists and has non-zero size
-$adb shell "run-as $pkg test -s files/iptv.sqlite" || fail "sqlite database missing or empty during playback refresh"
+# The shown playlist is focused. Its first action is Show, then Refresh.
+keys KEYCODE_DPAD_CENTER KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
+expect "iptv playlists: refresh $source_id([^0-9]|$)" 10
+expect 'iptv data: refreshed ImportCounts' 180
+assert_resume "$before_refresh" "playback refresh"
+# A refresh keeps the persistent player running; it need not emit ready again.
+if applog | grep -E 'iptv player 0 (open:|error)' >/dev/null; then
+  fail "refresh reopened or failed the playing stream"
+fi
+keys KEYCODE_BACK KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT
+pause 1
 shot 09-refreshed
 
 step "kill and reopen after a change"
 mark
-# Make a change: navigate in the guide
-keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN
-pause 1
-$adb shell am force-stop $pkg
-pause 2
+# Focus movement alone is not persisted: select a different channel to play.
+keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
+expect 'iptv player 0 open:' 30
+expect 'iptv player 0 state: ready' 60
+changed_identity=
+for _ in $(seq 1 60); do
+  changed_identity=$(resume_identity)
+  [ -n "$changed_identity" ] && [ "$changed_identity" != "$before_refresh" ] && break
+  pause 0.5
+done
+if [ -z "$changed_identity" ] || [ "$changed_identity" = "$before_refresh" ]; then
+  fail "playing another channel did not persist its identity"
+fi
+keys KEYCODE_HOME
+wait_stopped
+assert_resume "$changed_identity" "background flush"
+$adb shell am force-stop "$pkg"
 ! alive || fail "app failed to stop on kill"
-$adb shell am start -W -n $act >/dev/null
-expect 'iptv startup: fonts registered' 60
-expect 'iptv pip: supported' 60
-expect 'iptv (data: guide switched to|startup: guide shown)' 30
-# Assert persisted state survived process kill (database exists and app restores without wizard)
-$adb shell "run-as $pkg test -s files/iptv.sqlite" || fail "sqlite database not persisted across kill"
+mark
+reopen_and_expect_resume
+assert_resume "$changed_identity" "process restart"
 shot 10-reopened
 
 step "recreate the activity"
-mark
-orig_pid=$($adb shell pidof $pkg | tr -d '\r')
+orig_pid=$($adb shell pidof "$pkg" | tr -d '\r')
 [ -n "$orig_pid" ] || fail "app is not running before activity recreation"
-font_scale=$($adb shell settings get system font_scale 2>/dev/null | tr -d '\r')
-$adb shell settings put system font_scale 1.15
-pause 2
-new_pid=$($adb shell pidof $pkg | tr -d '\r')
-[ "$orig_pid" = "$new_pid" ] || fail "process died during activity recreation ($orig_pid vs $new_pid)"
-expect 'iptv pip: supported' 30
-$adb shell settings put system font_scale "${font_scale:-1.0}"
+# fontScale/orientation are handled by configChanges and do not recreate this
+# Activity. Don't-keep-activities destroys it on background, retaining its process.
+$adb shell settings put global always_finish_activities 1
+keys KEYCODE_HOME
+wait_destroyed
+[ "$orig_pid" = "$($adb shell pidof "$pkg" | tr -d '\r')" ] || fail "process died before recreation"
+mark
+reopen_and_expect_resume
+[ "$orig_pid" = "$($adb shell pidof "$pkg" | tr -d '\r')" ] || fail "recreation replaced the process"
+assert_resume "$changed_identity" "activity recreation"
+# Keep ordinary lifecycle for the final recovery case; the trap restores the original.
+$adb shell settings put global always_finish_activities 0
 shot 11-recreated
 
 step "interrupt then recover a restore"
-mark
-$adb shell am force-stop $pkg
-pause 1
+keys KEYCODE_HOME
+wait_stopped
+assert_resume "$changed_identity" "before interrupted restore"
+$adb shell am force-stop "$pkg"
 ! alive || fail "app failed to stop before staged restore"
-# Move working state to restore-previous to simulate a restore interrupted before final commit
+# A crash after moving current storage aside, before the new tree is
+# installed: activation must recover the previous tree, even if Android has
+# recreated the empty files directory. Compare content identity, not file size.
 $adb shell "run-as $pkg mv files files.restore-previous"
-$adb shell "run-as $pkg mkdir -p files"
-# Reopen app: activate() must detect restore-previous, recover it, and finish startup
-$adb shell am start -W -n $act >/dev/null
-expect 'iptv startup: fonts registered' 60
-expect 'iptv pip: supported' 60
-expect 'iptv (data: guide switched to|startup: guide shown)' 30
-# Assert persisted state was recovered and staging directory was cleaned up
-$adb shell "run-as $pkg test -s files/iptv.sqlite" || fail "state not recovered from interrupted restore"
-$adb shell "run-as $pkg test ! -d files.restore-previous" || fail "restore-previous was not cleaned up after recovery"
+$adb shell "run-as $pkg mkdir files"
+mark
+reopen_and_expect_resume
+assert_resume "$changed_identity" "interrupted restore recovery"
+$adb shell "run-as $pkg test ! -d files.restore-previous" || fail "restore-previous was not cleaned up"
 shot 12-recovered
 
 step "checks"
@@ -281,5 +373,4 @@ if grep -q "$pkg" "$out/crash.log"; then fail "the app crashed (crash.log)"; fi
 if grep -q 'ERROR_CODE_UNSUPPORTED_SCHEME' "$out/app.log"; then fail "a player load was refused"; fi
 echo "  ok: no crash, no refused load"
 echo "  player errors (the app retries them): $(grep -c 'iptv player [0-9] error' "$out/app.log" || true)"
-$adb shell appops reset $pkg
 echo "PASS (logs and screenshots in $out)"

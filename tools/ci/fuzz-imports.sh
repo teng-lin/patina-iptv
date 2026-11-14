@@ -24,7 +24,9 @@ export PATH="$fuzz_bin:$PATH"
 known=$(cargo-fuzz list)
 [ -n "$known" ] || { echo "cargo fuzz list reports no targets" >&2; exit 1; }
 failed=()
-for target in ${*:-$known}; do
+targets=("$@")
+[ "${#targets[@]}" -gt 0 ] || read -r -a targets <<< "$known"
+for target in "${targets[@]}"; do
   grep -qxF -- "$target" <<< "$known" || { echo "unknown fuzz target: $target" >&2; exit 1; }
   # Committed seeds join whatever corpus earlier runs accumulated.
   mkdir -p "fuzz/corpus/$target"

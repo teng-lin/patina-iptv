@@ -35,6 +35,7 @@ shopt -s nullglob
 apks=("$app"/.nsh/out/*.apk "$app"/.nsh/rust/android/*.apk)
 shopt -u nullglob
 [ ${#apks[@]} -gt 0 ] || { echo "no APK under $app/.nsh: build the crate first" >&2; exit 1; }
+# shellcheck disable=SC2012
 apk=$(ls -t "${apks[@]}" | head -1)
 lib="$app/.nsh/rust/android-rust-release/lib"
 [ -d "$lib" ] || { echo "no $lib: build the crate first" >&2; exit 1; }
