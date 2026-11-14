@@ -5,12 +5,12 @@ on:
   workflow_dispatch:
     inputs:
       platforms:
-        description: Platforms to package (all requires Apple signing secrets)
+        description: Platforms to package (all requires Apple signing secrets; a rehearsal takes android-desktop only)
         type: choice
         default: android-desktop
         options: [android-desktop, android, desktop, all]
       rehearsal:
-        description: Rehearsal mode (draft release and cleanup on throwaway tag)
+        description: Rehearsal (no release credentials; throwaway Android key, tag and draft release)
         type: boolean
         default: false
 permissions:
@@ -25,34 +25,19 @@ jobs:
       matrix: ${{ steps.platforms.outputs.matrix }}
       signing_matrix: ${{ steps.platforms.outputs.signing_matrix }}
     steps:
-      - name: Refuse manual releases outside master
-        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/master' && !inputs.rehearsal
-        run: exit 1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      # Refuses, before anything is built: a manual run outside master that is
+      # not a rehearsal, and a rehearsal of anything but Android and desktop
+      # (iOS cannot be signed without release credentials).
       - id: platforms
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
           PLATFORMS: ${{ inputs.platforms || 'android-desktop' }}
-          REHEARSAL: ${{ inputs.rehearsal || false }}
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          selection = os.environ["PLATFORMS"]
-          if os.environ["REHEARSAL"] == "true" and selection not in ("android-desktop", "all"):
-              raise SystemExit("A rehearsal requires the complete Android and desktop matrix")
-          platforms = []
-          if selection in ("android", "android-desktop", "all"):
-              platforms.append({"platform": "android", "os": "ubuntu-24.04"})
-          if selection in ("desktop", "android-desktop", "all"):
-              platforms += [
-                  {"platform": "linux", "os": "ubuntu-24.04"},
-                  {"platform": "macos", "os": "macos-15"},
-              ]
-          if selection == "all":
-              platforms.append({"platform": "ios", "os": "macos-15"})
-          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write("matrix=" + json.dumps({"include": platforms}) + "\n")
-              out.write("signing_matrix=" + json.dumps({"include": [p for p in platforms if p["platform"] != "linux"]}) + "\n")
-          PY
+          REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && inputs.rehearsal }}
+        run: python3 tools/ci/release-plan.py
   tests:
     uses: ./.github/workflows/ci.yml
   windows-tests:
@@ -103,9 +88,17 @@ jobs:
   # Authenticode through Azure Trusted Signing (Artifact Signing) when its
   # credentials exist; otherwise the installer is released as an unsigned
   # preview and the release notes say so (docs/release.md, "Platform signing").
+  #
+  # A rehearsal signs in `release-rehearsal`, an environment that holds no
+  # secrets and may run from any branch; everything else signs in `release`,
+  # whose protection rules decide which refs may reach the release credentials.
+  # Every `secrets.` expression of the two signing jobs is also forced empty in
+  # a rehearsal, so it is an unsigned preview there
+  # (tools/ci/test-release-workflow.py checks both).
   windows-sign:
     needs: [windows-package]
-    environment: release
+    environment:
+      name: ${{ github.event_name == 'workflow_dispatch' && inputs.rehearsal && 'release-rehearsal' || 'release' }}
     runs-on: windows-2025
     timeout-minutes: 30
     steps:
@@ -121,12 +114,12 @@ jobs:
         id: config
         shell: bash
         env:
-          TENANT: ${{ secrets.AZURE_TENANT_ID != '' }}
-          CLIENT: ${{ secrets.AZURE_CLIENT_ID != '' }}
-          CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET != '' }}
-          ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT != '' }}
-          ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT != '' }}
-          PROFILE: ${{ secrets.AZURE_CERTIFICATE_PROFILE != '' }}
+          TENANT: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.AZURE_TENANT_ID != '' }}
+          CLIENT: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.AZURE_CLIENT_ID != '' }}
+          CLIENT_SECRET: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.AZURE_CLIENT_SECRET != '' }}
+          ENDPOINT: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.AZURE_SIGNING_ENDPOINT != '' }}
+          ACCOUNT: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.AZURE_SIGNING_ACCOUNT != '' }}
+          PROFILE: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.AZURE_CERTIFICATE_PROFILE != '' }}
         run: |
           set -euo pipefail
           test "$(find dist -type f | wc -l)" -eq 1
@@ -144,12 +137,12 @@ jobs:
         if: steps.config.outputs.sign == 'true'
         uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
-          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ secrets.AZURE_CERTIFICATE_PROFILE }}
+          azure-tenant-id: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.AZURE_TENANT_ID || '' }}
+          azure-client-id: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.AZURE_CLIENT_ID || '' }}
+          azure-client-secret: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.AZURE_CLIENT_SECRET || '' }}
+          endpoint: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.AZURE_SIGNING_ENDPOINT || '' }}
+          signing-account-name: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.AZURE_SIGNING_ACCOUNT || '' }}
+          certificate-profile-name: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.AZURE_CERTIFICATE_PROFILE || '' }}
           files-folder: ${{ github.workspace }}\dist
           files-folder-filter: exe
           file-digest: SHA256
@@ -334,9 +327,14 @@ jobs:
           name: packages-sbom
           path: dist/*
           if-no-files-found: error
+  # The environment and the secrets follow the same rule as in windows-sign: a
+  # rehearsal gets `release-rehearsal` and no release credential. Its Android
+  # packages are signed with a key made for the run (tools/ci/sign-android.sh)
+  # and its macOS image is the ad hoc signed preview.
   sign:
     needs: [plan, tests, package]
-    environment: release
+    environment:
+      name: ${{ github.event_name == 'workflow_dispatch' && inputs.rehearsal && 'release-rehearsal' || 'release' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.signing_matrix) }}
@@ -357,48 +355,53 @@ jobs:
         run: |
           python3 tools/ci/unpack-signing-input.py
           python3 tools/ci/version.py
+      # keytool, jarsigner and apksigner run on the JDK the Android build uses
+      # (.github/actions/android), not on whichever one the runner image defaults to.
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        if: matrix.platform == 'android'
+        with:
+          distribution: temurin
+          java-version: '21'
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
         if: matrix.platform == 'android'
       - name: Install Android signing tools
         if: matrix.platform == 'android'
         run: sdkmanager "build-tools;35.0.1"
+      # A release fails here without the production keystore; only a rehearsal
+      # signs with a throwaway key, and only when no release credential arrived.
       - name: Android tablet and TV
         if: matrix.platform == 'android'
         env:
-          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: |
-          umask 077
-          test -n "$KEYSTORE"
-          printf '%s' "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/release.jks"
-          export KEYSTORE_PATH="$RUNNER_TEMP/release.jks"
-          bash tools/ci/package-android.sh
+          REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && inputs.rehearsal }}
+          KEYSTORE: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.ANDROID_KEYSTORE_BASE64 || '' }}
+          STORE_PASSWORD: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.ANDROID_STORE_PASSWORD || '' }}
+          KEY_PASSWORD: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.ANDROID_KEY_PASSWORD || '' }}
+          KEY_ALIAS: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.ANDROID_KEY_ALIAS || '' }}
+        run: bash tools/ci/sign-android.sh
       - name: macOS disk image
         env:
           IPTV_SIGNING_STAGE: '1'
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          MACOS_CERTIFICATE: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.MACOS_CERTIFICATE_BASE64 || '' }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          MACOS_SIGN_IDENTITY: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.MACOS_SIGN_IDENTITY || '' }}
+          APPLE_ID: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.APPLE_ID || '' }}
+          APPLE_TEAM_ID: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_APP_PASSWORD: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.APPLE_APP_PASSWORD || '' }}
         if: matrix.platform == 'macos'
         run: bash tools/ci/package-macos.sh
       - name: Signed iPad package
         if: matrix.platform == 'ios'
         env:
-          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
-          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
-          IOS_PROFILE: ${{ secrets.IOS_PROFILE_BASE64 }}
-          IOS_SIGN_IDENTITY: ${{ secrets.IOS_SIGN_IDENTITY }}
+          IOS_CERTIFICATE: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.IOS_CERTIFICATE_BASE64 || '' }}
+          IOS_CERTIFICATE_PASSWORD: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.IOS_CERTIFICATE_PASSWORD || '' }}
+          IOS_PROFILE: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.IOS_PROFILE_BASE64 || '' }}
+          IOS_SIGN_IDENTITY: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.IOS_SIGN_IDENTITY || '' }}
         run: bash tools/ci/package-ios.sh
       - name: Remove signing material
         if: always()
         shell: bash
         run: |
-          rm -f "$RUNNER_TEMP/macos.p12" "$RUNNER_TEMP/notarize.zip" "$RUNNER_TEMP/release.jks" "$RUNNER_TEMP/ios-profile.plist" "$RUNNER_TEMP/ios.entitlements" "$RUNNER_TEMP/ios.p12" "$RUNNER_TEMP/ios.mobileprovision"
+          rm -f "$RUNNER_TEMP/macos.p12" "$RUNNER_TEMP/notarize.zip" "$RUNNER_TEMP/release.jks" "$RUNNER_TEMP/rehearsal-android.p12" "$RUNNER_TEMP/ios-profile.plist" "$RUNNER_TEMP/ios.entitlements" "$RUNNER_TEMP/ios.p12" "$RUNNER_TEMP/ios.mobileprovision"
           if [ "${{ matrix.platform }}" = macos ]; then
             if [ -e "$RUNNER_TEMP/macos-release.keychain-db" ]; then
               security delete-keychain "$RUNNER_TEMP/macos-release.keychain-db"
@@ -419,7 +422,7 @@ jobs:
       - name: Record the signing state for the release notes
         if: matrix.platform == 'macos'
         env:
-          SIGNED: ${{ secrets.MACOS_CERTIFICATE_BASE64 != '' }}
+          SIGNED: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.MACOS_CERTIFICATE_BASE64 != '' }}
         run: |
           python3 tools/ci/publish-release.py signing macos \
             "$([ "$SIGNED" = true ] && echo signed || echo unsigned)" target/signing-status

@@ -20,6 +20,8 @@ is below 1.0, a minor release may change behaviour.
 - Releases carry build provenance attestations for every file and for
   `SHA256SUMS`, and CycloneDX SBOMs for Rust dependencies, bundled media runtimes, and the Android release classpath.
 - Release workflow includes end-to-end dry-run rehearsal mode on disposable tags and draft retry body updates.
+- Release rehearsals sign in a separate `release-rehearsal` environment without the release credentials: Android with a
+  throwaway key made for the run, macOS and Windows as unsigned previews.
 - Coverage floors enforced per library crate in CI, split fuzz targets with persistent corpus storage, and scaled scenario wait timeouts for slow CI runners.
 - `docs/architecture.md`, `CONTRIBUTING.md`, `SECURITY.md`, issue/PR templates, CODEOWNERS, and audit documentation.
 - Unsigned macOS and Windows packages are announced as previews in the release
