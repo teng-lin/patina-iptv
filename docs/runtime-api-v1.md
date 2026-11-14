@@ -106,6 +106,7 @@ The current foundation limits are:
 | Repair matching metadata | At most 100k playlist rows and 100k listed guide rows; 64 MiB checked playlist matching text and 64 MiB listed guide-index text |
 | Repair batch | At most 500 explicit mappings and 64 feed changes/additions |
 | Live preview / transient operation state | At most 32 previews, 200k total preview items and 128 operation/admitted-command identities per owner |
+| Legacy feed-identity history bootstrap | At most 4096 eligible receipts, 32 MiB total and 8 MiB per receipt; refuse unsafe allocation before mutation |
 | Undo eligibility | Seven days after durable commit, subject to affected-row preconditions |
 
 Callers may request a shorter budget through `InspectionControl`. Queueing,
@@ -158,7 +159,10 @@ A staged target carries exact staged evidence, not a guessed future feed ID.
 Apply pins/validates its stage, allocates any new feed IDs in the writer
 transaction, then commits feed configuration, mappings and inverse together.
 New feeds enter at lowest precedence unless an explicit reviewed ordering
-change says otherwise. Any affected-row/evidence failure changes nothing.
+change says otherwise. Allocation preserves numeric identities still reserved
+by manual choices and eligible inverses, including feeds removed in the same
+batch; exhaustion changes nothing. Any affected-row/evidence failure changes
+nothing.
 
 No-op refresh and unrelated edits alone cannot invalidate apply or undo.
 Apply checks relevant before-values/evidence inside the transaction; undo
@@ -180,6 +184,13 @@ Verification exposes
 `evidence_revision` and `current_evidence_revision` in addition to configuration
 and mapping revisions: a later programme or binding refresh with identical
 configuration cannot certify an observation from an earlier snapshot.
+
+Automatic matching, including an observed absence, requires evidence of a
+complete projection from the current matching metadata and feed configuration.
+A cached one-channel rebind cannot establish that proof for the other channels.
+Older caches without complete projection evidence remain readable; verification
+stays pending until a normal complete guide import supplies current evidence.
+Explicit no-guide remains an intentional choice rather than missing evidence.
 
 Ordinary restart retains committed choices and eligible inverses, reconstructs
 operation observations and expires uncommitted previews. Restore invalidates
