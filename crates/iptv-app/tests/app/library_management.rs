@@ -1,4 +1,5 @@
 //! Synthetic end-to-end editing; all storage is inside a temporary HOME.
+use crate::headless::Headless;
 use iptv_providers::{
     SecretUrl,
     model::{M3uSourceConfig, Source, SourceConfig},
@@ -6,7 +7,6 @@ use iptv_providers::{
 use iptv_store_sqlite::{ChannelQuery, SourcePolicy};
 use nsh_core::{Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 use std::time::Duration;
 
 const PLAYLIST: &str = "#EXTM3U\n\

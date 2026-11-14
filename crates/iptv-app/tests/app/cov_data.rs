@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
 use iptv_providers::model::SourceConfig;
 use iptv_store_sqlite::{SourceId, Store};
@@ -32,7 +33,6 @@ use nsh_core::picker::PickedFile;
 use nsh_core::time::Clock;
 use nsh_core::{ImageData, Size, ViewKind, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
 
 pub(super) const IMPORT: Duration = Duration::from_secs(20);
 
@@ -219,6 +219,7 @@ pub(super) fn until(
     limit: Duration,
     done: impl Fn(&Headless) -> bool,
 ) {
+    let limit = crate::isolated::scaled_duration(limit);
     let start = std::time::Instant::now();
     while !done(app) {
         assert!(start.elapsed() < limit, "{what} never happened");

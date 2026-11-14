@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 root = Path(__file__).resolve().parents[2]
@@ -66,7 +67,8 @@ def locked_environment(tools):
         bin_directory = Path(directory) / "bin"
         bin_directory.mkdir()
         # Wrappers, not links: some interpreters locate themselves through argv[0].
-        tools = {name: f'exec "{shutil.which(name)}" "$@"' for name in ("bash", "python3", "dirname")} | tools
+        real_binaries = {"bash": shutil.which("bash"), "python3": sys.executable, "dirname": shutil.which("dirname")}
+        tools = {name: f'exec "{real_binaries[name]}" "$@"' for name in ("bash", "python3", "dirname")} | tools
         for name, script in tools.items():
             (bin_directory / name).write_text("#!/bin/sh\n" + script + "\n")
             (bin_directory / name).chmod(0o755)

@@ -36,10 +36,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+use crate::headless::Headless;
 use iptv_store_sqlite::SourceId;
 use nsh_core::ImageData;
 use nsh_core::picker::PickedFile;
-use nsh_testing::Headless;
 
 use super::cov_data::{
     IMPORT, act, copy_of, enter_text, guide, playlist, rail, refreshed, replace_copy, start, step,
