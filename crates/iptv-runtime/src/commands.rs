@@ -520,6 +520,19 @@ pub fn guide_sources(
     })
 }
 
+/// `source`'s stored guide as a schedule shown at `now` holds it, read on
+/// the writer: after every write queued before this (a guide action's
+/// deletion or new match), which a read of the last commit may not see.
+pub fn stored_guide(
+    source: SourceId,
+    now: iptv_epg::UnixTime,
+) -> impl std::future::Future<Output = Result<iptv_epg::GuideStore, StoreError>> {
+    let window = super::paging::window(now, super::stored::keep_past_days(&super::settings::get()));
+    super::store_service::call(move |store| {
+        store.load_epg(source, &super::paging::store_window(window))
+    })
+}
+
 pub fn clear_guides(
     sources: Vec<SourceId>,
 ) -> impl std::future::Future<Output = Result<(bool, Vec<super::imports::Imported>), StoreError>> {

@@ -198,12 +198,15 @@ pub async fn send_stored(job: &Job, id: SourceId, now: UnixTime, tx: &Sender<Msg
                 } else {
                     state.as_ref()
                 };
-                if let Some(at) = stored::check_at(
-                    stored::plan(iptv_import::Trigger::Timer, &configs, matching, state, now),
-                    now,
-                ) {
-                    let _ = tx.send(Msg::NextCheck { source: id, at });
-                }
+                let _ = tx.send(
+                    match stored::check_at(
+                        stored::plan(iptv_import::Trigger::Timer, &configs, matching, state, now),
+                        now,
+                    ) {
+                        Some(at) => Msg::NextCheck { source: id, at },
+                        None => Msg::NoCheck { source: id },
+                    },
+                );
                 let counts = iptv_core::wizard::ImportCounts {
                     channels: channels.len() as u32,
                     groups: groups.len() as u32,

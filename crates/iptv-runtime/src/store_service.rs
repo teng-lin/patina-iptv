@@ -83,6 +83,12 @@ pub(crate) struct Service {
     pub(crate) files: Arc<super::file_writer::Files>,
     pub(crate) pool: OnceLock<super::workers::Pool>,
     pub(crate) settings: super::settings::Current,
+    /// This owner's registered guide checks, for a test's thread.
+    #[cfg(feature = "test-support")]
+    pub(crate) guide_checks: super::guide_checks::Mirror,
+    /// This owner's synthetic worker conditions.
+    #[cfg(feature = "test-support")]
+    pub(crate) hooks: super::workers::Hooks,
 }
 impl Service {
     pub(crate) fn new(ports: crate::Ports) -> Self {
@@ -104,12 +110,18 @@ impl Service {
             files: Arc::default(),
             pool: OnceLock::new(),
             settings: Arc::default(),
+            #[cfg(feature = "test-support")]
+            guide_checks: Default::default(),
+            #[cfg(feature = "test-support")]
+            hooks: Default::default(),
         }
     }
 }
 impl Service {
     pub(crate) fn retire(&self) {
         self.epochs.active.store(0, Ordering::SeqCst);
+        #[cfg(feature = "test-support")]
+        self.hooks.release();
         self.files.close();
         if let Some(pool) = self.pool.get() {
             pool.close();
@@ -123,10 +135,14 @@ thread_local! { static CONTEXT: RefCell<Option<Weak<Service>>> = const { RefCell
 static ACTIVE: Mutex<Weak<Service>> = Mutex::new(Weak::new());
 
 pub(crate) fn service() -> Arc<Service> {
+    try_service().unwrap_or_else(|| crate::current().store.clone())
+}
+
+/// The owner of this context, else the active one; `None` without either.
+pub(crate) fn try_service() -> Option<Arc<Service>> {
     CONTEXT
         .with(|context| context.borrow().as_ref().and_then(Weak::upgrade))
         .or_else(active_service)
-        .unwrap_or_else(|| crate::current().store.clone())
 }
 
 pub(crate) fn active_service() -> Option<Arc<Service>> {

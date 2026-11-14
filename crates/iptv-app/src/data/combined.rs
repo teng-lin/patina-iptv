@@ -142,6 +142,7 @@ fn reattach_guide(
             generation,
             super::GuideRead::CacheOnly,
             Some(pending.clone()),
+            false,
         )
         .await;
         if current() {
@@ -154,6 +155,7 @@ fn reattach_guide(
                 generation,
                 super::GuideRead::RestoreAndCheck,
                 Some(pending),
+                false,
             )
             .await;
         }
@@ -210,7 +212,7 @@ async fn switch_all_ready(ui: Ui) {
     if crate::runtime().generation().with(Cell::get) != generation || active(ui) {
         return;
     }
-    super::next_generation();
+    super::next_generation(None);
     reset_single();
     super::source_changed(ui, None);
     stored::note_shown(None);
