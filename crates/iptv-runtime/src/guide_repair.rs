@@ -643,12 +643,13 @@ impl Runtime {
             };
             if let Some(operation) = owner.repairs.borrow_mut().operations.get_mut(&id) {
                 operation.phase = if result.verified_coverage {
+                    operation.effective = Effective::Installed;
                     OperationPhase::Verified
                 } else if !same {
                     OperationPhase::Superseded
                 } else if matches!(
                     operation.phase,
-                    OperationPhase::Pending | OperationPhase::Refreshing
+                    OperationPhase::Pending | OperationPhase::Refreshing | OperationPhase::Failed
                 ) {
                     operation.phase
                 } else {

@@ -564,6 +564,12 @@ fn outcome(ui: Ui, size: Scale) -> impl IntoElement {
                         tr("Guide changes undone")
                     } else if s.verification.as_ref().is_some_and(|v| v.verified_coverage) {
                         tr("Guide coverage verified")
+                    } else if s
+                        .outcome
+                        .as_ref()
+                        .is_some_and(|o| o.effective == model::Effective::Failed)
+                    {
+                        tr("Guide choices saved; guide refresh failed")
                     } else {
                         tr("Guide choices saved; verification pending")
                     }

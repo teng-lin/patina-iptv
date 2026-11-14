@@ -201,10 +201,68 @@ pub(super) async fn after_commit(
     outcome
 }
 
+fn refresh_observed(
+    owner: &Rc<Runtime>,
+    id: String,
+    source: SourceId,
+    expected: Revisions,
+    accepted: bool,
+) {
+    let read = crate::inspection::query_with_deadline(
+        owner,
+        InspectionControl::default(),
+        Duration::from_secs(3),
+        move |store| {
+            Ok(Ok(store.guide_repair_snapshot(|store| {
+                Ok((
+                    store.guide_revisions(source)?,
+                    store
+                        .epg_guide(source)?
+                        .is_some_and(|guide| guide.last_error.is_some()),
+                ))
+            })?))
+        },
+    );
+    let owner = owner.clone();
+    owner.clone().spawn(async move {
+        let observed = read.await;
+        let mut state = owner.repairs.borrow_mut();
+        let Some(status) = state.operations.get_mut(&id) else {
+            return;
+        };
+        if status.commit.revisions != expected
+            || matches!(
+                status.phase,
+                OperationPhase::Superseded | OperationPhase::Cancelled
+            )
+        {
+            return;
+        }
+        match observed {
+            Ok((current, _))
+                if current.mapping != expected.mapping
+                    || current.configuration != expected.configuration =>
+            {
+                status.phase = OperationPhase::Superseded;
+            }
+            Ok((_, false)) if accepted => {
+                if status.phase != OperationPhase::Verified {
+                    status.phase = OperationPhase::ReadyToVerify;
+                }
+            }
+            _ => {
+                status.phase = OperationPhase::Failed;
+                status.effective = Effective::Failed;
+            }
+        }
+    });
+}
+
 fn schedule(owner: &Rc<Runtime>, commit: &Commit, after: Option<crate::library::ImportCompletion>) {
     let cancel = CancelToken::new();
     let id = commit.id.clone();
     let source = commit.source;
+    let expected = commit.revisions;
     {
         let mut state = owner.repairs.borrow_mut();
         state.revoke(source);
@@ -229,22 +287,11 @@ fn schedule(owner: &Rc<Runtime>, commit: &Commit, after: Option<crate::library::
         let finished = owner.clone();
         let operation = id.clone();
         if !crate::data::stored::restart_repair_update(&owner, source, after, move |accepted| {
-            let mut state = finished.repairs.borrow_mut();
-            if let Some(status) = state.operations.get_mut(&operation)
-                && !matches!(
-                    status.phase,
-                    OperationPhase::Superseded | OperationPhase::Cancelled
-                )
-            {
-                status.phase = if accepted {
-                    OperationPhase::ReadyToVerify
-                } else {
-                    OperationPhase::Failed
-                };
-            }
+            refresh_observed(&finished, operation, source, expected, accepted);
         }) && let Some(status) = owner.repairs.borrow_mut().operations.get_mut(&id)
         {
             status.phase = OperationPhase::Failed;
+            status.effective = Effective::Failed;
         }
         if !cancel.is_cancelled() {
             owner
