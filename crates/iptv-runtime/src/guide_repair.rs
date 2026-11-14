@@ -72,10 +72,10 @@ impl State {
     pub(crate) fn revoke(&mut self, source: SourceId) {
         if let Some((id, token)) = self.refreshes.remove(&source) {
             token.cancel();
-            if let Some(operation) = self.operations.get_mut(&id) {
-                if operation.phase != OperationPhase::Cancelled {
-                    operation.phase = OperationPhase::Superseded;
-                }
+            if let Some(operation) = self.operations.get_mut(&id)
+                && operation.phase != OperationPhase::Cancelled
+            {
+                operation.phase = OperationPhase::Superseded;
             }
         }
     }
