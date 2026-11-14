@@ -27,6 +27,7 @@ mod fonts;
 mod grid;
 mod guide_assign_view;
 mod guide_inspect_view;
+mod guide_repair_view;
 mod header;
 mod i18n;
 mod input;
@@ -230,6 +231,8 @@ pub struct Ui {
     /// and settings screens).
     pub guide_sources: Signal<Option<epg_sources_view::Open>>,
     pub guide_inspect: Signal<Option<iptv_library::guide_inspect::Screen>>,
+    pub guide_repair: Signal<Option<iptv_library::guide_repair_screen::Screen>>,
+    pub guide_repair_cancel: Stored<Option<iptv_import::CancelToken>>,
     pub guide_inspect_cancel: Stored<Option<iptv_import::CancelToken>>,
     /// The guide data chooser of a channel, when open.
     pub guide_assign: Signal<Option<guide_assign_view::Open>>,
@@ -663,6 +666,8 @@ fn ready_app() -> impl IntoElement {
         playlists: signal(None),
         guide_sources: signal(None),
         guide_inspect: signal(None),
+        guide_repair: signal(None),
+        guide_repair_cancel: stored(None),
         guide_inspect_cancel: stored(None),
         guide_assign: signal(None),
         library: data::Library::new(),
@@ -852,6 +857,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(organization_view::layer(ui))
         .child(epg_sources_view::layer(ui))
         .child(guide_inspect_view::layer(ui))
+        .child(guide_repair_view::layer(ui))
         .child(wizard_view::layer(ui))
 }
 
@@ -961,6 +967,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
         match (ui.mode.get(), ui.focus.with(|f| f.pane), panels || menu) {
             _ if top == Some(Overlay::Wizard) => wizard_view::back(ui),
             _ if top == Some(Overlay::GuideSources) => epg_sources_view::back(ui),
+            _ if top == Some(Overlay::GuideRepair) => guide_repair_view::back(ui),
             _ if top == Some(Overlay::GuideInspection) => guide_inspect_view::back(ui),
             _ if top == Some(Overlay::RemoteEditor) => remote_editor::back(ui),
             _ if top == Some(Overlay::Organization) => organization_view::back(ui),

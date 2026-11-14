@@ -41,6 +41,33 @@ pub(crate) struct State {
     refreshes: HashMap<SourceId, (String, CancelToken)>,
 }
 impl State {
+    fn reserve(&mut self, id: &str) -> Result<()> {
+        if self.applying.contains(id) {
+            return Err(Error::Busy);
+        }
+        let occupied: HashSet<_> = self.operations.keys().chain(self.applying.iter()).collect();
+        if !occupied.contains(&id.to_owned()) && occupied.len() >= MAX_OPERATIONS {
+            let old = self
+                .operations
+                .iter()
+                .filter(|(key, op)| {
+                    !self.applying.contains(*key)
+                        && !matches!(
+                            op.phase,
+                            OperationPhase::Pending | OperationPhase::Refreshing
+                        )
+                })
+                .min_by_key(|(_, op)| op.commit.created_at)
+                .map(|(id, _)| id.clone());
+            if let Some(old) = old {
+                self.operations.remove(&old);
+            } else {
+                return Err(Error::Busy);
+            }
+        }
+        self.applying.insert(id.into());
+        Ok(())
+    }
     pub(crate) fn revoke(&mut self, source: SourceId) {
         if let Some((id, token)) = self.refreshes.remove(&source) {
             token.cancel();
@@ -225,8 +252,27 @@ impl Runtime {
             state
                 .plans
                 .retain(|_, plan| plan.epoch == epoch && plan.preview.expires_at > now());
-            if state.plans.len() >= MAX_PLANS {
-                return Err(Error::Busy);
+            while state.plans.len() >= MAX_PLANS
+                || state
+                    .plans
+                    .values()
+                    .map(|p| p.rows.len() + p.indirect.len())
+                    .sum::<usize>()
+                    + result.rows.len()
+                    + result.indirect.len()
+                    > 200_000
+            {
+                let old = state
+                    .plans
+                    .iter()
+                    .filter(|(id, _)| !state.applying.contains(*id))
+                    .min_by_key(|(id, plan)| (plan.preview.created_at, (*id).clone()))
+                    .map(|(id, _)| id.clone());
+                if let Some(old) = old {
+                    state.plans.remove(&old);
+                } else {
+                    return Err(Error::Busy);
+                }
             }
             let preview = result.preview.clone();
             state.plans.insert(preview.id.clone(), result);
@@ -278,6 +324,19 @@ impl Runtime {
         Ok(page)
     }
 
+    pub fn release_guide_repair_plan(&self, id: &str, digest: [u8; 32]) -> Result<bool> {
+        let mut state = self.repairs.borrow_mut();
+        if state.applying.contains(id) {
+            return Err(Error::Busy);
+        }
+        if let Some(plan) = state.plans.get(id)
+            && plan.preview.digest != digest
+        {
+            return Err(Error::WrongDigest);
+        }
+        Ok(state.plans.remove(id).is_some())
+    }
+
     pub fn apply_guide_repair(
         self: &Rc<Self>,
         id: String,
@@ -292,7 +351,29 @@ impl Runtime {
         let guard = write::CancelOnDrop(child.clone());
         async move {
             let _guard = guard;
-            let plan = plan.ok_or(Error::PlanMissing)?;
+            let plan = match plan {
+                Some(plan) => plan,
+                None => {
+                    let lookup = id.clone();
+                    let hashed = digest_hex(&digest);
+                    let remaining = InspectionControl {
+                        cancel: control.cancel.clone(),
+                        timeout: deadline.saturating_duration_since(Instant::now()),
+                    };
+                    let existing = crate::inspection::query_with_deadline(
+                        &owner,
+                        remaining,
+                        PREVIEW_DEADLINE,
+                        move |store| Ok(Ok(store.guide_repair_receipt(&lookup, &hashed)?)),
+                    )
+                    .await?;
+                    return match existing {
+                        RepairResult::Committed(saved) => Ok(receipt(&owner, commit(saved))),
+                        RepairResult::Invalid => Err(Error::WrongDigest),
+                        _ => Err(Error::PlanMissing),
+                    };
+                }
+            };
             if plan.preview.digest != digest {
                 return Err(Error::WrongDigest);
             }
@@ -305,9 +386,7 @@ impl Runtime {
             if control.cancel.is_cancelled() {
                 return Err(Error::Cancelled);
             }
-            if !owner.repairs.borrow_mut().applying.insert(id.clone()) {
-                return Err(Error::Busy);
-            }
+            owner.repairs.borrow_mut().reserve(&id)?;
             let _applying = Applying {
                 owner: Rc::downgrade(&owner),
                 id: id.clone(),
@@ -405,6 +484,11 @@ impl Runtime {
             )
             .await?
             .ok_or(Error::CommitMissing)?;
+            owner.repairs.borrow_mut().reserve(&id)?;
+            let _applying = Applying {
+                owner: Rc::downgrade(&owner),
+                id: id.clone(),
+            };
             let source = existing.source;
             let cancelled = crate::data::stored::supersede(&owner, source);
             let edit = crate::stored::guide_edit_revision(&owner, source);
@@ -523,22 +607,51 @@ impl Runtime {
         }
     }
 
+    pub fn recent_guide_repairs(
+        &self,
+        source: SourceId,
+        limit: u32,
+        control: InspectionControl,
+    ) -> impl Future<Output = Result<Vec<Commit>>> + use<> {
+        let read =
+            crate::inspection::query_with_deadline(self, control, PREVIEW_DEADLINE, move |store| {
+                if limit == 0 || limit > 50 {
+                    return Ok(Err(InspectionError::InvalidRequest));
+                }
+                if store.source(source)?.is_none() {
+                    return Ok(Err(InspectionError::SourceMissing(source)));
+                }
+                Ok(Ok(store
+                    .recent_guide_repairs(source, limit)?
+                    .into_iter()
+                    .map(commit)
+                    .collect()))
+            });
+        async move { read.await.map_err(Error::from) }
+    }
+
     pub fn guide_repair_operation(
         self: &Rc<Self>,
         id: String,
     ) -> impl Future<Output = Result<Operation>> + use<> {
+        let owner = self.clone();
         let cached = self.repairs.borrow().operations.get(&id).cloned();
-        let services = self.services();
         async move {
+            if !owner.services().is_current() {
+                return Err(InspectionError::OwnerClosed.into());
+            }
             if let Some(operation) = cached {
                 return Ok(operation);
             }
             let read = id.clone();
-            let stored = services
-                .read(move |store| store.guide_repair_commit(&read))
-                .await
-                .map_err(|_| Error::Storage)?
-                .ok_or(Error::CommitMissing)?;
+            let stored = crate::inspection::query_with_deadline(
+                &owner,
+                InspectionControl::default(),
+                PREVIEW_DEADLINE,
+                move |store| Ok(Ok(store.guide_repair_commit(&read)?)),
+            )
+            .await?
+            .ok_or(Error::CommitMissing)?;
             Ok(Operation {
                 id,
                 commit: commit(stored),

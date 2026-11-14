@@ -173,3 +173,39 @@ impl Store {
         Ok(Some((commit, choices, changed_config)))
     }
 }
+
+impl Store {
+    /// Recent durable commits remain discoverable after an ordinary owner restart.
+    pub fn recent_guide_repairs(&self, source: SourceId, limit: u32) -> Result<Vec<RepairCommit>> {
+        crate::sources::ensure_source(&self.conn, source)?;
+        if limit == 0 || limit > 50 {
+            return Err(StoreError::InvalidData("guide repair history limit".into()));
+        }
+        let mut statement = self.conn.prepare_cached(
+            "SELECT id FROM guide_repair_commits
+            WHERE source_id=?1 ORDER BY created_at DESC,id DESC LIMIT ?2",
+        )?;
+        let ids = statement
+            .query_map(params![source.0, limit], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        ids.into_iter()
+            .map(|id| {
+                commit_value(&self.conn, &id)?
+                    .map(|(commit, _)| commit)
+                    .ok_or_else(invalid)
+            })
+            .collect()
+    }
+}
+
+impl Store {
+    pub fn guide_repair_receipt(&self, id: &str, digest: &str) -> Result<RepairResult> {
+        Ok(match commit_value(&self.conn, id)? {
+            Some((commit, payload)) if payload["digest"].as_str() == Some(digest) => {
+                RepairResult::Committed(commit)
+            }
+            Some(_) => RepairResult::Invalid,
+            None => RepairResult::Missing,
+        })
+    }
+}

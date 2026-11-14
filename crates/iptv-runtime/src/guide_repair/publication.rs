@@ -79,7 +79,8 @@ pub(super) async fn after_commit(
     let source = commit.source;
     {
         let mut state = owner.repairs.borrow_mut();
-        if state.operations.len() >= MAX_OPERATIONS {
+        state.plans.remove(&id);
+        if !state.operations.contains_key(&id) && state.operations.len() >= MAX_OPERATIONS {
             if let Some(old) = state
                 .operations
                 .iter()
@@ -92,6 +93,17 @@ pub(super) async fn after_commit(
                 .map(|(id, _)| id.clone())
             {
                 state.operations.remove(&old);
+            } else {
+                // Admission reserves capacity before commit; retain an honest
+                // durable receipt even if a future caller violates that rule.
+                return Outcome {
+                    commit: commit.clone(),
+                    configuration_committed: true,
+                    mapping_saved: true,
+                    effective: Effective::Pending,
+                    verification_pending: true,
+                    operation: id,
+                };
             }
         }
         state.operations.insert(

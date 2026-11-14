@@ -286,6 +286,7 @@ fn samples(ui: Ui, candidate: CandidateRef) {
         };
         let mut candidate = candidate;
         candidate.incarnation = stage.evidence.incarnation.clone();
+        let selected = candidate.clone();
         let result = crate::runtime()
             .probe_schedule(
                 stage.evidence.clone(),
@@ -304,6 +305,7 @@ fn samples(ui: Ui, candidate: CandidateRef) {
                     s.samples_back = screen.mode;
                     s.mode = Mode::Samples;
                     s.samples = programmes;
+                    s.selected = Some(selected);
                     s.next = None;
                 });
                 finish(ui, id, Ok(()));
@@ -326,9 +328,48 @@ fn activate(ui: Ui, row: Row) {
             candidates(ui, subject, false);
         }
         Row::Candidate(candidate) => samples(ui, candidate),
+        Row::UseCandidate => {
+            if let Some((Some(channel), Some(candidate), stage, window)) = state(ui, |s| {
+                (
+                    s.subject.clone(),
+                    s.selected.clone(),
+                    s.stage.clone(),
+                    s.window,
+                )
+            }) {
+                let target = stage.map_or_else(
+                    || iptv_library::guide_repair::Target::Configured(candidate.clone()),
+                    |stage| iptv_library::guide_repair::Target::Staged {
+                        evidence: stage.evidence,
+                        epg_channel: candidate.epg_channel.clone(),
+                        addition: None,
+                    },
+                );
+                crate::guide_repair_view::add(ui, channel, target, window);
+            }
+        }
+        Row::AutomaticRepair | Row::NoGuideRepair => {
+            if let Some((Some(channel), window)) = state(ui, |s| (s.subject.clone(), s.window)) {
+                let target = if row == Row::AutomaticRepair {
+                    iptv_library::guide_repair::Target::Automatic
+                } else {
+                    iptv_library::guide_repair::Target::NoGuide
+                };
+                crate::guide_repair_view::add(ui, channel, target, window);
+            }
+        }
+        Row::ReviewRepair => crate::guide_repair_view::reopen(ui),
+        Row::RepairHistory => {
+            if let Some((source, window)) = state(ui, |s| (s.source, s.window)) {
+                crate::guide_repair_view::history(ui, source, window);
+            }
+        }
         Row::Search => update(ui, |s| s.typing = true),
         Row::InspectLink => inspect_link(ui),
         Row::NewLink => update(ui, |s| {
+            if s.mode == Mode::Audit {
+                s.subject = None;
+            }
             s.mode = Mode::Link;
             s.next = None;
             s.typing = true;
@@ -368,7 +409,7 @@ fn evidence(value: Evidence) -> &'static str {
         Evidence::Alternative => tr("Alternative guide channel"),
     }
 }
-fn error_text(error: InspectionError) -> &'static str {
+pub(crate) fn error_text(error: InspectionError) -> &'static str {
     match error {
         InspectionError::Cancelled => tr("Cancelled"),
         InspectionError::Deadline => tr("The request timed out"),
@@ -401,6 +442,11 @@ fn title(ui: Ui, row: &Row) -> String {
         })
         .flatten()
         .unwrap_or_default(),
+        Row::UseCandidate => tr("Add this guide choice").into(),
+        Row::AutomaticRepair => tr("Automatic").into(),
+        Row::NoGuideRepair => tr("No guide data").into(),
+        Row::ReviewRepair => tr("Review guide changes").into(),
+        Row::RepairHistory => tr("Recent guide repairs").into(),
         Row::Search => tr("Search").to_owned(),
         Row::Next => tr("Next").to_owned(),
         Row::NewLink => tr("Inspect a guide link").to_owned(),

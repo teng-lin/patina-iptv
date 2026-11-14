@@ -652,7 +652,14 @@ impl Store {
         let touched: HashSet<_> = rows.iter().filter_map(|r| r["channel"].as_str()).collect();
         for row in rows {
             let channel = row["channel"].as_str().ok_or_else(invalid)?;
-            if overlay(&tx, commit.source, channel)? != overlay_from(&row["after"])? {
+            let allowed: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM channels c
+                LEFT JOIN channel_overlays o ON o.source_id=c.source_id AND o.channel_id=c.id
+                WHERE c.source_id=?1 AND c.id=?2 AND COALESCE(o.blocked,0)=0)",
+                params![commit.source.0, channel],
+                |r| r.get(0),
+            )?;
+            if !allowed || overlay(&tx, commit.source, channel)? != overlay_from(&row["after"])? {
                 conflicts.push(channel.into());
             }
         }
