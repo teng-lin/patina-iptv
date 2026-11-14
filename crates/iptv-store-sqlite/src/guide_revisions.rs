@@ -69,6 +69,18 @@ impl Store {
     /// Call on the accepted restore before any runtime owner can open it.
     pub fn invalidate_guide_repair_authority(&mut self) -> Result<()> {
         let tx = self.conn.transaction()?;
+        // Validate provenance before rotating authority. Matching addresses alone
+        // cannot revive a cache fetched with superseded credentials/headers.
+        let authoritative = {
+            let mut statement = tx.prepare_cached("SELECT m.key FROM store_meta m
+                JOIN guide_feed_incarnations i ON m.key='inspection.feed.' || i.source_id || '.' || i.feed_id
+                JOIN guide_sources g ON g.source_id=i.source_id AND g.feed_id=i.feed_id
+                JOIN epg_feeds f ON f.source_id=g.source_id AND f.feed_id=g.feed_id
+                WHERE m.value=i.incarnation AND f.url=g.url AND f.shift_minutes=g.shift_minutes")?;
+            statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
         tx.execute("DELETE FROM guide_repair_commits", [])?;
         tx.execute(
             "UPDATE guide_revisions SET incarnation = lower(hex(randomblob(16)))",
@@ -79,21 +91,15 @@ impl Store {
                     SET incarnation = lower(hex(randomblob(16)))",
             [],
         )?;
-        // Restored data and configuration were validated together. Rebind cached
-        // provenance to the new restore incarnation without reviving old handles.
-        tx.execute(
-            "UPDATE store_meta SET value=(SELECT i.incarnation FROM guide_feed_incarnations i
-             JOIN guide_sources g ON g.source_id=i.source_id AND g.feed_id=i.feed_id
-             JOIN epg_feeds f ON f.source_id=g.source_id AND f.feed_id=g.feed_id
-             WHERE store_meta.key='inspection.feed.' || i.source_id || '.' || i.feed_id
-             AND f.url=g.url AND f.shift_minutes=g.shift_minutes)
-             WHERE key LIKE 'inspection.feed.%' AND EXISTS(SELECT 1 FROM guide_feed_incarnations i
-             JOIN guide_sources g ON g.source_id=i.source_id AND g.feed_id=i.feed_id
-             JOIN epg_feeds f ON f.source_id=g.source_id AND f.feed_id=g.feed_id
-             WHERE store_meta.key='inspection.feed.' || i.source_id || '.' || i.feed_id
-             AND f.url=g.url AND f.shift_minutes=g.shift_minutes)",
-            [],
-        )?;
+        // Only previously authoritative cache origins follow the restore's new
+        // identities. All stale origins remain stale until a fresh import.
+        for key in authoritative {
+            tx.execute(
+                "UPDATE store_meta SET value=(SELECT incarnation FROM guide_feed_incarnations i
+                WHERE ?1='inspection.feed.' || i.source_id || '.' || i.feed_id) WHERE key=?1",
+                [key],
+            )?;
+        }
         tx.commit()?;
         Ok(())
     }
@@ -129,6 +135,71 @@ mod tests {
             enabled: true,
             shift_minutes: 0,
         }
+    }
+
+    #[test]
+    fn restore_preserves_stale_transport_provenance_and_retags_only_authoritative_cache() {
+        use crate::{EpgFeedMeta, EpgStage};
+        use iptv_import::{EpgImport, EpgSourceConfig};
+        let mut store = Store::open_in_memory().unwrap();
+        let fresh = source(&mut store);
+        let stale = source(&mut store);
+        let dir = tempfile::tempdir().unwrap();
+        for source in [fresh, stale] {
+            let config = feed();
+            store
+                .set_guide_sources(source, std::slice::from_ref(&config))
+                .unwrap();
+            let mut stage = EpgStage::create_in_store(&store, dir.path()).unwrap();
+            store
+                .replace_epg(
+                    source,
+                    &mut stage,
+                    &EpgImport::default(),
+                    &[EpgFeedMeta {
+                        config: EpgSourceConfig::new(config.feed, config.url),
+                        fetched_at: 100,
+                        etag: None,
+                        last_modified: None,
+                        bytes: 0,
+                    }],
+                    0,
+                )
+                .unwrap();
+            assert!(
+                store
+                    .inspection_stored_feed_incarnation(source, FeedId(1))
+                    .unwrap()
+                    .is_some()
+            );
+        }
+        let mut changed = store.source(stale).unwrap().unwrap().source;
+        if let SourceConfig::M3u(config) = &mut changed.config {
+            config.user_agent = Some("Synthetic transport B".into());
+        }
+        store.update_source(stale, &changed).unwrap();
+        assert!(
+            store
+                .inspection_stored_feed_incarnation(stale, FeedId(1))
+                .unwrap()
+                .is_none()
+        );
+        let original = store.feed_incarnation(fresh, FeedId(1)).unwrap();
+        store.invalidate_guide_repair_authority().unwrap();
+        assert_ne!(store.feed_incarnation(fresh, FeedId(1)).unwrap(), original);
+        assert_eq!(
+            store
+                .inspection_stored_feed_incarnation(fresh, FeedId(1))
+                .unwrap(),
+            store.feed_incarnation(fresh, FeedId(1)).unwrap()
+        );
+        assert!(
+            store
+                .inspection_stored_feed_incarnation(stale, FeedId(1))
+                .unwrap()
+                .is_none(),
+            "restore cannot certify data imported with old transport credentials"
+        );
     }
 
     #[test]
