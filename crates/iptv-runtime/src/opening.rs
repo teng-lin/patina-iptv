@@ -142,7 +142,7 @@ pub async fn send_stored(job: &Job, id: SourceId, now: UnixTime, tx: &Sender<Msg
         format_args!("{bound} channels, {kib} KiB in {} ms", ms(started)),
     );
     // A cached-only opening must complete without claiming a network slot.
-    let metadata = super::store_service::call(move |store| {
+    let metadata = super::store_service::read(move |store| {
         Ok((
             store.source_policy(id)?,
             store.import_status(id)?,

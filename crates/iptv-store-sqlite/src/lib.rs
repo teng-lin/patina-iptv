@@ -98,6 +98,8 @@ impl Default for OpenOptions {
 
 /// Page cache per connection, KiB.
 const CACHE_KIB: i64 = 16 * 1024;
+/// WAL file size limit before checkpoint truncation, bytes.
+pub const WAL_SIZE_LIMIT_BYTES: i64 = 16 * 1024 * 1024;
 
 /// Unix seconds from the system clock.
 fn system_now() -> i64 {
@@ -160,6 +162,7 @@ impl Store {
         // 16 MiB page cache (default 2 MiB): a 50k-channel refresh touches
         // several index B-trees.
         conn.pragma_update(None, "cache_size", -CACHE_KIB)?;
+        conn.pragma_update(None, "journal_size_limit", WAL_SIZE_LIMIT_BYTES)?;
         migrate::migrate_to(&mut conn, SCHEMA_VERSION, system_now())?;
         let fts_index = search::prepare(&mut conn)?;
         Ok(Self {

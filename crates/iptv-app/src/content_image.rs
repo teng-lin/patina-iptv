@@ -19,11 +19,14 @@ struct Cache {
     bytes: usize,
 }
 impl Cache {
-    fn get(&self, url: &str) -> Option<String> {
-        self.entries
-            .iter()
-            .find(|(key, _)| key == url)
-            .map(|(_, value)| value.clone())
+    fn get(&mut self, url: &str) -> Option<String> {
+        if let Some(at) = self.entries.iter().position(|(key, _)| key == url) {
+            let (key, value) = self.entries.remove(at)?;
+            self.entries.push_back((key, value.clone()));
+            Some(value)
+        } else {
+            None
+        }
     }
     /// Stores `value` for `url` as the newest entry. An address already
     /// held is replaced, not stored twice (two views asking for the same
@@ -193,6 +196,23 @@ mod tests {
         assert!(c.get("a").is_some());
         let held: usize = c.entries.iter().map(|(k, v)| k.len() + v.len()).sum();
         assert_eq!(c.bytes, held);
+    }
+    #[test]
+    fn cache_eviction_is_least_recently_used() {
+        let mut c = Cache::default();
+        c.insert("a".into(), "1".into());
+        c.insert("b".into(), "2".into());
+        // Access "a" so it is promoted to most recently used.
+        assert_eq!(c.get("a").as_deref(), Some("1"));
+        // Fill up to 64 entries.
+        for n in 0..62 {
+            c.insert(format!("more-{n}"), "x".into());
+        }
+        assert_eq!(c.entries.len(), 64);
+        // Next insertion must evict "b" (least recently used), not "a".
+        c.insert("overflow".into(), "x".into());
+        assert!(c.get("b").is_none(), "b should be evicted as LRU");
+        assert!(c.get("a").is_some(), "a was accessed so it is kept");
     }
     #[test]
     fn a_poisoned_cache_lock_still_serves() {

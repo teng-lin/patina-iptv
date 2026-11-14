@@ -167,6 +167,9 @@ fn perform(ui: Ui, edit: Edit) {
 fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), StoreError>) {
     if let Err(e) = result {
         log::warn!("iptv organization: change refused: {e}");
+        crate::runtime().emit(crate::runtime::RuntimeEvent::Notify(
+            "The change could not be saved. Reopen the list and try again.",
+        ));
         return;
     }
     let expected = s.clone();

@@ -181,6 +181,7 @@ pub fn start(ui: Ui) {
 /// A new generation owns the guide: older imports no longer show and
 /// their guide timers stop.
 fn next_generation() -> u64 {
+    crate::runtime().cancel_guide_checks();
     crate::runtime().generation().with(|g| {
         g.set(g.get() + 1);
         g.get()
@@ -204,6 +205,7 @@ fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(U
     let mut import_source = job.stored;
     let completion = library::import_completion(cancel.clone());
     if let Some(source) = import_source {
+        crate::runtime().cancel_guide_check(source);
         library::track_import(source, &completion);
     }
     let previous = Cell::new(
@@ -426,7 +428,9 @@ async fn show_part(
     };
     while organization::revision() != organization_revision {
         organization_revision = organization::revision();
-        organization::apply(&schedule, source).await;
+        if let Some(replacement) = organization::apply(&schedule, source).await {
+            schedule = replacement;
+        }
     }
     if crate::runtime().generation().with(Cell::get) != generation || combined::active(ui) {
         return;
@@ -478,9 +482,23 @@ fn schedule_check(ui: Ui, source: SourceId, at: i64, generation: u64) {
     let wait =
         Duration::from_secs(u64::try_from(at - now_unix()).unwrap_or(0)).clamp(MIN_WAIT, MAX_WAIT);
     log::info!("iptv data: next guide check in {} min", wait.as_secs() / 60);
+    let (ticket, cancel) = crate::runtime().replace_guide_check(source);
     spawn_in_app(async move {
-        timer(wait).await;
-        if crate::runtime().generation().with(Cell::get) == generation
+        let mut elapsed = std::pin::pin!(timer(wait));
+        let mut cancelled = std::pin::pin!(cancel.cancelled());
+        let fired = std::future::poll_fn(|cx| {
+            use std::future::Future;
+            use std::task::Poll;
+            if cancelled.as_mut().poll(cx).is_ready() {
+                return Poll::Ready(false);
+            }
+            elapsed.as_mut().poll(cx).map(|_| true)
+        })
+        .await;
+        if fired
+            && crate::runtime().guide_check_current(source, ticket)
+            && !library::running(source)
+            && crate::runtime().generation().with(Cell::get) == generation
             && (!combined::active(ui) || combined::includes(ui, source))
         {
             check_guide(ui, source, generation);
@@ -528,10 +546,17 @@ async fn read_guide(
     read: GuideRead,
     handoff: Option<library::ImportCompletion>,
 ) {
+    let read = if library::running(source) {
+        GuideRead::CacheOnly
+    } else {
+        read
+    };
+    let (ticket, cancel) = crate::runtime().replace_guide_check(source);
     let (tx, mut rx) = unbounded_channel();
     if !workers::submit(source_is_visible(ui, source), move || {
-        with_runtime(|| guide_pipeline(source, &tx, read));
+        with_runtime(|| guide_pipeline(source, &tx, read, &cancel));
     }) {
+        crate::runtime().cancel_guide_check(source);
         crate::runtime().emit(crate::runtime::RuntimeEvent::Notify(
             "Too many playlists are updating. Try again shortly.",
         ));
@@ -544,12 +569,19 @@ async fn read_guide(
         {
             return;
         }
-        match rx.recv().await {
+        let message = rx.recv().await;
+        if !crate::runtime().guide_check_current(source, ticket) {
+            return;
+        }
+        match message {
             Some(Msg::Guide(imported)) => show(ui, imported, generation, false).await,
             Some(Msg::NextCheck { source, at }) => schedule_check(ui, source, at, generation),
             Some(_) => {}
             None => break,
         }
+    }
+    if crate::runtime().guide_check_current(source, ticket) {
+        crate::runtime().cancel_guide_check(source);
     }
 }
 

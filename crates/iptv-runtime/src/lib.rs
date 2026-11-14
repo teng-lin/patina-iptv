@@ -1,5 +1,6 @@
 //! Application-owned state and events. This module has no UI toolkit imports.
 mod events;
+mod guide_checks;
 pub mod state;
 pub use events::RuntimeEvent;
 
@@ -46,6 +47,9 @@ pub struct Runtime {
     store: std::sync::Arc<store_service::Service>,
     pub(crate) settings_saved: Slot<SavedSettings>,
     pub(crate) settings_changed: Slot<Cell<u64>>,
+    pub(crate) settings_read_only: Cell<Option<std::io::ErrorKind>>,
+    pub(crate) link_client:
+        std::sync::Arc<std::sync::Mutex<Option<(iptv_net::NetConfig, iptv_net::NetClient)>>>,
     pub(crate) backup_busy: Cell<bool>,
     pub(crate) backup_progress: Cell<backup::Progress>,
     pub(crate) search_indexes: Slot<RefCell<search::Indexes>>,
@@ -79,6 +83,8 @@ pub struct Runtime {
     tasks: RefCell<Option<Rc<TaskHost>>>,
     pub(crate) foreground: Cell<bool>,
     pub(crate) scheduler_started: Cell<bool>,
+    guide_checks: RefCell<guide_checks::GuideChecks>,
+    organization_edits: RefCell<HashMap<SourceId, u64>>,
 }
 
 impl Runtime {
@@ -91,6 +97,8 @@ impl Runtime {
             store: store.clone(),
             settings_saved: Slot::default(),
             settings_changed: Slot::default(),
+            settings_read_only: Cell::new(None),
+            link_client: Default::default(),
             backup_busy: Cell::new(false),
             backup_progress: Cell::new(backup::Progress::Idle),
             search_indexes: Slot::default(),
@@ -124,6 +132,8 @@ impl Runtime {
             tasks: RefCell::new(None),
             foreground: Cell::new(true),
             scheduler_started: Cell::new(false),
+            guide_checks: RefCell::default(),
+            organization_edits: RefCell::default(),
         }
     }
 }
@@ -191,6 +201,7 @@ impl Runtime {
         store_service::with_service(self.store.clone(), store_service::register_ui_thread);
     }
     pub fn drain_services(&self) -> bool {
+        self.cancel_guide_checks();
         let drained =
             store_service::with_service(self.store.clone(), store_service::drain_on_shutdown);
         // Detached local tasks can retain this Runtime after the root closes.
@@ -211,6 +222,16 @@ impl Runtime {
         if let Some(sink) = sink {
             sink(event);
         }
+    }
+
+    pub fn begin_organization_edit(&self, source: SourceId) -> u64 {
+        let mut edits = self.organization_edits.borrow_mut();
+        let ticket = edits.entry(source).or_default();
+        *ticket = ticket.wrapping_add(1);
+        *ticket
+    }
+    pub fn organization_edit_current(&self, source: SourceId, ticket: u64) -> bool {
+        self.organization_edits.borrow().get(&source) == Some(&ticket)
     }
 
     pub fn schedule(&self) -> Rc<dyn Schedule> {

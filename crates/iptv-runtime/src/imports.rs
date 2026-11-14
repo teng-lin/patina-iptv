@@ -154,7 +154,15 @@ pub fn run(job: Job, tx: &Sender<Msg>, cancel: &CancelToken) {
 }
 
 /// The timer's guide check: the stored feeds for the stored channels.
-pub async fn guide_pipeline(source: SourceId, tx: &Sender<Msg>, read: GuideRead) {
+pub async fn guide_pipeline(
+    source: SourceId,
+    tx: &Sender<Msg>,
+    read: GuideRead,
+    cancel: &CancelToken,
+) {
+    if cancel.is_cancelled() {
+        return;
+    }
     let now = now_unix();
     let state = stored::guide_state(source);
     let guides = stored::current_configs(source, state.as_ref());
@@ -189,19 +197,14 @@ pub async fn guide_pipeline(source: SourceId, tx: &Sender<Msg>, read: GuideRead)
             log::info!("iptv data: downloading the guide ({reason:?})");
             match NetClient::new(super::settings::net_config()) {
                 Ok(net) => {
-                    let cancel = CancelToken::new();
-                    let result = download_guide(
-                        &net,
-                        &guides,
-                        matching,
-                        now,
-                        &mut NoProgress,
-                        &cancel,
-                        None,
-                    )
-                    .await;
+                    let result =
+                        download_guide(&net, &guides, matching, now, &mut NoProgress, cancel, None)
+                            .await;
                     match result {
                         Ok(import) => {
+                            if cancel.is_cancelled() {
+                                return;
+                            }
                             let guide = keep_guide(source, import, &guides, matching, now);
                             let _ = tx.send(Msg::Guide(Box::new(Imported {
                                 groups,
@@ -214,6 +217,9 @@ pub async fn guide_pipeline(source: SourceId, tx: &Sender<Msg>, read: GuideRead)
                             })));
                         }
                         Err(e) => {
+                            if cancel.is_cancelled() {
+                                return;
+                            }
                             log::warn!("iptv data: guide: {e}");
                             stored::record_failure(source, &e, &guides);
                         }

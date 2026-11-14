@@ -60,7 +60,7 @@ pub struct Organization {
     pub groups: Vec<(String, String, bool)>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct OrganizationState {
     names: Vec<String>,
     hidden: Vec<bool>,
@@ -68,30 +68,31 @@ struct OrganizationState {
     groups: Vec<(usize, String)>,
     lists: Option<Vec<(String, String, Vec<usize>)>>,
 }
+#[derive(Clone)]
 pub struct EpgSchedule {
-    organization: std::cell::RefCell<Option<OrganizationState>>,
+    organization: std::cell::RefCell<Option<std::sync::Arc<OrganizationState>>>,
     /// Each channel by key, made on the first lookup: channels never change.
-    key_index: std::cell::OnceCell<std::collections::HashMap<String, usize>>,
+    key_index: std::rc::Rc<std::cell::OnceCell<std::collections::HashMap<String, usize>>>,
     /// Each channel's group (`NO_GROUP` for none), made on the first lookup
     /// after the groups last changed ([`Self::set_organization`],
     /// [`Self::set_group_lists`]).
     group_index: std::cell::RefCell<Option<Vec<u32>>>,
-    group_keys: Vec<String>,
-    channels: Vec<GuideChannel>,
+    group_keys: std::sync::Arc<Vec<String>>,
+    channels: std::sync::Arc<Vec<GuideChannel>>,
     /// The imported channel behind each guide channel (stream and catch-up).
-    sources: Vec<Option<Channel>>,
-    group_names: Vec<String>,
+    sources: std::sync::Arc<Vec<Option<Channel>>>,
+    group_names: std::sync::Arc<Vec<String>>,
     /// The index of each group's first channel; channels are stored grouped.
-    group_starts: Vec<usize>,
+    group_starts: std::sync::Arc<Vec<usize>>,
     /// The channels in the playlist's order (empty: as stored).
-    playlist_order: Vec<usize>,
-    store: GuideStore,
+    playlist_order: std::sync::Arc<Vec<usize>>,
+    store: std::sync::Arc<GuideStore>,
     /// Unix time of guide minute 0.
     epoch: UnixTime,
     /// Reads a description the in-memory store left out.
-    describe: Option<DescriptionLookup>,
+    describe: Option<std::rc::Rc<DescriptionLookup>>,
     /// Older days than `store` holds, read in on demand.
-    pages: Pages,
+    pages: std::rc::Rc<Pages>,
     /// When the first programme in `store` starts and the last one ends.
     data_start: Option<UnixTime>,
     data_end: Option<UnixTime>,
@@ -135,7 +136,7 @@ impl EpgSchedule {
     pub fn set_group_lists(&self, lists: Vec<(String, String, Vec<String>)>) {
         self.group_index.take();
         if let Some(s) = self.organization.borrow_mut().as_mut() {
-            s.lists = Some(self.shape().lists(lists));
+            std::sync::Arc::make_mut(s).lists = Some(self.shape().lists(lists));
         }
     }
     /// `groups`: names with their channels, in display order. The epoch is
@@ -164,19 +165,19 @@ impl EpgSchedule {
             data_end,
         } = catalog;
         EpgSchedule {
-            organization: std::cell::RefCell::new(organization),
+            organization: std::cell::RefCell::new(organization.map(std::sync::Arc::new)),
             key_index: Default::default(),
             group_index: Default::default(),
-            group_keys,
-            channels,
-            sources,
-            group_names,
-            group_starts,
-            playlist_order,
-            store,
+            group_keys: std::sync::Arc::new(group_keys),
+            channels: std::sync::Arc::new(channels),
+            sources: std::sync::Arc::new(sources),
+            group_names: std::sync::Arc::new(group_names),
+            group_starts: std::sync::Arc::new(group_starts),
+            playlist_order: std::sync::Arc::new(playlist_order),
+            store: std::sync::Arc::new(store),
             epoch,
             describe: None,
-            pages: Pages::default(),
+            pages: std::rc::Rc::new(Pages::default()),
             data_start,
             data_end,
             held: None,
@@ -204,7 +205,7 @@ impl EpgSchedule {
         loader: impl Fn(PageRequest) + 'static,
     ) -> Self {
         let loader: PageLoader = Box::new(loader);
-        self.pages = Pages::new(window, loader);
+        self.pages = std::rc::Rc::new(Pages::new(window, loader));
         self
     }
 
@@ -264,7 +265,7 @@ impl EpgSchedule {
         mut self,
         lookup: impl Fn(&ChannelKey, UnixTime) -> Option<String> + 'static,
     ) -> Self {
-        self.describe = Some(Box::new(lookup));
+        self.describe = Some(std::rc::Rc::new(Box::new(lookup)));
         self
     }
 
@@ -306,10 +307,31 @@ impl EpgSchedule {
         Self::from_parts(prepared.0)
     }
 
+    /// Cheap immutable input for preparing an edit on a blocking worker.
+    pub fn same_catalogue(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.channels, &other.channels)
+    }
+    pub fn organization_builder(&self) -> OrganizationBuilder {
+        OrganizationBuilder {
+            channels: self.channels.clone(),
+            sources: self.sources.clone(),
+            playlist_order: self.playlist_order.clone(),
+            group_keys: self.group_keys.clone(),
+            group_names: self.group_names.clone(),
+        }
+    }
+    /// Copies display state without mutating a schedule retained by combined mode.
+    pub fn with_prepared_organization(&self, prepared: PreparedOrganization) -> Self {
+        let next = self.clone();
+        *next.organization.borrow_mut() = Some(std::sync::Arc::new(prepared.0));
+        next.group_index.take();
+        next
+    }
+
     pub fn set_organization(&self, organization: Organization) {
         self.group_index.take();
         let state = self.shape().organization(organization);
-        *self.organization.borrow_mut() = Some(state);
+        *self.organization.borrow_mut() = Some(std::sync::Arc::new(state));
     }
 
     /// Each channel's group as [`Schedule::group_channels`] lists them:
@@ -930,7 +952,7 @@ impl Schedule for EpgSchedule {
             return state.order.clone();
         }
         if self.playlist_order.len() == self.channels.len() {
-            self.playlist_order.clone()
+            self.playlist_order.to_vec()
         } else {
             (0..self.channels.len()).collect()
         }
@@ -1009,3 +1031,31 @@ mod index_tests;
 mod pages_tests;
 #[cfg(test)]
 mod tests;
+
+/// Sendable immutable catalogue shape for organization work.
+pub struct OrganizationBuilder {
+    channels: std::sync::Arc<Vec<GuideChannel>>,
+    sources: std::sync::Arc<Vec<Option<Channel>>>,
+    playlist_order: std::sync::Arc<Vec<usize>>,
+    group_keys: std::sync::Arc<Vec<String>>,
+    group_names: std::sync::Arc<Vec<String>>,
+}
+pub struct PreparedOrganization(OrganizationState);
+impl OrganizationBuilder {
+    pub fn prepare(
+        self,
+        organization: Organization,
+        lists: Vec<GroupList>,
+    ) -> PreparedOrganization {
+        let shape = Shape {
+            channels: &self.channels,
+            sources: &self.sources,
+            playlist_order: &self.playlist_order,
+            group_keys: &self.group_keys,
+            group_names: &self.group_names,
+        };
+        let mut state = shape.organization(organization);
+        state.lists = Some(shape.lists(lists));
+        PreparedOrganization(state)
+    }
+}

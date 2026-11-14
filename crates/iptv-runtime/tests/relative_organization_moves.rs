@@ -1,0 +1,61 @@
+#[path = "../../iptv-store-sqlite/tests/common/mod.rs"]
+mod common;
+
+use iptv_core::organization::{Action, Editor};
+use iptv_library::OrganizationScope;
+use iptv_runtime::{Ports, Runtime, commands, executor::block_on, with_runtime};
+use std::rc::Rc;
+
+#[test]
+fn two_later_presses_from_one_view_snapshot_move_twice() {
+    let directory = tempfile::tempdir().unwrap();
+    let key = iptv_runtime::model::DatabaseKey::from_bytes([0x68; 32]);
+    let mut store =
+        iptv_store_sqlite::Store::open_encrypted(directory.path().join("iptv.sqlite"), &key)
+            .unwrap();
+    let source = store
+        .add_source(&common::m3u_source("Generated moves"))
+        .unwrap();
+    let catalogue = common::catalog(4, 1, common::XT_PASSWORD);
+    common::replace(&mut store, source, &catalogue);
+    drop(store);
+    let runtime = Rc::new(Runtime::new(Ports::new(
+        directory.path().to_owned(),
+        move |_| Ok(key.clone()),
+    )));
+    with_runtime(runtime.clone(), || {
+        runtime.start_services();
+        let items = block_on(commands::organization_items(
+            source,
+            OrganizationScope::Channels,
+            Vec::new(),
+        ))
+        .unwrap();
+        let item = items[0].clone();
+        let editor = Editor::new(items, Some(item.id.clone()));
+        let first = commands::edit_organization(
+            source,
+            OrganizationScope::Channels,
+            editor.clone(),
+            item.clone(),
+            Action::Later,
+        );
+        let second = commands::edit_organization(
+            source,
+            OrganizationScope::Channels,
+            editor,
+            item.clone(),
+            Action::Later,
+        );
+        block_on(first).unwrap();
+        block_on(second).unwrap();
+        let changed = block_on(commands::organization_items(
+            source,
+            OrganizationScope::Channels,
+            Vec::new(),
+        ))
+        .unwrap();
+        assert_eq!(changed[2].id, item.id);
+        assert!(runtime.drain_services());
+    });
+}

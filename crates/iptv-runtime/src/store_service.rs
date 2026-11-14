@@ -427,6 +427,29 @@ pub fn blocking<R: Send + 'static>(
         .map_err(|_| StoreError::Unavailable("store reply lost"))?
 }
 
+/// For import/background workers only: a read of the last commit that runs on
+/// the reader lane and does not wait for the writer.
+pub fn blocking_read<R: Send + 'static>(
+    operation: impl FnOnce(&Store) -> Result<R, StoreError> + Send + 'static,
+) -> Result<R, StoreError> {
+    assert!(!UI_THREAD.get(), "blocking store read on the UI thread");
+    let epoch = affinity()?;
+    let (sender, receiver) = mpsc::sync_channel(1);
+    service().reader.queue(Box::new(move |store| {
+        let opened = with_epoch(
+            &service().epochs,
+            epoch,
+            store,
+            || open_reader(epoch),
+            |store| operation(store),
+        );
+        let _ = sender.send(opened);
+    }))?;
+    receiver
+        .recv()
+        .map_err(|_| StoreError::Unavailable("store reply lost"))?
+}
+
 /// Occupies the writer for `duration` after the work queued before it.
 #[cfg(feature = "test-support")]
 pub fn occupy_writer(duration: std::time::Duration) {

@@ -306,7 +306,20 @@ impl fmt::Display for ImportError {
     }
 }
 
-impl std::error::Error for ImportError {}
+impl std::error::Error for ImportError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Limit { error, .. } => Some(error),
+            Self::Network { error, .. } => Some(error),
+            Self::Portal { error, .. } => Some(error),
+            Self::Auth {
+                problem: AuthProblem::Stalker(error),
+                ..
+            } => Some(error),
+            _ => None,
+        }
+    }
+}
 
 impl From<FailureKind> for iptv_library::ImportErrorKind {
     fn from(kind: FailureKind) -> Self {

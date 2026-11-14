@@ -12,7 +12,7 @@ cargo fmt -p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-provider
 bash tools/ci/check-line-length.sh
 cargo clippy --locked --workspace --all-targets --features iptv-app/test-support -- -D warnings
 cargo deny --locked check
-cargo test --locked -p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-providers -p iptv-guide -p iptv-import -p iptv-net -p iptv-store-sqlite -p iptv-search -p iptv-player-mpv -p iptv-library -p iptv-runtime --quiet
+cargo test --locked --features iptv-runtime/test-support -p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-providers -p iptv-guide -p iptv-import -p iptv-net -p iptv-store-sqlite -p iptv-search -p iptv-player-mpv -p iptv-library -p iptv-runtime --quiet
 for c in iptv-core iptv-nav iptv-settings iptv-epg iptv-providers iptv-guide iptv-import iptv-search iptv-library; do
   cargo build --locked -p "$c" --target wasm32-unknown-unknown --quiet
 done

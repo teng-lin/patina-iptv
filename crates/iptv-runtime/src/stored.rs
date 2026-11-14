@@ -39,7 +39,7 @@ pub fn with_storage(
 
 /// A stored source's live groups and channels, in provider order.
 pub fn catalog(source: SourceId) -> Result<(Vec<Group>, Vec<Channel>), StoreError> {
-    super::store_service::blocking(move |store| catalog_in(store, source))
+    super::store_service::blocking_read(move |store| catalog_in(store, source))
 }
 
 /// [`catalog`] from an open store.
@@ -63,7 +63,7 @@ pub(crate) fn catalog_in(
 
 /// What is stored about `source`'s guide.
 pub fn guide_state(source: SourceId) -> Option<StoredGuide> {
-    match super::store_service::blocking(move |store| store.epg_guide(source)) {
+    match super::store_service::blocking_read(move |store| store.epg_guide(source)) {
         Ok(guide) => guide,
         Err(e) => {
             log::warn!("iptv data: stored guide state: {e}");
@@ -84,7 +84,7 @@ pub fn load_guide(source: SourceId, now: UnixTime) -> Option<GuideStore> {
 pub fn read_guide(source: SourceId, window: &EpgWindow<'_>) -> Option<GuideStore> {
     let (from, to, descriptions) = (window.from, window.to, window.descriptions);
     let keys = window.keys.map(<[ChannelKey]>::to_vec);
-    match super::store_service::blocking(move |store| {
+    match super::store_service::blocking_read(move |store| {
         store.load_epg(
             source,
             &EpgWindow {
@@ -106,10 +106,12 @@ pub fn read_guide(source: SourceId, window: &EpgWindow<'_>) -> Option<GuideStore
 
 /// `source`'s guide sources in the user's order (empty when unreadable).
 pub fn guide_sources(source: SourceId) -> Vec<GuideSource> {
-    super::store_service::blocking(move |store| store.guide_sources(source)).unwrap_or_else(|e| {
-        log::warn!("iptv data: guide sources: {e}");
-        Vec::new()
-    })
+    super::store_service::blocking_read(move |store| store.guide_sources(source)).unwrap_or_else(
+        |e| {
+            log::warn!("iptv data: guide sources: {e}");
+            Vec::new()
+        },
+    )
 }
 
 /// The download configs of `sources` (those switched on), with the storage
@@ -145,7 +147,7 @@ pub fn configs_for(
 /// guide.
 pub fn current_configs(source: SourceId, state: Option<&StoredGuide>) -> Vec<EpgSourceConfig> {
     let sources = guide_sources(source);
-    let source = super::store_service::blocking(move |store| store.source(source))
+    let source = super::store_service::blocking_read(move |store| store.source(source))
         .ok()
         .flatten();
     configs_from_sources(&sources, state, source.as_ref().map(|s| &s.source.config))
@@ -168,7 +170,7 @@ pub fn configs_from_sources(
 
 /// The channels of `source` whose guide the user chose by hand.
 pub fn overrides(source: SourceId) -> Overrides {
-    match super::store_service::blocking(move |store| store.epg_overrides(source)) {
+    match super::store_service::blocking_read(move |store| store.epg_overrides(source)) {
         Ok(rows) => rows
             .into_iter()
             .map(|(id, epg)| (ChannelKey::new(id.as_str()), epg.to_override()))

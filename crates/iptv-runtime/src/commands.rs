@@ -204,51 +204,96 @@ pub fn edit_organization(
     item: Item,
     edit: Edit,
 ) -> impl Future<Output = Result<(), StoreError>> {
+    #[derive(PartialEq)]
+    enum StoredKind {
+        Channels,
+        Groups,
+        GroupChannels(GroupId),
+        CustomChannels(CustomGroupId),
+    }
+    let kind = match kind {
+        Kind::Channels => Ok(StoredKind::Channels),
+        Kind::Groups => Ok(StoredKind::Groups),
+        Kind::GroupChannels(group) => Ok(StoredKind::GroupChannels(group)),
+        Kind::CustomChannels(group) => Ok(StoredKind::CustomChannels(group)),
+        Kind::Favorites => Err(StoreError::Unavailable(
+            "favourites use their ordered writer",
+        )),
+    };
     store_service::call(move |store| {
+        let kind = kind?;
         let id = ContentId::from_stored(&item.id);
         let group = GroupId::from_stored(&item.id);
-        let at = editor
-            .items
-            .iter()
-            .position(|i| i.id == item.id)
-            .unwrap_or(0);
+        // Resolve a relative move against the writer's current committed order,
+        // so two rapid Later presses compose even before the view reloads.
+        let current: Vec<String> =
+            if matches!(edit, Edit::Earlier | Edit::Later | Edit::First | Edit::Last) {
+                match &kind {
+                    StoredKind::Groups => store
+                        .library_groups(source)?
+                        .into_iter()
+                        .filter(|row| row.group.kind == iptv_providers::model::ContentKind::Live)
+                        .map(|row| row.group.id.as_str().to_owned())
+                        .collect(),
+                    _ => {
+                        let scope = match &kind {
+                            StoredKind::GroupChannels(group) => ChannelScope::Group(group.clone()),
+                            StoredKind::CustomChannels(group) => ChannelScope::Custom(*group),
+                            _ => ChannelScope::All,
+                        };
+                        store
+                            .load_channels(
+                                source,
+                                &ChannelQuery {
+                                    scope,
+                                    include_hidden: true,
+                                    ..Default::default()
+                                },
+                            )?
+                            .into_iter()
+                            .map(|row| row.channel.id.as_str().to_owned())
+                            .collect()
+                    }
+                }
+            } else {
+                Vec::new()
+            };
+        let at = current.iter().position(|id| id == &item.id).unwrap_or(0);
         let to = match edit {
             Edit::Earlier => at.saturating_sub(1),
-            Edit::Later => (at + 1).min(editor.items.len().saturating_sub(1)),
+            Edit::Later => (at + 1).min(current.len().saturating_sub(1)),
             Edit::First => 0,
-            Edit::Last => editor.items.len().saturating_sub(1),
+            Edit::Last => current.len().saturating_sub(1),
             _ => at,
         };
         match edit {
             Edit::Visibility => match &kind {
-                Kind::Groups => store.hide_group(source, &group, !item.hidden)?,
+                StoredKind::Groups => store.hide_group(source, &group, !item.hidden)?,
                 _ => store.set_hidden(source, &id, !item.hidden)?,
             },
             Edit::ResetName => match &kind {
-                Kind::Groups => store.rename_group(source, &group, None)?,
+                StoredKind::Groups => store.rename_group(source, &group, None)?,
                 _ => store.rename_channel(source, &id, None)?,
             },
             Edit::Earlier | Edit::Later | Edit::First | Edit::Last => match &kind {
-                Kind::Channels => {
+                StoredKind::Channels => {
                     store.move_channel(source, &OrderScope::All, &id, to)?;
                 }
-                Kind::GroupChannels(g) => {
+                StoredKind::GroupChannels(g) => {
                     store.move_channel(source, &OrderScope::Group(g.clone()), &id, to)?;
                 }
-                Kind::CustomChannels(g) => {
+                StoredKind::CustomChannels(g) => {
                     store.move_in_custom_group(*g, &id, to)?;
                 }
-                Kind::Favorites => unreachable!("handled before queuing"),
-                Kind::Groups => store.move_group(source, &group, to)?,
+                StoredKind::Groups => store.move_group(source, &group, to)?,
             },
             Edit::ResetOrder => match &kind {
-                Kind::Channels => store.reset_manual_order(source, &OrderScope::All)?,
-                Kind::GroupChannels(g) => {
+                StoredKind::Channels => store.reset_manual_order(source, &OrderScope::All)?,
+                StoredKind::GroupChannels(g) => {
                     store.reset_manual_order(source, &OrderScope::Group(g.clone()))?
                 }
-                Kind::CustomChannels(g) => store.reset_custom_group_order(*g)?,
-                Kind::Favorites => unreachable!("handled before queuing"),
-                Kind::Groups => store.reset_group_order(source)?,
+                StoredKind::CustomChannels(g) => store.reset_custom_group_order(*g)?,
+                StoredKind::Groups => store.reset_group_order(source)?,
             },
             Edit::HideSelected | Edit::ShowSelected | Edit::HideAll | Edit::ShowAll => {
                 let all = matches!(edit, Edit::HideAll | Edit::ShowAll);
@@ -259,7 +304,7 @@ pub fn edit_organization(
                     .filter(|i| all || editor.selected.contains(&i.id))
                     .map(|i| i.id.clone())
                     .collect();
-                store.set_library_visibility(source, &ids, kind == Kind::Groups, hidden)?;
+                store.set_library_visibility(source, &ids, kind == StoredKind::Groups, hidden)?;
             }
             _ => {}
         }
@@ -553,17 +598,19 @@ pub fn guide_page(
 
 pub fn combined_resume_key() -> impl std::future::Future<Output = Result<Option<String>, StoreError>>
 {
-    super::store_service::call(|store| {
+    super::store_service::read(|store| {
         let s = store;
-        Ok(s.combined_last_channel()?.or_else(|| {
-            // On first opening the combined browser, keep the previous
-            // single-source startup preference, including legacy files.
-            let source = s.active_source().ok().flatten()?;
-            if !s.source_policy(source).ok()?.enabled {
-                return None;
-            }
-            let key = super::playback::load_last_channel(Some(source))?;
-            Some(iptv_guide::combined::qualified_key(source.0, &key))
-        }))
+        Ok(super::playback::load_combined_channel()
+            .or(s.combined_last_channel()?)
+            .or_else(|| {
+                // On first opening the combined browser, keep the previous
+                // single-source startup preference, including legacy files.
+                let source = s.active_source().ok().flatten()?;
+                if !s.source_policy(source).ok()?.enabled {
+                    return None;
+                }
+                let key = super::playback::load_last_channel(Some(source))?;
+                Some(iptv_guide::combined::qualified_key(source.0, &key))
+            }))
     })
 }

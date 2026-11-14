@@ -88,6 +88,33 @@ async fn content_encoding_is_decoded_but_gz_files_pass_through() {
 }
 
 #[tokio::test]
+async fn guide_gzip_has_identical_bytes_and_budget_for_http_encoding_and_file() {
+    let xml = format!("<tv>{}</tv>", " ".repeat(4096));
+    let gzip = support::synth::gzip(xml.as_bytes());
+    assert!(gzip.len() < xml.len());
+    let payload = gzip.clone();
+    let server = TestServer::http(move |req| {
+        let response = Resp::ok(payload.clone());
+        if req.path == "/encoded" {
+            response.header("Content-Encoding", "gzip")
+        } else {
+            response
+        }
+    })
+    .await;
+    let net = NetClient::new(NetConfig {
+        max_streamed_bytes: gzip.len() as u64,
+        ..Default::default()
+    })
+    .unwrap();
+    for path in ["/encoded", "/guide.xml.gz"] {
+        let mut request = HttpRequest::get(server.url(path)).with_header("Accept-Encoding", "gzip");
+        request.preserve_gzip = true;
+        assert_eq!(net.fetch(request).await.unwrap().body, gzip);
+    }
+}
+
+#[tokio::test]
 async fn redirects_relative_cross_origin_and_cross_protocol() {
     let target = TestServer::http(|req| Resp::ok(format!("landed {}", req.path))).await;
     let to = target.url("/final");

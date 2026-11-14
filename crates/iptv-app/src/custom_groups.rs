@@ -183,6 +183,10 @@ fn reload(ui: Ui) {
                     s.reload_groups(groups);
                     s.members.reload(rows);
                 });
+            } else {
+                update(ui, |s| {
+                    s.status = "The list could not be reloaded. Reopen it and try again.".into()
+                });
             }
         },
     );

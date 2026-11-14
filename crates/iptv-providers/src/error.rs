@@ -57,7 +57,15 @@ impl fmt::Display for ProviderError {
     }
 }
 
-impl std::error::Error for ProviderError {}
+impl std::error::Error for ProviderError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Limit(err) => Some(err),
+            Self::Stalker(err) => Some(err),
+            _ => None,
+        }
+    }
+}
 
 impl From<StalkerError> for ProviderError {
     fn from(err: StalkerError) -> Self {

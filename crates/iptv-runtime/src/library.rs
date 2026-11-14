@@ -228,6 +228,7 @@ pub fn running(id: SourceId) -> bool {
 }
 
 pub fn cancel_running(id: SourceId) {
+    crate::current().cancel_guide_check(id);
     revoke_import_handoff(id);
     if let Some((_, token)) = crate::current()
         .imports
@@ -248,7 +249,7 @@ pub fn source_details(id: SourceId) -> Option<Source> {
 /// Tries `source` (new details of stored playlist `id`): they replace the
 /// stored ones once they imported; on failure the playlist stays as it was.
 pub fn snapshot() -> impl std::future::Future<Output = Result<Snapshot, StoreError>> {
-    super::store_service::call(|store| snapshot_in(store))
+    super::store_service::read(snapshot_in)
 }
 
 pub fn save_policy(

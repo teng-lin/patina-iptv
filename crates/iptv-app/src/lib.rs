@@ -499,12 +499,12 @@ pub fn App() -> impl IntoElement {
     runtime::set_current(&owner);
     owner.activate();
     RUNTIME.set(Some(owner));
-    if let Err(message) = backup::lock() {
+    if let Err(error) = backup::lock() {
         return view()
             .flex_1()
             .items_center()
             .justify_center()
-            .child(text(message));
+            .child(text(error.message()));
     }
     // Restore validation can decrypt/migrate SQLite and copied documents. It
     // must finish off the UI thread before settings or the live store open.

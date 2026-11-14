@@ -13,7 +13,7 @@ pub async fn begin(_ui: Ui, stored: &StoredSource) {
     crate::runtime().emit(crate::runtime::RuntimeEvent::ScheduleReady(Rc::new(shell)));
     let (done, wait) = futures_channel::oneshot::channel();
     crate::runtime().emit(crate::runtime::RuntimeEvent::EarlyResume {
-        source: stored.clone(),
+        source: Box::new(stored.clone()),
         done,
     });
     let _ = wait.await;

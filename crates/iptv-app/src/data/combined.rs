@@ -28,7 +28,7 @@ pub(super) fn ready_single() -> Option<SingleSchedule> {
             s
         })
 }
-pub(super) fn remember_single(source: SourceId, schedule: Rc<EpgSchedule>) {
+pub(crate) fn remember_single(source: SourceId, schedule: Rc<EpgSchedule>) {
     crate::runtime().single().with(|s| {
         *s.borrow_mut() = Some(SingleSchedule {
             source,
@@ -372,20 +372,25 @@ pub fn connection_limit(source: SourceId) -> Option<u32> {
         .limits()
         .with(|l| l.borrow().get(&source).copied().flatten())
 }
-pub fn organization_changed(ui: Ui, source: SourceId) {
+pub fn organization_changed(ui: Ui, source: SourceId, ticket: u64) {
     let schedule = crate::runtime()
         .parts()
         .with(|parts| parts.borrow().get(&source).cloned());
     super::spawn_in_app(async move {
         if let Some(schedule) = schedule {
-            organization::apply(&schedule, source).await;
+            let Some(replacement) = organization::apply(&schedule, source).await else {
+                return;
+            };
             let current = crate::runtime().parts().with(|parts| {
                 parts
                     .borrow()
                     .get(&source)
-                    .is_some_and(|s| Rc::ptr_eq(s, &schedule))
+                    .is_some_and(|s| s.same_catalogue(&schedule))
             });
-            if current {
+            if current && crate::runtime().organization_edit_current(source, ticket) {
+                crate::runtime().parts().with(|parts| {
+                    parts.borrow_mut().insert(source, Rc::new(replacement));
+                });
                 rebuild(ui);
             }
         }
