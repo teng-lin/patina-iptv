@@ -6,11 +6,77 @@ use iptv_providers::{
     model::{M3uSourceConfig, Source, SourceConfig},
 };
 use iptv_store_sqlite::{GuideSource, SourcePolicy};
-use nsh_core::{Size, element::Root, prelude::*};
+use nsh_core::{
+    EventKind, EventPayload, MountItem, NodeId, Size, ViewKind, ViewProps, element::Root,
+    prelude::*,
+};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+
+#[derive(Default)]
+struct PlaybackObserved {
+    views: HashMap<NodeId, ViewProps>,
+    commands: Vec<NodeId>,
+    structural: Vec<NodeId>,
+    hidden: Vec<NodeId>,
+}
+
+fn assert_playback_unchanged(
+    t: &T,
+    observed: &Arc<Mutex<PlaybackObserved>>,
+    player: NodeId,
+    ancestry: &[NodeId],
+    command_count: usize,
+    opens: u64,
+) {
+    let state = observed.lock().unwrap();
+    assert_eq!(
+        state.commands.iter().filter(|id| **id == player).count(),
+        command_count,
+        "repair sends no player commands"
+    );
+    assert!(
+        !state.structural.iter().any(|id| ancestry.contains(id)),
+        "repair never detaches, replaces or reparents the primary surface or its ancestors"
+    );
+    assert!(
+        !state.hidden.iter().any(|id| ancestry.contains(id)),
+        "repair never hides the primary surface or its ancestors"
+    );
+    assert_eq!(
+        iptv_app::player_opens(0),
+        opens,
+        "repair opens no additional stream"
+    );
+    assert!(iptv_app::player_has_source(0));
+    let nodes = t.app.screen().layout_nodes();
+    let players: Vec<_> = nodes
+        .iter()
+        .filter(|node| node.kind == ViewKind::Native)
+        .collect();
+    assert_eq!(players.len(), 1);
+    assert_eq!(players[0].id, player);
+    assert!(!players[0].hidden);
+    assert!(
+        nodes.iter().any(
+            |node| state.views.get(&node.id).is_some_and(|props| matches!(
+                props.accessibility.label.as_deref(),
+                Some("Synthetic Viewer" | "Synthetic Viewer · Synthetic viewer")
+            ) && props
+                .accessibility
+                .state
+                .selected)
+        ),
+        "focus retains the same viewer channel across source-qualified name presentation"
+    );
+}
+
 use nsh_engine::EngineConfig;
 
 #[test]
-fn inspected_candidate_applies_verifies_and_undoes_without_switching_active_source() {
+fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_playback() {
     let Some(home) = isolated!() else {
         return;
     };
@@ -105,6 +171,12 @@ fn inspected_candidate_applies_verifies_and_undoes_without_switching_active_sour
     drop(store);
     let mut settings = iptv_settings::Settings::new();
     settings
+        .set("guide.switch_delay", iptv_settings::Value::ms(0))
+        .unwrap();
+    settings
+        .set("guide.stay_on_guide", iptv_settings::Value::Bool(true))
+        .unwrap();
+    settings
         .set("epg.update_on_start", iptv_settings::Value::Bool(false))
         .unwrap();
     settings
@@ -116,6 +188,26 @@ fn inspected_candidate_applies_verifies_and_undoes_without_switching_active_sour
         clock: nsh_core::time::Clock::manual(std::time::SystemTime::now()),
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     });
+    let observed = Arc::new(Mutex::new(PlaybackObserved::default()));
+    let changes = observed.clone();
+    t.app.observe(move |_, batch| {
+        let mut state = changes.lock().unwrap();
+        for item in &batch.items {
+            match item {
+                MountItem::ViewProps { id, props } => {
+                    state.views.insert(*id, (**props).clone());
+                }
+                MountItem::AccessibilityLabel { id, label } => {
+                    state.views.entry(*id).or_default().accessibility.label = label.clone();
+                }
+                MountItem::ComponentProps { id, .. } => state.commands.push(*id),
+                MountItem::Insert { child, .. } => state.structural.push(*child),
+                MountItem::Remove { id } | MountItem::Delete { id } => state.structural.push(*id),
+                MountItem::ViewStyle { id, style } if style.hidden => state.hidden.push(*id),
+                _ => {}
+            }
+        }
+    });
     t.wait("text:/Synthetic Viewer/", 10);
     t.press("text:/^☰  /");
     t.key("left");
@@ -124,6 +216,47 @@ fn inspected_candidate_applies_verifies_and_undoes_without_switching_active_sour
     t.press("text:Synthetic viewer");
     t.press("text:Show this playlist");
     t.wait("text:Synthetic Viewer", 10);
+    t.press("text:Synthetic Viewer >> nth=0");
+    crate::cov_data::until(
+        &mut t.app,
+        "generated viewer stream active",
+        std::time::Duration::from_secs(10),
+        |_| iptv_app::player_has_source(0),
+    );
+    let nodes = t.app.screen().layout_nodes();
+    let player = nodes
+        .iter()
+        .find(|node| node.kind == ViewKind::Native)
+        .unwrap()
+        .id;
+    t.app.engine().control().dispatch_event(
+        player,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "state".into(),
+            data: serde_json::json!({"state":"ready"}),
+        },
+    );
+    t.app.settle();
+    // Keep the viewer's guide open while a different source is repaired.
+    if t.shows("id:player-banner") {
+        t.key("backspace");
+    }
+    let nodes = t.app.screen().layout_nodes();
+    let mut ancestry = vec![player];
+    let mut parent = nodes.iter().find(|node| node.id == player).unwrap().parent;
+    while let Some(node) = nodes.iter().find(|node| node.id == parent) {
+        ancestry.push(node.id);
+        parent = node.parent;
+    }
+    let opens = iptv_app::player_opens(0);
+    let command_count = {
+        let mut state = observed.lock().unwrap();
+        state.structural.clear();
+        state.hidden.clear();
+        state.commands.iter().filter(|id| **id == player).count()
+    };
+    assert_playback_unchanged(&t, &observed, player, &ancestry, command_count, opens);
     t.press("text:/^☰  /");
     t.key("left");
     t.key("left");
@@ -147,9 +280,9 @@ fn inspected_candidate_applies_verifies_and_undoes_without_switching_active_sour
     t.key("backspace");
     t.key("backspace");
     t.press("text:Synthetic Birch >> nth=0");
-    t.gone("text:Loading…", 10);
+    t.gone("id:guide-inspection-screen >> text:Loading…", 10);
     t.press("text:Reuse inspected guide");
-    t.gone("text:Loading…", 10);
+    t.gone("id:guide-inspection-screen >> text:Loading…", 10);
     t.wait("text:Synthetic Birch East", 10);
     t.press("text:Synthetic Birch East");
     t.wait("text:/Synthetic Birch Programme/", 10);
@@ -157,6 +290,7 @@ fn inspected_candidate_applies_verifies_and_undoes_without_switching_active_sour
     t.wait("id:guide-repair-screen", 5);
     t.press("text:Preview guide changes");
     t.wait("text:Apply guide changes", 10);
+    assert_playback_unchanged(&t, &observed, player, &ancestry, command_count, opens);
     assert!(
         crate::isolated::open_database(directory.join("iptv.sqlite"))
             .unwrap()
@@ -185,12 +319,14 @@ fn inspected_candidate_applies_verifies_and_undoes_without_switching_active_sour
     );
     t.press("text:Verify guide changes");
     t.wait("text:Guide coverage verified", 10);
+    assert_playback_unchanged(&t, &observed, player, &ancestry, command_count, opens);
     let store = crate::isolated::open_database(directory.join("iptv.sqlite")).unwrap();
     assert_eq!(store.epg_overrides(sources[1]).unwrap().len(), 2);
     assert_eq!(store.active_source().unwrap(), Some(sources[0]));
     drop(store);
     t.press("text:Undo guide changes");
     t.wait("text:Guide changes undone", 10);
+    assert_playback_unchanged(&t, &observed, player, &ancestry, command_count, opens);
     assert!(
         crate::isolated::open_database(directory.join("iptv.sqlite"))
             .unwrap()
