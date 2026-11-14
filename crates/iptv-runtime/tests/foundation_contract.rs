@@ -131,6 +131,8 @@ fn consume(
         owner.lease_probe(&evidence);
     let _: Option<Commit> = None;
     let _: Vec<Capability> = owner.foundation_capabilities();
+    let _: Result<bool, RepairError> = owner.release_guide_repair_plan("synthetic-plan", [0; 32]);
+    repair::<Vec<Commit>, _>(owner.recent_guide_repairs(source, 10, InspectionControl::default()));
 }
 
 fn inspection_error(error: InspectionError) -> &'static str {

@@ -98,7 +98,7 @@ The current foundation limits are:
 | Staging | At most 512 MiB aggregate, including reserved work and indexes |
 | Evidence / uncommitted plan lifetime | At most 24 hours; plans cannot outlive prerequisite stages |
 | Repair batch | At most 500 explicit mappings and 64 feed changes/additions |
-| Live preview / transient operation state | At most 32 previews and 128 operation entries per owner |
+| Live preview / transient operation state | At most 32 previews, 200k total preview items and 128 operation/admitted-command identities per owner |
 | Undo eligibility | Seven days after durable commit, subject to affected-row preconditions |
 
 Callers may request a shorter budget through `InspectionControl`. Queueing,
@@ -122,10 +122,12 @@ A caller must not create a new repair to retry an uncertain old effect.
 |---|---|
 | `preview_guide_repair` | Immutable plan, digest, before/after mappings/configuration, protected choices, indirect effects and expiry |
 | `guide_repair_plan` | Bounded mapping/indirect-effect pages for that same plan and digest |
+| `release_guide_repair_plan` | Release an abandoned uncommitted preview without changing stored choices |
 | `apply_guide_repair` | Atomic durable configuration/mapping commit, effective-state outcome and verification operation |
 | `undo_guide_repair` | Conditional inverse commit or a typed conflict/expiry result |
 | `verify_guide_repair` | Observed bindings/coverage tied to examined, expected and current revisions |
 | `guide_repair_operation` | Current transient status or reconstruction from durable commit state after restart |
+| `recent_guide_repairs` | Bounded source-scoped discovery of persisted commits/inverses after restart; at most 50 |
 | `cancel_guide_repair_operation` | Stop remaining transient work; committed choices remain committed |
 
 Each plan concerns one source and one explicit independently reviewable batch.
