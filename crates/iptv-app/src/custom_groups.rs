@@ -186,7 +186,7 @@ fn reload(ui: Ui) {
                 });
             } else {
                 update(ui, |s| {
-                    s.status = "The list could not be reloaded. Reopen it and try again.".into()
+                    s.status = tr("The list could not be reloaded. Reopen it and try again.").into()
                 });
             }
         },
