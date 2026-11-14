@@ -284,6 +284,16 @@ impl Drop for Directory {
 }
 
 struct Running(Arc<AtomicUsize>);
+impl Running {
+    fn acquire(running: Arc<AtomicUsize>) -> Option<Self> {
+        if running.fetch_add(1, Ordering::SeqCst) >= 2 {
+            running.fetch_sub(1, Ordering::SeqCst);
+            None
+        } else {
+            Some(Self(running))
+        }
+    }
+}
 impl Drop for Running {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::SeqCst);
@@ -613,6 +623,22 @@ fn await_worker<T: Send + 'static>(
     }
 }
 
+/// Submit blocking work only for reserved capacity. Rejected requests finish
+/// on the async executor and never enter its blocking queue.
+fn admitted_worker<T: Send + 'static, Permit: Send + 'static>(
+    services: &Services,
+    admission: Option<Permit>,
+    operation: impl FnOnce() -> InspectionResult<T> + Send + 'static,
+) -> tokio::task::JoinHandle<InspectionResult<T>> {
+    match admission {
+        Some(permit) => services.spawn_blocking(move || {
+            let _permit = permit;
+            operation()
+        }),
+        None => services.spawn(async { Err(InspectionError::Busy) }),
+    }
+}
+
 impl Runtime {
     pub fn probe_feed(
         &self,
@@ -620,7 +646,8 @@ impl Runtime {
         control: InspectionControl,
     ) -> impl Future<Output = InspectionResult<ProbeSummary>> + use<> {
         let source = request.source;
-        let config = configuration(self, request);
+        let admission = Running::acquire(self.inspection.running.clone());
+        let config = admission.as_ref().map(|_| configuration(self, request));
         let services = self.services();
         let stages = self.inspection.stages.clone();
         let key = self
@@ -636,7 +663,6 @@ impl Runtime {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
-        let running = self.inspection.running.clone();
         let deadline = Instant::now() + control.timeout.min(PROBE_DEADLINE);
         let accepted = services.clone();
 
@@ -645,12 +671,8 @@ impl Runtime {
         let operation_cancel = worker_control.cancel.clone();
         let guard = self.inspection.register(operation_cancel.clone());
         let cancel = operation_cancel.clone();
-        let task = services.spawn_blocking(move || {
-            if running.fetch_add(1, Ordering::SeqCst) >= 2 {
-                running.fetch_sub(1, Ordering::SeqCst);
-                return Err(InspectionError::Busy);
-            }
-            let _running = Running(running);
+        let task = admitted_worker(&services, admission, move || {
+            let config = config.ok_or(InspectionError::Busy)?;
             let key = key.ok_or(InspectionError::Storage)?;
             let reservation = Reservation::acquire(stages.clone())?;
             check(&accepted, &cancel, deadline)?;
@@ -852,7 +874,7 @@ impl Runtime {
         worker_control.cancel = CancelToken::new();
         let operation_cancel = worker_control.cancel.clone();
         let guard = self.inspection.register(operation_cancel.clone());
-        let task = services.spawn_blocking(move || {
+        let task = admitted_worker(&services, self.inspection.admit(), move || {
             let lease = lease?;
             lease.current_configuration()?;
             check(&lease.0.services, &worker_control.cancel, deadline)?;
@@ -928,7 +950,7 @@ impl Runtime {
         worker_control.cancel = CancelToken::new();
         let operation_cancel = worker_control.cancel.clone();
         let guard = self.inspection.register(operation_cancel.clone());
-        let task = services.spawn_blocking(move || {
+        let task = admitted_worker(&services, self.inspection.admit(), move || {
             if !window.valid() {
                 return Err(InspectionError::InvalidRequest);
             }
@@ -952,9 +974,7 @@ impl Runtime {
                     return;
                 };
                 if programme.channel != candidate.epg_channel
-                    || programme
-                        .stop
-                        .is_some_and(|stop| stop <= programme.start || stop <= window.from)
+                    || programme.stop.is_some_and(|stop| stop <= programme.start)
                 {
                     return;
                 }
@@ -971,7 +991,10 @@ impl Runtime {
                         raw.remove(&start);
                     }
                 }
-                if programme.start < window.from && programme.stop.is_none() {
+                // The latest predecessor is also boundary evidence when it
+                // ended before the window: it cuts off any earlier no-stop row.
+                // Keep just that predecessor even when the feed is out of order.
+                if programme.start < window.from {
                     if raw
                         .range(..window.from)
                         .next_back()
@@ -979,8 +1002,8 @@ impl Runtime {
                     {
                         return;
                     }
-                    if let Some((&start, entry)) = raw.range(..window.from).next_back()
-                        && entry.stop.is_none()
+                    if let Some((&start, _)) = raw.range(..window.from).next_back()
+                        && start < programme.start
                     {
                         raw.remove(&start);
                     }
