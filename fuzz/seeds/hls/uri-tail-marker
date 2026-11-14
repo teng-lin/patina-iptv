@@ -1,0 +1,4 @@
+#EXTM3U
+#EXTINF:2,http://media.example.test/direct.ts
+#EXT-X-DATERANGE:ID="a",/media.example.test/direct.ts
+#EXT-X-DATERANGE:ID="a",X-NOTEMEuRI=",X-ASSET-URI=X-NOTEMEURI=",X-ASSET-URI="ad/0.m3u8"

@@ -175,7 +175,13 @@ fn rewrite_tag(line: &str, base: &Url, prefix: &str, out: &mut String) -> Result
             // A URL holds a backslash only in its query, where `%5C` means
             // the same; in the quotes it would be FFmpeg's escape.
             let target = resolve(resource_prefix, base, attribute.value)?.replace('\\', "%5C");
-            if target.contains('"') {
+            // Media3 searches for uppercase `URI="` even inside values.
+            // If it ignores this mixed-case name, a trailing `URI=` plus
+            // our closing quote must not become its first URI match.
+            // Standard uppercase names consume their whole value normally.
+            if target.contains('"')
+                || (!attribute.name.ends_with("URI") && target.ends_with("URI="))
+            {
                 return Err(malformed());
             }
             out.push('"');
@@ -378,6 +384,48 @@ mod tests {
             line("#EXT-X-MAP:URI=\"init.mp4?nextURI=b\""),
             format!("#EXT-X-MAP:URI=\"{ON_RELAY}init.mp4?nextURI=b\"")
         );
+    }
+
+    #[test]
+    fn uri_tail_cannot_create_a_nested_attribute_when_quoted() {
+        for name in ["uri", "uRI", "X-ASSET-uRI"] {
+            for value in ["part?nextURI=", "part?nextURI=#ignored"] {
+                for value in [value.to_owned(), format!("\"{value}\"")] {
+                    for tail in ["", ",BYTERANGE=\"16@0\"", ",URI=\"next.m3u8\""] {
+                        refused(&format!("#EXT-X-MAP:{name}={value}{tail}"));
+                    }
+                }
+            }
+        }
+        // The case-sensitive reader consumes a standard URI attribute from
+        // its own name, so a marker inside that value starts no new match.
+        for name in ["URI", "SERVER-URI", "X-ASSET-URI"] {
+            assert_eq!(
+                line(&format!("#EXT-X-MAP:{name}=\"part?nextURI=\"")),
+                format!("#EXT-X-MAP:{name}=\"{ON_RELAY}part?nextURI=\"")
+            );
+        }
+        assert_eq!(
+            line("#EXT-X-MAP:uri=\"part?nextURI=value\""),
+            format!("#EXT-X-MAP:uri=\"{ON_RELAY}part?nextURI=value\"")
+        );
+        assert_eq!(
+            rewritten("#EXTM3U\npart?nextURI=\n").unwrap()[1],
+            format!("{ON_RELAY}part?nextURI=")
+        );
+    }
+
+    #[test]
+    fn uri_tail_fuzz_regression_is_refused() {
+        let body = include_bytes!("../../../../fuzz/seeds/hls/uri-tail-marker");
+        for base in [
+            "https://media.example.test/live/main.m3u8",
+            "http://media.example.test:8080/a/b/main.mpd?token=synthetic",
+            "http://media.example.test",
+            "https://[2001:db8::1]:8443/v/",
+        ] {
+            assert!(rewrite_hls(body, &Url::parse(base).unwrap(), PREFIX).is_err());
+        }
     }
 
     /// FFmpeg ends a line at a NUL byte: the rest of this tag line would be
