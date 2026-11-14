@@ -10,8 +10,8 @@ use nsh_core::{Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
 use std::{
-    path::PathBuf,
-    time::{Duration, SystemTime},
+    path::{Path, PathBuf},
+    time::{Duration, Instant, SystemTime},
 };
 pub const M3U: &str = "#EXTM3U\n\
                        #EXTINF:-1 group-title=\"News\" tvg-logo=\"http://example.test/logo.svg\",Local A\n\
@@ -32,8 +32,42 @@ pub fn step(r: Result<(), String>) {
         panic!("{error}");
     }
 }
+/// UI changes are optimistic; observe the settings file's atomic publication
+/// separately when a scenario checks persistence.
+#[track_caller]
+pub fn saved_settings(
+    app: &mut Headless,
+    path: &Path,
+    expected: impl Fn(&Settings) -> bool,
+) -> Settings {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Ok(text) = std::fs::read_to_string(path)
+            && let Ok((settings, report)) = Settings::from_json(&text)
+            && report.is_clean()
+            && expected(&settings)
+        {
+            return settings;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "settings did not reach the expected durable state"
+        );
+        step(app.wait(Duration::from_millis(10)));
+    }
+}
 /// `home`: the scenario's own (`isolated!()`).
 pub fn start(home: Home, settings: Settings, manual: bool) -> Fixture {
+    start_with_setup(home, settings, manual, |_| {})
+}
+
+/// Install observation before the app's initial batches are applied.
+pub fn start_with_setup(
+    home: Home,
+    settings: Settings,
+    manual: bool,
+    setup: impl FnOnce(&mut Headless),
+) -> Fixture {
     let dir = crate::isolated::data_dir(home.path());
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("settings.json"), settings.to_json_string()).unwrap();
@@ -76,6 +110,7 @@ pub fn start(home: Home, settings: Settings, manual: bool) -> Fixture {
         config.clock = nsh_core::time::Clock::manual(SystemTime::now());
     }
     let mut app = Headless::start(config).unwrap();
+    setup(&mut app);
     step(app.wait_for_within("text:★ Local A", Duration::from_secs(20)));
     step(app.press("text:/^☰  /"));
     step(app.press_key("right"));

@@ -298,6 +298,7 @@ fn badge(
             };
             tint(WHITE, alpha)
         })
+        .accessibility_elements_hidden(move || ui.playing.get().is_none())
         .opacity(move || {
             if ui.playing.get().is_some() {
                 1.0_f32

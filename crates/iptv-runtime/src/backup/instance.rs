@@ -1,22 +1,19 @@
-//! Hold the application storage lock for the process lifetime. The lock is a
-//! sibling of the data directory, so activating a restore never moves it.
+//! Hold each application storage lock for the process lifetime. A lock is a
+//! sibling of its data directory, so activating a restore never moves it.
 use super::error::{Context, Error, Result};
 use std::fs::{File, OpenOptions};
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::{collections::BTreeMap, path::PathBuf, sync::Mutex};
 
 const ALREADY_RUNNING: &str =
     "Patina is already running. Close the other instance before opening it again";
-static FILE: OnceLock<File> = OnceLock::new();
-static ACQUIRING: Mutex<()> = Mutex::new(());
+static FILES: Mutex<BTreeMap<PathBuf, File>> = Mutex::new(BTreeMap::new());
 
 /// Acquire before settings, restore activation or any storage worker starts.
 /// Activity/root recreation in this process reuses the already-held lock.
 pub(super) fn acquire(root: &Path) -> Result<()> {
-    let _guard = ACQUIRING
-        .lock()
-        .context("Could not lock application storage")?;
-    if FILE.get().is_some() {
+    let mut files = FILES.lock().context("Could not lock application storage")?;
+    if files.contains_key(root) {
         return Ok(());
     }
     let name = root
@@ -49,9 +46,7 @@ pub(super) fn acquire(root: &Path) -> Result<()> {
         file.set_permissions(std::fs::Permissions::from_mode(0o600))
             .context("Could not protect the application storage lock")?;
     }
-    // Only this function sets it, under `ACQUIRING`, after finding it empty.
-    FILE.set(file)
-        .map_err(|_| "Could not retain the application storage lock")?;
+    files.insert(root.to_owned(), file);
     // Do not unlink or explicitly unlock: every app-owned detached worker may
     // still have database handles until this process exits.
     Ok(())
@@ -64,7 +59,8 @@ mod tests {
     use std::process::{Command, Stdio};
     const ROOT: &str = "IPTV_RS_INSTANCE_LOCK_TEST_ROOT";
     const MODE: &str = "IPTV_RS_INSTANCE_LOCK_TEST_MODE";
-    const CHILD: &str = "runtime::backup::instance::tests::lock_child_process";
+    const SECOND_ROOT: &str = "IPTV_RS_INSTANCE_LOCK_TEST_SECOND_ROOT";
+    const CHILD: &str = "backup::instance::tests::lock_child_process";
 
     fn child(root: &Path, mode: &str) -> Command {
         let mut command = Command::new(std::env::current_exe().unwrap());
@@ -84,6 +80,10 @@ mod tests {
             "holder" => {
                 acquire(root).unwrap();
                 acquire(root).unwrap(); // Same-process root recreation is safe.
+                if let Some(second) = std::env::var_os(SECOND_ROOT) {
+                    acquire(Path::new(&second)).unwrap();
+                    acquire(Path::new(&second)).unwrap();
+                }
                 println!("instance-lock-ready");
                 std::io::stdout().flush().unwrap();
                 let mut release = [0];
@@ -139,5 +139,44 @@ mod tests {
         holder.stdin.take().unwrap().write_all(b"x").unwrap();
         assert!(holder.wait().unwrap().success());
         assert!(child(&root, "successor").output().unwrap().status.success());
+    }
+
+    #[test]
+    fn one_process_locks_each_storage_root_it_opens() {
+        let directory = tempfile::tempdir().unwrap();
+        let alpha = directory.path().join("alpha");
+        let beta = directory.path().join("beta");
+        let mut holder = child(&alpha, "holder")
+            .env(SECOND_ROOT, &beta)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap();
+        let mut output = BufReader::new(holder.stdout.take().unwrap());
+        loop {
+            let mut line = String::new();
+            assert!(
+                output.read_line(&mut line).unwrap() > 0,
+                "holder exited before locking both roots"
+            );
+            if line.contains("instance-lock-ready") {
+                break;
+            }
+        }
+        for root in [&alpha, &beta] {
+            let result = child(root, "contender").output().unwrap();
+            assert!(
+                result.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+        holder.stdin.take().unwrap().write_all(b"x").unwrap();
+        assert!(holder.wait().unwrap().success());
+        for root in [&alpha, &beta] {
+            assert!(child(root, "successor").output().unwrap().status.success());
+        }
     }
 }

@@ -83,7 +83,7 @@ thread_local! {
 /// container, or
 /// `~/.local/share/iptv-rs` on the other desktops.
 pub fn data_dir() -> PathBuf {
-    crate::platform_data::data_dir()
+    crate::runtime().data_dir().to_owned()
 }
 
 /// Runs `future` on the UI thread under the app's root owner.
@@ -132,7 +132,7 @@ pub fn start(ui: Ui) {
     // also waits for them in `onStop` (`TvActivity.flushPendingWrites`).
     effect(|| {
         let background = lifecycle() == nsh_core::platform::Lifecycle::Background;
-        crate::runtime().foreground.set(!background);
+        crate::runtime().foreground().set(!background);
         if background && !crate::runtime().flush_files(Duration::from_secs(2)) {
             log::warn!("iptv persistence: queued file writes did not finish in the background");
         }
@@ -181,7 +181,7 @@ pub fn start(ui: Ui) {
 /// A new generation owns the guide: older imports no longer show and
 /// their guide timers stop.
 fn next_generation() -> u64 {
-    crate::runtime().generation.with(|g| {
+    crate::runtime().generation().with(|g| {
         g.set(g.get() + 1);
         g.get()
     })
@@ -215,7 +215,7 @@ fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(U
     let generation = if shows {
         next_generation()
     } else {
-        crate::runtime().generation.with(Cell::get)
+        crate::runtime().generation().with(Cell::get)
     };
     // Only the startup refresh may start the last channel.
     let resume = purpose == Purpose::Startup;
@@ -248,7 +248,7 @@ fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(U
     let merge_requested = Cell::new(false);
     let show = async move |imported: Box<Imported>, held: Option<opening::Held>| {
         let _ = library::refresh_cache(ui).await;
-        if crate::runtime().generation.with(Cell::get) != generation {
+        if crate::runtime().generation().with(Cell::get) != generation {
             return;
         }
         if shows || combined::active(ui) {
@@ -277,7 +277,7 @@ fn start_import_with(ui: Ui, job: Job, cancel: CancelToken, on_update: impl Fn(U
                     Ok(Msg::Playlist(result)) => {
                         completion.playlist_done();
                         if import_source.is_none()
-                            && crate::runtime().generation.with(Cell::get) == generation
+                            && crate::runtime().generation().with(Cell::get) == generation
                             && let Ok((_, imported)) = &result
                         {
                             import_source = Some(imported.source);
@@ -360,7 +360,7 @@ async fn show_part(
     resume: bool,
     held: Option<opening::Held>,
 ) {
-    if crate::runtime().generation.with(Cell::get) != generation {
+    if crate::runtime().generation().with(Cell::get) != generation {
         return;
     }
     if combined::active(ui) {
@@ -387,7 +387,7 @@ async fn show_part(
     } = *imported;
     let mut organization_revision = organization::revision();
     let schedule = organization::build(source, groups, catalog, guide, now).await;
-    if crate::runtime().generation.with(Cell::get) != generation || combined::active(ui) {
+    if crate::runtime().generation().with(Cell::get) != generation || combined::active(ui) {
         return;
     }
     let built = started.elapsed();
@@ -416,7 +416,7 @@ async fn show_part(
             .held_channels(held.keys),
         None => pages::paged(ui, schedule, source, now).await,
     };
-    if crate::runtime().generation.with(Cell::get) != generation || combined::active(ui) {
+    if crate::runtime().generation().with(Cell::get) != generation || combined::active(ui) {
         return;
     }
     let wrapped = started.elapsed();
@@ -428,7 +428,7 @@ async fn show_part(
         organization_revision = organization::revision();
         organization::apply(&schedule, source).await;
     }
-    if crate::runtime().generation.with(Cell::get) != generation || combined::active(ui) {
+    if crate::runtime().generation().with(Cell::get) != generation || combined::active(ui) {
         return;
     }
     let favorites = started.elapsed();
@@ -480,7 +480,7 @@ fn schedule_check(ui: Ui, source: SourceId, at: i64, generation: u64) {
     log::info!("iptv data: next guide check in {} min", wait.as_secs() / 60);
     spawn_in_app(async move {
         timer(wait).await;
-        if crate::runtime().generation.with(Cell::get) == generation
+        if crate::runtime().generation().with(Cell::get) == generation
             && (!combined::active(ui) || combined::includes(ui, source))
         {
             check_guide(ui, source, generation);
@@ -561,7 +561,7 @@ use crate::runtime::imports::kept_file_name;
 
 /// Current browser generation for async state installation guards.
 pub(crate) fn generation() -> u64 {
-    crate::runtime().generation.with(Cell::get)
+    crate::runtime().generation().with(Cell::get)
 }
 
 #[cfg(test)]

@@ -703,6 +703,10 @@ fn member_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
         .test_id(&format!("custom-member-{}", at.index()))
 }
 
+fn contents_hidden(ui: Ui) -> bool {
+    read(ui, |screen| screen.editing.is_some()).unwrap_or(false)
+}
+
 pub fn layer(ui: Ui) -> impl IntoElement {
     effect(move || {
         ui.library.version.get();
@@ -733,20 +737,34 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             });
             ui_kit::screen(ui, size)
                 .test_id("custom-groups-screen")
-                .child(ui_kit::header(ui, size, tr("Custom groups"), close))
-                .child(ui_kit::caption(size, tr(CAPTION)))
-                .child(ui_kit::body(size, move || {
-                    read(ui, |s| s.status.clone()).unwrap_or_default()
-                }))
-                .child(ui_kit::heading(size, move || {
-                    read(ui, summary).unwrap_or_default()
-                }))
+                .accessibility_elements_hidden(move || {
+                    crate::overlays::Overlay::CustomGroups.accessibility_covered(ui)
+                })
+                .child(
+                    ui_kit::header(ui, size, tr("Custom groups"), close)
+                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
+                .child(
+                    ui_kit::caption(size, tr(CAPTION))
+                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
+                .child(
+                    ui_kit::body(size, move || {
+                        read(ui, |s| s.status.clone()).unwrap_or_default()
+                    })
+                    .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
+                .child(
+                    ui_kit::heading(size, move || read(ui, summary).unwrap_or_default())
+                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
                 .child(
                     virtual_list(
                         move || read(ui, |s| labels(s).len()).unwrap_or(0),
                         move |at| control_row(ui, size, at),
                     )
                     .element_ref(&controls)
+                    .accessibility_elements_hidden(move || contents_hidden(ui))
                     .estimated_item_size(crate::list_rows::pitch(size, crate::list_rows::ROW))
                     .h(move || size.px(if on_members_page(ui) { 260.0 } else { 480.0 })),
                 )
@@ -758,6 +776,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                             move |at| member_row(ui, size, at),
                         )
                         .element_ref(&members)
+                        .accessibility_elements_hidden(move || contents_hidden(ui))
                         .estimated_item_size(crate::list_rows::pitch(size, crate::list_rows::ROW))
                         .flex_1()
                     },

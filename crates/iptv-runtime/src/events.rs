@@ -3,7 +3,7 @@ use iptv_core::guide::Schedule;
 use iptv_library::SourceId;
 use std::rc::Rc;
 
-pub(crate) enum RuntimeEvent {
+pub enum RuntimeEvent {
     RefreshDue(SourceId),
     CatalogChanged,
     EarlyResume {
@@ -11,6 +11,7 @@ pub(crate) enum RuntimeEvent {
         done: futures_channel::oneshot::Sender<()>,
     },
     Message(String),
+    SettingsSaveFailed(super::settings::SaveFailure),
     BackupProgress(super::backup::Progress),
     FavoritesChanged {
         channels: std::collections::BTreeSet<usize>,

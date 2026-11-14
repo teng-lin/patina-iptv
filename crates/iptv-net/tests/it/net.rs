@@ -214,6 +214,53 @@ async fn cross_origin_redirects_keep_only_transport_headers_and_the_referer_orig
     }
 }
 
+/// A playlist may set `Origin` to any text (`url|Origin=…`). The server it
+/// was set for gets it as written; a redirect to another origin carries
+/// only the origin it names, or nothing when it names none.
+#[tokio::test]
+async fn an_origin_header_crosses_a_redirect_only_as_an_origin() {
+    for (given, crossed) in [
+        (
+            "https://portal.example.test/watch/7?token=synthetic-secret",
+            Some("https://portal.example.test"),
+        ),
+        (
+            "https://portal.example.test:8443",
+            Some("https://portal.example.test:8443"),
+        ),
+        ("null", None),
+        ("synthetic-secret, not an origin", None),
+        ("https://user:synthetic-secret@portal.example.test", None),
+        ("android-app://synthetic-secret.example.test", None),
+    ] {
+        let target = TestServer::http(|_| Resp::ok("landed")).await;
+        let to = target.url("/final");
+        let origin = TestServer::http(move |req| match req.path.as_str() {
+            "/start" => Resp::redirect(302, "/same"),
+            _ => Resp::redirect(307, &to),
+        })
+        .await;
+        let net = NetClient::new(NetConfig {
+            allow_private_fixture: true,
+            ..Default::default()
+        })
+        .unwrap();
+        let request = HttpRequest::get(origin.url("/start")).with_header("Origin", given);
+        assert_eq!(net.fetch(request).await.unwrap().body, b"landed");
+        // Same origin, including a same-origin redirect: exactly as given.
+        let first_party = origin.requests();
+        assert_eq!(first_party.len(), 2);
+        for request in &first_party {
+            assert_eq!(request.header("origin"), Some(given), "{}", request.path);
+        }
+        let landed = &target.requests()[0];
+        assert_eq!(landed.header("origin"), crossed, "{given}");
+        for (name, value) in &landed.headers {
+            assert!(!value.contains("synthetic-secret"), "{name}: {given}");
+        }
+    }
+}
+
 #[tokio::test]
 async fn a_body_sent_again_to_another_origin_keeps_its_media_type_only() {
     let target = TestServer::http(|_| Resp::ok("landed")).await;

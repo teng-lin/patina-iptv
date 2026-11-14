@@ -190,6 +190,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
 fn panel(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     view()
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::GuideAssign.accessibility_covered(ui)
+        })
         .absolute()
         .inset_0()
         .flex_row()

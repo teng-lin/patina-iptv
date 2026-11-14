@@ -65,6 +65,9 @@ pub fn toolbar(ui: Ui) -> impl IntoElement {
         move || shown.get(),
         move || {
             view()
+                .accessibility_elements_hidden(move || {
+                    with_state(ui, |state| state.dialog().is_some()).unwrap_or(false)
+                })
                 .absolute()
                 .top(px(12.0))
                 .left(px(0.0))

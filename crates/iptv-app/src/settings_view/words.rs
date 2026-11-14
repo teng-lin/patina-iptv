@@ -7,6 +7,19 @@ use crate::i18n::{tr, trf};
 use iptv_settings::schema::{IntUnit, TimeUnit, ValueType};
 use iptv_settings::{Section, Setting, Value};
 
+/// A failed save before publication differs from an update whose durability
+/// could not be confirmed. OS details are already recorded by the runtime.
+pub fn save_failure(failure: crate::runtime::settings::SaveFailure) -> &'static str {
+    match failure {
+        crate::runtime::settings::SaveFailure::NotPublished => {
+            tr("Settings could not be saved. Check storage permissions and try again.")
+        }
+        crate::runtime::settings::SaveFailure::DurabilityUnconfirmed => tr(
+            "Settings updated, but we could not confirm they were saved safely. Check storage and try again.",
+        ),
+    }
+}
+
 /// The name of a settings page (`settings_view::PAGES`).
 pub fn page(key: &str) -> &'static str {
     match key {
@@ -565,5 +578,27 @@ mod tests {
             read("remote.key_overrides", Value::KeyBindings(Vec::new())),
             "None"
         );
+    }
+}
+
+#[cfg(test)]
+mod save_failure_tests {
+    use super::save_failure;
+    use crate::runtime::settings::SaveFailure;
+
+    #[test]
+    fn publication_distinctions_are_translated_in_every_interface_language() {
+        let unsaved = save_failure(SaveFailure::NotPublished).to_owned();
+        let updated = save_failure(SaveFailure::DurabilityUnconfirmed).to_owned();
+        assert_ne!(unsaved, updated);
+        for language in iptv_core::i18n::LANGUAGES.iter().skip(1) {
+            crate::i18n::in_language(language.tag, || {
+                let not_published = save_failure(SaveFailure::NotPublished);
+                let durability = save_failure(SaveFailure::DurabilityUnconfirmed);
+                assert_ne!(not_published, unsaved, "{}", language.tag);
+                assert_ne!(durability, updated, "{}", language.tag);
+                assert_ne!(not_published, durability, "{}", language.tag);
+            });
+        }
     }
 }

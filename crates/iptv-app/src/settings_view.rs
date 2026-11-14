@@ -368,6 +368,12 @@ fn time_label(unix: i64) -> String {
     crate::time::label(unix, crate::time::wall_unix())
 }
 
+/// The runtime reports publication semantics; the shell chooses the wording
+/// in the current interface language, including changes made since the save.
+pub(crate) fn save_failed(failure: crate::runtime::settings::SaveFailure) {
+    notify(words::save_failure(failure));
+}
+
 /// Shows `text` briefly at the bottom of the screen.
 pub fn notify(text: &str) {
     announce_for_accessibility(text);

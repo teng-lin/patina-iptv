@@ -187,6 +187,10 @@ fn time_label(at: i64) -> String {
     crate::time::label(at, crate::time::wall_unix())
 }
 
+fn contents_hidden(ui: Ui) -> bool {
+    editing(ui) || state(ui, |screen| screen.layer() != Layer::List).unwrap_or(false)
+}
+
 pub fn layer(ui: Ui) -> impl IntoElement {
     // What is stored changed (an edit, an update, a guide download): reload.
     effect(move || {
@@ -211,8 +215,15 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         move || is_open(ui),
         move || {
             ui_kit::screen(ui, size)
-                .child(header(ui, size))
-                .child(ui_kit::caption(size, move || hint(ui)))
+                .test_id("guide-sources-screen")
+                .accessibility_elements_hidden(move || {
+                    crate::overlays::Overlay::GuideSources.accessibility_covered(ui)
+                })
+                .child(header(ui, size).accessibility_elements_hidden(move || contents_hidden(ui)))
+                .child(
+                    ui_kit::caption(size, move || hint(ui))
+                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                )
                 .child(when(
                     move || state(ui, |s| s.notice().is_some()).unwrap_or(false),
                     move || {
@@ -221,6 +232,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                 .flatten()
                                 .unwrap_or_default()
                         })
+                        .accessibility_elements_hidden(move || contents_hidden(ui))
                         .text_color(rgb(ERROR))
                     },
                 ))
@@ -247,7 +259,7 @@ fn hint(ui: Ui) -> &'static str {
     }
 }
 
-fn header(ui: Ui, size: Scale) -> impl IntoElement {
+fn header(ui: Ui, size: Scale) -> View {
     let name = move || {
         let playlist = state(ui, Screen::playlist);
         ui.library.version.get();
@@ -279,6 +291,7 @@ fn list(ui: Ui, size: Scale) -> impl IntoElement {
         }
     });
     virtual_list(count, move |at| row(ui, size, at.index(), focused_index))
+        .accessibility_elements_hidden(move || contents_hidden(ui))
         .estimated_item_size(list_rows::pitch(size, ROW_THREE))
         .element_ref(&rows)
         .flex_1()
@@ -441,6 +454,7 @@ fn sheet(ui: Ui, size: Scale) -> impl IntoElement {
 
 fn backdrop(ui: Ui, card: AnyElement) -> View {
     view()
+        .accessibility_elements_hidden(move || editing(ui))
         .absolute()
         .inset_0()
         .items_center()

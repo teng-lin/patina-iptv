@@ -1,35 +1,36 @@
 //! Platform-owned app storage location. Android supplies its actual user-scoped
 //! files directory before the Rust root starts; package names are not paths.
 
+#[cfg(all(test, unix))]
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
-use std::{fs, io};
 
 #[cfg(target_os = "android")]
 static ANDROID_FILES: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
-pub(crate) fn data_dir() -> PathBuf {
+pub(crate) fn resolve_data_dir() -> io::Result<PathBuf> {
     #[cfg(target_os = "android")]
     {
-        ANDROID_FILES
-            .get()
-            .expect("Android host must initialize its files directory")
-            .clone()
+        ANDROID_FILES.get().cloned().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "Android host has not initialized private storage",
+            )
+        })
     }
     #[cfg(windows)]
     {
-        home_directory(std::env::var_os("LOCALAPPDATA"))
-            .expect("LOCALAPPDATA must identify an absolute directory before app startup")
-            .join("Patina")
+        Ok(home_directory(std::env::var_os("LOCALAPPDATA"))?.join("Patina"))
     }
     #[cfg(not(any(target_os = "android", windows)))]
     {
-        let home = home_directory(std::env::var_os("HOME"))
-            .expect("HOME must identify an absolute directory before app startup");
-        if cfg!(any(target_os = "macos", target_os = "ios")) {
+        let home = home_directory(std::env::var_os("HOME"))?;
+        Ok(if cfg!(any(target_os = "macos", target_os = "ios")) {
             home.join("Library/Application Support/iptv-rs")
         } else {
             home.join(".local/share/iptv-rs")
-        }
+        })
     }
 }
 
@@ -71,20 +72,39 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_TvActivity_initializeDataD
     }
 }
 
+/// The Android host's `onStop`: the activity may be the process's last
+/// moment, so it waits (at most a second) for queued file writes before
+/// it lets the system stop it. NSH tells Rust about the move to the
+/// background asynchronously, which the same wait in `data.rs` relies on.
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_hantekllc_iptvrs_host_TvActivity_flushPendingWrites(
+    _env: jni::JNIEnv,
+    _activity: jni::objects::JObject,
+) {
+    // A panic must not unwind out of an `extern "system"` function into the
+    // JVM (the process aborts): it is logged, without its message.
+    match std::panic::catch_unwind(|| {
+        crate::runtime::flush_pending_writes(std::time::Duration::from_secs(1))
+    }) {
+        Ok(true) => {}
+        Ok(false) => log::warn!("iptv files: queued writes did not finish before the stop"),
+        Err(_) => log::error!("iptv files: waiting for queued writes panicked"),
+    }
+}
+
 /// Called before opening settings, the database, restore state, or any worker.
 /// The restrictive process mask also covers SQLite WAL/SHM and temporary files.
-pub(crate) fn initialize() -> io::Result<()> {
-    #[cfg(windows)]
-    home_directory(std::env::var_os("LOCALAPPDATA"))?;
-    #[cfg(not(any(target_os = "android", windows)))]
-    home_directory(std::env::var_os("HOME"))?;
+pub(crate) fn initialize() -> io::Result<PathBuf> {
+    let directory = resolve_data_dir()?;
     #[cfg(unix)]
     // SAFETY: umask has no pointer arguments; making the process mask more
     // restrictive is intentional and happens before app storage workers start.
     unsafe {
         libc::umask(0o077);
     }
-    protect_directory(&data_dir())
+    protect_directory(&directory)?;
+    Ok(directory)
 }
 
 #[cfg(not(target_os = "android"))]
@@ -99,53 +119,9 @@ fn home_directory(home: Option<std::ffi::OsString>) -> io::Result<PathBuf> {
         })
 }
 
-/// Correct old installations too. Never follow a link out of private storage.
+/// Protect storage before opening application services.
 pub(crate) fn protect_directory(path: &Path) -> io::Result<()> {
-    let mut builder = fs::DirBuilder::new();
-    builder.recursive(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
-    }
-    builder.create(path)?;
-    protect_tree(path)?;
-    exclude_from_backup(path)
-}
-
-fn protect_tree(path: &Path) -> io::Result<()> {
-    let metadata = fs::symlink_metadata(path)?;
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        // Reject junctions and all other reparse points, not just symlinks.
-        if metadata.file_attributes() & 0x400 != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "App storage contains a reparse point",
-            ));
-        }
-    }
-    if metadata.file_type().is_symlink() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "App storage contains a symbolic link",
-        ));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(
-            path,
-            fs::Permissions::from_mode(if metadata.is_dir() { 0o700 } else { 0o600 }),
-        )?;
-    }
-    if metadata.is_dir() {
-        for entry in fs::read_dir(path)? {
-            protect_tree(&entry?.path())?;
-        }
-    }
-    Ok(())
+    crate::runtime::storage::protect_directory(path, exclude_from_backup)
 }
 
 /// User-initiated exports are separate; OS backups must not copy credentials.
@@ -173,6 +149,81 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(not(target_os = "android"))]
+    fn bad_storage_displays_error_before_runtime_construction() {
+        const CHILD: &str = "IPTV_TEST_STORAGE_FAILURE";
+        const RAN: &str = "IPTV_TEST_STORAGE_FAILURE_RAN";
+        if std::env::var_os(CHILD).is_some() {
+            use nsh_core::element::Root;
+            let mut app = nsh_testing::Headless::start(nsh_engine::EngineConfig::new(Root::of::<
+                crate::App,
+            >(
+            )))
+            .unwrap();
+            let locale = std::env::var("IPTV_RS_TEST_LOCALE").unwrap();
+            let language = iptv_core::i18n::resolve("system", Some(&locale));
+            let message =
+                iptv_core::i18n::translate(language, "Private app storage is unavailable");
+            if locale == "de" {
+                assert_ne!(message, "Private app storage is unavailable");
+            }
+            app.wait_for(&format!("text:{message}")).unwrap();
+            assert!(crate::runtime::try_current().is_none());
+            std::fs::write(std::env::var_os(RAN).unwrap(), b"storage error shown").unwrap();
+            return;
+        }
+        let home = tempfile::tempdir().unwrap();
+        let blocked = home.path().join("generated-file");
+        std::fs::write(&blocked, b"synthetic non-directory").unwrap();
+        let base = if cfg!(windows) {
+            "LOCALAPPDATA"
+        } else {
+            "HOME"
+        };
+        for (mode, locale) in ["missing", "relative", "non-directory"]
+            .into_iter()
+            .flat_map(|mode| ["en", "de"].map(|locale| (mode, locale)))
+        {
+            let ran = home.path().join(format!("{mode}-{locale}-ran"));
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child
+                .args([
+                    "--exact",
+                    "platform_data::tests::bad_storage_displays_error_before_runtime_construction",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .current_dir(home.path())
+                .env(CHILD, mode)
+                .env("IPTV_RS_TEST_LOCALE", locale)
+                .env(RAN, &ran)
+                .env("HOME", home.path())
+                .env("LOCALAPPDATA", home.path());
+            match mode {
+                "missing" => {
+                    child.env_remove(base);
+                }
+                "relative" => {
+                    child.env(base, "generated-relative-home");
+                }
+                "non-directory" => {
+                    child.env(base, &blocked);
+                }
+                _ => unreachable!(),
+            }
+            let result = child.output().unwrap();
+            assert!(
+                result.status.success(),
+                "{mode}/{locale}: {}{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+            assert_eq!(std::fs::read(ran).unwrap(), b"storage error shown");
+        }
+    }
+
+    #[test]
+    #[cfg(not(target_os = "android"))]
     fn missing_or_relative_home_is_refused() {
         assert!(home_directory(None).is_err());
         assert!(home_directory(Some("".into())).is_err());
@@ -193,11 +244,8 @@ mod tests {
             unsafe {
                 libc::umask(0o022);
             }
-            initialize().unwrap();
-            let root = data_dir();
-            let _store =
-                crate::runtime::credential_store::plain_test_database(root.join("iptv.sqlite"))
-                    .unwrap();
+            let root = initialize().unwrap();
+            let _store = rusqlite::Connection::open(root.join("iptv.sqlite")).unwrap();
             fs::write(root.join("copied.m3u"), b"#EXTM3U\n").unwrap();
             for entry in fs::read_dir(root).unwrap() {
                 let entry = entry.unwrap();

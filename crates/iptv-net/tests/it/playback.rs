@@ -810,3 +810,277 @@ async fn failed_full_probe_does_not_prepend_stale_slice_bytes() {
     assert_eq!(response.status(), 403);
     assert_eq!(response.text().await.unwrap(), "refused");
 }
+
+/// A playlist may set `Origin` to any text (`url|Origin=…`): here a whole
+/// address with a token, `null`, and text that names no origin. The
+/// stream's own origin gets it as written. Another origin, reached by a
+/// redirect or named by the manifest, gets the origin it names or nothing.
+#[tokio::test]
+async fn an_origin_header_reaches_another_origin_only_as_an_origin() {
+    for (given, crossed) in [
+        (
+            "https://portal.example.test/watch/42?token=synthetic-secret",
+            Some("https://portal.example.test"),
+        ),
+        ("null", None),
+        ("synthetic-secret, not an origin", None),
+    ] {
+        let second = TestServer::http(|_| Resp::ok(vec![0x47, 0, 1, 2, 3, 4])).await;
+        let (key, segment, redirected) = (
+            second.url("/keys/key.bin"),
+            second.url("/media/other.ts"),
+            second.url("/media/redirected.ts"),
+        );
+        let origin = TestServer::http(move |request| match request.path.as_str() {
+            "/live/list.m3u8" => Resp::ok(format!(
+                "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"{key}\"\n#EXTINF:2,\nsame.ts\n\
+                 #EXTINF:2,\n{segment}\n#EXTINF:2,\nredirect.ts\n"
+            )),
+            "/live/redirect.ts" => Resp::redirect(302, &redirected),
+            _ => Resp::ok(vec![0x47, 0, 1, 2, 3, 4]),
+        })
+        .await;
+        let headers = [("Origin".to_owned(), given.to_owned())];
+        let relay = fixture_relay(&origin.url("/live/list.m3u8"), &headers);
+        let manifest = reqwest::get(relay.url())
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        let urls = relay_urls(&relay, &manifest);
+        assert_eq!(urls.len(), 4, "{manifest}");
+        for url in urls {
+            assert!(reqwest::get(url).await.unwrap().status().is_success());
+        }
+        let first_party = origin.requests();
+        assert_eq!(first_party.len(), 3);
+        for request in &first_party {
+            assert_eq!(request.header("origin"), Some(given), "{}", request.path);
+        }
+        let third_party = second.requests();
+        assert_eq!(third_party.len(), 3, "a key, a segment and a redirect");
+        for request in &third_party {
+            assert_eq!(
+                request.header("origin"),
+                crossed,
+                "{given} {}",
+                request.path
+            );
+            for (name, value) in &request.headers {
+                assert!(
+                    !value.contains("synthetic-secret"),
+                    "{name} {}",
+                    request.path
+                );
+            }
+        }
+    }
+}
+
+/// What FFmpeg reads as an address and the specification's syntax does not,
+/// served by a real relay: an unquoted `URI` is fetched through the relay
+/// only, and a playlist with two readings is refused as unsupported.
+#[tokio::test]
+async fn a_uri_only_some_players_read_is_on_the_relay_or_refuses_the_playlist() {
+    let second = TestServer::http(|_| Resp::ok(vec![0, 0, 0, 1])).await;
+    let direct = second.url("/direct");
+    let served = direct.clone();
+    let origin = TestServer::http(move |request| match request.path.as_str() {
+        "/unquoted.m3u8" => Resp::ok(format!(
+            "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI={served}/key.bin\n\
+             #EXT-X-MAP:URI={served}/init.mp4,BYTERANGE=\"720@0\"\n#EXTINF:2,\nsegment.ts\n"
+        )),
+        "/nul.m3u8" => Resp::ok(format!(
+            "#EXTM3U\n#EXTINF:2,\n#EXT-X-DISCONTINUITY\0{served}/nul.ts\n"
+        )),
+        "/escape.m3u8" => Resp::ok(format!(
+            "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,FOO=\"a\\\",BAR=\",URI={served}/key.bin\n\
+             #EXTINF:2,\nsegment.ts\n"
+        )),
+        "/open.m3u8" => Resp::ok(format!(
+            "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"{served}/key.bin\n#EXTINF:2,\nsegment.ts\n"
+        )),
+        _ => Resp::ok(vec![0x47, 0, 1, 2]),
+    })
+    .await;
+    let relay = fixture_relay(&origin.url("/unquoted.m3u8"), &[]);
+    let manifest = reqwest::get(relay.url())
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(!manifest.contains(&format!("={direct}")), "{manifest}");
+    assert!(
+        manifest.contains(&format!(
+            "#EXT-X-KEY:METHOD=AES-128,URI=\"{}key/{direct}/key.bin\"",
+            relay.prefix()
+        )),
+        "{manifest}"
+    );
+    assert!(
+        manifest.contains(&format!(
+            "#EXT-X-MAP:URI=\"{}{direct}/init.mp4\",BYTERANGE=\"720@0\"",
+            relay.prefix()
+        )),
+        "{manifest}"
+    );
+    assert!(second.requests().is_empty(), "nothing was fetched yet");
+    for url in relay_urls(&relay, &manifest) {
+        assert!(reqwest::get(url).await.unwrap().status().is_success());
+    }
+    let mut fetched: Vec<String> = second.requests().into_iter().map(|r| r.path).collect();
+    fetched.sort();
+    assert_eq!(fetched, ["/direct/init.mp4", "/direct/key.bin"]);
+
+    for path in ["/nul.m3u8", "/escape.m3u8", "/open.m3u8"] {
+        let relay = fixture_relay(&origin.url(path), &[]);
+        let response = reqwest::get(relay.url()).await.unwrap();
+        assert_eq!(response.status(), 502, "{path}");
+        assert_eq!(response.text().await.unwrap(), "Unsupported manifest");
+        assert_eq!(
+            relay.take_error_code(),
+            Some("ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED"),
+            "{path}"
+        );
+    }
+    assert_eq!(
+        second.requests().len(),
+        2,
+        "refused playlists fetch nothing"
+    );
+}
+
+/// One raw exchange with the relay: what it answers to `request`, read to
+/// the end of the connection (empty when it closes without an answer).
+async fn raw_exchange(relay: &PlaybackRelay, request: &str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut socket = tokio::net::TcpStream::connect(relay_address(relay))
+        .await
+        .unwrap();
+    socket.write_all(request.as_bytes()).await.unwrap();
+    let mut answer = Vec::new();
+    let read = socket.read_to_end(&mut answer);
+    // A reset counts as closed: the relay drops what it refuses unread.
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), read)
+        .await
+        .expect("the relay answers or closes");
+    String::from_utf8_lossy(&answer).into_owned()
+}
+
+/// `127.0.0.1:<port>` of the relay.
+fn relay_address(relay: &PlaybackRelay) -> String {
+    let url = reqwest::Url::parse(relay.url()).unwrap();
+    format!("{}:{}", url.host_str().unwrap(), url.port().unwrap())
+}
+
+/// Absolute-form requests must name this relay and its capability.
+/// Refusing other targets protects this server from acting as an open proxy;
+/// it makes no guarantee about requests a player sends elsewhere.
+#[tokio::test]
+async fn as_a_proxy_the_relay_serves_its_capability_and_nothing_else() {
+    let second = TestServer::http(|_| Resp::ok("0123456789abcdef")).await;
+    let origin = TestServer::http(|request| match request.path.as_str() {
+        "/list.m3u8" => Resp::ok("#EXTM3U\n#EXTINF:2,\nsegment.ts\n"),
+        _ => Resp::ok(vec![0x47, 0, 1, 2]),
+    })
+    .await;
+    let relay = fixture_relay(&origin.url("/list.m3u8"), &[]);
+
+    // The request line a proxy receives names the whole address.
+    let proxied = raw_exchange(
+        &relay,
+        &format!("GET {} HTTP/1.1\r\nHost: synthetic\r\n\r\n", relay.url()),
+    )
+    .await;
+    assert!(proxied.starts_with("HTTP/1.1 200 OK\r\n"), "{proxied}");
+    let segment = format!("{}{}", relay.prefix(), origin.url("/segment.ts"));
+    assert!(proxied.ends_with(&format!("#EXTM3U\n#EXTINF:2,\n{segment}\n")));
+    let head = raw_exchange(&relay, &format!("HEAD {segment} HTTP/1.1\r\n\r\n")).await;
+    assert!(head.starts_with("HTTP/1.1 200 "), "{head}");
+    assert_eq!(origin.requests().len(), 2);
+
+    // What a manifest could make a player load by itself.
+    let prefix_url = reqwest::Url::parse(relay.prefix()).unwrap();
+    let token = prefix_url.path();
+    let other_relay = relay.url().replace(&relay_address(&relay), "127.0.0.1:1");
+    for request in [
+        format!("GET {} HTTP/1.1\r\n\r\n", second.url("/key.bin")),
+        format!("HEAD {} HTTP/1.1\r\n\r\n", second.url("/key.bin")),
+        format!("CONNECT {} HTTP/1.1\r\n\r\n", second.addr),
+        // The capability on another host is not this relay's.
+        format!("GET {other_relay} HTTP/1.1\r\n\r\n"),
+        format!("GET {}{token} HTTP/1.1\r\n\r\n", second.url("")),
+        // Without the capability, or with a wrong one of the right length.
+        format!("GET {} HTTP/1.1\r\n\r\n", origin.url("/segment.ts")),
+        "GET / HTTP/1.1\r\n\r\n".to_owned(),
+        format!(
+            "GET /{}/{} HTTP/1.1\r\n\r\n",
+            "0".repeat(token.len() - 2),
+            origin.url("/segment.ts")
+        ),
+        "POST / HTTP/1.1\r\nContent-Length: 0\r\n\r\n".to_owned(),
+    ] {
+        assert_eq!(raw_exchange(&relay, &request).await, "", "{request}");
+    }
+    assert!(second.requests().is_empty(), "no request left the relay");
+    assert_eq!(
+        origin.requests().len(),
+        2,
+        "nor reached the stream's server"
+    );
+}
+
+/// Connections that never show the capability: silent ones, and ones that
+/// stop inside the request line. They hold the relay's twelve slots for
+/// about a second, not the fifteen a request head may take, and the
+/// player's next request is served.
+#[tokio::test]
+async fn idle_and_half_sent_connections_do_not_keep_the_relay_from_the_player() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let origin = TestServer::http(|_| Resp::ok(vec![0x47, 0, 1, 2])).await;
+    let relay = fixture_relay(&origin.url("/media.ts"), &[]);
+    let prefix_url = reqwest::Url::parse(relay.prefix()).unwrap();
+    let token = prefix_url.path();
+    let mut held = Vec::new();
+    // Twice the slots: the second dozen waits in the listener's queue.
+    for index in 0..24 {
+        let mut socket = tokio::net::TcpStream::connect(relay_address(&relay))
+            .await
+            .unwrap();
+        let sent = match index % 3 {
+            0 => String::new(),
+            1 => "GET /".to_owned(),
+            // All of the capability but its last characters.
+            _ => format!("GET {}", &token[..token.len() - 4]),
+        };
+        socket.write_all(sent.as_bytes()).await.unwrap();
+        held.push(socket);
+    }
+    let started = std::time::Instant::now();
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        reqwest::get(relay.url()),
+    )
+    .await
+    .expect("the player is served while idle connections are held")
+    .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.bytes().await.unwrap().as_ref(), &[0x47, 0, 1, 2]);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "served only after {:?}",
+        started.elapsed()
+    );
+    // Each of them was closed by the relay, unanswered.
+    for mut socket in held {
+        let mut answer = Vec::new();
+        let read = socket.read_to_end(&mut answer);
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(10), read)
+            .await
+            .expect("the relay closes an idle connection");
+        assert!(answer.is_empty());
+    }
+    assert_eq!(origin.requests().len(), 1);
+}

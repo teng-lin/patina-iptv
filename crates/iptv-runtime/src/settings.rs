@@ -48,8 +48,8 @@ fn path() -> PathBuf {
 /// Loads the saved settings (startup).
 pub fn load() {
     let settings = Arc::new(read_file(&path()));
-    crate::runtime().settings_saved.with(|saved| {
-        *saved.borrow_mut() = Some((crate::runtime().settings_changed.get(), settings.clone()))
+    crate::current().settings_saved.with(|saved| {
+        *saved.borrow_mut() = Some((crate::current().settings_changed.get(), settings.clone()))
     });
     *current_handle()
         .write()
@@ -123,6 +123,25 @@ pub enum SaveError {
     Durability(std::io::ErrorKind),
 }
 
+/// What the UI must distinguish after an asynchronous save failure.
+/// Detailed OS errors remain in diagnostics, outside user-facing messages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SaveFailure {
+    /// The write did not publish a replacement settings file.
+    NotPublished,
+    /// The replacement is live, but its directory synchronization failed.
+    DurabilityUnconfirmed,
+}
+
+impl From<WriteError> for SaveFailure {
+    fn from(error: WriteError) -> Self {
+        match error {
+            WriteError::Storage(_) => Self::NotPublished,
+            WriteError::Durability(_) => Self::DurabilityUnconfirmed,
+        }
+    }
+}
+
 impl From<WriteError> for SaveError {
     fn from(error: WriteError) -> Self {
         match error {
@@ -161,37 +180,36 @@ pub fn set(key: &str, value: Value) -> Result<(), SaveError> {
         .unwrap_or_else(PoisonError::into_inner) = Some(next.clone());
     if !changes.is_empty() {
         log::info!("iptv settings: {key} changed");
-        crate::runtime().emit(super::RuntimeEvent::SettingsChanged);
+        crate::current().emit(super::RuntimeEvent::SettingsChanged);
     }
-    let revision = crate::runtime().settings_changed.get() + 1;
-    crate::runtime().settings_changed.set(revision);
+    let revision = crate::current().settings_changed.get() + 1;
+    crate::current().settings_changed.set(revision);
     let saved = super::file_writer::write(path(), json.into_bytes());
-    crate::runtime().spawn(async move {
+    crate::current().spawn(async move {
         let result = saved.await;
         match settle(result) {
-            Settled::Saved => crate::runtime().settings_saved.with(|saved| {
+            Settled::Saved => crate::current().settings_saved.with(|saved| {
                 let mut saved = saved.borrow_mut();
                 if saved.as_ref().is_none_or(|(at, _)| *at < revision) {
                     *saved = Some((revision, next));
                 }
             }),
-            Settled::Failed if crate::runtime().settings_changed.get() == revision => {
-                if let Some((_, previous)) = crate::runtime()
+            Settled::Failed if crate::current().settings_changed.get() == revision => {
+                if let Some((_, previous)) = crate::current()
                     .settings_saved
                     .with(|saved| saved.borrow().clone())
                 {
                     *current_handle()
                         .write()
                         .unwrap_or_else(PoisonError::into_inner) = Some(previous);
-                    crate::runtime().emit(super::RuntimeEvent::SettingsChanged);
+                    crate::current().emit(super::RuntimeEvent::SettingsChanged);
                 }
             }
             Settled::Failed => {}
         }
         if let Err(error) = result {
-            let error = SaveError::from(error);
-            log::warn!("iptv settings: {error}");
-            crate::runtime().emit(super::RuntimeEvent::Message(error.to_string()));
+            log::warn!("iptv settings: {}", SaveError::from(error));
+            crate::current().emit(super::RuntimeEvent::SettingsSaveFailed(error.into()));
         }
     });
     Ok(())
@@ -311,6 +329,11 @@ mod persistence_tests {
             result.map_err(SaveError::from),
             Err(SaveError::Durability(_))
         ));
+        assert_eq!(
+            SaveFailure::from(result.unwrap_err()),
+            SaveFailure::DurabilityUnconfirmed,
+            "a published value must not be reported as unsaved"
+        );
         assert_eq!(settle(result), Settled::Saved, "the live settings stay");
         assert_eq!(read_file(&path), next, "restart must read the live setting");
         assert!(!path.with_extension("json.tmp").exists());
@@ -330,6 +353,10 @@ mod persistence_tests {
             .unwrap();
         let result = write_file(&path, &changed);
         assert!(result.is_err());
+        assert_eq!(
+            SaveFailure::from(result.unwrap_err()),
+            SaveFailure::NotPublished
+        );
         assert_eq!(settle(result), Settled::Failed, "the live settings go back");
         assert_eq!(read_file(&path), saved);
         std::fs::remove_dir(path.with_extension("json.tmp")).unwrap();

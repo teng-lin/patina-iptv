@@ -16,9 +16,30 @@ fn system() -> Option<&'static str> {
     SYSTEM.get_or_init(system_locale).as_deref()
 }
 
+#[cfg(test)]
+thread_local! {
+    // Wording fixtures only. Production preferences always come from the owner.
+    static WORDING_SETTINGS: std::cell::RefCell<Option<std::sync::Arc<iptv_settings::Settings>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The owner's current preferences. Before an owner can be constructed (for
+/// example, the private-storage error screen), use defaults and the device
+/// locale without discovering paths, opening storage or creating an owner.
+fn preferences() -> std::sync::Arc<iptv_settings::Settings> {
+    #[cfg(test)]
+    if let Some(settings) = WORDING_SETTINGS.with(|settings| settings.borrow().clone()) {
+        return settings;
+    }
+    if crate::runtime::try_current().is_some() {
+        crate::settings::get()
+    } else {
+        std::sync::Arc::new(iptv_settings::Settings::new())
+    }
+}
+
 pub fn language() -> &'static Language {
     crate::settings::observe();
-    let settings = crate::settings::get();
+    let settings = preferences();
     let preference = settings.text(keys::LANGUAGE, &Target::Global);
     i18n::resolve(&preference, system())
 }
@@ -29,7 +50,7 @@ pub fn language() -> &'static Language {
 /// follows the device, and of the chosen language otherwise.
 pub fn clock_style() -> Style {
     crate::settings::observe();
-    let settings = crate::settings::get();
+    let settings = preferences();
     let preference = settings.text(keys::LANGUAGE, &Target::Global);
     let locale = match preference.as_str() {
         "system" => system().unwrap_or("en"),
@@ -86,19 +107,25 @@ pub fn language_name(tag: &str) -> &'static str {
 }
 
 /// Runs `run` with `language` as the interface language and `clock` as
-/// the clock setting, for tests of wording: the settings of this thread
-/// only, as a store request sees its application's.
+/// the clock setting, for tests of wording: this thread's scoped fixture,
+/// restored even when a nested wording assertion unwinds.
 #[cfg(test)]
 pub(crate) fn with_language<R>(language: &str, clock: &str, run: impl FnOnce() -> R) -> R {
     use iptv_settings::{Settings, Value};
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
     let mut settings = Settings::new();
     settings
         .set("general.language", Value::text(language))
         .unwrap();
     settings.set("general.clock", Value::choice(clock)).unwrap();
-    let shared = Arc::new(RwLock::new(Some(Arc::new(settings))));
-    crate::runtime::settings::with_current(shared, run)
+    struct Restore(Option<Arc<iptv_settings::Settings>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            WORDING_SETTINGS.set(self.0.take());
+        }
+    }
+    let _restore = Restore(WORDING_SETTINGS.replace(Some(Arc::new(settings))));
+    run()
 }
 
 /// As [`with_language`], with the clock left to the language.
@@ -113,6 +140,20 @@ mod tests {
     use iptv_core::clock::HourCycle;
 
     const CHANNELS: &str = "{count, plural, one {# channel} other {# channels}}";
+
+    #[test]
+    fn wording_fixtures_restore_nested_preferences_after_unwinding() {
+        assert_eq!(super::language().tag, "en");
+        in_language("de", || {
+            assert_eq!(super::language().tag, "de");
+            let failed = std::panic::catch_unwind(|| {
+                in_language("ru", || panic!("synthetic wording assertion"));
+            });
+            assert!(failed.is_err());
+            assert_eq!(super::language().tag, "de");
+        });
+        assert_eq!(super::language().tag, "en");
+    }
 
     #[test]
     fn messages_follow_the_language_setting() {

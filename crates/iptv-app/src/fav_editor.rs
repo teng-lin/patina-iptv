@@ -147,6 +147,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .py(px(24.0))
         .gap(px(12.0))
         .bg(move || rgb(ui.theme.with(|t| t.background.window)))
+        .test_id("favorites-editor")
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::FavoritesEditor.accessibility_hidden(ui)
+        })
         .opacity(move || if open() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {
             if open() {

@@ -10,6 +10,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             let _ = done.send(());
         }),
         RuntimeEvent::Message(message) => crate::settings_view::notify(&message),
+        RuntimeEvent::SettingsSaveFailed(failure) => crate::settings_view::save_failed(failure),
         RuntimeEvent::BackupProgress(phase) => {
             log::debug!("iptv backup: {phase:?}");
             ui.settings.update(|version| *version += 1);

@@ -83,6 +83,8 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     let open = move || multiview::is_open(ui);
     let tiles = move || with_state(ui, |m| m.tiles().len()).unwrap_or(0);
     view()
+        .test_id("multiview-ui")
+        .accessibility_elements_hidden(move || !open() || ui.any_overlay_open())
         .absolute()
         .inset_0()
         .pointer_events(move || {
@@ -127,6 +129,9 @@ fn tile(ui: Ui, index: usize) -> impl IntoElement {
     let status = move || surface().map_or(TileStatus::Playing, |s| tile_status(ui, s));
     view()
         .test_id("multiview-tile")
+        .accessibility_elements_hidden(move || {
+            with_state(ui, |state| state.dialog().is_some()).unwrap_or(false)
+        })
         .absolute()
         .left(move || px(rect().0))
         .top(move || px(rect().1))

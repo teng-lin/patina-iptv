@@ -210,25 +210,6 @@ pub(crate) fn flush(limit: Duration) -> bool {
     true
 }
 
-/// The Android host's `onStop`: the activity may be the process's last
-/// moment, so it waits (at most a second) for queued file writes before
-/// it lets the system stop it. NSH tells Rust about the move to the
-/// background asynchronously, which the same wait in `data.rs` relies on.
-#[cfg(target_os = "android")]
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_hantekllc_iptvrs_host_TvActivity_flushPendingWrites(
-    _env: jni::JNIEnv,
-    _activity: jni::objects::JObject,
-) {
-    // A panic must not unwind out of an `extern "system"` function into the
-    // JVM (the process aborts): it is logged, without its message.
-    match std::panic::catch_unwind(|| flush(Duration::from_secs(1))) {
-        Ok(true) => {}
-        Ok(false) => log::warn!("iptv files: queued writes did not finish before the stop"),
-        Err(_) => log::error!("iptv files: waiting for queued writes panicked"),
-    }
-}
-
 fn run(writer: &Writer) {
     loop {
         let (path, content, waiters) = {

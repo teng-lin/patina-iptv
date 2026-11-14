@@ -34,7 +34,8 @@ mod list_rows;
 mod lists;
 mod media;
 mod menu_view;
-mod runtime;
+use iptv_runtime as runtime;
+pub(crate) use runtime::with_runtime;
 mod runtime_events;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", windows))]
 use iptv_player_mpv as mpv;
@@ -392,42 +393,39 @@ impl Ui {
 }
 
 thread_local! {
-    static RUNTIME: RefCell<Rc<runtime::Runtime>> = RefCell::new(Rc::new(runtime::Runtime::default()));
+    static RUNTIME: RefCell<Option<Rc<runtime::Runtime>>> = const { RefCell::new(None) };
 }
 
 /// The shell owns one application handle; all library state belongs to it.
 pub(crate) fn runtime() -> Rc<runtime::Runtime> {
-    RUNTIME.with(|runtime| runtime.borrow().clone())
+    runtime::try_current().unwrap_or_else(|| {
+        let owner = RUNTIME.with(|runtime| {
+            runtime
+                .borrow_mut()
+                .get_or_insert_with(|| {
+                    let directory = platform_data::resolve_data_dir()
+                        .expect("private storage must be resolved before using runtime services");
+                    Rc::new(new_runtime(directory))
+                })
+                .clone()
+        });
+        runtime::set_current(&owner);
+        owner
+    })
 }
 
-pub(crate) fn with_runtime<R>(owner: Rc<runtime::Runtime>, run: impl FnOnce() -> R) -> R {
-    struct Restore(Rc<runtime::Runtime>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            RUNTIME.set(self.0.clone());
-        }
-    }
-    let _restore = Restore(RUNTIME.replace(owner.clone()));
-    owner.with_context(run)
+fn new_runtime(directory: std::path::PathBuf) -> runtime::Runtime {
+    let mut ports = runtime::Ports::new(directory, credential_key::database_key);
+    ports.exclude_from_backup = platform_data::exclude_from_backup;
+    ports.startup_mark = |phase, detail| startup::mark_with(phase, detail);
+    runtime::Runtime::new(ports)
 }
 
-/// Poll an application task with the runtime that accepted it. A late wake
-/// from an old root must never read or change its successor's state.
 pub(crate) fn in_runtime(
     future: impl std::future::Future<Output = ()> + 'static,
 ) -> impl std::future::Future<Output = ()> {
-    let runtime = runtime();
-    let mut future = Box::pin(runtime.scope_future(future));
-    std::future::poll_fn(move |context| {
-        struct Restore(Rc<runtime::Runtime>);
-        impl Drop for Restore {
-            fn drop(&mut self) {
-                RUNTIME.set(self.0.clone());
-            }
-        }
-        let _restore = Restore(RUNTIME.replace(runtime.clone()));
-        future.as_mut().poll(context)
-    })
+    let owner = runtime();
+    runtime::with_runtime(owner, || runtime::in_runtime(future))
 }
 
 /// The guide data in use (synthetic until a playlist is imported).
@@ -480,22 +478,27 @@ pub fn channel_name(ch: usize) -> String {
 
 #[component]
 pub fn App() -> impl IntoElement {
-    RUNTIME.set(Rc::new(runtime::Runtime::default()));
-    runtime().activate();
     startup::mark("rust root");
     startup::log_library_base();
     fonts::register();
-    if let Err(error) = platform_data::initialize() {
-        log::error!("iptv storage initialization failed: {error}");
-        return view()
-            .flex_1()
-            .items_center()
-            .justify_center()
-            .child(text(i18n::tr("Private app storage is unavailable")))
-            .child(text(i18n::tr(
-                "Check your home directory and file permissions, then reopen Patina.",
-            )));
-    }
+    let directory = match platform_data::initialize() {
+        Ok(directory) => directory,
+        Err(error) => {
+            log::error!("iptv storage initialization failed: {error}");
+            return view()
+                .flex_1()
+                .items_center()
+                .justify_center()
+                .child(text(i18n::tr("Private app storage is unavailable")))
+                .child(text(i18n::tr(
+                    "Check your home directory and file permissions, then reopen Patina.",
+                )));
+        }
+    };
+    let owner = Rc::new(new_runtime(directory));
+    runtime::set_current(&owner);
+    owner.activate();
+    RUNTIME.set(Some(owner));
     if let Err(message) = backup::lock() {
         return view()
             .flex_1()
@@ -709,8 +712,10 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
     let fullscreen = move || ui.mode.get() == ViewMode::Fullscreen;
     let shown = move || pip::ui_shown(ui);
     view()
+        .test_id("app-ui")
         .absolute()
         .inset_0()
+        .accessibility_elements_hidden(move || !shown())
         .opacity(move || if shown() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {
             if shown() {
@@ -721,7 +726,9 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         })
         .child(
             view()
+                .test_id("guide-ui")
                 .flex_1()
+                .accessibility_elements_hidden(move || fullscreen() || ui.any_overlay_open())
                 .opacity(move || if fullscreen() { 0.0_f32 } else { 1.0 })
                 .pointer_events(move || {
                     if fullscreen() {
@@ -745,6 +752,9 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
             // there is no pointer).
             view()
                 .test_id("video")
+                .accessibility_elements_hidden(move || {
+                    !fullscreen() || ui.any_overlay_open() || multiview::is_open(ui)
+                })
                 .absolute()
                 .inset_0()
                 .pointer_events(move || {
