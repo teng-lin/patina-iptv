@@ -7,7 +7,7 @@ use iptv_store_sqlite::{ChannelQuery, SourcePolicy};
 use nsh_core::{Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const PLAYLIST: &str = "#EXTM3U\n\
                         #EXTINF:-1 group-title=\"News\",Local A\n\
@@ -59,27 +59,16 @@ fn saved_bindings(
     dir: &std::path::Path,
     expected: impl Fn(&[iptv_settings::KeyBinding]) -> bool,
 ) -> Vec<iptv_settings::KeyBinding> {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        // The UI edits optimistically; its custom/default marker is not a
-        // durability acknowledgement. Observe the actual atomic publication.
-        if let Ok(text) = std::fs::read_to_string(dir.join("settings.json"))
-            && let Ok((settings, _)) = iptv_settings::Settings::from_json(&text)
-        {
-            let bindings = settings.key_bindings(
-                iptv_settings::keys::KEY_OVERRIDES,
-                &iptv_settings::Target::Global,
-            );
-            if expected(&bindings) {
-                return bindings;
-            }
-        }
-        assert!(
-            Instant::now() < deadline,
-            "remote bindings did not reach the expected durable state"
-        );
-        step(app.wait(Duration::from_millis(10)));
-    }
+    crate::personalization::saved_settings(app, &dir.join("settings.json"), |settings| {
+        expected(&settings.key_bindings(
+            iptv_settings::keys::KEY_OVERRIDES,
+            &iptv_settings::Target::Global,
+        ))
+    })
+    .key_bindings(
+        iptv_settings::keys::KEY_OVERRIDES,
+        &iptv_settings::Target::Global,
+    )
 }
 #[test]
 fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted() {
