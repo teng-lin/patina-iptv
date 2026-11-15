@@ -123,7 +123,10 @@ class RecordingService : Service() {
         worker.execute {
             try {
                 System.loadLibrary("nsh")
-                if (!CredentialKey.initialize(this)) { stopSelf(); return@execute }
+                if (!CredentialKey.initialize(this)) {
+                    stopSelf()
+                    return@execute
+                }
                 RecordingHost.attach(this)
                 if (RecordingHost.start(filesDir.absolutePath) == 0L) stopSelf()
             } catch (_: Exception) { stopSelf() }
