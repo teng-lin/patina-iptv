@@ -350,6 +350,22 @@ url,
             .await
             .map_err(|_| unavailable())??;
         self.vod_update_session(key.source);
+        self.parental_check(&target(&key))
+            .await
+            .map_err(|_| unavailable())?;
+        let lookup = key.clone();
+        let incarnation = result.incarnation.clone();
+        let current = self
+            .services()
+            .read(move |s| {
+                Ok(s.source_incarnation(SourceId(lookup.source))
+                    .is_ok_and(|v| v == incarnation)
+                    && s.source_policy(SourceId(lookup.source))?.enabled)
+            })
+            .await?;
+        if !current {
+            return Err(unavailable());
+        }
         Ok(result)
     }
     pub async fn vod_play(
@@ -460,15 +476,26 @@ url,
                                 .await
                                 .map_err(|_| unavailable())?,
                         };
-                        let url = iptv_import::on_demand::stalker_episode_link(
-                            &client,
-                            &mut session,
-                            cmd,
-                            entry.episode,
-                            &cancel,
-                        )
-                        .await
-                        .map_err(|_| unavailable())?;
+                        let direct = if entry.episode.is_none() {
+                            match session.resolve_stream(&entry.locator, true) {
+                                Ok(iptv_providers::stalker::Resolve::Play(url)) => Some(url),
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        };
+                        let url = match direct {
+                            Some(url) => url,
+                            None => iptv_import::on_demand::stalker_episode_link(
+                                &client,
+                                &mut session,
+                                cmd,
+                                entry.episode,
+                                &cancel,
+                            )
+                            .await
+                            .map_err(|_| unavailable())?,
+                        };
                         let source = iptv_guide::playback::StalkerLink::source(&session, url, &[]);
                         state
                             .sessions

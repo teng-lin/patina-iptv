@@ -218,9 +218,10 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     step(app.press("text:/^Generated Voyage/"));
     step(app.wait_for("text:/Generated First/"));
     if idiom == nsh_core::platform::Idiom::Tv {
-        for _ in 0..3 {
+        for _ in 0..2 {
             step(app.press_key("right"));
         }
+        step(app.press_key("down"));
         step(app.press_key("down"));
         step(app.press_key("enter"));
     } else {

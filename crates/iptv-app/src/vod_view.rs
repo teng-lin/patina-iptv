@@ -578,198 +578,381 @@ fn card_label(card: &iptv_core::vod::Card) -> String {
     )
 }
 
+fn card_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
+    let card = move || ui.vod.with(|s| s.cards.get(at.index()).cloned());
+    ui_kit::button(
+        ui,
+        size,
+        move || card().as_ref().map(card_label).unwrap_or_default(),
+        move || {
+            card().is_some_and(|c| {
+                ui.vod
+                    .with(|s| s.control == Control::Catalogue && s.focused.as_ref() == Some(&c.key))
+            })
+        },
+        move || {
+            if let Some(card) = card() {
+                select(ui, card.key);
+            }
+        },
+    )
+    .test_id("vod-title")
+}
 fn catalogue(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = element_ref();
     effect(move || {
-        if let Some(at) = ui.vod.with(|s| {
+        let at = ui.vod.with(|s| {
             s.focused
                 .as_ref()
                 .and_then(|key| s.cards.iter().position(|c| &c.key == key))
-        }) {
+        });
+        if let Some(at) = at {
             rows.scroll_to_index(at as u32, percentage(0.5), px(0.0), false);
         }
     });
-    view().flex_1().gap(move||size.px(8.0)).child(toolbar(ui,
-size))
-    .child(when(move||ui.vod.with(|s|s.cards.is_empty()&&!s.busy),
-move||ui_kit::body(size,
-tr("No titles found. Enable movie and series imports in playlist settings, then refresh your playlist."))))
-    .child(virtual_list(move||ui.vod.with(|s|s.cards.len()),
-move|at|{
-        let card=move||ui.vod.with(|s|s.cards.get(at.index()).cloned());
-        ui_kit::button(ui,
-size,
-move||card().as_ref().map(card_label).unwrap_or_default(),
-move||card().is_some_and(|c|ui.vod.with(|s|s.control==Control::Catalogue&&s.focused.as_ref()==Some(&c.key))),
-move||if let Some(card)=card(){
-select(ui,
-card.key)}
-).test_id("vod-title")
+    let empty = when(
+        move || ui.vod.with(|s| s.cards.is_empty() && !s.busy),
+        move || {
+            ui_kit::body(
+                size,
+                tr(
+                    "No titles found. Enable movie and series imports in playlist settings, then refresh your playlist.",
+                ),
+            )
+        },
+    );
+    let titles = virtual_list(
+        move || ui.vod.with(|s| s.cards.len()),
+        move |at| card_row(ui, size, at),
+    )
+    .element_ref(&rows)
+    .flex_1();
+    let more = when(
+        move || ui.vod.with(|s| s.has_more),
+        move || {
+            ui_kit::button(
+                ui,
+                size,
+                tr("Load more"),
+                || false,
+                move || {
+                    if !ui.vod.with_untracked(|s| s.busy) {
+                        reload(ui, true);
+                    }
+                },
+            )
+        },
+    );
+    view()
+        .flex_1()
+        .gap(move || size.px(8.0))
+        .child(toolbar(ui, size))
+        .child(empty)
+        .child(titles)
+        .child(more)
+}
+fn episode_label(ep: &iptv_core::vod::Episode) -> String {
+    let watched = if ep.progress.completed {
+        format!(" · {}", tr("Watched"))
+    } else {
+        String::new()
+    };
+    format!("{} · {}{watched}", ep.number, ep.title)
+}
+fn episode_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
+    let ep = move || {
+        ui.vod.with(|s| {
+            s.details
+                .as_ref()
+                .and_then(|d| {
+                    d.episodes
+                        .iter()
+                        .filter(|e| Some(e.season) == s.season)
+                        .nth(at.index())
+                })
+                .cloned()
+        })
+    };
+    ui_kit::button(
+        ui,
+        size,
+        move || ep().as_ref().map(episode_label).unwrap_or_default(),
+        move || ep().is_some_and(|e| ui.vod.with(|s| s.episode.as_ref() == Some(&e.key))),
+        move || {
+            if let Some(ep) = ep() {
+                ui.vod.update(|s| {
+                    s.episode = Some(ep.key);
+                    s.control = Control::Episodes;
+                });
+                play(ui, false);
+            }
+        },
+    )
+    .test_id("vod-episode")
+}
+fn episodes(ui: Ui, size: Scale) -> impl IntoElement {
+    let rows = element_ref();
+    effect(move || {
+        let at = ui.vod.with(|s| {
+            s.details.as_ref().and_then(|d| {
+                d.episodes
+                    .iter()
+                    .filter(|e| Some(e.season) == s.season)
+                    .position(|e| Some(&e.key) == s.episode.as_ref())
+            })
+        });
+        if let Some(at) = at {
+            rows.scroll_to_index(at as u32, percentage(0.5), px(0.0), false);
+        }
+    });
+    let season = button(
+        ui,
+        size,
+        Control::Seasons,
+        move || {
+            format!(
+                "{} {}",
+                tr("Season"),
+                ui.vod.with(|s| s.season.unwrap_or(1))
+            )
+        },
+        move || ui.vod.update(|s| s.cycle_season(1)),
+    );
+    let empty = when(
+        move || {
+            ui.vod
+                .with(|s| s.details.as_ref().is_some_and(|d| d.episodes.is_empty()))
+        },
+        move || {
+            ui_kit::body(
+                size,
+                tr("This playlist does not provide playable episodes for this series."),
+            )
+        },
+    );
+    let list = virtual_list(
+        move || {
+            ui.vod.with(|s| {
+                s.details
+                    .as_ref()
+                    .map(|d| {
+                        d.episodes
+                            .iter()
+                            .filter(|e| Some(e.season) == s.season)
+                            .count()
+                    })
+                    .unwrap_or(0)
+            })
+        },
+        move |at| episode_row(ui, size, at),
+    )
+    .element_ref(&rows)
+    .flex_1();
+    view()
+        .flex_1()
+        .gap(move || size.px(8.0))
+        .child(season)
+        .child(empty)
+        .child(list)
+}
+fn metadata(ui: Ui, size: Scale) -> impl IntoElement {
+    let poster = when(
+        move || {
+            ui.vod.with(|s| {
+                s.details
+                    .as_ref()
+                    .is_some_and(|d| d.item.poster.as_ref().is_some_and(|p| !p.is_empty()))
+            })
+        },
+        move || {
+            let source = crate::content_image::source(move || {
+                ui.vod
+                    .with(|s| s.details.as_ref().and_then(|d| d.item.poster.clone()))
+                    .unwrap_or_default()
+            });
+            image(source)
+                .w(move || size.px(100.0))
+                .h(move || size.px(150.0))
+                .object_fit(ResizeMode::Contain)
+        },
+    );
+    let name = ui_kit::heading(size, move || {
+        ui.vod.with(|s| {
+            s.details
+                .as_ref()
+                .map(|d| card_label(&d.item))
+                .unwrap_or_default()
+        })
+    });
+    let plot = ui_kit::body(size, move || {
+        ui.vod.with(|s| {
+            s.details
+                .as_ref()
+                .and_then(|d| d.item.plot.clone())
+                .unwrap_or_default()
+        })
+    })
+    .number_of_lines(4);
+    let words = view()
+        .flex_1()
+        .gap(move || size.px(8.0))
+        .child(name)
+        .child(plot);
+    view()
+        .flex_row()
+        .gap(move || size.px(20.0))
+        .child(poster)
+        .child(words)
+}
+fn play_label(ui: Ui) -> &'static str {
+    let resume = ui.vod.with(|s| {
+        s.details.as_ref().is_some_and(|d| {
+            d.item.progress.resume_ms() > 0
+                || d.episodes
+                    .iter()
+                    .find(|e| Some(&e.key) == s.episode.as_ref())
+                    .is_some_and(|e| e.progress.resume_ms() > 0)
+        })
+    });
+    if resume { tr("Resume") } else { tr("Play") }
+}
+fn has_next(ui: Ui) -> bool {
+    ui.vod.with(|s| {
+        s.details.as_ref().is_some_and(|d| {
+            s.episode
+                .as_ref()
+                .is_some_and(|key| d.next_episode(key).is_some())
+        })
+    })
+}
+fn block_label(ui: Ui) -> &'static str {
+    let blocked = ui.vod.with(|s| {
+        s.details.as_ref().is_some_and(|d| {
+            crate::runtime().parental_explicitly_blocked(&iptv_runtime::vod::target(&d.item.key))
+        })
+    });
+    if blocked {
+        tr("Unblock content")
+    } else {
+        tr("Block content")
     }
-).element_ref(&rows).flex_1())
-    .child(when(move||ui.vod.with(|s|s.has_more),
-move||ui_kit::button(ui,
-size,
-tr("Load more"),
-||false,
-move||if !ui.vod.with_untracked(|s|s.busy){
-reload(ui,
-true);
 }
-)))
-}
-
 fn details(ui: Ui, size: Scale) -> impl IntoElement {
+    let play_button = button(
+        ui,
+        size,
+        Control::Play,
+        move || play_label(ui),
+        move || play(ui, false),
+    );
+    let restart = button(
+        ui,
+        size,
+        Control::Restart,
+        tr("Play from beginning"),
+        move || play(ui, true),
+    );
+    let next = when(
+        move || has_next(ui),
+        move || {
+            button(ui, size, Control::Next, tr("Next episode"), move || {
+                next(ui)
+            })
+        },
+    );
     let actions = view()
         .flex_row()
         .gap(move || size.px(12.0))
-        .child(button(
-            ui,
-            size,
-            Control::Play,
-            move || {
-                ui.vod.with(|s| {
-                    s.details
-                        .as_ref()
-                        .map(|d| {
-                            if d.item.progress.resume_ms() > 0
-                                || d.episodes
-                                    .iter()
-                                    .find(|e| Some(&e.key) == s.episode.as_ref())
-                                    .is_some_and(|e| e.progress.resume_ms() > 0)
-                            {
-                                tr("Resume")
-                            } else {
-                                tr("Play")
-                            }
-                        })
-                        .unwrap_or(tr("Play"))
-                })
-            },
-            move || play(ui, false),
-        ))
-        .child(button(
-            ui,
-            size,
-            Control::Restart,
-            tr("Play from beginning"),
-            move || play(ui, true),
-        ))
-        .child(when(
-            move || {
-                ui.vod.with(|s| {
-                    s.details.as_ref().is_some_and(|d| {
-                        s.episode
-                            .as_ref()
-                            .is_some_and(|key| d.next_episode(key).is_some())
-                    })
-                })
-            },
-            move || {
-                button(ui, size, Control::Next, tr("Next episode"), move || {
-                    next(ui)
-                })
-            },
-        ));
-    view().flex_1().gap(move||size.px(12.0))
-        .child(view().flex_row().gap(move||size.px(20.0))
-            .child(when(move||ui.vod.with(|s|s.details.as_ref().is_some_and(|d|d.item.poster.as_ref().is_some_and(|p|!p.is_empty()))),
-move||{
-                image(crate::content_image::source(move||ui.vod.with(|s|s.details.as_ref().and_then(|d|d.item.poster.clone())).unwrap_or_default()))
-                    .w(move||size.px(100.0)).h(move||size.px(150.0)).object_fit(ResizeMode::Contain)
-            }
-))
-            .child(view().flex_1().gap(move||size.px(8.0))
-                .child(ui_kit::heading(size,
-move||ui.vod.with(|s|s.details.as_ref().map(|d|card_label(&d.item)).unwrap_or_default())))
-                .child(ui_kit::body(size,
-move||ui.vod.with(|s|s.details.as_ref().and_then(|d|d.item.plot.clone()).unwrap_or_default())))))
+        .child(play_button)
+        .child(restart)
+        .child(next);
+    let block = button(
+        ui,
+        size,
+        Control::Block,
+        move || block_label(ui),
+        move || toggle_block(ui),
+    );
+    let seasons = when(
+        move || {
+            ui.vod.with(|s| {
+                s.details
+                    .as_ref()
+                    .is_some_and(|d| d.item.key.kind == Kind::Series)
+            })
+        },
+        move || episodes(ui, size),
+    );
+    view()
+        .flex_1()
+        .gap(move || size.px(12.0))
+        .child(metadata(ui, size))
         .child(actions)
-        .child(button(ui,
-size,
-Control::Block,
-move||ui.vod.with(|s|s.details.as_ref().map(|d|if crate::runtime().parental_explicitly_blocked(&iptv_runtime::vod::target(&d.item.key)){
-tr("Unblock content")}
-else{
-tr("Block content")}
-)).unwrap_or(tr("Block content")),
-move||toggle_block(ui)))
-        .child(when(move||ui.vod.with(|s|s.details.as_ref().is_some_and(|d|d.item.key.kind==Kind::Series)),
-move||{
-            view().flex_1().gap(move||size.px(8.0))
-                .child(button(ui,
-size,
-Control::Seasons,
-move||format!("{} {}",
-tr("Season"),
-ui.vod.with(|s|s.season.unwrap_or(1))),
-move||ui.vod.update(|s|s.cycle_season(1))))
-                .child(when(move||ui.vod.with(|s|s.details.as_ref().is_some_and(|d|d.episodes.is_empty())),
-move||ui_kit::body(size,
-tr("This playlist does not provide playable episodes for this series."))))
-                .child(virtual_list(move||ui.vod.with(|s|s.details.as_ref().map(|d|d.episodes.iter().filter(|e|Some(e.season)==s.season).count()).unwrap_or(0)),
-move|at|{
-                    let ep=move||ui.vod.with(|s|s.details.as_ref().and_then(|d|d.episodes.iter().filter(|e|Some(e.season)==s.season).nth(at.index())).cloned());
-                    ui_kit::button(ui,
-size,
-move||ep().map(|e|format!("{} · {}{}",
-e.number,
-e.title,
-if e.progress.completed{
-format!(" · {}",
-tr("Watched"))}
-else{
-String::new()}
-)).unwrap_or_default(),
-move||ep().is_some_and(|e|ui.vod.with(|s|s.episode.as_ref()==Some(&e.key))),
-move||if let Some(ep)=ep(){
-ui.vod.update(|s|{
-s.episode=Some(ep.key.clone());
-s.control=Control::Episodes;
+        .child(block)
+        .child(seasons)
 }
-);
-play(ui,
-false);
-}
-).test_id("vod-episode")
-                }
-).flex_1())
-        }
-))
-}
-
 pub fn layer(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     when(
         move || is_open(ui),
         move || {
-            ui_kit::screen(ui,
-size).test_id("vod-screen")
-    .accessibility_elements_hidden(move||crate::overlays::Overlay::Vod.accessibility_covered(ui))
-    .child(ui_kit::header(ui,
-size,
-move||if ui.vod.with(|s|s.query.kind==Kind::Series){
-tr("Series")}
-else{
-tr("Films")}
-,
-close))
-    .child(ui_kit::caption(size,
-tr("Choose a title, then play or resume. Left/Right changes controls; Up/Down browses titles and episodes.")))
-    .child(ui_kit::body(size,
-move||ui.vod.with(|s|s.error.as_ref().map(|e|tr(e).to_owned()).unwrap_or_default())))
-    .child(ui_kit::caption(size,
-move||ui.vod.with(|s|s.notice.as_ref().map(|e|tr(e).to_owned()).unwrap_or_default())))
-    .child(ui_kit::caption(size,
-move||if ui.vod.with(|s|s.busy){
-tr("Loading…")}
-else{
-""}
-))
-    .child(when(move||ui.vod.with(|s|s.details.is_some()),
-move||details(ui,
-size)).otherwise(move||catalogue(ui,
-size)))
+            let header = ui_kit::header(
+                ui,
+                size,
+                move || {
+                    if ui.vod.with(|s| s.query.kind == Kind::Series) {
+                        tr("Series")
+                    } else {
+                        tr("Films")
+                    }
+                },
+                close,
+            );
+            let hint = ui_kit::caption(
+                size,
+                tr(
+                    "Choose a title, then play or resume. Left/Right changes controls; Up/Down browses titles and episodes.",
+                ),
+            );
+            let error = ui_kit::body(size, move || {
+                ui.vod.with(|s| {
+                    s.error
+                        .as_ref()
+                        .map(|e| tr(e).to_owned())
+                        .unwrap_or_default()
+                })
+            });
+            let notice = ui_kit::caption(size, move || {
+                ui.vod.with(|s| {
+                    s.notice
+                        .as_ref()
+                        .map(|e| tr(e).to_owned())
+                        .unwrap_or_default()
+                })
+            });
+            let busy = ui_kit::caption(size, move || {
+                if ui.vod.with(|s| s.busy) {
+                    tr("Loading…")
+                } else {
+                    ""
+                }
+            });
+            let content = when(
+                move || ui.vod.with(|s| s.details.is_some()),
+                move || details(ui, size),
+            )
+            .otherwise(move || catalogue(ui, size));
+            ui_kit::screen(ui, size)
+                .test_id("vod-screen")
+                .accessibility_elements_hidden(move || {
+                    crate::overlays::Overlay::Vod.accessibility_covered(ui)
+                })
+                .child(header)
+                .child(hint)
+                .child(error)
+                .child(notice)
+                .child(busy)
+                .child(content)
         },
     )
 }
