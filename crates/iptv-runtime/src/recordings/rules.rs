@@ -115,29 +115,8 @@ impl Runtime {
         data.intent_revision += 1;
         data.recurring = rules.iter().any(|rule| rule.enabled);
         data.jobs = jobs;
-        let next = data
-            .jobs
-            .iter()
-            .filter(|job| job.status == Status::Scheduled)
-            .map(|job| job.request.start)
-            .min()
-            .unwrap_or_else(|| {
-                if data.recurring {
-                    now().saturating_add(30 * 60)
-                } else {
-                    0
-                }
-            });
-        let active = !data.active.is_empty()
-            || data.jobs.iter().any(|job| {
-                job.status == Status::Scheduled
-                    && job.request.start <= now()
-                    && job.request.end > now()
-            });
-        let revision = data.intent_revision;
         drop(data);
-        self.recordings
-            .publish_schedule(&self.services(), revision, next, active);
+        self.refresh_recording_wake().await?;
         Ok(())
     }
     pub async fn stop_repeating_recording(&self, job: JobId) -> Result<(), Error> {

@@ -77,6 +77,7 @@ struct Data {
     suspended_viewers: HashMap<usize, Lease>,
     active: HashMap<JobId, (Lease, CancelToken)>,
     jobs: Vec<Job>,
+    wake_capability: iptv_core::recording::WakeCapability,
     intent_revision: u64,
     recurring: bool,
     ready: bool,
@@ -183,7 +184,11 @@ impl State {
         if self.lock().intent_revision != revision {
             return false;
         }
-        (services.ports().recording_schedule)(next, active);
+        let capability = (services.ports().recording_schedule)(next, active);
+        let mut data = self.lock();
+        if data.intent_revision == revision {
+            data.wake_capability = capability;
+        }
         true
     }
     pub(crate) fn stop(&self) -> bool {
@@ -448,23 +453,59 @@ impl Runtime {
             .read(move |store| store.recording_job(id))
             .await?
         {
-            let next = job.request.start;
             let mut data = self.recordings.lock();
-            let active = next <= now() || !data.active.is_empty();
             data.intent_revision += 1;
             data.jobs.retain(|existing| existing.id != id);
             data.jobs.push(job);
-            let earliest = data
-                .jobs
-                .iter()
-                .filter(|j| j.status == Status::Scheduled)
-                .map(|j| j.request.start)
-                .min()
-                .unwrap_or(next);
-            let revision = data.intent_revision;
             drop(data);
-            self.recordings
-                .publish_schedule(&self.services(), revision, earliest, active);
+            self.refresh_recording_wake().await?;
+        }
+        Ok(())
+    }
+    pub fn recording_wake_notice(&self) -> Option<&'static str> {
+        let data = self.recordings.lock();
+        (data.recurring || data.jobs.iter().any(|job| job.status.active()))
+            .then(|| data.wake_capability.notice())
+            .flatten()
+    }
+    pub async fn refresh_recording_wake(&self) -> Result<(), Error> {
+        loop {
+            let (revision, next, active) = {
+                let data = self.recordings.lock();
+                let next = data
+                    .jobs
+                    .iter()
+                    .filter(|job| job.status == Status::Scheduled)
+                    .map(|job| job.request.start)
+                    .min()
+                    .unwrap_or_else(|| {
+                        if data.recurring {
+                            now().saturating_add(30 * 60)
+                        } else {
+                            0
+                        }
+                    });
+                let active = !data.active.is_empty()
+                    || data.jobs.iter().any(|job| {
+                        job.status == Status::Scheduled
+                            && job.request.start <= now()
+                            && job.request.end > now()
+                    });
+                (data.intent_revision, next, active)
+            };
+            let state = self.recordings.clone();
+            let services = self.services();
+            let published = self
+                .services()
+                .spawn_blocking(move || state.publish_schedule(&services, revision, next, active))
+                .await
+                .map_err(|_| Error::unavailable("Recording service unavailable"))?;
+            if published && self.recordings.lock().intent_revision == revision {
+                break;
+            }
+        }
+        if let Some(notice) = self.recording_wake_notice() {
+            self.emit(crate::RuntimeEvent::Notify(notice));
         }
         Ok(())
     }

@@ -4,6 +4,29 @@ pub const MAX_DURATION: i64 = 24 * 60 * 60;
 pub const MAX_JOBS: usize = 1000;
 pub const MAX_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 
+/// What the native host actually registered for the next recording wake.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WakeCapability {
+    #[default]
+    AwakeOnly,
+    Exact,
+    Inexact,
+    Denied,
+}
+impl WakeCapability {
+    pub fn notice(self) -> Option<&'static str> {
+        match self {
+            Self::AwakeOnly | Self::Exact => None,
+            Self::Inexact => Some(
+                "Precise background starts are unavailable. Allow alarms and reminders in Android settings.",
+            ),
+            Self::Denied => Some(
+                "The recording wake could not be registered. Check Recordings settings before relying on unattended starts.",
+            ),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct JobId(pub i64);
 
@@ -164,6 +187,7 @@ pub struct Screen {
     pub action: usize,
     pub confirm_delete: bool,
     pub error: Option<String>,
+    pub background_notice: Option<String>,
     pub draft: Option<Draft>,
     pub busy: bool,
     pub read_generation: u64,

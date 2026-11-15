@@ -57,11 +57,13 @@ fn reload(ui: Ui) {
         let result = owner.recording_jobs().await;
         let points = owner.recording_progress_points().await.unwrap_or_default();
         let repeating = owner.repeating_recording_jobs().await.unwrap_or_default();
+        let background_notice = owner.recording_wake_notice().map(str::to_owned);
         ui.recordings.update(|s| {
-            s.repeating = repeating;
             if s.read_generation != generation {
                 return;
             }
+            s.repeating = repeating;
+            s.background_notice = background_notice;
             match result {
                 Ok(jobs) => {
                     s.progress = points;
@@ -658,6 +660,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             .child(ui_kit::caption(size, tr("Recordings continue when you close the player. \
                 Check Recordings settings for startup and device wake requirements. \
                 Recordings use local storage and are excluded from backups.")))
+            .child(ui_kit::caption(size,move ||ui.recordings.with(|s|s.background_notice.as_ref().map(|message|tr(message).to_owned()).unwrap_or_default())))
             .child(ui_kit::caption(size, tr("Up/Down selects · Left/Right changes a value or filters the list · Menu shows all recordings · Back returns")))
             .child(ui_kit::body(size, move || ui.recordings.with(|s| s.error.as_ref().map(|message| tr(message).to_owned()).unwrap_or_default())))
             .child(ui_kit::caption(size, move || if ui.recordings.with(|s| s.busy) { tr("Saving…") } else { "" }))

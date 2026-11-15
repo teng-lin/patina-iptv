@@ -13,8 +13,10 @@ pub struct Ports {
     pub directory: PathBuf,
     /// Native host keeps recording independently of UI engine ownership.
     pub background_recordings: bool,
-    /// Notify the OS host of next start (UTC seconds, zero when none) and capture activity.
-    pub recording_schedule: fn(i64, bool),
+    /// Register the next wake (UTC seconds, zero when none) and capture activity.
+    /// Runs on a native worker; return only after OS registration completes and
+    /// report the capability actually granted.
+    pub recording_schedule: fn(i64, bool) -> iptv_core::recording::WakeCapability,
     pub database_key: Arc<KeyBroker>,
     pub exclude_from_backup: fn(&Path) -> io::Result<()>,
     pub startup_mark: fn(&'static str, String),
@@ -28,7 +30,7 @@ impl Ports {
         Self {
             directory,
             background_recordings: false,
-            recording_schedule: |_, _| {},
+            recording_schedule: |_, _| iptv_core::recording::WakeCapability::AwakeOnly,
             database_key: Arc::new(database_key),
             exclude_from_backup: |_| Ok(()),
             startup_mark: |_, _| {},

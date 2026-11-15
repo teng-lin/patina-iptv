@@ -174,6 +174,7 @@ const CARRIED_MESSAGES: &[(&str, &str)] = &[
     // Core parental entry and native errors are checked MESSAGE_FILES.
     ("iptv-app/src/parental_view.rs", "message"),
     ("iptv-app/src/parental_view.rs", "title"),
+    ("iptv-runtime/src/recordings.rs", "notice"),
     // Recording keys originate in the checked recording MESSAGE_FILES. Transport
     // failure keys are additionally enumerated by the recording transport test.
     ("iptv-app/src/recordings_view.rs", "job"),

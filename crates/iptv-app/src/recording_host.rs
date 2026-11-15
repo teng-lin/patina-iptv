@@ -8,11 +8,14 @@ mod windows;
 #[cfg(windows)]
 pub(crate) use windows::activate_existing;
 #[cfg(not(target_os = "android"))]
-pub(crate) fn schedule(next: i64, _active: bool) {
+pub(crate) fn schedule(next: i64, _active: bool) -> iptv_core::recording::WakeCapability {
     #[cfg(windows)]
-    windows::schedule(next);
+    return windows::schedule(next);
     #[cfg(not(windows))]
-    let _ = next;
+    {
+        let _ = next;
+        iptv_core::recording::WakeCapability::AwakeOnly
+    }
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
@@ -43,20 +46,9 @@ pub(crate) fn command(key: &str) {
                 })
                 .await;
             if enabled && matches!(result, Ok(Ok(Ok(())))) {
-                // A schedule may predate login opt-in. Arm its wake trigger now
-                // rather than waiting for an unrelated catalogue transition.
-                let jobs = owner.recording_snapshot();
-                let next = jobs
-                    .iter()
-                    .filter(|job| job.status == iptv_core::recording::Status::Scheduled)
-                    .map(|job| job.request.start)
-                    .min()
-                    .unwrap_or(0);
-                schedule(
-                    next,
-                    jobs.iter()
-                        .any(|job| job.status == iptv_core::recording::Status::Recording),
-                );
+                // Re-register existing intent on the native worker and surface
+                // any denied capability through the normal recording notice.
+                let _ = owner.refresh_recording_wake().await;
             }
             crate::settings_view::notify(crate::i18n::tr(if matches!(result, Ok(Ok(Ok(())))) {
                 "Recording startup preference saved"

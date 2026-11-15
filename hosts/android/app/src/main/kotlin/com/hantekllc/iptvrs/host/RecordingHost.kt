@@ -8,6 +8,7 @@ import android.net.Uri
 
 /** Only UTC scheduling metadata crosses JNI; streams and credentials stay in Rust. */
 object RecordingHost {
+    @Volatile private var desiredActive = false
     private lateinit var context: Context
     private var activity: java.lang.ref.WeakReference<Activity>? = null
     @JvmStatic fun requestAlarmAccess() { main.post { activity?.get()?.let { requestExactAlarms(it) } } }
@@ -30,43 +31,61 @@ object RecordingHost {
         context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
     fun requestExactAlarms(activity: Activity) {
         if (Build.VERSION.SDK_INT >= 31 && !exactAlarmsAllowed(activity)) {
-            activity.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
-                Uri.parse("package:${activity.packageName}")))
+            val packageUri = Uri.parse("package:${activity.packageName}")
+            val request = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, packageUri)
+            try { activity.startActivity(request) } catch (_: ActivityNotFoundException) {
+                activity.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri))
+            }
         }
     }
-    @JvmStatic fun schedule(next: Long, active: Boolean) {
-        main.post {
+    /** Called on Rust's publication worker. Durable OS registration completes
+     * before this returns; the UI engine never waits on Binder or disk itself.
+     * Codes: 1 exact, 2 inexact (permission missing), 3 registration denied. */
+    @JvmStatic @Synchronized fun schedule(next: Long, active: Boolean): Int {
+        desiredActive = active
+        return try {
             val preferences = context.getSharedPreferences("recording-host", Context.MODE_PRIVATE)
             val wake = if (active) {
                 val watchdog = System.currentTimeMillis() / 1000 + 120
                 if (next > 0) minOf(next, watchdog) else watchdog
             } else next
-            preferences.edit().putLong("next", wake).commit()
-            arm(context, wake)
-            if (active) startService(context) else RecordingService.idle(context)
-        }
+            if (!preferences.edit().putLong("next", wake).commit()) return 3
+            val capability = arm(context, wake)
+            if (active) {
+                if (!startService(context)) return 3
+            } else main.post {
+                // A later accepted record-now may overtake this queued idle.
+                if (!desiredActive) RecordingService.idle(context)
+            }
+            capability
+        } catch (_: RuntimeException) { 3 }
     }
-    fun arm(context: Context, next: Long) {
+    fun arm(context: Context, next: Long): Int = try {
         val alarms = context.getSystemService(AlarmManager::class.java)
         val pending = alarmIntent(context)
+        val exact = exactAlarmsAllowed(context)
         alarms.cancel(pending)
-        if (next <= 0) return
-        val at = maxOf(next * 1000, System.currentTimeMillis() + 1000)
-        if (exactAlarmsAllowed(context)) alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
-        else alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
-    }
+        if (next > 0) {
+            val at = maxOf(Math.multiplyExact(next, 1000L), System.currentTimeMillis() + 1000)
+            if (exact) alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
+            else alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
+        }
+        if (exact) 1 else 2
+    } catch (_: RuntimeException) { 3 }
     fun restore(context: Context) {
         val next = context.getSharedPreferences("recording-host", Context.MODE_PRIVATE).getLong("next", 0)
         arm(context, if (next > 0) next else System.currentTimeMillis() / 1000 + 5)
     }
-    fun startService(context: Context) {
-        try {
+    fun startService(context: Context): Boolean {
+        return try {
             val intent = Intent(context, RecordingService::class.java)
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
+            true
         } catch (_: RuntimeException) {
             // Android may refuse a non-exact background launch. Retry through
             // the registered alarm; the catalogue retains the accepted job.
             arm(context, System.currentTimeMillis() / 1000 + 60)
+            false
         }
     }
 }

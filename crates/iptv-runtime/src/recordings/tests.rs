@@ -594,3 +594,104 @@ async fn enabling_a_rule_publishes_background_intent_before_it_returns() {
     );
     assert!(owner.drain_services());
 }
+
+#[derive(Default)]
+struct PublicationGate {
+    entered: AtomicBool,
+    released: Mutex<bool>,
+    changed: Condvar,
+}
+static PUBLICATION_GATE: Mutex<Option<Arc<PublicationGate>>> = Mutex::new(None);
+fn blocking_wake_registration(next: i64, _active: bool) -> iptv_core::recording::WakeCapability {
+    use iptv_core::recording::WakeCapability;
+    if next <= 0 {
+        return WakeCapability::Exact;
+    }
+    let gate = PUBLICATION_GATE.lock().unwrap().clone();
+    if let Some(gate) = gate {
+        gate.entered.store(true, Ordering::SeqCst);
+        let released = gate.released.lock().unwrap();
+        let (released, _) = gate
+            .changed
+            .wait_timeout_while(released, Duration::from_secs(10), |released| !*released)
+            .unwrap();
+        if !*released {
+            return WakeCapability::Denied;
+        }
+    }
+    WakeCapability::Exact
+}
+struct ReleasePublication(Arc<PublicationGate>);
+impl Drop for ReleasePublication {
+    fn drop(&mut self) {
+        *self.0.released.lock().unwrap() = true;
+        self.0.changed.notify_all();
+        *PUBLICATION_GATE.lock().unwrap() = None;
+    }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn accepted_schedule_waits_for_os_registration_without_blocking_the_ui_executor() {
+    let directory = tempfile::tempdir().unwrap();
+    let gate = Arc::new(PublicationGate::default());
+    *PUBLICATION_GATE.lock().unwrap() = Some(gate.clone());
+    let release = ReleasePublication(gate.clone());
+    let mut ports = crate::Ports::new(directory.path().join("generated-app"), |_| {
+        Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
+    });
+    ports.recording_schedule = blocking_wake_registration;
+    let owner = Runtime::new(ports);
+    owner.start_services();
+    let request = seed(&owner, "https://example.test/generated.ts").await;
+    let mut accepted = Box::pin(owner.schedule_recording(request));
+    tokio::select! {
+        result=&mut accepted=>panic!("schedule acknowledged before platform registration completed: {result:?}"),
+        _=async {while !gate.entered.load(Ordering::SeqCst) {tokio::time::sleep(Duration::from_millis(10)).await;}}=>{},
+        _=tokio::time::sleep(Duration::from_secs(3))=>panic!("platform registration did not begin"),
+    }
+    assert_eq!(
+        owner
+            .services()
+            .read(|store| store.recording_jobs())
+            .await
+            .unwrap()
+            .len(),
+        1,
+        "intent is durable while platform registration is still blocked"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), accepted.as_mut())
+            .await
+            .is_err(),
+        "the UI executor must remain responsive while acceptance stays pending"
+    );
+    drop(release);
+    let id = accepted.await.unwrap();
+    assert_eq!(owner.recording_snapshot()[0].id, id);
+    assert_eq!(owner.recording_wake_notice(), None);
+    assert!(owner.drain_services());
+}
+#[tokio::test]
+async fn a_denied_wake_is_explicit_and_does_not_discard_the_accepted_job() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut ports = crate::Ports::new(directory.path().join("generated-app"), |_| {
+        Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
+    });
+    ports.recording_schedule = |_, _| iptv_core::recording::WakeCapability::Denied;
+    let owner = Runtime::new(ports);
+    owner.start_services();
+    let request = seed(&owner, "https://example.test/generated.ts").await;
+    let id = owner.schedule_recording(request).await.unwrap();
+    assert!(owner.recording_wake_notice().is_some());
+    assert_eq!(
+        owner
+            .recording_jobs()
+            .await
+            .unwrap()
+            .iter()
+            .find(|job| job.id == id)
+            .unwrap()
+            .status,
+        Status::Scheduled
+    );
+    assert!(owner.drain_services());
+}

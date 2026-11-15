@@ -14,22 +14,31 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_initialize(
         let _ = HOST.set((vm, class));
     }
 }
-pub(crate) fn schedule(next: i64, active: bool) {
+pub(crate) fn schedule(next: i64, active: bool) -> iptv_core::recording::WakeCapability {
+    use iptv_core::recording::WakeCapability;
     let Some((vm, class)) = HOST.get() else {
-        return;
+        return WakeCapability::Denied;
     };
     let Ok(mut env) = vm.attach_current_thread() else {
-        return;
+        return WakeCapability::Denied;
     };
     let class: &JClass = class.as_obj().into();
-    let _ = env.call_static_method(
-        class,
-        "schedule",
-        "(JZ)V",
-        &[JValue::Long(next), JValue::Bool(active as u8)],
-    );
+    let result = env
+        .call_static_method(
+            class,
+            "schedule",
+            "(JZ)I",
+            &[JValue::Long(next), JValue::Bool(active as u8)],
+        )
+        .and_then(|value| value.i());
     if env.exception_check().unwrap_or(false) {
         let _ = env.exception_clear();
+        return WakeCapability::Denied;
+    }
+    match result {
+        Ok(1) => WakeCapability::Exact,
+        Ok(2) => WakeCapability::Inexact,
+        _ => WakeCapability::Denied,
     }
 }
 #[unsafe(no_mangle)]
