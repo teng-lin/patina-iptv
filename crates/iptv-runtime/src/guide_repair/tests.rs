@@ -1317,7 +1317,7 @@ fn indirect_preview_uses_actual_low_feed_binding_when_high_feed_only_lists_chann
 
 #[test]
 #[cfg(feature = "test-support")]
-#[ignore = "50 ms wall-clock budget; tools/check.sh runs this in isolation"]
+#[ignore = "large synthetic catalogue; tools/check.sh runs this in isolation"]
 fn repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive() {
     use iptv_providers::{
         GroupId,
@@ -1350,34 +1350,43 @@ fn repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive(
     fixture
         .drive(fixture.owner.read_library_metadata())
         .unwrap();
+    // Pause a real SQLite scan, rather than measuring a thread's wall-clock
+    // scheduling delay. A completed display read before release proves it uses
+    // an independent lane even when the repair snapshot cannot make progress.
+    let (entered, observed) = mpsc::sync_channel(1);
+    let (release, resume) = mpsc::channel();
+    let (resumed, continuation) = mpsc::channel();
+    *fixture.owner.inspection_scan.borrow_mut() = Some(Box::new(move || {
+        let _ = entered.send(());
+        // Dropping the sender on assertion failure also releases the worker.
+        let _ = resume.recv_timeout(Duration::from_secs(30));
+        let _ = resumed.send(());
+    }));
     let request = fixture.request("synthetic-000000", Target::NoGuide);
     let future = fixture.owner.preview_guide_repair(
         request,
         InspectionControl {
-            timeout: Duration::from_secs(10),
+            timeout: Duration::from_secs(15),
             ..Default::default()
         },
     );
     let mut future = std::pin::pin!(future);
+    observed
+        .recv_timeout(Duration::from_secs(10))
+        .expect("repair did not enter its SQLite scan");
     let waker = Arc::new(Unpark(std::thread::current())).into();
     let mut context = Context::from_waker(&waker);
-    let started = Instant::now();
-    let mut maximum = Duration::ZERO;
-    let preview = loop {
-        if let Poll::Ready(value) = future.as_mut().poll(&mut context) {
-            break value.unwrap();
-        }
-        let read = Instant::now();
-        fixture
-            .drive(fixture.owner.read_library_metadata())
-            .unwrap();
-        maximum = maximum.max(read.elapsed());
-        assert!(started.elapsed() < Duration::from_secs(10));
-    };
+    assert!(future.as_mut().poll(&mut context).is_pending());
+    fixture
+        .drive(fixture.owner.read_library_metadata())
+        .unwrap();
     assert!(
-        maximum < Duration::from_millis(50),
-        "display read queued behind repair analysis: {maximum:?}"
+        matches!(continuation.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "repair scan resumed before the display read completed"
     );
+    assert!(future.as_mut().poll(&mut context).is_pending());
+    release.send(()).unwrap();
+    let preview = fixture.drive(future).unwrap();
     assert_eq!(preview.mapping_count, 1);
     assert_eq!(preview.indirect_count, 0);
     fixture
