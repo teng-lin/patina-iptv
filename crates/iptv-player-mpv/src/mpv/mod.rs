@@ -351,8 +351,8 @@ impl Inner {
     }
 
     /// The app went to the background, where iOS suspends it: the stream
-    /// stops (no connection held for nothing); [`Inner::resume`] opens it
-    /// again. Android's host does the same (`PlayerComponent.background`);
+    /// stops (no connection held for nothing); [`Inner::resume`] requests
+    /// fresh shell authorization. Android's host does the same (`PlayerComponent.background`);
     /// the app counts no stall meanwhile (`player.rs`).
     #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
     fn suspend(&self) {
@@ -367,13 +367,22 @@ impl Inner {
         self.send(Cmd::Stop);
     }
 
-    /// Back in the foreground: the stream opens again, its last frame
-    /// kept until it plays.
+    /// Back in the foreground: request a freshly authorized stream from the
+    /// shell, retaining the last frame meanwhile.
     #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
     fn resume(&self) {
         let was = std::mem::take(&mut self.state.borrow_mut().suspended);
-        if was {
-            self.open(true);
+        if was && self.state.borrow().url.is_some() {
+            // A retained URL is not authority after suspension. The shell must
+            // recheck parental access and the provider budget, then reopen with
+            // a new source token and the saved on-demand position.
+            self.emit(vec![
+                PlayerEvent::Error {
+                    code: "ERROR_CODE_IO_UNSPECIFIED".into(),
+                    http: None,
+                }
+                .wire(),
+            ]);
         }
     }
 

@@ -1322,7 +1322,7 @@ fn no_render_context_without_gl() {
 /// In the background the stream stops; in the foreground it opens again
 /// (keeping its last frame). A source set meanwhile waits for it.
 #[test]
-fn suspend_stops_the_stream_until_resume() {
+fn suspend_requires_shell_authorization_before_decoding_again() {
     let _serial = serial();
     let mut p = Player::new();
     p.inner.suspend(); // nothing playing
@@ -1344,12 +1344,25 @@ fn suspend_stops_the_stream_until_resume() {
     p.inner.resume();
     let st = p.inner.state.borrow();
     assert!(!st.suspended);
-    assert!(st.deferred, "opens once there is a render context");
+    assert!(!st.deferred, "resumption cannot open a retained URL");
     assert!(!st.shutter, "the last frame stays");
     drop(st);
+    assert_eq!(
+        p.events("error"),
+        [json!({"code":"ERROR_CODE_IO_UNSPECIFIED"})]
+    );
     p.inner.resume(); // not suspended: nothing
     p.idle(None, 50);
+    assert_eq!(p.events("error").len(), 1);
     assert!(p.states().is_empty());
+    p.set(
+        "source",
+        json!({"url":"http://stream.example.test/two.ts","token":9}),
+    );
+    assert!(
+        p.inner.state.borrow().deferred,
+        "authorized source waits for render context"
+    );
 }
 
 /// Real libmpv follows a redirected HLS manifest and plays its remote-origin
