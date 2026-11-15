@@ -25,6 +25,24 @@ pub(crate) struct State {
     sessions: Mutex<BTreeMap<i64, (SourceConfig, iptv_providers::stalker::StalkerSession)>>,
 }
 pub use iptv_core::vod::Playing;
+fn session_matches(
+    config: &SourceConfig,
+    session: &iptv_providers::stalker::StalkerSession,
+) -> bool {
+    let SourceConfig::Stalker(credentials) = config else {
+        return false;
+    };
+    iptv_providers::stalker::endpoint_candidates(&credentials.portal_url).is_ok_and(|endpoints| {
+        endpoints.iter().any(|endpoint| {
+            iptv_providers::stalker::StalkerPortal::from_credentials(
+                credentials,
+                endpoint,
+                session.portal().mode(),
+            )
+            .is_ok_and(|expected| expected == *session.portal())
+        })
+    })
+}
 fn unavailable() -> Error {
     Error::unavailable("On-demand content unavailable; refresh the playlist and try again")
 }
@@ -53,6 +71,7 @@ impl Runtime {
     ) -> Option<iptv_providers::stalker::StalkerSession> {
         self.vod_context(source)
             .and_then(|c| c.stalker_session())
+            .filter(|session| session_matches(config, session))
             .or_else(|| {
                 self.vod
                     .sessions
@@ -65,12 +84,15 @@ impl Runtime {
     }
     fn vod_update_session(&self, source: i64) {
         if let Some(context) = self.vod_context(source)
-            && let Some((_, session)) = self
+            && let Some((config, session)) = self
                 .vod
                 .sessions
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .get(&source)
+            && context
+                .stalker_session()
+                .is_some_and(|current| session_matches(config, &current))
         {
             context.update_stalker_session(session.clone());
         }
@@ -761,5 +783,45 @@ cmd,
         let mut out = Vec::new();
         append_stalker(&mut out, row, 2, Some("/media/generated-parent"));
         assert!(out.is_empty());
+    }
+    #[test]
+    fn imported_sessions_never_cross_changed_provider_credentials() {
+        use iptv_providers::{
+            model::{MacAddress, StalkerCredentials},
+            stalker::{PortalMode, StalkerPortal, StalkerSession},
+        };
+        let mut credentials = StalkerCredentials {
+            portal_url: "http://portal.example.test/c/".into(),
+            mac: MacAddress::parse("00:1A:79:00:00:01").unwrap(),
+            serial: None,
+            device_id: None,
+            device_id2: None,
+            signature: None,
+            signature2: None,
+            login: None,
+            password: None,
+        };
+        let portal = StalkerPortal::from_credentials(
+            &credentials,
+            "http://portal.example.test/portal.php",
+            PortalMode::Simple,
+        )
+        .unwrap();
+        let session = StalkerSession::new(portal);
+        assert!(session_matches(
+            &SourceConfig::Stalker(credentials.clone()),
+            &session
+        ));
+        credentials.mac = MacAddress::parse("00:1A:79:00:00:02").unwrap();
+        assert!(!session_matches(
+            &SourceConfig::Stalker(credentials.clone()),
+            &session
+        ));
+        credentials.mac = MacAddress::parse("00:1A:79:00:00:01").unwrap();
+        credentials.portal_url = "http://other.example.test/c/".into();
+        assert!(!session_matches(
+            &SourceConfig::Stalker(credentials),
+            &session
+        ));
     }
 }
