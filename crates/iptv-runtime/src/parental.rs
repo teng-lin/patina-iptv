@@ -44,6 +44,7 @@ pub(crate) struct State {
     pub access: Access,
     pub ready: bool,
     pub has_pin: bool,
+    complete: bool,
     epoch: Arc<AtomicU64>,
     blocked: BTreeSet<Target>,
     ancestry: std::collections::BTreeMap<Target, Vec<Target>>,
@@ -198,9 +199,50 @@ impl Runtime {
         let mut state = self.parental.borrow_mut();
         state.has_pin = has_pin;
         state.ready = true;
+        state.complete = true;
         state.blocked = blocked.into_iter().collect();
         state.ancestry = ancestry;
         state.names = names;
+        apply_policy(&mut state, policy(self));
+        Ok(())
+    }
+    /// Update authorization for a bounded set of content identities. The full
+    /// catalogue snapshot is reserved for boot, catalogue changes and management.
+    pub(crate) async fn parental_refresh_targets(&self, targets: Vec<Target>) -> Result<(), Error> {
+        let services = self.services();
+        let result = services
+            .read(move |store| {
+                let mut entries = Vec::new();
+                for target in targets {
+                    let parents = store.parental_ancestors(&target)?;
+                    let blocked = std::iter::once(&target)
+                        .chain(parents.iter())
+                        .map(|candidate| {
+                            Ok((candidate.clone(), store.parental_target_blocked(candidate)?))
+                        })
+                        .collect::<iptv_store_sqlite::Result<Vec<_>>>()?;
+                    entries.push((target, parents, blocked));
+                }
+                Ok((store.parental_credential()?.is_some(), entries))
+            })
+            .await
+            .map_err(|_| Error::Storage)?;
+        if !services.is_current() {
+            return Err(Error::OwnerClosed);
+        }
+        let mut state = self.parental.borrow_mut();
+        state.has_pin = result.0;
+        state.ready = true;
+        for (target, parents, blocked) in result.1 {
+            state.ancestry.insert(target, parents);
+            for (candidate, blocked) in blocked {
+                if blocked {
+                    state.blocked.insert(candidate);
+                } else {
+                    state.blocked.remove(&candidate);
+                }
+            }
+        }
         apply_policy(&mut state, policy(self));
         Ok(())
     }
@@ -226,6 +268,9 @@ impl Runtime {
         if !state.access.policy.protects(target.kind) {
             return true;
         }
+        if !state.complete && !state.ancestry.contains_key(target) {
+            return false;
+        }
         let blocked = state.blocked.contains(target)
             || state.ancestry.get(target).is_some_and(|parents| {
                 parents
@@ -237,20 +282,7 @@ impl Runtime {
     /// Fetch ancestry from durable provider membership before accepting a known
     /// content ID. Passing a URL or omitting a category cannot bypass this gate.
     pub async fn parental_check(&self, target: &Target) -> Result<(), Error> {
-        self.parental_refresh().await?;
-        let services = self.services();
-        let target_copy = target.clone();
-        let ancestry = services
-            .read(move |store| store.parental_ancestors(&target_copy))
-            .await
-            .map_err(|_| Error::Storage)?;
-        if !services.is_current() {
-            return Err(Error::OwnerClosed);
-        }
-        self.parental
-            .borrow_mut()
-            .ancestry
-            .insert(target.clone(), ancestry);
+        self.parental_refresh_targets(vec![target.clone()]).await?;
         if self.parental_allowed(target) {
             Ok(())
         } else {
@@ -258,7 +290,7 @@ impl Runtime {
         }
     }
     pub async fn parental_authorize(&self, target: Target, pin: Pin) -> Result<(), Error> {
-        self.parental_refresh().await?;
+        self.parental_refresh_targets(vec![target.clone()]).await?;
         let services = self.services();
         let now = (now_ms() / 1000) as i64;
         let epoch = self.parental.borrow().epoch.clone();
@@ -514,12 +546,11 @@ pub(crate) fn native_allowed(
     if !access.policy.protects(target.kind) {
         return Ok(true);
     }
-    let blocked = store.parental_blocks()?;
     let parents = store.parental_ancestors(target)?;
-    let denied = blocked.contains(target)
-        || parents
-            .iter()
-            .any(|p| blocked.contains(p) && !access.granted(p, now_ms()));
+    let mut denied = store.parental_target_blocked(target)?;
+    for parent in parents {
+        denied |= store.parental_target_blocked(&parent)? && !access.granted(&parent, now_ms());
+    }
     Ok(!denied || access.granted(target, now_ms()))
 }
 
@@ -645,6 +676,66 @@ mod source_tests {
             warnings_dropped: 0,
             stats: Default::default(),
         }
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn targeted_checks_keep_unrelated_catalogue_memberships_out_of_the_read() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = std::rc::Rc::new(Runtime::new(crate::Ports::new(
+            directory.path().to_owned(),
+            |_| Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x74; 32])),
+        )));
+        owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+        owner.start_services();
+        let services = owner.services();
+        let (target, group, other) = services
+            .call(|store| {
+                let id = store.add_source(&source("generated-large-membership"))?;
+                let mut playlist = String::from("#EXTM3U\n");
+                for number in 0..5000 {
+                    playlist.push_str(&format!(
+                        "#EXTINF:-1 group-title=\"Generated {}\",Generated channel {number}\nhttps://example.test/{number}.ts\n",
+                        number % 100
+                    ));
+                }
+                let parsed = iptv_providers::m3u::parse_m3u(&playlist);
+                store.replace_catalog(id, &parsed.groups, &parsed.channels.items, &[], &[])?;
+                let group = Target {
+                    source: id.0,
+                    kind: ContentKind::Group,
+                    id: parsed.channels.items[0].groups[0].as_str().into(),
+                };
+                store.set_parental_blocked(&group, true)?;
+                Ok((
+                    Target::live(id.0, parsed.channels.items[0].id.as_str()),
+                    group,
+                    Target::live(id.0, parsed.channels.items[1].id.as_str()),
+                ))
+            })
+            .await
+            .unwrap();
+        owner.parental_check(&target).await.unwrap();
+        assert_eq!(owner.parental.borrow().ancestry.len(), 1);
+        assert!(owner.parental.borrow().blocked.contains(&group));
+        owner
+            .set_setting("parental.live_enabled", iptv_settings::Value::Bool(true))
+            .unwrap();
+        assert_eq!(owner.parental_check(&target).await, Err(Error::Locked));
+        assert!(
+            !owner.parental_allowed(&other),
+            "unloaded protected identities fail closed"
+        );
+        let removed = group.clone();
+        services
+            .call(move |store| store.set_parental_blocked(&removed, false))
+            .await
+            .unwrap();
+        owner.parental_check(&target).await.unwrap();
+        assert!(!owner.parental.borrow().blocked.contains(&group));
+        assert_eq!(owner.parental.borrow().ancestry.len(), 1);
+        owner.parental_refresh().await.unwrap();
+        assert_eq!(owner.parental.borrow().ancestry.len(), 5000);
+        assert!(owner.parental_allowed(&other));
+        assert!(owner.drain_services());
     }
     #[tokio::test(flavor = "current_thread")]
     async fn content_unlocks_cannot_mutate_parental_policy_or_sources_for_any_window() {

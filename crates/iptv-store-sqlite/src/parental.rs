@@ -121,6 +121,26 @@ impl Store {
         }
         Ok(targets)
     }
+    /// Resolve only this identity's explicit, legacy and provider-labelled block.
+    /// Each branch uses its source/content key; unrelated catalogue memberships
+    /// are never materialized for a playback authorization.
+    pub fn parental_target_blocked(&self, target: &Target) -> Result<bool> {
+        self.conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM parental_blocks WHERE source_id=?1 \
+             AND kind=?2 AND content_id=?3 AND blocked=1) \
+             OR (?2='live' AND EXISTS(SELECT 1 FROM channel_overlays \
+             WHERE source_id=?1 AND channel_id=?3 AND blocked=1)) \
+             OR (?2 IN ('group','vod_category') AND EXISTS(SELECT 1 FROM groups \
+             WHERE source_id=?1 AND id=?3 AND adult=1 \
+             AND CASE WHEN kind IN ('live','radio') THEN 'group' ELSE 'vod_category' END=?2) \
+             AND NOT EXISTS(SELECT 1 FROM parental_blocks WHERE source_id=?1 \
+             AND kind=?2 AND content_id=?3 AND blocked=0))",
+                params![target.source, kind_slug(target.kind), target.id],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
     pub fn parental_custom_group_blocked(&self, group: crate::CustomGroupId) -> Result<bool> {
         Ok(self.conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM parental_blocks b \
