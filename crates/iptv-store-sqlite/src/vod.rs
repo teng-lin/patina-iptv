@@ -256,13 +256,18 @@ cap(progress.position_ms),
 progress.duration_ms.map(cap),
 progress.completed])?;
         if let Some(parent) = parent {
+            // Only the episode list can decide that a whole series is complete.
+            // Later completed tail ticks preserve that decision; a replay or a
+            // different episode starts watching the series again.
             tx.execute("INSERT INTO vod_progress(source_id,kind,content_id,position_ms,duration_ms,completed,updated_at,last_episode_id) \
 VALUES(?1,'series',?2,?3,?4,0,unixepoch(),?5) ON CONFLICT(source_id,kind,content_id) DO UPDATE SET \
-position_ms=excluded.position_ms,duration_ms=excluded.duration_ms,completed=0,updated_at=excluded.updated_at,last_episode_id=excluded.last_episode_id",
+position_ms=excluded.position_ms,duration_ms=excluded.duration_ms,\
+completed=CASE WHEN vod_progress.last_episode_id=excluded.last_episode_id AND ?6 \
+THEN vod_progress.completed ELSE 0 END,updated_at=excluded.updated_at,last_episode_id=excluded.last_episode_id",
 params![key.source,
 parent,
 cap(progress.position_ms),
-progress.duration_ms.map(cap), key.id])?;
+progress.duration_ms.map(cap), key.id, progress.completed])?;
         }
         tx.commit()?;
         Ok(())
@@ -331,6 +336,78 @@ mod tests {
         let replacement = store.add_source(&source).unwrap();
         assert_eq!(replacement.0, movie.source);
         assert_eq!(store.vod_resume_episode(&series).unwrap(), None);
+    }
+    #[test]
+    fn completed_series_stays_complete_through_tail_ticks_and_departure() {
+        let (mut store, movie) = fixture();
+        let series = Key {
+            kind: Kind::Series,
+            id: "generated-series".into(),
+            ..movie.clone()
+        };
+        let tail = Key {
+            kind: Kind::Episode,
+            id: "generated-tail".into(),
+            ..movie.clone()
+        };
+        let completed = Progress::observed(114_000, Some(120_000), false);
+        assert!(completed.completed, "completion can precede native EOF");
+        store
+            .save_vod_progress(&tail, Some(&series.id), completed)
+            .unwrap();
+        store
+            .save_vod_progress(
+                &series,
+                None,
+                Progress {
+                    completed: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        // A later five-second tick and the outgoing-source flush must preserve
+        // the series decision made when its final episode first completed.
+        for ms in [119_000, 119_000, 120_000] {
+            let point = Progress::observed(ms, Some(120_000), false);
+            store
+                .save_vod_progress(&tail, Some(&series.id), point)
+                .unwrap();
+            assert!(store.vod_progress(&series).unwrap().completed);
+            assert_eq!(
+                store.vod_resume_episode(&series).unwrap(),
+                Some(tail.clone())
+            );
+        }
+        // Deliberately replaying part of that episode starts watching again.
+        store
+            .save_vod_progress(
+                &tail,
+                Some(&series.id),
+                Progress::observed(37_000, Some(120_000), false),
+            )
+            .unwrap();
+        assert!(!store.vod_progress(&series).unwrap().completed);
+        store
+            .save_vod_progress(
+                &series,
+                None,
+                Progress {
+                    completed: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let earlier = Key {
+            id: "generated-earlier".into(),
+            ..tail
+        };
+        store
+            .save_vod_progress(&earlier, Some(&series.id), completed)
+            .unwrap();
+        assert!(
+            !store.vod_progress(&series).unwrap().completed,
+            "a different episode replaces the tail's completion"
+        );
     }
     #[test]
     fn exact_lookup_has_a_fixed_work_budget_among_many_shared_names() {

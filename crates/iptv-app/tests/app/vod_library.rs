@@ -340,6 +340,34 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resum
     // The final timeline can mark the tail completed before Ended arrives.
     // The forced final save must not put that series back in Continue watching.
     let tail_token = props.lock().unwrap()["source"]["token"].clone();
+    for ms in [114_000, 119_000] {
+        app.engine().control().dispatch_event(
+            surface,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: "timeline".into(),
+                data: json!({"token":tail_token,"seekId":0,"ms":ms,"durationMs":120000,"seekable":true}),
+            },
+        );
+        app.settle();
+    }
+    step(app.wait_until(
+        "tail progress saved before EOF",
+        Duration::from_secs(5),
+        |_| {
+            crate::isolated::open_database(&path)
+                .and_then(|store| store.vod_progress(&series_key))
+                .is_ok_and(|point| point.position_ms == 119_000)
+        },
+    ));
+    assert!(
+        crate::isolated::open_database(&path)
+            .unwrap()
+            .vod_progress(&series_key)
+            .unwrap()
+            .completed,
+        "a later five-second tick must preserve completion before native EOF"
+    );
     for (name, data) in [
         ("state", json!({"state":"ready"})),
         (
