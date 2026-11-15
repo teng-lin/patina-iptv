@@ -16,10 +16,10 @@ is below 1.0, a minor release may change behaviour.
 - Independent player windows can switch to compact picture-in-picture and back
   without opening another stream, with their own pause, return and close controls.
 
-
 ### Changed
 
 - README opens with Patina's banner and a new introduction.
+- Patina's branded splash appears at launch while the app initializes.
 
 ### Removed
 
@@ -35,7 +35,6 @@ is below 1.0, a minor release may change behaviour.
   by identity, and preserve pause after a refused channel switch. Hyprland PiP
   placement handles rotated displays and stream shapes without moving an
   already arranged window.
-
 - Resuming the last channel at startup shows the compact channel banner,
   with the normal automatic timeout.
 

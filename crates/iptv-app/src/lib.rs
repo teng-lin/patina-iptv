@@ -624,28 +624,46 @@ pub fn App() -> impl IntoElement {
             outcome.set(Some(rx.await.unwrap_or(stopped)));
         }));
     }
-    view().flex_1().child(dynamic(move || {
-        let result = outcome.get();
-        // Only the one-shot outcome controls this branch. Reads while building
-        // ReadyApp must not subscribe the branch and recreate its video surface.
-        untracked(move || match result {
-            None => view()
+    // Keep startup branding above the app while its library and player start.
+    // Removing this sibling overlay never remounts or hides a player surface.
+    let minimum_elapsed = signal(false);
+    let _splash_timer = set_timeout(Duration::from_millis(1500), move || {
+        minimum_elapsed.set(true);
+    });
+    let splash = move || match outcome.get() {
+        None => true,
+        Some(Ok(())) => !minimum_elapsed.get(),
+        Some(Err(_)) => false,
+    };
+    view()
+        .flex_1()
+        .child(
+            view()
                 .flex_1()
-                .items_center()
-                .justify_center()
-                .child(text(i18n::tr("Opening saved library…")))
-                .into_element(),
-            Some(Err(message)) => view()
-                .flex_1()
-                .items_center()
-                .justify_center()
-                .child(text(i18n::tr("Saved data could not be recovered")))
-                .child(text(i18n::tr(message)))
-                .child(text(i18n::tr("Close Patina and try opening it again.")))
-                .into_element(),
-            Some(Ok(())) => ready_app().into_element(),
-        })
-    }))
+                .accessibility_elements_hidden(splash)
+                .child(dynamic(move || {
+                    let result = outcome.get();
+                    // Only the one-shot outcome controls this branch. Reads while building
+                    // ReadyApp must not subscribe the branch and recreate its video surface.
+                    untracked(move || match result {
+                        None => view()
+                            .flex_1()
+                            .items_center()
+                            .justify_center()
+                            .into_element(),
+                        Some(Err(message)) => view()
+                            .flex_1()
+                            .items_center()
+                            .justify_center()
+                            .child(text(i18n::tr("Saved data could not be recovered")))
+                            .child(text(i18n::tr(message)))
+                            .child(text(i18n::tr("Close Patina and try opening it again.")))
+                            .into_element(),
+                        Some(Ok(())) => ready_app().into_element(),
+                    })
+                })),
+        )
+        .child(when(splash, startup::splash))
 }
 
 /// Constructed once after recovery; all player surfaces belong to this owner.

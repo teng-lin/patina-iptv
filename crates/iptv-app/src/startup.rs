@@ -165,3 +165,30 @@ mod tests {
         assert!(age < Duration::from_secs(86_400), "{age:?}");
     }
 }
+
+/// Original Patina artwork, embedded so startup needs no file or network access.
+pub(crate) fn splash() -> impl nsh_core::prelude::IntoElement {
+    use base64::Engine;
+    use nsh_core::prelude::*;
+    let artwork = format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD
+            .encode(include_bytes!("../../../art/icon/banner.png")),
+    );
+    view()
+        .test_id("startup-splash")
+        .absolute()
+        .inset_0()
+        .bg(crate::tint(
+            crate::theme::Theme::default().background.window,
+            0xff,
+        ))
+        .child(
+            image(artwork)
+                .accessible(true)
+                .label("Patina")
+                .w_full()
+                .h_full()
+                .object_fit(ResizeMode::Contain),
+        )
+}
