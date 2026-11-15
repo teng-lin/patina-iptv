@@ -114,7 +114,11 @@ class RecordingService : Service() {
     // Android 15's dataSync budget is six background hours per 24 hours.
     // Preserve the spool and pending jobs instead of letting the system crash us.
     override fun onTimeout(startId: Int, fgsType: Int) {
-        worker.execute { RecordingHost.stop(filesDir.absolutePath); stopSelf() }
+        worker.execute { RecordingHost.stop(filesDir.absolutePath) }
+        // Satisfy Android's short timeout immediately. Native cancellation and
+        // spool publication finish off the main thread; a process kill still
+        // leaves a recoverable Recording row and transport-packet spool.
+        stopSelf()
     }
     override fun onDestroy() {
         running = null

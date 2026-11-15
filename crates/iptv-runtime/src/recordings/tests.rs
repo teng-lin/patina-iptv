@@ -453,3 +453,64 @@ fn a_drained_ui_cannot_release_its_successors_viewing_lease() {
     assert!(new.recordings.lock().viewers.contains_key(&0));
     new.drain_services();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cold_native_host_resumes_a_spool_without_constructing_another_ui() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("generated-app");
+    let first = owner(&root);
+    let mut request = seed(&first, &server()).await;
+    request.start = now() + 2;
+    request.end = request.start + 3;
+    let id = first.schedule_recording(request).await.unwrap();
+    assert!(first.drain_services());
+    drop(first);
+    // Synthetic interrupted-process state: an acknowledged Recording row and
+    // a complete packet followed by a torn packet in its private spool.
+    let mut store = iptv_store_sqlite::Store::open_encrypted(
+        root.join("iptv.sqlite"),
+        &iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]),
+    )
+    .unwrap();
+    assert!(
+        store
+            .transition_recording(
+                id,
+                Status::Scheduled,
+                Status::Recording,
+                0,
+                "Starting recording"
+            )
+            .unwrap()
+    );
+    drop(store);
+    std::fs::create_dir_all(media_directory(&root)).unwrap();
+    let spool = media_directory(&root).join(format!("{}.part", id.0));
+    std::fs::write(&spool, [0x47; 200]).unwrap();
+    let mut ports = crate::Ports::new(root.clone(), |_| {
+        Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
+    });
+    ports.background_recordings = true;
+    host::start_background_host(ports.clone()).unwrap();
+    let state = host::acquire(&ports);
+    let services = state.host.lock().unwrap().as_ref().unwrap().accept();
+    tokio::time::sleep(Duration::from_secs(7)).await;
+    let job = services
+        .read(move |store| store.recording_job(id))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        job.status,
+        Status::Partial,
+        "a recovered gap must not be presented as complete"
+    );
+    assert!(
+        job.bytes > 188,
+        "capture must append new media after process restart"
+    );
+    assert_eq!(job.bytes % 188, 0);
+    assert!(!spool.exists());
+    assert!(path(&services, id, false).is_file());
+    assert!(state.stop());
+}

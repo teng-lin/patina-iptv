@@ -414,7 +414,7 @@ impl Store {
         now: i64,
     ) -> Result<Vec<(i64, i64)>> {
         Ok(self.conn.prepare("SELECT p.start,p.stop FROM epg_programmes p JOIN epg_bindings b ON b.epg_channel_id=p.channel_id
-            WHERE b.source_id=?1 AND b.channel_key=?2 AND p.title=?3 AND p.start>=?4 AND p.start<?5 ORDER BY p.start LIMIT 64")?
+            WHERE b.source_id=?1 AND b.channel_key=?2 AND p.title=?3 AND p.stop>?4 AND p.start<?5 ORDER BY p.start LIMIT 64")?
             .query_map(params![rule.request.source,rule.request.channel,rule.request.title,now,now.saturating_add(14*86400)],|r|Ok((r.get(0)?,r.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?)
     }

@@ -399,8 +399,8 @@ impl Runtime {
             .await?
         {
             let next = job.request.start;
-            let active = next <= now();
             let mut data = self.recordings.lock();
+            let active = next <= now() || !data.active.is_empty();
             data.jobs.retain(|existing| existing.id != id);
             data.jobs.push(job);
             let earliest = data
@@ -432,6 +432,7 @@ impl Runtime {
                 "This recording has already started or was cancelled",
             ));
         }
+        self.acknowledge_recording(id).await?;
         Ok(())
     }
 
@@ -442,8 +443,27 @@ impl Runtime {
             .await?
         {
             if job.status == Status::Scheduled && job.bytes > 0 {
-                recover_media(&self.services(), &job).await;
-                return Ok(());
+                let bytes = job.bytes;
+                if self
+                    .services()
+                    .call(move |store| {
+                        store.transition_recording(
+                            id,
+                            Status::Scheduled,
+                            Status::Partial,
+                            bytes,
+                            "Stopped by you",
+                        )
+                    })
+                    .await?
+                {
+                    // Invalidate the scheduler's stale snapshot before publishing
+                    // the spool: no capture may append during this rename.
+                    let mut stopped = job;
+                    stopped.status = Status::Partial;
+                    recover_media(&self.services(), &stopped).await;
+                    return Ok(());
+                }
             }
         }
         if let Some((_, stop)) = self.recordings.lock().active.get(&id) {
