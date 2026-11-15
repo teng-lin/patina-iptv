@@ -365,7 +365,11 @@ fn open(ui: Ui, surface: usize, session: u64) {
     if surface == 0
         && let Some((playing, _)) = ui.player.vod.get_untracked()
     {
-        let position = if ui.player.main().finished.get_untracked() { 0 } else { ui.player.main().timeline.get_untracked().position_ms };
+        let position = if ui.player.main().finished.get_untracked() {
+            0
+        } else {
+            ui.player.main().timeline.get_untracked().position_ms
+        };
         let key = playing.key.clone();
         crate::data::spawn_in_app(async move {
             let owner = crate::runtime();
@@ -389,13 +393,33 @@ fn open(ui: Ui, surface: usize, session: u64) {
                         ui.player.main().resume_ms.set(Some(position));
                     }
                 }
-                Ok(_) => fail(ui, 0, session, ErrorKind::Http(429), "Provider connection reserved for recording".into()),
+                Ok(_) => fail(
+                    ui,
+                    0,
+                    session,
+                    ErrorKind::Http(429),
+                    "Provider connection reserved for recording".into(),
+                ),
                 Err(_) => {
-                    let allowed = ui.player.vod.with_untracked(|p| p.as_ref().is_some_and(|(p,_)|
-                        owner.parental_allowed(&iptv_runtime::vod::target(&p.key))
-                        && p.parent.as_ref().is_none_or(|key| owner.parental_allowed(&iptv_runtime::vod::target(key)))));
-                    if allowed { fail(ui, 0, session, ErrorKind::Resolve, "On-demand playback unavailable".into()); }
-                    else { stop_surface(ui, 0); }
+                    let allowed = ui.player.vod.with_untracked(|p| {
+                        p.as_ref().is_some_and(|(p, _)| {
+                            owner.parental_allowed(&iptv_runtime::vod::target(&p.key))
+                                && p.parent.as_ref().is_none_or(|key| {
+                                    owner.parental_allowed(&iptv_runtime::vod::target(key))
+                                })
+                        })
+                    });
+                    if allowed {
+                        fail(
+                            ui,
+                            0,
+                            session,
+                            ErrorKind::Resolve,
+                            "On-demand playback unavailable".into(),
+                        );
+                    } else {
+                        stop_surface(ui, 0);
+                    }
                 }
             }
         });
