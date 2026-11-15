@@ -374,3 +374,201 @@ fn unsafe_optional_vod_rolls_back_active_sink_step_and_fails_import() {
     assert!(!sink.active);
     assert!(sink.rolled_back);
 }
+
+/// A native series catalogue is separate from the legacy VOD `is_series` rows.
+fn native_series_fetch(category_status: u16, page_status: u16) -> FakeFetch {
+    let sim = StalkerSim {
+        channels: 2,
+        ..Default::default()
+    };
+    FakeFetch::new(move |_, req| {
+        if req.param("type") == Some("series") {
+            match req.param("action") {
+                Some("get_categories") if category_status == 200 => SimResponse::ok(
+                    r#"{"js":[{"id":"generated-drama","title":"Generated drama"}]}"#,
+                )
+                .into(),
+                Some("get_categories") => SimResponse::status(category_status).into(),
+                Some("get_ordered_list") if page_status == 200 => {
+                    assert_eq!(req.param("category"), Some("*"));
+                    let page = req.param("p").unwrap().parse::<u32>().unwrap();
+                    assert!((1..=2).contains(&page), "unbounded series pagination");
+                    let category = if page == 1 {
+                        "generated-drama"
+                    } else {
+                        "generated-other"
+                    };
+                    SimResponse::ok(format!(
+                        concat!(
+                            r#"{{"js":{{"total_items":2,"max_page_items":1,"data":[{{"# ,
+                            r#""id":"show:generated-{0}","name":"Generated show {0}","# ,
+                            r#""category_id":"{1}","description":"Generated plot","year":"2024","# ,
+                            r#""rating_imdb":"7.5","screenshot_uri":"https://images.example.test/series/{0}.jpg"}}]}}}}"#
+                        ), page, category
+                    )).into()
+                }
+                Some("get_ordered_list") => SimResponse::status(page_status).into(),
+                action => panic!("unexpected native series action: {action:?}"),
+            }
+        } else {
+            let mut response = sim.handle(req);
+            response.body = String::from_utf8(response.body)
+                .unwrap()
+                .replace("http://127.0.0.1/ch/", "https://media.example.test/ch/")
+                .into_bytes();
+            response.into()
+        }
+    })
+}
+
+#[test]
+fn native_series_import_is_opt_in_and_preserves_opaque_identity_and_metadata() {
+    let fetch = native_series_fetch(200, 200);
+    assert!(run(&fetch).unwrap().series.is_empty());
+    assert!(
+        !fetch
+            .requests()
+            .iter()
+            .any(|r| r.url.contains("type=series"))
+    );
+    let fetch = native_series_fetch(200, 200);
+    let catalog = run_with(&fetch, ImportOptions::new(synth::NOW).with_vod(false, true)).unwrap();
+    assert_eq!(catalog.channels.len(), 2);
+    assert!(catalog.vod.is_empty());
+    assert_eq!(catalog.series.len(), 2);
+    let first = &catalog.series[0];
+    assert_eq!(first.provider_id.as_deref(), Some("show:generated-1"));
+    assert_eq!(first.plot.as_deref(), Some("Generated plot"));
+    assert_eq!(first.year, Some(2024));
+    assert_eq!(first.rating_x10, Some(75));
+    assert_eq!(
+        first.poster.as_deref(),
+        Some("https://images.example.test/series/1.jpg")
+    );
+    for series in &catalog.series {
+        assert!(
+            catalog
+                .groups
+                .iter()
+                .any(|g| g.kind == ContentKind::Series && series.groups.contains(&g.id))
+        );
+    }
+    assert_eq!(catalog.stats.synthesized_groups, 1);
+    assert_eq!(catalog.stats.pages, 3);
+    assert_eq!(catalog.stats.content_items, 4);
+}
+
+#[derive(Default)]
+struct SeriesSink {
+    rows: Vec<iptv_import::CatalogRow>,
+    boundary: Option<usize>,
+    finished: bool,
+}
+impl iptv_import::CatalogSink for SeriesSink {
+    fn begin_step(&mut self) -> Result<(), iptv_import::SinkError> {
+        assert!(self.boundary.replace(self.rows.len()).is_none());
+        Ok(())
+    }
+    fn push(&mut self, row: iptv_import::CatalogRow) -> Result<(), iptv_import::SinkError> {
+        assert!(self.boundary.is_some());
+        self.rows.push(row);
+        Ok(())
+    }
+    fn end_step(&mut self, success: bool) -> Result<(), iptv_import::SinkError> {
+        let boundary = self.boundary.take().expect("no active transaction");
+        if !success {
+            self.rows.truncate(boundary);
+        }
+        Ok(())
+    }
+    fn finish(&mut self) -> Result<(), iptv_import::SinkError> {
+        assert!(self.boundary.is_none());
+        self.finished = true;
+        Ok(())
+    }
+}
+
+#[test]
+fn native_series_stream_into_private_sink_without_retaining_catalogue_rows() {
+    let fetch = native_series_fetch(200, 200);
+    let mut sink = SeriesSink::default();
+    let catalog = block_on(iptv_import::import_source_into(
+        &fetch,
+        &config(),
+        &ImportOptions::new(synth::NOW).with_vod(false, true),
+        &mut NoProgress,
+        &CancelToken::new(),
+        &mut sink,
+    ))
+    .unwrap();
+    assert!(sink.finished);
+    assert!(catalog.channels.is_empty() && catalog.series.is_empty() && catalog.groups.is_empty());
+    assert!(
+        !catalog.is_empty(),
+        "streamed rows still count as imported content"
+    );
+    assert_eq!(catalog.stats.content_items, 4);
+    let series: Vec<_> = sink
+        .rows
+        .iter()
+        .filter_map(|r| match r {
+            iptv_import::CatalogRow::Series(v) => Some(v),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(series.len(), 2);
+    assert_eq!(series[1].provider_id.as_deref(), Some("show:generated-2"));
+    assert!(sink.rows.iter().any(|r| matches!(r,
+        iptv_import::CatalogRow::Group(g) if g.kind == ContentKind::Series
+    )));
+}
+
+#[test]
+fn unavailable_native_series_steps_warn_without_losing_live_channels() {
+    for (category_status, page_status, expected_step, expected_series) in [
+        (500, 200, Step::Categories(ContentKind::Series), 2),
+        (200, 500, Step::Items(ContentKind::Series), 0),
+    ] {
+        let fetch = native_series_fetch(category_status, page_status);
+        let catalog =
+            run_with(&fetch, ImportOptions::new(synth::NOW).with_vod(false, true)).unwrap();
+        assert_eq!(catalog.channels.len(), 2);
+        assert_eq!(catalog.series.len(), expected_series);
+        assert!(catalog.warnings.iter().any(|w| w.step == expected_step));
+        if expected_series != 0 {
+            assert_eq!(catalog.stats.synthesized_groups, 2);
+        }
+    }
+}
+
+#[test]
+fn native_series_cap_is_fatal_and_never_publishes_a_partial_stage() {
+    let fetch = native_series_fetch(200, 200);
+    let mut opts = ImportOptions::new(synth::NOW).with_vod(false, true);
+    opts.stalker_vod_cap = 1;
+    let mut sink = SeriesSink::default();
+    let error = block_on(iptv_import::import_source_into(
+        &fetch,
+        &config(),
+        &opts,
+        &mut NoProgress,
+        &CancelToken::new(),
+        &mut sink,
+    ))
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        ImportError::Limit {
+            step: Step::Items(ContentKind::Series),
+            ..
+        }
+    ));
+    assert!(!sink.finished);
+    assert!(sink.boundary.is_none());
+    assert!(
+        !sink
+            .rows
+            .iter()
+            .any(|r| matches!(r, iptv_import::CatalogRow::Series(_)))
+    );
+}
