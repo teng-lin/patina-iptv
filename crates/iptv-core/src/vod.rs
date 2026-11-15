@@ -119,7 +119,7 @@ pub struct Episode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Details {
     /// Opaque provider-source incarnation fences queued playback/progress after edits.
-    pub incarnation:String,
+    pub incarnation: String,
     pub item: Card,
     pub episodes: Vec<Episode>,
 }

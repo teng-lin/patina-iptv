@@ -398,7 +398,7 @@ fn open(ui: Ui, surface: usize, session: u64) {
                     0,
                     session,
                     ErrorKind::Http(429),
-                    "Provider connection reserved for recording".into(),
+                    crate::i18n::tr("Provider connection reserved for recording").into(),
                 ),
                 Err(_) => {
                     let allowed = ui.player.vod.with_untracked(|p| {
@@ -415,7 +415,7 @@ fn open(ui: Ui, surface: usize, session: u64) {
                             0,
                             session,
                             ErrorKind::Resolve,
-                            "On-demand playback unavailable".into(),
+                            crate::i18n::tr("On-demand playback unavailable").into(),
                         );
                     } else {
                         stop_surface(ui, 0);
@@ -502,7 +502,7 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
                         0,
                         session,
                         ErrorKind::Http(429),
-                        "Provider connection reserved for recording".into(),
+                        crate::i18n::tr("Provider connection reserved for recording").into(),
                     );
                 }
             }),
@@ -516,7 +516,7 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
             surface,
             session,
             ErrorKind::Http(429),
-            "Provider connection reserved for recording".into(),
+            crate::i18n::tr("Provider connection reserved for recording").into(),
         );
         return;
     }
