@@ -10,7 +10,8 @@ use iptv_providers::{
 };
 use iptv_settings::{Settings, Value as Setting};
 use nsh_core::{
-    EventKind, EventPayload, MountItem, Size, ViewKind, element::Root, platform::Idiom, prelude::*,
+    EventKind, EventPayload, MountItem, Point, Size, ViewKind, element::Root, platform::Idiom,
+    prelude::*,
 };
 use nsh_engine::EngineConfig;
 use serde_json::{Value, json};
@@ -192,11 +193,37 @@ fn saved_recording_resumes_seeks_paused_and_starts_again_without_changing_surfac
     );
     let next_token = props.lock().unwrap()["source"]["token"].as_u64().unwrap();
     assert_ne!(next_token, token);
+    assert_eq!(
+        props.lock().unwrap()["paused"],
+        false,
+        "Play again resumes playback"
+    );
     send(&mut app, "state", json!({"state":"ready"}));
     send(
         &mut app,
         "timeline",
         json!({"token":next_token,"seekId":0,"ms":0,"durationMs":120000,"seekable":true}),
+    );
+    // Touch users get the same recording timeline and can seek without reopening.
+    step(app.press_key("space"));
+    step(app.set_environment("a tablet", |e| e.idiom = Idiom::Pad));
+    step(app.press("label:Video"));
+    step(app.wait_for("id:play-bar-time-line >> text:2:00"));
+    let touch_opens = iptv_app::player_opens(0);
+    step(app.drag("id:play-bar-seek", Point::new(px(0.0), px(0.0))));
+    let touch_seek = props.lock().unwrap()["seek"].clone();
+    assert_eq!(touch_seek["ms"], 60_000);
+    assert_eq!(props.lock().unwrap()["paused"], true);
+    assert_eq!(iptv_app::player_opens(0), touch_opens);
+    send(
+        &mut app,
+        "timeline",
+        json!({"token":next_token,"seekId":touch_seek["id"],"ms":60000,"durationMs":120000,"seekable":true}),
+    );
+    send(
+        &mut app,
+        "timeline",
+        json!({"token":token,"seekId":99,"ms":99000,"durationMs":120000,"seekable":true}),
     );
     step(app.press_key("stop"));
     step(app.wait_for_within("text:Generated group", Duration::from_secs(10)));
@@ -205,7 +232,7 @@ fn saved_recording_resumes_seeks_paused_and_starts_again_without_changing_surfac
         .recording_progress(id)
         .unwrap();
     assert_eq!(
-        saved.position_ms, 0,
+        saved.position_ms, 60_000,
         "stale source events cannot replace the final position"
     );
     assert!(!saved.completed);

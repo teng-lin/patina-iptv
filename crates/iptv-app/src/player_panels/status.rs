@@ -164,7 +164,11 @@ pub fn status(ui: Ui) -> impl IntoElement {
                     .border_color(move || rgb(ui.theme.with(|t| t.accent.light)))
                     .on_press(move || {
                         ui.touched();
-                        crate::player::retry(ui);
+                        if crate::on_demand::active(ui) && !failed() {
+                            crate::player::toggle_pause(ui);
+                        } else {
+                            crate::player::retry(ui);
+                        }
                     })
                 }))
         }))

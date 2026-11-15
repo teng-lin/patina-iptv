@@ -259,10 +259,7 @@ fn bar(ui: Ui) -> impl IntoElement {
                         .child(centre(ui))
                         .child(right(ui)),
                 )
-                .child(when(
-                    move || ui.player.recorded.with(Option::is_none),
-                    move || progress::line(ui),
-                )),
+                .child(progress::line(ui)),
         )
 }
 
@@ -281,6 +278,7 @@ fn button(
             disabled: !enabled(),
             ..Default::default()
         })
+        .flex_shrink_0()
         .w(px(size))
         .h(px(size))
         .rounded(px(size / 2.0))
@@ -354,7 +352,7 @@ fn left(ui: Ui) -> impl IntoElement {
     // then the rest is cut, never the buttons beside it.
     view()
         .flex_1()
-        .min_w(px(0.0))
+        .min_w(px(size))
         .overflow_hidden()
         .flex_row()
         .items_center()
@@ -373,9 +371,7 @@ fn left(ui: Ui) -> impl IntoElement {
         .child(
             text(move || {
                 ui.data_version.get();
-                ui.player
-                    .recorded
-                    .with(|r| r.as_ref().map(|(job, _)| job.request.title.clone()))
+                crate::on_demand::title(ui)
                     .or_else(|| ui.playing.get().map(channel_name))
                     .unwrap_or_default()
             })

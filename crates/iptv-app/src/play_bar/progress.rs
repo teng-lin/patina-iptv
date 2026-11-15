@@ -79,6 +79,7 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
             .text_color(tint(WHITE, TEXT_SECONDARY_ALPHA))
     };
     view()
+        .test_id("play-bar-time-line")
         .flex_row()
         .items_center()
         .gap(px(10.0))
@@ -119,6 +120,7 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
                 // On top, for presses and drags along the whole line.
                 .child(
                     view()
+                        .test_id("play-bar-seek")
                         .absolute()
                         .inset_0()
                         .rounded(px(RADIUS))
