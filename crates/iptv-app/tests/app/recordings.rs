@@ -129,6 +129,16 @@ fn exercise(home: crate::isolated::Home, idiom: Idiom) {
         step(app.press("text:Delete recording"));
     }
     step(app.wait_for("text:/Delete this recording file permanently/"));
+    // Closing the whole screen also cancels the pending confirmation. Reopening
+    // and choosing Delete must ask again instead of reusing the previous consent.
+    if idiom != Idiom::Tv {
+        step(app.press("text:Close"));
+        step(app.press("text:/^☰  /"));
+        step(app.press("label:Recordings"));
+        step(app.press("id:recording-job"));
+        step(app.press("text:Delete recording"));
+        step(app.wait_for("text:/Delete this recording file permanently/"));
+    }
     // Cancelling a delete never loses the job.
     step(app.back());
     step(app.wait_for_gone(

@@ -16,6 +16,7 @@ pub fn open(ui: Ui) {
         s.open = true;
         s.error = None;
         s.actions = false;
+        s.confirm_delete = false;
         s.draft = None;
     });
     reload(ui);
@@ -24,6 +25,7 @@ pub fn close(ui: Ui) {
     ui.recordings.update(|s| {
         if !s.busy {
             s.open = false;
+            s.confirm_delete = false;
         }
     });
 }
@@ -260,6 +262,7 @@ fn select_job(ui: Ui, id: JobId) {
     ui.recordings.update(|s| {
         s.focus = Some(id);
         s.actions = true;
+        s.confirm_delete = false;
         s.action = 0;
         s.error = None;
     });
