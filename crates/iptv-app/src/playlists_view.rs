@@ -134,6 +134,21 @@ fn cancel(ui: Ui) {
 }
 
 fn perform(ui: Ui, effect: Effect) {
+    if matches!(
+        &effect,
+        Effect::Add
+            | Effect::Delete(_)
+            | Effect::OpenDetails(_)
+            | Effect::TryDetails(..)
+            | Effect::SetUserAgent(..)
+    ) && crate::runtime().parental_has_pin()
+        && !crate::runtime().parental_settings_allowed()
+    {
+        crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
+            perform(ui, effect)
+        });
+        return;
+    }
     data::spawn_in_app(async move {
         log::info!("iptv playlists: {}", effect_name(&effect));
         let result = match effect {

@@ -59,6 +59,12 @@ pub fn open_first_run(ui: Ui) {
 
 /// "Add playlist" from the guide: the type list.
 pub fn open_add(ui: Ui) {
+    if crate::runtime().parental_has_pin() && !crate::runtime().parental_settings_allowed() {
+        crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
+            open_add(ui)
+        });
+        return;
+    }
     if !is_open(ui) {
         open_with(ui, Wizard::add_playlist());
     }
@@ -74,6 +80,18 @@ fn read<R>(ui: Ui, f: impl FnOnce(&Wizard) -> R) -> Option<R> {
 
 /// Feeds `event` to the wizard and performs what it asks for.
 pub fn send(ui: Ui, event: WizardEvent) {
+    let submit = matches!(&event, WizardEvent::Tap(Target::Submit))
+        || (matches!(&event, WizardEvent::Ok)
+            && read(ui, |w| w.focus() == Some(Target::Submit)).unwrap_or(false));
+    if submit
+        && crate::runtime().parental_has_pin()
+        && !crate::runtime().parental_settings_allowed()
+    {
+        crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
+            send(ui, event)
+        });
+        return;
+    }
     let mut effect = None;
     ui.wizard.update(|w| {
         if let Some(open) = w {
@@ -162,6 +180,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
         }
         WizardEffect::CancelImport { id } => crate::runtime().cancel_wizard_import(id),
         WizardEffect::Close(exit) => {
+            crate::runtime().parental_content_closed();
             log::info!("iptv wizard: closed ({exit:?})");
             if let WizardExit::Added { .. } = exit {
                 crate::runtime().finish_wizard_import();

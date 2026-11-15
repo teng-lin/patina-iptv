@@ -153,8 +153,9 @@ pub(crate) fn run(
     tx: &Sender<Msg>,
     cancel: &CancelToken,
     revoked: &CancelToken,
+    authorization: crate::parental::Snapshot,
 ) {
-    services.block_on(pipeline(services, job, tx, cancel, revoked));
+    services.block_on(pipeline(services, job, tx, cancel, revoked, &authorization));
 }
 
 /// The timer's guide check: the stored feeds for the stored channels.
@@ -310,12 +311,21 @@ pub(crate) async fn pipeline(
     tx: &Sender<Msg>,
     cancel: &CancelToken,
     revoked: &CancelToken,
+    authorization: &crate::parental::Snapshot,
 ) {
     // What keeps a downloaded guide out of the store.
     let stops = [cancel, revoked];
     let fail = |failure: ImportFailure| {
         let _ = tx.send(Msg::Playlist(Err(failure)));
     };
+    let auth = authorization.clone();
+    let admission = job.clone();
+    if services
+        .blocking(move |store| crate::parental::require_import(store, &admission, &auth))
+        .is_err()
+    {
+        return fail(ImportFailure::new(FailureKind::Auth));
+    }
     let now = now_unix();
     if let Some(id) = job
         .stored
@@ -558,7 +568,8 @@ pub(crate) async fn pipeline(
         done: 0,
         total: None,
     }));
-    let (id, counts, sources) = match save(services, &job, &catalog, &planned, stage) {
+    let (id, counts, sources) = match save(services, &job, &catalog, &planned, stage, authorization)
+    {
         Ok(saved) => saved,
         Err(e) => {
             log::warn!("iptv data: store: {e}");
@@ -735,11 +746,16 @@ pub(crate) fn save(
     catalog: &Catalog,
     planned: &[GuideSource],
     stage: CatalogStage,
+    authorization: &crate::parental::Snapshot,
 ) -> Result<(SourceId, CatalogCounts, Vec<GuideSource>), StoreError> {
     let job = job.clone();
     let guide_urls = catalog.guide_urls();
     let planned = planned.to_vec();
-    services.blocking(move |store| save_in(store, &job, guide_urls, planned, stage))
+    let authorization = authorization.clone();
+    services.blocking(move |store| {
+        crate::parental::require_import(store, &job, &authorization)?;
+        save_in(store, &job, guide_urls, planned, stage)
+    })
 }
 
 pub(crate) fn save_in(

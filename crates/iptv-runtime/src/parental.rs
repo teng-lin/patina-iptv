@@ -261,12 +261,27 @@ impl Runtime {
         self.parental_refresh().await?;
         let services = self.services();
         let now = (now_ms() / 1000) as i64;
+        let epoch = self.parental.borrow().epoch.clone();
+        let expected = epoch.load(Ordering::SeqCst);
+        let verification_epoch = epoch.clone();
         services
-            .call(move |store| Ok(verify(store, pin.bytes(), false, now)))
+            .call(move |store| {
+                if verification_epoch.load(Ordering::SeqCst) != expected {
+                    return Ok(Err(Error::Locked));
+                }
+                let verified = verify(store, pin.bytes(), false, now);
+                if verification_epoch.load(Ordering::SeqCst) != expected {
+                    return Ok(Err(Error::Locked));
+                }
+                Ok(verified)
+            })
             .await
             .map_err(|_| Error::Storage)??;
         if !services.is_current() {
             return Err(Error::OwnerClosed);
+        }
+        if epoch.load(Ordering::SeqCst) != expected {
+            return Err(Error::Locked);
         }
         let mut state = self.parental.borrow_mut();
         apply_policy(&mut state, policy(self));
@@ -281,6 +296,7 @@ impl Runtime {
         new: Pin,
     ) -> Result<Zeroizing<String>, Error> {
         let services = self.services();
+        let epoch = self.parental.borrow().epoch.clone();
         let now = (now_ms() / 1000) as i64;
         let result = services
             .call(move |store| {
@@ -299,6 +315,9 @@ impl Runtime {
                     }
                     replace_pin(store, &new)
                 })();
+                if result.is_ok() {
+                    epoch.fetch_add(1, Ordering::SeqCst);
+                }
                 Ok(result)
             })
             .await
@@ -322,11 +341,16 @@ impl Runtime {
         new: Pin,
     ) -> Result<Zeroizing<String>, Error> {
         let services = self.services();
+        let epoch = self.parental.borrow().epoch.clone();
         let now = (now_ms() / 1000) as i64;
         let result = services
             .call(move |store| {
-                Ok(verify(store, recovery.trim().as_bytes(), true, now)
-                    .and_then(|()| replace_pin(store, &new)))
+                let result = verify(store, recovery.trim().as_bytes(), true, now)
+                    .and_then(|()| replace_pin(store, &new));
+                if result.is_ok() {
+                    epoch.fetch_add(1, Ordering::SeqCst);
+                }
+                Ok(result)
             })
             .await
             .map_err(|_| Error::Storage)??;
@@ -419,10 +443,45 @@ impl Runtime {
 
 /// Native command gate. Resolve membership from storage for every direct-ID
 /// command; callers cannot omit or spoof the item's category.
+#[derive(Clone)]
 pub(crate) struct Snapshot {
     pub access: Access,
     epoch: Arc<AtomicU64>,
     at: u64,
+}
+/// Administrative changes are gated against the credential that exists at
+/// execution time, including PIN setup or relock after work was queued.
+pub(crate) fn require_admin(
+    store: &iptv_store_sqlite::Store,
+    snapshot: &Snapshot,
+) -> iptv_store_sqlite::Result<()> {
+    if store.parental_credential()?.is_some()
+        && (snapshot.epoch.load(Ordering::SeqCst) != snapshot.at
+            || !snapshot.access.granted(&Target::settings(), now_ms()))
+    {
+        return Err(iptv_store_sqlite::StoreError::Unavailable(
+            "Unlock parental controls before changing settings",
+        ));
+    }
+    Ok(())
+}
+/// Only a refresh of the exact, durably authorized provider configuration is
+/// exempt. Caller-controlled purpose/edit flags never grant that exemption.
+pub(crate) fn require_import(
+    store: &iptv_store_sqlite::Store,
+    job: &crate::imports::Job,
+    snapshot: &Snapshot,
+) -> iptv_store_sqlite::Result<()> {
+    let same = job
+        .stored
+        .map(|id| store.source(id))
+        .transpose()?
+        .flatten()
+        .is_some_and(|stored| stored.source.config == job.source.config);
+    if !same || job.edit {
+        require_admin(store, snapshot)?;
+    }
+    Ok(())
 }
 pub(crate) fn require_group_edit(
     store: &iptv_store_sqlite::Store,
@@ -502,5 +561,169 @@ mod tests {
         );
         assert!(verify(&mut store, b"8642", false, 132).is_ok());
         assert_eq!(store.parental_credential().unwrap().unwrap().failures, 0);
+    }
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+    use crate::imports::{self, Job, Purpose};
+    use iptv_providers::{
+        SecretUrl,
+        model::{M3uSourceConfig, Source, SourceConfig},
+    };
+    fn source(path: &str) -> Source {
+        Source {
+            name: "Generated source".into(),
+            config: SourceConfig::M3u(M3uSourceConfig {
+                location: SecretUrl::new(format!("https://example.invalid/{path}.m3u")),
+                user_agent: None,
+                referrer: None,
+            }),
+        }
+    }
+    fn stage(services: &crate::store_service::Services) -> iptv_store_sqlite::CatalogStage {
+        let mut stage =
+            iptv_store_sqlite::CatalogStage::create_in_with(services.directory(), |path| {
+                let path = path.to_owned();
+                services.blocking(move |store| store.open_staging_connection(&path))
+            })
+            .unwrap();
+        iptv_import::CatalogSink::finish(&mut stage).unwrap();
+        stage
+    }
+    async fn save(
+        services: &crate::store_service::Services,
+        job: &Job,
+        snapshot: &Snapshot,
+    ) -> iptv_store_sqlite::Result<(
+        iptv_store_sqlite::SourceId,
+        iptv_store_sqlite::CatalogCounts,
+        Vec<iptv_store_sqlite::GuideSource>,
+    )> {
+        let worker = services.clone();
+        let job = job.clone();
+        let snapshot = snapshot.clone();
+        services
+            .spawn_blocking(move || {
+                imports::save(&worker, &job, &catalog(), &[], stage(&worker), &snapshot)
+            })
+            .await
+            .unwrap()
+    }
+    fn catalog() -> iptv_import::Catalog {
+        iptv_import::Catalog {
+            source: iptv_import::SourceMeta::M3u {
+                header: Default::default(),
+            },
+            groups: vec![],
+            channels: vec![],
+            vod: vec![],
+            series: vec![],
+            warnings: vec![],
+            warnings_dropped: 0,
+            stats: Default::default(),
+        }
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn native_import_admission_and_commit_bind_configuration_to_admin_authority() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = Runtime::new(crate::Ports::new(directory.path().to_owned(), |_| {
+            Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x71; 32]))
+        }));
+        owner.start_services();
+        let services = owner.services();
+        let initial = source("generated-original");
+        let saved = initial.clone();
+        let id = services
+            .call(move |store| store.add_source(&saved))
+            .await
+            .unwrap();
+        owner
+            .parental_change_pin(None, Pin::parse("2468").unwrap())
+            .await
+            .unwrap();
+        let authorized_before_lock = owner.parental_snapshot();
+        owner.parental_lock();
+        let locked = owner.parental_snapshot();
+        let add = Job {
+            source: source("generated-add"),
+            epg_url: None,
+            stored: None,
+            purpose: Purpose::Background,
+            edit: false,
+        };
+        assert!(save(&services, &add, &locked).await.is_err());
+        assert!(
+            save(&services, &add, &authorized_before_lock)
+                .await
+                .is_err()
+        );
+        let forged = Job {
+            source: source("generated-replacement"),
+            stored: Some(id),
+            ..add.clone()
+        };
+        // Neither a claimed background purpose nor edit=false can launder a
+        // different provider into an already authorized source's identity.
+        assert!(save(&services, &forged, &locked).await.is_err());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = services.clone();
+        let admission = locked.clone();
+        services
+            .spawn_blocking(move || {
+                worker.block_on(imports::pipeline(
+                    &worker,
+                    forged,
+                    &tx,
+                    &iptv_import::CancelToken::new(),
+                    &iptv_import::CancelToken::new(),
+                    &admission,
+                ))
+            })
+            .await
+            .unwrap();
+        assert!(
+            matches!(rx.try_recv(),Ok(imports::Msg::Playlist(Err(failure)))
+            if failure.kind==iptv_core::wizard::FailureKind::Auth)
+        );
+        assert_eq!(
+            services
+                .read(|store| Ok(store.sources()?.len()))
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            services
+                .read(move |store| Ok(store.source(id)?.unwrap().source.config))
+                .await
+                .unwrap(),
+            initial.config
+        );
+        // Exact existing configurations continue refreshing after viewing locks.
+        let refresh = Job {
+            source: initial,
+            stored: Some(id),
+            purpose: Purpose::Background,
+            edit: false,
+            ..add.clone()
+        };
+        save(&services, &refresh, &locked).await.unwrap();
+        owner
+            .parental_authorize(Target::settings(), Pin::parse("2468").unwrap())
+            .await
+            .unwrap();
+        let authorized = owner.parental_snapshot();
+        let added = save(&services, &add, &authorized).await.unwrap().0;
+        let pending = crate::library::delete_source(&owner, added);
+        owner.parental_lock();
+        assert!(pending.await.is_err());
+        owner
+            .parental_authorize(Target::settings(), Pin::parse("2468").unwrap())
+            .await
+            .unwrap();
+        assert!(crate::library::delete_source(&owner, added).await.unwrap());
+        assert!(owner.drain_services());
     }
 }
