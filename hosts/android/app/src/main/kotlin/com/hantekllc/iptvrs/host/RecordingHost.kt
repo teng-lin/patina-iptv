@@ -163,7 +163,8 @@ class RecordingAlarm : BroadcastReceiver() {
 
 /** Native capture survives activity/engine destruction; it never owns a player view. */
 class RecordingService : Service() {
-    private var wake: PowerManager.WakeLock? = null
+    private val wakeHandler = Handler(Looper.getMainLooper())
+    private var wakeLease: RecordingWakeLease? = null
     private val worker =
         java.util.concurrent.Executors
             .newSingleThreadExecutor()
@@ -197,12 +198,19 @@ class RecordingService : Service() {
                 .setOngoing(true)
                 .build(),
         )
-        wake =
+        val wake =
             getSystemService(PowerManager::class.java)
                 .newWakeLock(
                     PowerManager.PARTIAL_WAKE_LOCK,
                     "Patina:recording",
-                ).also { it.acquire(6 * 60 * 60 * 1000L) }
+                ).also { it.setReferenceCounted(false) }
+        wakeLease =
+            RecordingWakeLease(
+                acquire = { timeout -> wake.acquire(timeout) },
+                schedule = { renewal, delay -> wakeHandler.postDelayed(renewal, delay) },
+                cancel = { renewal -> wakeHandler.removeCallbacks(renewal) },
+                release = { if (wake.isHeld) wake.release() },
+            ).also { it.start() }
     }
 
     override fun onStartCommand(
@@ -241,7 +249,8 @@ class RecordingService : Service() {
 
     override fun onDestroy() {
         running = null
-        wake?.let { if (it.isHeld) it.release() }
+        wakeLease?.stop()
+        wakeLease = null
         worker.shutdown()
         super.onDestroy()
     }

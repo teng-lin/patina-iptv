@@ -32,6 +32,44 @@ fn linux_executable(
         .unwrap_or(fallback)
 }
 
+#[cfg(windows)]
+fn remove_windows_task(task: &str) -> io::Result<()> {
+    // Task Scheduler reports an absent task as HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND).
+    // Do not infer success from localized schtasks output or suppress other COM errors.
+    const REMOVE: &str = r#"
+$ErrorActionPreference = 'Stop'
+try {
+    $scheduler = New-Object -ComObject 'Schedule.Service'
+    $scheduler.Connect()
+    $folder = $scheduler.GetFolder('\')
+    try {
+        $folder.DeleteTask($env:PATINA_RECORDING_TASK, 0)
+    } catch {
+        $failure = $_.Exception
+        while ($null -ne $failure.InnerException) { $failure = $failure.InnerException }
+        if ($failure.HResult -ne -2147024894) { throw }
+    }
+    exit 0
+} catch { exit 1 }
+"#;
+    let result = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            REMOVE,
+        ])
+        // Pass the name as data, never interpolate it into the PowerShell program.
+        .env("PATINA_RECORDING_TASK", task)
+        .output()?;
+    if result.status.success() {
+        Ok(())
+    } else {
+        Err(io::ErrorKind::PermissionDenied.into())
+    }
+}
+
 pub(super) fn install(directory: &Path, enabled: bool) -> io::Result<()> {
     #[cfg(windows)]
     let _tasks = super::windows::TASKS
@@ -108,12 +146,7 @@ pub(super) fn install(directory: &Path, enabled: bool) -> io::Result<()> {
                 return Err(io::ErrorKind::PermissionDenied.into());
             }
         } else {
-            let result = std::process::Command::new("schtasks.exe")
-                .args(["/Delete", "/F", "/TN", task])
-                .output()?;
-            if !result.status.success() {
-                return Err(io::ErrorKind::PermissionDenied.into());
-            }
+            remove_windows_task(task)?;
         }
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
@@ -152,6 +185,17 @@ pub(super) fn task_xml(executable: &str, next: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn removing_an_absent_synthetic_task_is_idempotent() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let task = format!("Patina Synthetic Missing {} {unique}", std::process::id());
+        remove_windows_task(&task).unwrap();
+        remove_windows_task(&task).unwrap();
+    }
     #[cfg(target_os = "linux")]
     #[test]
     fn image_startup_uses_a_stable_absolute_executable_and_escapes_exec_fields() {
