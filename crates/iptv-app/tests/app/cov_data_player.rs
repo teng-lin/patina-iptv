@@ -736,7 +736,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.back());
 
     // --- The play bar -----------------------------------------------------
-    // Desktop pointer movement shows the bar, with what the host
+    // A headless pointer press shows the bar, with what the host
     // reported of the stream (lines, class, frame rate).
     step(app.set_environment("a desktop", |e| {
         e.idiom = Idiom::Desktop;
@@ -749,7 +749,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     send(&mut app, "size", json!({ "width": 1280, "height": 720 }));
     send(&mut app, "format", json!({ "fps": 50.0 }));
     send(&mut app, "tracks", tracks());
-    step(app.hover("label:Video"));
+    step(app.press("label:Video"));
     step(app.wait_for("label:Mute"));
     step(app.wait_for("text:720p"));
     step(app.wait_for("text:/50/"));
@@ -778,7 +778,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     run(&mut app, Duration::from_secs(8));
     step(app.wait_for_gone("label:Mute", Duration::from_secs(1)));
     // Picture in picture from the bar, and back to the app.
-    step(app.hover("label:Video"));
+    step(app.press("label:Video"));
     step(app.wait_for("label:Picture in picture"));
     step(app.press("label:Picture in picture"));
     step(app.wait_for("text:Playing in picture-in-picture"));
@@ -805,7 +805,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     // A replay under the pointer: the bar's TV guide, then two programmes
     // back; the bar's rewind and fast-forward, and its progress line under
     // a finger, seek in it; its programme details open and close.
-    step(app.hover("label:Video"));
+    step(app.press("label:Video"));
     step(app.wait_for("label:TV guide"));
     step(app.press("label:TV guide"));
     step(app.wait_for_gone("label:Mute", Duration::from_secs(1)));
@@ -833,7 +833,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
         },
     ));
     state(&mut app, "ready");
-    step(app.hover("label:Video"));
+    step(app.press("label:Video"));
     step(app.wait_for("label:Fast-forward"));
     let before = opens();
     step(app.press("label:Fast-forward"));
@@ -873,7 +873,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
 
     // In picture in picture, stopping playback in the main window closes
     // the window: it has nothing to show.
-    step(app.hover("label:Video"));
+    step(app.press("label:Video"));
     step(app.wait_for("label:Picture in picture"));
     step(app.press("label:Picture in picture"));
     step(app.wait_for("text:Playing in picture-in-picture"));
