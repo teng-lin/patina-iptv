@@ -28,16 +28,39 @@ fn player(app: &Headless) -> NodeId {
 #[test]
 fn movies_and_series_reach_playback_and_resume_by_identity() {
     let Some(home) = isolated!() else { return };
-    exercise(home, nsh_core::platform::Idiom::Pad);
+    exercise(home, nsh_core::platform::Idiom::Pad, ResumeCase::Seekable);
 }
 
 #[test]
 fn tv_remote_selects_movies_seasons_and_episodes() {
     let Some(home) = isolated!() else { return };
-    exercise(home, nsh_core::platform::Idiom::Tv);
+    exercise(home, nsh_core::platform::Idiom::Tv, ResumeCase::Seekable);
 }
 
-fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
+#[test]
+fn an_unseekable_resumed_episode_still_completes_and_advances() {
+    let Some(home) = isolated!() else { return };
+    exercise(home, nsh_core::platform::Idiom::Pad, ResumeCase::Unseekable);
+}
+
+#[test]
+fn a_resumed_episode_ending_before_its_first_timeline_still_advances() {
+    let Some(home) = isolated!() else { return };
+    exercise(
+        home,
+        nsh_core::platform::Idiom::Pad,
+        ResumeCase::EndedBeforeTimeline,
+    );
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ResumeCase {
+    Seekable,
+    Unseekable,
+    EndedBeforeTimeline,
+}
+
+fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resume: ResumeCase) {
     let server = Server::start(&[(
         "/player_api.php",
         r#"{
@@ -145,6 +168,33 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
             },
         )
         .unwrap();
+    let series_key = iptv_core::vod::Key {
+        source: source.0,
+        kind: iptv_core::vod::Kind::Series,
+        id: series.items[0].id.to_string(),
+    };
+    let second_key = iptv_core::vod::Key {
+        source: source.0,
+        kind: iptv_core::vod::Kind::Episode,
+        id: format!(
+            "{}:{}",
+            series_key.id,
+            iptv_providers::ContentId::from_provider(
+                iptv_providers::model::SourceKind::Xtream,
+                ContentKind::Episode,
+                "102"
+            )
+        ),
+    };
+    if resume != ResumeCase::Seekable {
+        store
+            .save_vod_progress(
+                &second_key,
+                Some(&series_key.id),
+                iptv_core::vod::Progress::observed(37_000, Some(120_000), false),
+            )
+            .unwrap();
+    }
     drop(store);
     let mut config = EngineConfig {
         viewport: Size::new(px(1920.0), px(1080.0)),
@@ -237,21 +287,35 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
             .ends_with("/series/generated-user/generated-pass/102.mp4")
     );
     let token = opened["token"].clone();
-    app.engine().control().dispatch_event(
-        surface,
-        EventKind::NativeEvent,
-        EventPayload::Native {
-            name: "timeline".into(),
-            data: json!({
-            "token":token,
-            "seekId":0,
-            "ms":120000,
-            "durationMs":120000,
-            "seekable":true}
-            ),
-        },
-    );
-    app.settle();
+    if resume != ResumeCase::Seekable {
+        assert_eq!(
+            crate::isolated::open_database(&path)
+                .unwrap()
+                .vod_progress(&second_key)
+                .unwrap()
+                .position_ms,
+            37_000,
+            "retain saved resume until an authoritative native timeline or end"
+        );
+    }
+    if resume != ResumeCase::EndedBeforeTimeline {
+        app.engine().control().dispatch_event(
+            surface,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: "timeline".into(),
+                data: json!({
+                    "token":token,"seekId":0,
+                    "ms":if resume==ResumeCase::Seekable {120000} else {7000},
+                    "durationMs":120000,"seekable":resume==ResumeCase::Seekable
+                }),
+            },
+        );
+        app.settle();
+    }
+    if resume != ResumeCase::Seekable {
+        assert!(props.lock().unwrap().get("seek").is_none_or(Value::is_null));
+    }
     app.engine().control().dispatch_event(
         surface,
         EventKind::NativeEvent,
@@ -296,11 +360,7 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     }
     drop(app);
     let store = crate::isolated::open_database(&path).unwrap();
-    let series_key = iptv_core::vod::Key {
-        source: source.0,
-        kind: iptv_core::vod::Kind::Series,
-        id: series.items[0].id.to_string(),
-    };
+    assert!(store.vod_progress(&second_key).unwrap().completed);
     assert!(store.vod_progress(&series_key).unwrap().completed);
     assert!(
         store

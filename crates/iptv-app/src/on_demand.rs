@@ -15,6 +15,14 @@ pub fn seek_to(ui: Ui, ms: u64) -> bool {
     let mut command = None;
     stream.timeline.update(|t| command = t.seek_to(ms));
     if let Some(command) = command {
+        if stream.finished.get_untracked() {
+            stream.finished.set(false);
+            ui.player.vod.update(|playing| {
+                if let Some((playing, _)) = playing {
+                    playing.ended = false;
+                }
+            });
+        }
         stream.seek.set(Some(iptv_player_mpv::SeekProps {
             token: stream.token.get_untracked(),
             id: command.id,
@@ -53,9 +61,11 @@ pub fn observe(
     if !accepted {
         return;
     }
-    if seekable && let Some(resume) = stream.resume_ms.get_untracked() {
+    if let Some(resume) = stream.resume_ms.get_untracked() {
+        // A current native timeline is authoritative even for an unseekable
+        // stream: it started from the beginning and cannot apply the old resume.
         stream.resume_ms.set(None);
-        if resume > 0 {
+        if seekable && resume > 0 {
             seek_to(ui, resume);
             return;
         }
@@ -67,8 +77,13 @@ pub fn observe(
 }
 pub fn flush(ui: Ui, ended: bool) {
     let stream = ui.player.main();
+    let ended = ended || stream.finished.get_untracked();
     if stream.resume_ms.get_untracked().is_some() {
-        return;
+        if !ended {
+            return;
+        }
+        // A short unseekable stream may end before its first timeline tick.
+        stream.resume_ms.set(None);
     }
     let progress = stream.timeline.get_untracked().progress(ended);
     crate::vod_view::observe(ui, progress.position_ms, progress.duration_ms, ended);
