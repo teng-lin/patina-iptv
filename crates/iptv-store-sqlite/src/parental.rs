@@ -1,0 +1,170 @@
+//! Parental credentials are encrypted with the catalogue. Only one-way
+//! verifiers are stored, and credential Debug output is always redacted.
+use crate::{Result, Store};
+use iptv_core::parental::{ContentKind, Target};
+use rusqlite::{OptionalExtension, params};
+
+pub struct ParentalCredential {
+    pub salt: [u8; 16],
+    pub verifier: [u8; 32],
+    pub recovery_verifier: [u8; 32],
+    pub failures: u32,
+    pub retry_after: i64,
+}
+impl std::fmt::Debug for ParentalCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ParentalCredential(***)")
+    }
+}
+
+pub fn kind_slug(kind: ContentKind) -> &'static str {
+    match kind {
+        ContentKind::Live => "live",
+        ContentKind::Movie => "movie",
+        ContentKind::Series => "series",
+        ContentKind::Episode => "episode",
+        ContentKind::Group => "group",
+        ContentKind::VodCategory => "vod_category",
+        ContentKind::Settings => "settings",
+    }
+}
+fn kind(value: &str) -> Option<ContentKind> {
+    Some(match value {
+        "live" => ContentKind::Live,
+        "movie" => ContentKind::Movie,
+        "series" => ContentKind::Series,
+        "episode" => ContentKind::Episode,
+        "group" => ContentKind::Group,
+        "vod_category" => ContentKind::VodCategory,
+        _ => return None,
+    })
+}
+impl Store {
+    pub fn parental_credential(&self) -> Result<Option<ParentalCredential>> {
+        self.conn.query_row("SELECT salt,verifier,recovery_verifier,failures,retry_after FROM parental_security WHERE singleton=1", [], |r| {
+            Ok(ParentalCredential { salt:r.get(0)?, verifier:r.get(1)?, recovery_verifier:r.get(2)?, failures:r.get(3)?, retry_after:r.get(4)? })
+        }).optional().map_err(Into::into)
+    }
+    pub fn set_parental_credential(&mut self, credential: &ParentalCredential) -> Result<()> {
+        self.conn.execute("INSERT INTO parental_security(singleton,salt,verifier,recovery_verifier,failures,retry_after) VALUES(1,?1,?2,?3,?4,?5) ON CONFLICT(singleton) DO UPDATE SET salt=excluded.salt,verifier=excluded.verifier,recovery_verifier=excluded.recovery_verifier,failures=excluded.failures,retry_after=excluded.retry_after", params![credential.salt.as_slice(),credential.verifier.as_slice(),credential.recovery_verifier.as_slice(),credential.failures,credential.retry_after])?;
+        Ok(())
+    }
+    pub fn set_parental_blocked(&mut self, target: &Target, blocked: bool) -> Result<()> {
+        if target.kind == ContentKind::Settings || target.id.is_empty() {
+            return Err(crate::StoreError::Unavailable("invalid parental target"));
+        }
+        // Explicit allow overrides also let a parent unmark a provider's adult
+        // category; refreshes do not silently reinstate it.
+        self.conn.execute("INSERT INTO parental_blocks(source_id,kind,content_id,blocked) VALUES(?1,?2,?3,?4) ON CONFLICT(source_id,kind,content_id) DO UPDATE SET blocked=excluded.blocked",params![target.source,kind_slug(target.kind),target.id,blocked])?;
+        if !blocked && target.kind == ContentKind::Live {
+            self.set_blocked(
+                crate::SourceId(target.source),
+                &iptv_providers::ContentId::from_stored(target.id.clone()),
+                false,
+            )?;
+        }
+        Ok(())
+    }
+    /// Explicit blocks and provider-labelled adult categories. Parent membership
+    /// is resolved from the current catalogue, never from a caller's claim.
+    pub fn parental_blocks(&self) -> Result<Vec<Target>> {
+        let mut q=self.conn.prepare("SELECT source_id,kind,content_id FROM parental_blocks WHERE blocked=1 UNION SELECT source_id,'live',channel_id FROM channel_overlays WHERE blocked=1 UNION SELECT source_id,CASE WHEN kind IN ('live','radio') THEN 'group' ELSE 'vod_category' END,id FROM groups g WHERE adult=1 AND NOT EXISTS(SELECT 1 FROM parental_blocks b WHERE b.source_id=g.source_id AND b.content_id=g.id AND b.kind=CASE WHEN g.kind IN ('live','radio') THEN 'group' ELSE 'vod_category' END AND b.blocked=0)")?;
+        let rows = q.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut targets = Vec::new();
+        for row in rows {
+            let (source, k, id) = row?;
+            if let Some(kind) = kind(&k) {
+                targets.push(Target { source, kind, id });
+            }
+        }
+        Ok(targets)
+    }
+    pub fn parental_memberships(&self) -> Result<std::collections::BTreeMap<Target, Vec<Target>>> {
+        let mut result = std::collections::BTreeMap::<Target, Vec<Target>>::new();
+        for (table, column, child, parent) in [
+            (
+                "channel_groups",
+                "channel_id",
+                ContentKind::Live,
+                ContentKind::Group,
+            ),
+            (
+                "vod_groups",
+                "vod_id",
+                ContentKind::Movie,
+                ContentKind::VodCategory,
+            ),
+            (
+                "series_groups",
+                "series_id",
+                ContentKind::Series,
+                ContentKind::VodCategory,
+            ),
+        ] {
+            let mut query = self
+                .conn
+                .prepare(&format!("SELECT source_id,{column},group_id FROM {table}"))?;
+            let rows = query.query_map([], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?;
+            for row in rows {
+                let (source, id, group) = row?;
+                result
+                    .entry(Target {
+                        source,
+                        kind: child,
+                        id,
+                    })
+                    .or_default()
+                    .push(Target {
+                        source,
+                        kind: parent,
+                        id: group,
+                    });
+            }
+        }
+        Ok(result)
+    }
+    pub fn parental_ancestors(&self, target: &Target) -> Result<Vec<Target>> {
+        let table = match target.kind {
+            ContentKind::Live => "channel_groups",
+            ContentKind::Movie => "vod_groups",
+            ContentKind::Series => "series_groups",
+            _ => return Ok(Vec::new()),
+        };
+        let column = match target.kind {
+            ContentKind::Live => "channel_id",
+            ContentKind::Movie => "vod_id",
+            _ => "series_id",
+        };
+        let parent_kind = if target.kind == ContentKind::Live {
+            ContentKind::Group
+        } else {
+            ContentKind::VodCategory
+        };
+        let mut query = self.conn.prepare(&format!(
+            "SELECT group_id FROM {table} WHERE source_id=?1 AND {column}=?2"
+        ))?;
+        let result = query
+            .query_map(params![target.source, target.id], |r| r.get::<_, String>(0))?
+            .map(|row| {
+                row.map(|id| Target {
+                    source: target.source,
+                    kind: parent_kind,
+                    id,
+                })
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(result)
+    }
+}

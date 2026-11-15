@@ -9,7 +9,13 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             }
         }
         RuntimeEvent::SchedulePresented(steps) => crate::startup::shown(&steps),
-        RuntimeEvent::CatalogChanged => ui.data_version.update(|version| *version += 1),
+        RuntimeEvent::CatalogChanged => {
+            ui.data_version.update(|version| *version += 1);
+            crate::data::spawn_in_app(async move {
+                let _ = crate::runtime().parental_refresh().await;
+                crate::parental_view::enforce(ui);
+            });
+        }
         RuntimeEvent::EarlyResume { source, done } => crate::data::spawn_in_app(async move {
             crate::player::resume::early(ui, &source).await;
             let _ = done.send(());

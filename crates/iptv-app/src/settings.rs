@@ -36,6 +36,11 @@ use crate::theme::{ACCENTS, BACKGROUNDS, Theme};
 
 /// The settings the app acts on.
 pub const WIRED: &[&str] = &[
+    "parental.live_enabled",
+    "parental.vod_enabled",
+    "parental.require_pin_for",
+    "parental.pin_input",
+    "parental.unlock_window",
     "playlists.max_connections",
     "general.language",
     "general.clock",
@@ -79,6 +84,7 @@ pub const WIRED: &[&str] = &[
 
 /// The commands the app runs (`settings_view::run`).
 pub const COMMANDS: &[&str] = &[
+    "parental.change_pin",
     "general.backup",
     "general.restore",
     "epg.add_source",
@@ -118,7 +124,7 @@ const NOT_OFFERED: &[&str] = &[
 ];
 
 /// Sections planned for later versions.
-const LATER: &[&str] = &["recordings.", "vod.", "parental."];
+const LATER: &[&str] = &["recordings.", "vod."];
 
 thread_local! { static REVISION: std::cell::Cell<Option<Signal<u64>>> = const { std::cell::Cell::new(None) }; }
 

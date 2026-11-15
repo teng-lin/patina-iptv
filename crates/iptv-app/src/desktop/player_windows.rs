@@ -347,6 +347,7 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
     local.wizard = signal(None);
     local.playlists = signal(None);
     local.settings_screen = signal(None);
+    local.parental = signal(None);
     // These screens belong to the main window. Its open state must never
     // capture keys or cover controls in an auxiliary player's presentation.
     local.editor = signal(None);

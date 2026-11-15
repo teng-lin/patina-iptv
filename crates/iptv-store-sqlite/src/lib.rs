@@ -62,6 +62,7 @@ pub mod migrate;
 mod order;
 mod organise;
 mod overlay;
+pub mod parental;
 mod recordings;
 mod search;
 mod search_history;

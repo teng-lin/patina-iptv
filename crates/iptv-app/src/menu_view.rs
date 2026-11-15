@@ -28,6 +28,9 @@ fn implemented(item: MenuItem, surface: usize) -> bool {
             | MenuItem::CustomRecording
             | MenuItem::Settings
             | MenuItem::Description
+            | MenuItem::BlockChannel
+            | MenuItem::BlockGroup
+            | MenuItem::ManageBlocked
             | MenuItem::ToggleFavorite
             | MenuItem::StartFromBeginning
             | MenuItem::ManageFavorites
@@ -58,6 +61,7 @@ fn label(item: MenuItem, favorite: bool) -> &'static str {
         ToggleFavorite if favorite => tr("Remove from favourites"),
         ToggleFavorite => tr("Add to favourites"),
         BlockChannel => tr("Block channel"),
+        BlockGroup => "Block group",
         HideChannel => tr("Hide channel"),
         AssignEpg => tr("Choose guide data…"),
         ChannelOptions => tr("Channel options…"),
@@ -152,6 +156,9 @@ pub fn perform(ui: Ui, item: MenuItem) {
     };
     ui.menu.set(None);
     match item {
+        MenuItem::BlockChannel => crate::parental_view::block_channel(ui, origin.channel),
+        MenuItem::BlockGroup => crate::parental_view::block_group(ui),
+        MenuItem::ManageBlocked => crate::parental_view::manage(ui),
         MenuItem::Record | MenuItem::CustomRecording => {
             crate::recordings_view::programme(ui, origin, item == MenuItem::CustomRecording);
         }

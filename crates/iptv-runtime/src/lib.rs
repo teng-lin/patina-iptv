@@ -31,6 +31,7 @@ mod events;
 pub mod guide_repair;
 pub mod inspection;
 mod operations;
+pub mod parental;
 pub mod recordings;
 pub use error::Error;
 
@@ -90,6 +91,7 @@ type Updates = Vec<(SourceId, Rc<ImportWork>)>;
 type SavedSettings = RefCell<Option<(u64, std::sync::Arc<iptv_settings::Settings>)>>;
 
 pub struct Runtime {
+    parental: RefCell<parental::State>,
     recordings: std::sync::Arc<recordings::State>,
     repairs: RefCell<guide_repair::State>,
     account_streams: Slot<Cell<Option<u32>>>,
@@ -156,6 +158,7 @@ impl Runtime {
         #[cfg(not(feature = "test-support"))]
         let guide_checks = guide_checks::GuideChecks::default();
         Self {
+            parental: RefCell::default(),
             recordings: Default::default(),
             repairs: RefCell::default(),
             account_streams: Slot::default(),
@@ -271,6 +274,7 @@ impl Runtime {
         self.inspection.renew();
     }
     pub fn drain_services(&self) -> bool {
+        self.parental_lock();
         self.recordings.stop();
         self.cancel_guide_checks();
         let drained = self

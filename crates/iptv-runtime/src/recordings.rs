@@ -492,6 +492,12 @@ impl Runtime {
             .read(move |store| store.recording_job(id))
             .await?
             .ok_or_else(|| Error::unavailable("Recording unavailable"))?;
+        self.parental_check(&iptv_core::parental::Target::live(
+            job.request.source,
+            job.request.channel.as_str(),
+        ))
+        .await
+        .map_err(|_| Error::unavailable("Unlock this recording with the parental PIN"))?;
         if !matches!(job.status, Status::Completed | Status::Partial) || job.bytes == 0 {
             return Err(Error::unavailable("This recording has no playable media"));
         }

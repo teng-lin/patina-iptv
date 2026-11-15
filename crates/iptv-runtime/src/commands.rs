@@ -114,8 +114,13 @@ fn channel_native(
     services: &Services,
     source: SourceId,
     channel: ContentId,
+    access: iptv_core::parental::Access,
 ) -> impl Future<Output = Result<Option<crate::model::PlaybackChannel>, StoreError>> + use<> {
     services.read(move |store| {
+        let target = iptv_core::parental::Target::live(source.0, channel.as_str());
+        if !crate::parental::native_allowed(store, &target, &access)? {
+            return Ok(None);
+        }
         Ok(store
             .channel(source, &channel)?
             .map(|row| crate::model::PlaybackChannel {
@@ -753,8 +758,9 @@ pub fn channel(
     channel: ContentId,
 ) -> impl Future<Output = Result<Option<crate::model::PlaybackChannel>, crate::Error>> + use<> {
     let services = owner.services();
+    let access = owner.parental_snapshot();
     async move {
-        channel_native(&services, source, channel)
+        channel_native(&services, source, channel, access)
             .await
             .map_err(crate::Error::from)
     }

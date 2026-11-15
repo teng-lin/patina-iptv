@@ -40,6 +40,7 @@ mod list_rows;
 mod lists;
 mod media;
 mod menu_view;
+pub(crate) mod parental_view;
 mod recordings_view;
 use iptv_runtime as runtime;
 mod runtime_events;
@@ -252,6 +253,7 @@ pub struct Ui {
     /// Bumped when a setting changes; read values with `settings::read`.
     pub settings: Signal<u64>,
     /// The settings screen, when open.
+    pub parental: Signal<Option<parental_view::Open>>,
     pub settings_screen: Signal<Option<iptv_settings::screen::Screen>>,
     /// Each player surface's stream, health, position, size and tracks;
     /// the channel history (`player.rs`).
@@ -326,6 +328,9 @@ impl Ui {
 
     /// Starts `channel` live or from the archive.
     pub fn play(&self, channel: usize, playback: Playback) {
+        if !parental_view::allow_play(*self, channel, playback) {
+            return;
+        }
         if self.player_surface != 0 {
             self.pending_zap.set(None);
             if player::start_surface(*self, self.player_surface, channel) {
@@ -730,6 +735,7 @@ fn ready_app() -> impl IntoElement {
         guide_assign: signal(None),
         library: data::Library::new(),
         settings: signal(0),
+        parental: signal(None),
         settings_screen: signal(None),
         player: player::Player::new(),
         player_surface: 0,
@@ -928,6 +934,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(guide_repair_view::layer(ui))
         .child(wizard_view::layer(ui))
         .child(recordings_view::indicator(ui))
+        .child(parental_view::layer(ui))
 }
 
 /// A tap on full-screen video: the play bar on a device with a pointer,
@@ -1034,6 +1041,10 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             || ui.chooser.with(Option::is_some)
             || ui.editor.with(Option::is_some);
         match (ui.mode.get(), ui.focus.with(|f| f.pane), panels || menu) {
+            _ if top == Some(Overlay::Parental) => {
+                parental_view::close(ui);
+                true
+            }
             _ if top == Some(Overlay::Wizard) => wizard_view::back(ui),
             _ if top == Some(Overlay::Recordings) => recordings_view::back(ui),
             _ if top == Some(Overlay::GuideSources) => epg_sources_view::back(ui),

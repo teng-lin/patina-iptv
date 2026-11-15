@@ -217,6 +217,9 @@ pub fn start(ui: &Ui, channel: usize) {
 /// session; the channel history is the full-screen player's only.
 /// Returns false when the provider connection cannot be reserved.
 pub fn start_surface(ui: Ui, surface: usize, channel: usize) -> bool {
+    if surface != 0 && !crate::parental_view::allow_play(ui, channel, Playback::Live) {
+        return false;
+    }
     if surface == 0 {
         ui.play(channel, Playback::Live);
         return ui.playing.get_untracked() == Some(channel);
@@ -313,6 +316,31 @@ fn close(ui: Ui, surface: usize) {
 
 /// Resolves what `surface` plays and hands the stream to its player.
 fn open(ui: Ui, surface: usize, session: u64) {
+    if let Some((channel, _)) = target(ui, surface)
+        && let Some(target) = crate::parental_view::live_target(ui, channel)
+    {
+        crate::data::spawn_in_app(async move {
+            let allowed = crate::runtime().parental_check(&target).await.is_ok();
+            if ui
+                .player
+                .stream(surface)
+                .health
+                .with_untracked(|h| h.session())
+                != session
+            {
+                return;
+            }
+            if allowed {
+                open_allowed(ui, surface, session);
+            } else {
+                stop_surface(ui, surface);
+            }
+        });
+    } else {
+        open_allowed(ui, surface, session);
+    }
+}
+fn open_allowed(ui: Ui, surface: usize, session: u64) {
     if surface == 0
         && let Some((_, source)) = ui.player.recorded.get_untracked()
     {

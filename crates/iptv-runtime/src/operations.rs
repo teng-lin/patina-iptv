@@ -17,6 +17,9 @@ impl Runtime {
     }
     pub fn set_foreground(&self, foreground: bool) {
         self.foreground.set(foreground);
+        if !foreground {
+            self.parental_backgrounded();
+        }
     }
     pub fn cancel_link_resolution(&self, surface: usize) {
         let running = self
