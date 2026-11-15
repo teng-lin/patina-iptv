@@ -168,6 +168,9 @@ can retain the host; login startup is opt-in, with experimental Windows task
 wake integration. Linux/macOS sleep wake and iPad background capture are not
 implemented. Recurring local-time and guide-title rules materialize durable,
 conditionally claimed jobs; accepted jobs do not depend on viewing unlocks.
+Independent UI and recording services share per-directory filesystem gates
+for private playlist publication and recovery, so opening one service cannot
+remove another service's active encrypted temporary file.
 
 Retained-media playback reports source-token-scoped timelines and numbered seek
 acknowledgements. Seeking preserves the player surface and pause state; stale

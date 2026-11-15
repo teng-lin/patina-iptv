@@ -19,6 +19,10 @@ is below 1.0, a minor release may change behaviour.
 - Native recording seek/duration, pause, durable resume, playback from the
   beginning and completion controls, sharing the persistent player surface.
 
+### Fixed
+
+- Touch player controls reserve room for every button, keeping optional
+  picture-in-picture and recording controls clear of rewind and fast-forward.
 
 ## [0.1.3] - 2026-11-15
 
