@@ -24,6 +24,7 @@ use crate::{Playback, Ui, ViewMode};
 pub struct Early {
     /// The channel's content key (finds it in the guide).
     pub key: String,
+    pub source_id: i64,
     pub source: PlaySource,
 }
 
@@ -78,6 +79,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     ui.player.resume.set(false);
     ui.playback.set(Playback::Live);
     ui.player.early.set(Some(Early {
+        source_id: stored.id.0,
         key,
         source: source.clone(),
     }));
@@ -92,10 +94,8 @@ pub fn playing(ui: Ui) -> bool {
 }
 
 /// The early stream to open again (a retry before the guide arrived).
-pub fn source(ui: Ui) -> Option<PlaySource> {
-    ui.player
-        .early
-        .with_untracked(|e| e.as_ref().map(|e| e.source.clone()))
+pub fn source(ui: Ui) -> Option<Early> {
+    ui.player.early.get_untracked()
 }
 
 /// The guide is on screen: the early stream's channel becomes the playing

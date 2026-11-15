@@ -383,11 +383,46 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
     let Some((channel, playback)) = target(ui, surface) else {
         // A retry of the last channel started before the guide arrived.
         match resume::source(ui).filter(|_| surface == 0) {
-            Some(source) => load(ui, 0, session, source),
+            Some(early) => crate::data::spawn_in_app(async move {
+                let owner = crate::runtime();
+                let source = iptv_library::SourceId(early.source_id);
+                let channel = iptv_providers::ContentId::from_stored(early.key);
+                let allowed = crate::runtime::commands::channel(&owner, source, channel)
+                    .await
+                    .is_ok_and(|row| row.is_some_and(|r| !r.blocked));
+                if ui.player.main().health.with_untracked(|h| h.session()) != session {
+                    return;
+                }
+                if !allowed {
+                    stop(ui);
+                    return;
+                }
+                if owner.reserve_viewing(0, source) {
+                    load(ui, 0, session, early.source);
+                } else {
+                    fail(
+                        ui,
+                        0,
+                        session,
+                        ErrorKind::Http(429),
+                        "Provider connection reserved for recording".into(),
+                    );
+                }
+            }),
             None => close(ui, surface),
         }
         return;
     };
+    if !crate::recordings_view::try_reserve_viewing(surface, channel) {
+        fail(
+            ui,
+            surface,
+            session,
+            ErrorKind::Http(429),
+            "Provider connection reserved for recording".into(),
+        );
+        return;
+    }
     let schedule = crate::schedule();
     // An older day's programme: its real times once its day is paged in.
     if let Playback::CatchUp { start, .. } = playback
