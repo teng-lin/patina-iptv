@@ -576,6 +576,7 @@ iptv-app/src/header.rs	keys {} · {} µs (max {})
 iptv-app/src/backup.rs	Patina.patinabackup
 iptv-app/src/desktop.rs	Patina
 iptv-app/src/main.rs	Patina
+iptv-app/src/startup.rs	Patina
 # What an edit or an effect is called in the log.
 iptv-app/src/epg_sources_view.rs	add (named {})
 iptv-app/src/epg_sources_view.rs	move {} by {step}

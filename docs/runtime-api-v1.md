@@ -1,18 +1,9 @@
 # Internal application service contract v1
 
-Status: **stable internal service contract v1**. The
-[foundation acceptance record](plans/2026-11-14-foundation-validation.md)
-records FND-01–26, independent and UI consumers, platform checks and CI on the
-integrated implementation. This document versions application semantics
-independently of the package version. It describes the boundary used by Patina's UI and an
-independent native test consumer. It establishes no binary ABI, external SDK
-or MCP wire-schema promise.
-
-The [delivery plan](plans/2026-11-14-mcp-plan.md),
-[F0 decisions](plans/2026-11-14-foundation-decisions.md) and
-[acceptance inventory](plans/2026-11-14-foundation-acceptance.md) define the
-requirements behind this contract. The preserved technical reference supplies
-transaction/staging details; its external-client machinery belongs to Stage 2.
+Status: **stable internal service contract v1**. This document versions
+application semantics independently of the package version. It describes the
+boundary used by Patina's UI and an independent native test consumer. It
+establishes no binary ABI, external SDK or MCP wire-schema promise.
 
 ## Public boundary and ownership
 
@@ -222,9 +213,8 @@ and required trait methods are not automatically nonbreaking Rust changes.
 Error meanings, identity lifetime, ordering, bounds, cursor invalidation,
 completion, cancellation and publication guarantees also require review.
 
-The acceptance record identifies the integrated source and executed evidence
-for FND-01–26, UI and independent headless consumers, architecture/signature
-checks, portable builds, full repository checks, contention/scale budgets and
-affected host/device tests. Keep these compatibility gates and the explicit
-platform/provider limits when extending v1. A missing, skipped or narrow test
-cannot establish a broader capability.
+Compatibility gates include UI and independent headless consumers,
+architecture/signature checks, portable builds, full repository checks,
+contention/scale budgets and affected host/device tests. Keep these gates
+and the explicit platform/provider limits when extending v1. A missing, skipped
+or narrow test cannot establish a broader capability.

@@ -12,17 +12,44 @@ use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
 /// A wrapper around [`nsh_testing::Headless`] that scales scenario wait timeouts.
-pub struct Headless(nsh_testing::Headless);
+pub struct Headless(nsh_testing::Headless, bool);
 
 impl Headless {
+    /// Observe initial mounts normally, but wait for the splash before input.
+    fn ready_for_input(&mut self) -> Result<(), String> {
+        if !self.1 {
+            self.wait_until("initial app frame", Duration::from_secs(20), |screen| {
+                !screen.layout_nodes().is_empty()
+            })?;
+            self.wait_for_gone("id:startup-splash", Duration::from_secs(20))?;
+            self.1 = true;
+        }
+        Ok(())
+    }
+
+    pub fn press(&mut self, selector: &str) -> Result<(), String> {
+        self.ready_for_input()?;
+        self.0.press(selector)
+    }
+
+    pub fn press_key(&mut self, key: &str) -> Result<(), String> {
+        self.ready_for_input()?;
+        self.0.press_key(key)
+    }
+
+    pub fn back(&mut self) -> Result<(), String> {
+        self.ready_for_input()?;
+        self.0.back()
+    }
+
     /// Starts the headless application runner with `config`.
     pub fn start(config: EngineConfig) -> std::io::Result<Self> {
-        nsh_testing::Headless::start(config).map(Self)
+        nsh_testing::Headless::start(config).map(|inner| Self(inner, false))
     }
 
     /// Starts the headless application runner opening `url`.
     pub fn start_with_link(config: EngineConfig, url: &str) -> std::io::Result<Self> {
-        nsh_testing::Headless::start_with_link(config, url).map(Self)
+        nsh_testing::Headless::start_with_link(config, url).map(|inner| Self(inner, false))
     }
 
     /// Starts the headless runner using a custom text engine.
@@ -31,7 +58,8 @@ impl Headless {
         M: TextEngine + 'static,
         F: FnOnce() -> M + Send + 'static,
     {
-        nsh_testing::Headless::start_with_text_engine(config, factory).map(Self)
+        nsh_testing::Headless::start_with_text_engine(config, factory)
+            .map(|inner| Self(inner, false))
     }
 
     /// The step `waitFor(<selector>)`: applies batches until a view on

@@ -1,14 +1,19 @@
 # Patina IPTV
 
-A bring-your-own-playlist IPTV player for Android TV, Android tablets,
-Linux, macOS, Windows (experimental) and iPad, written in Rust on
-[Native Shell (NSH)](https://github.com/longbridge/nsh).
+![Patina — a weathered copper P and wordmark on a dark teal background](art/icon/banner.png)
 
-Patina is inspired by the TV guide experience of TiviMate on Android TV
-and brings that experience to desktops and tablets: a remote-first guide
-over live video that works just as well with touch, mouse and keyboard.
-Patina is an independent project, not affiliated with TiviMate, and
-shares none of its code or artwork.
+**Keep watching. Find what’s next.**
+
+Browse the guide over live TV, keep your favourites close, and make your
+own IPTV playlists feel at home. Pick up a remote, tap the screen, or
+reach for your mouse and keyboard.
+
+For Android TV, Android tablets, Linux, macOS, Windows (experimental) and
+iPad. Built in Rust with [Native Shell (NSH)](https://github.com/longbridge/nsh).
+
+Inspired by TiviMate’s TV guide experience, Patina is an independent
+project with its own design, code and artwork, and no affiliation with
+TiviMate.
 
 ![The TV guide on Android TV, with the playing channel in the preview](docs/screenshots/tv-guide.png)
 

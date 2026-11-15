@@ -7,12 +7,24 @@ is below 1.0, a minor release may change behaviour.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-15
+
 ### Added
 
 - Linux and macOS prototype: open a live guide channel in an independent player window
   with the original player controls, while main playback continues.
 - Independent player windows can switch to compact picture-in-picture and back
   without opening another stream, with their own pause, return and close controls.
+
+### Changed
+
+- README opens with Patina's banner and a new introduction.
+- Patina's branded splash appears at launch while the app initializes.
+
+### Removed
+
+- Archived audit reports, implementation plans and foundation walkthroughs;
+  the runtime API contract now stands alone.
 
 ### Fixed
 
@@ -23,6 +35,8 @@ is below 1.0, a minor release may change behaviour.
   by identity, and preserve pause after a refused channel switch. Hyprland PiP
   placement handles rotated displays and stream shapes without moving an
   already arranged window.
+- Resuming the last channel at startup shows the compact channel banner,
+  with the normal automatic timeout.
 
 ## [0.1.2] - 2026-11-14
 
@@ -136,7 +150,8 @@ First public release, for Android TV and tablets, Linux and macOS.
 - Packages: a signed Android APK, Linux `.deb`, `.rpm`, pacman package and
   AppImage, and an ad hoc signed macOS disk image.
 
-[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/teng-lin/patina-iptv/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/teng-lin/patina-iptv/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/teng-lin/patina-iptv/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/teng-lin/patina-iptv/releases/tag/v0.1.0

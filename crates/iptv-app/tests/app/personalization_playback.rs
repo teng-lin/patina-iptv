@@ -103,3 +103,40 @@ fn rapid_navigation_cancels_tuning_menus_cancel_preview_and_input_extends_fullsc
     step(app.back());
     assert!(!preview(app));
 }
+
+#[test]
+fn cold_start_resumes_the_stored_channel_with_an_auto_hiding_banner() {
+    let Some(home) = isolated!() else { return };
+    let mut settings = Settings::new();
+    settings
+        .set("general.resume_last_channel", Value::Bool(true))
+        .unwrap();
+    let fixture = start(home, settings, true);
+    drop(fixture.app);
+    let key = iptv_providers::m3u::parse_m3u(M3U).channels.items[0]
+        .id
+        .as_str()
+        .to_owned();
+    std::fs::write(
+        fixture
+            .home
+            .data_dir()
+            .join(format!("last_channel-{}", fixture.source.0)),
+        key,
+    )
+    .unwrap();
+
+    // One cached playlist with refresh disabled takes the early-resume path.
+    // Keep the isolated home alive while a new app reads its saved channel.
+    let mut app = crate::cov_data::start();
+    step(app.wait_for_within(
+        "id:player-banner >> text:/Local A$/",
+        Duration::from_secs(20),
+    ));
+    assert!(iptv_app::player_has_source(0));
+    step(app.run_for(Duration::from_secs(10)));
+    assert!(!app.screen().matches("id:player-banner").unwrap());
+    // OK can still open the full information card after the banner expires.
+    step(app.press_key("enter"));
+    step(app.wait_for("id:player-card"));
+}
