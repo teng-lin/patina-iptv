@@ -160,8 +160,32 @@ swaps. Playback uses a read-only random-capability HTTP server with byte-range
 support, so both native player hosts keep their guarded HTTP path. Deletion
 refuses the file currently playing. Interrupted jobs recover captured media
 as partial recordings; publication never overwrites an existing media file.
-Scheduling is app-open-only; no background host, wake contract, recurring
-rule or stable recording API is advertised by runtime contract v1.
+Native recording ownership is independent of the UI service epoch. A host
+shares recording state and account budgets across engine recreation while a
+process-wide storage lock excludes competing processes. Android supplies a
+foreground service, wake lock and alarm/boot receivers. Desktop window close
+can retain the host; login startup is opt-in, with experimental Windows task
+wake integration. Linux/macOS sleep wake and iPad background capture are not
+implemented. Recurring local-time and guide-title rules materialize durable,
+conditionally claimed jobs; accepted jobs do not depend on viewing unlocks.
+
+Retained-media playback reports source-token-scoped timelines and numbered seek
+acknowledgements. Seeking preserves the player surface and pause state; stale
+observations cannot undo a newer seek. Recording and on-demand resume metadata
+live in the encrypted catalogue, independently of retained media bytes.
+
+Parental policy, unlock scopes and PIN-dialog state live in the portable core.
+The native runtime stores salted one-way PIN/recovery verifiers, durable attempt
+backoff and source-qualified blocks. Provider/category membership is checked
+from current storage at native admission, with final grant checks before
+handing resolved streams to the decoder. Suspending a mobile player requires
+fresh shell authorization before it can open its retained URL again.
+
+The on-demand catalogue renders source/content identities, provider details,
+seasons/episodes and persisted progress. Temporary provider links are resolved
+again on retry; source-incarnation checks reject stale detail/progress work
+following source deletion and recreation. These native recording, parental
+and VOD APIs remain experimental outside runtime contract v1.
 
 There is one persistent player surface under the UI
 (`iptv-app/src/video.rs`). It is a native component named `tv.player`:

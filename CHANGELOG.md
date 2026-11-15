@@ -7,6 +7,19 @@ is below 1.0, a minor release may change behaviour.
 
 ## [Unreleased]
 
+### Added
+
+- Provider movie and series libraries with search, category/source filters,
+  sorting, seasons, episodes, Continue watching and cross-season playback.
+- Parental PIN setup, change and recovery, protected channels/groups/on-demand
+  content, configurable unlock scopes and native playback/mutation checks.
+- Independent recording host with Android foreground execution and alarm/boot
+  recovery, opt-in desktop login startup, daily/weekly/series schedules and
+  interrupted-capture recovery. Host sleep and Android service limits apply.
+- Native recording seek/duration, pause, durable resume, playback from the
+  beginning and completion controls, sharing the persistent player surface.
+
+
 ## [0.1.3] - 2026-11-15
 
 ### Added

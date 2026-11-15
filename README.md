@@ -55,10 +55,16 @@ custom groups and history.
   picture-in-picture on the desktops, track and picture-size choice.
 - **Library:** favourites, custom groups, reordering, hiding, history and
   channel/programme search.
-- **Recording:** record live TV or schedule a one-off recording, with early/late
-  padding; play, stop, cancel and delete recordings from the Recordings screen.
-  Keep Patina running and the device awake. MPEG-TS and unencrypted MPEG-TS HLS
-  are supported; recordings use private local media storage, outside catalogue backups.
+- **Movies and series:** browse provider catalogues by playlist and category,
+  search and sort titles, choose seasons and episodes, resume unfinished items
+  and continue to the next episode.
+- **Parental controls:** protect channels, groups, movies and series with a PIN,
+  timed or session unlocks, protected settings and a one-time recovery code.
+- **Recording:** record live TV, schedule once, daily, weekly or by programme
+  title, and keep captures running independently of the player window. Retained
+  recordings support pause, seeking, resume and playback from the beginning.
+  MPEG-TS and unencrypted MPEG-TS HLS use private local storage outside backups;
+  [background execution depends on the host](#recordings-on-tv-tablet-and-desktop).
 - **Resilient live playback:** streams that the provider cuts reconnect
   without dropping to an error screen.
 - **Interface languages:** 11 partly translated language options with system-language detection
@@ -269,6 +275,24 @@ mocks: `tools/mock-xtream.py` (Xtream API), `tools/mock-live-cuts.py`
 (live streams the server keeps cutting), `tools/make-track-fixtures.sh`
 (multiple audio and subtitle tracks).
 
+## Movies, series and parental controls
+
+**Films** and **Series** in the navigation rail open the on-demand catalogue
+provided by Xtream Codes or Stalker sources. Filter by playlist/category, search
+by title and choose a sort order. Details show available metadata, seasons and
+episodes; Continue watching restores saved progress. Episode playback can
+continue into the next season. Availability and metadata depend on the provider.
+M3U imports remain channel playlists; Patina does not guess a movie catalogue
+from channel names or URL extensions.
+
+Use **Block channel**, **Block group** or the on-demand block control to protect
+content. The first protected action sets a four-to-eight-digit PIN and displays
+a recovery code. Parental settings control live/on-demand protection, unlock
+scope and whether opening general settings requires the PIN. Changing parental
+policy, protected organisation or backups still requires administrative unlock.
+Recovery resets the PIN and rotates the recovery code. Viewing locks do not
+cancel recordings that were already authorized.
+
 ## Recordings on TV, tablet and desktop
 
 Choose **Record** or **Schedule a recording…** in a programme's menu. The
@@ -280,12 +304,31 @@ finished recordings. Cancel removes a schedule; Stop retains captured media;
 Delete removes media after confirmation. A dot marks recording programmes in
 the guide, and the recording indicator opens management while watching.
 
-Recordings have fixed start/end times and do not follow later EPG changes.
-The app must remain running and the device awake; boot/wake execution,
-repeating schedules, reminders, network destinations and recording seek/resume
-controls are not included yet. A missed start is reported; interrupted input
-retains a partial recording. Provider accounts need enough connections for
-watching plus recording. **Settings → Other → Streams at once** sets a local
+Use **Repeat** to choose once, daily, weekly or series. Daily and weekly
+schedules keep their local clock time across daylight-saving changes; series
+rules match the programme title on the selected channel as guide data arrives.
+An accepted individual job keeps its start/end times. Cancel repeating schedule
+stops future occurrences without deleting finished recordings.
+
+On Android, capture runs in a foreground service with a notification. Allow
+precise wakeups in Recordings settings for scheduled starts; boot and package
+updates restore pending wakeups. Android force stop prevents execution until
+Patina is opened again, and Android 15 can limit background capture to six
+hours in a 24-hour period. Device, network and storage availability still apply.
+
+On desktop, closing the window keeps the process running when recordings or
+repeating rules need it. **Start recorder at login** enables recovery after
+sign-in; **Quit Patina** stops the recorder. Linux and macOS require an awake
+computer. Windows includes an experimental scheduled-task wake hook, subject
+to the system's wake-timer settings; it does not power on a shut-down computer.
+iPad background recording is not supported.
+
+Finished and partial recordings offer resume and playback from the beginning;
+the player uses its normal pause, rewind, fast-forward and seek bar controls.
+Interrupted jobs retain captured media and recover the remaining window when
+possible; gaps and missed windows are reported. Reminders and network recording
+destinations remain outside this feature. Provider accounts need enough
+connections for watching plus recording. **Settings → Other → Streams at once** sets a local
 ceiling (default one); known provider limits still apply. Accounts identified
 as the same Xtream/portal account share their budget. M3U account associations
 are unknown and are counted conservatively against other streams.
