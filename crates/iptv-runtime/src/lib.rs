@@ -279,7 +279,7 @@ impl Runtime {
         self.inspection.renew();
     }
     pub fn drain_services(&self) -> bool {
-            parental: RefCell::default(),
+        self.parental_lock();
         if !self.recordings_detached.replace(true) {
             self.recordings.detach_ui();
         }
