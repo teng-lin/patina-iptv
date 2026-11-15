@@ -442,7 +442,14 @@ pub(crate) async fn pipeline(
         return fail(ImportFailure::new(FailureKind::Network));
     };
     let mut progress = Forward(tx);
-    let mut options = ImportOptions::new(now);
+    let target = job.stored.map_or(iptv_settings::Target::Global, |id| {
+        iptv_settings::Target::playlist(id.0.to_string())
+    });
+    let include_vod = services.settings().bool(
+        iptv_settings::keys::BoolKey("playlists.include_vod"),
+        &target,
+    );
+    let mut options = ImportOptions::new(now).with_vod(include_vod, include_vod);
     // A whole catalog import (live, movies and series of an Xtream account)
     // may take long on a slow box; a stalled download still ends at the
     // client's idle timeout. The budget is counted over the whole import

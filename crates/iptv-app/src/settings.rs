@@ -41,6 +41,7 @@ pub const WIRED: &[&str] = &[
     "parental.require_pin_for",
     "parental.pin_input",
     "parental.unlock_window",
+    "playlists.include_vod",
     "playlists.max_connections",
     "vod.sort",
     "vod.autoplay_next_episode",
