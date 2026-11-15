@@ -495,9 +495,11 @@ fn right(ui: Ui) -> impl IntoElement {
             .find(|k| ui.player.main().tracks.with(|t| t.has_choice(*k)))
     };
     let playing = move || ui.playing.get().is_some();
-    // Never narrower than its buttons (seven on the desktop, six
-    // elsewhere) and the frame rate: they must not slide under the centre.
-    let buttons = if DESKTOP { 8.0 } else { 7.0 };
+    // Reserve space for every control, including recording and optional
+    // native window controls, so none overlap the transport hit targets.
+    let buttons = 8.0
+        + if DESKTOP { 1.0 } else { 0.0 }
+        + if crate::pip::supported(ui) { 1.0 } else { 0.0 };
     view()
         .flex_1()
         .min_w(px(buttons * size + (buttons - 1.0) * 2.0 + FPS_W + 6.0))
