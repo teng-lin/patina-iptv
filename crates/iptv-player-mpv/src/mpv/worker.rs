@@ -798,8 +798,14 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(5));
                     continue;
                 };
+                // Winsock inherits the listener's nonblocking mode. The
+                // fixture uses bounded blocking I/O, including write_all.
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                stream
+                    .set_write_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
                 let mut request = [0; 4096];
                 let read = stream.read(&mut request).unwrap_or(0);
@@ -920,6 +926,7 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(5));
                     continue;
                 };
+                stream.set_nonblocking(false).unwrap();
                 let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
                 let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
                 let mut request = [0; 4096];

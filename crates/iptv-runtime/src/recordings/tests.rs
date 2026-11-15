@@ -70,6 +70,7 @@ fn server() -> String {
                 std::thread::sleep(Duration::from_millis(10));
                 continue;
             };
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_write_timeout(Some(Duration::from_secs(2)))
                 .unwrap();
