@@ -27,6 +27,12 @@ class CoverageFloors(unittest.TestCase):
         self.assertEqual(checker.parse_summary(shortened), expected)
         self.assertEqual(checker.parse_summary(shortened.replace("/", "\\")), expected)
 
+    def test_checkout_under_src_does_not_shadow_the_crate_path(self):
+        expected = checker.parse_summary(SYNTHETIC_SUMMARY)
+        nested = SYNTHETIC_SUMMARY.replace("home/runner/work", "home/generated/src/worktrees")
+        self.assertEqual(checker.parse_summary(nested), expected)
+        self.assertEqual(checker.parse_summary(nested.replace("/", "\\")), expected)
+
     def test_evaluate_passes_when_above_floor(self):
         totals = {"iptv-core": [100, 5]}  # 95%
         results, failed = checker.evaluate(totals, {"iptv-core": 94.0})
