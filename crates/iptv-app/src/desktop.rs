@@ -41,6 +41,7 @@ pub fn bind(ui: Ui) {
         if reason != nsh_core::desktop::CloseReason::System
             && crate::runtime().recording_background_needed()
         {
+            crate::multiview::close(ui);
             crate::player::stop(ui);
             close_window.hide();
         } else {
