@@ -221,15 +221,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                         .unwrap_or_default()
                                 })
                             }))
-                            .child(crate::ui_kit::caption(size, move || {
-                                trf(
-                                    "Recorded video · {seconds} s",
-                                    &[(
-                                        "seconds",
-                                        (ui.player.main().position_ms.get() / 1000).into(),
-                                    )],
-                                )
-                            }))
+                            .child(card::time_line(ui))
                     },
                 ))
                 .child(when(cards, move || quick_row(ui, panel)))

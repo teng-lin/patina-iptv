@@ -163,6 +163,9 @@ fn saved_recording_resumes_seeks_paused_and_starts_again_without_changing_surfac
     step(app.press_key("left"));
     let seek = props.lock().unwrap()["seek"].clone();
     assert_eq!(seek["ms"], 0);
+    step(app.wait_for("id:player-time-line"));
+    step(app.wait_for("text:0:00"));
+    step(app.wait_for("text:2:00"));
     assert_eq!(
         iptv_app::player_opens(0),
         before,
