@@ -1,5 +1,10 @@
 //! Movies and series share one portable catalogue state and the persistent player.
-use crate::{Ui, i18n::tr, scale::Scale, ui_kit};
+use crate::{
+    Ui,
+    i18n::{tr, trf},
+    scale::Scale,
+    ui_kit,
+};
 use iptv_core::vod::{Control, Details, Key, Kind, Progress, Sort};
 use iptv_nav::Action;
 use nsh_base::input;
@@ -69,13 +74,25 @@ fn reload(ui: Ui, append: bool) {
                 }
                 Err(_) => {
                     s.busy = false;
-                    s.error = Some("On-demand library could not be loaded".into());
+                    s.error =
+                        Some(crate::i18n::key("On-demand library could not be loaded").into());
                 }
             }
         });
     });
 }
 fn select(ui: Ui, key: Key) {
+    let generation = ui.vod.with_untracked(|s| s.generation);
+    crate::parental_view::request(ui, iptv_runtime::vod::target(&key), move || {
+        if ui
+            .vod
+            .with_untracked(|s| s.open && s.generation == generation)
+        {
+            select_authorized(ui, key);
+        }
+    });
+}
+fn select_authorized(ui: Ui, key: Key) {
     let generation = edit(ui, |s| {
         s.focused = Some(key.clone());
         s.busy = true;
@@ -94,7 +111,10 @@ fn select(ui: Ui, key: Key) {
             match result {
                 Ok(details) => s.show_details(details),
                 Err(_) => {
-                    s.error = Some("Details unavailable; refresh the playlist and try again".into())
+                    s.error = Some(
+                        crate::i18n::key("Details unavailable; refresh the playlist and try again")
+                            .into(),
+                    )
                 }
             }
         });
@@ -116,10 +136,22 @@ fn play(ui: Ui, restart: bool) {
     }
 }
 fn play_key(ui: Ui, details: Details, key: Key, restart: bool) {
-    if !crate::runtime().reserve_viewing(0, iptv_library::SourceId(key.source)) {
-        ui.vod.update(|s|s.error=Some("No provider connection available while recording; stop a recording or check Streams at once".into()));
-        return;
+    let generation = ui.vod.with_untracked(|s| s.generation);
+    let parent = (key.kind == Kind::Episode).then(|| details.item.key.clone());
+    let run = move || {
+        crate::parental_view::request(ui, iptv_runtime::vod::target(&key), move || {
+            if ui.vod.with_untracked(|s| s.generation == generation) {
+                play_authorized(ui, details, key, restart);
+            }
+        })
+    };
+    if let Some(parent) = parent {
+        crate::parental_view::request(ui, iptv_runtime::vod::target(&parent), run);
+    } else {
+        run();
     }
+}
+fn play_authorized(ui: Ui, details: Details, key: Key, restart: bool) {
     let generation = edit(ui, |s| {
         s.busy = true;
         s.error = None;
@@ -135,18 +167,61 @@ fn play_key(ui: Ui, details: Details, key: Key, restart: bool) {
         ui.vod.update(|s| s.busy = false);
         match result {
             Ok((playing, source)) => {
+                if !owner.reserve_viewing(0, iptv_library::SourceId(playing.key.source)) {
+                    ui.vod.update(|s|s.error=Some(crate::i18n::key("No provider connection available while recording; stop a recording or check Streams at once").into()));
+                    return;
+                }
+
                 flush(ui);
                 crate::player::play_vod(ui, playing, source);
                 close(ui);
             }
             Err(_) => {
-                owner.release_viewing(0);
                 ui.vod.update(|s| {
-                    s.error =
-                        Some("Playback unavailable; refresh the playlist and try again".into())
+                    s.error = Some(
+                        crate::i18n::key(
+                            "Playback unavailable; refresh the playlist and try again",
+                        )
+                        .into(),
+                    )
                 });
             }
         }
+    });
+}
+fn toggle_block(ui: Ui) {
+    let Some(target) = ui.vod.with_untracked(|s| {
+        s.details
+            .as_ref()
+            .map(|d| iptv_runtime::vod::target(&d.item.key))
+    }) else {
+        return;
+    };
+    let blocked = !crate::runtime().parental_is_blocked(&target);
+    crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
+        let owner = crate::runtime();
+        crate::data::spawn_in_app(async move {
+            if blocked
+                && owner
+                    .set_setting("parental.vod_enabled", iptv_settings::Value::Bool(true))
+                    .is_err()
+            {
+                return;
+            }
+            if owner.parental_set_blocked(target, blocked).await.is_ok() {
+                ui.vod.update(|s| {
+                    s.notice = Some(
+                        if blocked {
+                            crate::i18n::key("Content blocked")
+                        } else {
+                            crate::i18n::key("Content unblocked")
+                        }
+                        .into(),
+                    )
+                });
+                crate::parental_view::enforce(ui);
+            }
+        });
     });
 }
 fn cycle_source(ui: Ui) {
@@ -200,6 +275,7 @@ fn activate(ui: Ui) {
         Control::Restart => play(ui, true),
         Control::Seasons => ui.vod.update(|s| s.cycle_season(1)),
         Control::Next => next(ui),
+        Control::Block => toggle_block(ui),
         Control::Search => {}
     }
 }
@@ -265,10 +341,13 @@ pub fn title(ui: Ui) -> Option<String> {
         .vod
         .with(|v| v.as_ref().map(|(p, _)| p.title.clone()))
 }
-pub fn flush(ui:Ui){crate::on_demand::flush(ui,false);}
+pub fn flush(ui: Ui) {
+    crate::on_demand::flush(ui, false);
+}
 pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) {
     let mut write = None;
     let mut finished = None;
+    let mut series_complete = None;
     ui.player.vod.update(|value| {
         let Some((p, _)) = value else { return };
         let progress =
@@ -281,13 +360,39 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
             write = Some((p.key.clone(), p.parent.clone(), progress));
             p.last_saved_ms = Some(progress.position_ms);
         }
-        if ended && !p.ended {
-            finished = Some(p.clone());
-            p.ended = true;
-        }
+        let just_ended = ended && !p.ended;
+        let became_completed = progress.completed && !p.progress.completed;
+        p.ended |= ended;
         p.progress = progress;
+        if let Some(ep) = p.details.episodes.iter_mut().find(|e| e.key == p.key) {
+            ep.progress = progress;
+        }
+        if p.key.kind == Kind::Movie {
+            p.details.item.progress = progress;
+        }
+        if became_completed
+            && p.parent.is_some()
+            && p.details.episodes.iter().all(|e| e.progress.completed)
+        {
+            series_complete = p.parent.clone();
+        }
+        if just_ended {
+            finished = Some(p.clone());
+        }
     });
-    if let Some((key,parent,progress))=write {crate::runtime().queue_vod_progress(key,parent,progress);}
+    if let Some((key, parent, progress)) = write {
+        crate::runtime().queue_vod_progress(key, parent, progress);
+    }
+    if let Some(parent) = series_complete {
+        crate::runtime().queue_vod_progress(
+            parent,
+            None,
+            Progress {
+                completed: true,
+                ..Default::default()
+            },
+        );
+    }
     if let Some(p) = finished {
         if let Some(next) = p.details.next_episode(&p.key) {
             if crate::settings::flag(iptv_settings::keys::BoolKey("vod.autoplay_next_episode")) {
@@ -298,7 +403,7 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
                     s.show_details(p.details.clone());
                     s.episode = Some(next.key.clone());
                     s.season = Some(next.season);
-                    s.notice = Some("Ready for the next episode".into());
+                    s.notice = Some(crate::i18n::key("Ready for the next episode").into());
                 });
             }
         }
@@ -401,12 +506,12 @@ fn toolbar(ui: Ui, size: Scale) -> impl IntoElement {
                     size,
                     Control::Sort,
                     move || {
-                        tr(ui.vod.with(|s| match s.query.sort {
-                            Sort::Name => "Name",
-                            Sort::Newest => "Recently added",
-                            Sort::Year => "Year",
-                            Sort::Rating => "Rating",
-                        }))
+                        ui.vod.with(|s| match s.query.sort {
+                            Sort::Name => tr("Name"),
+                            Sort::Newest => tr("Recently added"),
+                            Sort::Year => tr("Year"),
+                            Sort::Rating => tr("Rating"),
+                        })
                     },
                     move || {
                         ui.vod.update(|s| s.query.sort = s.query.sort.next());
@@ -441,10 +546,9 @@ fn card_label(card: &iptv_core::vod::Card) -> String {
         if card.progress.completed {
             format!(" · {}", tr("Watched"))
         } else if card.progress.resume_ms() > 0 {
-            format!(
-                " · {} {} min",
-                tr("Resume"),
-                card.progress.position_ms / 60_000
+            trf(
+                " · Resume at {minutes} min",
+                &[("minutes", (card.progress.position_ms / 60_000).into())],
             )
         } else {
             String::new()
@@ -520,9 +624,16 @@ fn details(ui: Ui, size: Scale) -> impl IntoElement {
             },
         ));
     view().flex_1().gap(move||size.px(12.0))
-        .child(ui_kit::heading(size,move||ui.vod.with(|s|s.details.as_ref().map(|d|card_label(&d.item)).unwrap_or_default())))
-        .child(ui_kit::body(size,move||ui.vod.with(|s|s.details.as_ref().and_then(|d|d.item.plot.clone()).unwrap_or_default())))
+        .child(view().flex_row().gap(move||size.px(20.0))
+            .child(when(move||ui.vod.with(|s|s.details.as_ref().is_some_and(|d|d.item.poster.as_ref().is_some_and(|p|!p.is_empty()))),move||{
+                image(crate::content_image::source(move||ui.vod.with(|s|s.details.as_ref().and_then(|d|d.item.poster.clone())).unwrap_or_default()))
+                    .w(move||size.px(100.0)).h(move||size.px(150.0)).object_fit(ResizeMode::Contain)
+            }))
+            .child(view().flex_1().gap(move||size.px(8.0))
+                .child(ui_kit::heading(size,move||ui.vod.with(|s|s.details.as_ref().map(|d|card_label(&d.item)).unwrap_or_default())))
+                .child(ui_kit::body(size,move||ui.vod.with(|s|s.details.as_ref().and_then(|d|d.item.plot.clone()).unwrap_or_default())))))
         .child(actions)
+        .child(button(ui,size,Control::Block,move||ui.vod.with(|s|s.details.as_ref().map(|d|if crate::runtime().parental_is_blocked(&iptv_runtime::vod::target(&d.item.key)){tr("Unblock content")}else{tr("Block content")})).unwrap_or(tr("Block content")),move||toggle_block(ui)))
         .child(when(move||ui.vod.with(|s|s.details.as_ref().is_some_and(|d|d.item.key.kind==Kind::Series)),move||{
             view().flex_1().gap(move||size.px(8.0))
                 .child(button(ui,size,Control::Seasons,move||format!("{} {}",tr("Season"),ui.vod.with(|s|s.season.unwrap_or(1))),move||ui.vod.update(|s|s.cycle_season(1))))

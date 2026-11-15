@@ -135,6 +135,16 @@ impl Details {
             .and_then(|i| self.episodes.get(i + 1))
     }
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Playing {
+    pub key: Key,
+    pub parent: Option<Key>,
+    pub title: String,
+    pub progress: Progress,
+    pub details: Details,
+    pub last_saved_ms: Option<u64>,
+    pub ended: bool,
+}
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Control {
     Search,
@@ -149,6 +159,7 @@ pub enum Control {
     Seasons,
     Episodes,
     Next,
+    Block,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Screen {
@@ -231,19 +242,32 @@ impl Screen {
             .find(|e| !e.progress.completed)
             .or_else(|| details.episodes.first())
             .map(|e| e.key.clone());
+        self.season = details
+            .episodes
+            .iter()
+            .find(|e| Some(&e.key) == self.episode.as_ref())
+            .map(|e| e.season)
+            .or(self.season);
         self.control = Control::Play;
         self.focused = Some(details.item.key.clone());
         self.details = Some(details);
         self.busy = false;
     }
     pub fn move_control(&mut self, delta: isize) {
-        let controls = if self.details.is_some() {
+        let controls = if self
+            .details
+            .as_ref()
+            .is_some_and(|d| d.item.key.kind == Kind::Movie)
+        {
+            &[Control::Play, Control::Restart, Control::Block][..]
+        } else if self.details.is_some() {
             &[
                 Control::Play,
                 Control::Restart,
                 Control::Seasons,
                 Control::Episodes,
                 Control::Next,
+                Control::Block,
             ][..]
         } else {
             &[
@@ -298,6 +322,8 @@ impl Screen {
         }
     }
     pub fn back(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+        self.busy = false;
         self.error = None;
         if self.details.take().is_none() {
             self.open = false;

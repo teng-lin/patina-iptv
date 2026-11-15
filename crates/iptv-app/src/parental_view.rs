@@ -198,6 +198,17 @@ fn manage_pick(ui: Ui, index: usize) {
     }
 }
 pub fn enforce(ui: Ui) {
+    if let Some((playing, _)) = ui.player.vod.get_untracked() {
+        let owner = crate::runtime();
+        if !owner.parental_allowed(&iptv_runtime::vod::target(&playing.key))
+            || playing
+                .parent
+                .as_ref()
+                .is_some_and(|parent| !owner.parental_allowed(&iptv_runtime::vod::target(parent)))
+        {
+            crate::player::stop(ui);
+        }
+    }
     if let Some((job, _)) = ui.player.recorded.get_untracked() {
         let target = Target::live(job.request.source, job.request.channel.as_str());
         if !crate::runtime().parental_allowed(&target) {

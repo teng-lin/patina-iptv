@@ -165,6 +165,7 @@ const LIST_NAMES: &[(&str, &str)] = &[
 /// `key(…)` constant, a helper's label, a backup error's text, a notice,
 /// a built-in list's name. A new one needs the same before it is listed.
 const CARRIED_MESSAGES: &[(&str, &str)] = &[
+    ("iptv-app/src/vod_view.rs", "e"),
     // Core parental entry and native errors are checked MESSAGE_FILES.
     ("iptv-app/src/parental_view.rs", "message"),
     ("iptv-app/src/parental_view.rs", "title"),

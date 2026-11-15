@@ -63,6 +63,7 @@ mod pip_control;
 mod pointer;
 mod recordings;
 mod recordings_transport;
+mod vod_library;
 mod screens_look;
 mod search_history;
 mod stalker_cancel;

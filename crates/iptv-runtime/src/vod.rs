@@ -21,21 +21,58 @@ struct Entry {
 #[derive(Default)]
 pub(crate) struct State {
     entries: Mutex<BTreeMap<Key, Entry>>,
+    sessions: Mutex<BTreeMap<i64, (SourceConfig, iptv_providers::stalker::StalkerSession)>>,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Playing {
-    pub key: Key,
-    pub parent: Option<Key>,
-    pub title: String,
-    pub progress: Progress,
-    pub details: Details,
-    pub last_saved_ms: Option<u64>,
-    pub ended: bool,
-}
+pub use iptv_core::vod::Playing;
 fn unavailable() -> Error {
     Error::unavailable("On-demand content unavailable; refresh the playlist and try again")
 }
 impl Runtime {
+    fn vod_context(
+        &self,
+        source: i64,
+    ) -> Option<std::rc::Rc<iptv_guide::playback::PlaybackContext>> {
+        self.parts
+            .borrow()
+            .get(&SourceId(source))
+            .and_then(|s| s.shared_playback())
+            .or_else(|| {
+                self.single
+                    .borrow()
+                    .as_ref()
+                    .filter(|s| s.source.0 == source)
+                    .and_then(|s| s.schedule.shared_playback())
+            })
+    }
+    fn vod_session(
+        &self,
+        source: i64,
+        config: &SourceConfig,
+    ) -> Option<iptv_providers::stalker::StalkerSession> {
+        self.vod_context(source)
+            .and_then(|c| c.stalker_session())
+            .or_else(|| {
+                self.vod
+                    .sessions
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get(&source)
+                    .filter(|(c, _)| c == config)
+                    .map(|(_, s)| s.clone())
+            })
+    }
+    fn vod_update_session(&self, source: i64) {
+        if let Some(context) = self.vod_context(source)
+            && let Some((_, session)) = self
+                .vod
+                .sessions
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(&source)
+        {
+            context.update_stalker_session(session.clone());
+        }
+    }
     pub async fn vod_catalogue(
         &self,
         query: Query,
@@ -49,15 +86,26 @@ impl Runtime {
         ),
         Error,
     > {
-        Ok(self
+        self.parental_refresh().await.map_err(|_| unavailable())?;
+        let mut result = self
             .services()
             .read(move |s| {
                 let (cards, more) = s.vod_page(&query, offset, 80)?;
                 Ok((cards, more, s.vod_sources()?, s.vod_categories(&query)?))
             })
-            .await?)
+            .await?;
+        for card in &mut result.0 {
+            if !self.parental_allowed(&target(&card.key)) {
+                card.plot = None;
+                card.poster = None;
+            }
+        }
+        Ok(result)
     }
     pub async fn vod_details(&self, key: Key) -> Result<Details, Error> {
+        self.parental_check(&target(&key))
+            .await
+            .map_err(|_| unavailable())?;
         let services = self.services();
         let lookup = key.clone();
         let (source, mut item, locator, provider) = services
@@ -77,6 +125,7 @@ impl Runtime {
             .await?;
         let config = source.ok_or_else(unavailable)?.source.config;
         let mut item = item.take().ok_or_else(unavailable)?;
+        let existing_session = self.vod_session(key.source, &config);
         let state = self.vod.clone();
         let work = services.clone();
         let key2 = key.clone();
@@ -110,10 +159,11 @@ impl Runtime {
                     }
                 }
                 SourceConfig::Stalker(credentials) if key2.kind==Kind::Series=>{
-                    let mut session=iptv_import::on_demand::stalker_session(&client,credentials,&cancel).await.map_err(|_|unavailable())?;
+                    let mut session=match existing_session {Some(s)=>s,None=>iptv_import::on_demand::stalker_session(&client,credentials,&cancel).await.map_err(|_|unavailable())?};
                     let id=provider.clone().or_else(||key2.id.rsplit(':').next().map(str::to_owned)).ok_or_else(unavailable)?;
                     let cmd=match &movie_locator {Some(StreamLocator::Stalker{cmd,..}) if provider.is_none()=>Some(cmd.clone()),_=>None};
                     let found=stalker_episodes(&client,&mut session,&id,cmd.as_deref(),&cancel).await?;
+                    state.sessions.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(key2.source,(config.clone(),session));
                     for (e,locator,episode) in found {
                         let key=Key{source:key2.source,kind:Kind::Episode,id:format!("{}:{}",key2.id,e.id.as_str())};
                         entries.push((key.clone(),Entry{config:config.clone(),locator,parent:Some(key2.clone()),episode}));
@@ -131,6 +181,7 @@ impl Runtime {
             cache.extend(entries);
             Ok::<_,Error>(Details{item,episodes})
         }).await.map_err(|_|unavailable())??;
+        self.vod_update_session(key.source);
         Ok(result)
     }
     pub async fn vod_play(
@@ -147,12 +198,26 @@ impl Runtime {
             .get(&key)
             .cloned()
             .ok_or_else(unavailable)?;
+        if let Some(parent) = &entry.parent {
+            self.parental_check(&target(parent))
+                .await
+                .map_err(|_| unavailable())?;
+        }
+        self.parental_check(&target(&key))
+            .await
+            .map_err(|_| unavailable())?;
+        let expected_item = entry.parent.as_ref().unwrap_or(&key);
+        if details.item.key != *expected_item {
+            return Err(unavailable());
+        }
         let lookup = key.clone();
+        let parent = entry.parent.clone();
         let expected = entry.config.clone();
         let progress = self
             .services()
             .read(move |s| {
-                let valid = s.source_policy(SourceId(lookup.source))?.enabled
+                let valid = s.vod_card(parent.as_ref().unwrap_or(&lookup))?.is_some()
+                    && s.source_policy(SourceId(lookup.source))?.enabled
                     && s.source(SourceId(lookup.source))?
                         .is_some_and(|s| s.source.config == expected);
                 if !valid {
@@ -182,6 +247,9 @@ impl Runtime {
         };
         let services = self.services();
         let work = services.clone();
+        let existing_session = self.vod_session(key.source, &entry.config);
+        let state = self.vod.clone();
+        let playing_source = key.source;
         let source = services
             .spawn(async move {
                 let mut source = match (&entry.config, &entry.locator) {
@@ -214,10 +282,12 @@ impl Runtime {
                             iptv_net::NetClient::new(crate::settings::net_config(&work.settings()))
                                 .map_err(|_| unavailable())?;
                         let cancel = iptv_import::CancelToken::new();
-                        let mut session =
-                            iptv_import::on_demand::stalker_session(&client, c, &cancel)
+                        let mut session = match existing_session {
+                            Some(s) => s,
+                            None => iptv_import::on_demand::stalker_session(&client, c, &cancel)
                                 .await
-                                .map_err(|_| unavailable())?;
+                                .map_err(|_| unavailable())?,
+                        };
                         let url = iptv_import::on_demand::stalker_episode_link(
                             &client,
                             &mut session,
@@ -227,7 +297,13 @@ impl Runtime {
                         )
                         .await
                         .map_err(|_| unavailable())?;
-                        iptv_guide::playback::StalkerLink::source(&session, url, &[])
+                        let source = iptv_guide::playback::StalkerLink::source(&session, url, &[]);
+                        state
+                            .sessions
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .insert(key.source, (entry.config.clone(), session));
+                        source
                     }
                     _ => return Err(unavailable()),
                 };
@@ -247,11 +323,14 @@ impl Runtime {
             })
             .await
             .map_err(|_| unavailable())??;
+        self.vod_update_session(playing_source);
         Ok((playing, source))
     }
-    pub fn queue_vod_progress(&self,key:Key,parent:Option<Key>,progress:Progress) {
+    pub fn queue_vod_progress(&self, key: Key, parent: Option<Key>, progress: Progress) {
         // Submission is synchronous; the owner's writer persists even if the view closes.
-        let _queued=self.services().call(move |s|s.save_vod_progress(&key,parent.as_ref().map(|p|p.id.as_str()),progress));
+        let _queued = self.services().call(move |s| {
+            s.save_vod_progress(&key, parent.as_ref().map(|p| p.id.as_str()), progress)
+        });
     }
     pub async fn vod_save_progress(
         &self,
@@ -275,9 +354,15 @@ async fn stalker_episodes(
     parent_cmd: Option<&str>,
     cancel: &iptv_import::CancelToken,
 ) -> Result<Vec<(iptv_providers::model::Episode, StreamLocator, Option<u32>)>, Error> {
+    let started = std::time::Instant::now();
+    let mut requests = 0;
     let mut out = Vec::new();
     let native = parent_cmd.is_none();
     for page in 1..=100 {
+        requests += 1;
+        if requests > 200 || started.elapsed() > std::time::Duration::from_secs(30) {
+            return Err(unavailable());
+        }
         let response = iptv_import::on_demand::stalker_detail(
             client,
             session,
@@ -296,6 +381,10 @@ async fn stalker_episodes(
             if row.season {
                 let before_season = out.len();
                 for ep_page in 1..=100 {
+                    requests += 1;
+                    if requests > 200 || started.elapsed() > std::time::Duration::from_secs(30) {
+                        return Err(unavailable());
+                    }
                     let response = iptv_import::on_demand::stalker_detail(
                         client,
                         session,
@@ -380,5 +469,18 @@ fn append_stalker(
             stream: locator.clone(),
         };
         out.push((e, locator, Some(number)));
+    }
+}
+
+pub fn target(key: &Key) -> iptv_core::parental::Target {
+    use iptv_core::parental::ContentKind;
+    iptv_core::parental::Target {
+        source: key.source,
+        id: key.id.clone(),
+        kind: match key.kind {
+            Kind::Movie => ContentKind::Movie,
+            Kind::Series => ContentKind::Series,
+            Kind::Episode => ContentKind::Episode,
+        },
     }
 }
