@@ -427,8 +427,12 @@ impl Runtime {
         if !self.parental_settings_allowed() {
             return Err(Error::Locked);
         }
+        let access = self.parental_snapshot();
         self.services()
-            .call(move |store| store.set_parental_blocked(&target, blocked))
+            .call(move |store| {
+                require_admin(store, &access)?;
+                store.set_parental_blocked(&target, blocked)
+            })
             .await
             .map_err(|_| Error::Storage)?;
         self.parental_refresh().await
@@ -522,6 +526,23 @@ pub(crate) fn native_allowed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn administrative_worker_gate_rejects_expired_and_revoked_snapshots() {
+        let mut store = iptv_store_sqlite::Store::open_in_memory().unwrap();
+        replace_pin(&mut store, &Pin::parse("2468").unwrap()).unwrap();
+        let mut snapshot = Snapshot {
+            access: Access::default(),
+            epoch: Arc::new(AtomicU64::new(0)),
+            at: 0,
+        };
+        snapshot.access.policy.window = UnlockWindow::Minutes(10);
+        snapshot.access.unlock(Target::settings(), 0);
+        assert!(require_admin(&store, &snapshot).is_err());
+        snapshot.access.unlock(Target::settings(), now_ms());
+        assert!(require_admin(&store, &snapshot).is_ok());
+        snapshot.epoch.fetch_add(1, Ordering::SeqCst);
+        assert!(require_admin(&store, &snapshot).is_err());
+    }
     #[test]
     fn salted_verifiers_rotation_recovery_and_durable_lockout() {
         let mut store = iptv_store_sqlite::Store::open_in_memory().unwrap();
@@ -624,6 +645,68 @@ mod source_tests {
             warnings_dropped: 0,
             stats: Default::default(),
         }
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn queued_unblock_is_revoked_before_the_writer_executes_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = Runtime::new(crate::Ports::new(directory.path().to_owned(), |_| {
+            Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x72; 32]))
+        }));
+        owner.start_services();
+        let services = owner.services();
+        let id = services
+            .call(|store| store.add_source(&source("generated-blocked")))
+            .await
+            .unwrap();
+        owner
+            .parental_change_pin(None, Pin::parse("2468").unwrap())
+            .await
+            .unwrap();
+        let target = Target {
+            source: id.0,
+            kind: ContentKind::Movie,
+            id: "generated-protected-title".into(),
+        };
+        owner
+            .parental_set_blocked(target.clone(), true)
+            .await
+            .unwrap();
+        let (started, ready) = std::sync::mpsc::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let writer = services.call(move |_| {
+            started.send(()).unwrap();
+            held.recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            Ok(())
+        });
+        ready
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        owner.parental.borrow_mut().ready = false;
+        let mut unblock = std::pin::pin!(owner.parental_set_blocked(target.clone(), false));
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !owner.parental_is_ready() {
+            tokio::select! {
+                result = &mut unblock => panic!("the held writer completed early: {result:?}"),
+                _ = tokio::time::sleep(std::time::Duration::from_millis(1)) => {}
+            }
+            assert!(tokio::time::Instant::now() < deadline);
+        }
+        // The read lane admitted the request; it is now queued behind the writer.
+        owner.parental_lock();
+        release.send(()).unwrap();
+        writer.await.unwrap();
+        assert!(
+            unblock.await.is_err(),
+            "relocking must revoke a queued unblock"
+        );
+        assert!(
+            services
+                .read(move |store| Ok(store.parental_blocks()?.contains(&target)))
+                .await
+                .unwrap()
+        );
+        assert!(owner.drain_services());
     }
     #[tokio::test(flavor = "current_thread")]
     async fn native_import_admission_and_commit_bind_configuration_to_admin_authority() {
