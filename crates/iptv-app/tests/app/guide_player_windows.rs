@@ -180,6 +180,56 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     app.settle();
     assert!(prop(&props, 1, "volume").as_u64().unwrap() < 100);
     assert_eq!(prop(&props, 0, "volume"), json!(100));
+    assert_eq!(prop(&props, 0, "muted"), json!(true));
+    assert_eq!(prop(&props, 1, "muted"), json!(false));
+
+    // Main Mute must reclaim audio even if its stored volume was already
+    // unmuted when B became audible. The slider must also reclaim audio.
+    step(app.press("id:guide-ui >> label:Local A"));
+    step(app.hover("label:Video >> nth=0"));
+    step(app.wait_for("id:play-bar-layer >> label:Mute >> nth=0"));
+    step(app.press("id:play-bar-layer >> label:Mute >> nth=0"));
+    app.settle();
+    assert_eq!(prop(&props, 0, "muted"), json!(false));
+    assert_eq!(prop(&props, 1, "muted"), json!(true));
+    step(app.hover("id:auxiliary-player-1 >> label:Video"));
+    step(app.press("id:auxiliary-player-1 >> label:Mute"));
+    app.settle();
+    assert_eq!(prop(&props, 0, "muted"), json!(true));
+    let nodes = app.screen().layout_nodes();
+    let main_volume = nodes
+        .iter()
+        .rev()
+        .find(|node| {
+            if node.text.is_some()
+                || node.hidden
+                || node.bounds.size.width.0 != 96.0
+                || node.bounds.size.height.0 != 24.0
+            {
+                return false;
+            }
+            let mut ancestor = *node;
+            while let Some(parent) = nodes
+                .iter()
+                .find(|p| p.id == ancestor.parent && p.id != ancestor.id)
+            {
+                if parent.test_id.as_deref() == Some("auxiliary-player-1") {
+                    return false;
+                }
+                ancestor = parent;
+            }
+            true
+        })
+        .unwrap()
+        .id;
+    step(app.drag(
+        &format!("view:{main_volume}"),
+        Point::new(px(-20.0), px(0.0)),
+    ));
+    app.settle();
+    assert_eq!(prop(&props, 0, "muted"), json!(false));
+    assert_eq!(prop(&props, 1, "muted"), json!(true));
+    step(app.press("id:play-bar-layer >> label:TV guide >> nth=0"));
     assert_eq!(prop(&props, 0, "source"), main_source);
     assert_eq!(prop(&props, 1, "source"), auxiliary_source);
     assert_eq!(player_node(&props, 1), auxiliary_node);
@@ -188,6 +238,18 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     // accounting; aliasing its stream into the original controls is not enough.
     let auxiliary_opens = iptv_app::player_opens(1);
     step(app.press("label:Channel list"));
+    step(app.press("id:auxiliary-player-1 >> id:channel-list >> text:/^◂/"));
+    step(app.press("id:auxiliary-player-1 >> id:channel-list-groups >> text:Sport"));
+    assert!(
+        app.screen().matches("id:guide-ui >> text:Local B").unwrap(),
+        "browsing Sport in B must preserve the main guide's All channels list"
+    );
+    assert!(
+        !app.screen()
+            .matches("id:auxiliary-player-1 >> id:channel-list >> text:/Local B/")
+            .unwrap()
+    );
+    step(app.press("id:auxiliary-player-1 >> id:channel-list-groups >> text:All channels"));
     step(app.wait_for("id:auxiliary-player-1 >> id:channel-list >> text:/Local A/"));
     step(app.press("id:auxiliary-player-1 >> id:channel-list >> text:/Local A/"));
     step(
@@ -196,7 +258,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
         }),
     );
     assert_eq!(iptv_app::player_opens(0), main_opens);
-    step(app.hover("id:auxiliary-player-1 >> label:Video"));
+    step(app.press("id:auxiliary-player-1 >> label:Video"));
     step(app.wait_for("label:Channel list"));
     step(app.press("label:Channel list"));
     step(app.wait_for("id:auxiliary-player-1 >> id:channel-list >> text:/Local B/"));

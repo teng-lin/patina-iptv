@@ -97,6 +97,13 @@ impl<C: Clone + PartialEq> Workspace<C> {
             self.audible = Some(id);
         }
     }
+    /// The main player's audio controls reclaim sound from auxiliary windows.
+    pub fn listen_to_main(&mut self) {
+        self.audible = None;
+        for session in &mut self.sessions {
+            session.volume.muted = true;
+        }
+    }
     pub fn retarget(&mut self, id: SessionId, channel: C) {
         if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
             s.channel = channel;
@@ -135,6 +142,18 @@ impl<C: Clone + PartialEq> Workspace<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn main_audio_selection_mutes_auxiliaries_without_closing_them() {
+        let mut w = Workspace::default();
+        let id = w.open_auxiliary("one").unwrap();
+        w.set_volume(id, crate::sound::Volume::default());
+        assert_eq!(w.audible, Some(id));
+        w.listen_to_main();
+        assert_eq!(w.audible, None);
+        assert!(w.on_surface(1).unwrap().volume.muted);
+        w.set_volume(id, crate::sound::Volume::default());
+        assert_eq!(w.audible, Some(id), "sound can be selected again");
+    }
     #[test]
     fn auxiliary_players_reserve_the_main_surface_and_enforce_the_limit() {
         let mut w = Workspace::default();

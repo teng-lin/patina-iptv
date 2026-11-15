@@ -19,6 +19,14 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+def cargo_target_directory(env):
+    metadata = subprocess.run(
+        ['cargo', 'metadata', '--format-version', '1', '--no-deps'],
+        cwd=ROOT, env=env, check=True, capture_output=True, text=True,
+    )
+    target = Path(json.loads(metadata.stdout)['target_directory'])
+    return (ROOT / target).resolve()
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--no-build', action='store_true')
@@ -42,7 +50,7 @@ def main():
     env['DYLD_LIBRARY_PATH' if platform == 'macos' else 'LD_LIBRARY_PATH'] = str(runtime)
     if not args.no_build:
         subprocess.run(['cargo','build','-p','iptv-app','--features','test-support','--example','guide_window_preview'], cwd=ROOT,env=env,check=True)
-    target = Path(env.get('CARGO_TARGET_DIR', ROOT / 'target'))
+    target = cargo_target_directory(env)
     binary = (target / 'debug/examples/guide_window_preview').resolve()
     if platform == 'macos':
         # A private app bundle gives native inspection tools an unambiguous

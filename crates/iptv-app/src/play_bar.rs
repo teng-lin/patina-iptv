@@ -332,7 +332,7 @@ fn badge(value: impl Fn() -> Option<String> + Copy + 'static) -> impl IntoElemen
 /// Mute, volume, quality, channel.
 fn left(ui: Ui) -> impl IntoElement {
     let size = target();
-    let muted = move || ui.media.volume.with(|v| v.muted || v.effective() == 0);
+    let muted = move || crate::media::muted(ui) || ui.media.volume.with(|v| v.level == 0);
     let height = move || {
         ui.player
             .main()
@@ -389,11 +389,17 @@ fn left(ui: Ui) -> impl IntoElement {
 /// The desktop's volume: press or drag along it.
 fn volume(ui: Ui) -> impl IntoElement {
     const W: f32 = 96.0;
-    let level = move || f32::from(ui.media.volume.with(|v| v.effective())) / 100.0;
+    let level = move || {
+        if crate::media::muted(ui) {
+            0.0
+        } else {
+            f32::from(ui.media.volume.with(|v| v.level)) / 100.0
+        }
+    };
     let set = move |e: &TouchEvent| {
         if let Some(p) = e.points.iter().find(|p| p.changed) {
             let at = (p.location.x.0 / W * 100.0).round() as i32;
-            ui.media.volume.update(|v| v.set(at));
+            crate::media::set_volume(ui, at);
             used(ui);
         }
     };

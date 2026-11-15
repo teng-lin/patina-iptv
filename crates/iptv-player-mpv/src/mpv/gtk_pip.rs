@@ -139,6 +139,31 @@ pub(super) fn redraw(id: u64) {
     });
 }
 
+/// A player has retired/recreated its GL context. The next sync must
+/// construct fresh areas, even though the player's identity is unchanged.
+pub(super) fn forget_areas(id: u64) {
+    let retired: Vec<_> = HOSTS.with(|hosts| {
+        hosts
+            .borrow()
+            .iter()
+            .filter_map(Weak::upgrade)
+            .filter_map(|host| {
+                let mut host = host.borrow_mut();
+                if host.area.as_ref().is_some_and(|(shown, _)| *shown == id) {
+                    let (_, area) = host.area.take()?;
+                    Some((host.frame.clone(), area))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    });
+    // GTK callbacks run without holding registry or host borrows.
+    for (frame, area) in retired {
+        frame.remove(&area);
+    }
+}
+
 /// An area drawing player `id`'s frames with its area's GL context.
 fn area_for(id: u64) -> gtk::GLArea {
     let area = gtk::GLArea::new();

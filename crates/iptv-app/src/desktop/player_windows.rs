@@ -41,18 +41,50 @@ pub fn open(ui: Ui, channel: usize) {
     {
         return;
     }
-    let mut surface = None;
-    ui.player_windows.update(|w| {
-        let audible = w.audible;
-        if let Some(id) = w.open_auxiliary(key) {
-            surface = w.sessions().iter().find(|s| s.id == id).map(|s| s.surface);
-        }
-        // Opening another channel leaves the main player's audio unchanged.
-        w.audible = audible;
+    admit_session(ui.player_windows, key, |surface| {
+        crate::player::start_surface(ui, surface, channel)
     });
-    if let Some(surface) = surface {
-        crate::player::start_surface(ui, surface, channel);
-    }
+}
+
+fn admit_session(
+    workspace: Signal<iptv_core::playback_windows::Workspace<String>>,
+    key: String,
+    start: impl FnOnce(usize) -> bool,
+) {
+    batch(|| {
+        let mut session = None;
+        workspace.update(|w| {
+            let audible = w.audible;
+            if let Some(id) = w.open_auxiliary(key) {
+                session = w.sessions().iter().find(|s| s.id == id).cloned();
+            }
+            // Opening another channel leaves the main player's audio unchanged.
+            w.audible = audible;
+        });
+        if let Some(session) = session
+            && !start(session.surface)
+        {
+            // Admission can fail when recordings own the remaining connections.
+            // Publish no window until both session allocation and admission succeed.
+            workspace.update(|w| w.close(session.id));
+        }
+    });
+}
+
+fn follow_clock(
+    parent: Signal<iptv_core::guide::Focus>,
+    local: Signal<iptv_core::guide::Focus>,
+    view: impl Fn() -> iptv_core::lists::ListView + 'static,
+) {
+    let now = computed(move || parent.with(|f| f.now));
+    effect(move || {
+        let now = now.get();
+        untracked(|| {
+            local.update(|f| {
+                f.tick(now, &view());
+            });
+        });
+    });
 }
 
 pub fn close(ui: Ui, id: SessionId) {
@@ -179,6 +211,8 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
     local.pending_zap = signal(None);
     local.browse_playback = signal(Default::default());
     local.focus = signal(parent.focus.get_untracked());
+    local.list = signal(parent.list.get_untracked());
+    follow_clock(parent.focus, local.focus, move || crate::lists::view(local));
     local.panels = signal(Default::default());
     local.play_bar = signal(Default::default());
     local.channels = signal(None);
@@ -298,9 +332,81 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
 
 #[cfg(test)]
 mod tests {
-    use super::cascade_position;
+    use super::{admit_session, cascade_position, follow_clock};
     use nsh_core::desktop::WindowPosition;
     use nsh_core::geometry::{Bounds, point, px, size};
+    use nsh_core::prelude::*;
+
+    #[component]
+    fn LocalStateHarness() -> impl IntoElement {
+        use iptv_core::guide::{Focus, Schedule, SyntheticSchedule};
+        use iptv_core::lists::{ALL, ChannelList, ListView};
+        use std::rc::Rc;
+        let parent = signal(Focus::at(0));
+        let mut focus = Focus::at(0);
+        focus.channel = 2;
+        let local = signal(focus);
+        let catalog: Rc<dyn Schedule> = Rc::new(SyntheticSchedule);
+        let list = Rc::new(ChannelList::build(ALL, &*catalog, &[], &[]));
+        follow_clock(parent, local, move || {
+            ListView::new(catalog.clone(), list.clone())
+        });
+        let workspace = signal(Default::default());
+        view()
+            .child(text(move || {
+                local.with(|f| format!("minute {} channel {}", f.now, f.channel))
+            }))
+            .child(
+                view()
+                    .label("Next minute")
+                    .w(px(220.0))
+                    .h(px(40.0))
+                    .on_press(move || parent.update(|f| f.now += 60)),
+            )
+            .child(text(move || {
+                workspace.with(|w: &iptv_core::playback_windows::Workspace<String>| {
+                    format!("sessions {}", w.sessions().len())
+                })
+            }))
+            .child(
+                view()
+                    .label("Refuse session")
+                    .w(px(220.0))
+                    .h(px(40.0))
+                    .on_press(move || admit_session(workspace, "generated".into(), |_| false)),
+            )
+            .child(
+                view()
+                    .label("Admit session")
+                    .w(px(220.0))
+                    .h(px(40.0))
+                    .on_press(move || admit_session(workspace, "generated".into(), |_| true)),
+            )
+    }
+
+    #[test]
+    fn window_clock_follows_parent_without_replacing_local_channel_focus() {
+        let mut app = nsh_testing::Headless::start(nsh_engine::EngineConfig::new(
+            nsh_core::element::Root::of::<LocalStateHarness>(),
+        ))
+        .unwrap();
+        app.wait_for("text:minute 0 channel 2").unwrap();
+        app.press("label:Next minute").unwrap();
+        app.wait_for("text:minute 60 channel 2").unwrap();
+    }
+
+    #[test]
+    fn refused_admission_leaves_no_session_and_the_same_channel_can_be_opened_again() {
+        let mut app = nsh_testing::Headless::start(nsh_engine::EngineConfig::new(
+            nsh_core::element::Root::of::<LocalStateHarness>(),
+        ))
+        .unwrap();
+        app.wait_for("text:sessions 0").unwrap();
+        app.press("label:Refuse session").unwrap();
+        assert!(app.screen().matches("text:sessions 0").unwrap());
+        app.press("label:Admit session").unwrap();
+        app.wait_for("text:sessions 1").unwrap();
+    }
 
     #[test]
     fn opening_positions_separate_title_bars_on_an_offset_display() {

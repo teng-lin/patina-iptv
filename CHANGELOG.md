@@ -12,6 +12,12 @@ is below 1.0, a minor release may change behaviour.
 - Linux and macOS prototype: open a live guide channel in an independent player window
   with the original player controls, while main playback continues.
 
+### Fixed
+
+- Auxiliary player windows keep channel browsing and programme clocks independent,
+  target manual retries correctly, release refused sessions, and let the main
+  player's audio controls reclaim sound.
+
 ## [0.1.2] - 2026-11-14
 
 ### Added

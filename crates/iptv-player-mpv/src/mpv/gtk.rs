@@ -96,6 +96,9 @@ impl Player {
         let weak = Rc::downgrade(&inner);
         area.connect_unrealize(move |_| {
             if let Some(p) = weak.upgrade() {
+                // Window areas borrowed this GL context too. Retire them
+                // before releasing the render context they draw with.
+                super::gtk_pip::forget_areas(p.id);
                 // The video output goes with the context: a source reopens
                 // when the area is realized again.
                 p.free_render();
@@ -125,6 +128,7 @@ fn realize(p: &Inner) {
     }
     if p.create_render() {
         log::info!("iptv mpv: rendering through GTK's GL context");
+        super::gtk_pip::forget_areas(p.id);
         super::gtk_pip::sync();
     }
 }

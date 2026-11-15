@@ -208,10 +208,11 @@ pub fn start(ui: &Ui, channel: usize) {
 
 /// Surface `surface` (not 0) plays `channel` live, with a fresh health
 /// session; the channel history is the full-screen player's only.
-pub fn start_surface(ui: Ui, surface: usize, channel: usize) {
+/// Returns false when the provider connection cannot be reserved.
+pub fn start_surface(ui: Ui, surface: usize, channel: usize) -> bool {
     if surface == 0 {
         ui.play(channel, Playback::Live);
-        return;
+        return ui.playing.get_untracked() == Some(channel);
     }
     if !crate::recordings_view::reserve_viewing(ui, surface, channel) {
         let previous = ui.player.stream(surface).channel.get_untracked();
@@ -230,7 +231,7 @@ pub fn start_surface(ui: Ui, surface: usize, channel: usize) {
                 });
             }
         });
-        return;
+        return false;
     }
     let stream = ui.player.stream(surface);
     let now = ui.now_ms();
@@ -240,6 +241,7 @@ pub fn start_surface(ui: Ui, surface: usize, channel: usize) {
     stream.key.set(crate::schedule().channel_key(channel));
     log::info!("iptv player {surface}: starting");
     open(ui, surface, session);
+    true
 }
 
 /// Nothing plays: the player closes.

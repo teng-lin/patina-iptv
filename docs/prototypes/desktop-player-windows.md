@@ -13,6 +13,8 @@ The same auxiliary channel does not open twice. Up to three auxiliary sessions
 are available, subject to known account limits; multiview and auxiliary windows
 are mutually exclusive in this prototype. Changing playlist closes the windows.
 Recording controls are disabled in auxiliary windows pending DVR integration.
+The primary player's compact PiP remains supported; auxiliary windows do not
+yet have their own compact/always-on-top PiP toggle.
 
 ## Reproduce on Linux or macOS
 
