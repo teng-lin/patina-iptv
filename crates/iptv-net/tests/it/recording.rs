@@ -70,6 +70,63 @@ async fn hls_records_each_sequence_once_and_detects_missing_segments() {
 }
 
 #[tokio::test]
+async fn caption_metadata_passes_the_relay_without_fetching_external_renditions() {
+    let server = TestServer::http(|r| match r.path.as_str() {
+        "/master.m3u8" => Resp::ok(
+            "#EXTM3U\n\
+             #EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS,GROUP-ID=\"cc\",NAME=\"English, SDH\",INSTREAM-ID=\"CC1\"\n\
+             #EXT-X-STREAM-INF:BANDWIDTH=800000,CLOSED-CAPTIONS=\"cc\"\n\
+             media.m3u8\n",
+        ),
+        "/media.m3u8" => Resp::ok(
+            "#EXTM3U\n#EXT-X-TARGETDURATION:60\n#EXTINF:60,\nsegment.ts\n#EXT-X-ENDLIST\n",
+        ),
+        "/external.m3u8" => Resp::ok(
+            "#EXTM3U\n\
+             #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",NAME=\"Generated\",URI=\"audio.m3u8\"\n\
+             #EXT-X-STREAM-INF:BANDWIDTH=800000,AUDIO=\"audio\"\n\
+             media.m3u8\n",
+        ),
+        _ => Resp::ok(packet(8)),
+    })
+    .await;
+    for (name, expected) in [("/master.m3u8", packet(8)), ("/external.m3u8", vec![])] {
+        let file = output("captions");
+        let result = capture(&server.url(name), &[], fixture_policy(), &file, 1024).await;
+        // Finite input ends honestly; accepting its in-band captions must still
+        // retain all TS bytes, whereas unsupported renditions retain none.
+        assert_eq!(
+            result,
+            Err(if expected.is_empty() {
+                Failure::Unsupported
+            } else {
+                Failure::Network
+            })
+        );
+        assert_eq!(std::fs::read(&file).unwrap(), expected);
+        std::fs::remove_file(file).unwrap();
+    }
+    assert!(
+        !server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.path == "/audio.m3u8")
+    );
+    assert_eq!(
+        server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.path == "/segment.ts")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn unsupported_media_and_disk_budget_cannot_be_reported_as_success() {
     let server = TestServer::http(|r| match r.path.as_str() {
         "/encrypted.m3u8" => {

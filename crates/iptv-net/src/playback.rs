@@ -29,6 +29,8 @@ use tokio::{
     sync::{Semaphore, oneshot},
 };
 
+pub(crate) use hls::in_band_closed_captions;
+
 use crate::{
     FetchError, FetchErrorKind, cross_origin,
     redirect::{self, Prepared},

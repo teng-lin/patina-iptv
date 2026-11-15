@@ -2,7 +2,9 @@
 //! including manifest children: the recorder cannot bypass its header/DNS policy.
 use crate::playback::{PlaybackPolicy, PlaybackRelay};
 use std::io::Write;
-use std::{path::Path, time::Duration};
+use std::{future::Future, path::Path, time::Duration};
+
+const STALL_TOLERANCE: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Failure {
@@ -125,7 +127,15 @@ struct Playlist {
     variant: Option<String>,
     segments: Vec<(u64, String)>,
     wait: Duration,
+    target_duration: Duration,
     ended: bool,
+}
+impl Playlist {
+    fn stall_allowance(&self) -> Duration {
+        // One advertised segment may elapse before the live playlist advances.
+        // Keep a fixed grace period for publication/network jitter as well.
+        self.target_duration + STALL_TOLERANCE
+    }
 }
 fn playlist(bytes: &[u8]) -> Result<Playlist, Failure> {
     let text = std::str::from_utf8(bytes).map_err(|_| Failure::Unsupported)?;
@@ -136,6 +146,7 @@ fn playlist(bytes: &[u8]) -> Result<Playlist, Failure> {
         variant: None,
         segments: vec![],
         wait: Duration::from_secs(2),
+        target_duration: Duration::ZERO,
         ended: false,
     };
     let mut sequence = 0;
@@ -145,12 +156,19 @@ fn playlist(bytes: &[u8]) -> Result<Playlist, Failure> {
             sequence = value.parse().map_err(|_| Failure::Unsupported)?;
         } else if let Some(value) = line.strip_prefix("#EXT-X-TARGETDURATION:") {
             let secs: u64 = value.parse().map_err(|_| Failure::Unsupported)?;
+            p.target_duration = Duration::from_secs(secs);
+            if secs == 0 || p.target_duration.checked_add(STALL_TOLERANCE).is_none() {
+                return Err(Failure::Unsupported);
+            }
             p.wait = Duration::from_secs((secs / 2).clamp(1, 10));
+        } else if let Some(attributes) = line.strip_prefix("#EXT-X-MEDIA:") {
+            if !crate::playback::in_band_closed_captions(attributes) {
+                return Err(Failure::Unsupported);
+            }
         } else if line.starts_with("#EXT-X-STREAM-INF:") {
             variant = true;
         } else if line.starts_with("#EXT-X-MAP:")
             || line.starts_with("#EXT-X-BYTERANGE:")
-            || line.starts_with("#EXT-X-MEDIA:")
             || line.starts_with("#EXT-X-SESSION-KEY:")
             || (line.starts_with("#EXT-X-KEY:") && line != "#EXT-X-KEY:METHOD=NONE")
         {
@@ -186,6 +204,24 @@ async fn manifest(
     }
     Ok(bytes)
 }
+/// Bound the whole reload (poll wait and HTTP fetch) by the last media progress,
+/// so repeated successful downloads of an unchanged playlist cannot keep it alive.
+async fn reload(
+    playlist: &Playlist,
+    last_progress: tokio::time::Instant,
+    fetch: impl Future<Output = Result<Vec<u8>, Failure>>,
+) -> Result<Vec<u8>, Failure> {
+    let deadline = last_progress
+        .checked_add(playlist.stall_allowance())
+        .ok_or(Failure::Unsupported)?;
+    tokio::time::timeout_at(deadline, async {
+        tokio::time::sleep(playlist.wait).await;
+        fetch.await
+    })
+    .await
+    .map_err(|_| Failure::Network)?
+}
+
 async fn hls(
     client: &reqwest::Client,
     relay: &PlaybackRelay,
@@ -217,7 +253,8 @@ async fn hls(
         if p.segments[0].0 > expected {
             return Err(Failure::Gap);
         }
-        for (sequence, segment) in p.segments {
+        for (sequence, segment) in &p.segments {
+            let sequence = *sequence;
             if sequence < next.unwrap() {
                 continue;
             }
@@ -225,7 +262,7 @@ async fn hls(
                 return Err(Failure::Gap);
             }
             // Buffer one bounded segment, so cancellation cannot leave half a segment in the file.
-            let mut response = get(client, relay, &segment).await?;
+            let mut response = get(client, relay, segment).await?;
             let mut data = Vec::new();
             while let Some(chunk) = response.chunk().await.map_err(|_| Failure::Network)? {
                 if data.len() + chunk.len() > 32 * 1024 * 1024 {
@@ -253,17 +290,110 @@ async fn hls(
         if p.ended {
             return Err(Failure::Network);
         }
-        if last_progress.elapsed() > Duration::from_secs(30) {
-            return Err(Failure::Network);
-        }
-        tokio::time::sleep(p.wait).await;
-        bytes = manifest(client, relay, &url).await?;
+        bytes = reload(&p, last_progress, manifest(client, relay, &url)).await?;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn in_band_caption_metadata_is_not_an_external_rendition() {
+        for attributes in [
+            "TYPE=CLOSED-CAPTIONS,GROUP-ID=\"captions\",NAME=\"English, SDH\",INSTREAM-ID=\"CC1\"",
+            "NAME=\"English, TYPE=AUDIO\",INSTREAM-ID=\"CC1\",TYPE=CLOSED-CAPTIONS",
+        ] {
+            assert!(
+                playlist(format!("#EXTM3U\n#EXT-X-MEDIA:{attributes}\na.ts\n").as_bytes()).is_ok()
+            );
+        }
+        for attributes in [
+            "TYPE=AUDIO,URI=\"audio.m3u8\"",
+            "TYPE=SUBTITLES,URI=\"subtitles.m3u8\"",
+            "TYPE=VIDEO",
+            "TYPE=CLOSED-CAPTIONS,URI=\"\"",
+            "TYPE=CLOSED-CAPTIONS,uri=\"external.m3u8\"",
+            "TYPE=CLOSED-CAPTIONS,TYPE=AUDIO",
+            "TYPE=CLOSED-CAPTIONS,type=AUDIO",
+            "NAME=\"TYPE=CLOSED-CAPTIONS\",TYPE=AUDIO",
+            "TYPE=\"CLOSED-CAPTIONS\"",
+            "TYPE=CLOSED-CAPTIONS,NAME=\"unterminated",
+            "TYPE=CLOSED-CAPTIONS,NAME=\"English\"garbage",
+        ] {
+            assert!(
+                matches!(
+                    playlist(format!("#EXTM3U\n#EXT-X-MEDIA:{attributes}\na.ts\n").as_bytes()),
+                    Err(Failure::Unsupported)
+                ),
+                "accepted {attributes}"
+            );
+        }
+    }
+
+    #[test]
+    fn target_duration_is_retained_and_stall_budgets_cannot_overflow() {
+        let long = playlist(b"#EXTM3U\n#EXT-X-TARGETDURATION:60\na.ts\n").unwrap();
+        assert_eq!(long.target_duration, Duration::from_secs(60));
+        assert_eq!(long.stall_allowance(), Duration::from_secs(90));
+        let short = playlist(b"#EXTM3U\n#EXT-X-TARGETDURATION:2\na.ts\n").unwrap();
+        assert_eq!(short.stall_allowance(), Duration::from_secs(32));
+        let missing = playlist(b"#EXTM3U\na.ts\n").unwrap();
+        assert_eq!(missing.stall_allowance(), Duration::from_secs(30));
+        for duration in ["0", "-1", "18446744073709551615", "not-a-duration"] {
+            assert!(matches!(
+                playlist(format!("#EXTM3U\n#EXT-X-TARGETDURATION:{duration}\na.ts\n").as_bytes()),
+                Err(Failure::Unsupported)
+            ));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn long_segments_survive_old_timeout_but_unchanged_manifests_are_bounded() {
+        let p = playlist(b"#EXTM3U\n#EXT-X-TARGETDURATION:60\na.ts\n").unwrap();
+        let progress = tokio::time::Instant::now();
+        // A healthy 60-second segment can be published after the old 30-second
+        // cutoff, with publication jitter. Successful unchanged reloads are not
+        // media progress and must not reset the overall deadline.
+        for _ in 0..7 {
+            assert_eq!(
+                reload(&p, progress, async { Ok(b"unchanged".to_vec()) })
+                    .await
+                    .unwrap(),
+                b"unchanged"
+            );
+        }
+        assert_eq!(progress.elapsed(), Duration::from_secs(70));
+        assert_eq!(
+            reload(&p, progress, std::future::pending()).await,
+            Err(Failure::Network)
+        );
+        assert_eq!(progress.elapsed(), Duration::from_secs(90));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reload_wait_and_fetch_share_the_remaining_stall_budget() {
+        let p = playlist(b"#EXTM3U\n#EXT-X-TARGETDURATION:2\na.ts\n").unwrap();
+        let progress = tokio::time::Instant::now();
+        tokio::time::advance(Duration::from_secs(31)).await;
+        assert_eq!(
+            reload(&p, progress, std::future::pending()).await,
+            Err(Failure::Network)
+        );
+        assert_eq!(progress.elapsed(), Duration::from_secs(32));
+        // Only new segment bytes reset progress, giving the next fetch its own
+        // bounded allowance instead of inheriting the expired deadline.
+        let progress = tokio::time::Instant::now();
+        assert_eq!(
+            reload(&p, progress, async { Ok(vec![1]) }).await.unwrap(),
+            vec![1]
+        );
+        assert_eq!(
+            reload(&p, progress, std::future::pending()).await,
+            Err(Failure::Network)
+        );
+        assert_eq!(progress.elapsed(), Duration::from_secs(32));
+    }
+
     #[test]
     fn sequences_and_unsupported_formats_are_explicit() {
         let p = playlist(b"#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:24\n#EXTINF:2,\nhttps://example.test/a.ts\n#EXTINF:2,\nhttps://example.test/b.ts\n").unwrap();

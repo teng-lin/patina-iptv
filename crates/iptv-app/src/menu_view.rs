@@ -48,7 +48,7 @@ fn label(item: MenuItem, favorite: bool) -> &'static str {
         ExternalPlayer => tr("Open in another player"),
         Reminder => tr("Remind me"),
         Record => tr("Record"),
-        CustomRecording => "Schedule a recording…",
+        CustomRecording => tr("Schedule a recording…"),
         SaveToList => "Save to my list",
         Description => tr("Details"),
         ToggleFavorite if favorite => tr("Remove from favourites"),

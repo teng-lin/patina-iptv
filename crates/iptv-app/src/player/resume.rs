@@ -35,6 +35,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     if !crate::settings::flag(iptv_settings::keys::RESUME_LAST_CHANNEL)
         || ui.wizard.with_untracked(Option::is_some)
         || ui.playing.get_untracked().is_some()
+        || ui.player.recorded.with_untracked(Option::is_some)
     {
         return false;
     }
@@ -57,6 +58,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     if crate::runtime().browser_generation() != generation
         || ui.wizard.with_untracked(Option::is_some)
         || ui.playing.get_untracked().is_some()
+        || ui.player.recorded.with_untracked(Option::is_some)
     {
         return false;
     }
