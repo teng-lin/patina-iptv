@@ -221,16 +221,24 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
                             return;
                         }
                         if let Err(e) = crate::settings::set(ui, key, value) {
-                            notify(&e.to_string());
+                            notify_setting_error(e);
                         }
                     },
                 );
             } else if let Err(e) = crate::settings::set(ui, key, value) {
-                notify(&e.to_string());
+                notify_setting_error(e);
             }
         }
         Effect::Run(key) => run(ui, key),
         Effect::Close => close(ui),
+    }
+}
+
+fn notify_setting_error(error: crate::settings::SaveError) {
+    if matches!(error, crate::settings::SaveError::ParentalLocked) {
+        notify(tr("Unlock parental controls before changing settings"));
+    } else {
+        notify(&error.to_string());
     }
 }
 

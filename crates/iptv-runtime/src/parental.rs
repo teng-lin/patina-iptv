@@ -50,6 +50,18 @@ pub(crate) struct State {
     names: std::collections::BTreeMap<Target, String>,
 }
 
+fn apply_policy(state: &mut State, new: Policy) {
+    if state.access.policy == new {
+        return;
+    }
+    let settings = state.access.granted(&Target::settings(), now_ms());
+    state.epoch.fetch_add(1, Ordering::SeqCst);
+    state.access.lock();
+    state.access.policy = new;
+    if settings {
+        state.access.unlock(Target::settings(), now_ms());
+    }
+}
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -189,8 +201,11 @@ impl Runtime {
         state.blocked = blocked.into_iter().collect();
         state.ancestry = ancestry;
         state.names = names;
-        state.access.policy = policy(self);
+        apply_policy(&mut state, policy(self));
         Ok(())
+    }
+    pub(crate) fn parental_policy_changed(&self) {
+        apply_policy(&mut self.parental.borrow_mut(), policy(self));
     }
     pub fn parental_has_pin(&self) -> bool {
         self.parental.borrow().has_pin
@@ -200,7 +215,7 @@ impl Runtime {
     }
     pub fn parental_allowed(&self, target: &Target) -> bool {
         let mut state = self.parental.borrow_mut();
-        state.access.policy = policy(self);
+        apply_policy(&mut state, policy(self));
         let settings = target.kind == ContentKind::Settings;
         if !state.ready {
             return false;
@@ -254,7 +269,7 @@ impl Runtime {
             return Err(Error::OwnerClosed);
         }
         let mut state = self.parental.borrow_mut();
-        state.access.policy = policy(self);
+        apply_policy(&mut state, policy(self));
         state.access.unlock(target, now_ms());
         Ok(())
     }
@@ -343,7 +358,7 @@ impl Runtime {
     }
     pub(crate) fn parental_snapshot(&self) -> Snapshot {
         let mut state = self.parental.borrow_mut();
-        state.access.policy = policy(self);
+        apply_policy(&mut state, policy(self));
         Snapshot {
             access: state.access.clone(),
             epoch: state.epoch.clone(),
@@ -411,9 +426,9 @@ pub(crate) fn native_allowed(
     target: &Target,
     snapshot: &Snapshot,
 ) -> iptv_store_sqlite::Result<bool> {
-    let mut access = snapshot.access.clone();
+    let access = snapshot.access.clone();
     if snapshot.epoch.load(Ordering::SeqCst) != snapshot.at {
-        access.lock();
+        return Ok(false);
     }
     if !access.policy.protects(target.kind) {
         return Ok(true);

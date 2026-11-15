@@ -90,6 +90,8 @@ impl Access {
             }
             UnlockWindow::UntilRestart | UnlockWindow::UntilUnblockedChannel => self.session = true,
             UnlockWindow::EveryTime => {
+                self.all_until = None;
+                self.session = false;
                 self.granted.insert(target);
             }
         }
@@ -134,7 +136,7 @@ pub struct Pin {
 }
 impl std::fmt::Debug for Pin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Pin(***)")
+        f.debug_tuple("PIN").field(&"***").finish()
     }
 }
 impl Pin {
@@ -257,7 +259,7 @@ mod tests {
         assert!(Pin::parse("123").is_none());
         assert!(Pin::parse("12345x").is_none());
         let mut pin = Pin::parse("2468").unwrap();
-        assert_eq!(format!("{pin:?}"), "Pin(***)");
+        assert_eq!(format!("{pin:?}"), "PIN(\"***\")");
         assert_eq!(pin.masked(), "••••");
         pin.erase();
         assert!(!pin.valid());

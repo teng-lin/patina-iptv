@@ -63,7 +63,7 @@ pub fn request(ui: Ui, target: Target, done: impl FnOnce() + 'static) {
                 };
                 show(ui, target, phase, done);
             }
-            Err(_) => notice("Parental settings are unavailable"),
+            Err(_) => notify_message("Parental settings are unavailable"),
         }
     });
 }
@@ -71,7 +71,7 @@ pub fn change_pin(ui: Ui) {
     crate::data::spawn_in_app(async move {
         let owner = crate::runtime();
         if owner.parental_refresh().await.is_err() {
-            notice("Parental settings are unavailable");
+            notify_message("Parental settings are unavailable");
             return;
         }
         show(
@@ -154,20 +154,20 @@ pub fn block(ui: Ui, target: Target, blocked: bool) {
                     .set_setting(key, iptv_settings::Value::Bool(true))
                     .is_err()
             {
-                notice("Unlock parental settings first");
+                notify_message("Unlock parental settings first");
                 return;
             }
             match owner.parental_set_blocked(target, blocked).await {
                 Ok(()) => {
                     crate::settings_view::refresh(ui);
-                    notice(if blocked {
+                    notify_message(if blocked {
                         "Content blocked"
                     } else {
                         "Content unblocked"
                     });
                     enforce(ui);
                 }
-                Err(_) => notice("Could not change parental protection"),
+                Err(_) => notify_message("Could not change parental protection"),
             }
         });
     });
@@ -194,7 +194,7 @@ fn manage_pick(ui: Ui, index: usize) {
         crate::runtime().parental_lock();
         close(ui);
         enforce(ui);
-        notice("Parental controls locked");
+        notify_message("Parental controls locked");
     }
 }
 pub fn enforce(ui: Ui) {
@@ -410,7 +410,7 @@ fn display_target(target: &Target) -> String {
         .unwrap_or_else(|| tr("Unavailable content").into());
     trf("Unblock {name}", &[("name", name.as_str().into())])
 }
-fn notice(message: &str) {
+fn notify_message(message: &str) {
     crate::settings_view::notify(tr(message));
 }
 fn focused(ui: Ui, index: usize) -> bool {

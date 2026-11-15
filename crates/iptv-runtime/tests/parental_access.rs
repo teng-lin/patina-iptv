@@ -22,6 +22,8 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
         .unwrap();
     let mut catalogue = common::catalog(2, 2, common::XT_PASSWORD);
     catalogue.groups[0].adult = true;
+    catalogue.groups.last_mut().unwrap().adult = true;
+    catalogue.vod[0].is_series = true;
     common::replace(&mut store, source, &catalogue);
     common::replace(&mut store, other, &catalogue);
     drop(store);
@@ -35,6 +37,7 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
     let recovery =
         support::block_on(owner.parental_change_pin(None, Pin::parse("2468").unwrap())).unwrap();
     assert_eq!(recovery.len(), 32);
+    let disabled_future = commands::channel(&owner, source, catalogue.channels[0].id.clone());
     owner
         .set_setting("parental.live_enabled", Value::Bool(true))
         .unwrap();
@@ -56,9 +59,37 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
     };
     support::block_on(owner.parental_set_blocked(movie.clone(), true)).unwrap();
     owner.parental_lock();
+    assert!(
+        support::block_on(disabled_future).unwrap().is_none(),
+        "a command made with protection disabled cannot outlive a protection change"
+    );
     assert!(support::block_on(owner.parental_check(&public)).is_ok());
     assert!(support::block_on(owner.parental_check(&channel)).is_err());
     assert!(support::block_on(owner.parental_check(&movie)).is_err());
+    let legacy_series = Target {
+        kind: ContentKind::Series,
+        ..movie.clone()
+    };
+    assert!(
+        support::block_on(owner.parental_check(&legacy_series)).is_err(),
+        "Stalker series stored in vod inherit their adult category"
+    );
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let request = iptv_core::recording::Request {
+        source: source.0,
+        channel: channel.id.clone(),
+        channel_name: "Generated channel".into(),
+        title: "Generated programme".into(),
+        start: now + 3600,
+        end: now + 7200,
+    };
+    assert!(
+        support::block_on(owner.schedule_recording(request)).is_err(),
+        "direct recording admission must not bypass a locked channel"
+    );
     assert!(
         support::block_on(commands::channel(
             &owner,
@@ -103,6 +134,17 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
     support::block_on(owner.parental_authorize(Target::settings(), Pin::parse("2468").unwrap()))
         .unwrap();
     assert!(owner.parental_settings_allowed());
+    let group = Target {
+        source: source.0,
+        kind: ContentKind::Group,
+        id: catalogue.groups[0].id.as_str().into(),
+    };
+    support::block_on(owner.parental_set_blocked(group.clone(), false)).unwrap();
+    owner.parental_lock();
+    assert!(support::block_on(owner.parental_check(&channel)).is_ok());
+    support::block_on(owner.parental_authorize(Target::settings(), Pin::parse("2468").unwrap()))
+        .unwrap();
+    support::block_on(owner.parental_set_blocked(group, true)).unwrap();
     owner.set_foreground(false);
     assert!(!owner.parental_settings_allowed());
     assert!(owner.flush_files(std::time::Duration::from_secs(2)));

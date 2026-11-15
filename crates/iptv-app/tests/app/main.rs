@@ -52,6 +52,7 @@ mod library_cached_epg;
 mod library_management;
 mod library_refresh;
 mod multiview_menu;
+mod parental;
 mod personalization_appearance;
 mod personalization_groups;
 mod personalization_order;

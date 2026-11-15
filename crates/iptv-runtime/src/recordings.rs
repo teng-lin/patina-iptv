@@ -327,6 +327,12 @@ impl Runtime {
 
     pub async fn schedule_recording(&self, request: Request) -> Result<JobId, Error> {
         request.validate(now()).map_err(Error::unavailable)?;
+        self.parental_check(&iptv_core::parental::Target::live(
+            request.source,
+            request.channel.as_str(),
+        ))
+        .await
+        .map_err(|_| Error::unavailable("Unlock this recording with the parental PIN"))?;
         if self.recordings.shutdown.is_cancelled() || !self.services().is_current() {
             return Err(Error::unavailable(
                 "Restart Patina before scheduling a recording",

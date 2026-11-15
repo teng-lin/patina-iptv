@@ -71,7 +71,7 @@ use iptv_core::i18n::is_catalogued;
 
 /// How many `[untranslated]` entries there are. Lower it with the list;
 /// it is never raised.
-const UNTRANSLATED: usize = 438;
+const UNTRANSLATED: usize = 437;
 
 /// Source directories read, relative to the workspace's `crates/`.
 const ROOTS: &[&str] = &[
@@ -116,7 +116,7 @@ const MESSAGE_TYPES: &[&str] = &["Notify"];
 /// Calls in the file itself are read, and those through the file's module
 /// (`wizard_view::button(…)`, `super::button(…)`).
 const TRANSLATING_HELPERS: &[(&str, &str, usize)] = &[
-    ("iptv-app/src/parental_view.rs", "notice", 0),
+    ("iptv-app/src/parental_view.rs", "notify_message", 0),
     ("iptv-app/src/fav_editor.rs", "button", 0),
     // `.label(move || tr(name))`, and the tile buttons' `tr(what)`.
     ("iptv-app/src/multiview_view/chrome.rs", "pill", 1),
@@ -149,7 +149,10 @@ const MESSAGE_FILES: &[&str] = &[
 
 /// The same for single calls of a file: the backup errors the view makes
 /// itself are the literals of its `context` and `Err`.
-const MESSAGE_CALLS_IN: &[(&str, &[&str])] = &[("iptv-app/src/backup.rs", &["context", "Err"])];
+const MESSAGE_CALLS_IN: &[(&str, &[&str])] = &[
+    ("iptv-app/src/backup.rs", &["context", "Err"]),
+    ("iptv-runtime/src/settings.rs", &["write_str"]),
+];
 
 /// The names of the built-in lists, made where the lists are and
 /// translated by the shell's `lists::entry_name`.

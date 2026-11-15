@@ -190,6 +190,9 @@ pub(crate) fn set(
     let json = next.to_json_string();
     let next = Arc::new(next);
     replace(services.shared_settings(), next.clone());
+    if key.starts_with("parental.") {
+        owner.parental_policy_changed();
+    }
     if !changes.is_empty() {
         log::info!("iptv settings: {key} changed");
         owner.emit(super::RuntimeEvent::SettingsChanged);
