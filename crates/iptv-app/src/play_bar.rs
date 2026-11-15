@@ -429,7 +429,7 @@ fn volume(ui: Ui) -> impl IntoElement {
 fn centre(ui: Ui) -> impl IntoElement {
     let size = target();
     let catch_up = move || {
-        matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::active(ui)
+        matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::seekable(ui)
     };
     let seek = move |forward: bool| {
         let steps = crate::seek::steps();
@@ -465,7 +465,7 @@ fn centre(ui: Ui) -> impl IntoElement {
             },
             always,
             size + 8.0,
-            move || ui.paused.update(|p| *p = !*p),
+            move || crate::player::toggle_pause(ui),
         ))
         .child(button(
             ui,

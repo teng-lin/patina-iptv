@@ -313,6 +313,18 @@ fn perform(ui: Ui, index: usize) {
     let Some(action) = actions(ui, &job).get(index).copied() else {
         return;
     };
+    if matches!(
+        action,
+        "Play recording" | "Resume recording" | "Play from beginning"
+    ) {
+        let target =
+            iptv_core::parental::Target::live(job.request.source, job.request.channel.clone());
+        crate::parental_view::request(ui, target, move || execute(ui, job, confirm, action, index));
+    } else {
+        execute(ui, job, confirm, action, index);
+    }
+}
+fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str, index: usize) {
     if action == "Stop playback" {
         crate::player_keys::stop_playback(ui);
         return;
@@ -597,7 +609,7 @@ fn action_view(ui: Ui, size: Scale) -> impl IntoElement {
             tr(j.status.label()), date(j.request.start), date(j.request.end), j.bytes / (1024 * 1024), "MiB", translated_reason(&j.message))).unwrap_or_default())))
         .child(when(move || ui.recordings.with(|s| s.confirm_delete), move ||
             ui_kit::body(size, tr("Delete this recording file permanently? Select Delete recording again to confirm. Back cancels."))))
-        .children((0..2).map(move |index| when(move || ui.recordings.with(|s| s.focused().is_some_and(|j| index < actions(ui, j).len())), move || {
+        .children((0..3).map(move |index| when(move || ui.recordings.with(|s| s.focused().is_some_and(|j| index < actions(ui, j).len())), move || {
             ui_kit::button(ui, size, move || ui.recordings.with(|s| s.focused().and_then(|j| actions(ui, j).get(index).copied()).map(|name| tr(name).to_owned()).unwrap_or_default()),
                 move || ui.recordings.with(|s| s.action == index), move || perform(ui, index))
         })))

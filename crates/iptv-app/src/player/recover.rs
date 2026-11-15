@@ -127,6 +127,7 @@ pub(super) fn watch_stall(ui: Ui, surface: usize) {
 /// The host's `state` event from `surface`.
 pub fn on_state(ui: Ui, surface: usize, state: PlayerState) {
     if surface == 0 && state == PlayerState::Ended {
+        ui.player.main().finished.set(true);
         crate::on_demand::flush(ui, true);
     }
     let health = ui.player.stream(surface).health;
@@ -160,7 +161,8 @@ pub fn on_error(ui: Ui, surface: usize, code: &str, http: Option<u16>) {
 /// The full-screen player shows its failure card (retries may go on
 /// behind it).
 pub fn failed(ui: &Ui) -> bool {
-    ui.playing.get_untracked().is_some() && surface_failed(*ui, 0)
+    (ui.playing.get_untracked().is_some() || crate::on_demand::active(*ui))
+        && surface_failed(*ui, 0)
 }
 
 /// `surface` shows its failure card.
@@ -178,7 +180,7 @@ pub fn retry(ui: Ui) {
 
 /// "Try again" on `surface`.
 pub fn retry_surface(ui: Ui, surface: usize) {
-    if target(ui, surface).is_none() {
+    if target(ui, surface).is_none() && !(surface == 0 && crate::on_demand::active(ui)) {
         return;
     }
     let now = ui.now_ms();

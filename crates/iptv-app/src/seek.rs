@@ -75,12 +75,10 @@ fn programme(ui: Ui) -> Option<(i32, i32, i32)> {
 pub fn elapsed(ui: Ui) -> Option<(i32, i32)> {
     if crate::on_demand::active(ui) {
         let t = ui.player.main().timeline.get();
-        return t.duration_ms.map(|duration| {
-            (
-                i32::try_from(t.position_ms / 1000).unwrap_or(i32::MAX),
-                i32::try_from(duration / 1000).unwrap_or(i32::MAX),
-            )
-        });
+        return Some((
+            i32::try_from(t.position_ms / 1000).unwrap_or(i32::MAX),
+            i32::try_from(t.duration_ms.unwrap_or(0) / 1000).unwrap_or(i32::MAX),
+        ));
     }
     let Playback::CatchUp { offset, start } = ui.playback.get() else {
         return None;

@@ -210,7 +210,11 @@ fn entered(ui: Ui) {
 pub fn on_action(ui: Ui, action: PipAction) {
     log::info!("iptv pip: {}", action.wire());
     match action {
-        PipAction::Play => ui.paused.set(false),
+        PipAction::Play => {
+            if ui.paused.get_untracked() || ui.player.main().finished.get_untracked() {
+                crate::player::toggle_pause(ui);
+            }
+        }
         PipAction::Pause => ui.paused.set(true),
         PipAction::Next => crate::player_keys::zap(ui, 1),
         PipAction::Previous => crate::player_keys::zap(ui, -1),

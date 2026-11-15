@@ -77,3 +77,9 @@ pub fn flush(ui: Ui, ended: bool) {
         crate::runtime().save_recording_progress(job.id, &source, progress);
     }
 }
+
+pub fn title(ui: Ui) -> Option<String> {
+    ui.player
+        .recorded
+        .with(|r| r.as_ref().map(|(job, _)| job.request.title.clone()))
+}

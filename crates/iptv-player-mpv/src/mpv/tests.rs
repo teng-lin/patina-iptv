@@ -1400,11 +1400,17 @@ fn recorded_media_seeks_while_paused_and_reports_duration_without_reopening() {
     let Some(media) = clip(dir.path(), "red", 12.0) else {
         return;
     };
-    let server = Server::start(vec![("/generated.ts", Answer::Body(media))]);
+    let path = dir.path().join("generated-recording.ts");
+    std::fs::write(&path, media).unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let relay = {
+        let _entered = runtime.enter();
+        iptv_net::recording_file::RecordingFile::start(path).unwrap()
+    };
     let mut player = Player::new();
     player.set(
         "source",
-        json!({"url":server.url("/generated.ts"),"token":81,"live":false}),
+        json!({"url":relay.url,"token":81,"live":false,"publicOnly":false}),
     );
     assert!(player.inner.create_render());
     player.wait_state(Some(&gpu), "ready");

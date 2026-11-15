@@ -56,7 +56,11 @@ fn programme(ui: Ui) -> (usize, Program) {
 /// the seek being chosen), else now in the live programme.
 fn progress(ui: Ui) -> f32 {
     if let Some((at, length)) = crate::seek::elapsed(ui) {
-        return at as f32 / length.max(1) as f32;
+        return if length > 0 {
+            at as f32 / length as f32
+        } else {
+            0.0
+        };
     }
     let (_, p) = programme(ui);
     let now = ui.focus.with(|f| f.now);
@@ -88,7 +92,11 @@ fn ends(ui: Ui) -> (String, String) {
             };
             (
                 format!("{seeking}{}", crate::seek::hms(at)),
-                crate::seek::hms(length),
+                if length > 0 {
+                    crate::seek::hms(length)
+                } else {
+                    "–:––".into()
+                },
             )
         }
         _ => {

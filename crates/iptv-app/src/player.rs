@@ -71,6 +71,7 @@ pub struct Stream {
     pub timeline: Signal<iptv_core::on_demand::Timeline>,
     pub seek: Signal<Option<iptv_player_mpv::SeekProps>>,
     pub resume_ms: Signal<Option<u64>>,
+    pub finished: Signal<bool>,
     /// A retry that came due while the app was away ([`recover::resume`]).
     parked: Signal<Option<Retry>>,
     /// What the open stream offers and what the viewer chose (`media.rs`).
@@ -95,6 +96,7 @@ impl Stream {
             timeline: signal(Default::default()),
             seek: signal(None),
             resume_ms: signal(None),
+            finished: signal(false),
             parked: signal(None),
             tracks: signal(Tracks::default()),
             choice: signal(Choice::default()),
@@ -211,6 +213,16 @@ pub fn start(ui: &Ui, channel: usize) {
         }
     }
     open(ui, 0, session);
+}
+
+pub fn toggle_pause(ui: Ui) {
+    if crate::on_demand::active(ui) && ui.player.main().finished.get_untracked() {
+        ui.paused.set(false);
+        retry_surface(ui, 0);
+    } else {
+        ui.paused.update(|p| *p = !*p);
+        crate::on_demand::flush(ui, false);
+    }
 }
 
 /// Surface `surface` (not 0) plays `channel` live, with a fresh health
@@ -342,11 +354,27 @@ fn open(ui: Ui, surface: usize, session: u64) {
 }
 fn open_allowed(ui: Ui, surface: usize, session: u64) {
     if surface == 0
-        && let Some((_, source)) = ui.player.recorded.get_untracked()
+        && let Some((job, source)) = ui.player.recorded.get_untracked()
     {
-        let position = ui.player.main().timeline.get_untracked().position_ms;
-        load(ui, surface, session, source);
-        ui.player.main().resume_ms.set(Some(position));
+        let position = if ui.player.main().finished.get_untracked() {
+            0
+        } else {
+            ui.player.main().timeline.get_untracked().position_ms
+        };
+        let owner = crate::runtime();
+        crate::data::spawn_in_app(async move {
+            let target = iptv_core::parental::Target::live(job.request.source, job.request.channel);
+            let allowed = owner.parental_check(&target).await.is_ok();
+            if ui.player.main().health.with_untracked(|h| h.session()) != session {
+                return;
+            }
+            if allowed {
+                load(ui, surface, session, source);
+                ui.player.main().resume_ms.set(Some(position));
+            } else {
+                stop(ui);
+            }
+        });
         return;
     }
     // What the surface asked for before is no longer wanted.
@@ -454,6 +482,7 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
         stream.reconnect.set(reconnect);
         stream.token.update(|t| *t += 1);
         stream.position_ms.set(0);
+        stream.finished.set(false);
         stream.timeline.set(Default::default());
         stream.seek.set(None);
         stream.resume_ms.set(None);

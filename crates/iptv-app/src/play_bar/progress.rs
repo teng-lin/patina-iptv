@@ -27,17 +27,30 @@ pub(super) fn programme(ui: Ui) -> (usize, crate::guide::Program) {
 pub(super) fn line(ui: Ui) -> impl IntoElement {
     let width = signal(0.0_f32);
     let catch_up = move || {
-        matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::active(ui)
+        matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::seekable(ui)
     };
     let fraction = move || match crate::seek::elapsed(ui) {
-        Some((at, length)) => at as f32 / length.max(1) as f32,
+        Some((at, length)) => {
+            if length > 0 {
+                at as f32 / length as f32
+            } else {
+                0.0
+            }
+        }
         None => {
             let (_, p) = programme(ui);
             p.progress(ui.focus.with(|f| f.now))
         }
     };
     let ends = move || match crate::seek::elapsed(ui) {
-        Some((at, length)) => (crate::seek::hms(at), crate::seek::hms(length)),
+        Some((at, length)) => (
+            crate::seek::hms(at),
+            if length > 0 {
+                crate::seek::hms(length)
+            } else {
+                "–:––".into()
+            },
+        ),
         None => {
             let (_, p) = programme(ui);
             (clock(p.start), clock(p.end))

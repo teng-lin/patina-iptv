@@ -127,7 +127,7 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
         Action::ShowPanels if crate::player::failed(&ui) => crate::player::retry(ui),
         Action::ShowPanels if crate::seek::pending(ui) => crate::seek::commit_now(ui),
         Action::ShowPanels if ok_pauses(ui) => {
-            ui.paused.update(|p| *p = !*p);
+            crate::player::toggle_pause(ui);
             ui.update_panels(|p, now| p.show_info(now));
         }
         Action::ShowPanels => ui.update_panels(|p, now| p.show_card(now)),
@@ -138,7 +138,7 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
         Action::ShowControls => ui.update_panels(|p, now| p.show_controls(now)),
         Action::ShowInfo if fullscreen => ui.update_panels(|p, now| p.show_info(now)),
         Action::ShowHistory => crate::chooser::open(ui, crate::chooser::Kind::History),
-        Action::PlayPause => ui.paused.update(|p| *p = !*p),
+        Action::PlayPause => crate::player::toggle_pause(ui),
         // Catch-up seeking (`seek.rs`); nothing to seek in a live stream.
         Action::SeekBack => seek(-crate::seek::steps().rewind),
         Action::SeekForward => seek(crate::seek::steps().forward),
