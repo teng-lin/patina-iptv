@@ -264,9 +264,7 @@ mocks: `tools/mock-xtream.py` (Xtream API), `tools/mock-live-cuts.py`
 (live streams the server keeps cutting), `tools/make-track-fixtures.sh`
 (multiple audio and subtitle tracks).
 
-## Keyboard
-
-### Recordings on TV, tablet and desktop
+## Recordings on TV, tablet and desktop
 
 Choose **Record** or **Schedule a recording…** in a programme's menu. The
 programme details and full-screen controls also offer recording. On a TV, use
@@ -293,6 +291,8 @@ conservative 32 GiB media budget. Recordings are not encrypted with the
 catalogue and are excluded from portable and OS backups. Catalogue restore
 clears recording schedules/history; existing media files remain in that
 directory and are never overwritten by restored recording identities.
+
+## Keyboard
 
 | Remote | Keyboard |
 | --- | --- |

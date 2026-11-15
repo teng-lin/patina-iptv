@@ -238,6 +238,7 @@ fn save(ui: Ui) {
             match result {
                 Ok(id) => {
                     s.draft = None;
+                    s.filter = Filter::All;
                     s.focus = Some(id);
                     s.actions = false;
                 }

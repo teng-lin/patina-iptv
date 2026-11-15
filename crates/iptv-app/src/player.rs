@@ -251,6 +251,9 @@ pub fn stop(ui: Ui) {
 
 pub fn play_recording(ui: Ui, job: iptv_core::recording::Job, source: PlaySource) {
     crate::multiview::close(ui);
+    cancel_resolve(0);
+    ui.pending_zap.set(None);
+    ui.browse_playback.set(Default::default());
     ui.player.resume.set(false);
     ui.player.early.set(None);
     ui.playing.set(None);

@@ -288,7 +288,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
             crate::recordings_view::programme(ui, origin, false);
             return;
         }
-        // The popover has no actions; Back (or Menu) closes it.
+        // Back (or Menu) closes programme details.
         if matches!(action, Action::Back | Action::ShowMenu) {
             crate::menu_view::close(ui);
         }
