@@ -117,9 +117,34 @@ fn deleting_and_reusing_a_source_id_cannot_retarget_recording_intent() {
         .delete_source(crate::SourceId(request.source))
         .unwrap();
     assert!(!store.recording_source_is_current(id).unwrap());
-    assert_eq!(store.add_source(&source).unwrap().0, request.source);
+    let replacement = store.add_source(&source).unwrap();
+    assert_eq!(replacement.0, request.source);
     assert!(!store.recording_source_is_current(id).unwrap());
     assert!(store.recording_job(id).unwrap().is_some());
+    let parsed = iptv_providers::m3u::parse_m3u(
+        "#EXTM3U\n#EXTINF:-1,Generated channel\nhttps://example.test/generated.ts\n",
+    );
+    store
+        .replace_catalog(
+            replacement,
+            &parsed.groups,
+            &parsed.channels.items,
+            &[],
+            &[],
+        )
+        .unwrap();
+    let new_id = store
+        .schedule_recording(JobId(44), &request, request.start - 100)
+        .unwrap();
+    assert_ne!(id, new_id);
+    assert!(!store.recording_job(id).unwrap().unwrap().source_current);
+    assert!(store.recording_job(new_id).unwrap().unwrap().source_current);
+    assert_eq!(
+        store
+            .schedule_recording(JobId(45), &request, request.start - 100)
+            .unwrap(),
+        new_id
+    );
 }
 #[test]
 fn portable_backups_exclude_host_jobs_without_changing_live_intent() {

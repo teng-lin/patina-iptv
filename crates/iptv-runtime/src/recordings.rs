@@ -134,6 +134,7 @@ pub(crate) struct State {
     started: AtomicBool,
     shutdown: CancelToken,
     contexts: Mutex<HashMap<i64, ContextEntry>>,
+    media_ops: tokio::sync::Mutex<()>,
     playback: Mutex<Option<(JobId, iptv_net::recording_file::RecordingFile)>>,
 }
 impl State {
@@ -198,6 +199,21 @@ fn finalize_name(from: &Path, to: &Path) -> std::io::Result<()> {
         std::fs::hard_link(from, to)?;
         std::fs::remove_file(from)
     }
+}
+
+/// Called on file workers only. A stopped partial remains readable even when
+/// the filesystem could not publish its final name; active jobs never use it.
+fn retained_media(services: &Services, id: JobId, partial: bool) -> Option<(PathBuf, u64)> {
+    [false, true].into_iter().find_map(|is_partial| {
+        if is_partial && !partial {
+            return None;
+        }
+        let file = path(services, id, is_partial);
+        let metadata = std::fs::symlink_metadata(&file).ok()?;
+        let bytes = metadata.len() / 188 * 188;
+        (metadata.is_file() && !metadata.file_type().is_symlink() && bytes > 0)
+            .then_some((file, bytes))
+    })
 }
 
 impl Runtime {
@@ -315,6 +331,7 @@ impl Runtime {
                     .into_iter()
                     .find(|j| {
                         j.status.active()
+                            && j.source_current
                             && j.request.source == duplicate.source
                             && j.request.channel == duplicate.channel
                             && j.request.start == duplicate.start
@@ -405,6 +422,7 @@ impl Runtime {
         Ok(jobs)
     }
     pub async fn open_recording(&self, id: JobId) -> Result<PlaySource, Error> {
+        let _operation = self.recordings.media_ops.lock().await;
         let file = self.recording_file(id).await?;
         let relay = self
             .services()
@@ -437,22 +455,19 @@ impl Runtime {
         if !matches!(job.status, Status::Completed | Status::Partial) || job.bytes == 0 {
             return Err(Error::unavailable("This recording has no playable media"));
         }
-        let file = path(&self.services(), id, false);
-        let checked = file.clone();
-        let valid = self
-            .services()
-            .spawn_blocking(move || {
-                std::fs::symlink_metadata(checked)
-                    .is_ok_and(|m| m.is_file() && !m.file_type().is_symlink() && m.len() > 0)
-            })
+        let services = self.services();
+        self.services()
+            .spawn_blocking(move || retained_media(&services, id, job.status == Status::Partial))
             .await
-            .unwrap_or(false);
-        if !valid {
-            return Err(Error::unavailable("The recording file is missing"));
-        }
-        Ok(file)
+            .ok()
+            .flatten()
+            .map(|(file, _)| file)
+            .ok_or_else(|| Error::unavailable("The recording file is missing"))
     }
     pub async fn delete_recording(&self, id: JobId) -> Result<(), Error> {
+        // Admission and deletion stay mutually exclusive across store/file awaits.
+        // Cancellation drops this guard too, so a failed operation cannot strand it.
+        let _operation = self.recordings.media_ops.lock().await;
         if self
             .recordings
             .playback
@@ -534,16 +549,18 @@ async fn transition(services: &Services, job: &Job, to: Status, bytes: u64, mess
 async fn recover_media(services: &Services, job: &Job) {
     let p = path(services, job.id, true);
     let complete = path(services, job.id, false);
+    let files = services.clone();
+    let id = job.id;
     let bytes = services
         .spawn_blocking(move || {
             let _ = finalize_name(&p, &complete);
-            std::fs::symlink_metadata(complete)
-                .ok()
-                .filter(|m| m.is_file() && !m.file_type().is_symlink())
-                .map_or(0, |m| m.len())
+            retained_media(&files, id, true).map_or(0, |(_, bytes)| bytes)
         })
         .await
         .unwrap_or(0);
+    if job.status == Status::Partial && bytes > 0 {
+        return;
+    }
     transition(
         services,
         job,
@@ -559,7 +576,7 @@ async fn recover_media(services: &Services, job: &Job) {
 }
 async fn recover(services: &Services) -> Result<(), crate::model::StoreError> {
     for job in services.read(|store| store.recording_jobs()).await? {
-        if job.status == Status::Recording {
+        if matches!(job.status, Status::Recording | Status::Partial) {
             recover_media(services, &job).await;
         } else if job.status == Status::Scheduled && job.request.start < now() {
             transition(
@@ -575,8 +592,19 @@ async fn recover(services: &Services) -> Result<(), crate::model::StoreError> {
     Ok(())
 }
 async fn run(services: Services, state: Arc<State>) {
-    if recover(&services).await.is_err() || refresh_accounts(&services, &state).await.is_err() {
-        return;
+    let mut retry = Duration::from_millis(250);
+    loop {
+        if !services.is_current() || state.shutdown.is_cancelled() {
+            return;
+        }
+        if recover(&services).await.is_ok() && refresh_accounts(&services, &state).await.is_ok() {
+            break;
+        }
+        tokio::select! {
+            _ = state.shutdown.cancelled() => return,
+            _ = tokio::time::sleep(retry) => {},
+        }
+        retry = (retry * 2).min(Duration::from_secs(5));
     }
     state.lock().ready = true;
     let mut tasks = tokio::task::JoinSet::new();
@@ -826,7 +854,17 @@ async fn record(services: &Services, state: &State, job: &Job, stop: &CancelToke
         .await;
     let (bytes, storage_ok) = match finalized {
         Ok(Ok(n)) => (n, true),
-        _ => (0, false),
+        _ => {
+            let files = services.clone();
+            let id = job.id;
+            let bytes = services
+                .spawn_blocking(move || {
+                    retained_media(&files, id, true).map_or(0, |(_, bytes)| bytes)
+                })
+                .await
+                .unwrap_or(0);
+            (bytes, false)
+        }
     };
     let message = if !storage_ok {
         "Could not finalize the recording; partial media was retained"
@@ -837,7 +875,7 @@ async fn record(services: &Services, state: &State, job: &Job, stop: &CancelToke
     };
     let status = if bytes == 0 {
         Status::Failed
-    } else if outcome.is_ok() {
+    } else if outcome.is_ok() && storage_ok {
         Status::Completed
     } else {
         Status::Partial

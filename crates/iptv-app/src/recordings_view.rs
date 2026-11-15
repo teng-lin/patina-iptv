@@ -117,6 +117,7 @@ pub fn badge(ui: Ui, channel: usize, programme: crate::guide::Program) -> &'stat
             .iter()
             .find(|j| {
                 j.status.active()
+                    && j.source_current
                     && j.request.source == source.0
                     && j.request.channel == key
                     && j.request.start < end
@@ -198,6 +199,7 @@ pub fn programme(ui: Ui, origin: Origin, custom: bool) {
         s.confirm_delete = false;
         let existing = s.jobs.iter().find(|j| {
             j.status.active()
+                && j.source_current
                 && j.request.source == request.source
                 && j.request.channel == request.channel
                 && j.request.start < request.end

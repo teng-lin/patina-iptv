@@ -113,7 +113,7 @@ async fn a_reused_playlist_id_is_rejected_before_resolving_recording_media() {
         .await
         .unwrap();
     assert_eq!(
-        seed(&owner, "https://example.test/replacement.ts")
+        seed(&owner, "https://example.test/generated.ts")
             .await
             .source,
         source.0
@@ -134,6 +134,12 @@ async fn a_reused_playlist_id_is_rejected_before_resolving_recording_media() {
         )
         .await
         .is_err()
+    );
+    let replacement = owner.schedule_recording(request.clone()).await.unwrap();
+    assert_ne!(replacement, id);
+    assert_eq!(
+        owner.schedule_recording(request).await.unwrap(),
+        replacement
     );
 }
 async fn until(owner: &Runtime, id: JobId, accept: impl Fn(&Job) -> bool) -> Job {
@@ -197,9 +203,77 @@ async fn record_stop_play_and_delete_preserve_real_media_and_its_lease() {
     assert!(!source.public_only);
     assert!(owner.delete_recording(id).await.is_err());
     owner.close_recording_playback();
-    owner.delete_recording(id).await.unwrap();
+    // Hold admission, queue deletion before a competing playback request, then
+    // release it. A new reader cannot acquire a lease during the file awaits.
+    let operation = owner.recordings.media_ops.lock().await;
+    let mut deleting = Box::pin(owner.delete_recording(id));
+    let mut opening = Box::pin(owner.open_recording(id));
+    std::future::poll_fn(|cx| {
+        use std::future::Future;
+        assert!(deleting.as_mut().poll(cx).is_pending());
+        assert!(opening.as_mut().poll(cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    drop(operation);
+    let (deleted, opened) = tokio::join!(deleting, opening);
+    deleted.unwrap();
+    assert!(opened.is_err());
     assert!(!file.exists());
     assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn startup_retries_a_transient_catalogue_failure_without_restarting_the_app() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("catalog");
+    let owner = owner(&root);
+    let request = seed(&owner, "https://example.test/generated.ts").await;
+    let conn = rusqlite::Connection::open(root.join("iptv.sqlite")).unwrap();
+    conn.pragma_update(None, "key", format!("x'{}'", "11".repeat(32)))
+        .unwrap();
+    conn.execute_batch("ALTER TABLE recording_jobs RENAME TO generated_unavailable_jobs")
+        .unwrap();
+    owner.start_recordings();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!owner.recordings.lock().ready);
+    conn.execute_batch("ALTER TABLE generated_unavailable_jobs RENAME TO recording_jobs")
+        .unwrap();
+    drop(conn);
+    let id = owner.schedule_recording(request).await.unwrap();
+    assert!(owner.recordings.lock().ready);
+    owner.stop_recording(id).await.unwrap();
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn a_failed_final_name_keeps_partial_media_playable_and_recoverable() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("catalog");
+    let owner = owner(&root);
+    let mut request = seed(&owner, &server()).await;
+    request.start = now() + 2;
+    request.end = now() + 20;
+    let id = owner.schedule_recording(request).await.unwrap();
+    let destination = path(&owner.services(), id, false);
+    std::fs::create_dir_all(&destination).unwrap();
+    until(&owner, id, |j| {
+        j.status == Status::Recording && j.bytes >= 188
+    })
+    .await;
+    owner.stop_recording(id).await.unwrap();
+    let job = until(&owner, id, |j| j.status == Status::Partial).await;
+    assert!(job.bytes >= 188);
+    assert_eq!(
+        owner.recording_file(id).await.unwrap().extension().unwrap(),
+        "part"
+    );
+    owner.open_recording(id).await.unwrap();
+    owner.close_recording_playback();
+    std::fs::remove_dir(&destination).unwrap();
+    recover(&owner.services()).await.unwrap();
+    assert_eq!(owner.recording_file(id).await.unwrap(), destination);
+    owner.delete_recording(id).await.unwrap();
 }
 
 #[tokio::test]

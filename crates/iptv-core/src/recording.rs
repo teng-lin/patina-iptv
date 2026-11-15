@@ -64,6 +64,8 @@ impl Request {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Job {
     pub id: JobId,
+    /// A read-time observation for views; native services recheck before I/O.
+    pub source_current: bool,
     pub request: Request,
     pub status: Status,
     pub bytes: u64,
@@ -190,6 +192,7 @@ mod tests {
     fn job(id: i64) -> Job {
         Job {
             id: JobId(id),
+            source_current: true,
             request: Request {
                 source: 1,
                 channel: "synthetic".into(),

@@ -15,5 +15,5 @@ CREATE TABLE recording_jobs (
     source_incarnation TEXT NOT NULL
 );
 CREATE INDEX recording_due ON recording_jobs(status, starts_at);
-CREATE UNIQUE INDEX recording_unique_active ON recording_jobs(source_id, channel_id, starts_at, ends_at)
+CREATE UNIQUE INDEX recording_unique_active ON recording_jobs(source_incarnation, source_id, channel_id, starts_at, ends_at)
     WHERE status IN ('scheduled','recording');

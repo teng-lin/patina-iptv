@@ -365,7 +365,7 @@ CREATE INDEX manual_order_by_position ON manual_order (source_id, scope, positio
 -- index recording_due
 CREATE INDEX recording_due ON recording_jobs(status, starts_at);
 -- index recording_unique_active
-CREATE UNIQUE INDEX recording_unique_active ON recording_jobs(source_id, channel_id, starts_at, ends_at)
+CREATE UNIQUE INDEX recording_unique_active ON recording_jobs(source_incarnation, source_id, channel_id, starts_at, ends_at)
     WHERE status IN ('scheduled','recording');
 -- index series_by_position
 CREATE INDEX series_by_position ON series (source_id, position);

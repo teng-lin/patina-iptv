@@ -30,6 +30,7 @@ fn stored(value: Status) -> &'static str {
 fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
     Ok(Job {
         id: JobId(r.get(0)?),
+        source_current: r.get(11)?,
         request: Request {
             source: r.get(1)?,
             channel: r.get(2)?,
@@ -47,14 +48,20 @@ impl Store {
     pub fn recording_jobs(&self) -> Result<Vec<Job>> {
         Ok(self
             .conn
-            .prepare("SELECT * FROM recording_jobs ORDER BY starts_at DESC, id DESC LIMIT 1000")?
+            .prepare("SELECT j.*, EXISTS(SELECT 1 FROM guide_revisions r WHERE r.source_id=j.source_id
+                AND r.incarnation=j.source_incarnation) FROM recording_jobs j ORDER BY starts_at DESC, id DESC LIMIT 1000")?
             .query_map([], row)?
             .collect::<rusqlite::Result<_>>()?)
     }
     pub fn recording_job(&self, id: JobId) -> Result<Option<Job>> {
         Ok(self
             .conn
-            .query_row("SELECT * FROM recording_jobs WHERE id=?1", [id.0], row)
+            .query_row(
+                "SELECT j.*, EXISTS(SELECT 1 FROM guide_revisions r WHERE r.source_id=j.source_id
+                AND r.incarnation=j.source_incarnation) FROM recording_jobs j WHERE id=?1",
+                [id.0],
+                row,
+            )
             .optional()?)
     }
     pub fn schedule_recording(&mut self, id: JobId, request: &Request, now: i64) -> Result<JobId> {
@@ -65,7 +72,8 @@ impl Store {
         // An identical accepted request is idempotent, including a lost reply.
         if let Some(id) = tx.query_row(
             "SELECT id FROM recording_jobs WHERE source_id=?1 AND channel_id=?2 AND starts_at=?3
-             AND ends_at=?4 AND status IN ('scheduled','recording')",
+             AND ends_at=?4 AND status IN ('scheduled','recording')
+             AND source_incarnation=(SELECT incarnation FROM guide_revisions WHERE source_id=?1)",
             params![request.source, request.channel, request.start, request.end], |r| r.get(0)).optional()? {
             return Ok(JobId(id));
         }
@@ -138,7 +146,8 @@ impl Store {
             .map_err(|m| StoreError::InvalidData(m.into()))?;
         Ok(self.conn.execute(
             "UPDATE recording_jobs SET starts_at=?1,ends_at=?2
-            WHERE id=?3 AND source_id=?4 AND channel_id=?5 AND status='scheduled'",
+            WHERE id=?3 AND source_id=?4 AND channel_id=?5 AND status='scheduled'
+            AND source_incarnation=(SELECT incarnation FROM guide_revisions WHERE source_id=?4)",
             params![
                 request.start,
                 request.end,
