@@ -156,6 +156,71 @@ fn prop(app: &Headless, props: &Props, name: &str) -> Value {
         .unwrap_or(Value::Null)
 }
 
+/// The last source props observed at the native player on this screen.
+fn native_source(screen: &nsh_testing::Screen, props: &Props) -> Value {
+    let id = screen
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.kind == ViewKind::Native)
+        .expect("a native player")
+        .id;
+    props
+        .lock()
+        .unwrap()
+        .get(&id)
+        .and_then(|p| p.get("source"))
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+fn wait_live_source(app: &mut Headless, props: &Props, channel: &str) {
+    let expected = format!("http://stream.example.test/{channel}.m3u8");
+    step(app.wait_until(
+        "selected native live source",
+        Duration::from_secs(5),
+        |screen| {
+            let source = native_source(screen, props);
+            iptv_app::player_has_source(0)
+                && source["live"] == json!(true)
+                && source["url"] == expected
+        },
+    ));
+}
+
+fn wait_archive_source(app: &mut Headless, props: &Props, previous: &Value) -> Value {
+    // UI labels can precede async authorization. The old archive also has
+    // live=false; its token must change before this host sends ready/position.
+    step(app.wait_until(
+        "new authorized native archive source",
+        Duration::from_secs(5),
+        |screen| {
+            let source = native_source(screen, props);
+            iptv_app::player_has_source(0)
+                && source["live"] == json!(false)
+                && source["token"].as_u64().is_some()
+                && source["token"] != previous["token"]
+                && source["url"]
+                    .as_str()
+                    .is_some_and(|url| url.contains("?utc="))
+        },
+    ));
+    prop(app, props, "source")
+}
+
+fn archive_start(source: &Value) -> i64 {
+    source["url"]
+        .as_str()
+        .unwrap()
+        .split_once("?utc=")
+        .unwrap()
+        .1
+        .split('&')
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap()
+}
+
 /// The view taking touches along a bar (the volume, the progress line):
 /// laid over the bar it shares its bounds with (sized `size(w, h)`), the
 /// last such one on screen.
@@ -388,25 +453,55 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
 
     // Try again; a stream that never plays gives the fast attempts, then
     // the card (retrying behind it).
+    let before = opens();
     step(app.press_key("enter"));
     step(app.wait_for_gone("text:/^Can't play/", Duration::from_secs(1)));
-    for _ in 0..6 {
+    step(app.wait_until(
+        "explicit retry reached the native player",
+        Duration::from_secs(5),
+        |_| opens() > before,
+    ));
+    for attempt in 0..6 {
+        let before = opens();
         network_error(&mut app);
         run(&mut app, Duration::from_secs(5));
+        if attempt < 5 {
+            step(app.wait_until(
+                "fast live retry reached the native player",
+                Duration::from_secs(5),
+                |_| opens() > before,
+            ));
+            wait_live_source(&mut app, &props, "one");
+        }
     }
     step(app.wait_for("text:Can't play Test Channel One"));
     step(app.wait_for("text:/· still trying$/"));
 
     // A refusal names the provider's limit when it is not known.
+    let before = opens();
     step(app.press_key("enter"));
     step(app.wait_for_gone("text:/^Can't play/", Duration::from_secs(1)));
-    for _ in 0..6 {
+    step(app.wait_until(
+        "explicit retry reached the native player",
+        Duration::from_secs(5),
+        |_| opens() > before,
+    ));
+    for attempt in 0..6 {
+        let before = opens();
         send(
             &mut app,
             "error",
             json!({ "code": "ERROR_CODE_IO_BAD_HTTP_STATUS", "http": 403 }),
         );
         run(&mut app, Duration::from_secs(5));
+        if attempt < 5 {
+            step(app.wait_until(
+                "refused live retry reached the native player",
+                Duration::from_secs(5),
+                |_| opens() > before,
+            ));
+            wait_live_source(&mut app, &props, "one");
+        }
     }
     step(app.wait_for("text:The provider is refusing this stream for now."));
 
@@ -414,6 +509,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.press_key("down"));
     step(app.wait_for_gone("text:/^Can't play/", Duration::from_secs(1)));
     step(app.wait_for("id:player-banner >> text:/Test Channel Two$/"));
+    wait_live_source(&mut app, &props, "two");
     state(&mut app, "ready");
 
     // --- Tracks and format -------------------------------------------------
@@ -490,6 +586,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for_gone(STRIP, Duration::from_secs(1)));
     step(app.press_key("up"));
     step(app.wait_for("id:player-banner >> text:/Test Channel One$/"));
+    wait_live_source(&mut app, &props, "one");
     app.settle();
     assert_eq!(prop(&app, &props, "videoTrack"), json!("auto"));
     assert_eq!(prop(&app, &props, "textTrack"), json!("off"));
@@ -498,8 +595,10 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     // Right: the most recent channel (Two); ⏮ (P) the one before (One).
     step(app.press_key("right"));
     step(app.wait_for("id:player-banner >> text:/Test Channel Two$/"));
+    wait_live_source(&mut app, &props, "two");
     step(app.press_key("p"));
     step(app.wait_for("id:player-banner >> text:/Test Channel One$/"));
+    wait_live_source(&mut app, &props, "one");
     // Info, play/pause, and the seek keys, which a live stream ignores.
     step(app.press_key("i"));
     step(app.wait_for(CARD));
@@ -519,11 +618,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
             opens() > before
         }),
     );
-    step(
-        app.wait_until("authorized player load", Duration::from_secs(5), |_| {
-            opens() > before
-        }),
-    );
+    wait_live_source(&mut app, &props, "one");
     assert_eq!(opens(), before + 1, "reconnected");
     state(&mut app, "ready");
     // The guide over the video (`G`) hides the status layer; again: the
@@ -546,8 +641,10 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for_gone("text:PAUSED", Duration::from_secs(1)));
     send(&mut app, "pipAction", json!({ "action": "next" }));
     step(app.wait_for("text:/Test Channel Two$/"));
+    wait_live_source(&mut app, &props, "two");
     send(&mut app, "pipAction", json!({ "action": "previous" }));
     step(app.wait_for("text:/Test Channel One$/"));
+    wait_live_source(&mut app, &props, "one");
     // A button the window does not have does nothing, and is logged like
     // the others.
     let before = opens();
@@ -576,26 +673,10 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.press_key("mod+left"));
     step(app.press_key("mod+left"));
     step(app.wait_for("text:/^Show -[5-7][0-9]$/"));
+    let before_archive = prop(&app, &props, "source");
     step(app.press_key("enter"));
     step(app.wait_for("text:CATCH-UP"));
-    step(app.wait_until(
-        "authorized archive source",
-        Duration::from_secs(5),
-        |screen| {
-            let id = screen
-                .layout_nodes()
-                .into_iter()
-                .find(|node| node.kind == ViewKind::Native)
-                .unwrap()
-                .id;
-            props
-                .lock()
-                .unwrap()
-                .get(&id)
-                .and_then(|p| p.get("source"))
-                .is_some_and(|source| source["live"] == json!(false))
-        },
-    ));
+    let older_archive = wait_archive_source(&mut app, &props, &before_archive);
     state(&mut app, "ready");
     step(app.press_key("stop"));
     step(app.wait_for("text:☰  All channels"));
@@ -606,25 +687,11 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for("text:Show -2"));
     step(app.press_key("enter"));
     step(app.wait_for("text:CATCH-UP"));
-    step(app.wait_until(
-        "authorized archive source",
-        Duration::from_secs(5),
-        |screen| {
-            let id = screen
-                .layout_nodes()
-                .into_iter()
-                .find(|node| node.kind == ViewKind::Native)
-                .unwrap()
-                .id;
-            props
-                .lock()
-                .unwrap()
-                .get(&id)
-                .and_then(|p| p.get("source"))
-                .is_some_and(|source| source["live"] == json!(false))
-        },
-    ));
-    let replay = prop(&app, &props, "source");
+    let replay = wait_archive_source(&mut app, &props, &older_archive);
+    assert!(
+        archive_start(&replay) > archive_start(&older_archive),
+        "the newly selected programme replaces the older day's archive"
+    );
     assert_eq!(replay["live"], json!(false));
     state(&mut app, "ready");
     send(&mut app, "position", json!({ "ms": 60_000 }));
@@ -640,10 +707,21 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     assert_eq!(opens(), before + 1, "reopened");
     let again = prop(&app, &props, "source");
     assert_ne!(again["url"], replay["url"], "a minute on");
+    assert_eq!(
+        archive_start(&again),
+        archive_start(&replay) + 60,
+        "resume exactly one minute on"
+    );
     // It gives up after the fast attempts: the card says how many.
-    for _ in 0..6 {
+    for attempt in 0..6 {
+        let previous = prop(&app, &props, "source");
         network_error(&mut app);
         run(&mut app, Duration::from_secs(5));
+        // The first retry already ran above; four further native loads use
+        // the remaining fast attempts before the archive gives up.
+        if attempt < 4 {
+            wait_archive_source(&mut app, &props, &previous);
+        }
     }
     step(app.wait_for("text:Can't reach the provider. Check the connection."));
     step(app.wait_for("text:/· tried 5 times$/"));
@@ -652,8 +730,14 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     assert_eq!(opens(), before, "a replay does not retry behind its card");
     // Try again, then a seek: Right chooses five minutes on, which opens
     // once the keys pause.
+    let before = opens();
     step(app.press_key("enter"));
     step(app.wait_for_gone("text:/^Can't play/", Duration::from_secs(1)));
+    step(app.wait_until(
+        "explicit retry reached the native player",
+        Duration::from_secs(5),
+        |_| opens() > before,
+    ));
     state(&mut app, "ready");
     let before = opens();
     step(app.press_key("right"));
@@ -682,22 +766,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for("text:The programme has ended"));
     step(app.wait_for("text:Next (⏭) returns to live."));
     step(app.press_key("n"));
-    step(
-        app.wait_until("authorized live source", Duration::from_secs(5), |screen| {
-            let id = screen
-                .layout_nodes()
-                .into_iter()
-                .find(|node| node.kind == ViewKind::Native)
-                .unwrap()
-                .id;
-            props
-                .lock()
-                .unwrap()
-                .get(&id)
-                .and_then(|p| p.get("source"))
-                .is_some_and(|source| source["live"] == json!(true))
-        }),
-    );
+    wait_live_source(&mut app, &props, "one");
     assert_eq!(prop(&app, &props, "source")["live"], json!(true));
     assert_eq!(
         prop(&app, &props, "source")["url"],
@@ -812,26 +881,10 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.press_key("home"));
     step(app.press_key("left"));
     step(app.press_key("left"));
+    let before_archive = prop(&app, &props, "source");
     step(app.press_key("enter"));
     step(app.wait_for("text:CATCH-UP"));
-    step(app.wait_until(
-        "authorized archive source",
-        Duration::from_secs(5),
-        |screen| {
-            let id = screen
-                .layout_nodes()
-                .into_iter()
-                .find(|node| node.kind == ViewKind::Native)
-                .unwrap()
-                .id;
-            props
-                .lock()
-                .unwrap()
-                .get(&id)
-                .and_then(|p| p.get("source"))
-                .is_some_and(|source| source["live"] == json!(false))
-        },
-    ));
+    wait_archive_source(&mut app, &props, &before_archive);
     state(&mut app, "ready");
     step(app.press("label:Video"));
     step(app.wait_for("label:Fast-forward"));
