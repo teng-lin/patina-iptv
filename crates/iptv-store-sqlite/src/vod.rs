@@ -3,10 +3,13 @@ use crate::{Result, Store, StoreError};
 use iptv_core::vod::{Card, Category, Key, Kind, Progress, Query, Source};
 use iptv_providers::model::StreamLocator;
 use rusqlite::{OptionalExtension, params};
-
 impl Store {
     pub fn vod_sources(&self) -> Result<Vec<Source>> {
-        let mut s=self.conn.prepare_cached("SELECT s.id,s.name FROM sources s LEFT JOIN source_policy p ON p.source_id=s.id WHERE COALESCE(p.enabled,1)=1 AND (EXISTS(SELECT 1 FROM vod v WHERE v.source_id=s.id) OR EXISTS(SELECT 1 FROM series v WHERE v.source_id=s.id)) ORDER BY s.name,s.id")?;
+        let mut s = self.conn.prepare_cached(
+            "SELECT s.id,s.name FROM sources s LEFT JOIN source_policy p ON p.source_id=s.id WHERE \
+COALESCE(p.enabled,1)=1 AND (EXISTS(SELECT 1 FROM vod v WHERE v.source_id=s.id) OR EXISTS(SELECT 1 \
+FROM series v WHERE v.source_id=s.id)) ORDER BY s.name,s.id",
+        )?;
         s.query_map([], |r| {
             Ok(Source {
                 id: r.get(0)?,
@@ -18,7 +21,11 @@ impl Store {
     }
     pub fn vod_categories(&self, query: &Query) -> Result<Vec<Category>> {
         let kind = query.kind.name();
-        let mut s=self.conn.prepare_cached("SELECT g.source_id,g.id,g.name,g.adult FROM groups g JOIN sources s ON s.id=g.source_id LEFT JOIN source_policy p ON p.source_id=s.id WHERE COALESCE(p.enabled,1)=1 AND (?1 IS NULL OR s.id=?1) AND (g.kind=?2 OR (?2='series' AND g.kind='movie' AND EXISTS(SELECT 1 FROM vod_groups x JOIN vod v ON v.source_id=x.source_id AND v.id=x.vod_id WHERE x.source_id=g.source_id AND x.group_id=g.id AND v.is_series=1))) ORDER BY g.name COLLATE NOCASE,g.source_id,g.id LIMIT 2000")?;
+        let mut s=self.conn.prepare_cached("SELECT g.source_id,g.id,g.name,g.adult FROM groups g JOIN sources s ON s.id=g.source_id LEFT JOIN \
+source_policy p ON p.source_id=s.id WHERE COALESCE(p.enabled,1)=1 AND (?1 IS NULL OR s.id=?1) AND \
+(g.kind=?2 OR (?2='series' AND g.kind='movie' AND EXISTS(SELECT 1 FROM vod_groups x JOIN vod v ON \
+v.source_id=x.source_id AND v.id=x.vod_id WHERE x.source_id=g.source_id AND x.group_id=g.id AND \
+v.is_series=1))) ORDER BY g.name COLLATE NOCASE,g.source_id,g.id LIMIT 2000")?;
         s.query_map(params![query.source, kind], |r| {
             Ok(Category {
                 source: r.get(0)?,
@@ -39,7 +46,19 @@ impl Store {
             iptv_core::vod::Sort::Rating => "v.rating DESC,v.name COLLATE NOCASE",
         };
         let sql = format!(
-            "WITH items AS (SELECT v.source_id,v.id,CASE WHEN v.is_series=1 THEN 'series' ELSE 'movie' END kind,v.name,v.group_ids,v.poster,v.plot,v.year,v.rating_x10 rating,v.duration_secs,v.added FROM vod v WHERE v.is_series=0 OR NOT EXISTS(SELECT 1 FROM series z WHERE z.source_id=v.source_id AND z.id=v.id) UNION ALL SELECT v.source_id,v.id,'series',v.name,v.group_ids,v.poster,v.plot,v.year,v.rating_x10,NULL,v.last_modified FROM series v) SELECT v.source_id,v.id,v.kind,v.name,s.name,v.group_ids,v.poster,v.plot,v.year,v.rating,v.duration_secs,COALESCE(w.position_ms,0),w.duration_ms,COALESCE(w.completed,0) FROM items v JOIN sources s ON s.id=v.source_id LEFT JOIN source_policy p ON p.source_id=s.id LEFT JOIN vod_progress w ON w.source_id=v.source_id AND w.kind=v.kind AND w.content_id=v.id WHERE COALESCE(p.enabled,1)=1 AND v.kind=?1 AND (?2 IS NULL OR v.source_id=?2) AND (?3 IS NULL OR (v.source_id=?3 AND EXISTS(SELECT 1 FROM json_each(v.group_ids) x WHERE x.value=?4))) AND instr(lower(v.name),lower(?5))>0 AND (?6=0 OR (w.position_ms>=5000 AND w.completed=0)) ORDER BY {order},v.source_id,v.id LIMIT ?7 OFFSET ?8"
+            "WITH items AS (SELECT v.source_id,v.id,CASE WHEN v.is_series=1 THEN 'series' ELSE 'movie' END \
+kind,v.name,v.group_ids,v.poster,v.plot,v.year,v.rating_x10 rating,v.duration_secs,v.added FROM vod \
+v WHERE v.is_series=0 OR NOT EXISTS(SELECT 1 FROM series z WHERE z.source_id=v.source_id AND \
+z.id=v.id) UNION ALL SELECT \
+v.source_id,v.id,'series',v.name,v.group_ids,v.poster,v.plot,v.year,v.rating_x10,NULL,v.last_modified \
+FROM series v) SELECT \
+v.source_id,v.id,v.kind,v.name,s.name,v.group_ids,v.poster,v.plot,v.year,v.rating,v.duration_secs,COALESCE(w.position_ms,0),w.duration_ms,COALESCE(w.completed,0) \
+FROM items v JOIN sources s ON s.id=v.source_id LEFT JOIN source_policy p ON p.source_id=s.id LEFT \
+JOIN vod_progress w ON w.source_id=v.source_id AND w.kind=v.kind AND w.content_id=v.id WHERE \
+COALESCE(p.enabled,1)=1 AND v.kind=?1 AND (?2 IS NULL OR v.source_id=?2) AND (?3 IS NULL OR \
+(v.source_id=?3 AND EXISTS(SELECT 1 FROM json_each(v.group_ids) x WHERE x.value=?4))) AND \
+instr(lower(v.name),lower(?5))>0 AND (?6=0 OR (w.position_ms>=5000 AND w.completed=0)) ORDER BY \
+{order},v.source_id,v.id LIMIT ?7 OFFSET ?8"
         );
         let mut s = self.conn.prepare(&sql)?;
         let rows = s.query_map(
@@ -120,8 +139,24 @@ impl Store {
         Ok((cards, more))
     }
     /// Returns only current, enabled source data; locator never crosses the UI boundary.
+    pub fn vod_episode_numbers(&self, key: &Key) -> Result<Vec<u32>> {
+        let json: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT episode_numbers FROM vod WHERE source_id=?1 AND id=?2",
+                params![key.source, key.id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(json
+            .map(|s| serde_json::from_str(&s))
+            .transpose()?
+            .unwrap_or_default())
+    }
     pub fn vod_locator(&self, key: &Key) -> Result<Option<(Option<String>, StreamLocator)>> {
-        let mut s=self.conn.prepare_cached("SELECT v.provider_id,v.stream FROM vod v LEFT JOIN source_policy p ON p.source_id=v.source_id WHERE v.source_id=?1 AND v.id=?2 AND COALESCE(p.enabled,1)=1 AND ((?3='series' AND v.is_series=1) OR (?3='movie' AND v.is_series=0))")?;
+        let mut s=self.conn.prepare_cached("SELECT v.provider_id,v.stream FROM vod v LEFT JOIN source_policy p ON p.source_id=v.source_id WHERE \
+v.source_id=?1 AND v.id=?2 AND COALESCE(p.enabled,1)=1 AND ((?3='series' AND v.is_series=1) OR \
+(?3='movie' AND v.is_series=0))")?;
         let row: Option<(Option<String>, String)> = s
             .query_row(params![key.source, key.id, key.kind.name()], |r| {
                 Ok((r.get(0)?, r.get(1)?))
@@ -168,7 +203,17 @@ impl Store {
         }
     }
     pub fn vod_progress(&self, key: &Key) -> Result<Progress> {
-        self.conn.query_row("SELECT position_ms,duration_ms,completed FROM vod_progress WHERE source_id=?1 AND kind=?2 AND content_id=?3",params![key.source,key.kind.name(),key.id],|r|Ok(Progress{position_ms:r.get::<_,i64>(0)?.max(0) as u64,duration_ms:r.get::<_,Option<i64>>(1)?.map(|v|v.max(0) as u64),completed:r.get(2)?})).optional().map(|v|v.unwrap_or_default()).map_err(Into::into)
+        self.conn.query_row("SELECT position_ms,duration_ms,completed FROM vod_progress WHERE source_id=?1 AND kind=?2 AND content_id=?3",
+params![key.source,
+key.kind.name(),
+key.id],
+|r|Ok(Progress{
+position_ms:r.get::<_,
+i64>(0)?.max(0) as u64,
+duration_ms:r.get::<_,
+Option<i64>>(1)?.map(|v|v.max(0) as u64),
+completed:r.get(2)?}
+)).optional().map(|v|v.unwrap_or_default()).map_err(Into::into)
     }
     pub fn save_vod_progress(
         &mut self,
@@ -180,9 +225,25 @@ impl Store {
             return Err(StoreError::Unavailable("Invalid on-demand identity"));
         }
         let cap = |v: u64| v.min(i64::MAX as u64) as i64;
-        self.conn.execute("INSERT INTO vod_progress(source_id,kind,content_id,parent_id,position_ms,duration_ms,completed,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,unixepoch()) ON CONFLICT(source_id,kind,content_id) DO UPDATE SET parent_id=excluded.parent_id,position_ms=excluded.position_ms,duration_ms=excluded.duration_ms,completed=excluded.completed,updated_at=excluded.updated_at",params![key.source,key.kind.name(),key.id,parent,cap(progress.position_ms),progress.duration_ms.map(cap),progress.completed])?;
+        self.conn.execute("INSERT INTO \
+vod_progress(source_id,kind,content_id,parent_id,position_ms,duration_ms,completed,updated_at) \
+VALUES(?1,?2,?3,?4,?5,?6,?7,unixepoch()) ON CONFLICT(source_id,kind,content_id) DO UPDATE SET \
+parent_id=excluded.parent_id,position_ms=excluded.position_ms,duration_ms=excluded.duration_ms,completed=excluded.completed,updated_at=excluded.updated_at",
+params![key.source,
+key.kind.name(),
+key.id,
+parent,
+cap(progress.position_ms),
+progress.duration_ms.map(cap),
+progress.completed])?;
         if let Some(parent) = parent {
-            self.conn.execute("INSERT INTO vod_progress(source_id,kind,content_id,position_ms,duration_ms,completed,updated_at) VALUES(?1,'series',?2,?3,?4,0,unixepoch()) ON CONFLICT(source_id,kind,content_id) DO UPDATE SET position_ms=excluded.position_ms,duration_ms=excluded.duration_ms,completed=0,updated_at=excluded.updated_at",params![key.source,parent,cap(progress.position_ms),progress.duration_ms.map(cap)])?;
+            self.conn.execute("INSERT INTO vod_progress(source_id,kind,content_id,position_ms,duration_ms,completed,updated_at) \
+VALUES(?1,'series',?2,?3,?4,0,unixepoch()) ON CONFLICT(source_id,kind,content_id) DO UPDATE SET \
+position_ms=excluded.position_ms,duration_ms=excluded.duration_ms,completed=0,updated_at=excluded.updated_at",
+params![key.source,
+parent,
+cap(progress.position_ms),
+progress.duration_ms.map(cap)])?;
         }
         Ok(())
     }
@@ -219,7 +280,23 @@ mod tests {
             ContentKind::Movie,
         )
         .unwrap();
-        let movies=iptv_providers::xtream::parse_vod_streams(&HttpResponse::ok(r#"[{"stream_id":10,"name":"Generated Aurora","category_id":"7","container_extension":"mp4"},{"stream_id":11,"name":"Generated Brook","category_id":"7","container_extension":"mp4"}]"#)).unwrap();
+        let movies = iptv_providers::xtream::parse_vod_streams(&HttpResponse::ok(
+            r#"[
+  {
+    "stream_id": 10,
+    "name": "Generated Aurora",
+    "category_id": "7",
+    "container_extension": "mp4"
+  },
+  {
+    "stream_id": 11,
+    "name": "Generated Brook",
+    "category_id": "7",
+    "container_extension": "mp4"
+  }
+]"#,
+        ))
+        .unwrap();
         store
             .replace_catalog(source, &groups.items, &[], &movies.items, &[])
             .unwrap();
@@ -329,6 +406,27 @@ mod tests {
         assert_eq!(
             store.vod_card(&key).unwrap().unwrap().progress.resume_ms(),
             0
+        );
+    }
+    #[test]
+    fn embedded_series_coordinates_round_trip() {
+        let (mut store, key) = fixture();
+        let mut item = store
+            .load_vod(crate::SourceId(key.source), None, 0, Some(1))
+            .unwrap()
+            .remove(0);
+        item.is_series = true;
+        item.episode_numbers = vec![2, 4, 7];
+        store
+            .replace_catalog(crate::SourceId(key.source), &[], &[], &[item], &[])
+            .unwrap();
+        assert_eq!(store.vod_episode_numbers(&key).unwrap(), vec![2, 4, 7]);
+        assert_eq!(
+            store
+                .load_vod(crate::SourceId(key.source), None, 0, None)
+                .unwrap()[0]
+                .episode_numbers,
+            vec![2, 4, 7]
         );
     }
 }

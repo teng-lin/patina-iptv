@@ -232,6 +232,8 @@ pub struct VodItem {
     pub stream: StreamLocator,
     /// Stalker VOD rows flagged `is_series` open as series.
     pub is_series: bool,
+    /// Embedded Stalker episode coordinates, used with the parent command.
+    pub episode_numbers: Vec<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

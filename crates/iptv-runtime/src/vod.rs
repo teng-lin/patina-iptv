@@ -10,14 +10,15 @@ use iptv_providers::{
     xtream::XtreamClient,
 };
 use std::{collections::BTreeMap, sync::Mutex};
-
 #[derive(Clone)]
 struct Entry {
+    incarnation: String,
     config: SourceConfig,
     locator: StreamLocator,
     parent: Option<Key>,
     episode: Option<u32>,
 }
+
 #[derive(Default)]
 pub(crate) struct State {
     entries: Mutex<BTreeMap<Key, Entry>>,
@@ -27,6 +28,7 @@ pub use iptv_core::vod::Playing;
 fn unavailable() -> Error {
     Error::unavailable("On-demand content unavailable; refresh the playlist and try again")
 }
+
 impl Runtime {
     fn vod_context(
         &self,
@@ -108,7 +110,7 @@ impl Runtime {
             .map_err(|_| unavailable())?;
         let services = self.services();
         let lookup = key.clone();
-        let (source, mut item, locator, provider) = services
+        let (source, mut item, locator, provider, embedded, incarnation) = services
             .read(move |s| {
                 if !s.source_policy(SourceId(lookup.source))?.enabled {
                     return Err(iptv_store_sqlite::StoreError::Unavailable(
@@ -120,6 +122,8 @@ impl Runtime {
                     s.vod_card(&lookup)?,
                     s.vod_locator(&lookup)?,
                     s.vod_series_provider_id(&lookup)?,
+                    s.vod_episode_numbers(&lookup)?,
+                    s.source_incarnation(SourceId(lookup.source))?,
                 ))
             })
             .await?;
@@ -129,58 +133,222 @@ impl Runtime {
         let state = self.vod.clone();
         let work = services.clone();
         let key2 = key.clone();
-        let result=services.spawn(async move {
-            let client=iptv_net::NetClient::new(crate::settings::net_config(&work.settings())).map_err(|_|unavailable())?;
-            let cancel=iptv_import::CancelToken::new();
-            let mut episodes=Vec::new();
-            let mut entries=Vec::new();
-            let mut movie_locator=locator.map(|(_,l)|l);
-            match &config {
-                SourceConfig::Xtream(credentials)=>{
-                    let xt=XtreamClient::from_credentials(credentials).map_err(|_|unavailable())?;
-                    if key2.kind==Kind::Series {
-                        let id=provider.as_deref().and_then(|id|id.parse().ok()).ok_or_else(unavailable)?;
-                        let response=iptv_import::on_demand::detail(&client,xt.series_info(id),&cancel).await.map_err(|_|unavailable())?;
-                        let details=iptv_providers::xtream::parse_series_info(&response,id).map_err(|_|unavailable())?;
-                        item.plot=details.series.plot.or(item.plot); item.poster=details.series.poster.or(item.poster);
-                        for e in details.episodes.items.into_iter().take(20_000) {
-                            let key=Key{source:key2.source,kind:Kind::Episode,id:format!("{}:{}",key2.id,e.id.as_str())};
-                            entries.push((key.clone(),Entry{config:config.clone(),locator:e.stream,parent:Some(key2.clone()),episode:None}));
-                            episodes.push(Episode{key,season:e.season,number:e.number,title:e.title,plot:e.plot,duration_secs:e.duration_secs,progress:Progress::default()});
-                        }
-                    } else if let Some(StreamLocator::Xtream{stream_id,..})=&movie_locator {
-                        // Detail metadata can fail independently of a usable catalogue stream.
-                        if let Ok(response)=iptv_import::on_demand::detail(&client,xt.vod_info(*stream_id),&cancel).await
-                            && let Ok(details)=iptv_providers::xtream::parse_vod_info(&response,*stream_id) {
-                            item.plot=details.item.plot.or(item.plot);item.poster=details.item.poster.or(item.poster);
-                            item.duration_secs=details.item.duration_secs.or(item.duration_secs);
-                            if matches!(&details.item.stream,StreamLocator::Url{url,..} if !url.is_empty()) || matches!(&details.item.stream,StreamLocator::Xtream{container_extension:Some(_),..}) {movie_locator=Some(details.item.stream)}
+        let result = services
+            .spawn(async move {
+                let client =
+                    iptv_net::NetClient::new(crate::settings::net_config(&work.settings()))
+                        .map_err(|_| unavailable())?;
+                let cancel = iptv_import::CancelToken::new();
+                let mut episodes = Vec::new();
+                let mut entries = Vec::new();
+                let mut movie_locator = locator.map(|(_, l)| l);
+                match &config {
+                    SourceConfig::Xtream(credentials) => {
+                        let xt = XtreamClient::from_credentials(credentials)
+                            .map_err(|_| unavailable())?;
+                        if key2.kind == Kind::Series {
+                            let id = provider
+                                .as_deref()
+                                .and_then(|id| id.parse().ok())
+                                .ok_or_else(unavailable)?;
+                            let response = iptv_import::on_demand::detail(
+                                &client,
+                                xt.series_info(id),
+                                &cancel,
+                            )
+                            .await
+                            .map_err(|_| unavailable())?;
+                            let details = iptv_providers::xtream::parse_series_info(&response, id)
+                                .map_err(|_| unavailable())?;
+                            item.plot = details.series.plot.or(item.plot);
+                            item.poster = details.series.poster.or(item.poster);
+                            for e in details.episodes.items.into_iter().take(20_000) {
+                                let key = Key {
+                                    source: key2.source,
+                                    kind: Kind::Episode,
+                                    id: format!("{}:{}", key2.id, e.id.as_str()),
+                                };
+                                entries.push((
+                                    key.clone(),
+                                    Entry {
+                                        incarnation: incarnation.clone(),
+                                        config: config.clone(),
+                                        locator: e.stream,
+                                        parent: Some(key2.clone()),
+                                        episode: None,
+                                    },
+                                ));
+                                episodes.push(Episode {
+                                    key,
+                                    season: e.season,
+                                    number: e.number,
+                                    title: e.title,
+                                    plot: e.plot,
+                                    duration_secs: e.duration_secs,
+                                    progress: Progress::default(),
+                                });
+                            }
+                        } else if let Some(StreamLocator::Xtream { stream_id, .. }) = &movie_locator
+                        {
+                            // Detail metadata can fail independently of a usable catalogue stream.
+                            if let Ok(response) = iptv_import::on_demand::detail(
+                                &client,
+                                xt.vod_info(*stream_id),
+                                &cancel,
+                            )
+                            .await
+                                && let Ok(details) =
+                                    iptv_providers::xtream::parse_vod_info(&response, *stream_id)
+                            {
+                                item.plot = details.item.plot.or(item.plot);
+                                item.poster = details.item.poster.or(item.poster);
+                                item.duration_secs =
+                                    details.item.duration_secs.or(item.duration_secs);
+                                if matches!(&details.item.stream,
+StreamLocator::Url{
+url,
+..}
+ if !url.is_empty()) || matches!(
+                                    &details.item.stream,
+                                    StreamLocator::Xtream {
+                                        container_extension: Some(_),
+                                        ..
+                                    }
+                                ) {
+                                    movie_locator = Some(details.item.stream)
+                                }
+                            }
                         }
                     }
-                }
-                SourceConfig::Stalker(credentials) if key2.kind==Kind::Series=>{
-                    let mut session=match existing_session {Some(s)=>s,None=>iptv_import::on_demand::stalker_session(&client,credentials,&cancel).await.map_err(|_|unavailable())?};
-                    let id=provider.clone().or_else(||key2.id.rsplit(':').next().map(str::to_owned)).ok_or_else(unavailable)?;
-                    let cmd=match &movie_locator {Some(StreamLocator::Stalker{cmd,..}) if provider.is_none()=>Some(cmd.clone()),_=>None};
-                    let found=stalker_episodes(&client,&mut session,&id,cmd.as_deref(),&cancel).await?;
-                    state.sessions.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(key2.source,(config.clone(),session));
-                    for (e,locator,episode) in found {
-                        let key=Key{source:key2.source,kind:Kind::Episode,id:format!("{}:{}",key2.id,e.id.as_str())};
-                        entries.push((key.clone(),Entry{config:config.clone(),locator,parent:Some(key2.clone()),episode}));
-                        episodes.push(Episode{key,season:e.season,number:e.number,title:e.title,plot:e.plot,duration_secs:e.duration_secs,progress:Progress::default()});
+                    SourceConfig::Stalker(credentials) if key2.kind == Kind::Series => {
+                        let found = if !embedded.is_empty() {
+                            let mut found = Vec::new();
+                            let cmd = match &movie_locator {
+                                Some(StreamLocator::Stalker { cmd, .. }) => Some(cmd.clone()),
+                                _ => None,
+                            };
+                            append_stalker(
+                                &mut found,
+                                iptv_providers::stalker::SeriesRow {
+                                    id: key2.id.clone(),
+                                    title: item.name.clone(),
+                                    video_id: None,
+                                    episode: false,
+                                    cmd,
+                                    season: false,
+                                    number: 1,
+                                    episodes: embedded,
+                                    plot: None,
+                                    duration_secs: None,
+                                },
+                                1,
+                                None,
+                            );
+                            found
+                        } else {
+                            let mut session = match existing_session {
+                                Some(s) => s,
+                                None => iptv_import::on_demand::stalker_session(
+                                    &client,
+                                    credentials,
+                                    &cancel,
+                                )
+                                .await
+                                .map_err(|_| unavailable())?,
+                            };
+                            let id = provider
+                                .clone()
+                                .or_else(|| key2.id.rsplit(':').next().map(str::to_owned))
+                                .ok_or_else(unavailable)?;
+                            let cmd = match &movie_locator {
+                                Some(StreamLocator::Stalker { cmd, .. }) if provider.is_none() => {
+                                    Some(cmd.clone())
+                                }
+                                _ => None,
+                            };
+                            let found = stalker_episodes(
+                                &client,
+                                &mut session,
+                                &id,
+                                cmd.as_deref(),
+                                &cancel,
+                            )
+                            .await?;
+                            state
+                                .sessions
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .insert(key2.source, (config.clone(), session));
+                            found
+                        };
+                        for (e, locator, episode) in found {
+                            let key = Key {
+                                source: key2.source,
+                                kind: Kind::Episode,
+                                id: format!("{}:{}", key2.id, e.id.as_str()),
+                            };
+                            entries.push((
+                                key.clone(),
+                                Entry {
+                                    incarnation: incarnation.clone(),
+                                    config: config.clone(),
+                                    locator,
+                                    parent: Some(key2.clone()),
+                                    episode,
+                                },
+                            ));
+                            episodes.push(Episode {
+                                key,
+                                season: e.season,
+                                number: e.number,
+                                title: e.title,
+                                plot: e.plot,
+                                duration_secs: e.duration_secs,
+                                progress: Progress::default(),
+                            });
+                        }
                     }
+                    _ => {}
                 }
-                _=>{}
-            }
-            if let Some(locator)=movie_locator {entries.push((key2.clone(),Entry{config,locator,parent:None,episode:None}));}
-            let keys:Vec<_>=episodes.iter().map(|e|e.key.clone()).collect();
-            let progress=work.read(move |s|keys.iter().map(|k|s.vod_progress(k)).collect::<iptv_store_sqlite::Result<Vec<_>>>()).await?;
-            for (e,p) in episodes.iter_mut().zip(progress) {e.progress=p;}
-            let mut cache=state.entries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            if cache.len()+entries.len()>30_000 {cache.clear();}
-            cache.extend(entries);
-            Ok::<_,Error>(Details{item,episodes})
-        }).await.map_err(|_|unavailable())??;
+                if let Some(locator) = movie_locator {
+                    entries.push((
+                        key2.clone(),
+                        Entry {
+                            incarnation: incarnation.clone(),
+                            config,
+                            locator,
+                            parent: None,
+                            episode: None,
+                        },
+                    ));
+                }
+                let keys: Vec<_> = episodes.iter().map(|e| e.key.clone()).collect();
+                let progress = work
+                    .read(move |s| {
+                        keys.iter()
+                            .map(|k| s.vod_progress(k))
+                            .collect::<iptv_store_sqlite::Result<Vec<_>>>()
+                    })
+                    .await?;
+                for (e, p) in episodes.iter_mut().zip(progress) {
+                    e.progress = p;
+                }
+                let mut cache = state
+                    .entries
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if cache.len() + entries.len() > 30_000 {
+                    cache.clear();
+                }
+                cache.extend(entries);
+                Ok::<_, Error>(Details {
+                    item,
+                    episodes,
+                    incarnation,
+                })
+            })
+            .await
+            .map_err(|_| unavailable())??;
         self.vod_update_session(key.source);
         Ok(result)
     }
@@ -207,16 +375,20 @@ impl Runtime {
             .await
             .map_err(|_| unavailable())?;
         let expected_item = entry.parent.as_ref().unwrap_or(&key);
-        if details.item.key != *expected_item {
+        if details.item.key != *expected_item || details.incarnation != entry.incarnation {
             return Err(unavailable());
         }
         let lookup = key.clone();
         let parent = entry.parent.clone();
         let expected = entry.config.clone();
+        let incarnation = entry.incarnation.clone();
         let progress = self
             .services()
             .read(move |s| {
-                let valid = s.vod_card(parent.as_ref().unwrap_or(&lookup))?.is_some()
+                let valid = s
+                    .source_incarnation(SourceId(lookup.source))
+                    .is_ok_and(|v| v == incarnation)
+                    && s.vod_card(parent.as_ref().unwrap_or(&lookup))?.is_some()
                     && s.source_policy(SourceId(lookup.source))?.enabled
                     && s.source(SourceId(lookup.source))?
                         .is_some_and(|s| s.source.config == expected);
@@ -326,25 +498,53 @@ impl Runtime {
         self.vod_update_session(playing_source);
         Ok((playing, source))
     }
-    pub fn queue_vod_progress(&self, key: Key, parent: Option<Key>, progress: Progress) {
-        // Submission is synchronous; the owner's writer persists even if the view closes.
-        let _queued = self.services().call(move |s| {
-            s.save_vod_progress(&key, parent.as_ref().map(|p| p.id.as_str()), progress)
-        });
+    pub fn queue_vod_progress(
+        &self,
+        key: Key,
+        parent: Option<Key>,
+        progress: Progress,
+        incarnation: String,
+    ) {
+        let _queued = self
+            .services()
+            .call(move |s| save_progress(s, key, parent, progress, incarnation));
     }
     pub async fn vod_save_progress(
         &self,
         key: Key,
         parent: Option<Key>,
         progress: Progress,
+        incarnation: String,
     ) -> Result<(), Error> {
         Ok(self
             .services()
-            .call(move |s| {
-                s.save_vod_progress(&key, parent.as_ref().map(|p| p.id.as_str()), progress)
-            })
+            .call(move |s| save_progress(s, key, parent, progress, incarnation))
             .await?)
     }
+}
+
+fn save_progress(
+    store: &mut iptv_store_sqlite::Store,
+    key: Key,
+    parent: Option<Key>,
+    progress: Progress,
+    incarnation: String,
+) -> iptv_store_sqlite::Result<()> {
+    let valid = store
+        .source_incarnation(SourceId(key.source))
+        .is_ok_and(|v| v == incarnation)
+        && store.source_policy(SourceId(key.source))?.enabled
+        && parent
+            .as_ref()
+            .is_none_or(|p| p.source == key.source && p.kind == Kind::Series)
+        && (key.kind != Kind::Episode || parent.is_some())
+        && store.vod_card(parent.as_ref().unwrap_or(&key))?.is_some();
+    if !valid {
+        return Err(iptv_store_sqlite::StoreError::Unavailable(
+            "Playlist changed",
+        ));
+    }
+    store.save_vod_progress(&key, parent.as_ref().map(|p| p.id.as_str()), progress)
 }
 
 async fn stalker_episodes(
@@ -378,7 +578,12 @@ async fn stalker_episodes(
         }
         let mut changed = false;
         for row in rows {
-            if row.season {
+            if !row.episodes.is_empty() {
+                let before = out.len();
+                let season = if native { row.number } else { 1 };
+                append_stalker(&mut out, row, season, parent_cmd);
+                changed |= out.len() > before;
+            } else if row.season {
                 let before_season = out.len();
                 for ep_page in 1..=100 {
                     requests += 1;
@@ -388,7 +593,14 @@ async fn stalker_episodes(
                     let response = iptv_import::on_demand::stalker_detail(
                         client,
                         session,
-                        |s| s.series_page(id, Some(&row.id), ep_page, native),
+                        |s| {
+                            s.series_page(
+                                row.video_id.as_deref().unwrap_or(id),
+                                Some(&row.id),
+                                ep_page,
+                                native,
+                            )
+                        },
                         cancel,
                     )
                     .await
@@ -423,13 +635,14 @@ async fn stalker_episodes(
     out.sort_by_key(|(e, _, _)| (e.season, e.number));
     Ok(out)
 }
+
 fn append_stalker(
     out: &mut Vec<(iptv_providers::model::Episode, StreamLocator, Option<u32>)>,
     row: iptv_providers::stalker::SeriesRow,
     season: u32,
     parent_cmd: Option<&str>,
 ) {
-    if row.season {
+    if row.season || (!row.episode && row.episodes.is_empty()) {
         return;
     }
     let numbers = if row.episodes.is_empty() {
@@ -482,5 +695,44 @@ pub fn target(key: &Key) -> iptv_core::parental::Target {
             Kind::Series => ContentKind::Series,
             Kind::Episode => ContentKind::Episode,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn native_seasons_keep_opaque_file_commands_and_episode_coordinates() {
+        let response = iptv_providers::HttpResponse::ok(
+            r#"{"js":[{"id":"file-season-3","name":"Season 3","cmd":"ffmpeg /media/generated-file","series":[2,4]}]}"#,
+        );
+        let row = iptv_providers::stalker::parse_series_rows(&response)
+            .unwrap()
+            .remove(0);
+        let mut out = Vec::new();
+        let season = row.number;
+        append_stalker(&mut out, row, season, None);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].0.season, 3);
+        assert_eq!(out[0].0.number, 2);
+        assert_eq!(out[1].2, Some(4));
+        assert!(matches!(&out[1].1,
+StreamLocator::Stalker{
+cmd,
+..}
+ if cmd=="ffmpeg /media/generated-file"));
+        assert_ne!(out[0].0.id, out[1].0.id);
+    }
+    #[test]
+    fn unrecognized_lazy_rows_never_play_the_parent_command() {
+        let response = iptv_providers::HttpResponse::ok(
+            r#"{"js":{"data":[{"id":"unknown","name":"Generated non-episode"}]}}"#,
+        );
+        let row = iptv_providers::stalker::parse_series_rows(&response)
+            .unwrap()
+            .remove(0);
+        let mut out = Vec::new();
+        append_stalker(&mut out, row, 2, Some("/media/generated-parent"));
+        assert!(out.is_empty());
     }
 }

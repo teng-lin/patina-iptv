@@ -119,6 +119,7 @@ impl CatalogStage {
         // Catalog columns are the original stable schema; no user overlays or
         // search index are needed in the private stage.
         conn.execute_batch(include_str!("../migrations/0001_provider_data.sql"))?;
+        conn.execute_batch("ALTER TABLE vod ADD COLUMN episode_numbers TEXT NOT NULL DEFAULT '[]'")?;
         Ok(Self {
             path,
             conn: Some(conn),

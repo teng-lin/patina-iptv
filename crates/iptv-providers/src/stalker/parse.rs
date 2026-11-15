@@ -498,7 +498,14 @@ pub fn parse_all_channels(response: &HttpResponse) -> Result<Import<Channel>, Pr
 fn vod_row(o: impl Fields) -> Result<VodItem, &'static str> {
     let id = o.str("id").ok_or("movie without id")?;
     let cmd = row_cmd(o).ok_or("movie without cmd")?;
-    let is_series = o.series_flag();
+    let episode_numbers: Vec<u32> = o
+        .strings("series")
+        .iter()
+        .filter_map(|n| n.parse().ok())
+        .filter(|n| *n > 0)
+        .take(20_000)
+        .collect();
+    let is_series = o.series_flag() || !episode_numbers.is_empty();
     let rating = o.f64("rating_imdb").or_else(|| o.f64("rating_kinopoisk"));
     Ok(VodItem {
         id: ContentId::from_provider(
@@ -535,6 +542,7 @@ fn vod_row(o: impl Fields) -> Result<VodItem, &'static str> {
             link: link_flags(o),
         },
         is_series,
+        episode_numbers,
         provider_id: Some(id),
     })
 }

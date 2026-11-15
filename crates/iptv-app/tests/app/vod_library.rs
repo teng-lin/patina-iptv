@@ -24,10 +24,54 @@ fn player(app: &Headless) -> NodeId {
     assert_eq!(nodes.len(), 1, "persistent player surface");
     nodes[0].id
 }
+
 #[test]
 fn movies_and_series_reach_playback_and_resume_by_identity() {
     let Some(home) = isolated!() else { return };
-    let server=Server::start(&[("/player_api.php",r#"{"info":{"name":"Generated Voyage","plot":"Generated series plot"},"episodes":{"1":[{"id":101,"episode_num":1,"title":"Generated First","container_extension":"mp4"},{"id":102,"episode_num":2,"title":"Generated Second","container_extension":"mp4"}],"2":[{"id":201,"episode_num":1,"title":"Generated Third","container_extension":"mp4"}]}}"#.into())]);
+    exercise(home, nsh_core::platform::Idiom::Pad);
+}
+
+#[test]
+fn tv_remote_selects_movies_seasons_and_episodes() {
+    let Some(home) = isolated!() else { return };
+    exercise(home, nsh_core::platform::Idiom::Tv);
+}
+
+fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
+    let server = Server::start(&[(
+        "/player_api.php",
+        r#"{
+  "info": {
+    "name": "Generated Voyage",
+    "plot": "Generated series plot"
+  },
+  "episodes": {
+    "1": [
+      {
+        "id": 101,
+        "episode_num": 1,
+        "title": "Generated First",
+        "container_extension": "mp4"
+      },
+      {
+        "id": 102,
+        "episode_num": 2,
+        "title": "Generated Second",
+        "container_extension": "mp4"
+      }
+    ],
+    "2": [
+      {
+        "id": 201,
+        "episode_num": 1,
+        "title": "Generated Third",
+        "container_extension": "mp4"
+      }
+    ]
+  }
+}"#
+        .into(),
+    )]);
     let root = crate::isolated::data_dir(home.path());
     std::fs::create_dir_all(&root).unwrap();
     let mut settings = iptv_settings::Settings::new();
@@ -57,7 +101,21 @@ fn movies_and_series_reach_playback_and_resume_by_identity() {
     let parsed = iptv_providers::m3u::parse_m3u(
         "#EXTM3U\n#EXTINF:-1 group-title=\"Generated group\",Generated live\nhttps://example.test/live.ts\n",
     );
-    let movies=iptv_providers::xtream::parse_vod_streams(&HttpResponse::ok(r#"[{"stream_id":10,"name":"Generated Aurora","container_extension":"mp4"},{"stream_id":11,"name":"Generated Brook","container_extension":"mp4"}]"#)).unwrap();
+    let movies = iptv_providers::xtream::parse_vod_streams(&HttpResponse::ok(
+        r#"[
+  {
+    "stream_id": 10,
+    "name": "Generated Aurora",
+    "container_extension": "mp4"
+  },
+  {
+    "stream_id": 11,
+    "name": "Generated Brook",
+    "container_extension": "mp4"
+  }
+]"#,
+    ))
+    .unwrap();
     let series = iptv_providers::xtream::parse_series_list(&HttpResponse::ok(
         r#"[{"series_id":19,"name":"Generated Voyage","category_id":"8"}]"#,
     ))
@@ -88,11 +146,12 @@ fn movies_and_series_reach_playback_and_resume_by_identity() {
         )
         .unwrap();
     drop(store);
-    let mut app = Headless::start(EngineConfig {
+    let mut config = EngineConfig {
         viewport: Size::new(px(1920.0), px(1080.0)),
         ..EngineConfig::new(Root::of::<iptv_app::App>())
-    })
-    .unwrap();
+    };
+    config.environment.idiom = idiom;
+    let mut app = Headless::start(config).unwrap();
     let props: Arc<Mutex<HashMap<String, Value>>> = Arc::default();
     let observed = props.clone();
     app.observe(move |_, batch| {
@@ -114,7 +173,11 @@ fn movies_and_series_reach_playback_and_resume_by_identity() {
     step(app.wait_for("id:vod-screen"));
     step(app.press("text:/^Generated Aurora/"));
     step(app.wait_for("text:Play from beginning"));
-    step(app.press("text:Play"));
+    if idiom == nsh_core::platform::Idiom::Tv {
+        step(app.press_key("enter"));
+    } else {
+        step(app.press("text:Play"));
+    }
     step(app.wait_for_gone("id:vod-screen", Duration::from_secs(5)));
     assert_eq!(player(&app), surface);
     let opened = props.lock().unwrap()["source"].clone();
@@ -131,7 +194,13 @@ fn movies_and_series_reach_playback_and_resume_by_identity() {
         EventKind::NativeEvent,
         EventPayload::Native {
             name: "timeline".into(),
-            data: json!({"token":token,"seekId":0,"ms":37000,"durationMs":120000,"seekable":true}),
+            data: json!({
+            "token":token,
+            "seekId":0,
+            "ms":37000,
+            "durationMs":120000,
+            "seekable":true}
+            ),
         },
     );
     app.settle();
@@ -148,7 +217,15 @@ fn movies_and_series_reach_playback_and_resume_by_identity() {
     step(app.wait_for("id:vod-screen"));
     step(app.press("text:/^Generated Voyage/"));
     step(app.wait_for("text:/Generated First/"));
-    step(app.press("text:/Generated Second/"));
+    if idiom == nsh_core::platform::Idiom::Tv {
+        for _ in 0..3 {
+            step(app.press_key("right"));
+        }
+        step(app.press_key("down"));
+        step(app.press_key("enter"));
+    } else {
+        step(app.press("text:/Generated Second/"));
+    }
     step(app.wait_for_gone("id:vod-screen", Duration::from_secs(5)));
     assert_eq!(player(&app), surface);
     let opened = props.lock().unwrap()["source"].clone();
@@ -158,6 +235,43 @@ fn movies_and_series_reach_playback_and_resume_by_identity() {
             .unwrap()
             .ends_with("/series/generated-user/generated-pass/102.mp4")
     );
+    let token = opened["token"].clone();
+    app.engine().control().dispatch_event(
+        surface,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "timeline".into(),
+            data: json!({
+            "token":token,
+            "seekId":0,
+            "ms":120000,
+            "durationMs":120000,
+            "seekable":true}
+            ),
+        },
+    );
+    app.settle();
+    app.engine().control().dispatch_event(
+        surface,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "state".into(),
+            data: json!({
+            "state":"ended"}
+            ),
+        },
+    );
+    step(
+        app.wait_until("next episode", Duration::from_secs(10), |_| {
+            props
+                .lock()
+                .unwrap()
+                .get("source")
+                .and_then(|s| s["url"].as_str())
+                .is_some_and(|url| url.ends_with("/series/generated-user/generated-pass/201.mp4"))
+        }),
+    );
+    assert_eq!(player(&app), surface);
     drop(app);
     let store = crate::isolated::open_database(&path).unwrap();
     assert_eq!(

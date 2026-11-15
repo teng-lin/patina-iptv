@@ -198,6 +198,19 @@ fn manage_pick(ui: Ui, index: usize) {
     }
 }
 pub fn enforce(ui: Ui) {
+    let details_allowed = ui.vod.with_untracked(|s| {
+        s.details.as_ref().is_none_or(|d| {
+            crate::runtime().parental_allowed(&iptv_runtime::vod::target(&d.item.key))
+        })
+    });
+    if !details_allowed {
+        ui.vod.update(|s| {
+            s.details = None;
+            s.episode = None;
+            s.control = iptv_core::vod::Control::Catalogue;
+        });
+    }
+
     if let Some((playing, _)) = ui.player.vod.get_untracked() {
         let owner = crate::runtime();
         if !owner.parental_allowed(&iptv_runtime::vod::target(&playing.key))

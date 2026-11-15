@@ -11,3 +11,5 @@ CREATE TABLE vod_progress (
     PRIMARY KEY(source_id,kind,content_id)
 ) WITHOUT ROWID;
 CREATE INDEX vod_progress_recent ON vod_progress(updated_at DESC);
+
+ALTER TABLE vod ADD COLUMN episode_numbers TEXT NOT NULL DEFAULT '[]';

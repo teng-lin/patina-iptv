@@ -362,6 +362,46 @@ fn close(ui: Ui, surface: usize) {
 
 /// Resolves what `surface` plays and hands the stream to its player.
 fn open(ui: Ui, surface: usize, session: u64) {
+    if surface == 0
+        && let Some((playing, _)) = ui.player.vod.get_untracked()
+    {
+        let position = if ui.player.main().finished.get_untracked() { 0 } else { ui.player.main().timeline.get_untracked().position_ms };
+        let key = playing.key.clone();
+        crate::data::spawn_in_app(async move {
+            let owner = crate::runtime();
+            let resolved = owner.vod_play(playing.details, key.clone(), false).await;
+            if ui.player.main().health.with_untracked(|h| h.session()) != session
+                || !ui
+                    .player
+                    .vod
+                    .with_untracked(|p| p.as_ref().is_some_and(|(p, _)| p.key == key))
+            {
+                return;
+            }
+            match resolved {
+                Ok((mut playing, source))
+                    if owner.reserve_viewing(0, iptv_library::SourceId(key.source)) =>
+                {
+                    playing.progress.position_ms = position;
+                    ui.player.vod.set(Some((playing, source.clone())));
+                    load(ui, 0, session, source);
+                    if position > 0 {
+                        ui.player.main().resume_ms.set(Some(position));
+                    }
+                }
+                Ok(_) => fail(ui, 0, session, ErrorKind::Http(429), "Provider connection reserved for recording".into()),
+                Err(_) => {
+                    let allowed = ui.player.vod.with_untracked(|p| p.as_ref().is_some_and(|(p,_)|
+                        owner.parental_allowed(&iptv_runtime::vod::target(&p.key))
+                        && p.parent.as_ref().is_none_or(|key| owner.parental_allowed(&iptv_runtime::vod::target(key)))));
+                    if allowed { fail(ui, 0, session, ErrorKind::Resolve, "On-demand playback unavailable".into()); }
+                    else { stop_surface(ui, 0); }
+                }
+            }
+        });
+        return;
+    }
+
     if let Some((channel, _)) = target(ui, surface)
         && let Some(target) = crate::parental_view::live_target(ui, channel)
     {
@@ -387,18 +427,6 @@ fn open(ui: Ui, surface: usize, session: u64) {
     }
 }
 fn open_allowed(ui: Ui, surface: usize, session: u64) {
-    if surface == 0
-        && let Some((_, source)) = ui.player.vod.get_untracked()
-    {
-        let position = if ui.player.main().finished.get_untracked() {
-            0
-        } else {
-            ui.player.main().timeline.get_untracked().position_ms
-        };
-        load(ui, 0, session, source);
-        ui.player.main().resume_ms.set(Some(position));
-        return;
-    }
     if surface == 0
         && let Some((job, source)) = ui.player.recorded.get_untracked()
     {

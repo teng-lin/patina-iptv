@@ -618,3 +618,9 @@ iptv-app/src/recording_host/startup.rs	Patina Recorder
 iptv-app/src/recording_host/startup.rs	[Desktop Entry]\nType=Application\nName=Patina Recorder\nExec={} --background-recordings\nTerminal=false\nNoDisplay=true\n
 iptv-app/src/recording_host/windows.rs	Patina Recorder
 iptv-app/src/recording_host/windows.rs	Patina
+# VOD native reasons are replaced with shell-owned translated messages; headers are wire names.
+iptv-runtime/src/vod.rs	On-demand content unavailable; refresh the playlist and try again
+iptv-runtime/src/vod.rs	Playlist changed
+iptv-runtime/src/vod.rs	Playlist disabled
+iptv-runtime/src/vod.rs	Referer
+iptv-runtime/src/vod.rs	User-Agent

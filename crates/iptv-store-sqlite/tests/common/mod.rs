@@ -155,6 +155,7 @@ pub fn catalog(channels: usize, groups: usize, password: &str) -> Catalog {
                 container_extension: Some("mkv".into()),
             },
             is_series: false,
+            episode_numbers: Vec::new(),
         })
         .collect();
     let series = vec![Series {

@@ -48,8 +48,9 @@ fn movie_playback_progress_survives_restart_and_locked_direct_ids_are_rejected()
     assert_eq!(playing.key, key);
     assert_eq!(stream.url, "https://example.test/generated-movie.mp4");
     assert_eq!(stream.header("X-Generated"), Some("fixture"));
+    let incarnation = details.incarnation.clone();
     let point = Progress::observed(37_000, Some(120_000), false);
-    support::block_on(owner.vod_save_progress(key.clone(), None, point)).unwrap();
+    support::block_on(owner.vod_save_progress(key.clone(), None, point, incarnation)).unwrap();
     assert!(owner.drain_services());
     drop(owner);
     let owner = make();
@@ -89,4 +90,52 @@ fn movie_playback_progress_survives_restart_and_locked_direct_ids_are_rejected()
         .set_setting("parental.vod_enabled", Value::Bool(false))
         .unwrap();
     assert!(owner.drain_services());
+}
+
+#[test]
+fn stale_observation_cannot_write_to_a_reused_source_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let database_key = iptv_runtime::model::DatabaseKey::from_bytes([0x64; 32]);
+    let mut store =
+        iptv_store_sqlite::Store::open_encrypted(dir.path().join("iptv.sqlite"), &database_key)
+            .unwrap();
+    let source_data = common::m3u_source("Generated reused source");
+    let source = store.add_source(&source_data).unwrap();
+    let catalog = common::catalog(1, 1, common::XT_PASSWORD);
+    common::replace(&mut store, source, &catalog);
+    let key = Key {
+        source: source.0,
+        kind: Kind::Movie,
+        id: catalog.vod[0].id.to_string(),
+    };
+    let old = store.source_incarnation(source).unwrap();
+    store.delete_source(source).unwrap();
+    let replacement = store.add_source(&source_data).unwrap();
+    assert_eq!(source, replacement);
+    common::replace(&mut store, replacement, &catalog);
+    drop(store);
+    let owner = Rc::new(Runtime::new(Ports::new(dir.path().to_owned(), move |_| {
+        Ok(database_key.clone())
+    })));
+    owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+    owner.start_services();
+    let point = Progress::observed(40_000, Some(100_000), false);
+    assert!(
+        support::block_on(owner.vod_save_progress(key.clone(), None, point, old.clone())).is_err()
+    );
+    owner.queue_vod_progress(key.clone(), None, point, old);
+    assert!(owner.drain_services());
+    let key = iptv_runtime::model::DatabaseKey::from_bytes([0x64; 32]);
+    let store =
+        iptv_store_sqlite::Store::open_encrypted(dir.path().join("iptv.sqlite"), &key).unwrap();
+    assert_eq!(
+        store
+            .vod_progress(&iptv_core::vod::Key {
+                source: source.0,
+                kind: Kind::Movie,
+                id: catalog.vod[0].id.to_string()
+            })
+            .unwrap(),
+        Progress::default()
+    );
 }

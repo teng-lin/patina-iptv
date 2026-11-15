@@ -145,6 +145,7 @@ pub(crate) struct Row {
     use_http_tmp_link: Scalar,
     use_load_balancing: Scalar,
     is_series: Scalar,
+    series: Vec<String>,
     rating_imdb: Scalar,
     rating_kinopoisk: Scalar,
     screenshot_uri: Scalar,
@@ -248,6 +249,7 @@ impl<'de> Deserialize<'de> for Row {
                         "use_http_tmp_link" => row.use_http_tmp_link = a.next_value()?,
                         "use_load_balancing" => row.use_load_balancing = a.next_value()?,
                         "is_series" => row.is_series = a.next_value()?,
+                        "series" => row.series = a.next_value::<StringList>()?.0,
                         "rating_imdb" => row.rating_imdb = a.next_value()?,
                         "rating_kinopoisk" => row.rating_kinopoisk = a.next_value()?,
                         "screenshot_uri" => row.screenshot_uri = a.next_value()?,
@@ -500,7 +502,9 @@ impl Fields for &Row {
         self.get(k).is_some_and(|v| !matches!(v, Scalar::Null))
     }
     fn strings(&self, k: &str) -> Vec<String> {
-        if k == "category_ids" {
+        if k == "series" {
+            self.series.clone()
+        } else if k == "category_ids" {
             self.category_ids.clone()
         } else {
             self.str(k)

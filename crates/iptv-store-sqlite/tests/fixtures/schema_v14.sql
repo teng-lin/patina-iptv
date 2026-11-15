@@ -347,7 +347,7 @@ CREATE TABLE vod (
     added INTEGER,
     duration_secs INTEGER,
     stream TEXT NOT NULL,
-    is_series INTEGER NOT NULL DEFAULT 0,
+    is_series INTEGER NOT NULL DEFAULT 0, episode_numbers TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (source_id, id)
 ) WITHOUT ROWID;
 -- table vod_groups
