@@ -294,6 +294,8 @@ fn follow(ui: Ui, outcome: Outcome) {
 fn open(ui: Ui, item: RailItem) {
     match item {
         RailItem::Search => crate::search_view::open(ui),
+        RailItem::Movies => crate::vod_view::open(ui, iptv_core::vod::Kind::Movie),
+        RailItem::Shows => crate::vod_view::open(ui, iptv_core::vod::Kind::Series),
         RailItem::Recordings => crate::recordings_view::open(ui),
         RailItem::Playlists => crate::playlists_view::open(ui),
         RailItem::Settings => crate::settings_view::open(ui),

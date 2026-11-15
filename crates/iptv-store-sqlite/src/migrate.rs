@@ -95,6 +95,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 14,
+        name: "vod_progress",
+        sql: include_str!("../migrations/0014_vod_progress.sql"),
+    },
+    Migration {
+        version: 15,
         name: "recording_rules",
         sql: include_str!("../migrations/0015_recording_rules.sql"),
     },

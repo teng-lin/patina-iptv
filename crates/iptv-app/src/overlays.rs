@@ -18,6 +18,7 @@ pub(crate) enum Overlay {
     Parental,
     Wizard,
     Recordings,
+    Vod,
     GuideSources,
     GuideInspection,
     GuideRepair,
@@ -48,7 +49,8 @@ impl Overlay {
     pub(crate) fn key_context(self) -> iptv_nav::Context {
         use iptv_nav::Context;
         match self {
-            Self::Recordings
+            Self::Vod
+            | Self::Recordings
             | Self::GuideRepair
             | Self::GuideInspection
             | Self::GuideSources
@@ -70,10 +72,12 @@ impl Overlay {
     }
 
     /// Every overlay, topmost layer first.
-    pub(crate) const ALL: [Overlay; 19] = [
+    pub(crate) const ALL: [Overlay; 20] = [
         Overlay::Parental,
+
         Overlay::Wizard,
         Overlay::Recordings,
+        Overlay::Vod,
         Overlay::GuideRepair,
         Overlay::GuideInspection,
         Overlay::GuideSources,
@@ -97,6 +101,7 @@ impl Overlay {
         match self {
             Overlay::Parental => crate::parental_view::is_open(ui),
             Overlay::Wizard => crate::wizard_view::is_open(ui),
+            Overlay::Vod => crate::vod_view::is_open(ui),
             Overlay::Recordings => crate::recordings_view::is_open(ui),
             Overlay::GuideRepair => crate::guide_repair_view::is_open(ui),
             Overlay::GuideInspection => crate::guide_inspect_view::is_open(ui),
@@ -140,6 +145,8 @@ impl Overlay {
         match self {
             Overlay::Parental
             | Overlay::Wizard
+            | Overlay::Vod
+
             | Overlay::Recordings
             | Overlay::GuideRepair
             | Overlay::GuideInspection
@@ -171,6 +178,8 @@ impl Overlay {
             Overlay::Description => false,
             Overlay::Parental
             | Overlay::Wizard
+            | Overlay::Vod
+
             | Overlay::Recordings
             | Overlay::GuideRepair
             | Overlay::GuideInspection
@@ -249,6 +258,8 @@ mod tests {
         let listed = |overlay: Overlay| match overlay {
             Overlay::Parental
             | Overlay::Wizard
+            | Overlay::Vod
+
             | Overlay::Recordings
             | Overlay::GuideRepair
             | Overlay::GuideInspection

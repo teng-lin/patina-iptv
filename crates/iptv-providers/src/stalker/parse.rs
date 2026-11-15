@@ -14,8 +14,8 @@ use crate::http::{HttpResponse, json_body};
 use crate::id::{ContentId, GroupId};
 use crate::lenient::{Obj, list_items, rating_x10, year_from};
 use crate::model::{
-    CatchUp, CatchUpKind, Channel, ContentKind, Group, Import, SourceKind, StalkerLinkFlags,
-    StreamLocator, VodItem, WarningLocation,
+    CatchUp, CatchUpKind, Channel, ContentKind, Group, Import, Series, SourceKind,
+    StalkerLinkFlags, StreamLocator, VodItem, WarningLocation,
 };
 
 /// Which authorization failure a portal reported.
@@ -342,6 +342,37 @@ impl HasProviderId for VodItem {
             .clone()
             .unwrap_or_else(|| self.id.to_string())
     }
+}
+
+impl HasProviderId for Series {
+    fn provider_key(&self) -> String {
+        self.provider_id
+            .clone()
+            .unwrap_or_else(|| self.id.to_string())
+    }
+}
+/// Native `series/get_ordered_list` catalogue; rows need no playback command.
+pub fn parse_series_page(response: &HttpResponse) -> Result<Page<Series>, ProviderError> {
+    typed::page(response, |o| {
+        let id = o.str("id").ok_or("series without id")?;
+        Ok(Series {
+            id: ContentId::from_provider(SourceKind::Stalker, ContentKind::Series, &id),
+            provider_id: Some(id.clone()),
+            name: o
+                .first_text(&["name", "o_name"])
+                .unwrap_or_else(|| format!("Series {id}")),
+            groups: o
+                .str("category_id")
+                .map(|g| GroupId::from_provider(SourceKind::Stalker, ContentKind::Series, &g))
+                .into_iter()
+                .collect(),
+            poster: o.first_text(&["screenshot_uri", "cover_big", "logo"]),
+            plot: o.text("description"),
+            year: year_from(o.text("year").as_deref()),
+            rating_x10: rating_x10(o.f64("rating_imdb").or_else(|| o.f64("rating_kinopoisk"))),
+            last_modified: o.i64("added"),
+        })
+    })
 }
 
 /// `itv/get_genres` and `vod|series/get_categories`. The `*` "All" entry is

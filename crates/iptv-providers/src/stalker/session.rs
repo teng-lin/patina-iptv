@@ -431,6 +431,32 @@ impl StalkerSession {
         ])
     }
 
+    /// Series catalogue or children, preserving opaque movie/season coordinates.
+    pub fn series_page(
+        &self,
+        movie: &str,
+        season: Option<&str>,
+        page: u32,
+        native: bool,
+    ) -> Result<HttpRequest, StalkerError> {
+        let page = page.max(1).to_string();
+        let mut params = vec![
+            ("type", if native { "series" } else { "vod" }),
+            ("action", "get_ordered_list"),
+            ("p", page.as_str()),
+            ("sortby", "added"),
+        ];
+        if movie.is_empty() {
+            params.push(("category", "*"));
+        } else {
+            params.push(("movie_id", movie));
+        }
+        if let Some(season) = season {
+            params.push(("season_id", season));
+        }
+        self.api_request(&params)
+    }
+
     /// Short EPG for a channel id.
     pub fn short_epg(&self, channel_id: &str, size: u32) -> Result<HttpRequest, StalkerError> {
         let size = size.to_string();

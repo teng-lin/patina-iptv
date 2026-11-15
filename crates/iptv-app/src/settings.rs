@@ -42,6 +42,8 @@ pub const WIRED: &[&str] = &[
     "parental.pin_input",
     "parental.unlock_window",
     "playlists.max_connections",
+    "vod.sort",
+    "vod.autoplay_next_episode",
     "general.language",
     "general.clock",
     "guide.autoplay",
@@ -360,9 +362,9 @@ mod tests {
         assert_eq!(offer("epg.manage_sources"), Offer::Active);
         assert_eq!(offer("epg.add_source"), Offer::Active);
         assert_eq!(offer("playback.afr"), Offer::Hidden);
-        assert_eq!(offer("vod.sort"), Offer::Later);
-        assert_eq!(offer("parental.live_enabled"), Offer::Active);
-        assert_eq!(offer("parental.change_pin"), Offer::Active);
+        assert_eq!(offer("vod.sort"),Offer::Active);
+        assert_eq!(offer("parental.live_enabled"),Offer::Active);
+        assert_eq!(offer("parental.change_pin"),Offer::Active);
         assert_eq!(offer("history.keep_days"), Offer::NotYet);
         assert_eq!(offer("remote.key_overrides"), Offer::ReadOnly);
         let pip = if cfg!(target_os = "android") {

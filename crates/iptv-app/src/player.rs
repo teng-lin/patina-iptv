@@ -108,6 +108,7 @@ impl Stream {
 /// Playback state beside [`Ui`]'s `playing`/`playback` (signals are `Copy`).
 #[derive(Clone, Copy)]
 pub struct Player {
+    pub vod: Signal<Option<(iptv_runtime::vod::Playing, PlaySource)>>,
     pub recorded: Signal<Option<(iptv_core::recording::Job, PlaySource)>>,
     /// By surface; 0 is the full-screen player.
     pub streams: [Stream; SURFACES],
@@ -125,6 +126,7 @@ impl Player {
     pub fn new() -> Self {
         Self {
             recorded: signal(None),
+            vod: signal(None),
             streams: std::array::from_fn(|_| Stream::new()),
             history: signal(ChannelHistory::default()),
             resume: signal(true),
@@ -270,12 +272,15 @@ pub fn start_surface(ui: Ui, surface: usize, channel: usize) -> bool {
 pub fn stop(ui: Ui) {
     crate::on_demand::flush(ui, false);
     crate::runtime().parental_content_closed();
+    ui.player.vod.set(None);
     ui.player.recorded.set(None);
     crate::runtime().close_recording_playback();
     close(ui, 0);
 }
 
 pub fn play_recording(ui: Ui, job: iptv_core::recording::Job, source: PlaySource) {
+    crate::vod_view::flush(ui);
+    ui.player.vod.set(None);
     crate::multiview::close(ui);
     cancel_resolve(0);
     ui.pending_zap.set(None);
@@ -288,6 +293,29 @@ pub fn play_recording(ui: Ui, job: iptv_core::recording::Job, source: PlaySource
     ui.player.recorded.set(Some((job, source.clone())));
     ui.paused.set(false);
     crate::runtime().release_viewing(0);
+    let mut session = 0;
+    ui.player
+        .main()
+        .health
+        .update(|h| session = h.start(false, ui.now_ms()));
+    load(ui, 0, session, source);
+    ui.mode.set(ViewMode::Fullscreen);
+}
+
+pub fn play_vod(ui: Ui, playing: iptv_runtime::vod::Playing, source: PlaySource) {
+    crate::multiview::close(ui);
+    cancel_resolve(0);
+    crate::runtime().close_recording_playback();
+    ui.pending_zap.set(None);
+    ui.browse_playback.set(Default::default());
+    ui.player.resume.set(false);
+    ui.player.early.set(None);
+    ui.playing.set(None);
+    ui.player.main().key.set(None);
+    ui.playback.set(Playback::Live);
+    ui.player.recorded.set(None);
+    ui.player.vod.set(Some((playing, source.clone())));
+    ui.paused.set(false);
     let mut session = 0;
     ui.player
         .main()
@@ -354,6 +382,12 @@ fn open(ui: Ui, surface: usize, session: u64) {
     }
 }
 fn open_allowed(ui: Ui, surface: usize, session: u64) {
+    if surface == 0 && let Some((_, source)) = ui.player.vod.get_untracked() {
+        let position = if ui.player.main().finished.get_untracked() { 0 } else { ui.player.main().timeline.get_untracked().position_ms };
+        load(ui, 0, session, source);
+        ui.player.main().resume_ms.set(Some(position));
+        return;
+    }
     if surface == 0
         && let Some((job, source)) = ui.player.recorded.get_untracked()
     {
@@ -768,7 +802,9 @@ pub fn row_dropped(ui: Ui) {
 /// the last channel starts once (`general.resume_last_channel`), unless
 /// something already plays.
 pub fn source_ready(ui: Ui, refresh: bool) {
-    if ui.player.recorded.with_untracked(Option::is_some) {
+    if ui.player.recorded.with_untracked(Option::is_some)
+        || ui.player.vod.with_untracked(Option::is_some)
+    {
         return;
     }
     if resume::adopt(ui) {

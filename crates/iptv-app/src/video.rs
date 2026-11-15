@@ -172,6 +172,7 @@ fn source_prop(ui: Ui, surface: usize) -> Option<SourceProps> {
         ui.playing.get().is_some()
             || crate::player::resume::playing(ui)
             || ui.player.recorded.with(Option::is_some)
+            || ui.player.vod.with(Option::is_some)
     } else {
         stream.channel.get().is_some()
     };

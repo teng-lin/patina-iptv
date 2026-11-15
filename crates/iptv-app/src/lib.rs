@@ -42,6 +42,7 @@ mod media;
 mod menu_view;
 pub(crate) mod parental_view;
 mod recordings_view;
+mod vod_view;
 use iptv_runtime as runtime;
 mod runtime_events;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", windows))]
@@ -212,6 +213,7 @@ pub struct Ui {
     /// The programme description popover, if open.
     pub description: Signal<Option<Origin>>,
     pub recordings: Signal<iptv_core::recording::Screen>,
+    pub vod: Signal<iptv_core::vod::Screen>,
     pub recordings_open: Memo<bool>,
     /// The favourite channels on screen (catalog channels); kept by key
     /// and changed through `favorites.rs`.
@@ -358,6 +360,7 @@ impl Ui {
             return;
         }
         crate::on_demand::flush(*self, false);
+        self.player.vod.set(None);
         self.player.recorded.set(None);
         crate::runtime().close_recording_playback();
         self.pending_zap.set(None);
@@ -733,6 +736,7 @@ fn ready_app() -> impl IntoElement {
         menu: signal(None),
         description: signal(None),
         recordings,
+        vod: signal(iptv_core::vod::Screen::default()),
         recordings_open,
         favorites: signal(BTreeSet::new()),
         has_vod: signal(false),
@@ -943,6 +947,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(play_bar::layer(ui))
         .child(fav_editor::layer(ui))
         .child(settings_view::layer(ui))
+        .child(vod_view::layer(ui))
         .child(recordings_view::layer(ui))
         .child(guide_assign_view::layer(ui))
         // The playlists screen opens over settings, a guide sources screen
@@ -1068,6 +1073,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 true
             }
             _ if top == Some(Overlay::Wizard) => wizard_view::back(ui),
+            _ if top == Some(Overlay::Vod) => vod_view::back(ui),
             _ if top == Some(Overlay::Recordings) => recordings_view::back(ui),
             _ if top == Some(Overlay::GuideSources) => epg_sources_view::back(ui),
             _ if top == Some(Overlay::GuideRepair) => guide_repair_view::back(ui),

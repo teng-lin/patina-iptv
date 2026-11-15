@@ -68,6 +68,7 @@ mod search;
 mod search_history;
 mod source_settings;
 mod sources;
+mod vod;
 
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

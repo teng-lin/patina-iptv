@@ -35,6 +35,7 @@ pub mod inspection;
 mod operations;
 pub mod parental;
 pub mod recordings;
+pub mod vod;
 pub use error::Error;
 
 /// Shell observations needed to prioritize reads and avoid replacing active playback.
@@ -96,6 +97,7 @@ pub struct Runtime {
     parental: RefCell<parental::State>,
     recordings: std::sync::Arc<recordings::State>,
     recordings_detached: Cell<bool>,
+    vod: std::sync::Arc<vod::State>,
     repairs: RefCell<guide_repair::State>,
     account_streams: Slot<Cell<Option<u32>>>,
     resolving: Slot<Resolves>,
@@ -165,6 +167,7 @@ impl Runtime {
             parental: RefCell::default(),
             recordings,
             recordings_detached: Cell::new(false),
+            vod: Default::default(),
             repairs: RefCell::default(),
             account_streams: Slot::default(),
             resolving: Slot::default(),

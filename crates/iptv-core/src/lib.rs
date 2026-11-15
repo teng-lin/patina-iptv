@@ -39,3 +39,5 @@ pub mod wizard;
 
 pub mod on_demand;
 pub mod organization;
+
+pub mod vod;
