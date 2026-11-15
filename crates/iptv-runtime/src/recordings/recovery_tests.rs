@@ -44,14 +44,24 @@ async fn park(owner: &Runtime, request: Request) -> JobId {
     owner
         .services()
         .call(move |store| {
-            store.schedule_recording(id, &request, request.start - 60)?;
-            store.transition_recording(
+            // The scheduler has a separate read lane. Keep this synthetic job
+            // in the future until both its spool and retained-byte row exist;
+            // otherwise it can correctly miss the half-prepared zero-byte job.
+            let staged_at = now();
+            let staged = Request {
+                start: staged_at + 3600,
+                end: staged_at + 3660,
+                ..request.clone()
+            };
+            store.schedule_recording(id, &staged, staged_at)?;
+            assert!(store.transition_recording(
                 id,
                 Status::Scheduled,
                 Status::Scheduled,
                 188,
                 "Resuming interrupted recording",
-            )?;
+            )?);
+            assert!(store.update_recording(id, &request, request.start - 60)?);
             Ok(())
         })
         .await

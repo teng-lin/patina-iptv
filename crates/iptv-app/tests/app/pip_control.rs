@@ -121,6 +121,13 @@ fn picture_in_picture_opens_a_window_of_its_own_on_the_same_player() {
     // screen (`guide.stay_on_guide` off by default).
     step(app.press_key("enter"));
     step(app.wait_for("id:player-banner"));
+    // The banner renders before asynchronous tuning reaches the native player.
+    // Count PiP's opens only after the initial stream has actually opened.
+    step(app.wait_until(
+        "initial native stream opens",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0) && iptv_app::player_opens(0) > 0,
+    ));
     let before = main_size(&mut app);
     let opens = iptv_app::player_opens(0);
 
