@@ -9,7 +9,7 @@ is below 1.0, a minor release may change behaviour.
 
 ### Added
 
-- Linux prototype: open a live guide channel in an independent player window
+- Linux and macOS prototype: open a live guide channel in an independent player window
   with the original player controls, while main playback continues.
 
 ## [0.1.2] - 2026-11-14

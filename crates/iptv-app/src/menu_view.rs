@@ -108,7 +108,9 @@ pub fn open(ui: Ui) {
                     ))
         },
     );
-    if cfg!(target_os = "linux") && program.airing(now) == crate::guide::Airing::Live {
+    if cfg!(any(target_os = "linux", target_os = "macos"))
+        && program.airing(now) == crate::guide::Airing::Live
+    {
         rows.insert(
             3,
             Row::Action {

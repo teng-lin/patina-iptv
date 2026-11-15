@@ -186,7 +186,7 @@ pub(super) fn cell(
         .overflow_hidden()
         .bg(move || rgba(colours.get().0))
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
-            if cfg!(target_os = "linux")
+            if cfg!(any(target_os = "linux", target_os = "macos"))
                 && let (Some(ch), Some(p)) = (channel.get(), program())
             {
                 crate::menu_view::open_at(ui, ch, p.start);

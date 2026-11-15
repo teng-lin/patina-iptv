@@ -70,7 +70,7 @@ pub(super) fn cell(
             channel.get().map(channel_name).unwrap_or_default()
         })
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
-            if cfg!(target_os = "linux")
+            if cfg!(any(target_os = "linux", target_os = "macos"))
                 && let Some(ch) = channel.get()
             {
                 crate::menu_view::open_at(ui, ch, ui.focus.with(|f| f.now));

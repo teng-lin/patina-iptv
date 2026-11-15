@@ -7,7 +7,10 @@
 use crate::i18n::tr;
 
 pub use iptv_core::guide;
-#[cfg(all(feature = "test-support", target_os = "linux"))]
+#[cfg(all(
+    feature = "test-support",
+    any(target_os = "linux", target_os = "macos")
+))]
 mod guide_window_walkthrough;
 pub mod theme;
 
@@ -737,7 +740,10 @@ fn ready_app() -> impl IntoElement {
     pip::bind(ui);
     desktop::player_windows::bind(ui);
     bind_back(ui);
-    #[cfg(all(feature = "test-support", target_os = "linux"))]
+    #[cfg(all(
+        feature = "test-support",
+        any(target_os = "linux", target_os = "macos")
+    ))]
     guide_window_walkthrough::bind(ui);
 
     let rows = element_ref();

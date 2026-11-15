@@ -245,8 +245,8 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
         .top(move || px(surface_rect(ui, surface).1))
         .w(move || px(surface_rect(ui, surface).2))
         .h(move || px(surface_rect(ui, surface).3));
-    // Linux-only prototype routing metadata; the shared player wire stays unchanged.
-    #[cfg(target_os = "linux")]
+    // Desktop prototype routing metadata; the shared player wire stays unchanged.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         player = player.prop("popupSurface", move || serde_json::json!(surface));
     }

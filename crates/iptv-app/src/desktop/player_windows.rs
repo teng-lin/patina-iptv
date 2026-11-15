@@ -1,15 +1,16 @@
-//! Linux guide-menu prototype: auxiliary players belong to the app, independently
+//! Desktop guide-menu prototype: auxiliary players belong to the app, independently
 //! of the main guide's navigation and the multiview layout.
 use crate::{Ui, i18n::tr};
 use iptv_core::playback_windows::SessionId;
 use nsh_core::prelude::*;
 
 pub fn mounted(ui: Ui, surface: usize) -> bool {
-    cfg!(target_os = "linux") && ui.player_windows.with(|w| w.on_surface(surface).is_some())
+    cfg!(any(target_os = "linux", target_os = "macos"))
+        && ui.player_windows.with(|w| w.on_surface(surface).is_some())
 }
 
 pub fn can_open(ui: Ui, channel: usize) -> bool {
-    if !cfg!(target_os = "linux") || crate::multiview::session(ui) {
+    if !cfg!(any(target_os = "linux", target_os = "macos")) || crate::multiview::session(ui) {
         return false;
     }
     let Some(key) = crate::schedule().channel_key(channel) else {
@@ -108,7 +109,7 @@ fn player_window(ui: Ui, surface: usize) -> impl IntoElement {
     attributes.frame = Some(nsh_core::desktop::WindowFrameStyle::Default);
     attributes.close_on_escape = Some(true);
     attributes.min_size = Some(Some(nsh_core::Size::new(px(640.0), px(360.0))));
-    nsh_core::element::desktop::window()
+    let window = nsh_core::element::desktop::window()
         .id(format!("player-window-{}", id.0))
         .title(move || {
             ui.guide_data();
@@ -122,7 +123,37 @@ fn player_window(ui: Ui, surface: usize) -> impl IntoElement {
         .default_size(nsh_core::Size::new(px(960.0), px(540.0)))
         .attributes(attributes)
         .on_open_change(move |_| close(ui, id))
-        .content(move || player_content(ui, surface, id))
+        .content(move || player_content(ui, surface, id));
+    // A starting position only: resizing/fullscreen/control updates never
+    // snap a window back after the viewer moves it.
+    #[cfg(target_os = "macos")]
+    let window = match untracked(|| opening_position(surface)) {
+        Some(position) => window.default_position(position),
+        None => window, // NSH's native cascade remains the fallback.
+    };
+    window
+}
+
+#[cfg(target_os = "macos")]
+fn opening_position(surface: usize) -> Option<nsh_core::desktop::WindowPosition> {
+    let state = super::with_window(|main| main.state()).flatten()?;
+    let area = nsh_core::element::desktop::display(state.display?)?.visible_bounds;
+    Some(cascade_position(surface, area))
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn cascade_position(
+    surface: usize,
+    area: nsh_core::Bounds<nsh_core::Points>,
+) -> nsh_core::desktop::WindowPosition {
+    // Separate title bars on the main display, including screens to the
+    // left/above the primary. Leave room for the native title bar too.
+    let x_step = ((area.size.width.0 - 960.0).max(0.0) / 4.0).min(72.0);
+    let y_step = ((area.size.height.0 - 572.0).max(0.0) / 4.0).min(56.0);
+    nsh_core::desktop::WindowPosition::At(nsh_core::geometry::point(
+        px(area.origin.x.0 + x_step * surface as f32),
+        px(area.origin.y.0 + y_step * surface as f32),
+    ))
 }
 
 /// Reuse the app's actual full-screen player views with a window-local
@@ -227,7 +258,7 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
     });
     view()
         .flex_1()
-        .test_id("auxiliary-player")
+        .test_id(&format!("auxiliary-player-{}", id.0))
         .bg(rgb(0x000000))
         .on_mouse_move(move |event: &MouseEvent| crate::pointer_moved(local, event))
         .child(
@@ -263,4 +294,35 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
         .child(crate::menu_view::layer(local))
         .child(crate::chooser::layer(local))
         .child(crate::play_bar::layer(local))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cascade_position;
+    use nsh_core::desktop::WindowPosition;
+    use nsh_core::geometry::{Bounds, point, px, size};
+
+    #[test]
+    fn opening_positions_separate_title_bars_on_an_offset_display() {
+        let area = Bounds::new(point(px(-1512.0), px(-200.0)), size(px(1512.0), px(900.0)));
+        let positions: Vec<_> = (1..=3)
+            .map(|surface| match cascade_position(surface, area) {
+                WindowPosition::At(at) => at,
+                _ => unreachable!(),
+            })
+            .collect();
+        for pair in positions.windows(2) {
+            assert!(pair[0].x.0 < pair[1].x.0 && pair[0].y.0 < pair[1].y.0);
+        }
+        for at in positions {
+            assert!(at.x.0 >= -1512.0 && at.x.0 + 960.0 <= 0.0);
+            assert!(at.y.0 >= -200.0 && at.y.0 + 572.0 <= 700.0);
+        }
+    }
+
+    #[test]
+    fn opening_positions_do_not_push_small_display_title_bars_offscreen() {
+        let area = Bounds::new(point(px(100.0), px(30.0)), size(px(960.0), px(540.0)));
+        assert_eq!(cascade_position(3, area), WindowPosition::At(area.origin));
+    }
 }

@@ -1,5 +1,5 @@
 //! Synthetic launcher for the actual Patina App, including its guide/context menu.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn main() {
     iptv_app::install_test_key([0x54; 32]);
     if std::env::args().any(|a| a == "seed") {
@@ -8,8 +8,13 @@ fn main() {
             model::{M3uSourceConfig, Source, SourceConfig},
         };
         use iptv_store_sqlite::{DatabaseKey, SourcePolicy, Store};
-        let root = std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
-            .join(".local/share/iptv-rs");
+        let root = std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join(
+            if cfg!(target_os = "macos") {
+                "Library/Application Support/iptv-rs"
+            } else {
+                ".local/share/iptv-rs"
+            },
+        );
         std::fs::create_dir_all(&root).unwrap();
         let mut store = Store::open_encrypted(
             root.join("iptv.sqlite"),
@@ -68,7 +73,10 @@ fn main() {
         return;
     }
     env_logger::init();
+    #[cfg(target_os = "linux")]
     use nsh_platform_linux as platform;
+    #[cfg(target_os = "macos")]
+    use nsh_platform_macos as platform;
     platform::set_components(iptv_app::components);
     platform::run_app(
         platform::AppSource::Rust(platform::Root::of::<iptv_app::App>()),
@@ -80,7 +88,7 @@ fn main() {
         },
     );
 }
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn main() {
-    eprintln!("This prototype currently runs on Linux.");
+    eprintln!("This prototype currently runs on Linux and macOS.");
 }
