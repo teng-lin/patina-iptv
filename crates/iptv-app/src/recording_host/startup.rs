@@ -20,6 +20,10 @@ fn desktop_quote(value: &str) -> String {
     )
 }
 pub(super) fn install(directory: &Path, enabled: bool) -> io::Result<()> {
+    #[cfg(windows)]
+    let _tasks = super::windows::TASKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let executable = std::env::current_exe()?;
     #[cfg(target_os = "linux")]
     {

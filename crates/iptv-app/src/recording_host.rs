@@ -41,6 +41,22 @@ pub(crate) fn command(key: &str) {
                     tokio::task::spawn_blocking(move || startup::install(&directory, enabled)).await
                 })
                 .await;
+            if enabled && matches!(result, Ok(Ok(Ok(())))) {
+                // A schedule may predate login opt-in. Arm its wake trigger now
+                // rather than waiting for an unrelated catalogue transition.
+                let jobs = owner.recording_snapshot();
+                let next = jobs
+                    .iter()
+                    .filter(|job| job.status == iptv_core::recording::Status::Scheduled)
+                    .map(|job| job.request.start)
+                    .min()
+                    .unwrap_or(0);
+                schedule(
+                    next,
+                    jobs.iter()
+                        .any(|job| job.status == iptv_core::recording::Status::Recording),
+                );
+            }
             crate::settings_view::notify(crate::i18n::tr(if matches!(result, Ok(Ok(Ok(())))) {
                 "Recording startup preference saved"
             } else {

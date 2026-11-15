@@ -617,3 +617,4 @@ iptv-app/src/recording_host/startup.rs	Library/LaunchAgents/com.hantekllc.patina
 iptv-app/src/recording_host/startup.rs	Patina Recorder
 iptv-app/src/recording_host/startup.rs	[Desktop Entry]\nType=Application\nName=Patina Recorder\nExec={} --background-recordings\nTerminal=false\nNoDisplay=true\n
 iptv-app/src/recording_host/windows.rs	Patina Recorder
+iptv-app/src/recording_host/windows.rs	Patina
