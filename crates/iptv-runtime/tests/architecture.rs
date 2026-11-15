@@ -88,6 +88,8 @@ const STATICS: &[(&str, &str)] = &[
     // Serialize native service startup/restore and retain its independent owner.
     ("recordings/host.rs", "ACTIVATION"),
     ("recordings/host.rs", "HOSTS"),
+    // Synthetic callback handoff barrier used only by recording unit tests.
+    ("recordings/tests.rs", "PUBLICATION_GATE"),
 ];
 
 fn sources(directory: &Path, files: &mut Vec<PathBuf>) {
