@@ -7,6 +7,8 @@ is below 1.0, a minor release may change behaviour.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-14
+
 ### Added
 
 - App-open DVR on TV, tablet and desktop: record-now and one-off schedules,
@@ -117,6 +119,7 @@ First public release, for Android TV and tablets, Linux and macOS.
 - Packages: a signed Android APK, Linux `.deb`, `.rpm`, pacman package and
   AppImage, and an ad hoc signed macOS disk image.
 
-[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/teng-lin/patina-iptv/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/teng-lin/patina-iptv/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/teng-lin/patina-iptv/releases/tag/v0.1.0
