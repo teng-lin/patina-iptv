@@ -555,9 +555,9 @@ mod tests {
         // Panel timeouts, channel-change info, seek keys and three steps.
         assert_eq!(active, 7);
         let parental = PAGES.iter().find(|p| p.key == "parental").unwrap();
-        // The two enable switches and PIN command are active by default;
-        // protection-dependent preferences activate after protection is enabled.
-        assert_eq!(counts(parental), (3, 6));
+        // Only the two enable switches and PIN command are visible by default;
+        // dependent preferences appear after live or VOD protection is enabled.
+        assert_eq!(counts(parental), (3, 3));
     }
 
     #[test]
