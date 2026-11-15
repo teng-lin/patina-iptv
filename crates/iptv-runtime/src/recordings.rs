@@ -1146,6 +1146,7 @@ async fn record(
             return Err("Recording storage unavailable");
         }
         let mut retry = Duration::from_secs(1);
+        let mut capture = iptv_net::recording::CaptureState::default();
         loop {
             let source = match resolve(services, state, job, stop).await {
                 Ok(source) => source,
@@ -1163,12 +1164,13 @@ async fn record(
                 #[cfg(debug_assertions)]
                 allow_private_fixture: net.allow_private_fixture,
             };
-            match iptv_net::recording::capture_resume(
+            match iptv_net::recording::capture_resume_with_state(
                 &source.url,
                 &source.headers,
                 policy,
                 &partial,
                 MAX_BYTES,
+                &mut capture,
             )
             .await
             {
