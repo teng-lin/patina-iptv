@@ -168,6 +168,38 @@ fn path(services: &Services, id: JobId, partial: bool) -> PathBuf {
     ))
 }
 
+// Android app sandboxes prohibit hard links. Linux's no-replace rename keeps
+// finalization atomic without overwriting previously acknowledged media.
+fn finalize_name(from: &Path, to: &Path) -> std::io::Result<()> {
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let from = std::ffi::CString::new(from.as_os_str().as_bytes())?;
+        let to = std::ffi::CString::new(to.as_os_str().as_bytes())?;
+        // SAFETY: both C strings stay alive through the synchronous syscall;
+        // AT_FDCWD and RENAME_NOREPLACE (1) are Linux kernel constants.
+        let result = unsafe {
+            libc::syscall(
+                libc::SYS_renameat2,
+                libc::AT_FDCWD,
+                from.as_ptr(),
+                libc::AT_FDCWD,
+                to.as_ptr(),
+                1u32,
+            )
+        };
+        if result != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "android", target_os = "linux")))]
+    {
+        std::fs::hard_link(from, to)?;
+        std::fs::remove_file(from)
+    }
+}
+
 impl Runtime {
     pub fn start_recordings(&self) {
         if self.recordings.started.swap(true, Ordering::SeqCst) {
@@ -504,9 +536,7 @@ async fn recover_media(services: &Services, job: &Job) {
     let complete = path(services, job.id, false);
     let bytes = services
         .spawn_blocking(move || {
-            if !complete.exists() {
-                let _ = std::fs::rename(&p, &complete);
-            }
+            let _ = finalize_name(&p, &complete);
             std::fs::symlink_metadata(complete)
                 .ok()
                 .filter(|m| m.is_file() && !m.file_type().is_symlink())
@@ -783,8 +813,7 @@ async fn record(services: &Services, state: &State, job: &Job, stop: &CancelToke
             file.set_len(bytes)?;
             file.sync_all()?;
             // Never replace a previous completed file, even after a lost acknowledgement.
-            std::fs::hard_link(&partial, &destination)?;
-            std::fs::remove_file(partial)?;
+            finalize_name(&partial, &destination)?;
             #[cfg(unix)]
             std::fs::File::open(
                 destination

@@ -5,6 +5,22 @@ use iptv_providers::{
 };
 use std::io::{Read, Write};
 
+#[test]
+fn media_finalization_moves_once_and_never_replaces_an_existing_recording() {
+    let directory = tempfile::tempdir().unwrap();
+    let from = directory.path().join("generated.part");
+    let to = directory.path().join("generated.ts");
+    std::fs::write(&from, b"generated new media").unwrap();
+    std::fs::write(&to, b"generated retained media").unwrap();
+    assert!(finalize_name(&from, &to).is_err());
+    assert_eq!(std::fs::read(&to).unwrap(), b"generated retained media");
+    assert!(from.exists());
+    std::fs::remove_file(&to).unwrap();
+    finalize_name(&from, &to).unwrap();
+    assert!(!from.exists());
+    assert_eq!(std::fs::read(&to).unwrap(), b"generated new media");
+}
+
 fn owner(directory: &Path) -> Runtime {
     let owner = Runtime::new(crate::Ports::new(directory.to_owned(), |_| {
         Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
