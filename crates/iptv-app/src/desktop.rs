@@ -20,6 +20,12 @@ pub mod player_windows;
 /// Linux, macOS and Windows.
 pub const DESKTOP: bool = cfg!(any(target_os = "linux", target_os = "macos", windows));
 
+/// Login/task launches run the recorder without automatically opening a viewer.
+/// Explicit foreground playback remains available when the user opens the UI.
+pub(crate) fn recorder_only_startup() -> bool {
+    DESKTOP && std::env::args().any(|arg| arg == "--background-recordings")
+}
+
 thread_local! {
     static WINDOW: RefCell<Option<WindowRef>> = const { RefCell::new(None) };
     /// Where the mouse last was (window points).
@@ -50,7 +56,7 @@ pub fn bind(ui: Ui) {
             close_window.close();
         }
     });
-    if std::env::args().any(|arg| arg == "--background-recordings") {
+    if recorder_only_startup() {
         window.hide();
     }
 }

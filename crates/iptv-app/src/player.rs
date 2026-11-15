@@ -898,7 +898,8 @@ pub fn row_dropped(ui: Ui) {
 /// the last channel starts once (`general.resume_last_channel`), unless
 /// something already plays.
 pub fn source_ready(ui: Ui, refresh: bool) {
-    if ui.player.recorded.with_untracked(Option::is_some)
+    if crate::desktop::recorder_only_startup()
+        || ui.player.recorded.with_untracked(Option::is_some)
         || ui.player.vod.with_untracked(Option::is_some)
     {
         return;

@@ -62,6 +62,7 @@ mod personalization_selection;
 mod personalization_zapping;
 mod pip_control;
 mod pointer;
+mod recorder_startup;
 mod recordings;
 mod recordings_transport;
 mod screens_look;
