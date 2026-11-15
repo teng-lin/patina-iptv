@@ -72,6 +72,24 @@ impl Runtime {
             .map_err(Into::into)
     }
     pub async fn set_recording_rule_enabled(&self, id: RuleId, enabled: bool) -> Result<(), Error> {
+        if enabled {
+            let rule = self
+                .services()
+                .read(move |store| {
+                    Ok(store
+                        .recording_rules()?
+                        .into_iter()
+                        .find(|rule| rule.id == id))
+                })
+                .await?
+                .ok_or_else(|| Error::unavailable("This recording does not repeat"))?;
+            self.parental_check(&iptv_core::parental::Target::live(
+                rule.request.source,
+                rule.request.channel,
+            ))
+            .await
+            .map_err(|_| Error::unavailable("Parental access is locked"))?;
+        }
         self.services()
             .call(move |store| store.set_recording_rule_enabled(id, enabled))
             .await?;
