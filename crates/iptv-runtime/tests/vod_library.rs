@@ -257,3 +257,90 @@ fn an_out_of_order_episode_resumes_after_restart_and_a_stale_writer_cannot_resto
     let store = iptv_store_sqlite::Store::open_encrypted(path, &database_key).unwrap();
     assert_eq!(store.vod_resume_episode(&series).unwrap(), None);
 }
+
+#[cfg(feature = "test-support")]
+#[test]
+fn xtream_movies_keep_the_configured_user_agent_for_direct_and_generated_urls() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        time::Duration,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let provider = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0; 1024];
+        while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+            let count = stream.read(&mut buffer).unwrap();
+            assert!(count > 0);
+            request.extend_from_slice(&buffer[..count]);
+            assert!(request.len() < 16_384);
+        }
+        assert!(
+            String::from_utf8(request)
+                .unwrap()
+                .contains("action=get_vod_info")
+        );
+        stream
+            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .unwrap();
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let database_key = iptv_runtime::model::DatabaseKey::from_bytes([0x79; 32]);
+    let mut store =
+        iptv_store_sqlite::Store::open_encrypted(dir.path().join("iptv.sqlite"), &database_key)
+            .unwrap();
+    let mut source_data = common::xtream_source("Generated source headers");
+    let iptv_providers::model::SourceConfig::Xtream(credentials) = &mut source_data.config else {
+        unreachable!()
+    };
+    credentials.server_url = format!("http://{address}");
+    let source = store.add_source(&source_data).unwrap();
+    let mut catalog = common::catalog(1, 1, common::XT_PASSWORD);
+    // An imported direct_source should keep source defaults, while explicit
+    // per-item headers take precedence over those defaults.
+    for (index, headers) in [
+        vec![("X-Generated".into(), "fixture".into())],
+        vec![("user-agent".into(), "Generated-Item/2.0".into())],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        catalog.vod[index].stream = StreamLocator::Url {
+            url: format!("https://media.example.test/generated-{index}.mp4"),
+            headers,
+            properties: vec![],
+        };
+    }
+    common::replace(&mut store, source, &catalog);
+    drop(store);
+    let owner = Rc::new(Runtime::new(Ports::new(dir.path().to_owned(), move |_| {
+        Ok(database_key.clone())
+    })));
+    owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+    owner.start_services();
+    for (index, expected_agent) in ["Synthetic/1.0", "Generated-Item/2.0", "Synthetic/1.0"]
+        .into_iter()
+        .enumerate()
+    {
+        let key = Key {
+            source: source.0,
+            kind: Kind::Movie,
+            id: catalog.vod[index].id.to_string(),
+        };
+        let details = support::block_on(owner.vod_details(key.clone())).unwrap();
+        let (_, stream) = support::block_on(owner.vod_play(details, key, false)).unwrap();
+        assert_eq!(stream.header("User-Agent"), Some(expected_agent));
+        if index == 0 {
+            assert_eq!(stream.header("X-Generated"), Some("fixture"));
+        }
+        assert_eq!(stream.public_only, index != 2);
+    }
+    provider.join().unwrap();
+    assert!(owner.drain_services());
+}

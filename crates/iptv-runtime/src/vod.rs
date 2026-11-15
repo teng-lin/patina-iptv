@@ -493,9 +493,6 @@ url,
                         .ok_or_else(unavailable)?;
                         let mut source = PlaySource::new(url);
                         source.public_only = false;
-                        if let Some(ua) = &c.user_agent {
-                            source.default_header("User-Agent", ua);
-                        }
                         source
                     }
                     (SourceConfig::Stalker(c), StreamLocator::Stalker { cmd, .. }) => {
@@ -539,6 +536,11 @@ url,
                     }
                     _ => return Err(unavailable()),
                 };
+                if let SourceConfig::Xtream(c) = &entry.config
+                    && let Some(ua) = &c.user_agent
+                {
+                    source.default_header("User-Agent", ua);
+                }
                 if let SourceConfig::M3u(c) = &entry.config {
                     if let Some(ua) = &c.user_agent {
                         source.default_header("User-Agent", ua);
