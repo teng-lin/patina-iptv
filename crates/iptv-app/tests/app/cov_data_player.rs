@@ -182,12 +182,38 @@ fn wait_live_source(app: &mut Headless, props: &Props, channel: &str) {
             let source = native_source(screen, props);
             iptv_app::player_has_source(0)
                 && source["live"] == json!(true)
+                && source["reconnect"] == json!(false)
                 && source["url"] == expected
         },
     ));
 }
 
-fn wait_archive_source(app: &mut Headless, props: &Props, previous: &Value) -> Value {
+/// A same-URL retry must reach the native props observer before this host
+/// reads its flags or emits events for that load. The open counter alone can
+/// advance while the observer still holds the previous source props.
+fn wait_live_reload(app: &mut Headless, props: &Props, previous: &Value, reconnect: bool) -> Value {
+    step(app.wait_until(
+        "new native live retry props",
+        Duration::from_secs(5),
+        |screen| {
+            let source = native_source(screen, props);
+            iptv_app::player_has_source(0)
+                && source["live"] == json!(true)
+                && source["reconnect"] == json!(reconnect)
+                && source["token"].as_u64().is_some()
+                && source["token"] != previous["token"]
+                && source["url"] == previous["url"]
+        },
+    ));
+    prop(app, props, "source")
+}
+
+fn wait_archive_source(
+    app: &mut Headless,
+    props: &Props,
+    previous: &Value,
+    reconnect: bool,
+) -> Value {
     // UI labels can precede async authorization. The old archive also has
     // live=false; its token must change before this host sends ready/position.
     step(app.wait_until(
@@ -197,6 +223,7 @@ fn wait_archive_source(app: &mut Headless, props: &Props, previous: &Value) -> V
             let source = native_source(screen, props);
             iptv_app::player_has_source(0)
                 && source["live"] == json!(false)
+                && source["reconnect"] == json!(reconnect)
                 && source["token"].as_u64().is_some()
                 && source["token"] != previous["token"]
                 && source["url"]
@@ -335,6 +362,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
             opens() > before
         }),
     );
+    wait_live_source(&mut app, &props, "one");
     assert_eq!(opens(), before + 1, "one open");
     // No channel played before it: ⏮ does nothing.
     step(app.press_key("p"));
@@ -394,6 +422,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
             opens() >= before + 2
         }),
     );
+    wait_live_reload(&mut app, &props, &source, true);
     assert_eq!(opens(), before + 2, "the retry reopened it");
     assert_eq!(prop(&app, &props, "source")["reconnect"], json!(true));
     state(&mut app, "ready");
@@ -428,6 +457,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
 
     // OK tries again at once: a new session, the card gone.
     let before = opens();
+    let previous = prop(&app, &props, "source");
     step(app.press_key("enter"));
     step(app.wait_for_gone("text:/^Can't play/", Duration::from_secs(1)));
     step(
@@ -435,6 +465,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
             opens() > before
         }),
     );
+    wait_live_reload(&mut app, &props, &previous, false);
     assert_eq!(opens(), before + 1);
     state(&mut app, "ready");
 
@@ -454,6 +485,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     // Try again; a stream that never plays gives the fast attempts, then
     // the card (retrying behind it).
     let before = opens();
+    let previous = prop(&app, &props, "source");
     step(app.press_key("enter"));
     step(app.wait_for_gone("text:/^Can't play/", Duration::from_secs(1)));
     step(app.wait_until(
@@ -461,8 +493,10 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
         Duration::from_secs(5),
         |_| opens() > before,
     ));
+    wait_live_reload(&mut app, &props, &previous, false);
     for attempt in 0..6 {
         let before = opens();
+        let previous = prop(&app, &props, "source");
         network_error(&mut app);
         run(&mut app, Duration::from_secs(5));
         if attempt < 5 {
@@ -471,7 +505,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
                 Duration::from_secs(5),
                 |_| opens() > before,
             ));
-            wait_live_source(&mut app, &props, "one");
+            wait_live_reload(&mut app, &props, &previous, false);
         }
     }
     step(app.wait_for("text:Can't play Test Channel One"));
@@ -479,6 +513,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
 
     // A refusal names the provider's limit when it is not known.
     let before = opens();
+    let previous = prop(&app, &props, "source");
     step(app.press_key("enter"));
     step(app.wait_for_gone("text:/^Can't play/", Duration::from_secs(1)));
     step(app.wait_until(
@@ -486,8 +521,10 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
         Duration::from_secs(5),
         |_| opens() > before,
     ));
+    wait_live_reload(&mut app, &props, &previous, false);
     for attempt in 0..6 {
         let before = opens();
+        let previous = prop(&app, &props, "source");
         send(
             &mut app,
             "error",
@@ -500,7 +537,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
                 Duration::from_secs(5),
                 |_| opens() > before,
             ));
-            wait_live_source(&mut app, &props, "one");
+            wait_live_reload(&mut app, &props, &previous, false);
         }
     }
     step(app.wait_for("text:The provider is refusing this stream for now."));
@@ -611,6 +648,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     // A live stream the server closed reconnects at once.
     state(&mut app, "ready");
     let before = opens();
+    let previous = prop(&app, &props, "source");
     state(&mut app, "ended");
     run(&mut app, Duration::from_millis(100));
     step(
@@ -618,16 +656,18 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
             opens() > before
         }),
     );
-    wait_live_source(&mut app, &props, "one");
+    wait_live_reload(&mut app, &props, &previous, true);
     assert_eq!(opens(), before + 1, "reconnected");
     state(&mut app, "ready");
     // The guide over the video (`G`) hides the status layer; again: the
     // guide alone, OK full screen again.
+    let previous = prop(&app, &props, "source");
     network_error(&mut app);
     run(&mut app, Duration::from_millis(1500));
     step(app.wait_for("text:Reconnecting…"));
     step(app.press_key("g"));
     step(app.wait_for_gone("text:Reconnecting…", Duration::from_secs(1)));
+    wait_live_reload(&mut app, &props, &previous, true);
     state(&mut app, "ready");
     step(app.press_key("g"));
     step(app.press_key("enter"));
@@ -676,7 +716,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     let before_archive = prop(&app, &props, "source");
     step(app.press_key("enter"));
     step(app.wait_for("text:CATCH-UP"));
-    let older_archive = wait_archive_source(&mut app, &props, &before_archive);
+    let older_archive = wait_archive_source(&mut app, &props, &before_archive, false);
     state(&mut app, "ready");
     step(app.press_key("stop"));
     step(app.wait_for("text:☰  All channels"));
@@ -687,7 +727,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for("text:Show -2"));
     step(app.press_key("enter"));
     step(app.wait_for("text:CATCH-UP"));
-    let replay = wait_archive_source(&mut app, &props, &older_archive);
+    let replay = wait_archive_source(&mut app, &props, &older_archive, false);
     assert!(
         archive_start(&replay) > archive_start(&older_archive),
         "the newly selected programme replaces the older day's archive"
@@ -705,7 +745,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
         }),
     );
     assert_eq!(opens(), before + 1, "reopened");
-    let again = prop(&app, &props, "source");
+    let again = wait_archive_source(&mut app, &props, &replay, true);
     assert_ne!(again["url"], replay["url"], "a minute on");
     assert_eq!(
         archive_start(&again),
@@ -720,7 +760,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
         // The first retry already ran above; four further native loads use
         // the remaining fast attempts before the archive gives up.
         if attempt < 4 {
-            wait_archive_source(&mut app, &props, &previous);
+            wait_archive_source(&mut app, &props, &previous, true);
         }
     }
     step(app.wait_for("text:Can't reach the provider. Check the connection."));
@@ -731,6 +771,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     // Try again, then a seek: Right chooses five minutes on, which opens
     // once the keys pause.
     let before = opens();
+    let previous = prop(&app, &props, "source");
     step(app.press_key("enter"));
     step(app.wait_for_gone("text:/^Can't play/", Duration::from_secs(1)));
     step(app.wait_until(
@@ -738,8 +779,10 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
         Duration::from_secs(5),
         |_| opens() > before,
     ));
+    wait_archive_source(&mut app, &props, &previous, false);
     state(&mut app, "ready");
     let before = opens();
+    let previous = prop(&app, &props, "source");
     step(app.press_key("right"));
     step(app.wait_for("text:/^⇢/"));
     run(&mut app, Duration::from_secs(1));
@@ -749,8 +792,10 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
             opens() > before
         }),
     );
+    wait_archive_source(&mut app, &props, &previous, false);
     assert_eq!(opens(), before + 1, "the archive reopened at the seek");
     // Left: five minutes back.
+    let previous = prop(&app, &props, "source");
     step(app.press_key("left"));
     step(app.wait_for("text:/^⇢/"));
     run(&mut app, Duration::from_secs(1));
@@ -759,6 +804,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
             opens() >= before + 2
         }),
     );
+    wait_archive_source(&mut app, &props, &previous, false);
     assert_eq!(opens(), before + 2, "and back");
     // The replay ends: its card says so, and Next (⏭) returns to live.
     state(&mut app, "ready");
@@ -861,6 +907,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     );
     step(app.wait_for("text:Try again"));
     let before = opens();
+    let previous = prop(&app, &props, "source");
     step(app.press("text:Try again"));
     step(app.wait_for_gone("text:Try again", Duration::from_secs(1)));
     step(
@@ -868,6 +915,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
             opens() > before
         }),
     );
+    wait_live_reload(&mut app, &props, &previous, false);
     assert_eq!(opens(), before + 1, "tried again");
     state(&mut app, "ready");
 
@@ -884,11 +932,12 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     let before_archive = prop(&app, &props, "source");
     step(app.press_key("enter"));
     step(app.wait_for("text:CATCH-UP"));
-    wait_archive_source(&mut app, &props, &before_archive);
+    wait_archive_source(&mut app, &props, &before_archive, false);
     state(&mut app, "ready");
     step(app.press("label:Video"));
     step(app.wait_for("label:Fast-forward"));
     let before = opens();
+    let previous = prop(&app, &props, "source");
     step(app.press("label:Fast-forward"));
     run(&mut app, Duration::from_secs(1));
     step(
@@ -896,7 +945,9 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
             opens() > before
         }),
     );
+    wait_archive_source(&mut app, &props, &previous, false);
     assert_eq!(opens(), before + 1, "reopened 30 s on");
+    let previous = prop(&app, &props, "source");
     step(app.press("label:Rewind"));
     run(&mut app, Duration::from_secs(1));
     step(
@@ -904,8 +955,10 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
             opens() >= before + 2
         }),
     );
+    wait_archive_source(&mut app, &props, &previous, false);
     assert_eq!(opens(), before + 2, "reopened 10 s back");
     let line = touch_area(&app, |w, h| h == 20.0 && w > 100.0);
+    let previous = prop(&app, &props, "source");
     step(app.drag(&line, Point::new(px(60.0), px(0.0))));
     app.settle();
     step(
@@ -913,6 +966,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
             opens() >= before + 3
         }),
     );
+    wait_archive_source(&mut app, &props, &previous, false);
     assert_eq!(opens(), before + 3, "reopened where the finger lifted");
     let titles = app.screen().count("text:Show -2").unwrap();
     step(app.press("label:Programme details"));
