@@ -494,29 +494,29 @@ impl Runtime {
             .services()
             .read(move |store| store.recording_job(id))
             .await?
+            && job.status == Status::Scheduled
+            && job.bytes > 0
         {
-            if job.status == Status::Scheduled && job.bytes > 0 {
-                let bytes = job.bytes;
-                if self
-                    .services()
-                    .call(move |store| {
-                        store.transition_recording(
-                            id,
-                            Status::Scheduled,
-                            Status::Partial,
-                            bytes,
-                            "Stopped by you",
-                        )
-                    })
-                    .await?
-                {
-                    // Invalidate the scheduler's stale snapshot before publishing
-                    // the spool: no capture may append during this rename.
-                    let mut stopped = job;
-                    stopped.status = Status::Partial;
-                    recover_media(&self.services(), &stopped).await;
-                    return Ok(());
-                }
+            let bytes = job.bytes;
+            if self
+                .services()
+                .call(move |store| {
+                    store.transition_recording(
+                        id,
+                        Status::Scheduled,
+                        Status::Partial,
+                        bytes,
+                        "Stopped by you",
+                    )
+                })
+                .await?
+            {
+                // Invalidate the scheduler's stale snapshot before publishing
+                // the spool: no capture may append during this rename.
+                let mut stopped = job;
+                stopped.status = Status::Partial;
+                recover_media(&self.services(), &stopped).await;
+                return Ok(());
             }
         }
         if let Some((_, stop)) = self.recordings.lock().active.get(&id) {

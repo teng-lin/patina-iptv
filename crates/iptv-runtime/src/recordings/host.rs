@@ -35,10 +35,10 @@ pub(crate) fn acquire(ports: &crate::Ports) -> Arc<State> {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     // A running UI and a restarted OS service must always share one account
     // budget and playback capability. Keep this identity even after shutdown.
-    if crate::backup::is_pending(&ports.directory) {
-        if let Some(previous) = hosts.get(&ports.directory) {
-            previous.stop();
-        }
+    if crate::backup::is_pending(&ports.directory)
+        && let Some(previous) = hosts.get(&ports.directory)
+    {
+        previous.stop();
     }
     hosts
         .entry(ports.directory.clone())
