@@ -139,33 +139,6 @@ fn start_ticks(stat: &str) -> Option<u64> {
     after.split_whitespace().nth(19)?.parse().ok()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_start_time_is_field_22() {
-        let stat = "1234 (a (b) c) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 4242 99";
-        assert_eq!(start_ticks(stat), Some(4242));
-        assert_eq!(start_ticks("1 (x) S 1"), None);
-    }
-
-    #[test]
-    fn a_phase_is_marked_once() {
-        assert!(!marked("test phase"));
-        assert!(first("test phase"));
-        assert!(!first("test phase"));
-        assert!(marked("test phase"));
-    }
-
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    #[test]
-    fn the_process_is_younger_than_a_day() {
-        let age = process_age().expect("this process's age");
-        assert!(age < Duration::from_secs(86_400), "{age:?}");
-    }
-}
-
 /// Original Patina artwork, embedded so startup needs no file or network access.
 pub(crate) fn splash() -> impl nsh_core::prelude::IntoElement {
     use base64::Engine;
@@ -191,4 +164,31 @@ pub(crate) fn splash() -> impl nsh_core::prelude::IntoElement {
                 .h_full()
                 .object_fit(ResizeMode::Contain),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_start_time_is_field_22() {
+        let stat = "1234 (a (b) c) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 4242 99";
+        assert_eq!(start_ticks(stat), Some(4242));
+        assert_eq!(start_ticks("1 (x) S 1"), None);
+    }
+
+    #[test]
+    fn a_phase_is_marked_once() {
+        assert!(!marked("test phase"));
+        assert!(first("test phase"));
+        assert!(!first("test phase"));
+        assert!(marked("test phase"));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn the_process_is_younger_than_a_day() {
+        let age = process_age().expect("this process's age");
+        assert!(age < Duration::from_secs(86_400), "{age:?}");
+    }
 }
