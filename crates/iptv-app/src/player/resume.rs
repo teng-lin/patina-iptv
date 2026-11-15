@@ -99,7 +99,7 @@ pub fn source(ui: Ui) -> Option<PlaySource> {
 }
 
 /// The guide is on screen: the early stream's channel becomes the playing
-/// channel, found by key, with its info card. True when there was an early
+/// channel, found by key, with its channel banner. True when there was an early
 /// stream (also when its channel is gone and it stopped).
 pub fn adopt(ui: Ui) -> bool {
     let Some(early) = ui.player.early.get_untracked() else {
@@ -128,7 +128,7 @@ pub fn adopt(ui: Ui) -> bool {
         ui.play(channel, Playback::Live);
     }
     if ui.mode.get_untracked() == ViewMode::Fullscreen {
-        ui.update_panels(|p, now| p.show_info(now));
+        ui.show_playing();
     }
     true
 }
