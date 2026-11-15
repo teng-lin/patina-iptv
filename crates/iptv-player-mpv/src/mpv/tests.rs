@@ -1448,8 +1448,39 @@ fn recorded_media_seeks_while_paused_and_reports_duration_without_reopening() {
         })
     });
     assert_eq!(player.inner.state.borrow().entry, entry);
+    assert!(
+        player
+            .events("timeline")
+            .iter()
+            .filter(|e| e["seekId"] == 1)
+            .all(|e| e["ms"]
+                .as_u64()
+                .is_some_and(|ms| (5500..6500).contains(&ms))),
+        "new seek acknowledgements must not carry pre-seek positions"
+    );
     assert_eq!(player.prop(c"pause").as_deref(), Some("yes"));
-    player.set("seek", json!({"token":80,"id":2,"ms":1000}));
-    player.set("seek", json!({"token":81,"id":1,"ms":1000}));
-    assert_eq!(player.inner.state.borrow().seek_id, 1);
+    player.set("seek", json!({"token":81,"id":2,"ms":9000}));
+    player.set("seek", json!({"token":81,"id":3,"ms":3000}));
+    player.wait(Some(&gpu), "coalesced seek", |p| {
+        host::tick(&p.inner);
+        p.events("timeline").iter().any(|e| {
+            e["seekId"] == 3
+                && e["ms"]
+                    .as_u64()
+                    .is_some_and(|ms| (2500..3500).contains(&ms))
+        })
+    });
+    assert!(
+        player
+            .events("timeline")
+            .iter()
+            .filter(|e| e["seekId"] == 3)
+            .all(|e| e["ms"]
+                .as_u64()
+                .is_some_and(|ms| (2500..3500).contains(&ms)))
+    );
+    assert_eq!(player.inner.state.borrow().entry, entry);
+    player.set("seek", json!({"token":80,"id":4,"ms":1000}));
+    player.set("seek", json!({"token":81,"id":3,"ms":1000}));
+    assert_eq!(player.inner.state.borrow().seek_id, 3);
 }

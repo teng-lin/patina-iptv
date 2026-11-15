@@ -409,7 +409,10 @@ impl Inner {
                 }
                 state.seek_id = request.id;
                 drop(state);
-                self.send(Cmd::Seek(request.ms));
+                self.send(Cmd::Seek {
+                    id: request.id,
+                    ms: request.ms,
+                });
                 self.tick();
             }
             PlayerProp::Paused => {

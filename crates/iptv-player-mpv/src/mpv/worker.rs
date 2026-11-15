@@ -64,7 +64,10 @@ pub enum Cmd {
     },
     /// Answered by [`Note::Position`] when mpv knows it.
     Position,
-    Seek(u64),
+    Seek {
+        id: u64,
+        ms: u64,
+    },
     Timeline {
         token: u64,
         seek_id: u64,
@@ -429,29 +432,38 @@ fn execute(mpv: &Mpv, cmd: Cmd, bridge: &mut Bridge) -> Vec<Note> {
             .map(Note::Position)
             .into_iter()
             .collect(),
-        Cmd::Seek(ms) => {
-            mpv.command(&[
-                "seek",
-                &format!("{:.3}", ms as f64 / 1000.0),
-                "absolute+exact",
-            ]);
-            Vec::new()
+        Cmd::Seek { id, ms } => {
+            if bridge.seek(mpv, id, ms) {
+                Vec::new()
+            } else {
+                vec![Note::TransportError("ERROR_CODE_IO_UNSPECIFIED")]
+            }
         }
-        Cmd::Timeline { token, seek_id } => mpv
-            .get_f64(c"time-pos")
-            .map(|seconds| Note::Timeline {
-                token,
-                seek_id,
-                seconds,
-                duration: mpv
-                    .get_f64(c"duration")
-                    .filter(|value| value.is_finite() && *value > 0.0),
-                seekable: mpv
-                    .get(c"seekable")
-                    .is_some_and(|value| value == "yes" || value == "true"),
-            })
-            .into_iter()
-            .collect(),
+        Cmd::Timeline { token, seek_id } => {
+            // A seek's command acknowledgement precedes decoder completion.
+            // Do not tag an old position with the newly accepted seek id.
+            if bridge.pending_seek.is_some()
+                || mpv
+                    .get(c"seeking")
+                    .is_some_and(|v| v == "yes" || v == "true")
+            {
+                return Vec::new();
+            }
+            mpv.get_f64(c"time-pos")
+                .map(|seconds| Note::Timeline {
+                    token,
+                    seek_id,
+                    seconds,
+                    duration: mpv
+                        .get_f64(c"duration")
+                        .filter(|value| value.is_finite() && *value > 0.0),
+                    seekable: mpv
+                        .get(c"seekable")
+                        .is_some_and(|value| value == "yes" || value == "true"),
+                })
+                .into_iter()
+                .collect()
+        }
         Cmd::Format => {
             let fps = mpv.get_f64(c"container-fps").map(Note::Fps);
             let channels = mpv
@@ -516,6 +528,10 @@ struct Bridge {
     started: Option<i64>,
     /// When the current entry started playing.
     since: Option<Instant>,
+    /// Only acknowledge positions after SEEK -> PLAYBACK_RESTART. Coalesce
+    /// further requests until completion so an old restart cannot ack a new id.
+    pending_seek: Option<(u64, bool)>,
+    queued_seek: Option<(u64, u64)>,
 }
 
 impl Bridge {
@@ -550,7 +566,25 @@ impl Bridge {
             spare: None,
             started: None,
             since: None,
+            pending_seek: None,
+            queued_seek: None,
         }
+    }
+
+    fn seek(&mut self, mpv: &Mpv, id: u64, ms: u64) -> bool {
+        if self.pending_seek.is_some() {
+            self.queued_seek = Some((id, ms));
+            return true;
+        }
+        if !mpv.command(&[
+            "seek",
+            &format!("{:.3}", ms as f64 / 1000.0),
+            "absolute+exact",
+        ]) {
+            return false;
+        }
+        self.pending_seek = Some((id, false));
+        true
     }
 
     /// A load replaced the playlist (or a stop cleared it).
@@ -559,6 +593,8 @@ impl Bridge {
         self.current = entry;
         self.spare = None;
         self.since = None;
+        self.pending_seek = None;
+        self.queued_seek = None;
     }
 
     /// Bridging takes these events first; `Some` replaces their note.
@@ -571,7 +607,21 @@ impl Bridge {
                 self.started = Some(s.playlist_entry_id);
                 None
             }
+            ffi::MPV_EVENT_SEEK => {
+                if let Some((_, started)) = self.pending_seek.as_mut() {
+                    *started = true;
+                }
+                None
+            }
             ffi::MPV_EVENT_PLAYBACK_RESTART => {
+                if self.pending_seek.is_some_and(|(_, started)| started) {
+                    self.pending_seek = None;
+                    if let Some((id, ms)) = self.queued_seek.take()
+                        && !self.seek(mpv, id, ms)
+                    {
+                        return Some(Note::TransportError("ERROR_CODE_IO_UNSPECIFIED"));
+                    }
+                }
                 self.restarted(mpv);
                 None
             }

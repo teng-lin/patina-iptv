@@ -25,6 +25,7 @@ pub const MPV_EVENT_SHUTDOWN: c_int = 1;
 pub const MPV_EVENT_LOG_MESSAGE: c_int = 2;
 pub const MPV_EVENT_START_FILE: c_int = 6;
 pub const MPV_EVENT_END_FILE: c_int = 7;
+pub const MPV_EVENT_SEEK: c_int = 20;
 pub const MPV_EVENT_PLAYBACK_RESTART: c_int = 21;
 pub const MPV_EVENT_PROPERTY_CHANGE: c_int = 22;
 pub const MPV_EVENT_HOOK: c_int = 25;

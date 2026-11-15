@@ -68,8 +68,7 @@ pub fn parse_series_rows(response: &HttpResponse) -> Result<Vec<SeriesRow>, Prov
         .or_else(|| {
             embedded.then(|| text(v, "name")).flatten().and_then(|s| {
                 s.split(|c: char| !c.is_ascii_digit())
-                    .filter(|s| !s.is_empty())
-                    .next_back()
+                    .rfind(|s| !s.is_empty())
                     .and_then(|n| n.parse().ok())
             })
         })
