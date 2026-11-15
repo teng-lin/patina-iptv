@@ -1,5 +1,9 @@
 //! App-open DVR. Durable intent is committed before acknowledgement; media workers
 //! have no rendered player and use the same connection budget as viewing surfaces.
+pub mod host;
+#[cfg(test)]
+mod recovery_tests;
+mod rules;
 #[cfg(test)]
 mod tests;
 use crate::{Error, Runtime, store_service::Services};
@@ -53,6 +57,7 @@ fn account(config: &SourceConfig) -> Account {
 }
 #[derive(Clone)]
 struct Lease {
+    source: i64,
     account: Account,
     limit: u32,
 }
@@ -71,14 +76,20 @@ struct Data {
     limits: HashMap<i64, u32>,
     provider_limits: HashMap<i64, u32>,
     viewers: HashMap<usize, Lease>,
+    suspended_viewers: HashMap<usize, Lease>,
     active: HashMap<JobId, (Lease, CancelToken)>,
     jobs: Vec<Job>,
+    wake_capability: iptv_core::recording::WakeCapability,
+    intent_revision: u64,
+    recurring: bool,
     ready: bool,
     stopped: bool,
+    completed_run: u64,
 }
 impl Data {
     fn lease(&self, source: i64) -> Lease {
         Lease {
+            source,
             account: self
                 .accounts
                 .get(&source)
@@ -128,11 +139,18 @@ struct ContextEntry {
     value: iptv_guide::playback::PlaybackContext,
 }
 #[derive(Default)]
+struct Execution {
+    generation: u64,
+    started: bool,
+    shutdown: CancelToken,
+}
+#[derive(Default)]
 pub(crate) struct State {
+    host: Mutex<Option<Arc<crate::store_service::Service>>>,
     data: Mutex<Data>,
     changed: Condvar,
-    started: AtomicBool,
-    shutdown: CancelToken,
+    publication: Mutex<()>,
+    execution: Mutex<Execution>,
     contexts: Mutex<HashMap<i64, ContextEntry>>,
     media_ops: tokio::sync::Mutex<()>,
     playback: Mutex<Option<(JobId, iptv_net::recording_file::RecordingFile)>>,
@@ -143,14 +161,55 @@ impl State {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
-    pub(crate) fn stop(&self) {
-        if !self.started.load(Ordering::SeqCst) {
-            return;
+    fn execution(&self) -> std::sync::MutexGuard<'_, Execution> {
+        self.execution
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    fn is_stopping(&self) -> bool {
+        let execution = self.execution();
+        execution.started && execution.shutdown.is_cancelled() && !self.lock().stopped
+    }
+    fn publish_schedule(
+        &self,
+        services: &Services,
+        revision: u64,
+        next: i64,
+        active: bool,
+    ) -> bool {
+        // UI acknowledgements and native polls publish in order. A late poll
+        // cannot replace the alarm belonging to a newly accepted edit.
+        let _publication = self
+            .publication
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.lock().intent_revision != revision {
+            return false;
         }
-        self.shutdown.cancel();
-        let _ = self
-            .changed
-            .wait_timeout_while(self.lock(), Duration::from_secs(5), |d| !d.stopped);
+        let capability = (services.ports().recording_schedule)(next, active);
+        let mut data = self.lock();
+        if data.intent_revision == revision {
+            data.wake_capability = capability;
+        }
+        true
+    }
+    pub(crate) fn stop(&self) -> bool {
+        let generation = {
+            let execution = self.execution();
+            if !execution.started {
+                return true;
+            }
+            execution.shutdown.cancel();
+            execution.generation
+        };
+        // A replacement may already be running when this waiter wakes. Wait
+        // for the execution we cancelled, rather than its successor's flag.
+        self.changed
+            .wait_timeout_while(self.lock(), Duration::from_secs(15), |d| {
+                d.completed_run < generation
+            })
+            .map(|(data, _)| data.completed_run >= generation)
+            .unwrap_or(false)
     }
 }
 
@@ -218,19 +277,27 @@ fn retained_media(services: &Services, id: JobId, partial: bool) -> Option<(Path
 
 impl Runtime {
     pub fn start_recordings(&self) {
-        if self.recordings.started.swap(true, Ordering::SeqCst) {
-            return;
-        }
-        let state = self.recordings.clone();
-        let services = self.services();
-        self.services().spawn(async move {
-            run(services, state.clone()).await;
-            state.lock().stopped = true;
-            state.changed.notify_all();
-        });
+        self.start_recording_host();
     }
     /// Synchronize imported sessions/limits without sharing UI-owned Rc state.
     pub fn sync_recording_contexts(&self) {
+        if self.recordings_detached.get() {
+            return;
+        }
+        if let Some(host) = self
+            .recordings
+            .host
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            *host
+                .accept()
+                .shared_settings()
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                Some(self.services().settings());
+        }
         let mut data = self.recordings.lock();
         if let (Some(source), Some(limit)) = (self.shown.get(), self.account_streams.get()) {
             data.provider_limits.insert(source.0, limit);
@@ -285,16 +352,25 @@ impl Runtime {
     /// Called before changing a viewing surface, including multiview. A retry of
     /// an existing surface retains its reservation; PiP adds no reservation.
     pub fn reserve_viewing(&self, surface: usize, source: SourceId) -> bool {
+        if self.recordings_detached.get() {
+            return false;
+        }
         let mut data = self.recordings.lock();
         if !data.active.is_empty() && !data.capacity(source.0, Some(surface)) {
             return false;
         }
         let lease = data.lease(source.0);
+        data.suspended_viewers.remove(&surface);
         data.viewers.insert(surface, lease);
         true
     }
     pub fn release_viewing(&self, surface: usize) {
-        self.recordings.lock().viewers.remove(&surface);
+        if self.recordings_detached.get() {
+            return;
+        }
+        let mut data = self.recordings.lock();
+        data.viewers.remove(&surface);
+        data.suspended_viewers.remove(&surface);
     }
     pub fn recording_snapshot(&self) -> Vec<Job> {
         self.recordings.lock().jobs.clone()
@@ -302,7 +378,13 @@ impl Runtime {
 
     pub async fn schedule_recording(&self, request: Request) -> Result<JobId, Error> {
         request.validate(now()).map_err(Error::unavailable)?;
-        if self.recordings.shutdown.is_cancelled() || !self.services().is_current() {
+        self.parental_check(&iptv_core::parental::Target::live(
+            request.source,
+            request.channel.as_str(),
+        ))
+        .await
+        .map_err(|_| Error::unavailable("Unlock this recording with the parental PIN"))?;
+        if self.recordings.is_stopping() || !self.services().is_current() {
             return Err(Error::unavailable(
                 "Restart Patina before scheduling a recording",
             ));
@@ -364,10 +446,80 @@ impl Runtime {
                     "Recording could not be scheduled; check the channel and recording times",
                 )
             })?;
+        self.acknowledge_recording(id).await?;
         Ok(id)
+    }
+    pub(crate) async fn acknowledge_recording(&self, id: JobId) -> Result<(), Error> {
+        if let Some(job) = self
+            .services()
+            .read(move |store| store.recording_job(id))
+            .await?
+        {
+            {
+                let mut data = self.recordings.lock();
+                data.intent_revision += 1;
+                data.jobs.retain(|existing| existing.id != id);
+                data.jobs.push(job);
+            }
+            self.refresh_recording_wake().await?;
+        }
+        Ok(())
+    }
+    pub fn recording_wake_notice(&self) -> Option<&'static str> {
+        let data = self.recordings.lock();
+        (data.recurring || data.jobs.iter().any(|job| job.status.active()))
+            .then(|| data.wake_capability.notice())
+            .flatten()
+    }
+    pub async fn refresh_recording_wake(&self) -> Result<(), Error> {
+        loop {
+            let (revision, next, active) = {
+                let data = self.recordings.lock();
+                let next = data
+                    .jobs
+                    .iter()
+                    .filter(|job| job.status == Status::Scheduled)
+                    .map(|job| job.request.start)
+                    .min()
+                    .unwrap_or_else(|| {
+                        if data.recurring {
+                            now().saturating_add(30 * 60)
+                        } else {
+                            0
+                        }
+                    });
+                let active = !data.active.is_empty()
+                    || data.jobs.iter().any(|job| {
+                        job.status == Status::Scheduled
+                            && job.request.start <= now()
+                            && job.request.end > now()
+                    });
+                (data.intent_revision, next, active)
+            };
+            let state = self.recordings.clone();
+            let services = self.services();
+            let published = self
+                .services()
+                .spawn_blocking(move || state.publish_schedule(&services, revision, next, active))
+                .await
+                .map_err(|_| Error::unavailable("Recording service unavailable"))?;
+            if published && self.recordings.lock().intent_revision == revision {
+                break;
+            }
+        }
+        if let Some(notice) = self.recording_wake_notice() {
+            self.emit(crate::RuntimeEvent::Notify(notice));
+        }
+        Ok(())
     }
     /// Cancels a future job, or requests that an active recording stop and retain media.
     pub async fn update_recording(&self, id: JobId, request: Request) -> Result<(), Error> {
+        self.parental_check(&iptv_core::parental::Target::live(
+            request.source,
+            request.channel.clone(),
+        ))
+        .await
+        .map_err(|_| Error::unavailable("Parental access is locked"))?;
         if !self
             .services()
             .call(move |store| store.update_recording(id, &request, now()))
@@ -377,10 +529,40 @@ impl Runtime {
                 "This recording has already started or was cancelled",
             ));
         }
+        self.acknowledge_recording(id).await?;
         Ok(())
     }
 
     pub async fn stop_recording(&self, id: JobId) -> Result<(), Error> {
+        if let Some(job) = self
+            .services()
+            .read(move |store| store.recording_job(id))
+            .await?
+            && job.status == Status::Scheduled
+            && job.bytes > 0
+        {
+            let bytes = job.bytes;
+            if self
+                .services()
+                .call(move |store| {
+                    store.transition_recording(
+                        id,
+                        Status::Scheduled,
+                        Status::Partial,
+                        bytes,
+                        "Stopped by you",
+                    )
+                })
+                .await?
+            {
+                // Invalidate the scheduler's stale snapshot before publishing
+                // the spool: no capture may append during this rename.
+                let mut stopped = job;
+                stopped.status = Status::Partial;
+                recover_media(&self.services(), &stopped).await;
+                return Ok(());
+            }
+        }
         if let Some((_, stop)) = self.recordings.lock().active.get(&id) {
             stop.cancel();
         }
@@ -439,6 +621,46 @@ impl Runtime {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((id, relay));
         Ok(source)
     }
+    pub async fn recording_progress_points(
+        &self,
+    ) -> Result<Vec<(JobId, iptv_core::on_demand::Progress)>, Error> {
+        Ok(self
+            .services()
+            .read(|store| store.recording_progress_points())
+            .await?)
+    }
+    pub async fn recording_progress(
+        &self,
+        id: JobId,
+    ) -> Result<iptv_core::on_demand::Progress, Error> {
+        Ok(self
+            .services()
+            .call(move |store| store.recording_progress(id))
+            .await?)
+    }
+    /// Only the active file capability may update its progress. Queues in FIFO
+    /// order before returning, including the final write during UI disposal.
+    pub fn save_recording_progress(
+        &self,
+        id: JobId,
+        source: &PlaySource,
+        point: iptv_core::on_demand::Progress,
+    ) {
+        let playback = self
+            .recordings
+            .playback
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if playback
+            .as_ref()
+            .is_some_and(|(playing, relay)| *playing == id && relay.url == source.url)
+        {
+            drop(
+                self.services()
+                    .call(move |store| store.save_recording_progress(id, point, now())),
+            );
+        }
+    }
     pub fn close_recording_playback(&self) {
         self.recordings
             .playback
@@ -452,6 +674,12 @@ impl Runtime {
             .read(move |store| store.recording_job(id))
             .await?
             .ok_or_else(|| Error::unavailable("Recording unavailable"))?;
+        self.parental_check(&iptv_core::parental::Target::live(
+            job.request.source,
+            job.request.channel.as_str(),
+        ))
+        .await
+        .map_err(|_| Error::unavailable("Unlock this recording with the parental PIN"))?;
         if !matches!(job.status, Status::Completed | Status::Partial) || job.bytes == 0 {
             return Err(Error::unavailable("This recording has no playable media"));
         }
@@ -574,44 +802,72 @@ async fn recover_media(services: &Services, job: &Job) {
     )
     .await;
 }
+async fn finish_unstarted(services: &Services, job: &Job, status: Status, message: &'static str) {
+    if job.bytes > 0 {
+        recover_media(services, job).await;
+    } else {
+        transition(services, job, status, 0, message).await;
+    }
+}
 async fn recover(services: &Services) -> Result<(), crate::model::StoreError> {
     for job in services.read(|store| store.recording_jobs()).await? {
-        if matches!(job.status, Status::Recording | Status::Partial) {
-            recover_media(services, &job).await;
-        } else if job.status == Status::Scheduled && job.request.start < now() {
+        if job.status == Status::Recording && job.request.end > now() {
+            let partial = path(services, job.id, true);
+            let bytes = services
+                .spawn_blocking(move || {
+                    std::fs::symlink_metadata(partial)
+                        .ok()
+                        .filter(|m| m.is_file() && !m.file_type().is_symlink())
+                        .map_or(0, |m| m.len() / 188 * 188)
+                })
+                .await
+                .unwrap_or(0);
             transition(
                 services,
                 &job,
+                Status::Scheduled,
+                bytes,
+                "Resuming interrupted recording",
+            )
+            .await;
+        } else if matches!(job.status, Status::Recording | Status::Partial) {
+            recover_media(services, &job).await;
+        } else if job.status == Status::Scheduled && job.request.end <= now() {
+            finish_unstarted(
+                services,
+                &job,
                 Status::Missed,
-                0,
-                "The app was closed at the scheduled start",
+                "The recording window elapsed while the host was unavailable",
             )
             .await;
         }
     }
     Ok(())
 }
-async fn run(services: Services, state: Arc<State>) {
+async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
     let mut retry = Duration::from_millis(250);
     loop {
-        if !services.is_current() || state.shutdown.is_cancelled() {
+        if !services.is_current() || shutdown.is_cancelled() {
             return;
         }
         if recover(&services).await.is_ok() && refresh_accounts(&services, &state).await.is_ok() {
             break;
         }
         tokio::select! {
-            _ = state.shutdown.cancelled() => return,
+            _ = shutdown.cancelled() => return,
             _ = tokio::time::sleep(retry) => {},
         }
         retry = (retry * 2).min(Duration::from_secs(5));
     }
     state.lock().ready = true;
     let mut tasks = tokio::task::JoinSet::new();
+    let mut last_schedule = None;
+    let mut rules_at = 0;
+    let mut guides_at = 0;
     loop {
         while tasks.try_join_next().is_some() {}
-        if !services.is_current() || state.shutdown.is_cancelled() {
-            state.shutdown.cancel();
+        if !services.is_current() || shutdown.is_cancelled() {
+            shutdown.cancel();
             while tasks.join_next().await.is_some() {}
             break;
         }
@@ -619,11 +875,86 @@ async fn run(services: Services, state: Arc<State>) {
             tokio::time::sleep(Duration::from_millis(100)).await;
             continue;
         }
+        let revision = state.lock().intent_revision;
         let Ok(jobs) = services.read(|store| store.recording_jobs()).await else {
             tokio::time::sleep(Duration::from_millis(100)).await;
             continue;
         };
-        state.lock().jobs = jobs.clone();
+        if now() >= guides_at {
+            if let Ok(rules) = services.read(|store| store.recording_rules()).await {
+                let sources: std::collections::BTreeSet<_> = rules
+                    .into_iter()
+                    .filter(|rule| {
+                        rule.enabled && rule.repeat == iptv_core::recording::Repeat::Series
+                    })
+                    .map(|rule| SourceId(rule.request.source))
+                    .collect();
+                for source in sources {
+                    let work = services.clone();
+                    let cancel = shutdown.clone();
+                    services.submit(false, move || {
+                        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+                        work.block_on(crate::imports::guide_pipeline(
+                            &work,
+                            source,
+                            &tx,
+                            crate::imports::GuideRead::Check,
+                            &cancel,
+                        ));
+                    });
+                }
+            }
+            guides_at = now().saturating_add(30 * 60);
+        }
+        if now() >= rules_at {
+            if let Ok(rules) = services.read(|store| store.recording_rules()).await {
+                let mut data = state.lock();
+                if data.intent_revision == revision {
+                    data.recurring = rules.iter().any(|rule| rule.enabled);
+                }
+            }
+            let _ = rules::materialize(&services).await;
+            rules_at = now().saturating_add(30);
+        }
+        let next = jobs
+            .iter()
+            .filter(|j| j.status == Status::Scheduled)
+            .map(|j| j.request.start)
+            .min()
+            .unwrap_or(0);
+        let next = if state.lock().recurring {
+            if next > 0 {
+                next.min(guides_at)
+            } else {
+                guides_at
+            }
+        } else {
+            next
+        };
+        let schedule = (
+            next,
+            !state.lock().active.is_empty()
+                || jobs.iter().any(|j| {
+                    j.status == Status::Scheduled
+                        && j.request.start <= now()
+                        && j.request.end > now()
+                }),
+        );
+        if state.lock().intent_revision != revision {
+            continue;
+        }
+        if last_schedule != Some(schedule) {
+            if !state.publish_schedule(&services, revision, schedule.0, schedule.1) {
+                continue;
+            }
+            last_schedule = Some(schedule);
+        }
+        {
+            let mut data = state.lock();
+            if data.intent_revision == revision {
+                data.jobs = jobs.clone();
+            }
+        }
         for mut job in jobs {
             if job.status == Status::Recording && !state.lock().active.contains_key(&job.id) {
                 recover_media(&services, &job).await;
@@ -632,12 +963,11 @@ async fn run(services: Services, state: Arc<State>) {
             if job.status != Status::Scheduled || job.request.start > now() {
                 continue;
             }
-            if job.request.end <= now() || now().saturating_sub(job.request.start) > 60 {
-                transition(
+            if job.request.end <= now() {
+                finish_unstarted(
                     &services,
                     &job,
                     Status::Missed,
-                    0,
                     "The scheduled recording window was missed",
                 )
                 .await;
@@ -655,11 +985,10 @@ async fn run(services: Services, state: Arc<State>) {
                 }
             };
             if !reserved {
-                transition(
+                finish_unstarted(
                     &services,
                     &job,
                     Status::Failed,
-                    0,
                     "No provider connection available; check Streams at once",
                 )
                 .await;
@@ -680,6 +1009,7 @@ async fn run(services: Services, state: Arc<State>) {
             job.status = Status::Recording;
             let services = services.clone();
             let state = state.clone();
+            let shutdown = shutdown.clone();
             tasks.spawn(async move {
                 struct Release(Arc<State>, JobId);
                 impl Drop for Release {
@@ -688,11 +1018,11 @@ async fn run(services: Services, state: Arc<State>) {
                     }
                 }
                 let _release = Release(state.clone(), job.id);
-                record(&services, &state, &job, &stop).await;
+                record(&services, &state, &job, &stop, &shutdown).await;
             });
         }
         tokio::select! {
-            _ = state.shutdown.cancelled() => {},
+            _ = shutdown.cancelled() => {},
             _ = tokio::time::sleep(Duration::from_secs(1)) => {},
         }
     }
@@ -731,7 +1061,7 @@ async fn resolve(
         .filter(|c| !c.blocked)
         .ok_or("Channel unavailable or blocked")?
         .channel;
-    let context = state
+    let mut context = state
         .contexts
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -739,6 +1069,16 @@ async fn resolve(
         .filter(|entry| entry.config == source.source.config)
         .map(|entry| entry.value.clone())
         .or_else(|| crate::playback::stored_context(&source.source.config));
+    if context.is_none()
+        && let SourceConfig::Stalker(credentials) = &source.source.config
+    {
+        let client = iptv_net::NetClient::new(crate::settings::net_config(&services.settings()))
+            .map_err(|_| "Network unavailable")?;
+        let session = iptv_import::stalker_session(&client, credentials, stop)
+            .await
+            .map_err(|_| "Portal authentication unavailable")?;
+        context = Some(iptv_guide::playback::PlaybackContext::stalker(session));
+    }
     let resolution = iptv_guide::playback::resolve(
         context.as_ref(),
         &channel,
@@ -771,7 +1111,13 @@ async fn resolve(
     Ok(stream)
 }
 
-async fn record(services: &Services, state: &State, job: &Job, stop: &CancelToken) {
+async fn record(
+    services: &Services,
+    state: &State,
+    job: &Job,
+    stop: &CancelToken,
+    shutdown: &CancelToken,
+) {
     let partial = path(services, job.id, true);
     let destination = path(services, job.id, false);
     let directory = media_directory(services.directory());
@@ -791,26 +1137,57 @@ async fn record(services: &Services, state: &State, job: &Job, stop: &CancelToke
             Ok(())
         })
         .await;
+    let had_gap = Arc::new(AtomicBool::new(
+        job.request.start < now().saturating_sub(5) || job.bytes > 0,
+    ));
+    let gap = had_gap.clone();
     let result = async {
         if !matches!(prepared, Ok(Ok(()))) {
             return Err("Recording storage unavailable");
         }
-        let source = resolve(services, state, job, stop).await?;
-        let net = crate::settings::net_config(&services.settings());
-        let policy = PlaybackPolicy {
-            public_only: source.public_only,
-            extra_roots_der: net.extra_roots_der,
-            #[cfg(debug_assertions)]
-            allow_private_fixture: net.allow_private_fixture,
-        };
-        iptv_net::recording::capture(&source.url, &source.headers, policy, &partial, MAX_BYTES)
+        let mut retry = Duration::from_secs(1);
+        let mut capture = iptv_net::recording::CaptureState::default();
+        loop {
+            let source = match resolve(services, state, job, stop).await {
+                Ok(source) => source,
+                Err(_) => {
+                    gap.store(true, Ordering::SeqCst);
+                    tokio::time::sleep(retry).await;
+                    retry = (retry * 2).min(Duration::from_secs(15));
+                    continue;
+                }
+            };
+            let net = crate::settings::net_config(&services.settings());
+            let policy = PlaybackPolicy {
+                public_only: source.public_only,
+                extra_roots_der: net.extra_roots_der,
+                #[cfg(debug_assertions)]
+                allow_private_fixture: net.allow_private_fixture,
+            };
+            match iptv_net::recording::capture_resume_with_state(
+                &source.url,
+                &source.headers,
+                policy,
+                &partial,
+                MAX_BYTES,
+                &mut capture,
+            )
             .await
-            .map_err(|failure| failure.message())
+            {
+                Err(iptv_net::recording::Failure::Network | iptv_net::recording::Failure::Gap) => {
+                    gap.store(true, Ordering::SeqCst);
+                    tokio::time::sleep(retry).await;
+                    retry = (retry * 2).min(Duration::from_secs(15));
+                }
+                Err(error) => return Err(error.message()),
+                Ok(()) => return Ok(()),
+            }
+        }
     };
     let remaining = job.request.end.saturating_sub(now()).max(0) as u64;
     let outcome = tokio::select! {
         biased;
-        _ = state.shutdown.cancelled() => Err("Interrupted when the app closed"),
+        _ = shutdown.cancelled() => Err("Interrupted when the app closed"),
         _ = stop.cancelled() => Ok("Stopped by you"),
         _ = async {
             let limit = tokio::time::Instant::now() + Duration::from_secs(remaining);
@@ -819,6 +1196,23 @@ async fn record(services: &Services, state: &State, job: &Job, stop: &CancelToke
             }
         } => Ok("Recording finished"),
         result = result => result.map(|_| "Recording finished"),
+    };
+    if shutdown.is_cancelled() && state.background() && job.request.end > now() {
+        let bytes = std::fs::symlink_metadata(&partial).map_or(0, |m| m.len() / 188 * 188);
+        transition(
+            services,
+            job,
+            Status::Scheduled,
+            bytes,
+            "Resuming interrupted recording",
+        )
+        .await;
+        return;
+    }
+    let outcome = if outcome.is_ok() && had_gap.load(Ordering::SeqCst) {
+        Err("Recording retained with a gap after interruption")
+    } else {
+        outcome
     };
     // capture uses synchronous file writes on this native worker: dropping its
     // future cannot leave an asynchronous write racing finalization/deletion.

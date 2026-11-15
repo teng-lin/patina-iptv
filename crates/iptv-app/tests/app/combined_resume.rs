@@ -43,14 +43,14 @@ struct Gates {
     auth_attempts: usize,
 }
 
-struct Portal {
+pub(super) struct Portal {
     url: String,
     gates: Arc<(Mutex<Gates>, Condvar)>,
     links: Arc<AtomicUsize>,
 }
 
 impl Portal {
-    fn start() -> Self {
+    pub(super) fn start() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let gates = Arc::new((Mutex::new(Gates::default()), Condvar::new()));
@@ -85,7 +85,7 @@ impl Portal {
         self.gates.0.lock().unwrap().reject_auth = true;
     }
 
-    fn recover_auth(&self) {
+    pub(super) fn recover_auth(&self) {
         let mut state = self.gates.0.lock().unwrap();
         state.reject_auth = false;
         state.fresh_catalog = true;
@@ -95,6 +95,10 @@ impl Portal {
 
     fn auth_attempts(&self) -> usize {
         self.gates.0.lock().unwrap().auth_attempts
+    }
+
+    pub(super) fn link_requests(&self) -> usize {
+        self.links.load(Ordering::SeqCst)
     }
 }
 
@@ -176,7 +180,7 @@ fn step(result: Result<(), String>) {
     result.unwrap_or_else(|error| panic!("{error}"));
 }
 
-fn seed_portal(store: &mut Store, portal: &Portal) -> (SourceId, String) {
+pub(super) fn seed_portal(store: &mut Store, portal: &Portal) -> (SourceId, String) {
     let stalker = store
         .add_source(&Source {
             name: "Portal".into(),

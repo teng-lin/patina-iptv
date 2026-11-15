@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 /// the native services it owns, and what those need. No UI toolkit, shell,
 /// player, JNI or platform credential store.
 const DEPENDENCIES: &[&str] = &[
+    "chrono", // Native recurring schedules preserve local wall-clock time.
     "futures-channel",
     "getrandom",
     "iptv-core",
@@ -22,9 +23,12 @@ const DEPENDENCIES: &[&str] = &[
     "iptv-store-sqlite",
     "libc",
     "log",
+    "pbkdf2", // Native PIN/recovery verification; hashing stays off the UI thread.
     "serde_json",
     "sha2",
+    "subtle", // Constant-time verifier comparison.
     "tokio",
+    "zeroize", // Short-lived native credential material.
 ];
 /// Test-only additions.
 const DEV_DEPENDENCIES: &[&str] = &["rusqlite", "tempfile"];
@@ -57,6 +61,7 @@ const STORE_ADAPTER_USERS: &[&str] = &[
     "opening/revocation.rs",
     "guide_checks/retry.rs",
     "paging.rs",
+    "parental.rs",
     "private_files.rs",
     "recordings.rs",
     "recordings/tests.rs",
@@ -64,10 +69,13 @@ const STORE_ADAPTER_USERS: &[&str] = &[
     "state.rs",
     "store_service.rs",
     "stored.rs",
+    "vod.rs",
 ];
 
-/// Process-lifetime facts that are not owner state. An owner is never found
-/// through one of these: every module is handed its owner.
+/// Process-lifetime facts and explicitly opted-in native recording services.
+/// UI Runtime owners are never discovered globally. The recording registry
+/// intentionally survives UI engine disposal and is keyed by protected storage
+/// directory; Ports defaults to isolated recording state for other consumers.
 const STATICS: &[(&str, &str)] = &[
     // Unique names of temporary backup files and document requests.
     ("backup.rs", "SEQUENCE"),
@@ -77,6 +85,13 @@ const STATICS: &[(&str, &str)] = &[
     ("backup/instance.rs", "HELD"),
     // Unique unopened directories of unit-test owners (`cfg(test)`).
     ("ports.rs", "NEXT"),
+    // Per-tree filesystem publication gates shared by independent native services.
+    ("private_files.rs", "TREES"),
+    // Serialize native service startup/restore and retain its independent owner.
+    ("recordings/host.rs", "ACTIVATION"),
+    ("recordings/host.rs", "HOSTS"),
+    // Synthetic callback handoff barrier used only by recording unit tests.
+    ("recordings/tests.rs", "PUBLICATION_GATE"),
 ];
 
 fn sources(directory: &Path, files: &mut Vec<PathBuf>) {
@@ -239,7 +254,7 @@ fn statics(code: &str) -> Vec<&str> {
 }
 
 #[test]
-fn runtime_keeps_no_ambient_owner() {
+fn runtime_keeps_no_ambient_ui_owner() {
     let mut found = BTreeSet::new();
     for (name, code) in runtime_sources() {
         assert!(
@@ -250,7 +265,7 @@ fn runtime_keeps_no_ambient_owner() {
             assert!(
                 STATICS.contains(&(name.as_str(), item)),
                 "{name}: static {item} must belong to a Runtime, or be listed as a \
-                 process-lifetime fact that is not owner state"
+                 process-lifetime fact or explicit native service"
             );
             found.insert((name.clone(), item.to_owned()));
         }

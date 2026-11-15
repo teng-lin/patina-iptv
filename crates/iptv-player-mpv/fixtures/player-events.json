@@ -7,6 +7,7 @@
   { "name": "error", "data": { "code": "ERROR_CODE_IO_BAD_HTTP_STATUS", "http": 404 } },
   { "name": "error", "data": { "code": "ERROR_CODE_IO_NETWORK_CONNECTION_FAILED" } },
   { "name": "position", "data": { "ms": 4000 } },
+  { "name": "timeline", "data": { "token": 37, "seekId": 9, "ms": 12345, "durationMs": 120000, "seekable": true } },
   {
     "name": "tracks",
     "data": {

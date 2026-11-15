@@ -88,6 +88,13 @@ impl Busy {
         &self,
         job: impl FnOnce(&Archive) -> Result<T> + Send + 'static,
     ) -> Result<T> {
+        self.0
+            .parental_refresh()
+            .await
+            .map_err(|_| Error::from("Parental settings are unavailable"))?;
+        if self.0.parental_has_pin() && !self.0.parental_settings_allowed() {
+            return Err("Unlock parental controls before changing settings".into());
+        }
         let (tx, rx) = futures_channel::oneshot::channel();
         progress(&self.0, Progress::Working);
         let archive = Archive {

@@ -36,7 +36,15 @@ use crate::theme::{ACCENTS, BACKGROUNDS, Theme};
 
 /// The settings the app acts on.
 pub const WIRED: &[&str] = &[
+    "parental.live_enabled",
+    "parental.vod_enabled",
+    "parental.require_pin_for",
+    "parental.pin_input",
+    "parental.unlock_window",
+    "playlists.include_vod",
     "playlists.max_connections",
+    "vod.sort",
+    "vod.autoplay_next_episode",
     "general.language",
     "general.clock",
     "guide.autoplay",
@@ -79,6 +87,12 @@ pub const WIRED: &[&str] = &[
 
 /// The commands the app runs (`settings_view::run`).
 pub const COMMANDS: &[&str] = &[
+    "parental.change_pin",
+    "recordings.quit_host",
+    "recordings.background_status",
+    "recordings.enable_startup",
+    "recordings.disable_startup",
+    "recordings.alarm_access",
     "general.backup",
     "general.restore",
     "epg.add_source",
@@ -118,7 +132,7 @@ const NOT_OFFERED: &[&str] = &[
 ];
 
 /// Sections planned for later versions.
-const LATER: &[&str] = &["recordings.", "vod.", "parental."];
+const LATER: &[&str] = &["recordings.", "vod."];
 
 thread_local! { static REVISION: std::cell::Cell<Option<Signal<u64>>> = const { std::cell::Cell::new(None) }; }
 
@@ -144,6 +158,19 @@ pub fn font_factor() -> f32 {
 /// time matters only where keys report their release (Android), and
 /// picture in picture on leaving only on Android.
 pub fn offer(key: &str) -> Offer {
+    if key == "recordings.quit_host" && !crate::desktop::DESKTOP {
+        return Offer::Hidden;
+    }
+    if key == "recordings.alarm_access" && !cfg!(target_os = "android") {
+        return Offer::Hidden;
+    }
+    if matches!(
+        key,
+        "recordings.enable_startup" | "recordings.disable_startup"
+    ) && !crate::desktop::DESKTOP
+    {
+        return Offer::Hidden;
+    }
     // Leaving the app into a picture-in-picture window: Android only.
     let android = cfg!(target_os = "android");
     if matches!(key, "general.backup" | "general.restore") && cfg!(target_os = "ios") {
@@ -336,8 +363,9 @@ mod tests {
         assert_eq!(offer("epg.manage_sources"), Offer::Active);
         assert_eq!(offer("epg.add_source"), Offer::Active);
         assert_eq!(offer("playback.afr"), Offer::Hidden);
-        assert_eq!(offer("vod.sort"), Offer::Later);
-        assert_eq!(offer("parental.live_enabled"), Offer::Later);
+        assert_eq!(offer("vod.sort"), Offer::Active);
+        assert_eq!(offer("parental.live_enabled"), Offer::Active);
+        assert_eq!(offer("parental.change_pin"), Offer::Active);
         assert_eq!(offer("history.keep_days"), Offer::NotYet);
         assert_eq!(offer("remote.key_overrides"), Offer::ReadOnly);
         let pip = if cfg!(target_os = "android") {

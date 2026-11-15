@@ -73,6 +73,13 @@ fn programme(ui: Ui) -> Option<(i32, i32, i32)> {
 /// Seconds into the archived programme: the seek being chosen, else where
 /// the stream is. `None` unless a programme plays from the archive.
 pub fn elapsed(ui: Ui) -> Option<(i32, i32)> {
+    if crate::on_demand::active(ui) {
+        let t = ui.player.main().timeline.get();
+        return Some((
+            i32::try_from(t.position_ms / 1000).unwrap_or(i32::MAX),
+            i32::try_from(t.duration_ms.unwrap_or(0) / 1000).unwrap_or(i32::MAX),
+        ));
+    }
     let Playback::CatchUp { offset, start } = ui.playback.get() else {
         return None;
     };
@@ -89,6 +96,13 @@ pub fn elapsed(ui: Ui) -> Option<(i32, i32)> {
 /// Moves the seek target by `delta` seconds; the archive reopens there
 /// once the keys pause. False when nothing plays from the archive.
 pub fn step(ui: Ui, delta: i32) -> bool {
+    if crate::on_demand::active(ui) {
+        let moved = crate::on_demand::step(ui, delta);
+        if moved {
+            show_info(ui);
+        }
+        return moved;
+    }
     let Some((offset, _, limit)) = programme(ui) else {
         return false;
     };
@@ -115,7 +129,7 @@ pub fn key(ui: Ui, step: i32, repeat: bool) -> bool {
     });
     match factor {
         Some(f) => self::step(ui, step.saturating_mul(f)),
-        None => programme(ui).is_some(),
+        None => programme(ui).is_some() || crate::on_demand::seekable(ui),
     }
 }
 
@@ -133,6 +147,13 @@ pub fn commit_now(ui: Ui) {
 /// The programme playing from the archive: its length in seconds and how
 /// far into it a seek may go now. `None` unless one plays.
 pub fn span(ui: Ui) -> Option<(i32, i32)> {
+    if crate::on_demand::active(ui) {
+        if !crate::on_demand::seekable(ui) {
+            return None;
+        }
+        let (_, length) = elapsed(ui)?;
+        return (length > 0).then_some((length, length));
+    }
     programme(ui).map(|(_, length, limit)| (length, limit))
 }
 
@@ -141,6 +162,10 @@ pub fn span(ui: Ui) -> Option<(i32, i32)> {
 /// [`span`]'s limit): shown at once, opened once `commit` says so or the
 /// pointer pauses.
 pub fn to(ui: Ui, target: i32, commit_now: bool) {
+    if crate::on_demand::active(ui) {
+        crate::on_demand::seek_to(ui, target.max(0) as u64 * 1000);
+        return;
+    }
     ui.seek_target.set(Some(target.max(0)));
     commit_later(
         ui,

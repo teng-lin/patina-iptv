@@ -4,7 +4,9 @@ mod wire;
 mod events;
 pub use events::{PipAction, PlayerEvent, PlayerEventError, PlayerEventKind};
 mod props;
-pub use props::{PipProps, PlayerBindings, PlayerProp, PlayerProps, SourceProps, WireValue};
+pub use props::{
+    PipProps, PlayerBindings, PlayerProp, PlayerProps, SeekProps, SourceProps, WireValue,
+};
 mod tracks;
 pub use tracks::parse_tracks;
 

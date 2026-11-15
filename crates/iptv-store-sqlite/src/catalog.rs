@@ -123,8 +123,8 @@ pub(crate) fn insert_vod(
 ) -> Result<usize> {
     let mut stmt = conn.prepare_cached(
         "INSERT OR IGNORE INTO vod (source_id, id, position, provider_id, name, group_ids, poster,
-             plot, year, rating_x10, added, duration_secs, stream, is_series)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+             plot, year, rating_x10, added, duration_secs, stream, is_series, episode_numbers)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
     )?;
     let mut inserted = 0;
     for (position, v) in vod.iter().enumerate() {
@@ -143,7 +143,8 @@ pub(crate) fn insert_vod(
             v.added,
             v.duration_secs,
             stream_to_json(&v.stream),
-            v.is_series
+            v.is_series,
+            serde_json::to_string(&v.episode_numbers)?
         ])?;
         if added > 0 {
             inserted += 1;
@@ -285,7 +286,7 @@ impl Store {
     ) -> Result<Vec<VodItem>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT v.id, v.provider_id, v.name, v.group_ids, v.poster, v.plot, v.year,
-                 v.rating_x10, v.added, v.duration_secs, v.stream, v.is_series
+                 v.rating_x10, v.added, v.duration_secs, v.stream, v.is_series,v.episode_numbers
              FROM vod v
              WHERE v.source_id = ?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM vod_groups m
                  WHERE m.source_id = v.source_id AND m.group_id = ?2 AND m.vod_id = v.id))
@@ -308,6 +309,7 @@ impl Store {
                     r.get::<_, Option<i64>>(9)?,
                     r.get::<_, String>(10)?,
                     r.get::<_, bool>(11)?,
+                    r.get::<_, String>(12)?,
                 ))
             },
         )?;
@@ -325,6 +327,7 @@ impl Store {
                 dur,
                 stream,
                 is_series,
+                episode_numbers,
             ) = row?;
             Ok(VodItem {
                 id: ContentId::from_stored(id),
@@ -339,6 +342,7 @@ impl Store {
                 duration_secs: narrow(dur, "vod.duration_secs")?,
                 stream: stream_from_json(&stream)?,
                 is_series,
+                episode_numbers: serde_json::from_str(&episode_numbers)?,
             })
         })
         .collect()

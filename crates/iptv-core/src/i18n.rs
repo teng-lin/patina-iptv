@@ -161,6 +161,11 @@ pub fn is_catalogued(source: &str) -> bool {
     messages().contains_key(source)
 }
 
+/// Mark a message stored as data and translated by the consuming shell.
+pub const fn key(source: &'static str) -> &'static str {
+    source
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -83,6 +83,41 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "recordings",
         sql: include_str!("../migrations/0011_recordings.sql"),
     },
+    Migration {
+        version: 12,
+        name: "recording_progress",
+        sql: include_str!("../migrations/0012_recording_progress.sql"),
+    },
+    Migration {
+        version: 13,
+        name: "parental",
+        sql: include_str!("../migrations/0013_parental.sql"),
+    },
+    Migration {
+        version: 14,
+        name: "vod_progress",
+        sql: include_str!("../migrations/0014_vod_progress.sql"),
+    },
+    Migration {
+        version: 15,
+        name: "recording_rules",
+        sql: include_str!("../migrations/0015_recording_rules.sql"),
+    },
+    Migration {
+        version: 16,
+        name: "recording_rule_padding",
+        sql: include_str!("../migrations/0016_recording_rule_padding.sql"),
+    },
+    Migration {
+        version: 17,
+        name: "vod_resume_episode",
+        sql: include_str!("../migrations/0017_vod_resume_episode.sql"),
+    },
+    Migration {
+        version: 18,
+        name: "recording_rule_occurrences",
+        sql: include_str!("../migrations/0018_recording_rule_occurrences.sql"),
+    },
 ];
 
 /// The schema version this build writes.

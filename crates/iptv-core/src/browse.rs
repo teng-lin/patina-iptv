@@ -47,6 +47,8 @@ impl RailItem {
             self,
             RailItem::Search
                 | RailItem::Tv
+                | RailItem::Movies
+                | RailItem::Shows
                 | RailItem::Recordings
                 | RailItem::Playlists
                 | RailItem::Settings

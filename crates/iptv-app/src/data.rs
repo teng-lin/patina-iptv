@@ -90,5 +90,10 @@ pub fn start(ui: Ui) {
         playing: ui.playing.get_untracked().is_some(),
         has_vod: ui.has_vod.get_untracked(),
     });
-    crate::runtime::data::start(&crate::runtime());
+    spawn_in_app(async move {
+        let owner = crate::runtime();
+        let _ = owner.parental_refresh().await;
+        crate::runtime::data::start(&owner);
+        crate::parental_view::bind(ui);
+    });
 }

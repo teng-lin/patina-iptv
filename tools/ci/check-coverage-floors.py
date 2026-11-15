@@ -27,7 +27,7 @@ def parse_summary(summary_text):
     for line in summary_text.splitlines():
         # llvm-cov shortens paths to their common root; hosted output can
         # start at the crate name rather than include the workspace's crates/.
-        m = re.search(r"(?:^|[/\\])([a-z0-9_-]+)[/\\]src[/\\]", line)
+        m = re.search(r"(?:^|[/\\])(iptv-[a-z0-9_-]+)[/\\]src[/\\]", line)
         if not m:
             continue
         crate = m.group(1)

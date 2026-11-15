@@ -1322,7 +1322,7 @@ fn no_render_context_without_gl() {
 /// In the background the stream stops; in the foreground it opens again
 /// (keeping its last frame). A source set meanwhile waits for it.
 #[test]
-fn suspend_stops_the_stream_until_resume() {
+fn suspend_requires_shell_authorization_before_decoding_again() {
     let _serial = serial();
     let mut p = Player::new();
     p.inner.suspend(); // nothing playing
@@ -1344,12 +1344,25 @@ fn suspend_stops_the_stream_until_resume() {
     p.inner.resume();
     let st = p.inner.state.borrow();
     assert!(!st.suspended);
-    assert!(st.deferred, "opens once there is a render context");
+    assert!(!st.deferred, "resumption cannot open a retained URL");
     assert!(!st.shutter, "the last frame stays");
     drop(st);
+    assert_eq!(
+        p.events("error"),
+        [json!({"code":"ERROR_CODE_IO_UNSPECIFIED"})]
+    );
     p.inner.resume(); // not suspended: nothing
     p.idle(None, 50);
+    assert_eq!(p.events("error").len(), 1);
     assert!(p.states().is_empty());
+    p.set(
+        "source",
+        json!({"url":"http://stream.example.test/two.ts","token":9}),
+    );
+    assert!(
+        p.inner.state.borrow().deferred,
+        "authorized source waits for render context"
+    );
 }
 
 /// Real libmpv follows a redirected HLS manifest and plays its remote-origin
@@ -1391,4 +1404,83 @@ fn adaptive_playback_never_sends_identity_to_another_origin() {
     for head in remote.heads("/red.ts") {
         assert!(!head.contains("synthetic-identity"));
     }
+}
+
+#[test]
+fn recorded_media_seeks_while_paused_and_reports_duration_without_reopening() {
+    let _serial = serial();
+    let Some((dir, gpu)) = rig() else { return };
+    let Some(media) = clip(dir.path(), "red", 12.0) else {
+        return;
+    };
+    let path = dir.path().join("generated-recording.ts");
+    std::fs::write(&path, media).unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let relay = {
+        let _entered = runtime.enter();
+        iptv_net::recording_file::RecordingFile::start(path).unwrap()
+    };
+    let mut player = Player::new();
+    player.set(
+        "source",
+        json!({"url":relay.url,"token":81,"live":false,"publicOnly":false}),
+    );
+    assert!(player.inner.create_render());
+    player.wait_state(Some(&gpu), "ready");
+    player.set("paused", json!(true));
+    player.wait_prop(c"pause", "yes");
+    host::tick(&player.inner);
+    player.wait(Some(&gpu), "seekable timeline", |p| {
+        host::tick(&p.inner);
+        p.events("timeline").iter().any(|e| {
+            e["seekable"] == true && e["durationMs"].as_u64().is_some_and(|ms| ms > 10_000)
+        })
+    });
+    let entry = player.inner.state.borrow().entry;
+    player.set("seek", json!({"token":81,"id":1,"ms":6000}));
+    player.wait(Some(&gpu), "paused seek position", |p| {
+        host::tick(&p.inner);
+        p.events("timeline").iter().any(|e| {
+            e["seekId"] == 1
+                && e["ms"]
+                    .as_u64()
+                    .is_some_and(|ms| (5500..6500).contains(&ms))
+        })
+    });
+    assert_eq!(player.inner.state.borrow().entry, entry);
+    assert!(
+        player
+            .events("timeline")
+            .iter()
+            .filter(|e| e["seekId"] == 1)
+            .all(|e| e["ms"]
+                .as_u64()
+                .is_some_and(|ms| (5500..6500).contains(&ms))),
+        "new seek acknowledgements must not carry pre-seek positions"
+    );
+    assert_eq!(player.prop(c"pause").as_deref(), Some("yes"));
+    player.set("seek", json!({"token":81,"id":2,"ms":9000}));
+    player.set("seek", json!({"token":81,"id":3,"ms":3000}));
+    player.wait(Some(&gpu), "coalesced seek", |p| {
+        host::tick(&p.inner);
+        p.events("timeline").iter().any(|e| {
+            e["seekId"] == 3
+                && e["ms"]
+                    .as_u64()
+                    .is_some_and(|ms| (2500..3500).contains(&ms))
+        })
+    });
+    assert!(
+        player
+            .events("timeline")
+            .iter()
+            .filter(|e| e["seekId"] == 3)
+            .all(|e| e["ms"]
+                .as_u64()
+                .is_some_and(|ms| (2500..3500).contains(&ms)))
+    );
+    assert_eq!(player.inner.state.borrow().entry, entry);
+    player.set("seek", json!({"token":80,"id":4,"ms":1000}));
+    player.set("seek", json!({"token":81,"id":3,"ms":1000}));
+    assert_eq!(player.inner.state.borrow().seek_id, 3);
 }

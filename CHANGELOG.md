@@ -11,6 +11,16 @@ is below 1.0, a minor release may change behaviour.
 
 ### Added
 
+- Provider movie and series libraries with search, category/source filters,
+  sorting, seasons, episodes, Continue watching and cross-season playback.
+- Parental PIN setup, change and recovery, protected channels/groups/on-demand
+  content, configurable unlock scopes and native playback/mutation checks.
+- Independent recording host with Android foreground execution and alarm/boot
+  recovery, opt-in desktop login startup, daily/weekly/series schedules and
+  interrupted-capture recovery. Host sleep and Android service limits apply.
+- Native recording seek/duration, pause, durable resume, playback from the
+  beginning and completion controls, sharing the persistent player surface.
+
 - Linux and macOS prototype: open a live guide channel in an independent player window
   with the original player controls, while main playback continues.
 - Independent player windows can switch to compact picture-in-picture and back
@@ -28,6 +38,8 @@ is below 1.0, a minor release may change behaviour.
 
 ### Fixed
 
+- Touch player controls reserve room for every button, keeping optional
+  picture-in-picture and recording controls clear of rewind and fast-forward.
 - Auxiliary player windows keep channel browsing and programme clocks independent,
   target manual retries correctly, release refused sessions, and let the main
   player's audio controls reclaim sound.

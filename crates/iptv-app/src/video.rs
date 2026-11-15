@@ -172,6 +172,7 @@ fn source_prop(ui: Ui, surface: usize) -> Option<SourceProps> {
         ui.playing.get().is_some()
             || crate::player::resume::playing(ui)
             || ui.player.recorded.with(Option::is_some)
+            || ui.player.vod.with(Option::is_some)
     } else {
         stream.channel.get().is_some()
     };
@@ -207,6 +208,7 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
         paused: Box::new(move || {
             (surface == 0 && ui.paused.get()) || crate::multiview::paused(ui, surface)
         }),
+        seek: Box::new(move || stream.seek.get()),
         picture_size: Box::new(move || {
             let ch = if surface == 0 {
                 ui.playing.get()
@@ -305,6 +307,16 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
         // Once a second while playing: not logged.
         PlayerEvent::Position { ms } => {
             stream.position_ms.set(ms);
+            return;
+        }
+        PlayerEvent::Timeline {
+            token,
+            seek_id,
+            ms,
+            duration_ms,
+            seekable,
+        } => {
+            crate::on_demand::observe(ui, surface, token, seek_id, ms, duration_ms, seekable);
             return;
         }
         PlayerEvent::Tracks(tracks) => return crate::media::on_tracks(ui, surface, tracks),

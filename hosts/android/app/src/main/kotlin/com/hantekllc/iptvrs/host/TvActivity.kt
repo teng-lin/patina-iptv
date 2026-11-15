@@ -29,8 +29,10 @@ import com.longbridge.nsh.NshView
  */
 class TvActivity : Activity() {
     private lateinit var nsh: NshView
+
     /** The mounted players (multiview mounts more than one). */
     private val players = LinkedHashSet<PlayerComponent>()
+
     /** Between onStart and onStop. */
     private var started = false
     private lateinit var pip: PipHost
@@ -44,6 +46,7 @@ class TvActivity : Activity() {
         mark("library loaded")
         initializeDataDirectory(filesDir.absolutePath)
         CredentialKey.initialize(this)
+        RecordingHost.attach(this)
         nsh.useStandaloneLimits()
         pip = PipHost(this)
         backups = BackupHost(this)
@@ -83,12 +86,14 @@ class TvActivity : Activity() {
     override fun onStart() {
         super.onStart()
         started = true
-        for (p in players.toList()) p.foreground()
+        val allowed = RecordingHost.resumeViewing(filesDir.absolutePath)
+        for (p in players.toList()) p.foreground(allowed)
     }
 
     override fun onStop() {
         started = false
         for (p in players.toList()) p.background()
+        RecordingHost.suspendViewing(filesDir.absolutePath)
         // The process may end in the background without a teardown: the
         // last channel or a setting changed a moment ago must be on disk.
         flushPendingWrites()
@@ -100,7 +105,10 @@ class TvActivity : Activity() {
         pip.userLeaving()
     }
 
-    override fun onPictureInPictureModeChanged(inPip: Boolean, config: Configuration) {
+    override fun onPictureInPictureModeChanged(
+        inPip: Boolean,
+        config: Configuration,
+    ) {
         super.onPictureInPictureModeChanged(inPip, config)
         pip.modeChanged(inPip)
     }
@@ -125,13 +133,15 @@ class TvActivity : Activity() {
             c.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             c.hide(WindowInsets.Type.systemBars())
         } else {
-            window.decorView.systemUiVisibility = (window.decorView.systemUiVisibility
-                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                or View.SYSTEM_UI_FLAG_FULLSCREEN
-                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
+            window.decorView.systemUiVisibility = (
+                window.decorView.systemUiVisibility
+                    or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    or View.SYSTEM_UI_FLAG_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+            )
         }
     }
 
@@ -142,7 +152,11 @@ class TvActivity : Activity() {
     }
 
     @Deprecated("App-owned Storage Access Framework bridge")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+    override fun onActivityResult(
+        requestCode: Int,
+        resultCode: Int,
+        data: Intent?,
+    ) {
         if (!backups.activityResult(requestCode, resultCode, data)) {
             super.onActivityResult(requestCode, resultCode, data)
         }
@@ -156,10 +170,19 @@ class TvActivity : Activity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val mapped = RemoteKeys.translate(event.keyCode)
         if (mapped == event.keyCode) return super.dispatchKeyEvent(event)
-        val search = KeyEvent(
-            event.downTime, event.eventTime, event.action, mapped, event.repeatCount,
-            event.metaState, event.deviceId, event.scanCode, event.flags, event.source,
-        )
+        val search =
+            KeyEvent(
+                event.downTime,
+                event.eventTime,
+                event.action,
+                mapped,
+                event.repeatCount,
+                event.metaState,
+                event.deviceId,
+                event.scanCode,
+                event.flags,
+                event.source,
+            )
         return super.dispatchKeyEvent(search)
     }
 
@@ -174,5 +197,4 @@ class TvActivity : Activity() {
         nsh.destroy()
         super.onDestroy()
     }
-
 }

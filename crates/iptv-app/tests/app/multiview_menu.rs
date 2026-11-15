@@ -396,3 +396,161 @@ fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
     assert_eq!(tiles(&app), 3);
     step(app.wait_for(&format!("{TILE} >> text:/Test Channel Four$/")));
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn closing_the_main_window_stops_grid_streams_and_keeps_pending_recordings() {
+    let Some(home) = isolated!() else { return };
+    let root = home.data_dir();
+    std::fs::create_dir_all(&root).unwrap();
+    let mut store = crate::isolated::open_database(root.join("iptv.sqlite")).unwrap();
+    let source = store
+        .add_source(&iptv_providers::model::Source {
+            name: "Generated recording grid".into(),
+            config: iptv_providers::model::SourceConfig::M3u(
+                iptv_providers::model::M3uSourceConfig {
+                    location: iptv_providers::SecretUrl::new("https://example.test/generated.m3u"),
+                    user_agent: None,
+                    referrer: None,
+                },
+            ),
+        })
+        .unwrap();
+    let parsed = iptv_providers::m3u::parse_m3u(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"Generated group\",Generated One\nhttps://example.test/one.ts\n#EXTINF:-1 group-title=\"Generated group\",Generated Two\nhttps://example.test/two.ts\n",
+    );
+    store
+        .replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
+        .unwrap();
+    store
+        .set_source_policy(
+            source,
+            iptv_store_sqlite::SourcePolicy {
+                refresh_on_start: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    store.set_active_source(source).unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let id = iptv_core::recording::JobId(471);
+    store
+        .schedule_recording(
+            id,
+            &iptv_core::recording::Request {
+                source: source.0,
+                channel: parsed.channels.items[0].id.as_str().into(),
+                channel_name: "Generated One".into(),
+                title: "Generated future programme".into(),
+                start: now + 3600,
+                end: now + 7200,
+            },
+            now,
+        )
+        .unwrap();
+    drop(store);
+    let mut settings = iptv_settings::Settings::new();
+    settings
+        .set("guide.autoplay", iptv_settings::Value::Bool(false))
+        .unwrap();
+    settings
+        .set(
+            "general.resume_last_channel",
+            iptv_settings::Value::Bool(false),
+        )
+        .unwrap();
+    settings
+        .set_in(
+            "playlists.max_connections",
+            &iptv_settings::Target::playlist(source.0.to_string()),
+            iptv_settings::Value::Int(3),
+        )
+        .unwrap();
+    std::fs::write(root.join("settings.json"), settings.to_json_string()).unwrap();
+    let mut config = EngineConfig::new(Root::of::<iptv_app::App>());
+    config.viewport = Size::new(px(1280.0), px(720.0));
+    config.environment.os = if cfg!(target_os = "macos") {
+        nsh_core::platform::Os::MacOs
+    } else {
+        nsh_core::platform::Os::Linux
+    };
+    let mut app = Headless::start(config).unwrap();
+    let props: std::sync::Arc<
+        std::sync::Mutex<HashMap<nsh_core::NodeId, HashMap<String, serde_json::Value>>>,
+    > = Default::default();
+    let observed = props.clone();
+    app.observe(move |_, batch| {
+        let mut observed = observed.lock().unwrap();
+        for item in &batch.items {
+            match item {
+                nsh_core::MountItem::ComponentProps { id, props } => {
+                    let entry = observed.entry(*id).or_default();
+                    for (name, value) in props {
+                        entry.insert(
+                            name.to_string(),
+                            value.clone().unwrap_or(serde_json::Value::Null),
+                        );
+                    }
+                }
+                nsh_core::MountItem::Delete { id } => {
+                    observed.remove(id);
+                }
+                _ => {}
+            }
+        }
+    });
+    let active = || {
+        props
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|p| {
+                p.contains_key("popupSurface")
+                    && p.get("source").is_some_and(|source| !source.is_null())
+            })
+            .count()
+    };
+
+    let step = |result: Result<(), String>| result.unwrap_or_else(|error| panic!("{error}"));
+    step(app.wait_for("text:Generated One"));
+    step(app.press("text:Generated One"));
+    step(app.wait_for("text:▶"));
+    step(app.press("text:Generated One"));
+    step(app.wait_for("label:Video"));
+    step(app.press("label:Video"));
+    step(app.wait_for("label:Multiview"));
+    step(app.press("label:Multiview"));
+    step(app.wait_for("id:multiview-picker"));
+    step(app.press("id:multiview-picker >> text:2  Generated Two"));
+    step(app.wait_until(
+        "both generated grid streams",
+        Duration::from_secs(10),
+        |_| active() == 2,
+    ));
+    let primary = *props
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(_, p)| p.get("popupSurface") == Some(&serde_json::json!(0)))
+        .unwrap()
+        .0;
+    step(app.press_window_close("main"));
+    step(app.wait_until(
+        "hidden grid streams released",
+        Duration::from_secs(5),
+        |_| active() == 0,
+    ));
+    assert!(
+        props.lock().unwrap().contains_key(&primary),
+        "the primary player surface remains mounted when the whole window hides"
+    );
+    assert!(!app.window_state("main").unwrap().unwrap().visible);
+    let store = crate::isolated::open_database(root.join("iptv.sqlite")).unwrap();
+    assert_eq!(
+        store.recording_job(id).unwrap().unwrap().status,
+        iptv_core::recording::Status::Scheduled
+    );
+}

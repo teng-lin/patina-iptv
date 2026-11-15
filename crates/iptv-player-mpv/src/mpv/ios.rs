@@ -469,7 +469,7 @@ define_class!(
         #[unsafe(method(foreground:))]
         fn foreground(&self, _note: &AnyObject) {
             if let Some(p) = find(*self.ivars()) {
-                log::info!("iptv mpv {}: foreground, the stream opens again", self.ivars());
+                log::info!("iptv mpv {}: foreground, requesting playback authorization", self.ivars());
                 p.resume();
             }
         }

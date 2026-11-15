@@ -28,6 +28,9 @@ fn implemented(item: MenuItem, surface: usize) -> bool {
             | MenuItem::CustomRecording
             | MenuItem::Settings
             | MenuItem::Description
+            | MenuItem::BlockChannel
+            | MenuItem::BlockGroup
+            | MenuItem::ManageBlocked
             | MenuItem::ToggleFavorite
             | MenuItem::StartFromBeginning
             | MenuItem::ManageFavorites
@@ -58,11 +61,12 @@ fn label(item: MenuItem, favorite: bool) -> &'static str {
         ToggleFavorite if favorite => tr("Remove from favourites"),
         ToggleFavorite => tr("Add to favourites"),
         BlockChannel => tr("Block channel"),
+        BlockGroup => tr("Block group"),
         HideChannel => tr("Hide channel"),
         AssignEpg => tr("Choose guide data…"),
         ChannelOptions => tr("Channel options…"),
         ManageFavorites => tr("Manage favourites…"),
-        ManageBlocked => "Manage blocked channels…",
+        ManageBlocked => tr("Manage blocked channels…"),
         ManageHidden => "Manage hidden channels…",
         ReorderChannels => tr("Reorder channels"),
         CopyChannels => "Copy channels to a group…",
@@ -94,6 +98,9 @@ pub fn open(ui: Ui) {
         crate::schedule().catchup_days(channel),
         now,
         |item| {
+            if item == MenuItem::BlockGroup && crate::parental_view::group_target(ui).is_none() {
+                return false;
+            }
             if matches!(item, MenuItem::Record | MenuItem::CustomRecording) {
                 return ui.player_surface == 0 && crate::recordings_view::available(channel);
             }
@@ -108,6 +115,9 @@ pub fn open(ui: Ui) {
                             | MenuItem::StartFromBeginning
                             | MenuItem::ManageFavorites
                             | MenuItem::AssignEpg
+                            | MenuItem::BlockChannel
+                            | MenuItem::BlockGroup
+                            | MenuItem::ManageBlocked
                     ))
         },
     );
@@ -152,6 +162,9 @@ pub fn perform(ui: Ui, item: MenuItem) {
     };
     ui.menu.set(None);
     match item {
+        MenuItem::BlockChannel => crate::parental_view::block_channel(ui, origin.channel),
+        MenuItem::BlockGroup => crate::parental_view::block_group(ui),
+        MenuItem::ManageBlocked => crate::parental_view::manage(ui),
         MenuItem::Record | MenuItem::CustomRecording => {
             crate::recordings_view::programme(ui, origin, item == MenuItem::CustomRecording);
         }

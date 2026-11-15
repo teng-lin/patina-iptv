@@ -36,7 +36,6 @@ iptv-app/src/grid.rs	◀ in the groups  ·  search      m  ·  menu
 iptv-app/src/grid/ruler.rs	Now
 iptv-app/src/header.rs	Nothing playing
 iptv-app/src/menu_view.rs	Copy channels to a group…
-iptv-app/src/menu_view.rs	Manage blocked channels…
 iptv-app/src/menu_view.rs	Manage hidden channels…
 iptv-app/src/menu_view.rs	Save to my list
 iptv-app/src/multiview_picker.rs	Choose a group or search its channels, then tap a channel
@@ -611,3 +610,18 @@ iptv-runtime/src/guide_repair/publication.rs	guide repair commit is missing
 iptv-runtime/src/guide_repair/publication.rs	guide repair was superseded
 
 iptv-app/src/play_bar/icons.rs	<circle cx='12' cy='12' r='6' fill='currentColor' stroke='none'/>
+
+# Native login integration: task/launch-agent identities and serialization.
+iptv-app/src/recording_host/startup.rs	\n$ErrorActionPreference = 'Stop'\ntry {\n    $scheduler = New-Object -ComObject 'Schedule.Service'\n    $scheduler.Connect()\n    $folder = $scheduler.GetFolder('\\')\n    try {\n        $folder.DeleteTask($env:PATINA_RECORDING_TASK, 0)\n    } catch {\n        $failure = $_.Exception\n        while ($null -ne $failure.InnerException) { $failure = $failure.InnerException }\n        if ($failure.HResult -ne -2147024894) { throw }\n    }\n    exit 0\n} catch { exit 1 }\n
+iptv-app/src/recording_host/startup.rs	<?xml version="1.0"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>com.hantekllc.patina.recorder</string><key>ProgramArguments</key><array><string>{}</string><string>--background-recordings</string></array><key>RunAtLoad</key><true/></dict></plist>
+iptv-app/src/recording_host/startup.rs	Library/LaunchAgents/com.hantekllc.patina.recorder.plist
+iptv-app/src/recording_host/startup.rs	Patina Recorder
+iptv-app/src/recording_host/startup.rs	[Desktop Entry]\nType=Application\nName=Patina Recorder\nExec={} --background-recordings\nTerminal=false\nNoDisplay=true\n
+iptv-app/src/recording_host/windows.rs	Patina Recorder
+iptv-app/src/recording_host/windows.rs	Patina
+# VOD native reasons are replaced with shell-owned translated messages; headers are wire names.
+iptv-runtime/src/vod.rs	On-demand content unavailable; refresh the playlist and try again
+iptv-runtime/src/vod.rs	Playlist changed
+iptv-runtime/src/vod.rs	Playlist disabled
+iptv-runtime/src/vod.rs	Referer
+iptv-runtime/src/vod.rs	User-Agent

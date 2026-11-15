@@ -32,12 +32,14 @@
 //!   [`MacAddress::from_stored`] keeps a stored value byte-for-byte.
 
 mod parse;
+mod series;
 mod session;
+pub use series::{SeriesRow, parse_series_rows};
 
 pub use parse::{
     AuthFailure, Page, PagedCrawl, ProbeResult, StalkerProfile, classify_auth_failure,
     classify_probe, normalize_cmd, parse_all_channels, parse_channel_page, parse_create_link,
-    parse_genres, parse_vod_page, static_playback_url,
+    parse_genres, parse_series_page, parse_vod_page, static_playback_url,
 };
 pub use session::{ApiError, AuthStep, Resolve, SessionState, StalkerSession};
 

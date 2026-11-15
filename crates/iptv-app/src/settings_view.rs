@@ -7,7 +7,7 @@
 //! applied where the app reads it) and runs its commands.
 //!
 //! Rows the app does not act on yet are dimmed and say so ("later" for
-//! recordings, reminders, movies and series, parental control); none of
+//! recordings, reminders, movies and series); none of
 //! the rows it acts on can be switched off by another setting yet;
 //! device-level features of TV boxes are left out (`settings::offer`). Remote: Up/Down move, Right/OK
 //! enter a page, OK changes a row, Left/Back go back, Back on the pages
@@ -112,6 +112,15 @@ thread_local! {
 // --- State ---------------------------------------------------------------------
 
 pub fn open(ui: Ui) {
+    if crate::settings::choice(keys::EnumKey("parental.require_pin_for"))
+        == "blocked_content_and_settings"
+        && !crate::runtime().parental_settings_allowed()
+    {
+        crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
+            open(ui)
+        });
+        return;
+    }
     if !is_open(ui) {
         ui.settings_screen
             .set(Some(Screen::new(PAGES, LAST.with(Cell::get))));
@@ -119,6 +128,7 @@ pub fn open(ui: Ui) {
 }
 
 pub fn close(ui: Ui) {
+    crate::runtime().parental_content_closed();
     if let Some(page) = ui
         .settings_screen
         .with_untracked(|s| s.as_ref().map(|s| s.page().key))
@@ -198,12 +208,31 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
     match effect {
         Effect::None => {}
         Effect::Set { key, value } => {
-            if let Err(e) = crate::settings::set(ui, key, value) {
-                log::warn!("iptv settings: {e}");
+            if (key.starts_with("parental.")
+                || crate::settings::choice(keys::EnumKey("parental.require_pin_for"))
+                    == "blocked_content_and_settings")
+                && (!crate::runtime().parental_has_pin()
+                    || !crate::runtime().parental_settings_allowed())
+            {
+                crate::parental_view::protected_settings(ui, move || {
+                    if let Err(e) = crate::settings::set(ui, key, value) {
+                        notify_setting_error(e);
+                    }
+                });
+            } else if let Err(e) = crate::settings::set(ui, key, value) {
+                notify_setting_error(e);
             }
         }
         Effect::Run(key) => run(ui, key),
         Effect::Close => close(ui),
+    }
+}
+
+fn notify_setting_error(error: crate::settings::SaveError) {
+    if matches!(error, crate::settings::SaveError::ParentalLocked) {
+        notify(tr("Unlock parental controls before changing settings"));
+    } else {
+        notify(&error.to_string());
     }
 }
 
@@ -214,9 +243,31 @@ pub(crate) fn refresh(ui: Ui) {
 
 /// Runs a command (`settings::COMMANDS`).
 fn run(ui: Ui, key: &'static str) {
+    if key != "parental.change_pin"
+        && crate::settings::choice(keys::EnumKey("parental.require_pin_for"))
+            == "blocked_content_and_settings"
+        && !crate::runtime().parental_settings_allowed()
+    {
+        crate::parental_view::protected_settings(ui, move || run(ui, key));
+        return;
+    }
     match key {
-        "general.backup" => crate::backup::export_ui(),
-        "general.restore" => crate::backup::restore_ui(ui),
+        "parental.change_pin" => crate::parental_view::change_pin(ui),
+        "recordings.quit_host" => crate::desktop::quit(),
+        "recordings.background_status"
+        | "recordings.enable_startup"
+        | "recordings.disable_startup"
+        | "recordings.alarm_access" => crate::recording_host::command(key),
+        "general.backup" => crate::parental_view::request(
+            ui,
+            iptv_core::parental::Target::settings(),
+            crate::backup::export_ui,
+        ),
+        "general.restore" => {
+            crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
+                crate::backup::restore_ui(ui)
+            })
+        }
         "epg.update_now" => {
             if stored::update_now(&crate::runtime(), move || refresh(ui)) {
                 refresh(ui);
@@ -447,7 +498,7 @@ mod tests {
         let resume = row("general", "general.resume_last_channel", &s);
         assert_eq!(note(&s, &resume), "");
         let pin = row("parental", "parental.live_enabled", &s);
-        assert_eq!(note(&s, &pin), "In a later version");
+        assert_eq!(note(&s, &pin), "");
     }
 
     #[test]
@@ -504,7 +555,9 @@ mod tests {
         // Panel timeouts, channel-change info, seek keys and three steps.
         assert_eq!(active, 7);
         let parental = PAGES.iter().find(|p| p.key == "parental").unwrap();
-        assert_eq!(counts(parental).0, 0);
+        // Only the two enable switches and PIN command are visible by default;
+        // dependent preferences appear after live or VOD protection is enabled.
+        assert_eq!(counts(parental), (3, 3));
     }
 
     #[test]

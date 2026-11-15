@@ -39,6 +39,37 @@ fn latest_snapshot_is_the_fresh_schema() {
     assert_eq!(schema_dump(&conn).unwrap(), snapshot.replace("\r\n", "\n"));
 }
 
+#[test]
+fn existing_episode_progress_gains_a_resume_identity_when_upgraded() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("generated-v16.sqlite");
+    build_old_file(&path, HISTORY.iter().find(|v| v.version == 16).unwrap());
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "INSERT INTO vod_progress(source_id,kind,content_id,parent_id,position_ms,duration_ms,completed,updated_at)
+         SELECT source_id,'episode','generated-episode-five',id,37000,120000,0,1800000017 FROM series ORDER BY source_id,id LIMIT 1;
+         INSERT INTO vod_progress(source_id,kind,content_id,position_ms,duration_ms,completed,updated_at)
+         SELECT source_id,'series',id,37000,120000,0,1800000017 FROM series ORDER BY source_id,id LIMIT 1;",
+    ).unwrap();
+    let (source, id): (i64, String) = conn
+        .query_row(
+            "SELECT source_id,id FROM series ORDER BY source_id,id LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    drop(conn);
+    let store = Store::open(path).unwrap();
+    let series = iptv_core::vod::Key {
+        source,
+        kind: iptv_core::vod::Kind::Series,
+        id,
+    };
+    let episode = store.vod_resume_episode(&series).unwrap().unwrap();
+    assert_eq!(episode.id, "generated-episode-five");
+    assert_eq!(store.vod_progress(&episode).unwrap().position_ms, 37_000);
+}
+
 /// A historical version: its schema snapshot and the data files to load
 /// into it, in order.
 struct Version {
@@ -152,6 +183,146 @@ const HISTORY: &[Version] = &[
             "data_v9.sql",
             "data_v10.sql",
             "data_v11.sql",
+        ],
+    },
+    Version {
+        version: 12,
+        data: &[
+            "data_v1.sql",
+            "data_v2.sql",
+            "data_v3.sql",
+            "data_v4.sql",
+            "data_v5.sql",
+            "data_v6.sql",
+            "data_v7.sql",
+            "data_v8.sql",
+            "data_v9.sql",
+            "data_v10.sql",
+            "data_v11.sql",
+            "data_v12.sql",
+        ],
+    },
+    Version {
+        version: 13,
+        data: &[
+            "data_v1.sql",
+            "data_v2.sql",
+            "data_v3.sql",
+            "data_v4.sql",
+            "data_v5.sql",
+            "data_v6.sql",
+            "data_v7.sql",
+            "data_v8.sql",
+            "data_v9.sql",
+            "data_v10.sql",
+            "data_v11.sql",
+            "data_v12.sql",
+            "data_v13.sql",
+        ],
+    },
+    Version {
+        version: 14,
+        data: &[
+            "data_v1.sql",
+            "data_v2.sql",
+            "data_v3.sql",
+            "data_v4.sql",
+            "data_v5.sql",
+            "data_v6.sql",
+            "data_v7.sql",
+            "data_v8.sql",
+            "data_v9.sql",
+            "data_v10.sql",
+            "data_v11.sql",
+            "data_v12.sql",
+            "data_v13.sql",
+            "data_v14.sql",
+        ],
+    },
+    Version {
+        version: 15,
+        data: &[
+            "data_v1.sql",
+            "data_v2.sql",
+            "data_v3.sql",
+            "data_v4.sql",
+            "data_v5.sql",
+            "data_v6.sql",
+            "data_v7.sql",
+            "data_v8.sql",
+            "data_v9.sql",
+            "data_v10.sql",
+            "data_v11.sql",
+            "data_v12.sql",
+            "data_v13.sql",
+            "data_v14.sql",
+            "data_v15.sql",
+        ],
+    },
+    Version {
+        version: 16,
+        data: &[
+            "data_v1.sql",
+            "data_v2.sql",
+            "data_v3.sql",
+            "data_v4.sql",
+            "data_v5.sql",
+            "data_v6.sql",
+            "data_v7.sql",
+            "data_v8.sql",
+            "data_v9.sql",
+            "data_v10.sql",
+            "data_v11.sql",
+            "data_v12.sql",
+            "data_v13.sql",
+            "data_v14.sql",
+            "data_v15.sql",
+            "data_v16.sql",
+        ],
+    },
+    Version {
+        version: 17,
+        data: &[
+            "data_v1.sql",
+            "data_v2.sql",
+            "data_v3.sql",
+            "data_v4.sql",
+            "data_v5.sql",
+            "data_v6.sql",
+            "data_v7.sql",
+            "data_v8.sql",
+            "data_v9.sql",
+            "data_v10.sql",
+            "data_v11.sql",
+            "data_v12.sql",
+            "data_v13.sql",
+            "data_v14.sql",
+            "data_v15.sql",
+            "data_v16.sql",
+            "data_v17.sql",
+        ],
+    },
+    Version {
+        version: 18,
+        data: &[
+            "data_v1.sql",
+            "data_v2.sql",
+            "data_v3.sql",
+            "data_v4.sql",
+            "data_v5.sql",
+            "data_v6.sql",
+            "data_v7.sql",
+            "data_v8.sql",
+            "data_v9.sql",
+            "data_v10.sql",
+            "data_v11.sql",
+            "data_v12.sql",
+            "data_v13.sql",
+            "data_v14.sql",
+            "data_v15.sql",
+            "data_v16.sql",
+            "data_v17.sql",
+            "data_v18.sql",
         ],
     },
 ];

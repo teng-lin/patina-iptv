@@ -166,6 +166,7 @@ class PlayerComponent(
 
     private var url: String? = null
     private var token: Long = 0
+    private var seekId: Long = 0
 
     /** The source is a live channel ([start]'s spare items). */
     private var live = false
@@ -425,6 +426,17 @@ class PlayerComponent(
                 if (player.isPlaying) {
                     emit(PlayerEvent.Position(player.currentPosition.coerceAtLeast(0)))
                 }
+                if (!away && !live && url != null && player.playbackState == Player.STATE_READY) {
+                    emit(
+                        PlayerEvent.Timeline(
+                            token,
+                            seekId,
+                            player.currentPosition.coerceAtLeast(0),
+                            player.duration.takeIf { it > 0 },
+                            player.isCurrentMediaItemSeekable,
+                        ),
+                    )
+                }
                 ticker.postDelayed(this, 1_000)
             }
         }
@@ -447,6 +459,15 @@ class PlayerComponent(
     private val props =
         object : PlayerProps {
             override fun source(source: PlayerSource?) = setSource(source)
+
+            override fun seek(seek: PlayerSeek?) {
+                if (seek == null || seek.token != token || live || url == null || seek.id <= seekId) return
+                if (!player.isCurrentMediaItemSeekable) return
+                seekId = seek.id
+                val target = player.duration.takeIf { it > 0 }?.let { seek.ms.coerceAtMost(it) } ?: seek.ms
+                player.seekTo(target)
+                emit(PlayerEvent.Timeline(token, seekId, target, player.duration.takeIf { it > 0 }, true))
+            }
 
             override fun paused(paused: Boolean) {
                 player.playWhenReady = !paused
@@ -510,6 +531,7 @@ class PlayerComponent(
         token = nextToken
         applyHeaders()
         if (!changed) return
+        seekId = 0
         triedOtherFormat = false
         if (!keepFrame) rendered = false
         // A new stream: default tracks, no old cues.
@@ -551,18 +573,21 @@ class PlayerComponent(
      * at the live edge, catch-up at its position) or the source the app set
      * meanwhile.
      */
-    fun foreground() {
+    fun foreground(allowed: Boolean = true) {
         if (!away) return
         away = false
         ticker.postDelayed(tick, 1_000)
         val what = reopen
         reopen = Reopen.NONE
         val target = url ?: return
-        when {
-            what == Reopen.NEW -> start(target, null)
-            what == Reopen.SAME && live -> start(target, mime)
-            what == Reopen.SAME -> player.prepare()
+        if (!allowed) {
+            emit(PlayerEvent.Error("ERROR_CODE_IO_BAD_HTTP_STATUS", 429))
+            return
         }
+        // A retained URL is no longer authority to decode: a parental grant
+        // may have expired while away. Rust retries with fresh authorization,
+        // stream reservation and a new source token (and restores position).
+        if (what != Reopen.NONE) emit(PlayerEvent.Error("ERROR_CODE_IO_UNSPECIFIED"))
     }
 
     private fun applyHeaders() {

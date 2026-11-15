@@ -1,10 +1,18 @@
 //! Bounded MPEG-TS recorder. All media requests pass through the playback relay,
 //! including manifest children: the recorder cannot bypass its header/DNS policy.
 use crate::playback::{PlaybackPolicy, PlaybackRelay};
-use std::io::Write;
+use std::io::{Seek, SeekFrom, Write};
 use std::{future::Future, path::Path, time::Duration};
 
 const STALL_TOLERANCE: Duration = Duration::from_secs(30);
+
+/// Retain this state across in-process retries of the same recording spool.
+/// Sequence state deliberately contains no provider URLs or segment-URI history.
+#[derive(Debug, Default)]
+pub struct CaptureState {
+    next_hls_sequence: Option<u64>,
+    continuing_hls: bool,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Failure {
@@ -35,6 +43,59 @@ pub async fn capture(
     path: &Path,
     max_bytes: u64,
 ) -> Result<(), Failure> {
+    capture_inner(
+        url,
+        headers,
+        policy,
+        path,
+        max_bytes,
+        false,
+        &mut CaptureState::default(),
+    )
+    .await
+}
+
+/// Resume a private TS spool after a connection/process interruption. Only whole
+/// transport packets are retained. The caller must mark the resulting gap.
+pub async fn capture_resume(
+    url: &str,
+    headers: &[(String, String)],
+    policy: PlaybackPolicy,
+    path: &Path,
+    max_bytes: u64,
+) -> Result<(), Failure> {
+    capture_resume_with_state(
+        url,
+        headers,
+        policy,
+        path,
+        max_bytes,
+        &mut CaptureState::default(),
+    )
+    .await
+}
+
+/// Reuse `state` for every retry within one recording. A cold process has no
+/// sequence proof and must still mark recovered media as interrupted.
+pub async fn capture_resume_with_state(
+    url: &str,
+    headers: &[(String, String)],
+    policy: PlaybackPolicy,
+    path: &Path,
+    max_bytes: u64,
+    state: &mut CaptureState,
+) -> Result<(), Failure> {
+    capture_inner(url, headers, policy, path, max_bytes, true, state).await
+}
+async fn capture_inner(
+    url: &str,
+    headers: &[(String, String)],
+    policy: PlaybackPolicy,
+    path: &Path,
+    max_bytes: u64,
+    resume: bool,
+    state: &mut CaptureState,
+) -> Result<(), Failure> {
     let relay =
         PlaybackRelay::start_with_policy(url, headers, policy).map_err(|_| Failure::Network)?;
     let client = reqwest::Client::builder()
@@ -46,16 +107,38 @@ pub async fn capture(
         .build()
         .map_err(|_| Failure::Network)?;
     let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
+    options.write(true);
+    let existing = if resume {
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+                Some(metadata.len() / 188 * 188)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            _ => return Err(Failure::Storage),
+        }
+    } else {
+        None
+    };
+    let bytes = existing.unwrap_or(0);
+    if existing.is_none() {
+        options.create_new(true);
+    }
+    if bytes >= max_bytes {
+        return Err(Failure::Limit);
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
-    let file = options.open(path).map_err(|_| Failure::Storage)?;
+    let mut file = options.open(path).map_err(|_| Failure::Storage)?;
+    file.set_len(bytes).map_err(|_| Failure::Storage)?;
+    // Windows append-only handles cannot truncate torn packets. One claimed
+    // capture owns this spool, so a writable handle plus seek is portable.
+    file.seek(SeekFrom::End(0)).map_err(|_| Failure::Storage)?;
     let mut writer = Writer {
         file,
-        bytes: 0,
+        bytes,
         max_bytes,
     };
     let mut response = get(&client, &relay, relay.url()).await?;
@@ -76,8 +159,9 @@ pub async fn capture(
             }
             head.extend_from_slice(&chunk);
         }
-        hls(&client, &relay, head, &mut writer).await?;
+        hls(&client, &relay, head, &mut writer, state).await?;
     } else {
+        *state = CaptureState::default();
         if head.first() != Some(&0x47) || head.len() < 188 {
             return Err(Failure::Unsupported);
         }
@@ -227,6 +311,7 @@ async fn hls(
     relay: &PlaybackRelay,
     mut bytes: Vec<u8>,
     writer: &mut Writer,
+    state: &mut CaptureState,
 ) -> Result<(), Failure> {
     let mut url = relay.url().to_owned();
     // Bound nested master playlists and never accumulate a segment-URI history.
@@ -236,7 +321,6 @@ async fn hls(
         url = variant;
         bytes = manifest(client, relay, &url).await?;
     }
-    let mut next = None;
     let mut last_progress = tokio::time::Instant::now();
     loop {
         let p = playlist(&bytes)?;
@@ -244,21 +328,27 @@ async fn hls(
             return Err(Failure::Unsupported);
         }
         // Start near the live edge, rather than silently recording the entire rewind window.
-        let first = if next.is_none() && !p.ended {
+        let first = if state.next_hls_sequence.is_none() && !state.continuing_hls && !p.ended {
             p.segments.last().unwrap().0
         } else {
             p.segments[0].0
         };
-        let expected = *next.get_or_insert(first);
+        state.continuing_hls = true;
+        let expected = *state.next_hls_sequence.get_or_insert(first);
         if p.segments[0].0 > expected {
+            // The missing interval is reported once; the next attempt resumes
+            // at the earliest still-available segment, rather than skipping to
+            // another live edge or remaining permanently behind the window.
+            state.next_hls_sequence = None;
             return Err(Failure::Gap);
         }
         for (sequence, segment) in &p.segments {
             let sequence = *sequence;
-            if sequence < next.unwrap() {
+            if sequence < state.next_hls_sequence.unwrap() {
                 continue;
             }
-            if sequence != next.unwrap() {
+            if sequence != state.next_hls_sequence.unwrap() {
+                state.next_hls_sequence = None;
                 return Err(Failure::Gap);
             }
             // Buffer one bounded segment, so cancellation cannot leave half a segment in the file.
@@ -282,8 +372,8 @@ async fn hls(
             }
             writer.write(&data)?;
             last_progress = tokio::time::Instant::now();
-            next = sequence.checked_add(1);
-            if next.is_none() {
+            state.next_hls_sequence = sequence.checked_add(1);
+            if state.next_hls_sequence.is_none() {
                 return Err(Failure::Unsupported);
             }
         }

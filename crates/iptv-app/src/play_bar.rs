@@ -259,10 +259,7 @@ fn bar(ui: Ui) -> impl IntoElement {
                         .child(centre(ui))
                         .child(right(ui)),
                 )
-                .child(when(
-                    move || ui.player.recorded.with(Option::is_none),
-                    move || progress::line(ui),
-                )),
+                .child(progress::line(ui)),
         )
 }
 
@@ -281,6 +278,7 @@ fn button(
             disabled: !enabled(),
             ..Default::default()
         })
+        .flex_shrink_0()
         .w(px(size))
         .h(px(size))
         .rounded(px(size / 2.0))
@@ -354,7 +352,7 @@ fn left(ui: Ui) -> impl IntoElement {
     // then the rest is cut, never the buttons beside it.
     view()
         .flex_1()
-        .min_w(px(0.0))
+        .min_w(px(size))
         .overflow_hidden()
         .flex_row()
         .items_center()
@@ -373,9 +371,7 @@ fn left(ui: Ui) -> impl IntoElement {
         .child(
             text(move || {
                 ui.data_version.get();
-                ui.player
-                    .recorded
-                    .with(|r| r.as_ref().map(|(job, _)| job.request.title.clone()))
+                crate::on_demand::title(ui)
                     .or_else(|| ui.playing.get().map(channel_name))
                     .unwrap_or_default()
             })
@@ -428,7 +424,9 @@ fn volume(ui: Ui) -> impl IntoElement {
 /// Rewind, play/pause, fast-forward.
 fn centre(ui: Ui) -> impl IntoElement {
     let size = target();
-    let catch_up = move || matches!(ui.playback.get(), Playback::CatchUp { .. });
+    let catch_up = move || {
+        matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::seekable(ui)
+    };
     let seek = move |forward: bool| {
         let steps = crate::seek::steps();
         let delta = if forward {
@@ -463,7 +461,7 @@ fn centre(ui: Ui) -> impl IntoElement {
             },
             always,
             size + 8.0,
-            move || ui.paused.update(|p| *p = !*p),
+            move || crate::player::toggle_pause(ui),
         ))
         .child(button(
             ui,
@@ -493,12 +491,14 @@ fn right(ui: Ui) -> impl IntoElement {
             .find(|k| ui.player.main().tracks.with(|t| t.has_choice(*k)))
     };
     let playing = move || ui.playing.get().is_some();
-    // Never narrower than its buttons (seven on the desktop, six
-    // elsewhere) and the frame rate: they must not slide under the centre.
-    let buttons = if DESKTOP { 8.0 } else { 7.0 };
+    // Reserve space for every control, including recording and optional
+    // native window controls, so none overlap the transport hit targets.
+    let buttons = move || {
+        8.0 + if DESKTOP { 1.0 } else { 0.0 } + if crate::pip::supported(ui) { 1.0 } else { 0.0 }
+    };
     view()
         .flex_1()
-        .min_w(px(buttons * size + (buttons - 1.0) * 2.0 + FPS_W + 6.0))
+        .min_w(move || px(buttons() * size + (buttons() - 1.0) * 2.0 + FPS_W + 6.0))
         .flex_row()
         .items_center()
         .justify_end()

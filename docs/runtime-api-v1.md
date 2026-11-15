@@ -46,7 +46,10 @@ shown schedule, browsing focus, playback session or player surface. Disabled
 explicit sources fail distinctly; all-enabled scopes omit disabled sources.
 Hidden content is a visibility preference. Blocked content follows runtime
 access policy and cannot be reached by bypassing search with a known ID.
-Full PIN/unlock and parental-control behavior remains separately scheduled P6.
+Native PIN/unlock behavior is implemented by the parental service. Direct-ID
+playback queries enforce its current policy and source membership; grants are
+revoked on lock and owner retirement. The administrative parental API remains
+experimental outside this versioned query/repair contract.
 
 Channel identity is `(SourceId, ContentId)` within its current catalogue context.
 Names, list positions and physical row IDs are not identities. Source deletion,
@@ -202,8 +205,9 @@ not implemented. Stage 1 stabilizes queries/EPG inspection/repair and their
 operation-status interfaces only after real consumers and contract tests pass.
 The app's existing M3U/Xtream catch-up behavior remains provider-dependent;
 Stalker archive support and Xtream probing are separate compatibility work.
-Playback/session APIs, reminders, DVR, local timeshift, VOD and full parental
-APIs are outside this contract until separately implemented and stabilized.
+Playback/session APIs, DVR, VOD and parental administration are implemented
+native application services outside this contract until separately stabilized.
+Reminders and local timeshift remain unimplemented.
 MCP transport, wire IDs, external grants and reconnect receipts are Stage 2.
 
 Breaking signatures or behavioral semantics require a recorded contract

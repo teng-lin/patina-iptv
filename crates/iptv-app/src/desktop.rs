@@ -20,6 +20,12 @@ pub mod player_windows;
 /// Linux, macOS and Windows.
 pub const DESKTOP: bool = cfg!(any(target_os = "linux", target_os = "macos", windows));
 
+/// Login/task launches run the recorder without automatically opening a viewer.
+/// Explicit foreground playback remains available when the user opens the UI.
+pub(crate) fn recorder_only_startup() -> bool {
+    DESKTOP && std::env::args().any(|arg| arg == "--background-recordings")
+}
+
 thread_local! {
     static WINDOW: RefCell<Option<WindowRef>> = const { RefCell::new(None) };
     /// Where the mouse last was (window points).
@@ -27,8 +33,32 @@ thread_local! {
 }
 
 /// Keeps the app's window; call while the app renders.
-pub fn bind() {
-    WINDOW.with(|w| *w.borrow_mut() = Some(current_window()));
+pub fn bind(ui: Ui) {
+    let window = current_window();
+    WINDOW.with(|w| *w.borrow_mut() = Some(window.clone()));
+    if !DESKTOP {
+        return;
+    }
+    let mut attributes = nsh_core::desktop::WindowAttributes::default();
+    attributes.close_on_press = Some(false);
+    window.set(attributes);
+    let close_window = window.clone();
+    window.on_close_press(move |reason| {
+        if reason != nsh_core::desktop::CloseReason::System
+            && crate::runtime().recording_background_needed()
+        {
+            crate::parental_view::close(ui);
+            crate::multiview::close(ui);
+            crate::player::stop(ui);
+            close_window.hide();
+        } else {
+            crate::runtime().shutdown_recording_host();
+            close_window.close();
+        }
+    });
+    if recorder_only_startup() {
+        window.hide();
+    }
 }
 
 /// Runs `f` on the app's window; `None` off desktops.
@@ -152,4 +182,15 @@ const POINTER_EVERY_MS: u64 = 250;
 
 thread_local! {
     static LAST_MOVE: Cell<Option<u64>> = const { Cell::new(None) };
+}
+
+/// Explicit quit preserves future recording intent but stops the native host.
+pub(crate) fn quit() {
+    if crate::runtime().shutdown_recording_host() {
+        with_window(WindowRef::close);
+    } else {
+        crate::settings_view::notify(tr(
+            "The recording host is still closing; try quitting again",
+        ));
+    }
 }

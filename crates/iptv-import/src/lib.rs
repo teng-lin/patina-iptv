@@ -55,7 +55,7 @@ pub use epg::{
 pub use error::{AuthProblem, FailureKind, ImportError, ParseProblem, Step};
 pub use fetch::{BodyStream, Fetch, FetchError, FetchErrorKind, MemoryBody, StreamingResponse};
 pub use iptv_core::import_limits::{ImportLimits, LimitExceeded, LimitKind};
-pub use link::stalker_link;
+pub use link::{stalker_link, stalker_session};
 pub use m3u::import_m3u_text;
 pub use progress::{NoProgress, Phase, Progress, ProgressSink};
 pub use refresh::{
@@ -152,3 +152,5 @@ pub(crate) fn validate_stream(
     }
     Ok(())
 }
+
+pub mod on_demand;

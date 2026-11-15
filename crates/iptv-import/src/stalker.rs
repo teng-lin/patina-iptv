@@ -7,10 +7,11 @@
 //! (every candidate shares the host); timeouts and non-portal answers move
 //! on. API calls rejected for the token re-run the auth loop and retry once.
 
-use iptv_providers::model::{Channel, ContentKind, StalkerCredentials, VodItem};
+use iptv_providers::model::{Channel, ContentKind, Series, StalkerCredentials, VodItem};
 use iptv_providers::stalker::{
     ApiError, AuthStep, Page, PagedCrawl, PortalMode, ProbeResult, StalkerPortal, StalkerSession,
-    classify_probe, endpoint_candidates, parse_channel_page, parse_genres, parse_vod_page,
+    classify_probe, endpoint_candidates, parse_channel_page, parse_genres, parse_series_page,
+    parse_vod_page,
 };
 use iptv_providers::{HttpRequest, HttpResponse, ProviderError, StalkerError, StalkerErrorKind};
 
@@ -79,6 +80,29 @@ pub(crate) async fn import_stalker<F: Fetch, P: ProgressSink>(
         vod = Some((cats, items));
     }
 
+    let mut series = None;
+    if opts.include_series {
+        let kind = ContentKind::Series;
+        let cats = call(
+            ctx,
+            &mut session,
+            Step::Categories(kind),
+            |s| s.series_categories(),
+            |r| parse_genres(r, kind),
+        )
+        .await;
+        let items = crawl::<_, _, Series>(
+            ctx,
+            &mut session,
+            kind,
+            opts,
+            opts.stalker_vod_cap,
+            |s, p| s.series_page("", None, p, true),
+            parse_series_page,
+        )
+        .await;
+        series = Some((cats, items));
+    }
     let mut catalog = Catalog::new(SourceMeta::Stalker {
         session: Box::new(session),
     });
@@ -107,6 +131,22 @@ pub(crate) async fn import_stalker<F: Fetch, P: ProgressSink>(
         }
     }
 
+    if let Some((cats, items)) = series {
+        let kind = ContentKind::Series;
+        if let Some(import) = soften(&mut catalog, cats)? {
+            let groups = catalog.absorb(Step::Categories(kind), None, import);
+            catalog.groups.extend(groups);
+        }
+        if let Some(items) = soften(&mut catalog, items)? {
+            catalog.series = items.into_catalog(&mut catalog);
+            let referenced: Vec<_> = catalog
+                .series
+                .iter()
+                .flat_map(|v| v.groups.clone())
+                .collect();
+            catalog.add_missing_groups(kind, referenced.iter());
+        }
+    }
     if let Some(sink) = &mut ctx.catalog_sink {
         sink.begin_step()
             .map_err(|e| ImportError::Storage(e.to_string()))?;
@@ -128,7 +168,7 @@ pub(crate) async fn import_stalker<F: Fetch, P: ProgressSink>(
 }
 
 /// Finds the API endpoint and mode, and authorises a session on it.
-async fn discover<F: Fetch, P: ProgressSink>(
+pub(crate) async fn discover<F: Fetch, P: ProgressSink>(
     ctx: &mut Ctx<'_, F, P>,
     creds: &StalkerCredentials,
 ) -> Result<StalkerSession, ImportError> {
@@ -294,6 +334,7 @@ macro_rules! crawlable {
 }
 crawlable!(Channel, Channel);
 crawlable!(VodItem, Vod);
+crawlable!(Series, Series);
 
 /// Items from a crawl plus what to report about them.
 struct Crawled<T> {

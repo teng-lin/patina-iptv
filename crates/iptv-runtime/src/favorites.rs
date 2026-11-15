@@ -174,9 +174,13 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
     let loaded = load(owner, |store| {
         let mut ids = Vec::new();
         let mut favorites = Vec::new();
+        let mut has_vod = false;
         for source in store.sources()? {
             if store.source_policy(source.id)?.enabled {
                 ids.push(source.id);
+                has_vod |= store
+                    .import_status(source.id)
+                    .is_ok_and(|status| status.counts.vod + status.counts.series > 0);
                 let rows = store.load_channels(
                     source.id,
                     &ChannelQuery {
@@ -195,13 +199,14 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
             ids,
             favorites,
             store.recent(None, Some(ContentKind::Live), RECENT_LIMIT as u32)?,
+            has_vod,
         ))
     })
     .await;
     if owner.generation.get() != generation {
         return None;
     }
-    let Ok((ids, favorites, recent)) = loaded else {
+    let Ok((ids, favorites, recent, has_vod)) = loaded else {
         return None;
     };
     let owner = owner.clone();
@@ -237,7 +242,7 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
                         .map(|row| qualified_key(row.source_id.0, row.item_id.as_str())),
                 );
             }
-            state.has_vod = false;
+            state.has_vod = has_vod;
         })
     })
 }

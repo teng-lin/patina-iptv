@@ -305,6 +305,11 @@ fn stored_playlists_switch_refresh_and_go() {
     add(&mut app, "first.m3u");
     step(app.wait_for_within("text:Alpha Now", IMPORT));
     step(app.press("text:/^(★ )?Alpha Two$/"));
+    step(app.wait_until(
+        "Alpha Two authorized and loaded",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0),
+    ));
     assert!(iptv_app::player_has_source(0), "Alpha Two plays");
     // A favourite of the first playlist's: full screen, the card's
     // Favourite, back to the guide.
@@ -377,6 +382,11 @@ fn stored_playlists_switch_refresh_and_go() {
 
     // Alpha Two plays; a refresh that moves it down a row keeps it playing.
     step(app.press("text:/^(★ )?Alpha Two$/"));
+    step(app.wait_until(
+        "Alpha Two authorized after playlist switch",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0),
+    ));
     assert!(iptv_app::player_has_source(0));
     let first_copy = copy_of(&data, "first.m3u");
     replace_copy(
@@ -568,6 +578,11 @@ fn stored_playlists_switch_refresh_and_go() {
     let mut app = start();
     on_pick(&mut app);
     step(app.wait_for_within("id:player-banner >> text:/Alpha Nine · first$/", IMPORT));
+    step(app.wait_until(
+        "Alpha Nine authorized and loaded",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0),
+    ));
     assert!(iptv_app::player_has_source(0), "Alpha Nine plays");
     drop(app);
 
@@ -585,6 +600,11 @@ fn stored_playlists_switch_refresh_and_go() {
     .unwrap();
     let mut app = start();
     step(app.wait_for_within("id:player-banner >> text:/Alpha One · first$/", IMPORT));
+    step(app.wait_until(
+        "Alpha One authorized and loaded",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0),
+    ));
     assert!(iptv_app::player_has_source(0), "Alpha One plays");
     drop(app);
 
@@ -644,8 +664,16 @@ fn stored_playlists_switch_refresh_and_go() {
     drop(app);
 
     // A store that cannot be opened: the first-run wizard all the same.
+    // Closing a desktop window retains the independent recording host. This
+    // fixture replaces its database, so simulate a full quit before doing so;
+    // Windows cannot unlink SQLite files while the native host owns them.
+    assert!(iptv_runtime::recordings::host::stop_background_host(&data));
     for f in ["iptv.sqlite", "iptv.sqlite-wal", "iptv.sqlite-shm"] {
-        let _ = std::fs::remove_file(data.join(f));
+        match std::fs::remove_file(data.join(f)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("could not replace synthetic database {f}: {error}"),
+        }
     }
     std::fs::create_dir_all(data.join("iptv.sqlite")).unwrap();
     let mut app = start();

@@ -15,8 +15,10 @@ use crate::Ui;
 /// A screen, popup or list that can be open above the guide and the video.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Overlay {
+    Parental,
     Wizard,
     Recordings,
+    Vod,
     GuideSources,
     GuideInspection,
     GuideRepair,
@@ -47,7 +49,8 @@ impl Overlay {
     pub(crate) fn key_context(self) -> iptv_nav::Context {
         use iptv_nav::Context;
         match self {
-            Self::Recordings
+            Self::Vod
+            | Self::Recordings
             | Self::GuideRepair
             | Self::GuideInspection
             | Self::GuideSources
@@ -56,7 +59,8 @@ impl Overlay {
             | Self::RemoteEditor
             | Self::Settings
             | Self::FavoritesEditor => Context::Editor,
-            Self::Wizard
+            Self::Parental
+            | Self::Wizard
             | Self::Playlists
             | Self::GuideAssign
             | Self::Chooser
@@ -68,9 +72,11 @@ impl Overlay {
     }
 
     /// Every overlay, topmost layer first.
-    pub(crate) const ALL: [Overlay; 18] = [
+    pub(crate) const ALL: [Overlay; 20] = [
+        Overlay::Parental,
         Overlay::Wizard,
         Overlay::Recordings,
+        Overlay::Vod,
         Overlay::GuideRepair,
         Overlay::GuideInspection,
         Overlay::GuideSources,
@@ -92,7 +98,9 @@ impl Overlay {
     /// Whether it is open (a tracked read, like each screen's `is_open`).
     pub(crate) fn is_open(self, ui: Ui) -> bool {
         match self {
+            Overlay::Parental => crate::parental_view::is_open(ui),
             Overlay::Wizard => crate::wizard_view::is_open(ui),
+            Overlay::Vod => crate::vod_view::is_open(ui),
             Overlay::Recordings => crate::recordings_view::is_open(ui),
             Overlay::GuideRepair => crate::guide_repair_view::is_open(ui),
             Overlay::GuideInspection => crate::guide_inspect_view::is_open(ui),
@@ -134,7 +142,9 @@ impl Overlay {
     /// falls through such a screen's background is not a tap on the video.
     pub(crate) fn covers_video(self) -> bool {
         match self {
-            Overlay::Wizard
+            Overlay::Parental
+            | Overlay::Wizard
+            | Overlay::Vod
             | Overlay::Recordings
             | Overlay::GuideRepair
             | Overlay::GuideInspection
@@ -164,7 +174,9 @@ impl Overlay {
     pub(crate) fn keeps_pointer_from_play_bar(self) -> bool {
         match self {
             Overlay::Description => false,
-            Overlay::Wizard
+            Overlay::Parental
+            | Overlay::Wizard
+            | Overlay::Vod
             | Overlay::Recordings
             | Overlay::GuideRepair
             | Overlay::GuideInspection
@@ -241,7 +253,9 @@ mod tests {
         // A variant missing from `ALL` would not be asked about: the match
         // makes adding one without counting it here a compile error.
         let listed = |overlay: Overlay| match overlay {
-            Overlay::Wizard
+            Overlay::Parental
+            | Overlay::Wizard
+            | Overlay::Vod
             | Overlay::Recordings
             | Overlay::GuideRepair
             | Overlay::GuideInspection
@@ -261,7 +275,7 @@ mod tests {
             | Overlay::ChannelList => Overlay::ALL.contains(&overlay),
         };
         assert!(Overlay::ALL.into_iter().all(listed));
-        assert_eq!(Overlay::ALL.len(), 18);
+        assert_eq!(Overlay::ALL.len(), 20);
     }
 
     #[test]

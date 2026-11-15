@@ -132,6 +132,16 @@ fn mutate<R: Send + 'static>(
     });
 }
 pub fn open(ui: Ui, source: SourceId, browse: bool) {
+    if !crate::runtime().parental_settings_allowed()
+        && crate::runtime().parental_blocked_targets().iter().any(|t| {
+            t.source == source.0
+                && t.kind == iptv_core::parental::ContentKind::Group
+                && t.id.starts_with("custom:")
+        })
+    {
+        crate::parental_view::protected_settings(ui, move || open(ui, source, browse));
+        return;
+    }
     advance();
     ui.custom_groups.set(Some(Open {
         source,
@@ -400,6 +410,25 @@ fn act(ui: Ui, index: usize) {
     let Some(s) = read(ui, Clone::clone) else {
         return;
     };
+    let removing = match s.page {
+        Page::Members if index == 5 => origin(&s),
+        Page::Destination(true) if index > 0 => origin(&s),
+        Page::Delete(g) if index > 0 => Some(g),
+        _ => None,
+    };
+    if let Some(group) = removing {
+        let target = iptv_core::parental::Target {
+            source: s.source.0,
+            kind: iptv_core::parental::ContentKind::Group,
+            id: format!("custom:{}", group.0),
+        };
+        if crate::runtime().parental_explicitly_blocked(&target)
+            && !crate::runtime().parental_settings_allowed()
+        {
+            crate::parental_view::protected_settings(ui, move || act(ui, index));
+            return;
+        }
+    }
     match s.page {
         Page::Groups => match index {
             0 => begin_text(ui, Text::Create),

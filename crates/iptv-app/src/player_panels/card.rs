@@ -56,7 +56,11 @@ fn programme(ui: Ui) -> (usize, Program) {
 /// the seek being chosen), else now in the live programme.
 fn progress(ui: Ui) -> f32 {
     if let Some((at, length)) = crate::seek::elapsed(ui) {
-        return at as f32 / length.max(1) as f32;
+        return if length > 0 {
+            at as f32 / length as f32
+        } else {
+            0.0
+        };
     }
     let (_, p) = programme(ui);
     let now = ui.focus.with(|f| f.now);
@@ -69,7 +73,8 @@ fn progress(ui: Ui) -> f32 {
 
 /// The one time line's kind now.
 fn line_kind(ui: Ui) -> Line {
-    let replay = matches!(ui.playback.get(), Playback::CatchUp { .. });
+    let replay =
+        matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::active(ui);
     ui.panels
         .with(|p| p.line(replay))
         .unwrap_or(if replay { Line::Seek } else { Line::Progress })
@@ -87,7 +92,11 @@ fn ends(ui: Ui) -> (String, String) {
             };
             (
                 format!("{seeking}{}", crate::seek::hms(at)),
-                crate::seek::hms(length),
+                if length > 0 {
+                    crate::seek::hms(length)
+                } else {
+                    "–:––".into()
+                },
             )
         }
         _ => {
@@ -102,7 +111,7 @@ fn ends(ui: Ui) -> (String, String) {
 
 /// The time line: a track with the programme's progress; a replay's seek
 /// bar has a dot where it plays.
-fn time_line(ui: Ui) -> View {
+pub(super) fn time_line(ui: Ui) -> View {
     let accent = move || rgb(ui.theme.with(|t| t.accent.light));
     let dot = move || line_kind(ui) == Line::Seek;
     view()
@@ -154,6 +163,9 @@ fn time_line(ui: Ui) -> View {
 }
 
 fn number_and_name(ui: Ui, channel: usize) -> String {
+    if let Some((job, _)) = ui.player.recorded.get() {
+        return job.request.channel_name;
+    }
     // As in the guide: its place in the list on screen.
     format!(
         "{}  {}",
@@ -190,7 +202,11 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
                 .bg(tint(WHITE, RESTING_ALPHA))
                 .child(
                     image(crate::content_image::source(move || {
-                        logo(channel()).unwrap_or_else(crate::grid::no_logo)
+                        if crate::on_demand::active(ui) {
+                            crate::grid::no_logo()
+                        } else {
+                            logo(channel()).unwrap_or_else(crate::grid::no_logo)
+                        }
                     }))
                     .w_full()
                     .h_full()
@@ -216,15 +232,23 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
                         .children((0..3).map(move |i| badge(ui, format, i))),
                 )
                 .child(
-                    text(move || crate::schedule().title(channel(), now()))
-                        .number_of_lines(1)
-                        .text_size(px(OSD_TITLE))
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(rgb(WHITE)),
+                    text(move || {
+                        ui.player
+                            .recorded
+                            .with(|r| r.as_ref().map(|(j, _)| j.request.title.clone()))
+                            .unwrap_or_else(|| crate::schedule().title(channel(), now()))
+                    })
+                    .number_of_lines(1)
+                    .text_size(px(OSD_TITLE))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rgb(WHITE)),
                 )
                 .child(time_line(ui))
                 .child(
                     text(move || {
+                        if crate::on_demand::active(ui) {
+                            return String::new();
+                        }
                         let p = next();
                         crate::i18n::trf(
                             "Next  {time}  {title}",

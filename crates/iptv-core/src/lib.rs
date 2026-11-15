@@ -21,6 +21,7 @@ pub mod membership;
 pub mod menu;
 pub mod multiview;
 pub mod panels;
+pub mod parental;
 pub mod pip;
 pub mod pip_window;
 pub mod play_bar;
@@ -36,4 +37,7 @@ pub mod timeline;
 pub mod tracks;
 pub mod wizard;
 
+pub mod on_demand;
 pub mod organization;
+
+pub mod vod;

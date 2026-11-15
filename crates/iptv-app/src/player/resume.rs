@@ -24,6 +24,7 @@ use crate::{Playback, Ui, ViewMode};
 pub struct Early {
     /// The channel's content key (finds it in the guide).
     pub key: String,
+    pub source_id: i64,
     pub source: PlaySource,
 }
 
@@ -32,7 +33,8 @@ pub struct Early {
 /// when it does not start (the guide's arrival resumes it, if anything).
 pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     let generation = crate::runtime().browser_generation();
-    if !crate::settings::flag(iptv_settings::keys::RESUME_LAST_CHANNEL)
+    if crate::desktop::recorder_only_startup()
+        || !crate::settings::flag(iptv_settings::keys::RESUME_LAST_CHANNEL)
         || ui.wizard.with_untracked(Option::is_some)
         || ui.playing.get_untracked().is_some()
         || ui.player.recorded.with_untracked(Option::is_some)
@@ -78,6 +80,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     ui.player.resume.set(false);
     ui.playback.set(Playback::Live);
     ui.player.early.set(Some(Early {
+        source_id: stored.id.0,
         key,
         source: source.clone(),
     }));
@@ -92,10 +95,8 @@ pub fn playing(ui: Ui) -> bool {
 }
 
 /// The early stream to open again (a retry before the guide arrived).
-pub fn source(ui: Ui) -> Option<PlaySource> {
-    ui.player
-        .early
-        .with_untracked(|e| e.as_ref().map(|e| e.source.clone()))
+pub fn source(ui: Ui) -> Option<Early> {
+    ui.player.early.get_untracked()
 }
 
 /// The guide is on screen: the early stream's channel becomes the playing

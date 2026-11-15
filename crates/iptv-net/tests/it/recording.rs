@@ -2,7 +2,7 @@
 use super::support::{Resp, TestServer};
 use iptv_net::{
     playback::PlaybackPolicy,
-    recording::{Failure, capture},
+    recording::{CaptureState, Failure, capture, capture_resume, capture_resume_with_state},
     recording_file::RecordingFile,
 };
 use std::{
@@ -22,12 +22,186 @@ fn fixture_policy() -> PlaybackPolicy {
 fn packet(value: u8) -> Vec<u8> {
     let mut p = vec![value; 188];
     p[0] = 0x47;
+    p[1] = 0x1f;
+    p[2] = 0xff;
+    p[3] = 0x10;
     p
 }
 fn output(name: &str) -> std::path::PathBuf {
     let mut random = [0; 16];
     getrandom::fill(&mut random).unwrap();
     std::env::temp_dir().join(format!("patina-generated-recording-{name}-{random:x?}"))
+}
+
+#[tokio::test]
+async fn resumed_capture_truncates_a_torn_packet_and_appends_without_overwriting() {
+    let server = TestServer::http(|_| Resp::ok(packet(7))).await;
+    let file = output("resume-torn-packet");
+    let mut original = packet(6);
+    original.extend_from_slice(&[0x47, 1, 2]);
+    std::fs::write(&file, original).unwrap();
+    assert_eq!(
+        capture_resume(
+            &server.url("/generated.ts"),
+            &[],
+            fixture_policy(),
+            &file,
+            1024
+        )
+        .await,
+        Err(Failure::Network)
+    );
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        [packet(6), packet(7)].concat()
+    );
+    std::fs::remove_file(file).unwrap();
+}
+
+#[tokio::test]
+async fn hls_retry_keeps_written_sequences_and_captures_intervening_available_segments() {
+    for advanced_window in [false, true] {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let seen = requests.clone();
+        let server = TestServer::http(move |r| {
+            if r.path == "/live.m3u8" {
+                let request = seen.fetch_add(1, Ordering::SeqCst);
+                if request == 1 {
+                    return Resp::status(503);
+                }
+                let last = if request >= 3 || (advanced_window && request == 2) {
+                    14
+                } else {
+                    12
+                };
+                let mut manifest =
+                    String::from("#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:10\n");
+                for segment in 10..=last {
+                    manifest.push_str(&format!("#EXTINF:1,\nsegment-{segment}.ts\n"));
+                }
+                if request >= 3 {
+                    manifest.push_str("#EXT-X-ENDLIST\n");
+                }
+                Resp::ok(manifest)
+            } else {
+                let sequence = r
+                    .path
+                    .strip_prefix("/segment-")
+                    .unwrap()
+                    .strip_suffix(".ts")
+                    .unwrap()
+                    .parse::<u8>()
+                    .unwrap();
+                Resp::ok(packet(sequence))
+            }
+        })
+        .await;
+        let file = output("retry-cursor");
+        let mut state = CaptureState::default();
+        for expected in [packet(12), [packet(12), packet(13), packet(14)].concat()] {
+            let outcome = tokio::time::timeout(
+                Duration::from_secs(8),
+                capture_resume_with_state(
+                    &server.url("/live.m3u8"),
+                    &[],
+                    fixture_policy(),
+                    &file,
+                    4096,
+                    &mut state,
+                ),
+            )
+            .await
+            .unwrap();
+            assert_eq!(outcome, Err(Failure::Network));
+            assert_eq!(
+                std::fs::read(&file).unwrap(),
+                expected,
+                "requests: {:?}",
+                server
+                    .requests
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|request| &request.path)
+                    .collect::<Vec<_>>()
+            );
+        }
+        let requests = server.requests.lock().unwrap();
+        for sequence in 12..=14 {
+            assert_eq!(
+                requests
+                    .iter()
+                    .filter(|request| request.path == format!("/segment-{sequence}.ts"))
+                    .count(),
+                1,
+                "every successfully written segment is fetched once across reload failure"
+            );
+        }
+        assert!(!requests.iter().any(|request| request.path == "/segment-10.ts" || request.path == "/segment-11.ts"));
+        drop(requests);
+        std::fs::remove_file(file).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn a_reported_hls_gap_recovers_the_available_window_on_the_next_retry() {
+    let seen = Arc::new(AtomicUsize::new(0));
+    let counter = seen.clone();
+    let server = TestServer::http(move |request| {
+        if request.path == "/live.m3u8" {
+            let step = counter.fetch_add(1, Ordering::SeqCst);
+            let first = match step {
+                0 => 0,
+                1 => 5,
+                _ => 8,
+            };
+            let mut manifest =
+                format!("#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:{first}\n");
+            for sequence in first..first + 3 {
+                manifest.push_str(&format!("#EXTINF:1,\nsegment-{sequence}.ts\n"));
+            }
+            if step >= 3 {
+                manifest.push_str("#EXT-X-ENDLIST\n");
+            }
+            Resp::ok(manifest)
+        } else {
+            let sequence = request
+                .path
+                .strip_prefix("/segment-")
+                .unwrap()
+                .strip_suffix(".ts")
+                .unwrap()
+                .parse::<u8>()
+                .unwrap();
+            Resp::ok(packet(sequence))
+        }
+    })
+    .await;
+    let file = output("gap-cursor");
+    let mut state = CaptureState::default();
+    for failure in [Failure::Gap, Failure::Network] {
+        assert_eq!(
+            tokio::time::timeout(
+                Duration::from_secs(8),
+                capture_resume_with_state(
+                    &server.url("/live.m3u8"),
+                    &[],
+                    fixture_policy(),
+                    &file,
+                    4096,
+                    &mut state,
+                )
+            )
+            .await
+            .unwrap(),
+            Err(failure)
+        );
+    }
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        [packet(2), packet(8), packet(9), packet(10)].concat()
+    );
+    std::fs::remove_file(file).unwrap();
 }
 
 #[tokio::test]

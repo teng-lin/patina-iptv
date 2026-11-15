@@ -5,6 +5,7 @@ import com.hantekllc.iptvrs.host.PipButton
 import com.hantekllc.iptvrs.host.PlayerEvent
 import com.hantekllc.iptvrs.host.PlayerPip
 import com.hantekllc.iptvrs.host.PlayerProps
+import com.hantekllc.iptvrs.host.PlayerSeek
 import com.hantekllc.iptvrs.host.PlayerSource
 import com.hantekllc.iptvrs.host.PlayerState
 import org.junit.Assert.assertEquals
@@ -42,6 +43,8 @@ class PlayerContractTest {
 
         override fun paused(paused: Boolean) = put("paused", paused)
 
+        override fun seek(seek: PlayerSeek?) = put("seek", seek)
+
         override fun pictureSize(mode: String) = put("pictureSize", mode)
 
         override fun videoTrack(id: String) = put("videoTrack", id)
@@ -72,6 +75,7 @@ class PlayerContractTest {
                     reconnect = true,
                 ),
             "paused" to true,
+            "seek" to PlayerSeek(37L, 9L, 12345L),
             "pictureSize" to "zoom",
             "videoTrack" to "1",
             "audioTrack" to "2",
@@ -107,6 +111,7 @@ class PlayerContractTest {
             (props["source"] as Map<*, *>).keys,
         )
         assertEquals(setOf("auto", "enter", "window"), (props["pip"] as Map<*, *>).keys)
+        assertEquals(setOf("token", "id", "ms"), (props["seek"] as Map<*, *>).keys)
 
         val source = expected["source"] as PlayerSource
         val bare = PlayerSource.from(emptyMap<String, Any?>())!!
@@ -137,6 +142,7 @@ class PlayerContractTest {
             mapOf<String, Any?>(
                 "source" to null,
                 "paused" to false,
+                "seek" to null,
                 "pictureSize" to "normal",
                 "videoTrack" to "auto",
                 "audioTrack" to "auto",
@@ -272,6 +278,7 @@ class PlayerContractTest {
                 PlayerEvent.Error("ERROR_CODE_IO_BAD_HTTP_STATUS", 404),
                 PlayerEvent.Error("ERROR_CODE_IO_NETWORK_CONNECTION_FAILED"),
                 PlayerEvent.Position(4000L),
+                PlayerEvent.Timeline(37L, 9L, 12345L, 120000L, true),
                 tracks,
                 PlayerEvent.Tracks(emptyList(), emptyList(), emptyList(), "auto", null, "off"),
                 PlayerEvent.Format(25f, 2),

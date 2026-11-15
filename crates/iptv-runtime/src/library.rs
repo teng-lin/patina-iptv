@@ -333,7 +333,11 @@ pub fn delete_source(
     owner: &super::Runtime,
     id: SourceId,
 ) -> impl std::future::Future<Output = Result<bool, StoreError>> + use<> {
-    owner.services().call(move |store| store.delete_source(id))
+    let snapshot = owner.parental_snapshot();
+    owner.services().call(move |store| {
+        crate::parental::require_admin(store, &snapshot)?;
+        store.delete_source(id)
+    })
 }
 
 pub fn edit_guides(

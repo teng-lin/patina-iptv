@@ -3,7 +3,58 @@
 use iptv_import::{BodyStream, Fetch, FetchError, FetchErrorKind, StreamingResponse};
 use iptv_providers::{HttpRequest, HttpResponse};
 use iptv_store_sqlite::{PrivateFileReader, Store, StoreError};
-use std::{io::Read, path::Path};
+use std::{
+    collections::HashMap,
+    io::Read,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock, Weak},
+};
+
+// UI and recording services own separate SQLite writers, but publication and
+// recovery of the same private document tree must share one filesystem gate.
+fn publication<T>(directory: &Path, run: impl FnOnce() -> T) -> T {
+    static TREES: OnceLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> = OnceLock::new();
+    // Use the outermost tree name: a restored subdirectory may itself be named
+    // playlists, but its writes must still exclude cleanup of the enclosing tree.
+    let root = directory
+        .ancestors()
+        .filter(|path| path.file_name().is_some_and(|name| name == "playlists"))
+        .last()
+        .unwrap_or(directory);
+    let gate = {
+        let mut trees = TREES
+            .get_or_init(Mutex::default)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        trees.retain(|_, gate| gate.strong_count() > 0);
+        if let Some(gate) = trees.get(root).and_then(Weak::upgrade) {
+            gate
+        } else {
+            let gate = Arc::new(Mutex::new(()));
+            trees.insert(root.to_owned(), Arc::downgrade(&gate));
+            gate
+        }
+    };
+    let _guard = gate
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    run()
+}
+
+pub(crate) fn prepare_store(store: Store, path: &Path) -> Result<Store, StoreError> {
+    let Some(root) = path.parent() else {
+        return Ok(store);
+    };
+    let directory = root.join("playlists");
+    publication(&directory, || {
+        cleanup_unlocked(&directory)?;
+        if !store.private_documents_sealed()? {
+            seal_clean_tree(&store, &directory)?;
+            store.mark_private_documents_sealed()?;
+        }
+        Ok(store)
+    })
+}
 
 fn failure() -> FetchError {
     FetchError::new(FetchErrorKind::Io, "Private document is unavailable")
@@ -21,8 +72,7 @@ fn remove_temporary(path: &Path) -> Result<(), StoreError> {
     }
 }
 
-/// Run on every open, even after the one-time legacy conversion completed.
-pub(crate) fn cleanup_temporary(directory: &Path) -> Result<(), StoreError> {
+fn cleanup_unlocked(directory: &Path) -> Result<(), StoreError> {
     if !directory.exists() {
         return Ok(());
     }
@@ -38,15 +88,17 @@ pub(crate) fn cleanup_temporary(directory: &Path) -> Result<(), StoreError> {
             .map_err(|_| StoreError::Unavailable("cannot inspect private documents"))?
             .is_dir()
         {
-            cleanup_temporary(&entry.path())?;
+            cleanup_unlocked(&entry.path())?;
         }
     }
     Ok(())
 }
 
 pub(crate) fn seal_tree(store: &Store, directory: &Path) -> Result<(), StoreError> {
-    cleanup_temporary(directory)?;
-    seal_clean_tree(store, directory)
+    publication(directory, || {
+        cleanup_unlocked(directory)?;
+        seal_clean_tree(store, directory)
+    })
 }
 
 fn seal_clean_tree(store: &Store, directory: &Path) -> Result<(), StoreError> {
@@ -69,13 +121,19 @@ fn seal_clean_tree(store: &Store, directory: &Path) -> Result<(), StoreError> {
         if kind.is_dir() {
             seal_clean_tree(store, &entry.path())?;
         } else if kind.is_file() {
-            seal_file(store, &entry.path())?;
+            seal_file_unlocked(store, &entry.path())?;
         }
     }
     Ok(())
 }
 
-pub(crate) fn seal_file(store: &Store, path: &Path) -> Result<(), StoreError> {
+#[cfg(test)]
+fn seal_file(store: &Store, path: &Path) -> Result<(), StoreError> {
+    publication(path.parent().unwrap_or(path), || {
+        seal_file_unlocked(store, path)
+    })
+}
+fn seal_file_unlocked(store: &Store, path: &Path) -> Result<(), StoreError> {
     seal_file_after_probe(store, path, store.read_private_file(path).map(|_| ()))
 }
 
@@ -99,7 +157,7 @@ fn seal_file_after_probe(
     // reinterpret bytes as plaintext; routine reads always fail closed.
     let mut input = std::fs::File::open(path)
         .map_err(|_| StoreError::Unavailable("cannot read legacy document"))?;
-    write_atomic(store, path, &mut input)
+    write_unlocked(store, path, &mut input)
 }
 
 pub(crate) fn write_atomic(
@@ -107,12 +165,17 @@ pub(crate) fn write_atomic(
     path: &Path,
     input: &mut impl Read,
 ) -> Result<(), StoreError> {
+    publication(path.parent().unwrap_or(path), || {
+        write_unlocked(store, path, input)
+    })
+}
+fn write_unlocked(store: &Store, path: &Path, input: &mut impl Read) -> Result<(), StoreError> {
     let temporary = path.with_file_name(format!(
         ".iptv-sealing-{}",
         path.file_name().unwrap_or_default().to_string_lossy()
     ));
-    // All producers run on the single store worker. Recovery occurs before a
-    // new write, so these names cannot belong to a concurrent publication.
+    // The tree gate excludes other producers and open-time recovery until the
+    // temporary database is closed and its atomic rename has completed.
     for suffix in ["", "-journal", "-wal", "-shm"] {
         let mut name = temporary.as_os_str().to_owned();
         name.push(suffix);

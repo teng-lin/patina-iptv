@@ -34,16 +34,7 @@ mod test_support_tests {
 }
 
 fn seal_documents(store: Store, path: &Path) -> Result<Store, StoreError> {
-    if let Some(root) = path.parent() {
-        super::private_files::cleanup_temporary(&root.join("playlists"))?;
-    }
-    if !store.private_documents_sealed()? {
-        if let Some(root) = path.parent() {
-            super::private_files::seal_tree(&store, &root.join("playlists"))?;
-        }
-        store.mark_private_documents_sealed()?;
-    }
-    Ok(store)
+    super::private_files::prepare_store(store, path)
 }
 
 /// Revalidate an encrypted pending restore; strictly validate and seal legacy
@@ -140,5 +131,125 @@ mod recovery_tests {
         }
         drop(seal_documents(store, &path).unwrap());
         assert_eq!(std::fs::read_dir(documents).unwrap().count(), 0);
+    }
+}
+
+#[cfg(test)]
+mod concurrent_services {
+    use super::*;
+    use std::io::{self, Read};
+    use std::sync::{Arc, Barrier, mpsc};
+    use std::time::Duration;
+
+    #[test]
+    fn independent_service_opens_seal_the_managed_playlist_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("generated-app");
+        let documents = root.join("playlists/generated");
+        std::fs::create_dir_all(&documents).unwrap();
+        let path = root.join("iptv.sqlite");
+        let document = documents.join("generated.m3u");
+        let key = DatabaseKey::from_bytes([0x67; 32]);
+        drop(Store::open_encrypted(&path, &key).unwrap());
+        let expected = b"#EXTM3U\nhttps://example.test/generated.ts\n".repeat(4096);
+        std::fs::write(&document, &expected).unwrap();
+        let ports = crate::Ports::new(root, |_| Ok(DatabaseKey::from_bytes([0x67; 32])));
+        let barrier = Arc::new(Barrier::new(3));
+        let tasks: Vec<_> = (0..2)
+            .map(|_| {
+                let ports = ports.clone();
+                let path = path.clone();
+                let document = document.clone();
+                let expected = expected.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    let store = open_database(&ports, &path).unwrap();
+                    let mut actual = Vec::new();
+                    store
+                        .read_private_file(&document)
+                        .unwrap()
+                        .read_to_end(&mut actual)
+                        .unwrap();
+                    assert_eq!(actual, expected);
+                })
+            })
+            .collect();
+        barrier.wait();
+        for task in tasks {
+            task.join().unwrap();
+        }
+        assert!(std::fs::read(&document).unwrap() != expected);
+    }
+
+    #[test]
+    fn service_recovery_cannot_remove_an_active_encrypted_publication() {
+        struct HeldInput {
+            ready: Option<mpsc::Sender<()>>,
+            release: mpsc::Receiver<()>,
+            bytes: &'static [u8],
+        }
+        impl Read for HeldInput {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+                if let Some(ready) = self.ready.take() {
+                    ready.send(()).unwrap();
+                    self.release
+                        .recv_timeout(Duration::from_secs(5))
+                        .map_err(|_| io::ErrorKind::TimedOut)?;
+                }
+                self.bytes.read(buffer)
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("generated-app");
+        let documents = root.join("playlists/generated/playlists");
+        std::fs::create_dir_all(&documents).unwrap();
+        let path = root.join("iptv.sqlite");
+        let document = documents.join("generated.m3u");
+        let store = Store::open_encrypted(&path, &DatabaseKey::from_bytes([0x68; 32])).unwrap();
+        store.mark_private_documents_sealed().unwrap();
+        drop(store);
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let writer_path = path.clone();
+        let writer_document = document.clone();
+        let writer = std::thread::spawn(move || {
+            let store =
+                Store::open_encrypted(writer_path, &DatabaseKey::from_bytes([0x68; 32])).unwrap();
+            super::super::private_files::write_atomic(
+                &store,
+                &writer_document,
+                &mut HeldInput {
+                    ready: Some(ready_tx),
+                    release: release_rx,
+                    bytes: b"#EXTM3U\nhttps://example.test/generated.ts\n",
+                },
+            )
+            .unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        let ports = crate::Ports::new(root, |_| Ok(DatabaseKey::from_bytes([0x68; 32])));
+        let (done_tx, done_rx) = mpsc::channel();
+        let opener = std::thread::spawn(move || {
+            let store = open_database(&ports, &path).unwrap();
+            done_tx.send(()).unwrap();
+            store
+        });
+        assert!(
+            done_rx.recv_timeout(Duration::from_millis(100)).is_err(),
+            "recovery must wait for the active publisher"
+        );
+        assert!(documents.join(".iptv-sealing-generated.m3u").exists());
+        release_tx.send(()).unwrap();
+        writer.join().unwrap();
+        let store = opener.join().unwrap();
+        let mut actual = Vec::new();
+        store
+            .read_private_file(&document)
+            .unwrap()
+            .read_to_end(&mut actual)
+            .unwrap();
+        assert_eq!(actual, b"#EXTM3U\nhttps://example.test/generated.ts\n");
+        assert!(!documents.join(".iptv-sealing-generated.m3u").exists());
     }
 }

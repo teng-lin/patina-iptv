@@ -4,12 +4,18 @@ use crate::{Ui, runtime::RuntimeEvent};
 pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
     match event {
         RuntimeEvent::ResumeChannel(channel) => {
-            if ui.playing.get_untracked().is_none() {
+            if !crate::desktop::recorder_only_startup() && ui.playing.get_untracked().is_none() {
                 ui.play(channel, crate::Playback::Live);
             }
         }
         RuntimeEvent::SchedulePresented(steps) => crate::startup::shown(&steps),
-        RuntimeEvent::CatalogChanged => ui.data_version.update(|version| *version += 1),
+        RuntimeEvent::CatalogChanged => {
+            ui.data_version.update(|version| *version += 1);
+            crate::data::spawn_in_app(async move {
+                let _ = crate::runtime().parental_refresh().await;
+                crate::parental_view::enforce(ui);
+            });
+        }
         RuntimeEvent::EarlyResume { source, done } => crate::data::spawn_in_app(async move {
             crate::player::resume::early(ui, &source).await;
             let _ = done.send(());
@@ -78,8 +84,10 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::FirstRun => crate::wizard_view::open_first_run(ui),
         RuntimeEvent::Notify(message) => crate::settings_view::notify(crate::i18n::tr(message)),
         RuntimeEvent::ResumeFullscreen => {
-            ui.mode.set(crate::ViewMode::Fullscreen);
-            ui.show_playing();
+            if !crate::desktop::recorder_only_startup() {
+                ui.mode.set(crate::ViewMode::Fullscreen);
+                ui.show_playing();
+            }
         }
         RuntimeEvent::GuideChanged => ui.guide_pages.update(|version| *version += 1),
         RuntimeEvent::LibraryChanged => ui.library.version.update(|version| *version += 1),

@@ -58,7 +58,9 @@ fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
         _ => "guide.stay_on_list",
     };
     Policy {
-        autoplay: surface != Some(Surface::Player) && s.bool(keys::AUTOPLAY, at),
+        autoplay: !crate::desktop::recorder_only_startup()
+            && surface != Some(Surface::Player)
+            && s.bool(keys::AUTOPLAY, at),
         delay_ms: s.duration_ms(keys::SWITCH_DELAY, at).max(0) as u64,
         fullscreen_ms: if surface == Some(Surface::Player) {
             0

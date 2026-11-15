@@ -28,6 +28,7 @@ pub enum MenuItem {
     // Channel.
     ToggleFavorite,
     BlockChannel,
+    BlockGroup,
     HideChannel,
     AssignEpg,
     ChannelOptions,
@@ -186,6 +187,7 @@ pub fn program_menu(
         [
             ManageFavorites,
             ManageBlocked,
+            BlockGroup,
             ManageHidden,
             ReorderChannels,
             CopyChannels,

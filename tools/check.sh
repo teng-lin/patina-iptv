@@ -19,6 +19,10 @@ bash tools/ci/lint.sh
 cargo clippy --locked --workspace --all-targets --features iptv-app/test-support -- -D warnings
 cargo deny --locked check
 cargo test --locked --features iptv-runtime/test-support -p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-providers -p iptv-guide -p iptv-import -p iptv-net -p iptv-store-sqlite -p iptv-sqlcipher-init -p iptv-search -p iptv-player-mpv -p iptv-library -p iptv-runtime --quiet
+# Run the large repair/display lane independence scenario in isolation.
+cargo test --locked -p iptv-runtime --features test-support --lib \
+  guide_repair::tests::repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive \
+  -- --ignored --exact
 for c in iptv-core iptv-nav iptv-settings iptv-epg iptv-providers iptv-guide iptv-import iptv-search iptv-library; do
   cargo build --locked -p "$c" --target wasm32-unknown-unknown --quiet
 done

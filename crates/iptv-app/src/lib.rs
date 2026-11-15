@@ -40,7 +40,9 @@ mod list_rows;
 mod lists;
 mod media;
 mod menu_view;
+pub(crate) mod parental_view;
 mod recordings_view;
+mod vod_view;
 use iptv_runtime as runtime;
 mod runtime_events;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", windows))]
@@ -49,6 +51,7 @@ mod multiview;
 mod multiview_picker;
 mod multiview_view;
 mod numbers;
+mod on_demand;
 mod organization_view;
 mod overlays;
 mod panels;
@@ -60,6 +63,7 @@ mod player_keys;
 mod player_panels;
 mod playlists_view;
 mod rail;
+mod recording_host;
 mod remote_editor;
 mod scale;
 mod search_view;
@@ -209,6 +213,7 @@ pub struct Ui {
     /// The programme description popover, if open.
     pub description: Signal<Option<Origin>>,
     pub recordings: Signal<iptv_core::recording::Screen>,
+    pub vod: Signal<iptv_core::vod::Screen>,
     pub recordings_open: Memo<bool>,
     /// The favourite channels on screen (catalog channels); kept by key
     /// and changed through `favorites.rs`.
@@ -251,6 +256,7 @@ pub struct Ui {
     /// Bumped when a setting changes; read values with `settings::read`.
     pub settings: Signal<u64>,
     /// The settings screen, when open.
+    pub parental: Signal<Option<parental_view::Open>>,
     pub settings_screen: Signal<Option<iptv_settings::screen::Screen>>,
     /// Each player surface's stream, health, position, size and tracks;
     /// the channel history (`player.rs`).
@@ -325,6 +331,21 @@ impl Ui {
 
     /// Starts `channel` live or from the archive.
     pub fn play(&self, channel: usize, playback: Playback) {
+        if self.player_surface == 0
+            && self
+                .playing
+                .get_untracked()
+                .is_some_and(|old| old != channel)
+            && let Some(old) = self
+                .playing
+                .get_untracked()
+                .and_then(|old| parental_view::live_target(*self, old))
+        {
+            crate::runtime().parental_content_left(&old);
+        }
+        if !parental_view::allow_play(*self, channel, playback) {
+            return;
+        }
         if self.player_surface != 0 {
             self.pending_zap.set(None);
             if player::start_surface(*self, self.player_surface, channel) {
@@ -336,6 +357,8 @@ impl Ui {
         if !recordings_view::reserve_viewing(*self, 0, channel) {
             return;
         }
+        crate::on_demand::flush(*self, false);
+        self.player.vod.set(None);
         self.player.recorded.set(None);
         crate::runtime().close_recording_playback();
         self.pending_zap.set(None);
@@ -488,8 +511,15 @@ pub(crate) fn with_runtime<R>(owner: Rc<runtime::Runtime>, run: impl FnOnce() ->
     run()
 }
 
-fn new_runtime(directory: std::path::PathBuf) -> runtime::Runtime {
+pub(crate) fn new_runtime(directory: std::path::PathBuf) -> runtime::Runtime {
     let mut ports = runtime::Ports::new(directory, credential_key::database_key);
+    ports.background_recordings = cfg!(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "macos",
+        windows
+    ));
+    ports.recording_schedule = recording_host::schedule;
     ports.exclude_from_backup = platform_data::exclude_from_backup;
     ports.startup_mark = |phase, detail| startup::mark_with(phase, detail);
     runtime::Runtime::new(ports)
@@ -704,6 +734,7 @@ fn ready_app() -> impl IntoElement {
         menu: signal(None),
         description: signal(None),
         recordings,
+        vod: signal(iptv_core::vod::Screen::default()),
         recordings_open,
         favorites: signal(BTreeSet::new()),
         has_vod: signal(false),
@@ -728,6 +759,7 @@ fn ready_app() -> impl IntoElement {
         guide_assign: signal(None),
         library: data::Library::new(),
         settings: signal(0),
+        parental: signal(None),
         settings_screen: signal(None),
         player: player::Player::new(),
         player_surface: 0,
@@ -741,7 +773,7 @@ fn ready_app() -> impl IntoElement {
     };
     settings::bind(ui);
     browse_playback::bind(ui);
-    desktop::bind();
+    desktop::bind(ui);
     desktop::menus(ui);
     // Leaving full screen closes the panels.
     effect(move || {
@@ -913,6 +945,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(play_bar::layer(ui))
         .child(fav_editor::layer(ui))
         .child(settings_view::layer(ui))
+        .child(vod_view::layer(ui))
         .child(recordings_view::layer(ui))
         .child(guide_assign_view::layer(ui))
         // The playlists screen opens over settings, a guide sources screen
@@ -926,6 +959,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(guide_repair_view::layer(ui))
         .child(wizard_view::layer(ui))
         .child(recordings_view::indicator(ui))
+        .child(parental_view::layer(ui))
 }
 
 /// A tap on full-screen video: the play bar on a device with a pointer,
@@ -1032,7 +1066,12 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             || ui.chooser.with(Option::is_some)
             || ui.editor.with(Option::is_some);
         match (ui.mode.get(), ui.focus.with(|f| f.pane), panels || menu) {
+            _ if top == Some(Overlay::Parental) => {
+                parental_view::close(ui);
+                true
+            }
             _ if top == Some(Overlay::Wizard) => wizard_view::back(ui),
+            _ if top == Some(Overlay::Vod) => vod_view::back(ui),
             _ if top == Some(Overlay::Recordings) => recordings_view::back(ui),
             _ if top == Some(Overlay::GuideSources) => epg_sources_view::back(ui),
             _ if top == Some(Overlay::GuideRepair) => guide_repair_view::back(ui),

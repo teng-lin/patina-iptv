@@ -343,7 +343,7 @@ fn rail_items_follow_the_playlist() {
     };
     assert_eq!(
         f.tap_rail(2, &cols, &SyntheticList),
-        Outcome::None,
+        Outcome::Open(Movies),
         "Movies"
     );
     assert_eq!(f.tap_rail(0, &cols, &SyntheticList), Outcome::Open(Search));

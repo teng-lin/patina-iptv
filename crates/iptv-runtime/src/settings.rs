@@ -115,6 +115,7 @@ fn settle(result: Result<(), WriteError>) -> Settled {
 #[derive(Debug)]
 pub enum SaveError {
     Invalid(SettingsError),
+    ParentalLocked,
     Storage(std::io::ErrorKind),
     /// Published to disk, but directory synchronization failed.
     Durability(std::io::ErrorKind),
@@ -151,6 +152,9 @@ impl From<WriteError> for SaveError {
 impl std::fmt::Display for SaveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ParentalLocked => {
+                f.write_str("Unlock parental controls before changing settings")
+            }
             Self::Invalid(error) => error.fmt(f),
             Self::Storage(kind) => write!(f, "Could not save settings ({kind})"),
             Self::Durability(kind) => write!(
@@ -172,6 +176,11 @@ pub(crate) fn set(
     key: &str,
     value: Value,
 ) -> Result<(), SaveError> {
+    let protect_all = owner.settings().get("parental.require_pin_for").ok()
+        == Some(Value::Enum("blocked_content_and_settings".into()));
+    if (key.starts_with("parental.") || protect_all) && !owner.parental_settings_allowed() {
+        return Err(SaveError::ParentalLocked);
+    }
     if let Some(error) = owner.settings_read_only.get() {
         return Err(SaveError::Storage(error));
     }
@@ -181,6 +190,9 @@ pub(crate) fn set(
     let json = next.to_json_string();
     let next = Arc::new(next);
     replace(services.shared_settings(), next.clone());
+    if key.starts_with("parental.") {
+        owner.parental_policy_changed();
+    }
     if !changes.is_empty() {
         log::info!("iptv settings: {key} changed");
         owner.emit(super::RuntimeEvent::SettingsChanged);

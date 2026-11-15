@@ -174,6 +174,17 @@ fn start_import_with(
             let owner = owner.clone();
             async move {
                 let services = owner.services();
+                let authorization = owner.parental_snapshot();
+                let admission = job.clone();
+                let auth = authorization.clone();
+                if services
+                    .read(move |store| crate::parental::require_import(store, &admission, &auth))
+                    .await
+                    .is_err()
+                {
+                    let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(FailureKind::Auth))));
+                    return;
+                }
                 if job.purpose.shows_stored_first()
                     && let Some(id) = job.stored
                     && opening::send_stored(&services, &job, id, now_unix(), &tx, &cancel, &revoked)
@@ -186,7 +197,9 @@ fn start_import_with(
                 }
                 let failed = tx.clone();
                 let worker = services.clone();
-                if !services.submit(visible, move || run(&worker, job, &tx, &cancel, &revoked)) {
+                if !services.submit(visible, move || {
+                    run(&worker, job, &tx, &cancel, &revoked, authorization)
+                }) {
                     let _ = failed.send(Msg::Playlist(Err(ImportFailure::new(FailureKind::Busy))));
                 }
             }

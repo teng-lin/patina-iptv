@@ -15,6 +15,10 @@ use std::time::Duration;
 #[test]
 fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
     crate::isolated::initialize_key();
+    let _ = env_logger::builder()
+        .is_test(true)
+        .filter_level(log::LevelFilter::Info)
+        .try_init();
     let phase = std::env::var("IPTV_BACKUP_PHASE").ok();
     if phase.is_none() {
         let directory = tempfile::tempdir().unwrap();

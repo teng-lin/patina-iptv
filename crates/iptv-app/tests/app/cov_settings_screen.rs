@@ -161,9 +161,12 @@ fn menu(app: &mut Headless) {
     assert!(app.screen().matches("role:menuitem").unwrap());
     step(app.wait_for("text:/^Quiet Harbour · /"));
     step(app.wait_for("text:Test Channel One >> nth=1"));
-    step(app.press("text:Block channel"));
+    step(app.press("text:Open in another player"));
     step(app.wait(Duration::from_millis(100)));
-    assert!(app.shows("Block channel"), "a disabled item keeps the menu");
+    assert!(
+        app.shows("Open in another player"),
+        "a disabled item keeps the menu"
+    );
     // Favourites: added, and the menu then offers to remove it.
     step(app.press("text:Add to favourites"));
     step(app.wait_for_gone("text:Manage favourites…", GONE));
@@ -543,10 +546,11 @@ fn guide_data(app: &mut Headless, home: &Path) {
 }
 
 fn other_pages(app: &mut Headless) {
-    // Parental control: planned for later.
+    // Parental controls now expose working PIN and protection settings.
     step(app.press("text:Parental control >> nth=0"));
-    step(app.wait_for("text:In a later version"));
-    step(app.wait_for("text:/ settings here, none available yet$/"));
+    step(app.wait_for("text:Set the PIN"));
+    step(app.wait_for("text:Protect live channels"));
+    step(app.wait_for("text:Protect movies and series"));
     // About: the compiled version and source commit.
     step(app.press("text:About >> nth=0"));
     step(app.wait_for(&format!(

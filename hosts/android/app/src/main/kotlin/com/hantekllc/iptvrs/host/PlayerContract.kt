@@ -76,6 +76,24 @@ internal data class PlayerPip(
     }
 }
 
+/** An idempotent native seek scoped to the exact source. */
+internal data class PlayerSeek(
+    val token: Long,
+    val id: Long,
+    val ms: Long,
+) {
+    companion object {
+        fun from(value: Any?): PlayerSeek? {
+            val map = value as? Map<*, *> ?: return null
+            val token = (map["token"] as? Number)?.toLong() ?: return null
+            val id = (map["id"] as? Number)?.toLong() ?: return null
+            val ms = (map["ms"] as? Number)?.toLong() ?: return null
+            if (token < 0 || id <= 0 || ms < 0) return null
+            return PlayerSeek(token, id, ms)
+        }
+    }
+}
+
 /**
  * The props of `tv.player`, one typed setter each. [setProp] is the only
  * place a prop's name is matched: a player implements the setters, and a
@@ -86,6 +104,8 @@ internal interface PlayerProps {
     fun source(source: PlayerSource?)
 
     fun paused(paused: Boolean)
+
+    fun seek(seek: PlayerSeek?)
 
     /** "normal", "full", "zoom", "cinema", "reduced", "4:3", "16:9" or "2.35:1". */
     fun pictureSize(mode: String)
@@ -121,6 +141,7 @@ internal interface PlayerProps {
         when (name) {
             "source" -> source(PlayerSource.from(value))
             "paused" -> paused(value == true)
+            "seek" -> seek(PlayerSeek.from(value))
             "pictureSize" -> pictureSize((value as? String) ?: "normal")
             "videoTrack" -> videoTrack((value as? String) ?: PlayerTracks.AUTO)
             "audioTrack" -> audioTrack((value as? String) ?: PlayerTracks.AUTO)
@@ -221,6 +242,23 @@ internal sealed class PlayerEvent(
         val ms: Long,
     ) : PlayerEvent("position") {
         override fun data(): Map<String, Any?> = mapOf("ms" to ms)
+    }
+
+    data class Timeline(
+        val token: Long,
+        val seekId: Long,
+        val ms: Long,
+        val durationMs: Long?,
+        val seekable: Boolean,
+    ) : PlayerEvent("timeline") {
+        override fun data(): Map<String, Any?> =
+            mapOf(
+                "token" to token,
+                "seekId" to seekId,
+                "ms" to ms,
+                "durationMs" to durationMs,
+                "seekable" to seekable,
+            )
     }
 
     /** The open stream's tracks and what plays; a null number is unknown. */

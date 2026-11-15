@@ -10,6 +10,7 @@ mod common;
 
 mod epg;
 mod m3u;
+mod on_demand;
 mod stalker;
 mod xtream;
 

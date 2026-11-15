@@ -109,6 +109,13 @@ impl PlaybackContext {
     }
 
     /// Keeps a session that re-authenticated while resolving a link.
+    pub fn stalker_session(&self) -> Option<StalkerSession> {
+        match &self.inner {
+            Inner::Stalker { session } => Some((**session.borrow()).clone()),
+            _ => None,
+        }
+    }
+
     pub fn update_stalker_session(&self, updated: StalkerSession) {
         if let Inner::Stalker { session } = &self.inner {
             **session.borrow_mut() = updated;

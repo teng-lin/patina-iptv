@@ -24,8 +24,7 @@ pub struct ImportOptions {
     pub now: i64,
     /// Xtream/Stalker movie categories and lists.
     pub include_vod: bool,
-    /// Xtream series categories and lists (Stalker series arrive as VOD
-    /// rows with `is_series`).
+    /// Xtream and native Stalker series categories and lists.
     pub include_series: bool,
     /// Upper bound for a Stalker channel crawl.
     pub stalker_channel_cap: usize,

@@ -288,6 +288,7 @@ fn vod_item(o: impl Fields, stream_id: u64, name: String) -> VodItem {
         duration_secs: duration(o),
         stream: vod_locator(o, stream_id),
         is_series: false,
+        episode_numbers: Vec::new(),
     }
 }
 

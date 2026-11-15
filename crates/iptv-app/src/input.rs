@@ -120,6 +120,12 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     if phase != Phase::Up {
         crate::browse_playback::activity(ui);
     }
+    if crate::parental_view::is_open(ui) {
+        if phase == Phase::Down {
+            crate::parental_view::remote(ui, key);
+        }
+        return;
+    }
     if crate::remote_editor::captures(ui) {
         if phase == Phase::Down {
             crate::remote_editor::capture(ui, key);
@@ -239,6 +245,14 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
     use crate::overlays::Overlay;
     let top = ui.top_overlay();
     let mv = |m: Move| crate::lists::navigate(ui, m);
+    if top == Some(Overlay::Vod) {
+        crate::vod_view::key(ui, action);
+        return;
+    }
+    if top == Some(Overlay::Parental) {
+        crate::parental_view::key(ui, action);
+        return;
+    }
     if top == Some(Overlay::Recordings) {
         crate::recordings_view::key(ui, action);
         return;

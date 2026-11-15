@@ -17,6 +17,9 @@ impl Runtime {
     }
     pub fn set_foreground(&self, foreground: bool) {
         self.foreground.set(foreground);
+        if !foreground {
+            self.parental_backgrounded();
+        }
     }
     pub fn cancel_link_resolution(&self, surface: usize) {
         let running = self
@@ -102,7 +105,20 @@ impl Runtime {
         &self,
     ) -> impl FnOnce() -> Result<(), crate::backup::StartupError> + Send + 'static + use<> {
         let ports = self.services().ports().clone();
-        move || crate::backup::startup(&ports)
+        move || {
+            if crate::backup::is_pending(&ports.directory)
+                && !crate::recordings::host::stop_background_host(&ports.directory)
+            {
+                return Err(crate::backup::StartupError {
+                    error: iptv_core::i18n::key(
+                        "Recording host did not close; restart Patina before restoring",
+                    )
+                    .into(),
+                    fatal: true,
+                });
+            }
+            crate::recordings::host::activate_storage(&ports)
+        }
     }
 
     /// Reuses connections across Stalker zaps; a settings change replaces
