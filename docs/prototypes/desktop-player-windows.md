@@ -20,6 +20,17 @@ Back, Escape and a double-click restore the auxiliary window's previous bounds
 and fullscreen/maximized mode. Close stops only that session. The video host,
 decoder and stream stay the same throughout these presentation changes.
 
+Keyboard playback, sound and channel controls target the focused player window.
+In normal mode, Escape dismisses its chooser/list before leaving native
+fullscreen or closing the window. Primary-only Search and Multiview actions are
+disabled in auxiliary players. Catalogue refreshes restore local browsing by
+channel/group identity; main-window editors do not cover popup controls.
+
+Native Mac validation of the initial compact implementation found 600×306
+geometry instead of 600×338 and a 32-point height increase on repeated returns.
+These remain known native presentation defects; automated geometry checks do
+not establish correct AppKit sizing or settled fullscreen restoration.
+
 macOS uses native floating levels; X11 requests above/sticky window-manager
 hints and removes them on return. Wayland floating, positioning and always-on-top
 behavior remain compositor policy, as with the primary PiP. The window uses the
@@ -55,6 +66,9 @@ IPC adapter gives newly floating PiPs distinct initial slots within the display
 work area, preserving already arranged windows. It targets only this process
 and never edits compositor rules. Other Wayland compositors retain their own
 placement policy.
+The adapter serializes compositor snapshots with its placement cache, accounts
+for display rotation/scaling, and fits each window's existing aspect ratio
+inside its initial slot.
 
 ## Mac video and lifecycle
 

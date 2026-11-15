@@ -10,7 +10,10 @@ pub fn mounted(ui: Ui, surface: usize) -> bool {
 }
 
 pub fn can_open(ui: Ui, channel: usize) -> bool {
-    if !cfg!(any(target_os = "linux", target_os = "macos")) || crate::multiview::session(ui) {
+    if ui.player_surface != 0
+        || !cfg!(any(target_os = "linux", target_os = "macos"))
+        || crate::multiview::session(ui)
+    {
         return false;
     }
     let Some(key) = crate::schedule().channel_key(channel) else {
@@ -83,6 +86,32 @@ fn follow_clock(
             local.update(|f| {
                 f.tick(now, &view());
             });
+        });
+    });
+}
+
+fn follow_lists(local: Ui) {
+    let catalog = std::cell::RefCell::new(crate::schedule());
+    effect(move || {
+        local.data_version.get();
+        local.list_version.get();
+        untracked(|| {
+            let next = crate::schedule();
+            let previous = catalog.replace(next.clone());
+            if !std::rc::Rc::ptr_eq(&previous, &next) {
+                let kept = crate::lists::keep_in(local, previous);
+                crate::lists::restore(local, kept);
+                // These open presentations also contain catalogue row indices.
+                local.channels.set(None);
+                local.menu.set(None);
+                local.description.set(None);
+                local.chooser.set(None);
+            } else if matches!(
+                iptv_core::lists::Entry::at(local.focus.with_untracked(|f| f.group)),
+                iptv_core::lists::Entry::Favorites | iptv_core::lists::Entry::Recent
+            ) {
+                crate::lists::rebuild(local, true);
+            }
         });
     });
 }
@@ -207,9 +236,21 @@ fn bind_pip(parent: Ui, local: Ui, id: SessionId, window: nsh_core::element::des
     let was_compact = std::cell::Cell::new(false);
     let key_window = window.clone();
     on_key("escape", move |_| {
-        if !crate::pip::exit(local, iptv_core::pip_window::Exit::BackToApp) {
-            key_window.close();
+        if crate::pip::exit(local, iptv_core::pip_window::Exit::BackToApp) {
+            return;
         }
+        if local.top_overlay().is_some() {
+            crate::go_back(local);
+            return;
+        }
+        if key_window
+            .state()
+            .is_some_and(|s| s.mode == WindowMode::FullScreen)
+        {
+            key_window.set_mode(WindowMode::Normal);
+            return;
+        }
+        key_window.close();
     });
     effect(move || {
         let compact = crate::pip::in_window(local);
@@ -289,6 +330,10 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
     local.focus = signal(parent.focus.get_untracked());
     local.list = signal(parent.list.get_untracked());
     follow_clock(parent.focus, local.focus, move || crate::lists::view(local));
+    local.guide_panning = signal(false);
+    local.visible_rows = signal(None);
+    local.stats = signal(Default::default());
+    local.back_guard = signal(Default::default());
     local.panels = signal(Default::default());
     local.play_bar = signal(Default::default());
     local.channels = signal(None);
@@ -302,6 +347,18 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
     local.wizard = signal(None);
     local.playlists = signal(None);
     local.settings_screen = signal(None);
+    // These screens belong to the main window. Its open state must never
+    // capture keys or cover controls in an auxiliary player's presentation.
+    local.editor = signal(None);
+    local.organization = signal(None);
+    local.custom_groups = signal(None);
+    local.remote_editor = signal(None);
+    local.guide_sources = signal(None);
+    local.guide_inspect = signal(None);
+    local.guide_repair = signal(None);
+    local.guide_assign = signal(None);
+    local.guide_repair_cancel = stored(None);
+    local.guide_inspect_cancel = stored(None);
     local.pip = signal(Default::default());
     local.seek_target = signal(None);
     local.sleep = signal(Default::default());
@@ -345,6 +402,8 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
         }
     });
     let window = nsh_core::element::desktop::current_window();
+    follow_lists(local);
+    crate::input::bind(local);
     crate::pip::bind(local);
     bind_pip(parent, local, id, window.clone());
     let back_window = window.clone();
@@ -377,6 +436,16 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
         .flex_1()
         .test_id(&format!("auxiliary-player-{}", id.0))
         .bg(rgb(0x000000))
+        .on_mouse_enter(move |_: &MouseEvent| {
+            if !crate::pip::in_window(local)
+                && !untracked(|| {
+                    local.overlay_open(crate::overlays::Overlay::keeps_pointer_from_play_bar)
+                })
+            {
+                local.touched();
+                crate::play_bar::pointer_moved(local);
+            }
+        })
         .on_mouse_move(move |event: &MouseEvent| {
             if !crate::pip::in_window(local) {
                 crate::pointer_moved(local, event);

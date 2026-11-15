@@ -182,6 +182,8 @@ pub struct Ui {
     pub guide_panning: Signal<bool>,
     /// The list the guide shows: catalog channels (`lists.rs`).
     pub list: Signal<Rc<ChannelList>>,
+    /// Ordered favourites/recent lists changed, including while a popup owns its list.
+    pub list_version: Signal<u64>,
     /// The playing channel (catalog).
     pub playing: Signal<Option<usize>>,
     pub input: Signal<Input>,
@@ -325,9 +327,10 @@ impl Ui {
     pub fn play(&self, channel: usize, playback: Playback) {
         if self.player_surface != 0 {
             self.pending_zap.set(None);
-            self.playback.set(Playback::Live);
-            self.paused.set(false);
-            player::start_surface(*self, self.player_surface, channel);
+            if player::start_surface(*self, self.player_surface, channel) {
+                self.playback.set(Playback::Live);
+                self.paused.set(false);
+            }
             return;
         }
         if !recordings_view::reserve_viewing(*self, 0, channel) {
@@ -662,6 +665,7 @@ fn ready_app() -> impl IntoElement {
             &[],
             &[],
         ))),
+        list_version: signal(0),
         playing: signal(None),
         // An iPad is touched first: no remote hints until a key is used.
         input: signal(if cfg!(target_os = "ios") {
@@ -1045,7 +1049,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 multiview_picker::key(ui, iptv_nav::Action::Back);
                 true
             }
-            _ if desktop::fullscreen() => {
+            _ if ui.player_surface == 0 && desktop::fullscreen() => {
                 desktop::set_fullscreen(false);
                 true
             }

@@ -201,6 +201,7 @@ pub fn start(ui: &Ui, channel: usize) {
                 save_last_channel(ui.library.shown.get_untracked(), &key);
             }
             crate::favorites::played(&key);
+            ui.list_version.update(|v| *v += 1);
         }
     }
     open(ui, 0, session);

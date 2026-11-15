@@ -2,7 +2,7 @@
 //! asked for cancels that request: the portal sees its connection close.
 //! Only generated catalogues and a local mock portal are used.
 use std::{
-    io::{Read, Write},
+    io::{ErrorKind, Read, Write},
     net::{TcpListener, TcpStream},
     sync::{Arc, Condvar, Mutex},
     time::Duration,
@@ -82,7 +82,10 @@ fn answer(mut stream: TcpStream, state: &(Mutex<Slow>, Condvar)) {
             state.0.lock().unwrap().asked = true;
             state.1.notify_all();
             // No answer: wait until the app hangs up (or the test ends).
-            let closed = matches!(stream.read(&mut buffer), Ok(0) | Err(_));
+            // Several individually scaled waits can follow this request.
+            // A mock-server deadline is not evidence of app cancellation.
+            let budget = crate::isolated::scaled_duration(WAIT.saturating_mul(8));
+            let closed = wait_for_cancel(&mut stream, budget);
             state.0.lock().unwrap().abandoned = closed;
             state.1.notify_all();
             return;
@@ -103,6 +106,35 @@ fn answer(mut stream: TcpStream, state: &(Mutex<Slow>, Condvar)) {
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
+}
+
+fn wait_for_cancel(stream: &mut TcpStream, budget: Duration) -> bool {
+    stream.set_read_timeout(Some(budget)).unwrap();
+    loop {
+        match stream.read(&mut [0; 256]) {
+            Ok(0) => return true,
+            Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+            Err(error) => {
+                return matches!(
+                    error.kind(),
+                    ErrorKind::ConnectionReset
+                        | ErrorKind::ConnectionAborted
+                        | ErrorKind::BrokenPipe
+                );
+            }
+            Ok(_) => {}
+        }
+    }
+}
+
+#[test]
+fn a_mock_read_timeout_does_not_mean_the_application_cancelled() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut server, _) = listener.accept().unwrap();
+    assert!(!wait_for_cancel(&mut server, Duration::from_millis(30)));
+    drop(client);
+    assert!(wait_for_cancel(&mut server, Duration::from_secs(1)));
 }
 
 fn start_portal(home: &crate::isolated::Home) -> (Headless, Arc<(Mutex<Slow>, Condvar)>) {

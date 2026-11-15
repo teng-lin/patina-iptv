@@ -578,7 +578,11 @@ fn right(ui: Ui) -> impl IntoElement {
                 ui,
                 "Multiview",
                 || Icon::Multiview,
-                move || ui.player_surface == 0 && playing(),
+                move || {
+                    ui.player_surface == 0
+                        && playing()
+                        && ui.player_windows.with(|w| w.sessions().is_empty())
+                },
                 size,
                 move || {
                     ui.play_bar.update(PlayBar::hide);

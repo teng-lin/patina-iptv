@@ -168,7 +168,11 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
         nsh_core::desktop::WindowMode::FullScreen
     );
     assert_eq!(app.window_state("main").unwrap().unwrap().mode, main_mode);
-    step(app.press("label:Full screen"));
+    step(app.press_key("escape"));
+    assert_eq!(
+        app.window_state("player-window-1").unwrap().unwrap().mode,
+        nsh_core::desktop::WindowMode::Normal
+    );
 
     // These are the original player's controls, rather than a separate toolbar.
     step(app.press("label:Play or pause"));
@@ -179,6 +183,51 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     step(app.press("label:Play or pause"));
     app.settle();
     assert_eq!(prop(&props, 1, "paused"), json!(false));
+
+    // Keyboard playback and sound shortcuts belong to the focused popup.
+    step(app.press_key("space"));
+    app.settle();
+    assert_eq!(prop(&props, 1, "paused"), json!(true));
+    assert_eq!(prop(&props, 0, "paused"), json!(false));
+    step(app.press_key("space"));
+    step(app.press_key("ctrl+down"));
+    app.settle();
+    assert_eq!(prop(&props, 1, "volume"), json!(95));
+    assert_eq!(prop(&props, 0, "volume"), json!(100));
+    step(app.press_key("ctrl+up"));
+    step(app.hover("id:auxiliary-player-1 >> label:Video"));
+    if !app
+        .screen()
+        .matches("id:auxiliary-player-1 >> label:Subtitles and tracks")
+        .unwrap()
+    {
+        step(app.press("id:auxiliary-player-1 >> label:Video"));
+    }
+
+    // A main-window editor is not an invisible overlay in this player.
+    step(app.right_click("id:guide-ui >> label:Local A"));
+    step(app.press("text:Manage favourites…"));
+    step(app.wait_for("text:Tap a channel to add or remove it"));
+    step(app.hover("text:Tap a channel to add or remove it"));
+    app.idle(Duration::from_secs(3)).unwrap();
+    step(app.hover("id:auxiliary-player-1 >> label:Video"));
+    step(app.wait_for("id:auxiliary-player-1 >> label:Play or pause"));
+    step(app.press("id:auxiliary-player-1 >> label:Play or pause"));
+    app.settle();
+    assert_eq!(prop(&props, 1, "paused"), json!(true));
+    assert_eq!(prop(&props, 0, "paused"), json!(false));
+    step(app.press_key("space"));
+    app.settle();
+    assert_eq!(prop(&props, 1, "paused"), json!(false));
+    step(app.press("text:Done"));
+    step(app.hover("id:auxiliary-player-1 >> label:Video"));
+    if !app
+        .screen()
+        .matches("id:auxiliary-player-1 >> label:Subtitles and tracks")
+        .unwrap()
+    {
+        step(app.press("id:auxiliary-player-1 >> label:Video"));
+    }
 
     // Native track events and the original chooser route back to B only.
     app.engine().control().dispatch_event(
@@ -198,6 +247,15 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
         },
     );
     app.settle();
+    step(app.press("label:Subtitles and tracks"));
+    step(app.wait_for("text:/Second synthetic audio/"));
+    step(app.press_key("escape"));
+    assert!(app.window_state("player-window-1").unwrap().is_some());
+    assert!(
+        !app.screen()
+            .matches("text:/Second synthetic audio/")
+            .unwrap()
+    );
     step(app.press("label:Subtitles and tracks"));
     step(app.wait_for("text:/Second synthetic audio/"));
     step(app.press("text:/Second synthetic audio/"));
@@ -340,6 +398,17 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     assert_eq!(compact_prop(&props, 2), json!(false));
     let compact = app.window_state("player-window-1").unwrap().unwrap();
     assert_eq!(compact.bounds.size, Size::new(px(600.0), px(338.0)));
+    step(app.press_key("space"));
+    app.settle();
+    assert_eq!(prop(&props, 1, "paused"), json!(true));
+    assert_eq!(prop(&props, 2, "paused"), json!(false));
+    // Compact keyboard input must not zap or open unsupported screens.
+    step(app.press_key("down"));
+    step(app.press_key("/"));
+    step(app.press_key("f"));
+    assert_eq!(compact_prop(&props, 1), json!(true));
+    assert_eq!(iptv_app::player_opens(1), b_opens);
+    step(app.press_key("space"));
     assert!(
         app.window_state("pip").unwrap().is_none(),
         "primary PiP is independent"
@@ -375,6 +444,11 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
             .unwrap()
     );
     // Escape restores this popup, rather than closing it or affecting C/main.
+    enter_popup_pip(&mut app, 1);
+    step(app.press_key("backspace"));
+    app.settle();
+    assert_eq!(compact_prop(&props, 1), json!(false));
+    assert_eq!(compact_prop(&props, 2), json!(true));
     enter_popup_pip(&mut app, 1);
     step(app.press_key("escape"));
     app.settle();
@@ -472,6 +546,29 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     step(app.press("id:auxiliary-player-3 >> label:TV guide"));
     app.idle(Duration::from_millis(300)).unwrap();
     assert!(app.window_state("player-window-3").unwrap().is_none());
+    // Keyboard close actions dispose their local signals during key dispatch.
+    for (session, key) in [(4, "stop"), (5, "g")] {
+        step(app.right_click("id:guide-ui >> text:Local B"));
+        step(app.press("text:Watch in new window"));
+        step(app.wait_for(&format!("id:auxiliary-player-{session} >> label:Video")));
+        step(app.press(&format!("id:auxiliary-player-{session} >> label:Video")));
+        // Unsupported keyboard DVR must not open an invisible input overlay.
+        step(app.press_key("record"));
+        step(app.press_key("space"));
+        app.settle();
+        assert_eq!(prop(&props, 1, "paused"), json!(true));
+        assert_eq!(prop(&props, 0, "paused"), json!(false));
+        step(app.press_key("space"));
+        step(app.press_key(key));
+        app.idle(Duration::from_millis(300)).unwrap();
+        assert!(
+            app.window_state(&format!("player-window-{session}"))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(iptv_app::player_opens(0), main_opens);
+        assert_eq!(player_node(&props, 2), third_node);
+    }
     step(app.press_window_close("player-window-2"));
     app.idle(Duration::from_millis(300)).unwrap();
     // Check actual native-player deletion. The debug source counter can

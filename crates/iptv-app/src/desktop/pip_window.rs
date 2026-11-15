@@ -169,6 +169,7 @@ fn pointer_moved(ui: Ui, hover: Signal<Hover>, shown: Signal<bool>) {
 /// A click on the video: the second of a double click goes back to the
 /// app; after the first, presses are clicks (not drags) for a moment.
 fn clicked(ui: Ui, hover: Signal<Hover>, drags: Signal<bool>, clicks: u32) {
+    ui.touched();
     let now = ui.now_ms();
     let mut double = false;
     hover.update(|h| double = h.click(now));
@@ -203,6 +204,7 @@ fn controls(ui: Ui) -> impl IntoElement {
                 || Icon::BackToApp,
                 32.0,
                 move || {
+                    ui.touched();
                     crate::pip::exit(ui, Exit::BackToApp);
                 },
             )
@@ -217,6 +219,7 @@ fn controls(ui: Ui) -> impl IntoElement {
                 || Icon::Close,
                 32.0,
                 move || {
+                    ui.touched();
                     crate::pip::exit(ui, Exit::Close);
                 },
             )
@@ -238,7 +241,10 @@ fn controls(ui: Ui) -> impl IntoElement {
                     },
                     move || if paused() { Icon::Play } else { Icon::Pause },
                     48.0,
-                    move || ui.paused.update(|p| *p = !*p),
+                    move || {
+                        ui.touched();
+                        ui.paused.update(|p| *p = !*p);
+                    },
                 )),
         )
 }

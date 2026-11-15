@@ -113,8 +113,17 @@ pub struct Kept {
 
 /// Before a catalog swap (`set_schedule`).
 pub fn keep(ui: Ui) -> Kept {
-    let view = view(ui);
-    let focus = ui.focus.get_untracked();
+    keep_in(ui, crate::schedule())
+}
+
+/// A window can observe a catalog replacement after the runtime installed it.
+/// Resolve its old row identities against the catalog that built its list.
+pub(super) fn keep_in(ui: Ui, catalog: Rc<dyn Schedule>) -> Kept {
+    keep_list(ui.focus.get_untracked(), ui.list.get_untracked(), catalog)
+}
+
+fn keep_list(focus: Focus, list: Rc<ChannelList>, catalog: Rc<dyn Schedule>) -> Kept {
+    let view = ListView::new(catalog, list);
     Kept {
         list: ListId::of(focus.group, &**view.catalog()),
         key: view.channel_key(focus.channel),
@@ -125,17 +134,41 @@ pub fn keep(ui: Ui) -> Kept {
 /// After a catalog swap: the same list and channel by identity, at the new
 /// catalog's now, with the same column focused.
 pub fn restore(ui: Ui, kept: Kept) {
-    let catalog = crate::schedule();
-    let mut focus = Focus::at(crate::time::now_minute());
+    let (focus, list) = restored_list(
+        kept,
+        crate::schedule(),
+        &crate::favorites::favorite_channels(),
+        &crate::favorites::recent_channels(),
+        crate::time::now_minute(),
+    );
+    batch(|| {
+        ui.list.set(list);
+        ui.focus.set(focus);
+    });
+}
+
+fn restored_list(
+    kept: Kept,
+    catalog: Rc<dyn Schedule>,
+    favorites: &[usize],
+    recent: &[usize],
+    now: i32,
+) -> (Focus, Rc<ChannelList>) {
+    let mut focus = Focus::at(now);
     focus.visible = kept.focus.visible;
     focus.pane = kept.focus.pane;
     focus.rail = kept.focus.rail;
     focus.group = kept.list.find(&*catalog);
-    ui.focus.set(focus);
-    rebuild(ui, false);
-    let view = view(ui);
-    let row = kept.key.and_then(|k| row_of_key(&view, &k));
-    ui.focus.update(|f| f.restore(row, &view));
+    let list = Rc::new(ChannelList::build(
+        focus.group,
+        &*catalog,
+        favorites,
+        recent,
+    ));
+    let view = ListView::new(catalog, list.clone());
+    let row = kept.key.and_then(|key| view.find_channel(&key));
+    focus.restore(row, &view);
+    (focus, list)
 }
 
 /// The row of catalog `channel`, selecting the channel's own group first
@@ -313,4 +346,91 @@ pub fn browser_entry_name(entry: usize) -> String {
         }
     }
     name
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+    use iptv_core::lists::{FIRST_GROUP, RECENT};
+    use iptv_guide::{EpgSchedule, GuideChannel, Organization};
+
+    fn catalog(groups: &[(&str, &[&str])]) -> EpgSchedule {
+        EpgSchedule::new(
+            groups
+                .iter()
+                .map(|(group, keys)| {
+                    (
+                        (*group).to_owned(),
+                        keys.iter()
+                            .map(|key| GuideChannel {
+                                key: (*key).into(),
+                                name: format!("Generated {key}"),
+                                number: 1,
+                                catchup_days: 0,
+                            })
+                            .collect(),
+                    )
+                })
+                .collect(),
+            iptv_epg::GuideStore::default(),
+            1_800_000_000,
+        )
+    }
+
+    fn keys(catalog: Rc<dyn Schedule>, list: Rc<ChannelList>) -> Vec<String> {
+        let view = ListView::new(catalog, list);
+        (0..view.channel_count())
+            .map(|row| view.channel_key(row).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn popup_list_restores_group_and_channel_identity_after_reorder_and_hide() {
+        let before: Rc<dyn Schedule> =
+            Rc::new(catalog(&[("News", &["a", "b"]), ("Sport", &["c"])]));
+        let mut focus = Focus::at(0);
+        focus.group = FIRST_GROUP;
+        focus.channel = 1;
+        let list = Rc::new(ChannelList::build(focus.group, &*before, &[], &[]));
+        let kept = keep_list(focus, list, before);
+        // Both catalogue row indices and the group's position change. The
+        // remaining focused channel is retained; a hidden member disappears.
+        let after = catalog(&[("Sport", &["c"]), ("News", &["b", "a"])]);
+        after.set_organization(Organization {
+            channels: vec![("a".into(), "Generated a".into(), true)],
+            ..Default::default()
+        });
+        let after: Rc<dyn Schedule> = Rc::new(after);
+        let (focus, list) = restored_list(kept, after.clone(), &[], &[], 60);
+        assert_eq!(focus.group, FIRST_GROUP + 1);
+        assert_eq!(focus.now, 60);
+        assert_eq!(keys(after.clone(), list.clone()), ["b"]);
+        let view = ListView::new(after, list);
+        assert_eq!(view.channel_key(focus.channel).as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn popup_dynamic_lists_follow_edits_without_changing_selected_content() {
+        let catalog: Rc<dyn Schedule> = Rc::new(catalog(&[("Generated", &["a", "b", "c"])]));
+        for (entry, changed) in [(FAVORITES, vec![2, 1]), (RECENT, vec![2, 0, 1])] {
+            let mut focus = Focus::at(0);
+            focus.group = entry;
+            focus.channel = 1;
+            let list = Rc::new(ChannelList::build(entry, &*catalog, &[0, 1], &[0, 1]));
+            let kept = keep_list(focus, list, catalog.clone());
+            let (focus, list) = restored_list(kept, catalog.clone(), &changed, &changed, 0);
+            let view = ListView::new(catalog.clone(), list.clone());
+            assert_eq!(view.channel_key(focus.channel).as_deref(), Some("b"));
+            assert_eq!(
+                keys(catalog.clone(), list.clone())
+                    .first()
+                    .map(String::as_str),
+                Some("c")
+            );
+            // Removing the focused item must remove its stale list row too.
+            let kept = keep_list(focus, list, catalog.clone());
+            let (_, list) = restored_list(kept, catalog.clone(), &[2], &[2], 0);
+            assert_eq!(keys(catalog.clone(), list), ["c"]);
+        }
+    }
 }

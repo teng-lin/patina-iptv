@@ -117,7 +117,11 @@ fn is_favorite(ui: Ui) -> bool {
 pub fn enabled(ui: Ui, control: Control) -> bool {
     let choice = |k| ui.player.main().tracks.with(|t| t.has_choice(k));
     match control {
-        Control::Multiview => ui.player_surface == 0 && ui.playing.get().is_some(),
+        Control::Multiview => {
+            ui.player_surface == 0
+                && ui.playing.get().is_some()
+                && ui.player_windows.with(|w| w.sessions().is_empty())
+        }
         Control::Record => {
             ui.player_surface == 0
                 && ui
@@ -125,12 +129,8 @@ pub fn enabled(ui: Ui, control: Control) -> bool {
                     .get()
                     .is_some_and(crate::recordings_view::available)
         }
-        Control::Recordings => ui.player_surface == 0,
-        Control::Search
-        | Control::ChannelList
-        | Control::Favorite
-        | Control::Scaling
-        | Control::SleepTimer => true,
+        Control::Recordings | Control::Search => ui.player_surface == 0,
+        Control::ChannelList | Control::Favorite | Control::Scaling | Control::SleepTimer => true,
         Control::VideoTracks => choice(Track::Video),
         Control::AudioTracks => choice(Track::Audio),
         Control::Captions => choice(Track::Text),

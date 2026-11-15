@@ -42,6 +42,8 @@ pub fn size_for(video: Option<(u32, u32)>) -> (f32, f32) {
 
 /// Initial slots for up to four compact players. Native adapters place only
 /// newly compact windows; existing user placements remain unchanged.
+/// Slots reserve the supported tallest shape (4:3); adapters fit each player's
+/// actual shape inside its slot without stretching it.
 pub fn popup_rects(area: (f32, f32, f32, f32), count: usize) -> Vec<(f32, f32, f32, f32)> {
     let (x, y, width, height) = area;
     let count = count.min(crate::multiview::MAX_SURFACES);
@@ -57,8 +59,8 @@ pub fn popup_rects(area: (f32, f32, f32, f32), count: usize) -> Vec<(f32, f32, f
     let gap = 16.0_f32.min(width / 8.0).min(height / 8.0);
     let w = WIDTH
         .min((width - gap * (columns + 1) as f32) / columns as f32)
-        .min((height - gap * (rows + 1) as f32) / rows as f32 * 16.0 / 9.0);
-    let h = w * 9.0 / 16.0;
+        .min((height - gap * (rows + 1) as f32) / rows as f32 * 4.0 / 3.0);
+    let h = w * 3.0 / 4.0;
     (0..count)
         .map(|i| {
             (
