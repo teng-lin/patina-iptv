@@ -108,6 +108,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "recording_rule_padding",
         sql: include_str!("../migrations/0016_recording_rule_padding.sql"),
     },
+    Migration {
+        version: 17,
+        name: "vod_resume_episode",
+        sql: include_str!("../migrations/0017_vod_resume_episode.sql"),
+    },
 ];
 
 /// The schema version this build writes.
