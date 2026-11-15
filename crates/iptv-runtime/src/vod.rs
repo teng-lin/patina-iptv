@@ -460,6 +460,8 @@ url,
         let existing_session = self.vod_session(key.source, &entry.config);
         let state = self.vod.clone();
         let playing_source = key.source;
+        let expected_config = entry.config.clone();
+        let expected_incarnation = entry.incarnation.clone();
         let source = services
             .spawn(async move {
                 let mut source = match (&entry.config, &entry.locator) {
@@ -544,6 +546,32 @@ url,
             })
             .await
             .map_err(|_| unavailable())??;
+        // Portal authentication and link creation can outlive a playlist edit,
+        // disable or deletion. The old catalogue's result is no longer authority.
+        if let Some(parent) = &playing.parent {
+            self.parental_check(&target(parent))
+                .await
+                .map_err(|_| unavailable())?;
+        }
+        self.parental_check(&target(&playing.key))
+            .await
+            .map_err(|_| unavailable())?;
+        let lookup = playing.key.clone();
+        let parent = playing.parent.clone();
+        let current = self
+            .services()
+            .read(move |s| {
+                Ok(s.source_incarnation(SourceId(lookup.source))
+                    .is_ok_and(|v| v == expected_incarnation)
+                    && s.source_policy(SourceId(lookup.source))?.enabled
+                    && s.vod_card(parent.as_ref().unwrap_or(&lookup))?.is_some()
+                    && s.source(SourceId(lookup.source))?
+                        .is_some_and(|s| s.source.config == expected_config))
+            })
+            .await?;
+        if !current {
+            return Err(unavailable());
+        }
         self.vod_update_session(playing_source);
         Ok((playing, source))
     }
@@ -750,6 +778,155 @@ pub fn target(key: &Key) -> iptv_core::parental::Target {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_portal_link_cannot_survive_a_concurrent_source_change() {
+        use iptv_providers::{
+            ContentId,
+            model::{MacAddress, Source, StalkerCredentials, VodItem},
+            stalker::{PortalMode, StalkerPortal, StalkerSession},
+        };
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+            rc::Rc,
+        };
+
+        for change in ["unchanged", "disable", "credentials", "delete"] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("iptv.sqlite");
+            let database_key = crate::model::DatabaseKey::from_bytes([0x74; 32]);
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let credentials = StalkerCredentials {
+                portal_url: format!("http://{address}/c/"),
+                mac: MacAddress::parse("00:1A:79:00:00:74").unwrap(),
+                serial: None,
+                device_id: None,
+                device_id2: None,
+                signature: None,
+                signature2: None,
+                login: None,
+                password: None,
+            };
+            let config = SourceConfig::Stalker(credentials.clone());
+            let mut store = iptv_store_sqlite::Store::open_encrypted(&path, &database_key).unwrap();
+            let source = store
+                .add_source(&Source {
+                    name: "Generated delayed portal".into(),
+                    config: config.clone(),
+                })
+                .unwrap();
+            let movie = VodItem {
+                id: ContentId::from_stored("generated-movie"),
+                provider_id: Some("74".into()),
+                name: "Generated delayed film".into(),
+                groups: vec![],
+                poster: None,
+                plot: None,
+                year: None,
+                rating_x10: None,
+                added: None,
+                duration_secs: None,
+                stream: StreamLocator::Stalker {
+                    cmd: "ffmpeg /media/generated-movie".into(),
+                    link: Default::default(),
+                },
+                is_series: false,
+                episode_numbers: vec![],
+            };
+            store
+                .replace_catalog(source, &[], &[], &[movie], &[])
+                .unwrap();
+            drop(store);
+            let key = Key {
+                source: source.0,
+                kind: Kind::Movie,
+                id: "generated-movie".into(),
+            };
+            let owner = Rc::new(Runtime::new(crate::Ports::new(
+                directory.path().to_owned(),
+                {
+                    let database_key = database_key.clone();
+                    move |_| Ok(database_key.clone())
+                },
+            )));
+            owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+            owner.start_services();
+            let portal = StalkerPortal::from_credentials(
+                &credentials,
+                &iptv_providers::stalker::endpoint_candidates(&credentials.portal_url).unwrap()[0],
+                PortalMode::Simple,
+            )
+            .unwrap();
+            owner
+                .vod
+                .sessions
+                .lock()
+                .unwrap()
+                .insert(source.0, (config, StalkerSession::new(portal)));
+            let details = owner.services().block_on(owner.vod_details(key.clone()));
+            let details = details.unwrap();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0; 1024];
+                while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert!(count > 0);
+                    request.extend_from_slice(&buffer[..count]);
+                    assert!(request.len() < 16_384);
+                }
+                assert!(
+                    String::from_utf8(request)
+                        .unwrap()
+                        .contains("action=create_link")
+                );
+                let mut store =
+                    iptv_store_sqlite::Store::open_encrypted(path, &database_key).unwrap();
+                match change {
+                    "disable" => {
+                        let mut policy = store.source_policy(source).unwrap();
+                        policy.enabled = false;
+                        store.set_source_policy(source, policy).unwrap();
+                    }
+                    "credentials" => {
+                        let mut source_data = store.source(source).unwrap().unwrap().source;
+                        let SourceConfig::Stalker(credentials) = &mut source_data.config else {
+                            unreachable!()
+                        };
+                        credentials.mac = MacAddress::parse("00:1A:79:00:00:75").unwrap();
+                        store.update_source(source, &source_data).unwrap();
+                    }
+                    "delete" => {
+                        store.delete_source(source).unwrap();
+                    }
+                    "unchanged" => {}
+                    _ => unreachable!(),
+                }
+                let body =
+                    format!(r#"{{"js":{{"cmd":"ffmpeg http://{address}/media/generated.ts"}}}}"#);
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+            });
+            let result = owner
+                .services()
+                .block_on(owner.vod_play(details, key, false));
+            server.join().unwrap();
+            assert_eq!(
+                result.is_err(),
+                change != "unchanged",
+                "source change during link resolution: {change}"
+            );
+            assert!(owner.drain_services());
+        }
+    }
     #[test]
     fn native_seasons_keep_opaque_file_commands_and_episode_coordinates() {
         let response = iptv_providers::HttpResponse::ok(
