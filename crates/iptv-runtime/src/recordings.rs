@@ -1,9 +1,9 @@
 //! App-open DVR. Durable intent is committed before acknowledgement; media workers
 //! have no rendered player and use the same connection budget as viewing surfaces.
 pub mod host;
-mod rules;
 #[cfg(test)]
 mod recovery_tests;
+mod rules;
 #[cfg(test)]
 mod tests;
 use crate::{Error, Runtime, store_service::Services};
@@ -802,12 +802,7 @@ async fn recover_media(services: &Services, job: &Job) {
     )
     .await;
 }
-async fn finish_unstarted(
-    services: &Services,
-    job: &Job,
-    status: Status,
-    message: &'static str,
-) {
+async fn finish_unstarted(services: &Services, job: &Job, status: Status, message: &'static str) {
     if job.bytes > 0 {
         recover_media(services, job).await;
     } else {
