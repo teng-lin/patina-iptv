@@ -267,7 +267,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for("text:Loading…"));
     step(
         app.wait_until("authorized player load", Duration::from_secs(5), |_| {
-            opens() >= before + 1
+            opens() > before
         }),
     );
     assert_eq!(opens(), before + 1, "one open");
@@ -275,7 +275,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.press_key("p"));
     step(
         app.wait_until("authorized player load", Duration::from_secs(5), |_| {
-            opens() >= before + 1
+            opens() > before
         }),
     );
     assert_eq!(opens(), before + 1, "nothing else opened");
@@ -367,7 +367,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for_gone("text:/^Can't play/", Duration::from_secs(1)));
     step(
         app.wait_until("authorized player load", Duration::from_secs(5), |_| {
-            opens() >= before + 1
+            opens() > before
         }),
     );
     assert_eq!(opens(), before + 1);
@@ -521,7 +521,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     );
     step(
         app.wait_until("authorized player load", Duration::from_secs(5), |_| {
-            opens() >= before + 1
+            opens() > before
         }),
     );
     assert_eq!(opens(), before + 1, "reconnected");
@@ -634,7 +634,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     run(&mut app, Duration::from_millis(1100));
     step(
         app.wait_until("authorized player load", Duration::from_secs(5), |_| {
-            opens() >= before + 1
+            opens() > before
         }),
     );
     assert_eq!(opens(), before + 1, "reopened");
@@ -662,7 +662,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for_gone("text:/^⇢/", Duration::from_secs(1)));
     step(
         app.wait_until("authorized player load", Duration::from_secs(5), |_| {
-            opens() >= before + 1
+            opens() > before
         }),
     );
     assert_eq!(opens(), before + 1, "the archive reopened at the seek");
@@ -736,13 +736,13 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.back());
 
     // --- The play bar -----------------------------------------------------
-    // A pointer: a tap on the video shows the bar, with what the host
+    // Desktop pointer movement shows the bar, with what the host
     // reported of the stream (lines, class, frame rate).
     step(app.set_environment("a desktop", |e| e.idiom = Idiom::Desktop));
     send(&mut app, "size", json!({ "width": 1280, "height": 720 }));
     send(&mut app, "format", json!({ "fps": 50.0 }));
     send(&mut app, "tracks", tracks());
-    step(app.press("label:Video"));
+    step(app.hover("label:Video"));
     step(app.wait_for("label:Mute"));
     step(app.wait_for("text:720p"));
     step(app.wait_for("text:/50/"));
@@ -771,7 +771,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     run(&mut app, Duration::from_secs(8));
     step(app.wait_for_gone("label:Mute", Duration::from_secs(1)));
     // Picture in picture from the bar, and back to the app.
-    step(app.press("label:Video"));
+    step(app.hover("label:Video"));
     step(app.wait_for("label:Picture in picture"));
     step(app.press("label:Picture in picture"));
     step(app.wait_for("text:Playing in picture-in-picture"));
@@ -789,7 +789,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for_gone("text:Try again", Duration::from_secs(1)));
     step(
         app.wait_until("authorized player load", Duration::from_secs(5), |_| {
-            opens() >= before + 1
+            opens() > before
         }),
     );
     assert_eq!(opens(), before + 1, "tried again");
@@ -798,7 +798,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     // A replay under the pointer: the bar's TV guide, then two programmes
     // back; the bar's rewind and fast-forward, and its progress line under
     // a finger, seek in it; its programme details open and close.
-    step(app.press("label:Video"));
+    step(app.hover("label:Video"));
     step(app.wait_for("label:TV guide"));
     step(app.press("label:TV guide"));
     step(app.wait_for_gone("label:Mute", Duration::from_secs(1)));
@@ -826,14 +826,14 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
         },
     ));
     state(&mut app, "ready");
-    step(app.press("label:Video"));
+    step(app.hover("label:Video"));
     step(app.wait_for("label:Fast-forward"));
     let before = opens();
     step(app.press("label:Fast-forward"));
     run(&mut app, Duration::from_secs(1));
     step(
         app.wait_until("authorized player load", Duration::from_secs(5), |_| {
-            opens() >= before + 1
+            opens() > before
         }),
     );
     assert_eq!(opens(), before + 1, "reopened 30 s on");
@@ -866,7 +866,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
 
     // In picture in picture, stopping playback in the main window closes
     // the window: it has nothing to show.
-    step(app.press("label:Video"));
+    step(app.hover("label:Video"));
     step(app.wait_for("label:Picture in picture"));
     step(app.press("label:Picture in picture"));
     step(app.wait_for("text:Playing in picture-in-picture"));

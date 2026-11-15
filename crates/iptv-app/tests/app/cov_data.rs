@@ -382,6 +382,11 @@ fn stored_playlists_switch_refresh_and_go() {
 
     // Alpha Two plays; a refresh that moves it down a row keeps it playing.
     step(app.press("text:/^(★ )?Alpha Two$/"));
+    step(app.wait_until(
+        "Alpha Two authorized after playlist switch",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0),
+    ));
     assert!(iptv_app::player_has_source(0));
     let first_copy = copy_of(&data, "first.m3u");
     replace_copy(
