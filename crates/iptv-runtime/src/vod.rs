@@ -691,7 +691,7 @@ fn append_stalker(
     season: u32,
     parent_cmd: Option<&str>,
 ) {
-    if row.season || (!row.episode && row.episodes.is_empty()) {
+    if row.episodes.is_empty() && (row.season || !row.episode) {
         return;
     }
     let numbers = if row.episodes.is_empty() {
@@ -753,7 +753,7 @@ mod tests {
     #[test]
     fn native_seasons_keep_opaque_file_commands_and_episode_coordinates() {
         let response = iptv_providers::HttpResponse::ok(
-            r#"{"js":[{"id":"file-season-3","name":"Season 3","cmd":"ffmpeg /media/generated-file","series":[2,4]}]}"#,
+            r#"{"js":[{"id":"file-season-3","name":"Season 3","is_season":true,"cmd":"ffmpeg /media/generated-file","series":[2,4]}]}"#,
         );
         let row = iptv_providers::stalker::parse_series_rows(&response)
             .unwrap()
