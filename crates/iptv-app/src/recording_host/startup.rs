@@ -13,18 +13,42 @@ fn desktop_quote(value: &str) -> String {
     format!(
         "\"{}\"",
         value
+            .replace('%', "%%")
             .replace('\\', "\\\\")
             .replace('"', "\\\"")
             .replace('`', "\\`")
             .replace('$', "\\$")
     )
 }
+#[cfg(target_os = "linux")]
+fn linux_executable(
+    image: Option<&Path>,
+    fallback: std::path::PathBuf,
+    usable: impl FnOnce(&Path) -> bool,
+) -> std::path::PathBuf {
+    image
+        .filter(|path| path.is_absolute() && usable(path))
+        .map(Path::to_owned)
+        .unwrap_or(fallback)
+}
+
 pub(super) fn install(directory: &Path, enabled: bool) -> io::Result<()> {
     #[cfg(windows)]
     let _tasks = super::windows::TASKS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let executable = std::env::current_exe()?;
+    #[cfg(target_os = "linux")]
+    let executable = linux_executable(
+        std::env::var_os("APPIMAGE").as_deref().map(Path::new),
+        executable,
+        |path| {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::metadata(path).is_ok_and(|metadata| {
+                metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+            })
+        },
+    );
     #[cfg(target_os = "linux")]
     {
         let root = std::env::var_os("XDG_CONFIG_HOME")
@@ -128,6 +152,37 @@ pub(super) fn task_xml(executable: &str, next: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn image_startup_uses_a_stable_absolute_executable_and_escapes_exec_fields() {
+        let mounted = std::path::PathBuf::from("/tmp/.mount_generated/usr/bin/patina");
+        let image = Path::new("/home/generated/Patina 100%.AppImage");
+        assert_eq!(
+            linux_executable(Some(image), mounted.clone(), |path| path == image),
+            image
+        );
+        assert_eq!(
+            linux_executable(
+                Some(Path::new("relative.AppImage")),
+                mounted.clone(),
+                |_| true
+            ),
+            mounted
+        );
+        assert_eq!(
+            linux_executable(Some(image), mounted.clone(), |_| false),
+            mounted
+        );
+        assert_eq!(linux_executable(None, mounted.clone(), |_| true), mounted);
+        assert_eq!(
+            desktop_quote("/home/generated/Patina 100%.AppImage"),
+            "\"/home/generated/Patina 100%%.AppImage\""
+        );
+        assert_eq!(
+            desktop_quote("/home/generated/$literal`name\".AppImage"),
+            "\"/home/generated/\\$literal\\`name\\\".AppImage\""
+        );
+    }
     #[test]
     fn startup_task_has_a_bounded_identity_and_escaped_executable() {
         let task = task_xml(
