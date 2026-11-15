@@ -26,7 +26,9 @@ pub(super) fn programme(ui: Ui) -> (usize, crate::guide::Program) {
 /// seeks.
 pub(super) fn line(ui: Ui) -> impl IntoElement {
     let width = signal(0.0_f32);
-    let catch_up = move || matches!(ui.playback.get(), Playback::CatchUp { .. });
+    let catch_up = move || {
+        matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::active(ui)
+    };
     let fraction = move || match crate::seek::elapsed(ui) {
         Some((at, length)) => at as f32 / length.max(1) as f32,
         None => {

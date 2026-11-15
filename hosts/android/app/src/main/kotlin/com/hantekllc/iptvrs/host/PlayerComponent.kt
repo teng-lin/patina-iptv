@@ -166,6 +166,7 @@ class PlayerComponent(
 
     private var url: String? = null
     private var token: Long = 0
+    private var seekId: Long = 0
 
     /** The source is a live channel ([start]'s spare items). */
     private var live = false
@@ -425,6 +426,10 @@ class PlayerComponent(
                 if (player.isPlaying) {
                     emit(PlayerEvent.Position(player.currentPosition.coerceAtLeast(0)))
                 }
+                if (!away && !live && url != null && player.playbackState == Player.STATE_READY) {
+                    emit(PlayerEvent.Timeline(token, seekId, player.currentPosition.coerceAtLeast(0),
+                        player.duration.takeIf { it > 0 }, player.isCurrentMediaItemSeekable))
+                }
                 ticker.postDelayed(this, 1_000)
             }
         }
@@ -447,6 +452,15 @@ class PlayerComponent(
     private val props =
         object : PlayerProps {
             override fun source(source: PlayerSource?) = setSource(source)
+
+            override fun seek(seek: PlayerSeek?) {
+                if (seek == null || seek.token != token || live || url == null || seek.id <= seekId) return
+                if (!player.isCurrentMediaItemSeekable) return
+                seekId = seek.id
+                val target = player.duration.takeIf { it > 0 }?.let { seek.ms.coerceAtMost(it) } ?: seek.ms
+                player.seekTo(target)
+                emit(PlayerEvent.Timeline(token, seekId, target, player.duration.takeIf { it > 0 }, true))
+            }
 
             override fun paused(paused: Boolean) {
                 player.playWhenReady = !paused
@@ -510,6 +524,7 @@ class PlayerComponent(
         token = nextToken
         applyHeaders()
         if (!changed) return
+        seekId = 0
         triedOtherFormat = false
         if (!keepFrame) rendered = false
         // A new stream: default tracks, no old cues.

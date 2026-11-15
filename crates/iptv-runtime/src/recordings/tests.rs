@@ -202,6 +202,14 @@ async fn record_stop_play_and_delete_preserve_real_media_and_its_lease() {
     assert!(std::fs::read(&file).unwrap().starts_with(&[0x47]));
     let source = owner.open_recording(id).await.unwrap();
     assert!(!source.public_only);
+    let point = iptv_core::on_demand::Progress::observed(12_000, Some(60_000), false);
+    owner.save_recording_progress(id, &source, point);
+    assert_eq!(owner.recording_progress(id).await.unwrap(), point);
+    let next = owner.open_recording(id).await.unwrap();
+    let newer = iptv_core::on_demand::Progress::observed(18_000, Some(60_000), false);
+    owner.save_recording_progress(id, &next, newer);
+    owner.save_recording_progress(id, &source, point);
+    assert_eq!(owner.recording_progress(id).await.unwrap(), newer);
     assert!(owner.delete_recording(id).await.is_err());
     owner.close_recording_playback();
     // Hold admission, queue deletion before a competing playback request, then

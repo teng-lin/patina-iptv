@@ -428,7 +428,9 @@ fn volume(ui: Ui) -> impl IntoElement {
 /// Rewind, play/pause, fast-forward.
 fn centre(ui: Ui) -> impl IntoElement {
     let size = target();
-    let catch_up = move || matches!(ui.playback.get(), Playback::CatchUp { .. });
+    let catch_up = move || {
+        matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::active(ui)
+    };
     let seek = move |forward: bool| {
         let steps = crate::seek::steps();
         let delta = if forward {

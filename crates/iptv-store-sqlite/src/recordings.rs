@@ -169,3 +169,48 @@ impl Store {
         Ok(())
     }
 }
+
+impl Store {
+    pub fn recording_progress_points(
+        &self,
+    ) -> Result<Vec<(JobId, iptv_core::on_demand::Progress)>> {
+        Ok(self.conn.prepare("SELECT recording_id,position_ms,duration_ms,completed FROM recording_playback_progress LIMIT 1000")?
+            .query_map([], |row| Ok((JobId(row.get(0)?), iptv_core::on_demand::Progress {
+                position_ms: row.get::<_, i64>(1)? as u64,
+                duration_ms: row.get::<_, Option<i64>>(2)?.map(|ms| ms as u64),
+                completed: row.get(3)?,
+            })))?.collect::<rusqlite::Result<_>>()?)
+    }
+    pub fn recording_progress(&self, id: JobId) -> Result<iptv_core::on_demand::Progress> {
+        Ok(self.conn.query_row(
+            "SELECT position_ms,duration_ms,completed FROM recording_playback_progress WHERE recording_id=?1",
+            [id.0], |row| Ok(iptv_core::on_demand::Progress {
+                position_ms: row.get::<_, i64>(0)? as u64,
+                duration_ms: row.get::<_, Option<i64>>(1)?.map(|n| n as u64),
+                completed: row.get(2)?,
+            }),
+        ).optional()?.unwrap_or_default())
+    }
+    pub fn save_recording_progress(
+        &mut self,
+        id: JobId,
+        point: iptv_core::on_demand::Progress,
+        now: i64,
+    ) -> Result<()> {
+        let point = iptv_core::on_demand::Progress::observed(
+            point.position_ms,
+            point.duration_ms,
+            point.completed,
+        );
+        self.conn.execute(
+            "INSERT INTO recording_playback_progress(recording_id,position_ms,duration_ms,completed,updated_at)
+             SELECT id,?2,?3,?4,?5 FROM recording_jobs WHERE id=?1 AND status IN ('completed','partial') AND bytes>0
+             ON CONFLICT(recording_id) DO UPDATE SET position_ms=excluded.position_ms,
+                 duration_ms=excluded.duration_ms,completed=excluded.completed,updated_at=excluded.updated_at
+             WHERE position_ms<>excluded.position_ms OR duration_ms IS NOT excluded.duration_ms OR completed<>excluded.completed",
+            params![id.0, point.position_ms.min(i64::MAX as u64) as i64,
+                point.duration_ms.map(|ms| ms.min(i64::MAX as u64) as i64), point.completed, now.max(0)],
+        )?;
+        Ok(())
+    }
+}

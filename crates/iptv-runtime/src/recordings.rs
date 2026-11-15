@@ -439,6 +439,46 @@ impl Runtime {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((id, relay));
         Ok(source)
     }
+    pub async fn recording_progress_points(
+        &self,
+    ) -> Result<Vec<(JobId, iptv_core::on_demand::Progress)>, Error> {
+        Ok(self
+            .services()
+            .read(|store| store.recording_progress_points())
+            .await?)
+    }
+    pub async fn recording_progress(
+        &self,
+        id: JobId,
+    ) -> Result<iptv_core::on_demand::Progress, Error> {
+        Ok(self
+            .services()
+            .call(move |store| store.recording_progress(id))
+            .await?)
+    }
+    /// Only the active file capability may update its progress. Queues in FIFO
+    /// order before returning, including the final write during UI disposal.
+    pub fn save_recording_progress(
+        &self,
+        id: JobId,
+        source: &PlaySource,
+        point: iptv_core::on_demand::Progress,
+    ) {
+        let playback = self
+            .recordings
+            .playback
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if playback
+            .as_ref()
+            .is_some_and(|(playing, relay)| *playing == id && relay.url == source.url)
+        {
+            drop(
+                self.services()
+                    .call(move |store| store.save_recording_progress(id, point, now())),
+            );
+        }
+    }
     pub fn close_recording_playback(&self) {
         self.recordings
             .playback

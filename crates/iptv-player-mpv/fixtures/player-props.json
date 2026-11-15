@@ -21,5 +21,10 @@
     "auto": true,
     "enter": 3,
     "window": true
+  },
+  "seek": {
+    "token": 37,
+    "id": 9,
+    "ms": 12345
   }
 }

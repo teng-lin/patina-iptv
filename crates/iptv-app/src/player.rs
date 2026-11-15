@@ -68,6 +68,9 @@ pub struct Stream {
     /// Where the open stream is (ms from where it was opened), as the
     /// player last reported.
     pub position_ms: Signal<u64>,
+    pub timeline: Signal<iptv_core::on_demand::Timeline>,
+    pub seek: Signal<Option<iptv_player_mpv::SeekProps>>,
+    pub resume_ms: Signal<Option<u64>>,
     /// A retry that came due while the app was away ([`recover::resume`]).
     parked: Signal<Option<Retry>>,
     /// What the open stream offers and what the viewer chose (`media.rs`).
@@ -89,6 +92,9 @@ impl Stream {
             channel: signal(None),
             size: signal(None),
             position_ms: signal(0),
+            timeline: signal(Default::default()),
+            seek: signal(None),
+            resume_ms: signal(None),
             parked: signal(None),
             tracks: signal(Tracks::default()),
             choice: signal(Choice::default()),
@@ -247,6 +253,7 @@ pub fn start_surface(ui: Ui, surface: usize, channel: usize) -> bool {
 
 /// Nothing plays: the player closes.
 pub fn stop(ui: Ui) {
+    crate::on_demand::flush(ui, false);
     ui.player.recorded.set(None);
     crate::runtime().close_recording_playback();
     close(ui, 0);
@@ -295,6 +302,9 @@ fn close(ui: Ui, surface: usize) {
     stream.health.update(Health::stop);
     stream.parked.set(None);
     stream.source.set(None);
+    stream.timeline.set(Default::default());
+    stream.seek.set(None);
+    stream.resume_ms.set(None);
     if stream.size.with_untracked(Option::is_some) {
         stream.size.set(None);
     }
@@ -306,7 +316,9 @@ fn open(ui: Ui, surface: usize, session: u64) {
     if surface == 0
         && let Some((_, source)) = ui.player.recorded.get_untracked()
     {
+        let position = ui.player.main().timeline.get_untracked().position_ms;
         load(ui, surface, session, source);
+        ui.player.main().resume_ms.set(Some(position));
         return;
     }
     // What the surface asked for before is no longer wanted.
@@ -414,6 +426,9 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
         stream.reconnect.set(reconnect);
         stream.token.update(|t| *t += 1);
         stream.position_ms.set(0);
+        stream.timeline.set(Default::default());
+        stream.seek.set(None);
+        stream.resume_ms.set(None);
         // A new stream: its own tracks, from the default choices.
         crate::media::reset(ui, surface);
         stream.source.set(Some(source));
@@ -565,6 +580,7 @@ pub fn source_changed(ui: Ui) {
 /// Data changes keep the playing channel (found again by key); stall
 /// checks pause while paused (full screen's pause, or a multiview tile's).
 pub fn bind(ui: Ui) {
+    cleanup(move || crate::on_demand::flush(ui, false));
     effect(move || {
         ui.data_version.get();
         // Out of the effect: following the row writes signals.
@@ -580,6 +596,9 @@ pub fn bind(ui: Ui) {
         let away = stopped_in_background(lifecycle());
         let now = ui.now_ms();
         untracked(|| {
+            if paused || away {
+                crate::on_demand::flush(ui, false);
+            }
             for (surface, tile_paused) in tiles_paused.into_iter().enumerate() {
                 let held = away || (surface == 0 && paused) || tile_paused;
                 ui.player

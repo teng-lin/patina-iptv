@@ -190,6 +190,7 @@ unsafe extern "C" fn on_frame(data: *mut c_void) {
 struct State {
     url: Option<String>,
     token: i64,
+    seek_id: u64,
     /// The source is a live channel (bridged, see [`worker`]).
     live: bool,
     headers: Vec<(String, String)>,
@@ -314,6 +315,7 @@ impl Inner {
             state: RefCell::new(State {
                 url: None,
                 token: 0,
+                seek_id: 0,
                 live: false,
                 headers: Vec::new(),
                 public_only: true,
@@ -382,6 +384,25 @@ impl Inner {
         };
         match prop {
             PlayerProp::Source => self.set_source(value),
+            PlayerProp::Seek => {
+                let Some(request) = value.and_then(|value| {
+                    serde_json::from_value::<crate::SeekProps>(value.clone()).ok()
+                }) else {
+                    return;
+                };
+                let mut state = self.state.borrow_mut();
+                if state.live
+                    || state.url.is_none()
+                    || state.token as u64 != request.token
+                    || request.id <= state.seek_id
+                {
+                    return;
+                }
+                state.seek_id = request.id;
+                drop(state);
+                self.send(Cmd::Seek(request.ms));
+                self.tick();
+            }
             PlayerProp::Paused => {
                 let paused = value.and_then(Value::as_bool).unwrap_or(false);
                 self.state.borrow_mut().paused = paused;
@@ -500,6 +521,9 @@ impl Inner {
             let keep = map::keeps_frame(st.url.as_deref(), url.as_deref(), reconnect);
             st.url = url;
             st.token = token;
+            if changed {
+                st.seek_id = 0;
+            }
             st.live = live;
             st.headers = headers;
             st.public_only = public_only;
@@ -888,6 +912,29 @@ impl Inner {
                     }
                 }
             }
+            Note::Timeline {
+                token,
+                seek_id,
+                seconds,
+                duration,
+                seekable,
+            } => {
+                let state = self.state.borrow();
+                if self.current(&state) && !state.live && state.token as u64 == token {
+                    let ms = (seconds.max(0.0) * 1000.0).round() as u64;
+                    let duration_ms = duration.map(|value| (value * 1000.0).round() as u64);
+                    out.push(
+                        PlayerEvent::Timeline {
+                            token,
+                            seek_id,
+                            ms,
+                            duration_ms,
+                            seekable,
+                        }
+                        .wire(),
+                    );
+                }
+            }
             Note::Position(seconds) => {
                 if self.playing() {
                     let ms = (seconds.max(0.0) * 1000.0).round() as u64;
@@ -908,6 +955,13 @@ impl Inner {
     fn tick(&self) {
         if self.playing() {
             self.send(Cmd::Position);
+        }
+        let state = self.state.borrow();
+        if !state.live && self.current(&state) && state.playing {
+            self.send(Cmd::Timeline {
+                token: state.token as u64,
+                seek_id: state.seek_id,
+            });
         }
     }
 

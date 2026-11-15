@@ -126,6 +126,9 @@ pub(super) fn watch_stall(ui: Ui, surface: usize) {
 
 /// The host's `state` event from `surface`.
 pub fn on_state(ui: Ui, surface: usize, state: PlayerState) {
+    if surface == 0 && state == PlayerState::Ended {
+        crate::on_demand::flush(ui, true);
+    }
     let health = ui.player.stream(surface).health;
     let now = ui.now_ms();
     let before = health.with_untracked(|h| h.stall_deadline());

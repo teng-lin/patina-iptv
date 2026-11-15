@@ -94,6 +94,7 @@ impl Filter {
 pub struct Screen {
     pub open: bool,
     pub jobs: Vec<Job>,
+    pub progress: Vec<(JobId, crate::on_demand::Progress)>,
     pub focus: Option<JobId>,
     pub filter: Filter,
     pub actions: bool,

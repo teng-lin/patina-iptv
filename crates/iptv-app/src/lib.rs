@@ -49,6 +49,7 @@ mod multiview;
 mod multiview_picker;
 mod multiview_view;
 mod numbers;
+mod on_demand;
 mod organization_view;
 mod overlays;
 mod panels;
@@ -336,6 +337,7 @@ impl Ui {
         if !recordings_view::reserve_viewing(*self, 0, channel) {
             return;
         }
+        crate::on_demand::flush(*self, false);
         self.player.recorded.set(None);
         crate::runtime().close_recording_playback();
         self.pending_zap.set(None);

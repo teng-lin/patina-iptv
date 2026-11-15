@@ -21,6 +21,16 @@ wire_struct! {
 }
 
 wire_struct! {
+    /// An idempotent seek request scoped to the exact source token.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct SeekProps {
+        TOKEN => token: u64 = "token",
+        ID => id: u64 = "id",
+        MS => ms: u64 = "ms",
+    }
+}
+
+wire_struct! {
     /// The `pip` prop: picture in picture, for surface 0's player.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct PipProps {
@@ -74,6 +84,7 @@ macro_rules! player_props {
 player_props! {
     Source => source: Option<SourceProps> = "source",
     Paused => paused: bool = "paused",
+    Seek => seek: Option<SeekProps> = "seek",
     PictureSize => picture_size: String = "pictureSize",
     VideoTrack => video_track: String = "videoTrack",
     AudioTrack => audio_track: String = "audioTrack",
@@ -135,6 +146,7 @@ mod tests {
         assert_eq!(sorted(&props), keys(&fixture));
         assert_eq!(sorted(SourceProps::FIELDS), keys(&fixture["source"]));
         assert_eq!(sorted(PipProps::FIELDS), keys(&fixture["pip"]));
+        assert_eq!(sorted(SeekProps::FIELDS), keys(&fixture["seek"]));
         for prop in PlayerProp::ALL {
             assert_eq!(PlayerProp::from_wire(prop.wire()), Some(*prop));
         }
@@ -153,6 +165,7 @@ mod tests {
         let bindings = PlayerBindings {
             source: constant(&props.source),
             paused: constant(&props.paused),
+            seek: constant(&props.seek),
             picture_size: constant(&props.picture_size),
             video_track: constant(&props.video_track),
             audio_track: constant(&props.audio_track),

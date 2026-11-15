@@ -64,6 +64,11 @@ pub enum Cmd {
     },
     /// Answered by [`Note::Position`] when mpv knows it.
     Position,
+    Seek(u64),
+    Timeline {
+        token: u64,
+        seek_id: u64,
+    },
     /// Answered by [`Note::Fps`] and [`Note::Channels`], as far as known
     /// (an unchanged value is not observed again for the next file).
     Format,
@@ -100,6 +105,13 @@ pub enum Note {
     },
     /// `time-pos` in seconds.
     Position(f64),
+    Timeline {
+        token: u64,
+        seek_id: u64,
+        seconds: f64,
+        duration: Option<f64>,
+        seekable: bool,
+    },
     /// `track-list` changed: mpv's JSON of it.
     Tracks(String),
     /// `container-fps`.
@@ -415,6 +427,29 @@ fn execute(mpv: &Mpv, cmd: Cmd, bridge: &mut Bridge) -> Vec<Note> {
         Cmd::Position => mpv
             .get_f64(c"time-pos")
             .map(Note::Position)
+            .into_iter()
+            .collect(),
+        Cmd::Seek(ms) => {
+            mpv.command(&[
+                "seek",
+                &format!("{:.3}", ms as f64 / 1000.0),
+                "absolute+exact",
+            ]);
+            Vec::new()
+        }
+        Cmd::Timeline { token, seek_id } => mpv
+            .get_f64(c"time-pos")
+            .map(|seconds| Note::Timeline {
+                token,
+                seek_id,
+                seconds,
+                duration: mpv
+                    .get_f64(c"duration")
+                    .filter(|value| value.is_finite() && *value > 0.0),
+                seekable: mpv
+                    .get(c"seekable")
+                    .is_some_and(|value| value == "yes" || value == "true"),
+            })
             .into_iter()
             .collect(),
         Cmd::Format => {

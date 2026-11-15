@@ -164,3 +164,39 @@ fn portable_backups_exclude_host_jobs_without_changing_live_intent() {
     );
     assert_eq!(store.recording_jobs().unwrap().len(), 1);
 }
+
+#[test]
+fn playback_progress_is_durable_only_for_playable_jobs_and_cascades_on_delete() {
+    use iptv_core::on_demand::Progress;
+    let (mut store, request) = fixture();
+    let id = store
+        .schedule_recording(JobId(96), &request, request.start - 100)
+        .unwrap();
+    let point = Progress::observed(24_000, Some(120_000), false);
+    store
+        .save_recording_progress(id, point, request.start)
+        .unwrap();
+    assert_eq!(store.recording_progress(id).unwrap(), Progress::default());
+    store
+        .conn
+        .execute(
+            "UPDATE recording_jobs SET status='partial',bytes=1200 WHERE id=?1",
+            [id.0],
+        )
+        .unwrap();
+    store
+        .save_recording_progress(id, point, request.start)
+        .unwrap();
+    assert_eq!(store.recording_progress(id).unwrap(), point);
+    let finished = Progress::observed(119_000, Some(120_000), false);
+    store
+        .save_recording_progress(id, finished, request.start + 2)
+        .unwrap();
+    assert_eq!(store.recording_progress(id).unwrap().resume_ms(), 0);
+    assert!(store.remove_recording(id).unwrap());
+    assert_eq!(store.recording_progress(id).unwrap(), Progress::default());
+    store
+        .save_recording_progress(id, point, request.start + 3)
+        .unwrap();
+    assert_eq!(store.recording_progress(id).unwrap(), Progress::default());
+}

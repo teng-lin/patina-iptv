@@ -31,7 +31,8 @@ pub(crate) fn remap(
     if !matches!(ctx, Context::Player | Context::Controls) {
         return action;
     }
-    let replay = matches!(ui.playback.get_untracked(), Playback::CatchUp { .. });
+    let replay = matches!(ui.playback.get_untracked(), Playback::CatchUp { .. })
+        || crate::on_demand::active(*ui);
     let action = if replay && ctx == Context::Player {
         seek_key(seek_scheme(), key, action)
     } else {
@@ -47,7 +48,8 @@ pub(crate) fn remap(
 /// Whether `key` seeks now (in a replay, under the panels' Player context):
 /// it then has no long press, so holding it repeats the step.
 pub(crate) fn seeks(ui: &Ui, ctx: Context, key: RemoteKey) -> bool {
-    let replay = matches!(ui.playback.get_untracked(), Playback::CatchUp { .. });
+    let replay = matches!(ui.playback.get_untracked(), Playback::CatchUp { .. })
+        || crate::on_demand::active(*ui);
     replay && ctx == Context::Player && seek_arrows(seek_scheme()).contains(&key)
 }
 
@@ -94,7 +96,8 @@ pub(crate) fn up_down_key(choice: &str, key: RemoteKey, action: Option<Action>) 
 /// Seeking in a replay: whether OK plays and pauses (the arrows seek, as
 /// in a media player) instead of showing the card.
 fn ok_pauses(ui: Ui) -> bool {
-    let replay = matches!(ui.playback.get_untracked(), Playback::CatchUp { .. });
+    let replay = matches!(ui.playback.get_untracked(), Playback::CatchUp { .. })
+        || crate::on_demand::active(ui);
     replay && !seek_arrows(seek_scheme()).is_empty()
 }
 

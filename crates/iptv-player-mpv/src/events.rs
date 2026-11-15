@@ -17,6 +17,7 @@ wire_enum! {
         Size = "size",
         Error = "error",
         Position = "position",
+        Timeline = "timeline",
         Tracks = "tracks",
         Format = "format",
         Pip = "pip",
@@ -46,6 +47,14 @@ pub enum PlayerEvent {
     Error { code: String, http: Option<u16> },
     /// `position` {ms}, from where the source opened.
     Position { ms: u64 },
+    /// Seek acknowledgement and source-relative timeline for on-demand media.
+    Timeline {
+        token: u64,
+        seek_id: u64,
+        ms: u64,
+        duration_ms: Option<u64>,
+        seekable: bool,
+    },
     /// `tracks`: the open stream's, and what plays.
     Tracks(Tracks),
     /// `format` {fps?, channels?}: whichever the host knows by now.
@@ -106,6 +115,7 @@ impl PlayerEvent {
             Self::Size { .. } => PlayerEventKind::Size,
             Self::Error { .. } => PlayerEventKind::Error,
             Self::Position { .. } => PlayerEventKind::Position,
+            Self::Timeline { .. } => PlayerEventKind::Timeline,
             Self::Tracks(_) => PlayerEventKind::Tracks,
             Self::Format { .. } => PlayerEventKind::Format,
             Self::Pip { .. } => PlayerEventKind::Pip,
@@ -126,6 +136,15 @@ impl PlayerEvent {
                 data
             }
             Self::Position { ms } => json!({ "ms": ms }),
+            Self::Timeline {
+                token,
+                seek_id,
+                ms,
+                duration_ms,
+                seekable,
+            } => {
+                json!({ "token": token, "seekId": seek_id, "ms": ms, "durationMs": duration_ms, "seekable": seekable })
+            }
             Self::Tracks(tracks) => tracks_data(tracks),
             Self::Format { fps, channels } => {
                 let mut data = serde_json::Map::new();
@@ -186,6 +205,15 @@ impl PlayerEvent {
             },
             PlayerEventKind::Position => Self::Position {
                 ms: data["ms"].as_u64().ok_or(PlayerEventError::NoPosition)?,
+            },
+            PlayerEventKind::Timeline => Self::Timeline {
+                token: data["token"].as_u64().ok_or(PlayerEventError::NoPosition)?,
+                seek_id: data["seekId"]
+                    .as_u64()
+                    .ok_or(PlayerEventError::NoPosition)?,
+                ms: data["ms"].as_u64().ok_or(PlayerEventError::NoPosition)?,
+                duration_ms: data["durationMs"].as_u64().filter(|value| *value > 0),
+                seekable: flag("seekable"),
             },
             PlayerEventKind::Tracks => Self::Tracks(parse_tracks(data)),
             PlayerEventKind::Format => Self::Format {
@@ -272,6 +300,13 @@ mod tests {
             error("ERROR_CODE_IO_BAD_HTTP_STATUS", Some(404)),
             error("ERROR_CODE_IO_NETWORK_CONNECTION_FAILED", None),
             PlayerEvent::Position { ms: 4000 },
+            PlayerEvent::Timeline {
+                token: 37,
+                seek_id: 9,
+                ms: 12345,
+                duration_ms: Some(120000),
+                seekable: true,
+            },
             PlayerEvent::Tracks(tracks),
             PlayerEvent::Tracks(Tracks::default()),
             format(Some(25.0), Some(2)),

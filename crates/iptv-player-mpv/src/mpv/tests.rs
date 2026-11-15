@@ -1392,3 +1392,44 @@ fn adaptive_playback_never_sends_identity_to_another_origin() {
         assert!(!head.contains("synthetic-identity"));
     }
 }
+
+#[test]
+fn recorded_media_seeks_while_paused_and_reports_duration_without_reopening() {
+    let _serial = serial();
+    let Some((dir, gpu)) = rig() else { return };
+    let Some(media) = clip(dir.path(), "red", 12.0) else {
+        return;
+    };
+    let server = Server::start(vec![("/generated.ts", Answer::Body(media))]);
+    let mut player = Player::new();
+    player.set(
+        "source",
+        json!({"url":server.url("/generated.ts"),"token":81,"live":false}),
+    );
+    assert!(player.inner.create_render());
+    player.wait_state(Some(&gpu), "ready");
+    player.set("paused", json!(true));
+    player.wait_prop(c"pause", "yes");
+    host::tick(&player.inner);
+    player.wait(Some(&gpu), "seekable timeline", |p| {
+        p.events("timeline").iter().any(|e| {
+            e["seekable"] == true && e["durationMs"].as_u64().is_some_and(|ms| ms > 10_000)
+        })
+    });
+    let entry = player.inner.state.borrow().entry;
+    player.set("seek", json!({"token":81,"id":1,"ms":6000}));
+    player.wait(Some(&gpu), "paused seek position", |p| {
+        host::tick(&p.inner);
+        p.events("timeline").iter().any(|e| {
+            e["seekId"] == 1
+                && e["ms"]
+                    .as_u64()
+                    .is_some_and(|ms| (5500..6500).contains(&ms))
+        })
+    });
+    assert_eq!(player.inner.state.borrow().entry, entry);
+    assert_eq!(player.prop(c"pause").as_deref(), Some("yes"));
+    player.set("seek", json!({"token":80,"id":2,"ms":1000}));
+    player.set("seek", json!({"token":81,"id":1,"ms":1000}));
+    assert_eq!(player.inner.state.borrow().seek_id, 1);
+}

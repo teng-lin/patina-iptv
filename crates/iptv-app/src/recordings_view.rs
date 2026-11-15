@@ -55,12 +55,16 @@ fn reload(ui: Ui) {
     });
     crate::data::spawn_in_app(async move {
         let result = owner.recording_jobs().await;
+        let points = owner.recording_progress_points().await.unwrap_or_default();
         ui.recordings.update(|s| {
             if s.read_generation != generation {
                 return;
             }
             match result {
-                Ok(jobs) => s.reload(jobs),
+                Ok(jobs) => {
+                    s.progress = points;
+                    s.reload(jobs);
+                }
                 Err(_) => s.error = Some("Recordings could not be loaded".into()),
             }
         });
@@ -282,8 +286,17 @@ fn actions(ui: Ui, job: &Job) -> Vec<&'static str> {
                 {
                     "Stop playback"
                 } else {
-                    "Play recording"
+                    if ui.recordings.with(|s| {
+                        s.progress
+                            .iter()
+                            .any(|(id, p)| *id == job.id && p.resume_ms() > 0)
+                    }) {
+                        "Resume recording"
+                    } else {
+                        "Play recording"
+                    }
                 },
+                "Play from beginning",
                 "Delete recording",
             ]
         }
@@ -329,10 +342,23 @@ fn perform(ui: Ui, index: usize) {
     });
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
-        let result = if action == "Play recording" {
+        let result = if matches!(
+            action,
+            "Play recording" | "Resume recording" | "Play from beginning"
+        ) {
+            crate::on_demand::flush(ui, false);
+            let progress = owner.recording_progress(job.id).await.unwrap_or_default();
             match owner.open_recording(job.id).await {
                 Ok(source) => {
                     crate::player::play_recording(ui, job.clone(), source);
+                    ui.player
+                        .main()
+                        .resume_ms
+                        .set(Some(if action == "Play from beginning" {
+                            0
+                        } else {
+                            progress.resume_ms()
+                        }));
                     Ok(())
                 }
                 Err(e) => Err(e),
@@ -348,7 +374,10 @@ fn perform(ui: Ui, index: usize) {
             match result {
                 Ok(()) => {
                     s.actions = false;
-                    if action == "Play recording" {
+                    if matches!(
+                        action,
+                        "Play recording" | "Resume recording" | "Play from beginning"
+                    ) {
                         s.open = false;
                     }
                 }
