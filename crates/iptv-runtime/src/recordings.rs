@@ -3,6 +3,8 @@
 pub mod host;
 mod rules;
 #[cfg(test)]
+mod recovery_tests;
+#[cfg(test)]
 mod tests;
 use crate::{Error, Runtime, store_service::Services};
 use iptv_core::{
@@ -800,6 +802,18 @@ async fn recover_media(services: &Services, job: &Job) {
     )
     .await;
 }
+async fn finish_unstarted(
+    services: &Services,
+    job: &Job,
+    status: Status,
+    message: &'static str,
+) {
+    if job.bytes > 0 {
+        recover_media(services, job).await;
+    } else {
+        transition(services, job, status, 0, message).await;
+    }
+}
 async fn recover(services: &Services) -> Result<(), crate::model::StoreError> {
     for job in services.read(|store| store.recording_jobs()).await? {
         if job.status == Status::Recording && job.request.end > now() {
@@ -824,11 +838,10 @@ async fn recover(services: &Services) -> Result<(), crate::model::StoreError> {
         } else if matches!(job.status, Status::Recording | Status::Partial) {
             recover_media(services, &job).await;
         } else if job.status == Status::Scheduled && job.request.end <= now() {
-            transition(
+            finish_unstarted(
                 services,
                 &job,
                 Status::Missed,
-                0,
                 "The recording window elapsed while the host was unavailable",
             )
             .await;
@@ -956,11 +969,10 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
                 continue;
             }
             if job.request.end <= now() {
-                transition(
+                finish_unstarted(
                     &services,
                     &job,
                     Status::Missed,
-                    0,
                     "The scheduled recording window was missed",
                 )
                 .await;
@@ -978,11 +990,10 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
                 }
             };
             if !reserved {
-                transition(
+                finish_unstarted(
                     &services,
                     &job,
                     Status::Failed,
-                    0,
                     "No provider connection available; check Streams at once",
                 )
                 .await;
