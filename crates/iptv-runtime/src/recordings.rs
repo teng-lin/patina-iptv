@@ -453,11 +453,12 @@ impl Runtime {
             .read(move |store| store.recording_job(id))
             .await?
         {
-            let mut data = self.recordings.lock();
-            data.intent_revision += 1;
-            data.jobs.retain(|existing| existing.id != id);
-            data.jobs.push(job);
-            drop(data);
+            {
+                let mut data = self.recordings.lock();
+                data.intent_revision += 1;
+                data.jobs.retain(|existing| existing.id != id);
+                data.jobs.push(job);
+            }
             self.refresh_recording_wake().await?;
         }
         Ok(())

@@ -111,11 +111,12 @@ impl Runtime {
             .services()
             .read(|store| Ok((store.recording_rules()?, store.recording_jobs()?)))
             .await?;
-        let mut data = self.recordings.lock();
-        data.intent_revision += 1;
-        data.recurring = rules.iter().any(|rule| rule.enabled);
-        data.jobs = jobs;
-        drop(data);
+        {
+            let mut data = self.recordings.lock();
+            data.intent_revision += 1;
+            data.recurring = rules.iter().any(|rule| rule.enabled);
+            data.jobs = jobs;
+        }
         self.refresh_recording_wake().await?;
         Ok(())
     }
