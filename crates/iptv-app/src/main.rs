@@ -33,7 +33,6 @@ fn main() -> impl std::process::Termination {
             title: "Patina".to_owned(),
             app_id: "com.hantekllc.iptvrs".to_owned(),
             size: (1280, 720),
-            schemes: vec!["patina".into()],
             ..Default::default()
         },
     )
