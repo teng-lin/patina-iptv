@@ -82,13 +82,14 @@ fn series_occurrences_keep_raw_identity_across_padding_cancellation_and_retry() 
         None
     );
     // A retry may have a later clamped record-now start; its raw occurrence is stable.
-    let mut retry = rule.clone();
-    retry.request.start += 10;
+    let mut retry = rule.request.clone();
+    retry.start += 10;
     assert_eq!(
         store
-            .schedule_recording_rule_and_first_at(
-                &retry,
+            .schedule_recording_rule_with_first(
+                &rule,
                 JobId(403),
+                &retry,
                 original.start,
                 original.start - 1000
             )
@@ -171,6 +172,49 @@ fn a_colliding_first_job_cannot_silently_attach_a_different_repeating_rule() {
         store.recording_rule_for_job(first).unwrap(),
         Some(RuleId(500))
     );
+}
+
+#[test]
+fn recurring_requests_with_different_durations_do_not_reuse_the_shorter_rule() {
+    use iptv_core::recording::{Repeat, Rule, RuleId};
+    for repeat in [Repeat::Daily, Repeat::Weekly] {
+        let (mut store, mut request) = fixture();
+        request.end = request.start + 1800;
+        let mut rule = Rule {
+            id: RuleId(600),
+            local_start: request.start,
+            request: request.clone(),
+            repeat,
+            enabled: true,
+            lead_seconds: 0,
+            trail_seconds: 0,
+        };
+        let shorter = store
+            .schedule_recording_rule_and_first(&rule, JobId(601), request.start - 1)
+            .unwrap();
+        rule.id = RuleId(602);
+        rule.request.end = rule.request.start + 3600;
+        let longer = store
+            .schedule_recording_rule_and_first(&rule, JobId(603), request.start - 1)
+            .unwrap();
+        assert_ne!(shorter, longer);
+        assert_eq!(
+            store.recording_job(shorter).unwrap().unwrap().request.end - request.start,
+            1800
+        );
+        assert_eq!(
+            store.recording_job(longer).unwrap().unwrap().request.end - request.start,
+            3600
+        );
+        assert_eq!(store.recording_rules().unwrap().len(), 2);
+        assert_eq!(
+            store
+                .schedule_recording_rule_and_first(&rule, JobId(604), request.start - 1)
+                .unwrap(),
+            longer,
+            "an equivalent longer request remains idempotent"
+        );
+    }
 }
 #[test]
 fn edited_or_cancelled_intent_invalidates_a_scheduler_claim() {

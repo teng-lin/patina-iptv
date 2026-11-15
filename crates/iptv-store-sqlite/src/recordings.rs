@@ -140,6 +140,7 @@ fn insert_rule(
         .query_row(
             "SELECT id FROM recording_rules WHERE source_id=?1 AND channel_id=?2 AND repeat=?3
              AND local_start=?4 AND title=?5 AND enabled=1 AND lead_seconds=?6 AND trail_seconds=?7
+             AND ends_at-starts_at=?8
              AND source_incarnation=(SELECT incarnation FROM guide_revisions WHERE source_id=?1)",
             params![
                 request.source,
@@ -148,7 +149,8 @@ fn insert_rule(
                 rule.local_start,
                 request.title,
                 rule.lead_seconds,
-                rule.trail_seconds
+                rule.trail_seconds,
+                request.end - request.start
             ],
             |r| r.get(0),
         )
