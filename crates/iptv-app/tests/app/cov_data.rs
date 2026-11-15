@@ -305,6 +305,11 @@ fn stored_playlists_switch_refresh_and_go() {
     add(&mut app, "first.m3u");
     step(app.wait_for_within("text:Alpha Now", IMPORT));
     step(app.press("text:/^(★ )?Alpha Two$/"));
+    step(app.wait_until(
+        "Alpha Two authorized and loaded",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0),
+    ));
     assert!(iptv_app::player_has_source(0), "Alpha Two plays");
     // A favourite of the first playlist's: full screen, the card's
     // Favourite, back to the guide.
@@ -568,6 +573,11 @@ fn stored_playlists_switch_refresh_and_go() {
     let mut app = start();
     on_pick(&mut app);
     step(app.wait_for_within("id:player-banner >> text:/Alpha Nine · first$/", IMPORT));
+    step(app.wait_until(
+        "Alpha Nine authorized and loaded",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0),
+    ));
     assert!(iptv_app::player_has_source(0), "Alpha Nine plays");
     drop(app);
 
@@ -585,6 +595,11 @@ fn stored_playlists_switch_refresh_and_go() {
     .unwrap();
     let mut app = start();
     step(app.wait_for_within("id:player-banner >> text:/Alpha One · first$/", IMPORT));
+    step(app.wait_until(
+        "Alpha One authorized and loaded",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0),
+    ));
     assert!(iptv_app::player_has_source(0), "Alpha One plays");
     drop(app);
 
