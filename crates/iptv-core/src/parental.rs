@@ -73,16 +73,43 @@ pub struct Access {
     granted: BTreeSet<Target>,
     all_until: Option<u64>,
     session: bool,
+    settings_until: Option<u64>,
+    settings_session: bool,
 }
 impl Access {
     pub fn granted(&self, target: &Target, now: u64) -> bool {
+        if target.kind == ContentKind::Settings {
+            return self.settings_session
+                || self.settings_until.is_some_and(|until| now < until)
+                || self.granted.contains(target);
+        }
         self.session
             || self.all_until.is_some_and(|until| now < until)
             || self.granted.contains(target)
     }
     pub fn unlock(&mut self, target: Target, now: u64) {
+        if target.kind == ContentKind::Settings {
+            self.granted.remove(&target);
+            self.settings_until = None;
+            self.settings_session = false;
+            match self.policy.window {
+                UnlockWindow::Minutes(minutes) => {
+                    self.settings_until = Some(now.saturating_add(u64::from(minutes) * 60_000));
+                }
+                UnlockWindow::UntilRestart | UnlockWindow::UntilUnblockedChannel => {
+                    self.settings_session = true;
+                }
+                UnlockWindow::EveryTime => {
+                    self.granted.insert(target);
+                }
+            }
+            return;
+        }
         if self.policy.window != UnlockWindow::EveryTime {
-            self.lock();
+            self.granted
+                .retain(|target| target.kind == ContentKind::Settings);
+            self.all_until = None;
+            self.session = false;
         }
         match self.policy.window {
             UnlockWindow::Minutes(minutes) => {
@@ -100,6 +127,8 @@ impl Access {
         self.granted.clear();
         self.all_until = None;
         self.session = false;
+        self.settings_until = None;
+        self.settings_session = false;
     }
     pub fn unblocked_channel_played(&mut self) {
         if matches!(
@@ -197,6 +226,35 @@ impl Drop for Pin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn content_grants_never_authorize_or_extend_administration() {
+        for window in [
+            UnlockWindow::EveryTime,
+            UnlockWindow::Minutes(10),
+            UnlockWindow::Minutes(30),
+            UnlockWindow::Minutes(60),
+            UnlockWindow::Minutes(120),
+            UnlockWindow::UntilRestart,
+            UnlockWindow::UntilUnblockedChannel,
+        ] {
+            let mut access = Access::default();
+            access.policy.window = window;
+            let channel = Target::live(1, "generated-channel");
+            access.unlock(channel.clone(), 10);
+            assert!(access.granted(&channel, 10));
+            assert!(!access.granted(&Target::settings(), 10), "{window:?}");
+            access.unlock(Target::settings(), 20);
+            assert!(access.granted(&Target::settings(), 20));
+            access.unlock(Target::live(1, "generated-other"), 30);
+            assert!(access.granted(&Target::settings(), 30));
+            if let UnlockWindow::Minutes(minutes) = window {
+                assert!(!access.granted(&Target::settings(), 20 + u64::from(minutes) * 60_000));
+            }
+            access.lock();
+            assert!(!access.granted(&channel, 40));
+            assert!(!access.granted(&Target::settings(), 40));
+        }
+    }
     #[test]
     fn exact_grants_do_not_unlock_another_source_or_item() {
         let target = Target::live(1, "synthetic-a");

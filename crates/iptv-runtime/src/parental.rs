@@ -647,6 +647,68 @@ mod source_tests {
         }
     }
     #[tokio::test(flavor = "current_thread")]
+    async fn content_unlocks_cannot_mutate_parental_policy_or_sources_for_any_window() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = std::rc::Rc::new(Runtime::new(crate::Ports::new(
+            directory.path().to_owned(),
+            |_| Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x73; 32])),
+        )));
+        owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+        owner.start_services();
+        let services = owner.services();
+        let id = services
+            .call(|store| store.add_source(&source("generated-admin-boundary")))
+            .await
+            .unwrap();
+        owner
+            .parental_change_pin(None, Pin::parse("2468").unwrap())
+            .await
+            .unwrap();
+        for window in [
+            "every_time",
+            "min_10",
+            "min_30",
+            "hour_1",
+            "hour_2",
+            "until_restart",
+            "until_unblocked_channel",
+        ] {
+            owner
+                .set_setting(
+                    "parental.unlock_window",
+                    iptv_settings::Value::Enum(window.into()),
+                )
+                .unwrap();
+            owner.parental_lock();
+            owner
+                .parental_authorize(
+                    Target::live(id.0, "generated-channel"),
+                    Pin::parse("2468").unwrap(),
+                )
+                .await
+                .unwrap();
+            assert!(!owner.parental_settings_allowed(), "{window}");
+            assert!(
+                owner
+                    .set_setting("parental.live_enabled", iptv_settings::Value::Bool(false))
+                    .is_err()
+            );
+            assert!(crate::library::delete_source(&owner, id).await.is_err());
+            assert!(
+                owner
+                    .parental_set_blocked(Target::live(id.0, "generated-channel"), false)
+                    .await
+                    .is_err()
+            );
+            owner
+                .parental_authorize(Target::settings(), Pin::parse("2468").unwrap())
+                .await
+                .unwrap();
+            assert!(owner.parental_settings_allowed());
+        }
+        assert!(owner.drain_services());
+    }
+    #[tokio::test(flavor = "current_thread")]
     async fn queued_unblock_is_revoked_before_the_writer_executes_it() {
         let directory = tempfile::tempdir().unwrap();
         let owner = Runtime::new(crate::Ports::new(directory.path().to_owned(), |_| {
