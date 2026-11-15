@@ -46,6 +46,7 @@ fn label(item: MenuItem, favorite: bool) -> &'static str {
         Settings => tr("Settings"),
         StartFromBeginning => tr("Play from the beginning"),
         ExternalPlayer => tr("Open in another player"),
+        WatchInNewWindow => tr("Watch in new window"),
         Reminder => tr("Remind me"),
         Record => tr("Record"),
         CustomRecording => tr("Schedule a recording…"),
@@ -85,7 +86,7 @@ pub fn open(ui: Ui) {
         }
     };
     let program = crate::schedule().program_at(channel, minute);
-    let rows = program_menu(
+    let mut rows = program_menu(
         program,
         crate::schedule().catchup_days(channel),
         now,
@@ -107,6 +108,15 @@ pub fn open(ui: Ui) {
                     ))
         },
     );
+    if cfg!(target_os = "linux") && program.airing(now) == crate::guide::Airing::Live {
+        rows.insert(
+            3,
+            Row::Action {
+                item: MenuItem::WatchInNewWindow,
+                enabled: crate::desktop::player_windows::can_open(ui, channel),
+            },
+        );
+    }
     let origin = Origin {
         channel,
         program_start: program.start,
@@ -142,6 +152,9 @@ pub fn perform(ui: Ui, item: MenuItem) {
         }
         // Details replaces the menu; Back from it returns to the guide.
         MenuItem::Description => ui.description.set(Some(origin)),
+        MenuItem::WatchInNewWindow => {
+            crate::desktop::player_windows::open(ui, origin.channel);
+        }
         MenuItem::StartFromBeginning => {
             close(ui);
             ui.play(
@@ -455,4 +468,11 @@ fn description(ui: Ui) -> impl IntoElement {
                         if let Some(origin) = ui.description.get_untracked() { crate::recordings_view::programme(ui, origin, false); }
                     }))),
         )
+}
+
+/// Context-click targets a channel without tuning the main player.
+pub fn open_at(ui: Ui, channel: usize, minute: i32) {
+    ui.touched();
+    crate::lists::tap(ui, channel, minute);
+    open(ui);
 }

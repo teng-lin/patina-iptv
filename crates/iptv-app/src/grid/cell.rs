@@ -185,6 +185,13 @@ pub(super) fn cell(
         .justify_center()
         .overflow_hidden()
         .bg(move || rgba(colours.get().0))
+        .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
+            if cfg!(target_os = "linux") {
+                if let (Some(ch), Some(p)) = (channel.get(), program()) {
+                    crate::menu_view::open_at(ui, ch, p.start);
+                }
+            }
+        })
         .on_press(move || {
             let Some(p) = program() else { return };
             ui.touched();

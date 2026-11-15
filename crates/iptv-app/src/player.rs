@@ -545,6 +545,7 @@ fn save_last_channel(source: Option<crate::runtime::model::SourceId>, key: &str)
 /// channel history belong to the old one (channel keys are unique only
 /// within a playlist, so the new one may reuse the playing key).
 pub fn source_changed(ui: Ui) {
+    crate::desktop::player_windows::close_all(ui);
     crate::multiview::close(ui);
     if ui.playing.get_untracked().is_some() {
         log::info!("iptv player: another playlist is shown; stopping");

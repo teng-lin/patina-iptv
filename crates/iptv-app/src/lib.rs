@@ -7,6 +7,8 @@
 use crate::i18n::tr;
 
 pub use iptv_core::guide;
+#[cfg(all(feature = "test-support", target_os = "linux"))]
+mod guide_window_walkthrough;
 pub mod theme;
 
 #[cfg(target_os = "android")]
@@ -248,10 +250,12 @@ pub struct Ui {
     /// Each player surface's stream, health, position, size and tracks;
     /// the channel history (`player.rs`).
     pub player: player::Player,
+    pub player_surface: usize,
     /// Volume, mute and audio delay (`media.rs`).
     pub media: media::Media,
     /// Several channels at once, while open (`multiview.rs`).
     pub multiview: Signal<Option<multiview::State>>,
+    pub player_windows: Signal<iptv_core::playback_windows::Workspace<String>>,
     /// The channel list over full-screen video, while open.
     pub channels: Signal<Option<iptv_core::channel_list::ChannelList>>,
     /// Group and search selection while adding or replacing a multiview tile.
@@ -694,8 +698,10 @@ fn ready_app() -> impl IntoElement {
         settings: signal(0),
         settings_screen: signal(None),
         player: player::Player::new(),
+        player_surface: 0,
         media: media::Media::new(),
         multiview: signal(None),
+        player_windows: signal(Default::default()),
         channels: signal(None),
         channel_picker: signal(None),
         pip: signal(Default::default()),
@@ -722,7 +728,10 @@ fn ready_app() -> impl IntoElement {
     play_bar::bind(ui);
     multiview::bind(ui);
     pip::bind(ui);
+    desktop::player_windows::bind(ui);
     bind_back(ui);
+    #[cfg(all(feature = "test-support", target_os = "linux"))]
+    guide_window_walkthrough::bind(ui);
 
     let rows = element_ref();
     let groups = element_ref();
@@ -773,13 +782,14 @@ fn ready_app() -> impl IntoElement {
         .child(video::layer(ui, 0))
         .children((1..player::SURFACES).map(move |s| {
             when(
-                move || multiview::mounted(ui, s),
+                move || multiview::mounted(ui, s) || desktop::player_windows::mounted(ui, s),
                 move || video::layer(ui, s),
             )
         }))
         .child(ui_layers(ui, groups, rows))
         // The desktops' picture-in-picture window, while it is open.
         .child(desktop::pip_window::window(ui))
+        .child(desktop::player_windows::windows(ui))
 }
 
 /// Everything over the video: the guide, the full-screen tap catcher,

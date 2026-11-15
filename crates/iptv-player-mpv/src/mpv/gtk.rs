@@ -125,6 +125,7 @@ fn realize(p: &Inner) {
     }
     if p.create_render() {
         log::info!("iptv mpv: rendering through GTK's GL context");
+        super::gtk_pip::sync();
     }
 }
 
@@ -134,6 +135,12 @@ impl NativeComponent for Player {
     }
 
     fn set_prop(&mut self, name: &str, value: Option<&Value>) {
-        self.0.set_prop(name, value);
+        if name == "popupSurface" {
+            if let Some(surface) = value.and_then(Value::as_u64) {
+                super::gtk_pip::register_surface(surface as usize, self.0.id);
+            }
+        } else {
+            self.0.set_prop(name, value);
+        }
     }
 }

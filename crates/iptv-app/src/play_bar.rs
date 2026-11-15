@@ -184,6 +184,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
 /// accessibility label says which; a remote's Back and an iPad's swipe
 /// from the left edge hide the bar first).
 fn back(ui: Ui) -> impl IntoElement {
+    let window = nsh_core::element::desktop::current_window();
     let side = target();
     view()
         .absolute()
@@ -205,6 +206,10 @@ fn back(ui: Ui) -> impl IntoElement {
                 }
             },
             move || {
+                if !window.is_main() {
+                    window.close();
+                    return;
+                }
                 ui.touched();
                 log::info!("iptv play bar: back");
                 ui.panels.update(|p| p.hide());
@@ -463,6 +468,8 @@ fn centre(ui: Ui) -> impl IntoElement {
 /// Favourite, tracks, details, picture size, channels, multiview, guide,
 /// window full screen, frame rate.
 fn right(ui: Ui) -> impl IntoElement {
+    let target_window = nsh_core::element::desktop::current_window();
+    let icon_window = target_window.clone();
     use crate::chooser::{self, Kind};
     let size = target();
     let favourite = move || {
@@ -561,7 +568,7 @@ fn right(ui: Ui) -> impl IntoElement {
                 ui,
                 "Multiview",
                 || Icon::Multiview,
-                playing,
+                move || ui.player_surface == 0 && playing(),
                 size,
                 move || {
                     ui.play_bar.update(PlayBar::hide);
@@ -606,11 +613,16 @@ fn right(ui: Ui) -> impl IntoElement {
         .child(when(
             || DESKTOP,
             move || {
+                let icon_window = icon_window.clone();
+                let target_window = target_window.clone();
                 button(
                     ui,
                     "Full screen",
-                    || {
-                        if crate::desktop::fullscreen() {
+                    move || {
+                        if icon_window
+                            .state()
+                            .is_some_and(|s| s.mode == nsh_core::desktop::WindowMode::FullScreen)
+                        {
                             Icon::ExitFullScreen
                         } else {
                             Icon::FullScreen
@@ -618,7 +630,16 @@ fn right(ui: Ui) -> impl IntoElement {
                     },
                     always,
                     size,
-                    crate::desktop::toggle_fullscreen,
+                    move || {
+                        let full = target_window
+                            .state()
+                            .is_some_and(|s| s.mode == nsh_core::desktop::WindowMode::FullScreen);
+                        target_window.set_mode(if full {
+                            nsh_core::desktop::WindowMode::Normal
+                        } else {
+                            nsh_core::desktop::WindowMode::FullScreen
+                        });
+                    },
                 )
             },
         ))

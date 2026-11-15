@@ -221,11 +221,22 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
         video_track: Box::new(move || stream.choice.with(|c| c.video.clone())),
         audio_track: Box::new(move || stream.choice.with(|c| c.audio.clone())),
         text_track: Box::new(move || stream.choice.with(|c| c.text.clone())),
-        volume: Box::new(move || ui.media.volume.with(|v| v.level)),
-        muted: Box::new(move || {
-            ui.media.volume.with(|v| v.muted) || !crate::multiview::audible(ui, surface)
+        volume: Box::new(move || {
+            ui.player_windows
+                .with(|w| w.on_surface(surface).map(|s| s.volume.level))
+                .unwrap_or_else(|| ui.media.volume.with(|v| v.level))
         }),
-        audio_delay: Box::new(move || ui.media.delay_ms.get()),
+        muted: Box::new(move || {
+            ui.player_windows
+                .with(|w| w.on_surface(surface).map(|s| s.volume.muted))
+                .unwrap_or_else(|| ui.media.volume.with(|v| v.muted))
+                || !crate::multiview::audible(ui, surface)
+        }),
+        audio_delay: Box::new(move || {
+            ui.player_windows
+                .with(|w| w.on_surface(surface).map(|s| s.audio_delay))
+                .unwrap_or_else(|| ui.media.delay_ms.get())
+        }),
         pip: Box::new(move || crate::pip::prop(ui, surface)),
     };
     let mut player = native(iptv_player_mpv::PLAYER_VIEW)
@@ -234,6 +245,11 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
         .top(move || px(surface_rect(ui, surface).1))
         .w(move || px(surface_rect(ui, surface).2))
         .h(move || px(surface_rect(ui, surface).3));
+    // Linux-only prototype routing metadata; the shared player wire stays unchanged.
+    #[cfg(target_os = "linux")]
+    {
+        player = player.prop("popupSurface", move || serde_json::json!(surface));
+    }
     // Every prop of the contract, under its one declared name.
     for (prop, value) in props.into_wire() {
         player = player.prop(prop.wire(), value);

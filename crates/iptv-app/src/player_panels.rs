@@ -117,7 +117,7 @@ fn is_favorite(ui: Ui) -> bool {
 pub fn enabled(ui: Ui, control: Control) -> bool {
     let choice = |k| ui.player.main().tracks.with(|t| t.has_choice(k));
     match control {
-        Control::Multiview => ui.playing.get().is_some(),
+        Control::Multiview => ui.player_surface == 0 && ui.playing.get().is_some(),
         Control::Record => ui
             .playing
             .get()
