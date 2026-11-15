@@ -36,6 +36,12 @@ impl Runtime {
         if repeat == Repeat::Once {
             return self.schedule_recording(request).await;
         }
+        self.parental_check(&iptv_core::parental::Target::live(
+            request.source,
+            request.channel.clone(),
+        ))
+        .await
+        .map_err(|_| Error::unavailable("Parental access is locked"))?;
         request.validate(now()).map_err(Error::unavailable)?;
         let rule = Rule {
             id: RuleId(identity()?),

@@ -303,8 +303,8 @@ pub fn play_recording(ui: Ui, job: iptv_core::recording::Job, source: PlaySource
 }
 
 pub fn play_vod(ui: Ui, playing: iptv_runtime::vod::Playing, source: PlaySource) {
-    crate::on_demand::flush(ui,false);
-    let resume=playing.progress.resume_ms();
+    crate::on_demand::flush(ui, false);
+    let resume = playing.progress.resume_ms();
     crate::multiview::close(ui);
     cancel_resolve(0);
     crate::runtime().close_recording_playback();
@@ -324,7 +324,9 @@ pub fn play_vod(ui: Ui, playing: iptv_runtime::vod::Playing, source: PlaySource)
         .health
         .update(|h| session = h.start(false, ui.now_ms()));
     load(ui, 0, session, source);
-    if resume>0 {ui.player.main().resume_ms.set(Some(resume));}
+    if resume > 0 {
+        ui.player.main().resume_ms.set(Some(resume));
+    }
     ui.mode.set(ViewMode::Fullscreen);
 }
 
@@ -385,8 +387,14 @@ fn open(ui: Ui, surface: usize, session: u64) {
     }
 }
 fn open_allowed(ui: Ui, surface: usize, session: u64) {
-    if surface == 0 && let Some((_, source)) = ui.player.vod.get_untracked() {
-        let position = if ui.player.main().finished.get_untracked() { 0 } else { ui.player.main().timeline.get_untracked().position_ms };
+    if surface == 0
+        && let Some((_, source)) = ui.player.vod.get_untracked()
+    {
+        let position = if ui.player.main().finished.get_untracked() {
+            0
+        } else {
+            ui.player.main().timeline.get_untracked().position_ms
+        };
         load(ui, 0, session, source);
         ui.player.main().resume_ms.set(Some(position));
         return;
@@ -535,6 +543,39 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
     if stream.health.with_untracked(|h| h.session()) != session {
         return; // the viewer moved on
     }
+    // Recheck timed grants after asynchronous resolution, before the decoder
+    // sees a stream. The runtime already checked current durable membership.
+    let owner = crate::runtime();
+    let allowed = if surface == 0
+        && let Some((playing, _)) = ui.player.vod.get_untracked()
+    {
+        owner.parental_allowed(&iptv_runtime::vod::target(&playing.key))
+            && playing
+                .parent
+                .as_ref()
+                .is_none_or(|p| owner.parental_allowed(&iptv_runtime::vod::target(p)))
+    } else if surface == 0
+        && let Some((job, _)) = ui.player.recorded.get_untracked()
+    {
+        owner.parental_allowed(&iptv_core::parental::Target::live(
+            job.request.source,
+            job.request.channel,
+        ))
+    } else if let Some((channel, _)) = target(ui, surface) {
+        crate::parental_view::live_target(ui, channel).is_none_or(|t| owner.parental_allowed(&t))
+    } else if let Some(early) = resume::source(ui) {
+        owner.parental_allowed(&iptv_core::parental::Target::live(
+            early.source_id,
+            early.key,
+        ))
+    } else {
+        true
+    };
+    if !allowed {
+        stop_surface(ui, surface);
+        return;
+    }
+
     crate::settings::add_user_agent(&mut source.headers, crate::settings::user_agent());
     let (live, reconnect) = stream
         .health

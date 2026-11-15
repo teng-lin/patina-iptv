@@ -63,7 +63,6 @@ mod pip_control;
 mod pointer;
 mod recordings;
 mod recordings_transport;
-mod vod_library;
 mod screens_look;
 mod search_history;
 mod stalker_cancel;
@@ -71,5 +70,6 @@ mod tablet_rows;
 mod tv_player;
 mod tv_replay;
 mod type_drift;
+mod vod_library;
 
 mod store_latency;

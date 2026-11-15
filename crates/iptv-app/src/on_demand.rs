@@ -2,8 +2,7 @@
 use crate::Ui;
 
 pub fn active(ui: Ui) -> bool {
-    ui.player.recorded.with(Option::is_some)
-        || (!ui.player.main().live.get() && ui.playing.get().is_none())
+    ui.player.recorded.with(Option::is_some) || ui.player.vod.with(Option::is_some)
 }
 pub fn seekable(ui: Ui) -> bool {
     active(ui) && ui.player.main().timeline.with(|t| t.seekable)
@@ -72,7 +71,7 @@ pub fn flush(ui: Ui, ended: bool) {
         return;
     }
     let progress = stream.timeline.get_untracked().progress(ended);
-    crate::vod_view::observe(ui,progress.position_ms,progress.duration_ms,ended);
+    crate::vod_view::observe(ui, progress.position_ms, progress.duration_ms, ended);
     if let Some((job, source)) = ui.player.recorded.get_untracked() {
         // This method queues the write immediately; disposal cannot lose the last point.
         crate::runtime().save_recording_progress(job.id, &source, progress);
@@ -83,4 +82,5 @@ pub fn title(ui: Ui) -> Option<String> {
     ui.player
         .recorded
         .with(|r| r.as_ref().map(|(job, _)| job.request.title.clone()))
+        .or_else(|| crate::vod_view::title(ui))
 }

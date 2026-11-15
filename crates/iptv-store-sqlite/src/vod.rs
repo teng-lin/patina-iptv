@@ -198,26 +198,137 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iptv_providers::{HttpResponse, SecretUrl,model::{Source, SourceConfig,M3uSourceConfig,ContentKind}};
-    fn fixture()->(Store,Key) {
-        let mut store=Store::open_in_memory().unwrap();
-        let source=store.add_source(&Source{name:"Generated catalogue".into(),config:SourceConfig::M3u(M3uSourceConfig{location:SecretUrl::new("https://example.test/generated.m3u"),user_agent:None,referrer:None})}).unwrap();
-        let groups=iptv_providers::xtream::parse_categories(&HttpResponse::ok(r#"[{"category_id":"7","category_name":"Generated category"}]"#),ContentKind::Movie).unwrap();
+    use iptv_providers::{
+        HttpResponse, SecretUrl,
+        model::{ContentKind, M3uSourceConfig, Source, SourceConfig},
+    };
+    fn fixture() -> (Store, Key) {
+        let mut store = Store::open_in_memory().unwrap();
+        let source = store
+            .add_source(&Source {
+                name: "Generated catalogue".into(),
+                config: SourceConfig::M3u(M3uSourceConfig {
+                    location: SecretUrl::new("https://example.test/generated.m3u"),
+                    user_agent: None,
+                    referrer: None,
+                }),
+            })
+            .unwrap();
+        let groups = iptv_providers::xtream::parse_categories(
+            &HttpResponse::ok(r#"[{"category_id":"7","category_name":"Generated category"}]"#),
+            ContentKind::Movie,
+        )
+        .unwrap();
         let movies=iptv_providers::xtream::parse_vod_streams(&HttpResponse::ok(r#"[{"stream_id":10,"name":"Generated Aurora","category_id":"7","container_extension":"mp4"},{"stream_id":11,"name":"Generated Brook","category_id":"7","container_extension":"mp4"}]"#)).unwrap();
-        store.replace_catalog(source,&groups.items,&[],&movies.items,&[]).unwrap();
-        (store,Key{source:source.0,kind:Kind::Movie,id:movies.items[0].id.to_string()})
+        store
+            .replace_catalog(source, &groups.items, &[], &movies.items, &[])
+            .unwrap();
+        (
+            store,
+            Key {
+                source: source.0,
+                kind: Kind::Movie,
+                id: movies.items[0].id.to_string(),
+            },
+        )
     }
-    #[test] fn pages_search_categories_and_progress_are_source_scoped(){
-        let (mut store,key)=fixture();let query=Query::default();
-        let (first,more)=store.vod_page(&query,0,1).unwrap();assert!(more);assert_eq!(first[0].key,key);
-        assert_eq!(store.vod_page(&query,1,1).unwrap().0[0].name,"Generated Brook");
-        let categories=store.vod_categories(&query).unwrap();assert_eq!(categories.len(),1);
-        let query=Query{text:"aurora".into(),category:Some((key.source,categories[0].id.clone())),..Default::default()};assert_eq!(store.vod_page(&query,0,50).unwrap().0.len(),1);
-        assert!(store.vod_page(&Query{continue_watching:true,..Default::default()},0,20).unwrap().0.is_empty());
-        let progress=Progress::observed(31_000,Some(120_000),false);store.save_vod_progress(&key,None,progress).unwrap();assert_eq!(store.vod_progress(&key).unwrap(),progress);
-        assert_eq!(store.vod_page(&Query{continue_watching:true,..Default::default()},0,20).unwrap().0[0].key,key);
-        let other=Key{source:key.source+1,..key.clone()};assert_eq!(store.vod_progress(&other).unwrap(),Progress::default());
-        store.set_source_policy(crate::SourceId(key.source),crate::SourcePolicy{enabled:false,..Default::default()}).unwrap();assert!(store.vod_page(&Query::default(),0,20).unwrap().0.is_empty());assert!(store.vod_locator(&key).unwrap().is_none());
+    #[test]
+    fn pages_search_categories_and_progress_are_source_scoped() {
+        let (mut store, key) = fixture();
+        let query = Query::default();
+        let (first, more) = store.vod_page(&query, 0, 1).unwrap();
+        assert!(more);
+        assert_eq!(first[0].key, key);
+        assert_eq!(
+            store.vod_page(&query, 1, 1).unwrap().0[0].name,
+            "Generated Brook"
+        );
+        let categories = store.vod_categories(&query).unwrap();
+        assert_eq!(categories.len(), 1);
+        let query = Query {
+            text: "aurora".into(),
+            category: Some((key.source, categories[0].id.clone())),
+            ..Default::default()
+        };
+        assert_eq!(store.vod_page(&query, 0, 50).unwrap().0.len(), 1);
+        assert!(
+            store
+                .vod_page(
+                    &Query {
+                        continue_watching: true,
+                        ..Default::default()
+                    },
+                    0,
+                    20
+                )
+                .unwrap()
+                .0
+                .is_empty()
+        );
+        let progress = Progress::observed(31_000, Some(120_000), false);
+        store.save_vod_progress(&key, None, progress).unwrap();
+        assert_eq!(store.vod_progress(&key).unwrap(), progress);
+        assert_eq!(
+            store
+                .vod_page(
+                    &Query {
+                        continue_watching: true,
+                        ..Default::default()
+                    },
+                    0,
+                    20
+                )
+                .unwrap()
+                .0[0]
+                .key,
+            key
+        );
+        let other = Key {
+            source: key.source + 1,
+            ..key.clone()
+        };
+        assert_eq!(store.vod_progress(&other).unwrap(), Progress::default());
+        store
+            .set_source_policy(
+                crate::SourceId(key.source),
+                crate::SourcePolicy {
+                    enabled: false,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(
+            store
+                .vod_page(&Query::default(), 0, 20)
+                .unwrap()
+                .0
+                .is_empty()
+        );
+        assert!(store.vod_locator(&key).unwrap().is_none());
     }
-    #[test] fn completed_titles_leave_continue_watching(){let (mut store,key)=fixture();store.save_vod_progress(&key,None,Progress::observed(120_000,Some(120_000),true)).unwrap();assert!(store.vod_page(&Query{continue_watching:true,..Default::default()},0,20).unwrap().0.is_empty());assert_eq!(store.vod_card(&key).unwrap().unwrap().progress.resume_ms(),0);}
+    #[test]
+    fn completed_titles_leave_continue_watching() {
+        let (mut store, key) = fixture();
+        store
+            .save_vod_progress(&key, None, Progress::observed(120_000, Some(120_000), true))
+            .unwrap();
+        assert!(
+            store
+                .vod_page(
+                    &Query {
+                        continue_watching: true,
+                        ..Default::default()
+                    },
+                    0,
+                    20
+                )
+                .unwrap()
+                .0
+                .is_empty()
+        );
+        assert_eq!(
+            store.vod_card(&key).unwrap().unwrap().progress.resume_ms(),
+            0
+        );
+    }
 }

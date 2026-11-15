@@ -417,6 +417,12 @@ impl Runtime {
     }
     /// Cancels a future job, or requests that an active recording stop and retain media.
     pub async fn update_recording(&self, id: JobId, request: Request) -> Result<(), Error> {
+        self.parental_check(&iptv_core::parental::Target::live(
+            request.source,
+            request.channel.clone(),
+        ))
+        .await
+        .map_err(|_| Error::unavailable("Parental access is locked"))?;
         if !self
             .services()
             .call(move |store| store.update_recording(id, &request, now()))

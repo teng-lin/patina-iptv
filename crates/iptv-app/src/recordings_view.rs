@@ -229,6 +229,11 @@ fn save(ui: Ui) {
     let Some(draft) = draft else {
         return;
     };
+    let target =
+        iptv_core::parental::Target::live(draft.request.source, draft.request.channel.clone());
+    crate::parental_view::request(ui, target, move || save_allowed(ui, draft));
+}
+fn save_allowed(ui: Ui, draft: Draft) {
     let request = draft.padded(crate::time::wall_unix());
     if let Err(message) = request.validate(crate::time::wall_unix()) {
         ui.recordings.update(|s| s.error = Some(message.into()));

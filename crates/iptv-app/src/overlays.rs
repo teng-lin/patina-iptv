@@ -74,7 +74,6 @@ impl Overlay {
     /// Every overlay, topmost layer first.
     pub(crate) const ALL: [Overlay; 20] = [
         Overlay::Parental,
-
         Overlay::Wizard,
         Overlay::Recordings,
         Overlay::Vod,
@@ -146,7 +145,6 @@ impl Overlay {
             Overlay::Parental
             | Overlay::Wizard
             | Overlay::Vod
-
             | Overlay::Recordings
             | Overlay::GuideRepair
             | Overlay::GuideInspection
@@ -179,7 +177,6 @@ impl Overlay {
             Overlay::Parental
             | Overlay::Wizard
             | Overlay::Vod
-
             | Overlay::Recordings
             | Overlay::GuideRepair
             | Overlay::GuideInspection
@@ -259,7 +256,6 @@ mod tests {
             Overlay::Parental
             | Overlay::Wizard
             | Overlay::Vod
-
             | Overlay::Recordings
             | Overlay::GuideRepair
             | Overlay::GuideInspection
