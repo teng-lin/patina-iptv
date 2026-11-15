@@ -514,3 +514,60 @@ async fn a_cold_native_host_resumes_a_spool_without_constructing_another_ui() {
     assert!(path(&services, id, false).is_file());
     assert!(state.stop());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_surviving_ui_and_a_restarted_host_keep_one_recording_budget() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("generated-app");
+    let mut ports = crate::Ports::new(root.clone(), |_| {
+        Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
+    });
+    ports.background_recordings = true;
+    let owner = Runtime::new(ports.clone());
+    owner.start_services();
+    let mut request = seed(&owner, &server()).await;
+    owner.start_recordings();
+    for _ in 0..100 {
+        if owner.recordings.lock().ready {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(owner.reserve_viewing(0, SourceId(request.source)));
+    let first_services = owner
+        .recordings
+        .host
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .accept();
+    assert!(owner.shutdown_recording_host());
+    assert!(
+        !first_services.is_current(),
+        "old store epoch must close before a successor opens"
+    );
+    // The OS restarts its native service while this exact UI Runtime survives.
+    host::start_background_host(ports.clone()).unwrap();
+    let restarted = host::acquire(&ports);
+    assert!(Arc::ptr_eq(&owner.recordings, &restarted));
+    assert!(restarted.lock().viewers.contains_key(&0));
+    owner.release_viewing(0);
+    assert!(restarted.lock().viewers.is_empty());
+    request.start = now();
+    request.end = request.start + 20;
+    let id = owner.schedule_recording(request.clone()).await.unwrap();
+    until(&owner, id, |job| {
+        job.status == Status::Recording && job.bytes >= 188
+    })
+    .await;
+    assert!(
+        !owner.reserve_viewing(0, SourceId(request.source)),
+        "a surviving UI cannot bypass its restarted host's active recording lease"
+    );
+    owner.stop_recording(id).await.unwrap();
+    let job = until(&owner, id, |job| !job.status.active()).await;
+    assert!(job.bytes >= 188);
+    assert!(owner.shutdown_recording_host());
+    assert!(owner.drain_services());
+}

@@ -80,6 +80,7 @@ struct Data {
     recurring: bool,
     ready: bool,
     stopped: bool,
+    completed_run: u64,
 }
 impl Data {
     fn lease(&self, source: i64) -> Lease {
@@ -134,12 +135,17 @@ struct ContextEntry {
     value: iptv_guide::playback::PlaybackContext,
 }
 #[derive(Default)]
+struct Execution {
+    generation: u64,
+    started: bool,
+    shutdown: CancelToken,
+}
+#[derive(Default)]
 pub(crate) struct State {
     host: Mutex<Option<Arc<crate::store_service::Service>>>,
     data: Mutex<Data>,
     changed: Condvar,
-    started: AtomicBool,
-    shutdown: CancelToken,
+    execution: Mutex<Execution>,
     contexts: Mutex<HashMap<i64, ContextEntry>>,
     media_ops: tokio::sync::Mutex<()>,
     playback: Mutex<Option<(JobId, iptv_net::recording_file::RecordingFile)>>,
@@ -150,14 +156,31 @@ impl State {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+    fn execution(&self) -> std::sync::MutexGuard<'_, Execution> {
+        self.execution
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    fn is_stopping(&self) -> bool {
+        let execution = self.execution();
+        execution.started && execution.shutdown.is_cancelled() && !self.lock().stopped
+    }
     pub(crate) fn stop(&self) -> bool {
-        if !self.started.load(Ordering::SeqCst) {
-            return true;
-        }
-        self.shutdown.cancel();
+        let generation = {
+            let execution = self.execution();
+            if !execution.started {
+                return true;
+            }
+            execution.shutdown.cancel();
+            execution.generation
+        };
+        // A replacement may already be running when this waiter wakes. Wait
+        // for the execution we cancelled, rather than its successor's flag.
         self.changed
-            .wait_timeout_while(self.lock(), Duration::from_secs(15), |d| !d.stopped)
-            .map(|(data, _)| data.stopped)
+            .wait_timeout_while(self.lock(), Duration::from_secs(15), |d| {
+                d.completed_run < generation
+            })
+            .map(|(data, _)| data.completed_run >= generation)
             .unwrap_or(false)
     }
 }
@@ -333,7 +356,7 @@ impl Runtime {
         ))
         .await
         .map_err(|_| Error::unavailable("Unlock this recording with the parental PIN"))?;
-        if self.recordings.shutdown.is_cancelled() || !self.services().is_current() {
+        if self.recordings.is_stopping() || !self.services().is_current() {
             return Err(Error::unavailable(
                 "Restart Patina before scheduling a recording",
             ));
@@ -747,17 +770,17 @@ async fn recover(services: &Services) -> Result<(), crate::model::StoreError> {
     }
     Ok(())
 }
-async fn run(services: Services, state: Arc<State>) {
+async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
     let mut retry = Duration::from_millis(250);
     loop {
-        if !services.is_current() || state.shutdown.is_cancelled() {
+        if !services.is_current() || shutdown.is_cancelled() {
             return;
         }
         if recover(&services).await.is_ok() && refresh_accounts(&services, &state).await.is_ok() {
             break;
         }
         tokio::select! {
-            _ = state.shutdown.cancelled() => return,
+            _ = shutdown.cancelled() => return,
             _ = tokio::time::sleep(retry) => {},
         }
         retry = (retry * 2).min(Duration::from_secs(5));
@@ -769,8 +792,8 @@ async fn run(services: Services, state: Arc<State>) {
     let mut guides_at = 0;
     loop {
         while tasks.try_join_next().is_some() {}
-        if !services.is_current() || state.shutdown.is_cancelled() {
-            state.shutdown.cancel();
+        if !services.is_current() || shutdown.is_cancelled() {
+            shutdown.cancel();
             while tasks.join_next().await.is_some() {}
             break;
         }
@@ -793,7 +816,7 @@ async fn run(services: Services, state: Arc<State>) {
                     .collect();
                 for source in sources {
                     let work = services.clone();
-                    let cancel = state.shutdown.clone();
+                    let cancel = shutdown.clone();
                     services.submit(false, move || {
                         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
                         work.block_on(crate::imports::guide_pipeline(
@@ -900,6 +923,7 @@ async fn run(services: Services, state: Arc<State>) {
             job.status = Status::Recording;
             let services = services.clone();
             let state = state.clone();
+            let shutdown = shutdown.clone();
             tasks.spawn(async move {
                 struct Release(Arc<State>, JobId);
                 impl Drop for Release {
@@ -908,11 +932,11 @@ async fn run(services: Services, state: Arc<State>) {
                     }
                 }
                 let _release = Release(state.clone(), job.id);
-                record(&services, &state, &job, &stop).await;
+                record(&services, &state, &job, &stop, &shutdown).await;
             });
         }
         tokio::select! {
-            _ = state.shutdown.cancelled() => {},
+            _ = shutdown.cancelled() => {},
             _ = tokio::time::sleep(Duration::from_secs(1)) => {},
         }
     }
@@ -1001,7 +1025,13 @@ async fn resolve(
     Ok(stream)
 }
 
-async fn record(services: &Services, state: &State, job: &Job, stop: &CancelToken) {
+async fn record(
+    services: &Services,
+    state: &State,
+    job: &Job,
+    stop: &CancelToken,
+    shutdown: &CancelToken,
+) {
     let partial = path(services, job.id, true);
     let destination = path(services, job.id, false);
     let directory = media_directory(services.directory());
@@ -1069,7 +1099,7 @@ async fn record(services: &Services, state: &State, job: &Job, stop: &CancelToke
     let remaining = job.request.end.saturating_sub(now()).max(0) as u64;
     let outcome = tokio::select! {
         biased;
-        _ = state.shutdown.cancelled() => Err("Interrupted when the app closed"),
+        _ = shutdown.cancelled() => Err("Interrupted when the app closed"),
         _ = stop.cancelled() => Ok("Stopped by you"),
         _ = async {
             let limit = tokio::time::Instant::now() + Duration::from_secs(remaining);
@@ -1079,7 +1109,7 @@ async fn record(services: &Services, state: &State, job: &Job, stop: &CancelToke
         } => Ok("Recording finished"),
         result = result => result.map(|_| "Recording finished"),
     };
-    if state.shutdown.is_cancelled() && state.background() && job.request.end > now() {
+    if shutdown.is_cancelled() && state.background() && job.request.end > now() {
         let bytes = std::fs::symlink_metadata(&partial).map_or(0, |m| m.len() / 188 * 188);
         transition(
             services,

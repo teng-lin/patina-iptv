@@ -43,6 +43,11 @@ impl Runtime {
         .await
         .map_err(|_| Error::unavailable("Parental access is locked"))?;
         request.validate(now()).map_err(Error::unavailable)?;
+        if self.recordings.is_stopping() || !self.services().is_current() {
+            return Err(Error::unavailable(
+                "Restart Patina before scheduling a recording",
+            ));
+        }
         let rule = Rule {
             id: RuleId(identity()?),
             local_start: local_timestamp(request.start)

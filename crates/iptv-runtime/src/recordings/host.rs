@@ -10,6 +10,15 @@ pub(crate) fn activate_storage(ports: &crate::Ports) -> Result<(), crate::backup
     let _guard = ACTIVATION
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if crate::backup::is_pending(&ports.directory) && !stop_background_host(&ports.directory) {
+        return Err(crate::backup::StartupError {
+            error: iptv_core::i18n::key(
+                "Recording host did not close; restart Patina before restoring",
+            )
+            .into(),
+            fatal: true,
+        });
+    }
     crate::backup::startup(ports)
 }
 
@@ -24,21 +33,12 @@ pub(crate) fn acquire(ports: &crate::Ports) -> Arc<State> {
     let mut hosts = hosts()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    // A pending restore must not reopen yesterday's catalogue handles.
+    // A running UI and a restarted OS service must always share one account
+    // budget and playback capability. Keep this identity even after shutdown.
     if crate::backup::is_pending(&ports.directory) {
-        if let Some(previous) = hosts.get(&ports.directory).cloned() {
-            if previous.stop() {
-                hosts.remove(&ports.directory);
-            } else {
-                return previous;
-            }
+        if let Some(previous) = hosts.get(&ports.directory) {
+            previous.stop();
         }
-    }
-    if hosts
-        .get(&ports.directory)
-        .is_some_and(|state| state.lock().stopped)
-    {
-        hosts.remove(&ports.directory);
     }
     hosts
         .entry(ports.directory.clone())
@@ -73,16 +73,26 @@ impl State {
             self.stop();
         }
     }
-    fn start(self: &Arc<Self>, ui: Option<&Services>) {
-        if self.started.swap(true, Ordering::SeqCst) {
-            return;
+    fn start(self: &Arc<Self>, ui: Option<&Services>) -> bool {
+        // The execution gate serializes UI restart, alarm restart and shutdown.
+        // A run keeps its own cancellation token until all captures have joined
+        // and its writer/reader handles have been released.
+        let mut execution = self.execution();
+        if execution.started && !self.lock().stopped {
+            return !execution.shutdown.is_cancelled();
         }
-        let host = self
+        let mut host = self
             .host
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        let services = if let Some(host) = host {
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if execution.started {
+            let Some(previous) = host.as_ref() else {
+                return false;
+            };
+            let ports = previous.accept().ports().clone();
+            *host = Some(Arc::new(Service::new(ports)));
+        }
+        let services = if let Some(host) = host.as_ref() {
             host.begin();
             let services = host.accept();
             if let Some(ui) = ui {
@@ -90,35 +100,47 @@ impl State {
                     .shared_settings()
                     .write()
                     .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ui.settings());
-            } else {
-                // Native host initialization runs off the main thread. Invalid
-                // settings are left untouched; a UI may later repair them.
-                if let Ok(text) =
-                    std::fs::read_to_string(services.directory().join("settings.json"))
-                    && let Ok((settings, _)) = iptv_settings::Settings::from_json(&text)
-                {
-                    *services
-                        .shared_settings()
-                        .write()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                        Some(Arc::new(settings));
-                }
+            } else if let Ok(text) =
+                std::fs::read_to_string(services.directory().join("settings.json"))
+                && let Ok((settings, _)) = iptv_settings::Settings::from_json(&text)
+            {
+                *services
+                    .shared_settings()
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(settings));
             }
             services
         } else {
             ui.expect("application recording services").clone()
         };
+        drop(host);
+        let shutdown = CancelToken::new();
+        execution.started = true;
+        execution.generation += 1;
+        let generation = execution.generation;
+        execution.shutdown = shutdown.clone();
+        {
+            let mut data = self.lock();
+            data.stopped = false;
+            data.ready = false;
+        }
         let state = self.clone();
         services.clone().spawn(async move {
-            run(services.clone(), state.clone()).await;
+            run(services.clone(), state.clone(), shutdown).await;
             let closed = if state.background() {
                 services.service_retire()
             } else {
                 true
             };
-            state.lock().stopped = closed;
+            let mut data = state.lock();
+            data.stopped = closed;
+            if closed {
+                data.completed_run = generation;
+            }
+            drop(data);
             state.changed.notify_all();
         });
+        true
     }
 }
 impl Runtime {
@@ -143,11 +165,19 @@ pub fn start_background_host(ports: crate::Ports) -> Result<(), Error> {
     }
     crate::backup::lock(&ports.directory)
         .map_err(|_| Error::unavailable("Recording storage already in use"))?;
+    // Serialize native restarts with catalogue activation and handle closure.
+    let _activation = ACTIVATION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let state = acquire(&ports);
-    if !state.started.load(Ordering::SeqCst) {
-        activate_storage(&ports)
+    if !state.execution().started || crate::backup::is_pending(&ports.directory) {
+        crate::backup::startup(&ports)
             .map_err(|_| Error::unavailable("Recording storage recovery failed"))?;
-        state.start(None);
+    }
+    if !state.start(None) {
+        return Err(Error::unavailable(
+            "Restart Patina before scheduling a recording",
+        ));
     }
     Ok(())
 }
