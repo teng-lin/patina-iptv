@@ -72,6 +72,22 @@ fn setup_block_remote_unlock_change_and_recovery() {
             .any(|target| target.source == source.0)
     );
     drop(store);
+    // A manager selection completes one authorized operation without asking
+    // for the same administrative PIN again after closing the manager.
+    personalization::menu(&mut app, "Manage blocked channels…");
+    wait(&mut app, "Blocked content");
+    let unblock = app
+        .screen()
+        .texts()
+        .into_iter()
+        .find(|text| text.starts_with("Unblock "))
+        .unwrap()
+        .to_owned();
+    step(app.press(&format!("text:{unblock}")));
+    step(app.wait_for("text:Content unblocked"));
+    assert!(!app.shows("Enter parental PIN"));
+    personalization::menu(&mut app, "Block channel");
+    step(app.wait_for("text:Content blocked"));
     // Close the settings grant explicitly before trying another viewing action.
     personalization::menu(&mut app, "Manage blocked channels…");
     wait(&mut app, "Blocked content");

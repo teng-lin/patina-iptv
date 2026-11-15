@@ -200,7 +200,7 @@ fn manage_pick(ui: Ui, index: usize) {
         .parental
         .with_untracked(|o| o.as_ref()?.blocks.as_ref()?.get(index).cloned());
     if let Some(target) = target {
-        close(ui);
+        finish(ui);
         block(ui, target, false);
     } else {
         crate::runtime().parental_lock();
