@@ -269,6 +269,7 @@ pub fn start_surface(ui: Ui, surface: usize, channel: usize) -> bool {
 /// Nothing plays: the player closes.
 pub fn stop(ui: Ui) {
     crate::on_demand::flush(ui, false);
+    crate::runtime().parental_content_closed();
     ui.player.recorded.set(None);
     crate::runtime().close_recording_playback();
     close(ui, 0);

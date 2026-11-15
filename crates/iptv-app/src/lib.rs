@@ -329,6 +329,20 @@ impl Ui {
 
     /// Starts `channel` live or from the archive.
     pub fn play(&self, channel: usize, playback: Playback) {
+        if self.player_surface == 0
+            && self
+                .playing
+                .get_untracked()
+                .is_some_and(|old| old != channel)
+        {
+            if let Some(old) = self
+                .playing
+                .get_untracked()
+                .and_then(|old| parental_view::live_target(*self, old))
+            {
+                crate::runtime().parental_content_left(&old);
+            }
+        }
         if !parental_view::allow_play(*self, channel, playback) {
             return;
         }

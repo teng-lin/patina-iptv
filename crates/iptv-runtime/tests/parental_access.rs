@@ -27,8 +27,9 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
     drop(store);
     let owner = Rc::new(Runtime::new(Ports::new(
         directory.path().to_owned(),
-        move |_| Ok(key.clone()),
+        |_| Ok(iptv_runtime::model::DatabaseKey::from_bytes([0x79; 32])),
     )));
+    owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
     owner.start_services();
     support::block_on(owner.parental_refresh()).unwrap();
     let recovery =
@@ -89,6 +90,12 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
         .unwrap()
         .is_some()
     );
+    let pending = commands::channel(&owner, source, catalogue.channels[0].id.clone());
+    owner.parental_lock();
+    assert!(
+        support::block_on(pending).unwrap().is_none(),
+        "locking revokes a previously constructed command future"
+    );
     assert!(!owner.parental_allowed(&Target::live(other.0, catalogue.channels[0].id.as_str())));
     assert!(!owner.parental_settings_allowed());
     owner.parental_unblocked_channel_played();
@@ -98,5 +105,17 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
     assert!(owner.parental_settings_allowed());
     owner.set_foreground(false);
     assert!(!owner.parental_settings_allowed());
+    assert!(owner.flush_files(std::time::Duration::from_secs(2)));
     assert!(owner.drain_services());
+    let second = Rc::new(Runtime::new(Ports::new(
+        directory.path().to_owned(),
+        |_| Ok(iptv_runtime::model::DatabaseKey::from_bytes([0x79; 32])),
+    )));
+    second.load_settings();
+    second.start_services();
+    support::block_on(second.parental_refresh()).unwrap();
+    assert!(second.parental_has_pin());
+    assert!(support::block_on(second.parental_check(&channel)).is_err());
+    assert!(!second.parental_settings_allowed());
+    assert!(second.drain_services());
 }

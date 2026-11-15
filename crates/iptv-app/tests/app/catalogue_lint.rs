@@ -116,6 +116,7 @@ const MESSAGE_TYPES: &[&str] = &["Notify"];
 /// Calls in the file itself are read, and those through the file's module
 /// (`wizard_view::button(…)`, `super::button(…)`).
 const TRANSLATING_HELPERS: &[(&str, &str, usize)] = &[
+    ("iptv-app/src/parental_view.rs", "notice", 0),
     ("iptv-app/src/fav_editor.rs", "button", 0),
     // `.label(move || tr(name))`, and the tile buttons' `tr(what)`.
     ("iptv-app/src/multiview_view/chrome.rs", "pill", 1),
@@ -134,6 +135,9 @@ const TRANSLATING_HELPERS: &[(&str, &str, usize)] = &[
 /// through `tr`: a backup error keeps its English text for the log and is
 /// translated when the user is told (`backup::report`, `App`).
 const MESSAGE_FILES: &[&str] = &[
+    "iptv-core/src/parental.rs",
+    "iptv-runtime/src/parental.rs",
+    "iptv-app/src/parental_view.rs",
     "iptv-runtime/src/backup.rs",
     "iptv-runtime/src/backup/instance.rs",
     "iptv-runtime/src/recordings.rs",
@@ -161,6 +165,9 @@ const LIST_NAMES: &[(&str, &str)] = &[
 /// `key(…)` constant, a helper's label, a backup error's text, a notice,
 /// a built-in list's name. A new one needs the same before it is listed.
 const CARRIED_MESSAGES: &[(&str, &str)] = &[
+    // Core parental entry and native errors are checked MESSAGE_FILES.
+    ("iptv-app/src/parental_view.rs", "message"),
+    ("iptv-app/src/parental_view.rs", "title"),
     // Recording keys originate in the checked recording MESSAGE_FILES. Transport
     // failure keys are additionally enumerated by the recording transport test.
     ("iptv-app/src/recordings_view.rs", "job"),

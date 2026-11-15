@@ -128,6 +128,7 @@ pub fn open(ui: Ui) {
 }
 
 pub fn close(ui: Ui) {
+    crate::runtime().parental_content_closed();
     if let Some(page) = ui
         .settings_screen
         .with_untracked(|s| s.as_ref().map(|s| s.page().key))
@@ -247,8 +248,16 @@ fn run(ui: Ui, key: &'static str) {
         | "recordings.enable_startup"
         | "recordings.disable_startup"
         | "recordings.alarm_access" => crate::recording_host::command(key),
-        "general.backup" => crate::backup::export_ui(),
-        "general.restore" => crate::backup::restore_ui(ui),
+        "general.backup" => crate::parental_view::request(
+            ui,
+            iptv_core::parental::Target::settings(),
+            crate::backup::export_ui,
+        ),
+        "general.restore" => {
+            crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
+                crate::backup::restore_ui(ui)
+            })
+        }
         "epg.update_now" => {
             if stored::update_now(&crate::runtime(), move || refresh(ui)) {
                 refresh(ui);

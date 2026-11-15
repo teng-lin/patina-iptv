@@ -81,7 +81,9 @@ impl Access {
             || self.granted.contains(target)
     }
     pub fn unlock(&mut self, target: Target, now: u64) {
-        self.lock();
+        if self.policy.window != UnlockWindow::EveryTime {
+            self.lock();
+        }
         match self.policy.window {
             UnlockWindow::Minutes(minutes) => {
                 self.all_until = Some(now.saturating_add(u64::from(minutes) * 60_000))
@@ -102,6 +104,16 @@ impl Access {
             self.policy.window,
             UnlockWindow::UntilUnblockedChannel | UnlockWindow::EveryTime
         ) {
+            self.lock();
+        }
+    }
+    pub fn content_left(&mut self, target: &Target) {
+        if self.policy.window == UnlockWindow::EveryTime {
+            self.granted.remove(target);
+        }
+    }
+    pub fn content_closed(&mut self) {
+        if self.policy.window == UnlockWindow::EveryTime {
             self.lock();
         }
     }
@@ -222,6 +234,25 @@ mod tests {
         assert!(!access.granted(&target, 3));
     }
     #[test]
+    fn compound_episode_operation_holds_both_grants_until_content_closes() {
+        let mut access = Access::default();
+        let series = Target {
+            source: 1,
+            kind: ContentKind::Series,
+            id: "generated-series".into(),
+        };
+        let episode = Target {
+            source: 1,
+            kind: ContentKind::Episode,
+            id: "generated-episode".into(),
+        };
+        access.unlock(series.clone(), 1);
+        access.unlock(episode.clone(), 2);
+        assert!(access.granted(&series, 3) && access.granted(&episode, 3));
+        access.content_closed();
+        assert!(!access.granted(&series, 4) && !access.granted(&episode, 4));
+    }
+    #[test]
     fn pin_input_is_bounded_redacted_and_cleared() {
         assert!(Pin::parse("123").is_none());
         assert!(Pin::parse("12345x").is_none());
@@ -260,6 +291,7 @@ pub struct Dialog {
     new: Option<Pin>,
     pub recovery: zeroize::Zeroizing<String>,
     changing: bool,
+    setup: bool,
 }
 pub enum Submission {
     None,
@@ -286,6 +318,7 @@ impl Dialog {
             new: None,
             recovery: zeroize::Zeroizing::new(String::new()),
             changing: phase == Phase::Old,
+            setup: phase == Phase::New,
         }
     }
     pub fn digit(&mut self, digit: u8) {
@@ -312,7 +345,9 @@ impl Dialog {
         self.old = None;
         self.new = None;
         self.recovery.clear();
-        self.phase = if self.changing {
+        self.phase = if self.setup {
+            Phase::New
+        } else if self.changing {
             Phase::Old
         } else {
             Phase::Unlock

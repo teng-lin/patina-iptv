@@ -114,9 +114,11 @@ fn channel_native(
     services: &Services,
     source: SourceId,
     channel: ContentId,
-    access: iptv_core::parental::Access,
+    mut access: crate::parental::Snapshot,
 ) -> impl Future<Output = Result<Option<crate::model::PlaybackChannel>, StoreError>> + use<> {
+    let current = services.clone();
     services.read(move |store| {
+        access.access.policy = crate::parental::policy_settings(&current.settings());
         let target = iptv_core::parental::Target::live(source.0, channel.as_str());
         if !crate::parental::native_allowed(store, &target, &access)? {
             return Ok(None);

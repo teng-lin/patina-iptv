@@ -3,7 +3,13 @@
 use crate::Runtime;
 use iptv_core::parental::{Access, ContentKind, Pin, Policy, Target, UnlockWindow};
 use iptv_store_sqlite::parental::ParentalCredential;
-use std::collections::BTreeSet;
+use std::{
+    collections::BTreeSet,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
@@ -38,8 +44,10 @@ pub(crate) struct State {
     pub access: Access,
     pub ready: bool,
     pub has_pin: bool,
+    epoch: Arc<AtomicU64>,
     blocked: BTreeSet<Target>,
     ancestry: std::collections::BTreeMap<Target, Vec<Target>>,
+    names: std::collections::BTreeMap<Target, String>,
 }
 
 fn now_ms() -> u64 {
@@ -51,11 +59,13 @@ fn now_ms() -> u64 {
         .unwrap_or(u64::MAX)
 }
 fn policy(owner: &Runtime) -> Policy {
+    policy_settings(&owner.settings())
+}
+pub(crate) fn policy_settings(settings: &iptv_settings::Settings) -> Policy {
     use iptv_settings::{
         Target as Scope,
         keys::{BoolKey, EnumKey},
     };
-    let settings = owner.settings();
     let scope = Scope::Global;
     let window = match settings.choice(EnumKey("parental.unlock_window"), &scope) {
         "min_10" => UnlockWindow::Minutes(10),
@@ -152,12 +162,20 @@ impl Runtime {
     /// Refresh public policy metadata without returning any credential verifier.
     pub async fn parental_refresh(&self) -> Result<(), Error> {
         let services = self.services();
-        let (has_pin, blocked, ancestry) = services
+        let (has_pin, blocked, ancestry, names) = services
             .read(|store| {
+                let blocked = store.parental_blocks()?;
+                let mut names = std::collections::BTreeMap::new();
+                for target in &blocked {
+                    if let Some(name) = store.parental_name(target)? {
+                        names.insert(target.clone(), name);
+                    }
+                }
                 Ok((
                     store.parental_credential()?.is_some(),
-                    store.parental_blocks()?,
+                    blocked,
                     store.parental_memberships()?,
+                    names,
                 ))
             })
             .await
@@ -170,6 +188,7 @@ impl Runtime {
         state.ready = true;
         state.blocked = blocked.into_iter().collect();
         state.ancestry = ancestry;
+        state.names = names;
         state.access.policy = policy(self);
         Ok(())
     }
@@ -307,13 +326,32 @@ impl Runtime {
             .unlock(Target::settings(), now_ms());
         Ok(result)
     }
-    pub fn parental_backgrounded(&self) {
-        self.parental.borrow_mut().access.backgrounded();
+    pub fn parental_content_left(&self, target: &Target) {
+        let mut state = self.parental.borrow_mut();
+        state.access.content_left(target);
+        state.epoch.fetch_add(1, Ordering::SeqCst);
     }
-    pub fn parental_snapshot(&self) -> Access {
+    pub fn parental_content_closed(&self) {
+        if self.parental.borrow().access.policy.window == UnlockWindow::EveryTime {
+            self.parental_lock();
+        }
+    }
+    pub fn parental_backgrounded(&self) {
+        if self.parental.borrow().access.policy.window == UnlockWindow::EveryTime {
+            self.parental_lock();
+        }
+    }
+    pub(crate) fn parental_snapshot(&self) -> Snapshot {
         let mut state = self.parental.borrow_mut();
         state.access.policy = policy(self);
-        state.access.clone()
+        Snapshot {
+            access: state.access.clone(),
+            epoch: state.epoch.clone(),
+            at: state.epoch.load(Ordering::SeqCst),
+        }
+    }
+    pub fn parental_explicitly_blocked(&self, target: &Target) -> bool {
+        self.parental.borrow().blocked.contains(target)
     }
     pub fn parental_is_blocked(&self, target: &Target) -> bool {
         let state = self.parental.borrow();
@@ -324,10 +362,17 @@ impl Runtime {
                 .is_some_and(|a| a.iter().any(|p| state.blocked.contains(p)))
     }
     pub fn parental_lock(&self) {
-        self.parental.borrow_mut().access.lock();
+        let mut state = self.parental.borrow_mut();
+        state.epoch.fetch_add(1, Ordering::SeqCst);
+        state.access.lock();
     }
     pub fn parental_unblocked_channel_played(&self) {
-        self.parental.borrow_mut().access.unblocked_channel_played();
+        if matches!(
+            self.parental.borrow().access.policy.window,
+            UnlockWindow::EveryTime | UnlockWindow::UntilUnblockedChannel
+        ) {
+            self.parental_lock();
+        }
     }
     pub fn parental_settings_allowed(&self) -> bool {
         self.parental_allowed(&Target::settings())
@@ -346,6 +391,9 @@ impl Runtime {
             .map_err(|_| Error::Storage)?;
         self.parental_refresh().await
     }
+    pub fn parental_name(&self, target: &Target) -> Option<String> {
+        self.parental.borrow().names.get(target).cloned()
+    }
     pub fn parental_blocked_targets(&self) -> Vec<Target> {
         self.parental.borrow().blocked.iter().cloned().collect()
     }
@@ -353,11 +401,20 @@ impl Runtime {
 
 /// Native command gate. Resolve membership from storage for every direct-ID
 /// command; callers cannot omit or spoof the item's category.
+pub(crate) struct Snapshot {
+    pub access: Access,
+    epoch: Arc<AtomicU64>,
+    at: u64,
+}
 pub(crate) fn native_allowed(
     store: &iptv_store_sqlite::Store,
     target: &Target,
-    access: &Access,
+    snapshot: &Snapshot,
 ) -> iptv_store_sqlite::Result<bool> {
+    let mut access = snapshot.access.clone();
+    if snapshot.epoch.load(Ordering::SeqCst) != snapshot.at {
+        access.lock();
+    }
     if !access.policy.protects(target.kind) {
         return Ok(true);
     }
