@@ -29,12 +29,12 @@ use iptv_providers::xtream::{
 
 /// What the source contributes to playback: credentials, the account's
 /// stream format and clock, or the authorised Stalker session.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PlaybackContext {
     inner: Inner,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Inner {
     M3u {
         user_agent: Option<String>,

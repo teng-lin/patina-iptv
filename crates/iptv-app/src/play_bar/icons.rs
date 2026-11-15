@@ -11,6 +11,7 @@ pub enum Icon {
     Rewind,
     Play,
     Pause,
+    Record,
     Forward,
     Star,
     StarFilled,
@@ -44,6 +45,7 @@ fn body(icon: Icon) -> &'static str {
             "<path fill='currentColor' stroke='none' d='M11.5 6v12L3 12zM21 6v12l-8.5-6z'/>"
         }
         Icon::Play => "<path fill='currentColor' stroke='none' d='M7 4.5v15L19.5 12z'/>",
+        Icon::Record => "<circle cx='12' cy='12' r='6' fill='currentColor' stroke='none'/>",
         Icon::Pause => {
             "<path fill='currentColor' stroke='none' d='M6 4.5h4v15H6zM14 4.5h4v15h-4z'/>"
         }

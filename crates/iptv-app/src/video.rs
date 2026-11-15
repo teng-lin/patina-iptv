@@ -169,7 +169,9 @@ fn count_open(surface: usize, last: &RefCell<Option<(String, u64)>>, source: Opt
 fn source_prop(ui: Ui, surface: usize) -> Option<SourceProps> {
     let stream = ui.player.stream(surface);
     let playing = if surface == 0 {
-        ui.playing.get().is_some() || crate::player::resume::playing(ui)
+        ui.playing.get().is_some()
+            || crate::player::resume::playing(ui)
+            || ui.player.recorded.with(Option::is_some)
     } else {
         stream.channel.get().is_some()
     };

@@ -209,6 +209,10 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
     use crate::overlays::Overlay;
     let top = ui.top_overlay();
     let mv = |m: Move| crate::lists::navigate(ui, m);
+    if top == Some(Overlay::Recordings) {
+        crate::recordings_view::key(ui, action);
+        return;
+    }
     if top == Some(Overlay::Wizard) {
         crate::wizard_view::key(ui, action);
         return;
@@ -278,7 +282,13 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         return;
     }
     if top == Some(Overlay::Description) {
-        // The popover has no actions; Back (or Menu) closes it.
+        if matches!(action, Action::Select | Action::Record)
+            && let Some(origin) = ui.description.get_untracked()
+        {
+            crate::recordings_view::programme(ui, origin, false);
+            return;
+        }
+        // Back (or Menu) closes programme details.
         if matches!(action, Action::Back | Action::ShowMenu) {
             crate::menu_view::close(ui);
         }
@@ -328,6 +338,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
     }
     match action {
         // Menu in the groups pane adds a playlist; elsewhere it opens the menu.
+        Action::Record => crate::recordings_view::current(ui),
         Action::ShowMenu if ui.focus.with(|f| f.pane) == Pane::Groups => {
             crate::wizard_view::open_add(ui)
         }

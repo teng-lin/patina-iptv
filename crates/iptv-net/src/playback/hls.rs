@@ -130,6 +130,21 @@ fn attributes(list: &str) -> Result<Vec<Attribute<'_>>, FetchError> {
     }
 }
 
+/// Closed captions already live in the video segments; external renditions
+/// still need a separate recorder and are deliberately unsupported.
+pub(crate) fn in_band_closed_captions(list: &str) -> bool {
+    let Ok(attributes) = attributes(list) else {
+        return false;
+    };
+    let mut names = std::collections::HashSet::new();
+    attributes
+        .iter()
+        .all(|a| !a.is_uri() && names.insert(a.name.to_ascii_uppercase()))
+        && attributes
+            .iter()
+            .any(|a| a.name == "TYPE" && !a.quoted && a.value == "CLOSED-CAPTIONS")
+}
+
 /// Whether FFmpeg would read past the quote that closes `value`: it takes a
 /// backslash and the character after it as one, so a value ending in an odd
 /// number of backslashes takes its closing quote along.

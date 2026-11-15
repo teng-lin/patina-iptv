@@ -7,8 +7,14 @@ is below 1.0, a minor release may change behaviour.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-14
+
 ### Added
 
+- App-open DVR on TV, tablet and desktop: record-now and one-off schedules,
+  timing/padding controls, recording badges, local playback, stop/cancel and
+  confirmed deletion. Durable jobs reconcile interrupted/missed recordings;
+  MPEG-TS/HLS capture shares provider connection accounting with viewing.
 - Headless application runtime extracted into dedicated `iptv-runtime` crate behind explicit platform ports, owning background workers, scheduling, lanes, favourites, search, and backup orchestration.
 - Portable channel organisation and guide state machine extracted into dedicated `iptv-library` crate.
 - Native libmpv desktop and iPad player extracted into dedicated `iptv-player-mpv` crate with typed playback contracts.
@@ -113,6 +119,7 @@ First public release, for Android TV and tablets, Linux and macOS.
 - Packages: a signed Android APK, Linux `.deb`, `.rpm`, pacman package and
   AppImage, and an ad hoc signed macOS disk image.
 
-[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/teng-lin/patina-iptv/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/teng-lin/patina-iptv/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/teng-lin/patina-iptv/releases/tag/v0.1.0

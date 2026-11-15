@@ -35,6 +35,7 @@ mod list_rows;
 mod lists;
 mod media;
 mod menu_view;
+mod recordings_view;
 use iptv_runtime as runtime;
 mod runtime_events;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", windows))]
@@ -200,6 +201,8 @@ pub struct Ui {
     pub menu: Signal<Option<Menu>>,
     /// The programme description popover, if open.
     pub description: Signal<Option<Origin>>,
+    pub recordings: Signal<iptv_core::recording::Screen>,
+    pub recordings_open: Memo<bool>,
     /// The favourite channels on screen (catalog channels); kept by key
     /// and changed through `favorites.rs`.
     pub favorites: Signal<BTreeSet<usize>>,
@@ -299,12 +302,25 @@ impl Ui {
                 self.mode.set(ViewMode::Fullscreen);
                 self.show_playing();
             }
-            Airing::Ended | Airing::Upcoming => {}
+            Airing::Upcoming => {
+                let origin = Origin {
+                    channel,
+                    program_start: program.start,
+                };
+                recordings_view::remember(*self, origin);
+                self.description.set(Some(origin));
+            }
+            Airing::Ended => {}
         }
     }
 
     /// Starts `channel` live or from the archive.
     pub fn play(&self, channel: usize, playback: Playback) {
+        if !recordings_view::reserve_viewing(*self, 0, channel) {
+            return;
+        }
+        self.player.recorded.set(None);
+        crate::runtime().close_recording_playback();
         self.pending_zap.set(None);
         self.browse_playback.set(Default::default());
         self.playback.set(playback);
@@ -619,6 +635,8 @@ pub fn App() -> impl IntoElement {
 fn ready_app() -> impl IntoElement {
     settings::load();
     startup::mark("settings loaded");
+    let recordings = signal(iptv_core::recording::Screen::default());
+    let recordings_open = computed(move || recordings.with(|s| s.open));
     let ui = Ui {
         focus: signal(Focus::default()),
         browse_playback: signal(Default::default()),
@@ -649,6 +667,8 @@ fn ready_app() -> impl IntoElement {
         epoch: nsh_core::time::now(),
         menu: signal(None),
         description: signal(None),
+        recordings,
+        recordings_open,
         favorites: signal(BTreeSet::new()),
         has_vod: signal(false),
         playback: signal(Playback::Live),
@@ -848,6 +868,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(play_bar::layer(ui))
         .child(fav_editor::layer(ui))
         .child(settings_view::layer(ui))
+        .child(recordings_view::layer(ui))
         .child(guide_assign_view::layer(ui))
         // The playlists screen opens over settings, a guide sources screen
         // over both.
@@ -859,6 +880,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(guide_inspect_view::layer(ui))
         .child(guide_repair_view::layer(ui))
         .child(wizard_view::layer(ui))
+        .child(recordings_view::indicator(ui))
 }
 
 /// A tap on full-screen video: the play bar on a device with a pointer,
@@ -966,6 +988,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             || ui.editor.with(Option::is_some);
         match (ui.mode.get(), ui.focus.with(|f| f.pane), panels || menu) {
             _ if top == Some(Overlay::Wizard) => wizard_view::back(ui),
+            _ if top == Some(Overlay::Recordings) => recordings_view::back(ui),
             _ if top == Some(Overlay::GuideSources) => epg_sources_view::back(ui),
             _ if top == Some(Overlay::GuideRepair) => guide_repair_view::back(ui),
             _ if top == Some(Overlay::GuideInspection) => guide_inspect_view::back(ui),

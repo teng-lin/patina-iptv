@@ -75,9 +75,10 @@ pub enum Control {
     Favorite,
     ChannelOptions,
     Settings,
+    Record,
 }
 
-pub const CONTROLS: [Control; 14] = [
+pub const CONTROLS: [Control; 15] = [
     Control::Search,
     Control::ChannelList,
     Control::Recordings,
@@ -92,6 +93,7 @@ pub const CONTROLS: [Control; 14] = [
     Control::Favorite,
     Control::ChannelOptions,
     Control::Settings,
+    Control::Record,
 ];
 
 /// The one time line a panel shows.

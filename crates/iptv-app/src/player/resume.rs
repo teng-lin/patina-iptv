@@ -35,6 +35,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     if !crate::settings::flag(iptv_settings::keys::RESUME_LAST_CHANNEL)
         || ui.wizard.with_untracked(Option::is_some)
         || ui.playing.get_untracked().is_some()
+        || ui.player.recorded.with_untracked(Option::is_some)
     {
         return false;
     }
@@ -57,6 +58,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     if crate::runtime().browser_generation() != generation
         || ui.wizard.with_untracked(Option::is_some)
         || ui.playing.get_untracked().is_some()
+        || ui.player.recorded.with_untracked(Option::is_some)
     {
         return false;
     }
@@ -64,6 +66,9 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
         Resolution::Play(source) => source,
         Resolution::StalkerLink(_) | Resolution::Unavailable(_) => return false,
     };
+    if !crate::runtime().reserve_viewing(0, stored.id) {
+        return false;
+    }
     log::info!("iptv player: resuming the last channel before the guide");
     crate::startup::mark("last channel resolved");
     let main = ui.player.main();

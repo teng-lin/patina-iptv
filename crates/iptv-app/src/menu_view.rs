@@ -21,6 +21,8 @@ fn implemented(item: MenuItem) -> bool {
     matches!(
         item,
         MenuItem::Search
+            | MenuItem::Record
+            | MenuItem::CustomRecording
             | MenuItem::Settings
             | MenuItem::Description
             | MenuItem::ToggleFavorite
@@ -46,7 +48,7 @@ fn label(item: MenuItem, favorite: bool) -> &'static str {
         ExternalPlayer => tr("Open in another player"),
         Reminder => tr("Remind me"),
         Record => tr("Record"),
-        CustomRecording => "Schedule a recording…",
+        CustomRecording => tr("Schedule a recording…"),
         SaveToList => "Save to my list",
         Description => tr("Details"),
         ToggleFavorite if favorite => tr("Remove from favourites"),
@@ -88,6 +90,9 @@ pub fn open(ui: Ui) {
         crate::schedule().catchup_days(channel),
         now,
         |item| {
+            if matches!(item, MenuItem::Record | MenuItem::CustomRecording) {
+                return crate::recordings_view::available(channel);
+            }
             implemented(item)
                 && (!crate::data::combined::active(&crate::runtime())
                     || matches!(
@@ -106,6 +111,7 @@ pub fn open(ui: Ui) {
         channel,
         program_start: program.start,
     };
+    crate::recordings_view::remember(ui, origin);
     ui.menu.set(Some(Menu::new(rows, origin)));
 }
 
@@ -131,6 +137,9 @@ pub fn perform(ui: Ui, item: MenuItem) {
     };
     ui.menu.set(None);
     match item {
+        MenuItem::Record | MenuItem::CustomRecording => {
+            crate::recordings_view::programme(ui, origin, item == MenuItem::CustomRecording);
+        }
         // Details replaces the menu; Back from it returns to the guide.
         MenuItem::Description => ui.description.set(Some(origin)),
         MenuItem::StartFromBeginning => {
@@ -439,6 +448,11 @@ fn description(ui: Ui) -> impl IntoElement {
                         .font_family(SANS)
                         .text_size(move || size.text_px(HEADER_BODY))
                         .text_color(rgb(LIST_TEXT)),
-                ),
+                )
+                .child(when(move || program().is_some_and(|(ch, p)|
+                    crate::recordings_view::available(ch) && crate::guide::unix_of(&*crate::schedule(), p.end) > crate::time::wall_unix()),
+                    move || crate::ui_kit::button(ui, size, tr("Record"), || true, move || {
+                        if let Some(origin) = ui.description.get_untracked() { crate::recordings_view::programme(ui, origin, false); }
+                    }))),
         )
 }

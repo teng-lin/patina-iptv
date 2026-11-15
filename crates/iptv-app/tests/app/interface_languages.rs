@@ -487,3 +487,16 @@ fn a_settings_write_failure_is_localized_once_and_keeps_the_previous_value() {
     );
     assert!(!app.shows("Could not save settings"));
 }
+
+#[test]
+fn custom_recording_menu_uses_the_selected_interface_language() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start_in(home, "es", "h24");
+    let words = Words::of("es");
+    personalization::group(&mut fixture.app, "News");
+    step(fixture.app.press_key("m"));
+    let schedule = words.t("Schedule a recording…");
+    shown(&mut fixture.app, &schedule);
+    step(fixture.app.press(&format!("text:{schedule}")));
+    shown(&mut fixture.app, &words.t("Save recording"));
+}

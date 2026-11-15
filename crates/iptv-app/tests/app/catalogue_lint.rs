@@ -71,7 +71,7 @@ use iptv_core::i18n::is_catalogued;
 
 /// How many `[untranslated]` entries there are. Lower it with the list;
 /// it is never raised.
-const UNTRANSLATED: usize = 439;
+const UNTRANSLATED: usize = 438;
 
 /// Source directories read, relative to the workspace's `crates/`.
 const ROOTS: &[&str] = &[
@@ -136,6 +136,9 @@ const TRANSLATING_HELPERS: &[(&str, &str, usize)] = &[
 const MESSAGE_FILES: &[&str] = &[
     "iptv-runtime/src/backup.rs",
     "iptv-runtime/src/backup/instance.rs",
+    "iptv-runtime/src/recordings.rs",
+    "iptv-core/src/recording.rs",
+    "iptv-app/src/recordings_view.rs",
 ];
 
 /// The same for single calls of a file: the backup errors the view makes
@@ -158,6 +161,13 @@ const LIST_NAMES: &[(&str, &str)] = &[
 /// `key(…)` constant, a helper's label, a backup error's text, a notice,
 /// a built-in list's name. A new one needs the same before it is listed.
 const CARRIED_MESSAGES: &[(&str, &str)] = &[
+    // Recording keys originate in the checked recording MESSAGE_FILES. Transport
+    // failure keys are additionally enumerated by the recording transport test.
+    ("iptv-app/src/recordings_view.rs", "job"),
+    ("iptv-app/src/recordings_view.rs", "j"),
+    ("iptv-app/src/recordings_view.rs", "name"),
+    ("iptv-app/src/recordings_view.rs", "message"),
+    ("iptv-app/src/recordings_view.rs", "EMPTY"),
     // What `tr` and `trf` hand to the core is what they were given.
     ("iptv-app/src/i18n.rs", "source"),
     // `key(…)` constants.

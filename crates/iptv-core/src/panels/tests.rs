@@ -177,9 +177,9 @@ fn reopening_starts_at_the_first_control_and_no_card() {
     p.move_focus(-1, 1);
     assert_eq!(p.focus, 0);
     p.move_focus(99, 2);
-    assert_eq!(p.focused(), Control::Settings);
+    assert_eq!(p.focused(), Control::Record);
     p.show_controls(3);
-    assert_eq!(p.focused(), Control::Settings, "still open: focus stays");
+    assert_eq!(p.focused(), Control::Record, "still open: focus stays");
     p.hide();
     p.show_controls(4);
     assert_eq!(p.focused(), Control::Search);

@@ -36,6 +36,7 @@ use crate::theme::{ACCENTS, BACKGROUNDS, Theme};
 
 /// The settings the app acts on.
 pub const WIRED: &[&str] = &[
+    "playlists.max_connections",
     "general.language",
     "general.clock",
     "guide.autoplay",

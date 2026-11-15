@@ -100,6 +100,7 @@ impl Stream {
 /// Playback state beside [`Ui`]'s `playing`/`playback` (signals are `Copy`).
 #[derive(Clone, Copy)]
 pub struct Player {
+    pub recorded: Signal<Option<(iptv_core::recording::Job, PlaySource)>>,
     /// By surface; 0 is the full-screen player.
     pub streams: [Stream; SURFACES],
     pub history: Signal<ChannelHistory>,
@@ -115,6 +116,7 @@ pub struct Player {
 impl Player {
     pub fn new() -> Self {
         Self {
+            recorded: signal(None),
             streams: std::array::from_fn(|_| Stream::new()),
             history: signal(ChannelHistory::default()),
             resume: signal(true),
@@ -211,6 +213,25 @@ pub fn start_surface(ui: Ui, surface: usize, channel: usize) {
         ui.play(channel, Playback::Live);
         return;
     }
+    if !crate::recordings_view::reserve_viewing(ui, surface, channel) {
+        let previous = ui.player.stream(surface).channel.get_untracked();
+        ui.multiview.update(|m| {
+            if let Some(m) = m {
+                m.retain(|s, ch| {
+                    if s != surface {
+                        return true;
+                    }
+                    if let Some(old) = previous {
+                        *ch = old;
+                        true
+                    } else {
+                        false
+                    }
+                });
+            }
+        });
+        return;
+    }
     let stream = ui.player.stream(surface);
     let now = ui.now_ms();
     let mut session = 0;
@@ -223,7 +244,31 @@ pub fn start_surface(ui: Ui, surface: usize, channel: usize) {
 
 /// Nothing plays: the player closes.
 pub fn stop(ui: Ui) {
+    ui.player.recorded.set(None);
+    crate::runtime().close_recording_playback();
     close(ui, 0);
+}
+
+pub fn play_recording(ui: Ui, job: iptv_core::recording::Job, source: PlaySource) {
+    crate::multiview::close(ui);
+    cancel_resolve(0);
+    ui.pending_zap.set(None);
+    ui.browse_playback.set(Default::default());
+    ui.player.resume.set(false);
+    ui.player.early.set(None);
+    ui.playing.set(None);
+    ui.player.main().key.set(None);
+    ui.playback.set(Playback::Live);
+    ui.player.recorded.set(Some((job, source.clone())));
+    ui.paused.set(false);
+    crate::runtime().release_viewing(0);
+    let mut session = 0;
+    ui.player
+        .main()
+        .health
+        .update(|h| session = h.start(false, ui.now_ms()));
+    load(ui, 0, session, source);
+    ui.mode.set(ViewMode::Fullscreen);
 }
 
 /// Surface `surface` plays nothing (surface 0 keeps its channel's key;
@@ -241,6 +286,7 @@ pub fn stop_surface(ui: Ui, surface: usize) {
 }
 
 fn close(ui: Ui, surface: usize) {
+    crate::runtime().release_viewing(surface);
     cancel_resolve(surface);
     let stream = ui.player.stream(surface);
     stream.health.update(Health::stop);
@@ -254,6 +300,12 @@ fn close(ui: Ui, surface: usize) {
 
 /// Resolves what `surface` plays and hands the stream to its player.
 fn open(ui: Ui, surface: usize, session: u64) {
+    if surface == 0
+        && let Some((_, source)) = ui.player.recorded.get_untracked()
+    {
+        load(ui, surface, session, source);
+        return;
+    }
     // What the surface asked for before is no longer wanted.
     cancel_resolve(surface);
     let Some((channel, playback)) = target(ui, surface) else {
@@ -600,6 +652,9 @@ pub fn row_dropped(ui: Ui) {
 /// the last channel starts once (`general.resume_last_channel`), unless
 /// something already plays.
 pub fn source_ready(ui: Ui, refresh: bool) {
+    if ui.player.recorded.with_untracked(Option::is_some) {
+        return;
+    }
     if resume::adopt(ui) {
         return;
     }

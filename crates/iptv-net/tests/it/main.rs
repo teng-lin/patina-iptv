@@ -13,5 +13,6 @@ mod net;
 mod pipeline;
 
 mod playback;
+mod recording;
 
 mod audit_transport;

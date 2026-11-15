@@ -8,6 +8,7 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+iptv-core.workspace = true
 iptv-library.workspace = true
 iptv-sqlcipher-init.workspace = true
 iptv-providers.workspace = true

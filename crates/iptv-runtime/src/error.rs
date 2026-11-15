@@ -2,6 +2,13 @@
 pub struct Error(iptv_store_sqlite::StoreError);
 
 impl Error {
+    /// A static application reason, without database diagnostics or provider data.
+    pub fn unavailable_reason(&self) -> Option<&'static str> {
+        match &self.0 {
+            iptv_store_sqlite::StoreError::Unavailable(reason) => Some(reason),
+            _ => None,
+        }
+    }
     pub fn unavailable(reason: &'static str) -> Self {
         Self(iptv_store_sqlite::StoreError::Unavailable(reason))
     }

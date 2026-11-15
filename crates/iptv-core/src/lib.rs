@@ -27,6 +27,7 @@ pub mod play_bar;
 pub mod playback;
 pub mod player_info;
 pub mod player_options;
+pub mod recording;
 pub mod reorder;
 pub mod seek_hold;
 pub mod sound;

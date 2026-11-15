@@ -295,13 +295,16 @@ fn the_rail_skips_items_without_a_screen() {
     assert_eq!(s.mv(Move::Down), Outcome::Moved);
     assert_eq!(
         s.rail[s.focus.rail],
-        RailItem::Playlists,
-        "Recordings and My list are dimmed"
+        RailItem::Recordings,
+        "Recordings has its own screen"
     );
+    assert_eq!(s.ok(), Outcome::Open(RailItem::Recordings));
+    s.mv(Move::Down);
     assert_eq!(s.ok(), Outcome::Open(RailItem::Playlists));
     s.mv(Move::Down);
     assert_eq!(s.rail[s.focus.rail], RailItem::Settings);
     assert_eq!(s.mv(Move::Down), Outcome::None, "Settings is last");
+    s.mv(Move::Up);
     s.mv(Move::Up);
     s.mv(Move::Up);
     assert_eq!(s.rail[s.focus.rail], RailItem::Tv);
