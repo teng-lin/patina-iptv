@@ -952,9 +952,32 @@ mod source_tests {
             .unwrap();
         let authorized = owner.parental_snapshot();
         let added = save(&services, &add, &authorized).await.unwrap().0;
+        // Deletion queues eagerly, so hold the writer until its captured grant
+        // has been revoked. Otherwise a fast worker may legitimately delete the
+        // source before the lock, making this assertion a scheduling race.
+        let (started, ready) = std::sync::mpsc::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let writer = services.call(move |_| {
+            started.send(()).unwrap();
+            held.recv_timeout(std::time::Duration::from_secs(30))
+                .unwrap();
+            Ok(())
+        });
+        ready
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
         let pending = crate::library::delete_source(&owner, added);
         owner.parental_lock();
+        release.send(()).unwrap();
+        writer.await.unwrap();
         assert!(pending.await.is_err());
+        assert!(
+            services
+                .read(move |store| Ok(store.source(added)?.is_some()))
+                .await
+                .unwrap(),
+            "a rejected queued deletion must retain its source"
+        );
         owner
             .parental_authorize(Target::settings(), Pin::parse("2468").unwrap())
             .await
