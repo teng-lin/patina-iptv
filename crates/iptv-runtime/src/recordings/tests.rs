@@ -83,6 +83,43 @@ fn server() -> String {
     });
     url
 }
+
+#[tokio::test]
+async fn a_reused_playlist_id_is_rejected_before_resolving_recording_media() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(directory.path());
+    let request = seed(&owner, "https://example.test/generated.ts").await;
+    let source = SourceId(request.source);
+    let id = owner.schedule_recording(request.clone()).await.unwrap();
+    owner
+        .services()
+        .call(move |store| store.delete_source(source))
+        .await
+        .unwrap();
+    assert_eq!(
+        seed(&owner, "https://example.test/replacement.ts")
+            .await
+            .source,
+        source.0
+    );
+    let job = owner
+        .recording_jobs()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|j| j.id == id)
+        .unwrap();
+    assert!(
+        resolve(
+            &owner.services(),
+            &owner.recordings,
+            &job,
+            &CancelToken::new()
+        )
+        .await
+        .is_err()
+    );
+}
 async fn until(owner: &Runtime, id: JobId, accept: impl Fn(&Job) -> bool) -> Job {
     for _ in 0..1000 {
         if let Some(job) = owner

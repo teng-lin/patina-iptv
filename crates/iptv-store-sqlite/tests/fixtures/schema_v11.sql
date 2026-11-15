@@ -222,7 +222,8 @@ CREATE TABLE recording_jobs (
     status TEXT NOT NULL CHECK(status IN
         ('scheduled','recording','completed','partial','failed','cancelled','missed')),
     bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes >= 0),
-    message TEXT NOT NULL DEFAULT ''
+    message TEXT NOT NULL DEFAULT '',
+    source_incarnation TEXT NOT NULL
 );
 -- table schema_migrations
 CREATE TABLE schema_migrations (

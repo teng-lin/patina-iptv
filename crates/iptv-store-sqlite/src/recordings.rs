@@ -87,8 +87,8 @@ impl Store {
         if !allowed {
             return Err(StoreError::Unavailable("Channel unavailable or blocked"));
         }
-        tx.execute("INSERT INTO recording_jobs(source_id,channel_id,channel_name,title,starts_at,ends_at,status,id)
-            VALUES(?1,?2,?3,?4,?5,?6,'scheduled',?7)",
+        tx.execute("INSERT INTO recording_jobs(source_id,channel_id,channel_name,title,starts_at,ends_at,status,id,source_incarnation)
+            VALUES(?1,?2,?3,?4,?5,?6,'scheduled',?7,(SELECT incarnation FROM guide_revisions WHERE source_id=?1))",
             params![request.source, request.channel, request.channel_name, request.title, request.start, request.end, id.0])?;
         tx.commit()?;
         Ok(id)
@@ -111,6 +111,16 @@ impl Store {
                 stored(from)
             ],
         )? == 1)
+    }
+    /// Numeric source IDs may be reused after deletion; old recording intent
+    /// has authority only for the original playlist incarnation.
+    pub fn recording_source_is_current(&self, id: JobId) -> Result<bool> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM recording_jobs j JOIN guide_revisions r
+             ON r.source_id=j.source_id AND r.incarnation=j.source_incarnation WHERE j.id=?1)",
+            [id.0],
+            |row| row.get(0),
+        )?)
     }
     /// Compare the full accepted window: an edit/cancel racing the scheduler
     /// invalidates its old read instead of starting the previous schedule.

@@ -100,6 +100,27 @@ fn scheduling_rechecks_blocking_and_source_enablement() {
             .is_err()
     );
 }
+
+#[test]
+fn deleting_and_reusing_a_source_id_cannot_retarget_recording_intent() {
+    let (mut store, request) = fixture();
+    let id = store
+        .schedule_recording(JobId(43), &request, request.start - 100)
+        .unwrap();
+    assert!(store.recording_source_is_current(id).unwrap());
+    let source = store
+        .source(crate::SourceId(request.source))
+        .unwrap()
+        .unwrap()
+        .source;
+    store
+        .delete_source(crate::SourceId(request.source))
+        .unwrap();
+    assert!(!store.recording_source_is_current(id).unwrap());
+    assert_eq!(store.add_source(&source).unwrap().0, request.source);
+    assert!(!store.recording_source_is_current(id).unwrap());
+    assert!(store.recording_job(id).unwrap().is_some());
+}
 #[test]
 fn portable_backups_exclude_host_jobs_without_changing_live_intent() {
     let (mut store, request) = fixture();

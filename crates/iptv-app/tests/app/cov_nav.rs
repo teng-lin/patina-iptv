@@ -218,12 +218,14 @@ fn guide_keys(app: &mut Headless) {
     // Info is not the guide's: nothing changes.
     step(app.press_key("i"));
     assert!(focused(app, "Morning Talk"));
-    // OK on a programme still to come does nothing (no reminders yet).
+    // OK on a future programme opens its details with a recording action.
     step(app.press_key("right"));
     wait_focused(app, "Show 1");
     step(app.press_key("enter"));
     step(app.wait(Duration::from_millis(200)));
     assert!(focused(app, "Show 1") && app.shows("Nothing playing"));
+    step(app.wait_for("text:Record"));
+    step(app.back());
     step(app.press_key("home"));
     wait_focused(app, "Morning Talk");
     // Menu: the programme's menu; Menu again closes it.
@@ -283,13 +285,18 @@ fn guide_keys(app: &mut Headless) {
     step(app.wait_for(FIELD));
     assert!(app.screen().matches("text:☰  News").unwrap());
     close_search(app);
-    // From Search down past TV (the disabled items are skipped) to
-    // Playlists, then Settings: each opens its screen.
+    // From Search down past TV to Recordings, Playlists, then Settings:
+    // each enabled destination opens its screen.
     const PLAYLISTS: &str = "text:▲▼ choose   OK actions   Back close";
     const SETTINGS: &str = "text:▲▼ page   ▶ OK its settings   Back close";
     step(app.press_key("up"));
     step(app.press_key("up"));
     step(app.press_key("down"));
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:recordings-screen"));
+    step(app.back());
+    gone(app, "id:recordings-screen");
     step(app.press_key("down"));
     step(app.press_key("enter"));
     step(app.wait_for(PLAYLISTS));
@@ -315,6 +322,7 @@ fn guide_keys(app: &mut Headless) {
     gone(app, SETTINGS);
     // Up to TV, OK: the groups; Up shows All channels, OK takes it (the
     // hint again, which the next key but Back dismisses).
+    step(app.press_key("up"));
     step(app.press_key("up"));
     step(app.press_key("up"));
     step(app.press_key("enter"));

@@ -477,6 +477,8 @@ async fn refresh_accounts(
         .await?;
     let settings = services.settings();
     let mut data = state.lock();
+    data.accounts.clear();
+    data.limits.clear();
     for source in sources.into_iter().flatten() {
         let limit = match settings.get_in(
             "playlists.max_connections",
@@ -648,6 +650,7 @@ async fn resolve(
         SourceId(job.request.source),
         ContentId::from_stored(job.request.channel.clone()),
     );
+    let id = job.id;
     let (source, channel) = services
         .read(move |store| {
             if !store.source_policy(source)?.enabled {
@@ -655,7 +658,13 @@ async fn resolve(
                     "Playlist disabled",
                 ));
             }
-            Ok((store.source(source)?, store.channel(source, &channel)?))
+            let result = (store.source(source)?, store.channel(source, &channel)?);
+            if !store.recording_source_is_current(id)? {
+                return Err(iptv_store_sqlite::StoreError::Unavailable(
+                    "Playlist unavailable",
+                ));
+            }
+            Ok(result)
         })
         .await
         .map_err(|_| "Channel unavailable")?;

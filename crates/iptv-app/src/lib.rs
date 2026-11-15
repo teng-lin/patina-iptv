@@ -202,6 +202,7 @@ pub struct Ui {
     /// The programme description popover, if open.
     pub description: Signal<Option<Origin>>,
     pub recordings: Signal<iptv_core::recording::Screen>,
+    pub recordings_open: Memo<bool>,
     /// The favourite channels on screen (catalog channels); kept by key
     /// and changed through `favorites.rs`.
     pub favorites: Signal<BTreeSet<usize>>,
@@ -634,6 +635,8 @@ pub fn App() -> impl IntoElement {
 fn ready_app() -> impl IntoElement {
     settings::load();
     startup::mark("settings loaded");
+    let recordings = signal(iptv_core::recording::Screen::default());
+    let recordings_open = computed(move || recordings.with(|s| s.open));
     let ui = Ui {
         focus: signal(Focus::default()),
         browse_playback: signal(Default::default()),
@@ -664,7 +667,8 @@ fn ready_app() -> impl IntoElement {
         epoch: nsh_core::time::now(),
         menu: signal(None),
         description: signal(None),
-        recordings: signal(Default::default()),
+        recordings,
+        recordings_open,
         favorites: signal(BTreeSet::new()),
         has_vod: signal(false),
         playback: signal(Playback::Live),

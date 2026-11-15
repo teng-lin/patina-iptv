@@ -11,7 +11,8 @@ CREATE TABLE recording_jobs (
     status TEXT NOT NULL CHECK(status IN
         ('scheduled','recording','completed','partial','failed','cancelled','missed')),
     bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes >= 0),
-    message TEXT NOT NULL DEFAULT ''
+    message TEXT NOT NULL DEFAULT '',
+    source_incarnation TEXT NOT NULL
 );
 CREATE INDEX recording_due ON recording_jobs(status, starts_at);
 CREATE UNIQUE INDEX recording_unique_active ON recording_jobs(source_id, channel_id, starts_at, ends_at)

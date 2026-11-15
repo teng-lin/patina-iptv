@@ -431,7 +431,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     // The strip's other buttons by taps, each opening its chooser or
     // screen: the audio track, the sound's delay, the picture size, the
     // sleep timer (set, then off again), the favourite, Search, the
-    // channel list; Recordings does nothing yet.
+    // channel list and recordings.
     let pick_next = |app: &mut Headless, button: &str| {
         strip(app);
         step(app.press(&format!("text:{button}")));
@@ -455,9 +455,12 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for("text:Sleep timer · Off"));
     step(app.press("text:☆ Favourite"));
     step(app.wait_for("text:★ Favourite"));
-    // Recordings is not available yet: nothing opens.
+    // Recordings opens management without replacing the viewing surface.
     step(app.press("text:Recordings"));
+    step(app.wait_for("id:recordings-screen"));
     assert!(!seen(&app, "text:No recent searches yet"));
+    step(app.back());
+    step(app.wait_for_gone("id:recordings-screen", Duration::from_secs(1)));
     // Another stream forgets the tracks and the choices.
     // (`M` toggles the strip, which may be up without its hint.)
     step(app.press_key("m"));

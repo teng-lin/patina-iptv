@@ -9,7 +9,7 @@ use nsh_core::prelude::*;
 use std::time::Duration;
 
 pub fn is_open(ui: Ui) -> bool {
-    ui.recordings.with(|s| s.open)
+    ui.recordings_open.get()
 }
 pub fn open(ui: Ui) {
     ui.recordings.update(|s| {
@@ -564,7 +564,7 @@ fn action_view(ui: Ui, size: Scale) -> impl IntoElement {
         .child(when(move || ui.recordings.with(|s| s.confirm_delete), move ||
             ui_kit::body(size, tr("Delete this recording file permanently? Select Delete recording again to confirm. Back cancels."))))
         .children((0..2).map(move |index| when(move || ui.recordings.with(|s| s.focused().is_some_and(|j| index < actions(ui, j).len())), move || {
-            ui_kit::button(ui, size, move || ui.recordings.with(|s| s.focused().and_then(|j| actions(ui, j).get(index).copied()).map(tr).unwrap_or("")),
+            ui_kit::button(ui, size, move || ui.recordings.with(|s| s.focused().and_then(|j| actions(ui, j).get(index).copied()).map(|name| tr(name).to_owned()).unwrap_or_default()),
                 move || ui.recordings.with(|s| s.action == index), move || perform(ui, index))
         })))
 }
