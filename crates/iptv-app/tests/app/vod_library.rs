@@ -273,8 +273,50 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
         }),
     );
     assert_eq!(player(&app), surface);
+    // The final timeline can mark the tail completed before Ended arrives.
+    // The forced final save must not put that series back in Continue watching.
+    let tail_token = props.lock().unwrap()["source"]["token"].clone();
+    for (name, data) in [
+        ("state", json!({"state":"ready"})),
+        (
+            "timeline",
+            json!({"token":tail_token,"seekId":0,"ms":120000,"durationMs":120000,"seekable":true}),
+        ),
+        ("state", json!({"state":"ended"})),
+    ] {
+        app.engine().control().dispatch_event(
+            surface,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: name.into(),
+                data,
+            },
+        );
+        app.settle();
+    }
     drop(app);
     let store = crate::isolated::open_database(&path).unwrap();
+    let series_key = iptv_core::vod::Key {
+        source: source.0,
+        kind: iptv_core::vod::Kind::Series,
+        id: series.items[0].id.to_string(),
+    };
+    assert!(store.vod_progress(&series_key).unwrap().completed);
+    assert!(
+        store
+            .vod_page(
+                &iptv_core::vod::Query {
+                    kind: iptv_core::vod::Kind::Series,
+                    continue_watching: true,
+                    ..Default::default()
+                },
+                0,
+                20
+            )
+            .unwrap()
+            .0
+            .is_empty()
+    );
     assert_eq!(
         store
             .vod_progress(&iptv_core::vod::Key {

@@ -379,9 +379,10 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
         if p.key.kind == Kind::Movie {
             p.details.item.progress = progress;
         }
-        if became_completed
+        if (became_completed || ended)
             && p.parent.is_some()
-            && p.details.episodes.iter().all(|e| e.progress.completed)
+            && (p.details.episodes.iter().all(|e| e.progress.completed)
+                || p.details.next_episode(&p.key).is_none())
         {
             series_complete = p
                 .parent

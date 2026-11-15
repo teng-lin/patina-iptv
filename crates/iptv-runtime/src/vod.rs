@@ -345,11 +345,14 @@ url,
                     ));
                 }
                 let keys: Vec<_> = episodes.iter().map(|e| e.key.clone()).collect();
-                let progress = work
+                let resume_key = key2.clone();
+                let (progress, resume_episode) = work
                     .read(move |s| {
-                        keys.iter()
+                        let progress = keys
+                            .iter()
                             .map(|k| s.vod_progress(k))
-                            .collect::<iptv_store_sqlite::Result<Vec<_>>>()
+                            .collect::<iptv_store_sqlite::Result<Vec<_>>>()?;
+                        Ok((progress, s.vod_resume_episode(&resume_key)?))
                     })
                     .await?;
                 for (e, p) in episodes.iter_mut().zip(progress) {
@@ -366,6 +369,7 @@ url,
                 Ok::<_, Error>(Details {
                     item,
                     episodes,
+                    resume_episode,
                     incarnation,
                 })
             })
@@ -392,7 +396,7 @@ url,
     }
     pub async fn vod_play(
         &self,
-        details: Details,
+        mut details: Details,
         key: Key,
         restart: bool,
     ) -> Result<(Playing, PlaySource), Error> {
@@ -438,6 +442,9 @@ url,
                 s.vod_progress(&lookup)
             })
             .await?;
+        if key.kind == Kind::Episode {
+            details.resume_episode = Some(key.clone());
+        }
         let title = details.episodes.iter().find(|e| e.key == key).map_or_else(
             || details.item.name.clone(),
             |e| format!("{} · {}", details.item.name, e.title),

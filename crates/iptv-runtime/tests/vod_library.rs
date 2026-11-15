@@ -139,3 +139,121 @@ fn stale_observation_cannot_write_to_a_reused_source_id() {
         Progress::default()
     );
 }
+
+#[cfg(feature = "test-support")]
+#[test]
+fn an_out_of_order_episode_resumes_after_restart_and_a_stale_writer_cannot_restore_its_cursor() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        time::Duration,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let body = serde_json::json!({
+        "info": {"name": "Generated out-of-order series"},
+        "episodes": (1..=6).map(|number| serde_json::json!({
+            "id":1000+number,"episode_num":number,"title":format!("Generated episode {number}"),
+            "season":if number<5 {1} else {2},"container_extension":"mp4"
+        })).collect::<Vec<_>>()
+    })
+    .to_string();
+    let provider = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 1024];
+            while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                let count = stream.read(&mut buffer).unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&buffer[..count]);
+                assert!(request.len() < 16_384);
+            }
+            assert!(
+                String::from_utf8(request)
+                    .unwrap()
+                    .contains("action=get_series_info")
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        }
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("iptv.sqlite");
+    let database_key = iptv_runtime::model::DatabaseKey::from_bytes([0x75; 32]);
+    let mut store = iptv_store_sqlite::Store::open_encrypted(&path, &database_key).unwrap();
+    let mut source_data = common::xtream_source("Generated out-of-order source");
+    let iptv_providers::model::SourceConfig::Xtream(credentials) = &mut source_data.config else {
+        unreachable!()
+    };
+    credentials.server_url = format!("http://{address}");
+    let source = store.add_source(&source_data).unwrap();
+    let catalogue = common::catalog(1, 1, common::XT_PASSWORD);
+    common::replace(&mut store, source, &catalogue);
+    let series = Key {
+        source: source.0,
+        kind: Kind::Series,
+        id: catalogue.series[0].id.to_string(),
+    };
+    drop(store);
+    let make = || {
+        let owner = Rc::new(Runtime::new(Ports::new(directory.path().to_owned(), {
+            let database_key = database_key.clone();
+            move |_| Ok(database_key.clone())
+        })));
+        owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+        owner.start_services();
+        owner
+    };
+    let owner = make();
+    let details = support::block_on(owner.vod_details(series.clone())).unwrap();
+    let fifth = details.episodes[4].key.clone();
+    let old_incarnation = details.incarnation.clone();
+    let point = Progress::observed(37_000, Some(120_000), false);
+    support::block_on(owner.vod_save_progress(
+        fifth.clone(),
+        Some(series.clone()),
+        point,
+        old_incarnation.clone(),
+    ))
+    .unwrap();
+    assert!(owner.drain_services());
+    drop(owner);
+    let owner = make();
+    let details = support::block_on(owner.vod_details(series.clone())).unwrap();
+    assert_eq!(details.resume_episode, Some(fifth.clone()));
+    let mut screen = iptv_core::vod::Screen::default();
+    screen.show_details(details.clone());
+    assert_eq!(screen.episode, Some(fifth.clone()));
+    assert_eq!(screen.season, Some(2));
+    let (playing, _) = support::block_on(owner.vod_play(details, fifth.clone(), false)).unwrap();
+    assert_eq!(playing.key, fifth);
+    assert_eq!(playing.progress.resume_ms(), 37_000);
+    provider.join().unwrap();
+    assert!(owner.drain_services());
+    let mut store = iptv_store_sqlite::Store::open_encrypted(&path, &database_key).unwrap();
+    store.delete_source(source).unwrap();
+    let replacement = store.add_source(&source_data).unwrap();
+    assert_eq!(replacement, source);
+    common::replace(&mut store, replacement, &catalogue);
+    drop(store);
+    assert!(
+        support::block_on(owner.vod_save_progress(
+            fifth,
+            Some(series.clone()),
+            point,
+            old_incarnation
+        ))
+        .is_err()
+    );
+    assert!(owner.drain_services());
+    let store = iptv_store_sqlite::Store::open_encrypted(path, &database_key).unwrap();
+    assert_eq!(store.vod_resume_episode(&series).unwrap(), None);
+}

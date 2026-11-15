@@ -122,8 +122,31 @@ pub struct Details {
     pub incarnation: String,
     pub item: Card,
     pub episodes: Vec<Episode>,
+    /// The last episode watched, kept by content identity across app restarts.
+    pub resume_episode: Option<Key>,
 }
 impl Details {
+    pub fn preferred_episode(&self) -> Option<&Episode> {
+        if let Some(at) = self
+            .resume_episode
+            .as_ref()
+            .and_then(|key| self.episodes.iter().position(|episode| &episode.key == key))
+        {
+            let current = &self.episodes[at];
+            return if current.progress.completed {
+                self.episodes[at + 1..]
+                    .iter()
+                    .find(|episode| !episode.progress.completed)
+                    .or(Some(current))
+            } else {
+                Some(current)
+            };
+        }
+        self.episodes
+            .iter()
+            .find(|episode| !episode.progress.completed)
+            .or_else(|| self.episodes.first())
+    }
     pub fn seasons(&self) -> Vec<u32> {
         let mut out: Vec<_> = self.episodes.iter().map(|e| e.season).collect();
         out.sort();
@@ -238,12 +261,7 @@ impl Screen {
     }
     pub fn show_details(&mut self, details: Details) {
         self.season = details.seasons().first().copied();
-        self.episode = details
-            .episodes
-            .iter()
-            .find(|e| !e.progress.completed)
-            .or_else(|| details.episodes.first())
-            .map(|e| e.key.clone());
+        self.episode = details.preferred_episode().map(|e| e.key.clone());
         self.season = details
             .episodes
             .iter()
@@ -385,5 +403,52 @@ mod tests {
         let g = s.begin(Kind::Movie);
         s.publish(g, vec![a, b], false, false);
         assert_eq!(s.cards.len(), 2);
+    }
+    #[test]
+    fn series_resume_keeps_the_last_watched_episode_and_advances_after_completion() {
+        let mut item = card("generated-series");
+        item.key.kind = Kind::Series;
+        let episodes: Vec<_> = (1..=6)
+            .map(|number| Episode {
+                key: Key {
+                    source: 1,
+                    kind: Kind::Episode,
+                    id: format!("episode-{number}"),
+                },
+                season: if number < 5 { 1 } else { 2 },
+                number,
+                title: format!("Generated episode {number}"),
+                plot: None,
+                duration_secs: Some(120),
+                progress: Progress::default(),
+            })
+            .collect();
+        let fifth = episodes[4].key.clone();
+        let sixth = episodes[5].key.clone();
+        let mut details = Details {
+            incarnation: "generated".into(),
+            item,
+            episodes,
+            resume_episode: Some(fifth.clone()),
+        };
+        details.episodes[4].progress = Progress::observed(37_000, Some(120_000), false);
+        let mut screen = Screen::default();
+        screen.show_details(details.clone());
+        assert_eq!(screen.episode, Some(fifth.clone()));
+        assert_eq!(screen.season, Some(2));
+        details.episodes[4].progress.completed = true;
+        screen.show_details(details.clone());
+        assert_eq!(screen.episode, Some(sixth.clone()));
+        details.resume_episode = Some(sixth.clone());
+        details.episodes[5].progress.completed = true;
+        screen.show_details(details.clone());
+        assert_eq!(
+            screen.episode,
+            Some(sixth),
+            "a completed tail never jumps back to unrelated episode one"
+        );
+        details.resume_episode = None;
+        screen.show_details(details.clone());
+        assert_eq!(screen.episode, Some(details.episodes[0].key.clone()));
     }
 }

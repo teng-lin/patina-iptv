@@ -215,6 +215,21 @@ Option<i64>>(1)?.map(|v|v.max(0) as u64),
 completed:r.get(2)?}
 )).optional().map(|v|v.unwrap_or_default()).map_err(Into::into)
     }
+    pub fn vod_resume_episode(&self, key: &Key) -> Result<Option<Key>> {
+        if key.kind != Kind::Series {
+            return Ok(None);
+        }
+        let id: Option<Option<String>> = self.conn.query_row(
+            "SELECT last_episode_id FROM vod_progress WHERE source_id=?1 AND kind='series' AND content_id=?2",
+            params![key.source, key.id],
+            |row| row.get(0),
+        ).optional()?;
+        Ok(id.flatten().map(|id| Key {
+            source: key.source,
+            kind: Kind::Episode,
+            id,
+        }))
+    }
     pub fn save_vod_progress(
         &mut self,
         key: &Key,
@@ -224,8 +239,12 @@ completed:r.get(2)?}
         if key.id.is_empty() || key.id.len() > 2048 || parent.is_some_and(|p| p.len() > 2048) {
             return Err(StoreError::Unavailable("Invalid on-demand identity"));
         }
+        if (key.kind == Kind::Episode) != parent.is_some() {
+            return Err(StoreError::Unavailable("Invalid on-demand parent"));
+        }
         let cap = |v: u64| v.min(i64::MAX as u64) as i64;
-        self.conn.execute("INSERT INTO \
+        let tx = self.conn.transaction()?;
+        tx.execute("INSERT INTO \
 vod_progress(source_id,kind,content_id,parent_id,position_ms,duration_ms,completed,updated_at) \
 VALUES(?1,?2,?3,?4,?5,?6,?7,unixepoch()) ON CONFLICT(source_id,kind,content_id) DO UPDATE SET \
 parent_id=excluded.parent_id,position_ms=excluded.position_ms,duration_ms=excluded.duration_ms,completed=excluded.completed,updated_at=excluded.updated_at",
@@ -237,14 +256,15 @@ cap(progress.position_ms),
 progress.duration_ms.map(cap),
 progress.completed])?;
         if let Some(parent) = parent {
-            self.conn.execute("INSERT INTO vod_progress(source_id,kind,content_id,position_ms,duration_ms,completed,updated_at) \
-VALUES(?1,'series',?2,?3,?4,0,unixepoch()) ON CONFLICT(source_id,kind,content_id) DO UPDATE SET \
-position_ms=excluded.position_ms,duration_ms=excluded.duration_ms,completed=0,updated_at=excluded.updated_at",
+            tx.execute("INSERT INTO vod_progress(source_id,kind,content_id,position_ms,duration_ms,completed,updated_at,last_episode_id) \
+VALUES(?1,'series',?2,?3,?4,0,unixepoch(),?5) ON CONFLICT(source_id,kind,content_id) DO UPDATE SET \
+position_ms=excluded.position_ms,duration_ms=excluded.duration_ms,completed=0,updated_at=excluded.updated_at,last_episode_id=excluded.last_episode_id",
 params![key.source,
 parent,
 cap(progress.position_ms),
-progress.duration_ms.map(cap)])?;
+progress.duration_ms.map(cap), key.id])?;
         }
+        tx.commit()?;
         Ok(())
     }
     pub fn clear_vod_progress(&mut self, key: &Key) -> Result<()> {
@@ -263,6 +283,55 @@ mod tests {
         HttpResponse, SecretUrl,
         model::{ContentKind, M3uSourceConfig, Source, SourceConfig},
     };
+    #[test]
+    fn series_resume_identity_keeps_write_order_and_is_removed_with_its_source() {
+        let (mut store, movie) = fixture();
+        let series = Key {
+            source: movie.source,
+            kind: Kind::Series,
+            id: "generated-series".into(),
+        };
+        let first = Key {
+            source: movie.source,
+            kind: Kind::Episode,
+            id: "episode-one".into(),
+        };
+        let fifth = Key {
+            source: movie.source,
+            kind: Kind::Episode,
+            id: "episode-five".into(),
+        };
+        let point = Progress::observed(37_000, Some(120_000), false);
+        for key in [&fifth, &first, &fifth] {
+            store
+                .save_vod_progress(key, Some(&series.id), point)
+                .unwrap();
+            assert_eq!(
+                store.vod_resume_episode(&series).unwrap().as_ref(),
+                Some(key)
+            );
+        }
+        store
+            .save_vod_progress(
+                &series,
+                None,
+                Progress {
+                    completed: true,
+                    ..point
+                },
+            )
+            .unwrap();
+        assert_eq!(store.vod_resume_episode(&series).unwrap(), Some(fifth));
+        let source = store
+            .source(crate::SourceId(movie.source))
+            .unwrap()
+            .unwrap()
+            .source;
+        store.delete_source(crate::SourceId(movie.source)).unwrap();
+        let replacement = store.add_source(&source).unwrap();
+        assert_eq!(replacement.0, movie.source);
+        assert_eq!(store.vod_resume_episode(&series).unwrap(), None);
+    }
     fn fixture() -> (Store, Key) {
         let mut store = Store::open_in_memory().unwrap();
         let source = store
