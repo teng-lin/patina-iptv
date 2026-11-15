@@ -110,7 +110,6 @@ impl Runtime {
         ),
         Error,
     > {
-        self.parental_refresh().await.map_err(|_| unavailable())?;
         let mut result = self
             .services()
             .read(move |s| {
@@ -118,6 +117,9 @@ impl Runtime {
                 Ok((cards, more, s.vod_sources()?, s.vod_categories(&query)?))
             })
             .await?;
+        self.parental_refresh_targets(result.0.iter().map(|card| target(&card.key)).collect())
+            .await
+            .map_err(|_| unavailable())?;
         for card in &mut result.0 {
             if !self.parental_allowed(&target(&card.key)) {
                 card.plot = None;
@@ -785,6 +787,77 @@ pub fn target(key: &Key) -> iptv_core::parental::Target {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn catalogue_authorization_only_loads_the_returned_movie_identities() {
+        use iptv_providers::{
+            HttpResponse, SecretUrl,
+            model::{M3uSourceConfig, Source},
+        };
+        use std::rc::Rc;
+        let directory = tempfile::tempdir().unwrap();
+        let database_key = crate::model::DatabaseKey::from_bytes([0x76; 32]);
+        let mut store = iptv_store_sqlite::Store::open_encrypted(
+            directory.path().join("iptv.sqlite"),
+            &database_key,
+        )
+        .unwrap();
+        let source = store
+            .add_source(&Source {
+                name: "Generated bounded catalogue".into(),
+                config: SourceConfig::M3u(M3uSourceConfig {
+                    location: SecretUrl::new("https://example.test/generated.m3u"),
+                    user_agent: None,
+                    referrer: None,
+                }),
+            })
+            .unwrap();
+        let mut playlist = String::from("#EXTM3U\n");
+        for channel in 0..5000 {
+            playlist.push_str(&format!("#EXTINF:-1 group-title=\"Generated live\",Generated channel {channel}\nhttps://example.test/generated/{channel}.ts\n"));
+        }
+        let parsed = iptv_providers::m3u::parse_m3u(&playlist);
+        let movies=iptv_providers::xtream::parse_vod_streams(&HttpResponse::ok(
+            r#"[{"stream_id":1,"name":"Generated movie one"},{"stream_id":2,"name":"Generated movie two"}]"#,
+        )).unwrap();
+        store
+            .replace_catalog(
+                source,
+                &parsed.groups,
+                &parsed.channels.items,
+                &movies.items,
+                &[],
+            )
+            .unwrap();
+        let live =
+            iptv_core::parental::Target::live(source.0, parsed.channels.items[0].id.as_str());
+        drop(store);
+        let mut settings = iptv_settings::Settings::new();
+        settings
+            .set("parental.live_enabled", iptv_settings::Value::Bool(true))
+            .unwrap();
+        std::fs::write(
+            directory.path().join("settings.json"),
+            settings.to_json_string(),
+        )
+        .unwrap();
+        let owner = Rc::new(Runtime::new(crate::Ports::new(
+            directory.path().to_owned(),
+            move |_| Ok(database_key.clone()),
+        )));
+        owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+        owner.start_services();
+        crate::settings::load(&owner);
+        let (cards, _, _, _) = owner
+            .services()
+            .block_on(owner.vod_catalogue(Query::default(), 0))
+            .unwrap();
+        assert_eq!(cards.len(), 2);
+        assert!(
+            !owner.parental_allowed(&live),
+            "a VOD page must not populate unrelated live-channel ancestry"
+        );
+        assert!(owner.drain_services());
+    }
     #[test]
     fn a_portal_link_cannot_survive_a_concurrent_source_change() {
         use iptv_providers::{
