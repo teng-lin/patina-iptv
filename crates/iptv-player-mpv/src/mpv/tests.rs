@@ -1412,6 +1412,7 @@ fn recorded_media_seeks_while_paused_and_reports_duration_without_reopening() {
     player.wait_prop(c"pause", "yes");
     host::tick(&player.inner);
     player.wait(Some(&gpu), "seekable timeline", |p| {
+        host::tick(&p.inner);
         p.events("timeline").iter().any(|e| {
             e["seekable"] == true && e["durationMs"].as_u64().is_some_and(|ms| ms > 10_000)
         })
