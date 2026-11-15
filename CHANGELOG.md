@@ -7,6 +7,8 @@ is below 1.0, a minor release may change behaviour.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-15
+
 ### Added
 
 - Provider movie and series libraries with search, category/source filters,
@@ -18,15 +20,6 @@ is below 1.0, a minor release may change behaviour.
   interrupted-capture recovery. Host sleep and Android service limits apply.
 - Native recording seek/duration, pause, durable resume, playback from the
   beginning and completion controls, sharing the persistent player surface.
-
-### Fixed
-
-- Touch player controls reserve room for every button, keeping optional
-  picture-in-picture and recording controls clear of rewind and fast-forward.
-
-## [0.1.3] - 2026-11-15
-
-### Added
 
 - Linux and macOS prototype: open a live guide channel in an independent player window
   with the original player controls, while main playback continues.
@@ -45,6 +38,8 @@ is below 1.0, a minor release may change behaviour.
 
 ### Fixed
 
+- Touch player controls reserve room for every button, keeping optional
+  picture-in-picture and recording controls clear of rewind and fast-forward.
 - Auxiliary player windows keep channel browsing and programme clocks independent,
   target manual retries correctly, release refused sessions, and let the main
   player's audio controls reclaim sound.

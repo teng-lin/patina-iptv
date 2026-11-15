@@ -1317,6 +1317,7 @@ fn indirect_preview_uses_actual_low_feed_binding_when_high_feed_only_lists_chann
 
 #[test]
 #[cfg(feature = "test-support")]
+#[ignore = "50 ms wall-clock budget; tools/check.sh runs this in isolation"]
 fn repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive() {
     use iptv_providers::{
         GroupId,

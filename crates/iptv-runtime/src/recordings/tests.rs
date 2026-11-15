@@ -758,7 +758,7 @@ async fn a_cold_native_host_resumes_a_spool_without_constructing_another_ui() {
     let first = owner(&root);
     let mut request = seed(&first, &server()).await;
     request.start = now() + 2;
-    request.end = request.start + 3;
+    request.end = request.start + 60;
     let id = first.schedule_recording(request).await.unwrap();
     assert!(first.drain_services());
     drop(first);
@@ -791,12 +791,33 @@ async fn a_cold_native_host_resumes_a_spool_without_constructing_another_ui() {
     host::start_background_host(ports.clone()).unwrap();
     let state = host::acquire(&ports);
     let services = state.host.lock().unwrap().as_ref().unwrap().accept();
-    tokio::time::sleep(Duration::from_secs(7)).await;
-    let job = services
-        .read(move |store| store.recording_job(id))
-        .await
-        .unwrap()
-        .unwrap();
+    // Native startup and filesystem work can exceed a three-second window on
+    // Windows CI. Observe actual appended media, then stop this one capture;
+    // neither a fixed sleep nor wall-clock setup speed is the behavior here.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while std::fs::metadata(&spool).is_ok_and(|meta| meta.len() / 188 <= 1) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "capture did not append media"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let stop = state.lock().active.get(&id).map(|(_, token)| token.clone());
+    if let Some(stop) = stop {
+        stop.cancel();
+    }
+    let job = loop {
+        let job = services
+            .read(move |store| store.recording_job(id))
+            .await
+            .unwrap()
+            .unwrap();
+        if !job.status.active() {
+            break job;
+        }
+        assert!(std::time::Instant::now() < deadline, "capture did not stop");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
     assert_eq!(
         job.status,
         Status::Partial,
