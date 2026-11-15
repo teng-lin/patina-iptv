@@ -664,8 +664,16 @@ fn stored_playlists_switch_refresh_and_go() {
     drop(app);
 
     // A store that cannot be opened: the first-run wizard all the same.
+    // Closing a desktop window retains the independent recording host. This
+    // fixture replaces its database, so simulate a full quit before doing so;
+    // Windows cannot unlink SQLite files while the native host owns them.
+    assert!(iptv_runtime::recordings::host::stop_background_host(&data));
     for f in ["iptv.sqlite", "iptv.sqlite-wal", "iptv.sqlite-shm"] {
-        let _ = std::fs::remove_file(data.join(f));
+        match std::fs::remove_file(data.join(f)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("could not replace synthetic database {f}: {error}"),
+        }
     }
     std::fs::create_dir_all(data.join("iptv.sqlite")).unwrap();
     let mut app = start();
