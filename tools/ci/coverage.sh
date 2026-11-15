@@ -21,7 +21,7 @@ mkdir -p "$out"
 cargo llvm-cov clean --workspace
 cargo llvm-cov --locked --no-report "${features[@]}" "${crates[@]}"
 if [ "$#" -eq 0 ]; then
-  cargo llvm-cov --locked --no-report -p iptv-runtime --features test-support --lib \
+  cargo llvm-cov test --locked --no-report -p iptv-runtime --features test-support --lib \
     guide_repair::tests::repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive \
     -- --ignored --exact
 fi
