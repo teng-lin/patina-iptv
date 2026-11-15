@@ -286,7 +286,7 @@ async fn a_failed_final_name_keeps_partial_media_playable_and_recoverable() {
 }
 
 #[tokio::test]
-async fn restart_retains_schedules_but_never_claims_interrupted_media_is_complete() {
+async fn restart_resumes_future_windows_and_never_claims_interrupted_media_is_complete() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("catalog");
     let first = owner(&root);
@@ -311,10 +311,10 @@ async fn restart_retains_schedules_but_never_claims_interrupted_media_is_complet
     drop(first);
     let second = owner(&root);
     second.start_recordings();
-    let job = until(&second, id, |j| !j.status.active()).await;
-    assert_eq!(job.status, Status::Partial);
+    let job = until(&second, id, |j| j.status == Status::Scheduled).await;
     assert_eq!(job.bytes, 188);
-    assert!(second.recording_file(id).await.unwrap().is_file());
+    assert!(path(&second.services(), id, true).is_file());
+    assert!(second.recording_file(id).await.is_err());
     assert!(second.drain_services());
 }
 
@@ -364,4 +364,36 @@ async fn a_connection_conflict_fails_recording_without_stopping_the_viewer() {
     assert!(job.message.contains("connection"));
     assert_eq!(owner.recordings.lock().viewers.len(), 1);
     assert!(owner.drain_services());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_host_captures_after_its_ui_owner_is_drained_and_dropped() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("generated-app");
+    std::fs::create_dir_all(&root).unwrap();
+    let mut ports = crate::Ports::new(root.clone(), |_| {
+        Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
+    });
+    ports.background_recordings = true;
+    let owner = Runtime::new(ports.clone());
+    owner.start_services();
+    let mut request = seed(&owner, &server()).await;
+    request.start = now() + 2;
+    request.end = request.start + 3;
+    let id = owner.schedule_recording(request).await.unwrap();
+    let state = owner.recordings.clone();
+    assert!(owner.drain_services());
+    drop(owner);
+    let services = state.host.lock().unwrap().as_ref().unwrap().accept();
+    tokio::time::sleep(Duration::from_secs(7)).await;
+    let job = services
+        .read(move |store| store.recording_job(id))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(job.status, Status::Completed);
+    assert!(job.bytes >= 188);
+    assert!(path(&services, id, false).is_file());
+    assert!(state.lock().viewers.is_empty());
+    state.stop();
 }

@@ -222,6 +222,12 @@ fn stale() -> StoreError {
 }
 
 impl Services {
+    pub(crate) fn service_retire(&self) -> bool {
+        let drained = self.service.drain_on_shutdown_with(|| {});
+        self.service.retire();
+        drained
+    }
+
     pub(crate) fn epoch(&self) -> u64 {
         self.epoch
     }

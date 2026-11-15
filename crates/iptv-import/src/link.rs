@@ -39,3 +39,15 @@ pub async fn stalker_link<F: Fetch>(
     )
     .await
 }
+
+/// Authorize playback from saved credentials without importing a catalogue.
+/// The session stays in memory and follows the same endpoint/auth policy as an import.
+pub async fn stalker_session<F: Fetch>(
+    fetch: &F,
+    credentials: &iptv_providers::model::StalkerCredentials,
+    cancel: &CancelToken,
+) -> Result<StalkerSession, ImportError> {
+    let mut progress = NoProgress;
+    let mut ctx = Ctx::new(fetch, &mut progress, cancel);
+    crate::stalker::discover(&mut ctx, credentials).await
+}

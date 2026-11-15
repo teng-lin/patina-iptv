@@ -35,6 +35,28 @@ pub async fn capture(
     path: &Path,
     max_bytes: u64,
 ) -> Result<(), Failure> {
+    capture_inner(url, headers, policy, path, max_bytes, false).await
+}
+
+/// Resume a private TS spool after a connection/process interruption. Only whole
+/// transport packets are retained. The caller must mark the resulting gap.
+pub async fn capture_resume(
+    url: &str,
+    headers: &[(String, String)],
+    policy: PlaybackPolicy,
+    path: &Path,
+    max_bytes: u64,
+) -> Result<(), Failure> {
+    capture_inner(url, headers, policy, path, max_bytes, true).await
+}
+async fn capture_inner(
+    url: &str,
+    headers: &[(String, String)],
+    policy: PlaybackPolicy,
+    path: &Path,
+    max_bytes: u64,
+    resume: bool,
+) -> Result<(), Failure> {
     let relay =
         PlaybackRelay::start_with_policy(url, headers, policy).map_err(|_| Failure::Network)?;
     let client = reqwest::Client::builder()
@@ -46,16 +68,36 @@ pub async fn capture(
         .build()
         .map_err(|_| Failure::Network)?;
     let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
+    options.write(true);
+    let bytes = if resume {
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+                metadata.len() / 188 * 188
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            _ => return Err(Failure::Storage),
+        }
+    } else {
+        0
+    };
+    if resume && path.exists() {
+        options.append(true);
+    } else {
+        options.create_new(true);
+    }
+    if bytes >= max_bytes {
+        return Err(Failure::Limit);
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
     let file = options.open(path).map_err(|_| Failure::Storage)?;
+    file.set_len(bytes).map_err(|_| Failure::Storage)?;
     let mut writer = Writer {
         file,
-        bytes: 0,
+        bytes,
         max_bytes,
     };
     let mut response = get(&client, &relay, relay.url()).await?;

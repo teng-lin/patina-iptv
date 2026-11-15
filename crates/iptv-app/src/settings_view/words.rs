@@ -120,6 +120,11 @@ pub fn subsection(section: Section, subsection: &str) -> &'static str {
 /// The name of a setting or command.
 pub fn label(key: &str) -> &'static str {
     match key {
+        "recordings.quit_host" => tr("Stop recorder and quit"),
+        "recordings.background_status" => tr("Background recording requirements"),
+        "recordings.enable_startup" => tr("Start recorder at login"),
+        "recordings.disable_startup" => tr("Remove recorder login startup"),
+        "recordings.alarm_access" => tr("Allow precise recording wakeups"),
         "general.start_on_boot" => "Start when the device turns on",
         "general.start_on_wake" => "Start when the device wakes",
         "general.resume_last_channel" => tr("Play the last channel on start"),

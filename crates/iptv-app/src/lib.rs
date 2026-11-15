@@ -62,6 +62,7 @@ mod player_keys;
 mod player_panels;
 mod playlists_view;
 mod rail;
+mod recording_host;
 mod remote_editor;
 mod scale;
 mod search_view;
@@ -495,8 +496,15 @@ pub(crate) fn with_runtime<R>(owner: Rc<runtime::Runtime>, run: impl FnOnce() ->
     run()
 }
 
-fn new_runtime(directory: std::path::PathBuf) -> runtime::Runtime {
+pub(crate) fn new_runtime(directory: std::path::PathBuf) -> runtime::Runtime {
     let mut ports = runtime::Ports::new(directory, credential_key::database_key);
+    ports.background_recordings = cfg!(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "macos",
+        windows
+    ));
+    ports.recording_schedule = recording_host::schedule;
     ports.exclude_from_backup = platform_data::exclude_from_backup;
     ports.startup_mark = |phase, detail| startup::mark_with(phase, detail);
     runtime::Runtime::new(ports)
@@ -749,7 +757,7 @@ fn ready_app() -> impl IntoElement {
     };
     settings::bind(ui);
     browse_playback::bind(ui);
-    desktop::bind();
+    desktop::bind(ui);
     desktop::menus(ui);
     // Leaving full screen closes the panels.
     effect(move || {

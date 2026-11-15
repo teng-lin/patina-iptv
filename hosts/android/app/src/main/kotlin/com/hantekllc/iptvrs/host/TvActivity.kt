@@ -44,6 +44,7 @@ class TvActivity : Activity() {
         mark("library loaded")
         initializeDataDirectory(filesDir.absolutePath)
         CredentialKey.initialize(this)
+        RecordingHost.attach(this)
         nsh.useStandaloneLimits()
         pip = PipHost(this)
         backups = BackupHost(this)

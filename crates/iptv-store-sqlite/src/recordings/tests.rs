@@ -200,3 +200,93 @@ fn playback_progress_is_durable_only_for_playable_jobs_and_cascades_on_delete() 
         .unwrap();
     assert_eq!(store.recording_progress(id).unwrap(), Progress::default());
 }
+#[test]
+fn recurrence_claim_cancel_and_deletion_never_rearm_an_occurrence() {
+    use iptv_core::recording::{Repeat, Rule, RuleId};
+    let (mut store, request) = fixture();
+    let rule = Rule {
+        id: RuleId(100),
+        local_start: request.start,
+        request: request.clone(),
+        repeat: Repeat::Daily,
+        enabled: true,
+    };
+    let first = store
+        .schedule_recording_rule_and_first(&rule, JobId(101), request.start - 1)
+        .unwrap();
+    assert_eq!(store.recording_rule_for_job(first).unwrap(), Some(rule.id));
+    assert_eq!(
+        store
+            .materialize_recording_rule(rule.id, JobId(102), &request, request.start - 1)
+            .unwrap(),
+        None
+    );
+    store
+        .transition_recording(first, Status::Scheduled, Status::Cancelled, 0, "Cancelled")
+        .unwrap();
+    assert!(store.remove_recording(first).unwrap());
+    assert!(
+        store
+            .recording_rule_has_occurrence(rule.id, request.start)
+            .unwrap()
+    );
+    assert_eq!(
+        store
+            .materialize_recording_rule(rule.id, JobId(103), &request, request.start - 1)
+            .unwrap(),
+        None
+    );
+    let mut next = request.clone();
+    next.start += 86400;
+    next.end += 86400;
+    assert_eq!(
+        store
+            .materialize_recording_rule(rule.id, JobId(104), &next, request.start - 1)
+            .unwrap(),
+        Some(JobId(104))
+    );
+    store.set_recording_rule_enabled(rule.id, false).unwrap();
+    assert_eq!(
+        store.recording_job(JobId(104)).unwrap().unwrap().status,
+        Status::Cancelled
+    );
+    next.start += 86400;
+    next.end += 86400;
+    assert_eq!(
+        store
+            .materialize_recording_rule(rule.id, JobId(105), &next, request.start - 1)
+            .unwrap(),
+        None
+    );
+    store.discard_recording_jobs().unwrap();
+    assert!(store.recording_rules().unwrap().is_empty());
+}
+#[test]
+fn stale_recurring_source_has_no_authority_for_a_replacement() {
+    use iptv_core::recording::{Repeat, Rule, RuleId};
+    let (mut store, request) = fixture();
+    let rule = Rule {
+        id: RuleId(100),
+        local_start: request.start,
+        request: request.clone(),
+        repeat: Repeat::Daily,
+        enabled: true,
+    };
+    store
+        .schedule_recording_rule(&rule, request.start - 1)
+        .unwrap();
+    store
+        .conn
+        .execute(
+            "UPDATE guide_revisions SET incarnation='generated-replacement' WHERE source_id=?1",
+            [request.source],
+        )
+        .unwrap();
+    assert!(!store.recording_rules().unwrap()[0].enabled);
+    assert_eq!(
+        store
+            .materialize_recording_rule(rule.id, JobId(101), &request, request.start - 1)
+            .unwrap(),
+        None
+    );
+}

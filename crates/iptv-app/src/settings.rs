@@ -85,6 +85,11 @@ pub const WIRED: &[&str] = &[
 /// The commands the app runs (`settings_view::run`).
 pub const COMMANDS: &[&str] = &[
     "parental.change_pin",
+    "recordings.quit_host",
+    "recordings.background_status",
+    "recordings.enable_startup",
+    "recordings.disable_startup",
+    "recordings.alarm_access",
     "general.backup",
     "general.restore",
     "epg.add_source",
@@ -150,6 +155,19 @@ pub fn font_factor() -> f32 {
 /// time matters only where keys report their release (Android), and
 /// picture in picture on leaving only on Android.
 pub fn offer(key: &str) -> Offer {
+    if key == "recordings.quit_host" && !crate::desktop::DESKTOP {
+        return Offer::Hidden;
+    }
+    if key == "recordings.alarm_access" && !cfg!(target_os = "android") {
+        return Offer::Hidden;
+    }
+    if matches!(
+        key,
+        "recordings.enable_startup" | "recordings.disable_startup"
+    ) && !crate::desktop::DESKTOP
+    {
+        return Offer::Hidden;
+    }
     // Leaving the app into a picture-in-picture window: Android only.
     let android = cfg!(target_os = "android");
     if matches!(key, "general.backup" | "general.restore") && cfg!(target_os = "ios") {

@@ -7,7 +7,9 @@
 //! connections, file writer, network executor, refresh pool, settings and
 //! platform ports) is reached through the handle the caller passes; nothing
 //! in this crate looks an owner up through a thread-local or a process-wide
-//! registry. The shell keeps the one handle and passes it in.
+//! registry. The shell keeps the one handle and passes it in. A native host may
+//! explicitly share recording execution across UI engine lifetimes for the same
+//! locked storage root; UI services and transient playback remain owner-scoped.
 //!
 //! Native library snapshots and store jobs are implementation details. External
 //! callers use named commands and portable values instead:
@@ -93,6 +95,7 @@ type SavedSettings = RefCell<Option<(u64, std::sync::Arc<iptv_settings::Settings
 pub struct Runtime {
     parental: RefCell<parental::State>,
     recordings: std::sync::Arc<recordings::State>,
+    recordings_detached: Cell<bool>,
     repairs: RefCell<guide_repair::State>,
     account_streams: Slot<Cell<Option<u32>>>,
     resolving: Slot<Resolves>,
@@ -152,6 +155,7 @@ impl Runtime {
     /// and touches no other owner: its store opens on first use, after
     /// [`Runtime::start_services`].
     pub fn new(ports: Ports) -> Self {
+        let recordings = recordings::host::acquire(&ports);
         let store = std::sync::Arc::new(store_service::Service::new(ports));
         #[cfg(feature = "test-support")]
         let guide_checks = guide_checks::GuideChecks::mirrored(store.guide_checks.clone());
@@ -159,7 +163,8 @@ impl Runtime {
         let guide_checks = guide_checks::GuideChecks::default();
         Self {
             parental: RefCell::default(),
-            recordings: Default::default(),
+            recordings,
+            recordings_detached: Cell::new(false),
             repairs: RefCell::default(),
             account_streams: Slot::default(),
             resolving: Slot::default(),
@@ -274,8 +279,10 @@ impl Runtime {
         self.inspection.renew();
     }
     pub fn drain_services(&self) -> bool {
-        self.parental_lock();
-        self.recordings.stop();
+            parental: RefCell::default(),
+        if !self.recordings_detached.replace(true) {
+            self.recordings.detach_ui();
+        }
         self.cancel_guide_checks();
         let drained = self
             .store
@@ -349,7 +356,9 @@ impl Runtime {
 
 impl Drop for Runtime {
     fn drop(&mut self) {
-        self.recordings.stop();
+        if !self.recordings_detached.replace(true) {
+            self.recordings.detach_ui();
+        }
         self.store.retire();
         if let Some((_, cancel)) = self.wizard_import.borrow().as_ref() {
             cancel.cancel();

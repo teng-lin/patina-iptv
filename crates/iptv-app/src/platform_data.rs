@@ -124,6 +124,10 @@ fn host_stop_flush(limit: std::time::Duration) -> bool {
 /// Called before opening settings, the database, restore state, or any worker.
 /// The restrictive process mask also covers SQLite WAL/SHM and temporary files.
 pub(crate) fn initialize() -> io::Result<PathBuf> {
+    #[cfg(windows)]
+    if crate::recording_host::activate_existing() {
+        std::process::exit(0);
+    }
     let directory = resolve_data_dir()?;
     #[cfg(unix)]
     // SAFETY: umask has no pointer arguments; making the process mask more

@@ -27,8 +27,30 @@ thread_local! {
 }
 
 /// Keeps the app's window; call while the app renders.
-pub fn bind() {
-    WINDOW.with(|w| *w.borrow_mut() = Some(current_window()));
+pub fn bind(ui: Ui) {
+    let window = current_window();
+    WINDOW.with(|w| *w.borrow_mut() = Some(window.clone()));
+    if !DESKTOP {
+        return;
+    }
+    let mut attributes = nsh_core::desktop::WindowAttributes::default();
+    attributes.close_on_press = Some(false);
+    window.set(attributes);
+    let close_window = window.clone();
+    window.on_close_press(move |reason| {
+        if reason != nsh_core::desktop::CloseReason::System
+            && crate::runtime().recording_background_needed()
+        {
+            crate::player::stop(ui);
+            close_window.hide();
+        } else {
+            crate::runtime().shutdown_recording_host();
+            close_window.close();
+        }
+    });
+    if std::env::args().any(|arg| arg == "--background-recordings") {
+        window.hide();
+    }
 }
 
 /// Runs `f` on the app's window; `None` off desktops.
@@ -152,4 +174,13 @@ const POINTER_EVERY_MS: u64 = 250;
 
 thread_local! {
     static LAST_MOVE: Cell<Option<u64>> = const { Cell::new(None) };
+}
+
+/// Explicit quit preserves future recording intent but stops the native host.
+pub(crate) fn quit() {
+    if crate::runtime().shutdown_recording_host() {
+        with_window(WindowRef::close);
+    } else {
+        crate::settings_view::notify("The recording host is still closing; try quitting again");
+    }
 }

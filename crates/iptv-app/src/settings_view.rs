@@ -242,6 +242,11 @@ pub(crate) fn refresh(ui: Ui) {
 fn run(ui: Ui, key: &'static str) {
     match key {
         "parental.change_pin" => crate::parental_view::change_pin(ui),
+        "recordings.quit_host" => crate::desktop::quit(),
+        "recordings.background_status"
+        | "recordings.enable_startup"
+        | "recordings.disable_startup"
+        | "recordings.alarm_access" => crate::recording_host::command(key),
         "general.backup" => crate::backup::export_ui(),
         "general.restore" => crate::backup::restore_ui(ui),
         "epg.update_now" => {
