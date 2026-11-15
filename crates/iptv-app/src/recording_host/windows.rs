@@ -28,27 +28,37 @@ unsafe extern "system" fn visit(window: Handle, data: isize) -> i32 {
     // SAFETY: EnumWindows invokes synchronously while Search remains live.
     let search = unsafe { &mut *(data as *mut Search) };
     let mut process = 0;
+    // SAFETY: EnumWindows supplied the HWND; process points to a live u32.
     unsafe { GetWindowThreadProcessId(window, &mut process) };
     if process == std::process::id() {
         return 1;
     }
     let mut title = [0u16; 128];
+    // SAFETY: title is writable for the supplied UTF-16 character count. An
+    // HWND destroyed during enumeration simply makes this Win32 call fail.
     let title_len = unsafe { GetWindowTextW(window, title.as_mut_ptr(), title.len() as i32) };
     if title_len <= 0 || String::from_utf16_lossy(&title[..title_len as usize]) != "Patina" {
         return 1;
     }
 
+    // SAFETY: query-only access, no inherited handle, and a numeric process ID.
+    // Failure returns NULL and is handled before using or closing the handle.
     let handle = unsafe { OpenProcess(0x1000, 0, process) };
     if handle.is_null() {
         return 1;
     }
     let mut buffer = [0u16; 32768];
     let mut size = buffer.len() as u32;
+    // SAFETY: handle is owned from OpenProcess; buffer and size remain writable
+    // for the call, and size describes the allocated UTF-16 element count.
     let ok = unsafe { QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr(), &mut size) };
+    // SAFETY: this owned handle is closed exactly once after the final query.
     unsafe { CloseHandle(handle) };
     if ok != 0
         && PathBuf::from(String::from_utf16_lossy(&buffer[..size as usize])) == search.executable
     {
+        // SAFETY: both APIs accept the enumerated opaque HWND, retain no Rust
+        // pointers, and return failure if the window has since disappeared.
         unsafe {
             ShowWindow(window, 9);
             SetForegroundWindow(window)
@@ -66,6 +76,8 @@ pub(crate) fn activate_existing() -> bool {
         executable,
         found: false,
     };
+    // SAFETY: enumeration and callbacks are synchronous. search outlives every
+    // callback, its address fits LPARAM, and visit has the required system ABI.
     unsafe { EnumWindows(visit, &mut search as *mut Search as isize) };
     search.found
 }

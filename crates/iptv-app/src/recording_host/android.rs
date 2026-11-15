@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 static HOST: OnceLock<(JavaVM, GlobalRef)> = OnceLock::new();
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_initialize(
-    mut env: jni::JNIEnv,
+    env: jni::JNIEnv,
     class: JClass,
 ) {
     if let (Ok(vm), Ok(class)) = (env.get_java_vm(), env.new_global_ref(class)) {
