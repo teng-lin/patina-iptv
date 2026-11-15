@@ -265,9 +265,19 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     let before = opens();
     step(app.press_key("enter"));
     step(app.wait_for("text:Loading…"));
+    step(
+        app.wait_until("authorized player load", Duration::from_secs(5), |_| {
+            opens() >= before + 1
+        }),
+    );
     assert_eq!(opens(), before + 1, "one open");
     // No channel played before it: ⏮ does nothing.
     step(app.press_key("p"));
+    step(
+        app.wait_until("authorized player load", Duration::from_secs(5), |_| {
+            opens() >= before + 1
+        }),
+    );
     assert_eq!(opens(), before + 1, "nothing else opened");
     let source = prop(&app, &props, "source");
     assert_eq!(source["url"], "http://stream.example.test/one.m3u8");
@@ -314,6 +324,11 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     assert!(!seen(&app, "text:Reconnecting…"), "quiet at first");
     run(&mut app, Duration::from_millis(1100));
     step(app.wait_for("text:Reconnecting…"));
+    step(
+        app.wait_until("authorized player load", Duration::from_secs(5), |_| {
+            opens() >= before + 2
+        }),
+    );
     assert_eq!(opens(), before + 2, "the retry reopened it");
     assert_eq!(prop(&app, &props, "source")["reconnect"], json!(true));
     state(&mut app, "ready");
@@ -350,6 +365,11 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     let before = opens();
     step(app.press_key("enter"));
     step(app.wait_for_gone("text:/^Can't play/", Duration::from_secs(1)));
+    step(
+        app.wait_until("authorized player load", Duration::from_secs(5), |_| {
+            opens() >= before + 1
+        }),
+    );
     assert_eq!(opens(), before + 1);
     state(&mut app, "ready");
 
@@ -494,6 +514,16 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     let before = opens();
     state(&mut app, "ended");
     run(&mut app, Duration::from_millis(100));
+    step(
+        app.wait_until("authorized reconnect", Duration::from_secs(5), |_| {
+            opens() > before
+        }),
+    );
+    step(
+        app.wait_until("authorized player load", Duration::from_secs(5), |_| {
+            opens() >= before + 1
+        }),
+    );
     assert_eq!(opens(), before + 1, "reconnected");
     state(&mut app, "ready");
     // The guide over the video (`G`) hides the status layer; again: the
@@ -548,6 +578,24 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for("text:/^Show -[5-7][0-9]$/"));
     step(app.press_key("enter"));
     step(app.wait_for("text:CATCH-UP"));
+    step(app.wait_until(
+        "authorized archive source",
+        Duration::from_secs(5),
+        |screen| {
+            let id = screen
+                .layout_nodes()
+                .into_iter()
+                .find(|node| node.kind == ViewKind::Native)
+                .unwrap()
+                .id;
+            props
+                .lock()
+                .unwrap()
+                .get(&id)
+                .and_then(|p| p.get("source"))
+                .is_some_and(|source| source["live"] == json!(false))
+        },
+    ));
     state(&mut app, "ready");
     step(app.press_key("stop"));
     step(app.wait_for("text:☰  All channels"));
@@ -558,6 +606,24 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for("text:Show -2"));
     step(app.press_key("enter"));
     step(app.wait_for("text:CATCH-UP"));
+    step(app.wait_until(
+        "authorized archive source",
+        Duration::from_secs(5),
+        |screen| {
+            let id = screen
+                .layout_nodes()
+                .into_iter()
+                .find(|node| node.kind == ViewKind::Native)
+                .unwrap()
+                .id;
+            props
+                .lock()
+                .unwrap()
+                .get(&id)
+                .and_then(|p| p.get("source"))
+                .is_some_and(|source| source["live"] == json!(false))
+        },
+    ));
     let replay = prop(&app, &props, "source");
     assert_eq!(replay["live"], json!(false));
     state(&mut app, "ready");
@@ -566,6 +632,11 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     let before = opens();
     network_error(&mut app);
     run(&mut app, Duration::from_millis(1100));
+    step(
+        app.wait_until("authorized player load", Duration::from_secs(5), |_| {
+            opens() >= before + 1
+        }),
+    );
     assert_eq!(opens(), before + 1, "reopened");
     let again = prop(&app, &props, "source");
     assert_ne!(again["url"], replay["url"], "a minute on");
@@ -589,11 +660,21 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for("text:/^⇢/"));
     run(&mut app, Duration::from_secs(1));
     step(app.wait_for_gone("text:/^⇢/", Duration::from_secs(1)));
+    step(
+        app.wait_until("authorized player load", Duration::from_secs(5), |_| {
+            opens() >= before + 1
+        }),
+    );
     assert_eq!(opens(), before + 1, "the archive reopened at the seek");
     // Left: five minutes back.
     step(app.press_key("left"));
     step(app.wait_for("text:/^⇢/"));
     run(&mut app, Duration::from_secs(1));
+    step(
+        app.wait_until("authorized player load", Duration::from_secs(5), |_| {
+            opens() >= before + 2
+        }),
+    );
     assert_eq!(opens(), before + 2, "and back");
     // The replay ends: its card says so, and Next (⏭) returns to live.
     state(&mut app, "ready");
@@ -601,7 +682,22 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for("text:The programme has ended"));
     step(app.wait_for("text:Next (⏭) returns to live."));
     step(app.press_key("n"));
-    app.settle();
+    step(
+        app.wait_until("authorized live source", Duration::from_secs(5), |screen| {
+            let id = screen
+                .layout_nodes()
+                .into_iter()
+                .find(|node| node.kind == ViewKind::Native)
+                .unwrap()
+                .id;
+            props
+                .lock()
+                .unwrap()
+                .get(&id)
+                .and_then(|p| p.get("source"))
+                .is_some_and(|source| source["live"] == json!(true))
+        }),
+    );
     assert_eq!(prop(&app, &props, "source")["live"], json!(true));
     assert_eq!(
         prop(&app, &props, "source")["url"],
@@ -691,6 +787,11 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     let before = opens();
     step(app.press("text:Try again"));
     step(app.wait_for_gone("text:Try again", Duration::from_secs(1)));
+    step(
+        app.wait_until("authorized player load", Duration::from_secs(5), |_| {
+            opens() >= before + 1
+        }),
+    );
     assert_eq!(opens(), before + 1, "tried again");
     state(&mut app, "ready");
 
@@ -706,19 +807,52 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.press_key("left"));
     step(app.press_key("enter"));
     step(app.wait_for("text:CATCH-UP"));
+    step(app.wait_until(
+        "authorized archive source",
+        Duration::from_secs(5),
+        |screen| {
+            let id = screen
+                .layout_nodes()
+                .into_iter()
+                .find(|node| node.kind == ViewKind::Native)
+                .unwrap()
+                .id;
+            props
+                .lock()
+                .unwrap()
+                .get(&id)
+                .and_then(|p| p.get("source"))
+                .is_some_and(|source| source["live"] == json!(false))
+        },
+    ));
     state(&mut app, "ready");
     step(app.press("label:Video"));
     step(app.wait_for("label:Fast-forward"));
     let before = opens();
     step(app.press("label:Fast-forward"));
     run(&mut app, Duration::from_secs(1));
+    step(
+        app.wait_until("authorized player load", Duration::from_secs(5), |_| {
+            opens() >= before + 1
+        }),
+    );
     assert_eq!(opens(), before + 1, "reopened 30 s on");
     step(app.press("label:Rewind"));
     run(&mut app, Duration::from_secs(1));
+    step(
+        app.wait_until("authorized player load", Duration::from_secs(5), |_| {
+            opens() >= before + 2
+        }),
+    );
     assert_eq!(opens(), before + 2, "reopened 10 s back");
     let line = touch_area(&app, |w, h| h == 20.0 && w > 100.0);
     step(app.drag(&line, Point::new(px(60.0), px(0.0))));
     app.settle();
+    step(
+        app.wait_until("authorized player load", Duration::from_secs(5), |_| {
+            opens() >= before + 3
+        }),
+    );
     assert_eq!(opens(), before + 3, "reopened where the finger lifted");
     let titles = app.screen().count("text:Show -2").unwrap();
     step(app.press("label:Programme details"));
