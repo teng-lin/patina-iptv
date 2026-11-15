@@ -35,6 +35,7 @@ struct Host {
     frame: gtk::Box,
     /// None is the existing single-player PiP window.
     surface: Option<usize>,
+    compact: bool,
     area: Option<(u64, gtk::GLArea)>,
 }
 
@@ -59,19 +60,21 @@ impl PipView {
         frame.set_vexpand(true);
         frame.set_can_target(false);
         frame.set_focusable(false);
-        frame.connect_map(|frame| {
-            let frame = frame.clone();
-            glib::idle_add_local_once(move || {
-                if let Some(window) = frame.root().and_downcast::<gtk::Window>() {
-                    super::x11::keep_above(&window);
-                }
-            });
-        });
         let host = Rc::new(RefCell::new(Host {
             frame,
             surface: None,
+            compact: false,
             area: None,
         }));
+        let weak = Rc::downgrade(&host);
+        host.borrow().frame.connect_map(move |_| {
+            let weak = weak.clone();
+            glib::idle_add_local_once(move || {
+                if let Some(host) = weak.upgrade() {
+                    window_hints(&host.borrow());
+                }
+            });
+        });
         HOSTS.with(|h| h.borrow_mut().push(Rc::downgrade(&host)));
         sync();
         PipView(host)
@@ -96,7 +99,19 @@ impl NativeComponent for PipView {
         if name == "surface" {
             self.0.borrow_mut().surface = value.and_then(Value::as_u64).map(|s| s as usize);
             sync();
+        } else if name == "compact" {
+            self.0.borrow_mut().compact = value.and_then(Value::as_bool).unwrap_or(false);
+        } else {
+            return;
         }
+        window_hints(&self.0.borrow());
+    }
+}
+
+fn window_hints(host: &Host) {
+    if let Some(window) = host.frame.root().and_downcast::<gtk::Window>() {
+        super::x11::set_keep_above(&window, host.surface.is_none() || host.compact);
+        super::gtk_placement::arrange();
     }
 }
 

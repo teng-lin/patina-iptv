@@ -106,13 +106,25 @@ fn closed(ui: Ui, cause: WindowCloseCause) {
 }
 
 fn content(ui: Ui) -> impl IntoElement {
+    view()
+        .test_id("primary-pip")
+        .flex_1()
+        .bg(rgb(0x000000))
+        .child(native(VIEW).absolute().inset_0())
+        .child(chrome(ui))
+}
+
+/// Shared compact controls, without a native video view. Auxiliary players
+/// keep their existing host mounted while this chrome comes and goes.
+pub(super) fn chrome(ui: Ui) -> impl IntoElement {
     let hover = signal(Hover::default());
     let shown = signal(false);
     let drags = signal(true);
     let last = Cell::new(None::<(f32, f32)>);
     view()
-        .flex_1()
-        .bg(rgb(0x000000))
+        .absolute()
+        .inset_0()
+        .on_mouse_enter(move |_: &MouseEvent| pointer_moved(ui, hover, shown))
         .on_mouse_move(move |e: &MouseEvent| {
             let at = (e.page_position.x.0, e.page_position.y.0);
             // A redraw under a resting pointer reports it again.
@@ -127,7 +139,6 @@ fn content(ui: Ui) -> impl IntoElement {
             hover.update(Hover::left);
             shown.set(false);
         })
-        .child(native(VIEW).absolute().inset_0())
         .child(
             view()
                 .test_id("pip-video")

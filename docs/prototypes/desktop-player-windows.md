@@ -13,8 +13,17 @@ The same auxiliary channel does not open twice. Up to three auxiliary sessions
 are available, subject to known account limits; multiview and auxiliary windows
 are mutually exclusive in this prototype. Changing playlist closes the windows.
 Recording controls are disabled in auxiliary windows pending DVR integration.
-The primary player's compact PiP remains supported; auxiliary windows do not
-yet have their own compact/always-on-top PiP toggle.
+Each auxiliary player's Picture in picture button turns its existing window
+into compact PiP. Multiple players can be compact at once, alongside the primary
+player's existing PiP. Hover to pause/resume, return, or close just that player.
+Back, Escape and a double-click restore the auxiliary window's previous bounds
+and fullscreen/maximized mode. Close stops only that session. The video host,
+decoder and stream stay the same throughout these presentation changes.
+
+macOS uses native floating levels; X11 requests above/sticky window-manager
+hints and removes them on return. Wayland floating, positioning and always-on-top
+behavior remain compositor policy, as with the primary PiP. The window uses the
+standard Picture-in-Picture title so existing compositor rules can recognize it.
 
 ## Reproduce on Linux or macOS
 
@@ -28,6 +37,8 @@ with `bash tools/make-hls-fixtures.sh` if needed. Then run:
 python3 tools/preview-guide-windows.py --walkthrough
 ```
 
+Add `--pip` to have both walkthrough players enter compact mode automatically.
+
 This launches the actual App with an isolated temporary profile and a local
 synthetic HLS server on port 18091. The timed walkthrough invokes the same menu
 action to open two channels; omit `--walkthrough` to use the guide manually.
@@ -39,8 +50,11 @@ selected runtime environment; it never launches an installed Patina profile.
 Mac auxiliary windows open with separated title bars on the main window's
 display, constrained by its usable area. This uses NSH's supported initial
 position API, with its native cascade as fallback. Later controls, resizes and
-fullscreen transitions do not reset a user's placement. There is no
-compositor-specific placement adapter for Linux.
+fullscreen transitions do not reset a user's placement. On Hyprland, an optional
+IPC adapter gives newly floating PiPs distinct initial slots within the display
+work area, preserving already arranged windows. It targets only this process
+and never edits compositor rules. Other Wayland compositors retain their own
+placement policy.
 
 ## Mac video and lifecycle
 
@@ -82,7 +96,11 @@ personal profile or provider information.
 3. Run the native synthetic demo above. Confirm that the channel and live
    programme context menus offer **Watch in new window**, and that the main
    preview continues while auxiliary windows show their own test patterns.
-4. Test main A plus separate B and C in one process;
+4. Run `--walkthrough --pip`, then verify compact mode in both auxiliary
+   players: hover controls, independent pause/close, dragging, Back/Escape/double
+   click restoring each player's bounds and fullscreen mode, and simultaneous
+   primary PiP. No extra streams should open when changing presentation.
+5. Test main A plus separate B and C in one process;
    visible video in both, movable/resizable windows, correct channel identity,
    local pause/tracks/volume/full screen, closing B leaving A/C playing, reopening
    without duplicate sessions, changing channels and playlists, main minimize,

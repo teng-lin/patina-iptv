@@ -10,6 +10,8 @@ pub struct Session<C> {
     pub surface: usize,
     pub channel: C,
     pub separate: bool,
+    /// Compact PiP presentation in this session's existing player window.
+    pub compact: bool,
     pub paused: bool,
     pub volume: crate::sound::Volume,
     pub audio_delay: i32,
@@ -69,6 +71,7 @@ impl<C: Clone + PartialEq> Workspace<C> {
             surface,
             channel,
             separate: true,
+            compact: false,
             paused: false,
             volume: crate::sound::Volume {
                 muted: first_surface > 0,
@@ -90,6 +93,11 @@ impl<C: Clone + PartialEq> Workspace<C> {
     pub fn toggle_pause(&mut self, id: SessionId) {
         if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
             s.paused = !s.paused;
+        }
+    }
+    pub fn set_compact(&mut self, id: SessionId, compact: bool) {
+        if let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) {
+            session.compact = compact;
         }
     }
     pub fn listen(&mut self, id: SessionId) {
@@ -142,6 +150,23 @@ impl<C: Clone + PartialEq> Workspace<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn compact_presentation_is_per_session_and_stale_actions_cannot_target_a_reused_surface() {
+        let mut w = Workspace::default();
+        let first = w.open_auxiliary("one").unwrap();
+        let second = w.open_auxiliary("two").unwrap();
+        w.set_compact(first, true);
+        assert!(w.on_surface(1).unwrap().compact);
+        assert!(!w.on_surface(2).unwrap().compact);
+        w.set_compact(second, true);
+        w.set_compact(first, false);
+        assert!(w.on_surface(2).unwrap().compact);
+        w.close(first);
+        let replacement = w.open_auxiliary("three").unwrap();
+        w.set_compact(first, true);
+        assert_eq!(w.on_surface(1).unwrap().id, replacement);
+        assert!(!w.on_surface(1).unwrap().compact);
+    }
     #[test]
     fn main_audio_selection_mutes_auxiliaries_without_closing_them() {
         let mut w = Workspace::default();

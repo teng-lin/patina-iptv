@@ -11,6 +11,8 @@ is below 1.0, a minor release may change behaviour.
 
 - Linux and macOS prototype: open a live guide channel in an independent player window
   with the original player controls, while main playback continues.
+- Independent player windows can switch to compact picture-in-picture and back
+  without opening another stream, with their own pause, return and close controls.
 
 ### Fixed
 

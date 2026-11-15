@@ -137,13 +137,16 @@ fn player_window(ui: Ui, surface: usize) -> impl IntoElement {
         .with_untracked(|w| w.on_surface(surface).cloned())
         .unwrap();
     let id = session.id;
-    let mut attributes = nsh_core::desktop::WindowAttributes::default();
-    attributes.frame = Some(nsh_core::desktop::WindowFrameStyle::Default);
-    attributes.close_on_escape = Some(true);
-    attributes.min_size = Some(Some(nsh_core::Size::new(px(640.0), px(360.0))));
+    let compact = move || {
+        ui.player_windows
+            .with(|w| w.on_surface(surface).is_some_and(|s| s.compact))
+    };
     let window = nsh_core::element::desktop::window()
         .id(format!("player-window-{}", id.0))
         .title(move || {
+            if compact() {
+                return iptv_core::pip_window::TITLE.to_owned();
+            }
             ui.guide_data();
             ui.player
                 .stream(surface)
@@ -153,7 +156,7 @@ fn player_window(ui: Ui, surface: usize) -> impl IntoElement {
                 .unwrap_or_default()
         })
         .default_size(nsh_core::Size::new(px(960.0), px(540.0)))
-        .attributes(attributes)
+        .attributes(move || window_attributes(compact()))
         .on_open_change(move |_| close(ui, id))
         .content(move || player_content(ui, surface, id));
     // A starting position only: resizing/fullscreen/control updates never
@@ -164,6 +167,79 @@ fn player_window(ui: Ui, surface: usize) -> impl IntoElement {
         None => window, // NSH's native cascade remains the fallback.
     };
     window
+}
+
+fn window_attributes(compact: bool) -> nsh_core::desktop::WindowAttributes {
+    use nsh_core::desktop::{WindowAttributes, WindowFrameStyle, WindowLevel, Workspaces};
+    let mut attributes = WindowAttributes::default();
+    attributes.frame = Some(if compact {
+        WindowFrameStyle::None
+    } else {
+        WindowFrameStyle::Default
+    });
+    attributes.level = Some(if compact {
+        WindowLevel::Floating
+    } else {
+        WindowLevel::Normal
+    });
+    attributes.workspaces = Some(if compact {
+        Workspaces::All
+    } else {
+        Workspaces::Current
+    });
+    attributes.taskbar = Some(!compact);
+    attributes.minimizable = Some(!compact);
+    attributes.maximizable = Some(!compact);
+    // A window-local key binding restores compact mode on Escape.
+    attributes.close_on_escape = Some(false);
+    let (w, h) = if compact {
+        (240.0, 135.0)
+    } else {
+        (640.0, 360.0)
+    };
+    attributes.min_size = Some(Some(nsh_core::Size::new(px(w), px(h))));
+    attributes
+}
+
+fn bind_pip(parent: Ui, local: Ui, id: SessionId, window: nsh_core::element::desktop::WindowRef) {
+    use nsh_core::desktop::{WindowFrame, WindowMode};
+    let saved = std::cell::Cell::new(None);
+    let was_compact = std::cell::Cell::new(false);
+    let key_window = window.clone();
+    on_key("escape", move |_| {
+        if !crate::pip::exit(local, iptv_core::pip_window::Exit::BackToApp) {
+            key_window.close();
+        }
+    });
+    effect(move || {
+        let compact = crate::pip::in_window(local);
+        if was_compact.replace(compact) == compact {
+            return;
+        }
+        untracked(|| {
+            parent.player_windows.update(|w| w.set_compact(id, compact));
+            if local.mode.get() != crate::ViewMode::Fullscreen {
+                return; // The compact Close action is disposing this session.
+            }
+            window.set(window_attributes(compact));
+            if compact {
+                saved.set(window.state().map(|s| s.placement));
+                let (w, h) = iptv_core::pip_window::size_for(local.player.main().size.get());
+                window.set_mode(WindowMode::Normal);
+                window.set_bounds(WindowFrame {
+                    width: Some(px(w)),
+                    height: Some(px(h)),
+                    ..Default::default()
+                });
+            } else {
+                if let Some(placement) = saved.take() {
+                    window.set_placement(placement);
+                }
+                crate::play_bar::pointer_moved(local);
+            }
+            window.focus();
+        });
+    });
 }
 
 #[cfg(target_os = "macos")]
@@ -269,6 +345,8 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
         }
     });
     let window = nsh_core::element::desktop::current_window();
+    crate::pip::bind(local);
+    bind_pip(parent, local, id, window.clone());
     let back_window = window.clone();
     effect(move || {
         if local.mode.get() != crate::ViewMode::Fullscreen {
@@ -284,6 +362,11 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
         let _reveal = set_timeout(std::time::Duration::from_secs(9), move || {
             crate::play_bar::pointer_moved(local)
         });
+        if std::env::var_os("PATINA_GUIDE_PIP_WALKTHROUGH").is_some() {
+            let _compact = set_timeout(std::time::Duration::from_secs(2), move || {
+                crate::pip::enter(local);
+            });
+        }
     }
 
     // Keep the controls visible for the first moments of a newly opened player.
@@ -294,40 +377,60 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
         .flex_1()
         .test_id(&format!("auxiliary-player-{}", id.0))
         .bg(rgb(0x000000))
-        .on_mouse_move(move |event: &MouseEvent| crate::pointer_moved(local, event))
+        .on_mouse_move(move |event: &MouseEvent| {
+            if !crate::pip::in_window(local) {
+                crate::pointer_moved(local, event);
+            }
+        })
         .child(
             native(iptv_player_mpv::PIP_VIEW)
                 .prop("surface", move || serde_json::json!(surface))
+                .prop("compact", move || {
+                    serde_json::json!(crate::pip::in_window(local))
+                })
                 .absolute()
                 .inset_0(),
         )
-        .child(
-            view()
-                .absolute()
-                .inset_0()
-                .label(move || tr("Video"))
-                .on_press(move |event: &PressEvent| {
-                    local.touched();
-                    crate::toggle_panels(local);
-                    if event.clicks == 2 {
-                        let full = window
-                            .state()
-                            .is_some_and(|s| s.mode == nsh_core::desktop::WindowMode::FullScreen);
-                        window.set_mode(if full {
-                            nsh_core::desktop::WindowMode::Normal
-                        } else {
-                            nsh_core::desktop::WindowMode::FullScreen
-                        });
-                    }
-                }),
-        )
-        .child(crate::player_panels::status(local))
-        .child(crate::player_panels::layer(local))
-        .child(crate::channels_view::layer(local))
-        .child(crate::search_view::layer(local))
-        .child(crate::menu_view::layer(local))
-        .child(crate::chooser::layer(local))
-        .child(crate::play_bar::layer(local))
+        .child(when(
+            move || crate::pip::in_window(local),
+            move || super::pip_window::chrome(local),
+        ))
+        .child(when(
+            move || !crate::pip::in_window(local),
+            move || {
+                let window = window.clone();
+                view()
+                    .absolute()
+                    .inset_0()
+                    .child(
+                        view()
+                            .absolute()
+                            .inset_0()
+                            .label(move || tr("Video"))
+                            .on_press(move |event: &PressEvent| {
+                                local.touched();
+                                crate::toggle_panels(local);
+                                if event.clicks == 2 {
+                                    let full = window.state().is_some_and(|s| {
+                                        s.mode == nsh_core::desktop::WindowMode::FullScreen
+                                    });
+                                    window.set_mode(if full {
+                                        nsh_core::desktop::WindowMode::Normal
+                                    } else {
+                                        nsh_core::desktop::WindowMode::FullScreen
+                                    });
+                                }
+                            }),
+                    )
+                    .child(crate::player_panels::status(local))
+                    .child(crate::player_panels::layer(local))
+                    .child(crate::channels_view::layer(local))
+                    .child(crate::search_view::layer(local))
+                    .child(crate::menu_view::layer(local))
+                    .child(crate::chooser::layer(local))
+                    .child(crate::play_bar::layer(local))
+            },
+        ))
 }
 
 #[cfg(test)]

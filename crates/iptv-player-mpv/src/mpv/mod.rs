@@ -71,6 +71,8 @@ mod gtk;
 #[cfg(all(target_os = "linux", not(test)))]
 mod gtk_pip;
 #[cfg(all(target_os = "linux", not(test)))]
+mod gtk_placement;
+#[cfg(all(target_os = "linux", not(test)))]
 mod x11;
 #[cfg(all(target_os = "linux", not(test)))]
 use gtk as platform;

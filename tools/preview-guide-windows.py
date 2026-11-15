@@ -31,7 +31,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--no-build', action='store_true')
     parser.add_argument('--walkthrough', action='store_true')
+    parser.add_argument('--pip', action='store_true', help='Use compact PiP for each walkthrough player')
     args = parser.parse_args()
+    if args.pip and not args.walkthrough:
+        parser.error('--pip requires --walkthrough')
     if sys.platform not in ('linux', 'darwin'):
         raise SystemExit('This prototype runs on Linux and macOS.')
     platform = 'macos' if sys.platform == 'darwin' else 'linux'
@@ -77,6 +80,8 @@ def main():
             keys = json.loads((Path(home) / 'demo-channel-keys.json').read_text())
             env['PATINA_GUIDE_SECOND_KEY'] = keys[1]
             env['PATINA_GUIDE_THIRD_KEY'] = keys[2]
+        if args.pip:
+            env['PATINA_GUIDE_PIP_WALKTHROUGH'] = '1'
         process = subprocess.Popen([str(binary)],cwd=ROOT,env=env)
         print(f'Synthetic actual-App demo running (PID {process.pid}).',flush=True)
         try:
