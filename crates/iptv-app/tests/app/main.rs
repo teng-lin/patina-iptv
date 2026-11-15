@@ -45,6 +45,7 @@ mod guide_check_recovery;
 mod guide_look;
 mod guide_nav;
 mod guide_pages;
+mod guide_player_windows;
 mod guide_scroll_cost;
 mod interface_languages;
 mod library_cached_epg;

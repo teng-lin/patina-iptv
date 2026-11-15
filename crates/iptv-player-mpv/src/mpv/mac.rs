@@ -362,6 +362,12 @@ impl Video {
 /// The component NSH holds.
 struct Player(std::rc::Rc<Inner>);
 
+impl Drop for Player {
+    fn drop(&mut self) {
+        super::mac_pip::forget_player(self.0.id);
+    }
+}
+
 impl Player {
     fn new(ctx: ComponentContext) -> Self {
         let mtm = MainThreadMarker::new().expect("NSH makes components on the main thread");
@@ -387,6 +393,13 @@ impl NativeComponent for Player {
     }
 
     fn set_prop(&mut self, name: &str, value: Option<&Value>) {
-        self.0.set_prop(name, value);
+        if name == "popupSurface" {
+            let surface = value
+                .and_then(Value::as_u64)
+                .and_then(|surface| usize::try_from(surface).ok());
+            super::mac_pip::bind_surface(self.0.id, surface);
+        } else {
+            self.0.set_prop(name, value);
+        }
     }
 }

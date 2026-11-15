@@ -2,7 +2,7 @@
 //! asked for cancels that request: the portal sees its connection close.
 //! Only generated catalogues and a local mock portal are used.
 use std::{
-    io::{Read, Write},
+    io::{ErrorKind, Read, Write},
     net::{TcpListener, TcpStream},
     sync::{Arc, Condvar, Mutex},
     time::Duration,
@@ -38,6 +38,7 @@ struct Slow {
     /// The app closed the connection before an answer.
     abandoned: bool,
     quick_asked: bool,
+    quick_calls: usize,
 }
 
 fn serve() -> (String, Arc<(Mutex<Slow>, Condvar)>) {
@@ -81,13 +82,20 @@ fn answer(mut stream: TcpStream, state: &(Mutex<Slow>, Condvar)) {
             state.0.lock().unwrap().asked = true;
             state.1.notify_all();
             // No answer: wait until the app hangs up (or the test ends).
-            let closed = matches!(stream.read(&mut buffer), Ok(0) | Err(_));
+            // Several individually scaled waits can follow this request.
+            // A mock-server deadline is not evidence of app cancellation.
+            let budget = crate::isolated::scaled_duration(WAIT.saturating_mul(8));
+            let closed = wait_for_cancel(&mut stream, budget);
             state.0.lock().unwrap().abandoned = closed;
             state.1.notify_all();
             return;
         }
         "create_link" => {
-            state.0.lock().unwrap().quick_asked = true;
+            {
+                let mut seen = state.0.lock().unwrap();
+                seen.quick_asked = true;
+                seen.quick_calls += 1;
+            }
             state.1.notify_all();
             r#"{"js":{"cmd":"ffmpeg http://stream.example.test/quick-resolved.m3u8"}}"#.to_owned()
         }
@@ -100,9 +108,36 @@ fn answer(mut stream: TcpStream, state: &(Mutex<Slow>, Condvar)) {
     );
 }
 
+fn wait_for_cancel(stream: &mut TcpStream, budget: Duration) -> bool {
+    stream.set_read_timeout(Some(budget)).unwrap();
+    loop {
+        match stream.read(&mut [0; 256]) {
+            Ok(0) => return true,
+            Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+            Err(error) => {
+                return matches!(
+                    error.kind(),
+                    ErrorKind::ConnectionReset
+                        | ErrorKind::ConnectionAborted
+                        | ErrorKind::BrokenPipe
+                );
+            }
+            Ok(_) => {}
+        }
+    }
+}
+
 #[test]
-fn zapping_away_cancels_a_pending_stalker_link_request() {
-    let Some(home) = isolated!() else { return };
+fn a_mock_read_timeout_does_not_mean_the_application_cancelled() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut server, _) = listener.accept().unwrap();
+    assert!(!wait_for_cancel(&mut server, Duration::from_millis(30)));
+    drop(client);
+    assert!(wait_for_cancel(&mut server, Duration::from_secs(1)));
+}
+
+fn start_portal(home: &crate::isolated::Home) -> (Headless, Arc<(Mutex<Slow>, Condvar)>) {
     let data = home.data_dir();
     std::fs::create_dir_all(&data).unwrap();
     let mut settings = Settings::new();
@@ -141,11 +176,18 @@ fn zapping_away_cancels_a_pending_stalker_link_request() {
     drop(store);
     std::fs::write(data.join(format!("last_channel-{}", source.0)), slow).unwrap();
 
-    let mut app = Headless::start(EngineConfig {
+    let app = Headless::start(EngineConfig {
         viewport: Size::new(px(1920.0), px(1080.0)),
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     })
     .unwrap();
+    (app, state)
+}
+
+#[test]
+fn zapping_away_cancels_a_pending_stalker_link_request() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, state) = start_portal(&home);
     let asked = |what: fn(&Slow) -> bool| {
         let state = state.clone();
         move || what(&state.0.lock().unwrap())
@@ -174,4 +216,73 @@ fn zapping_away_cancels_a_pending_stalker_link_request() {
         asked(|s| s.quick_asked),
     )
     .unwrap();
+}
+
+#[test]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn retrying_an_auxiliary_player_keeps_the_main_stalker_request_alive() {
+    use nsh_core::{EventKind, EventPayload, MountItem};
+    use serde_json::json;
+    let Some(home) = isolated!() else { return };
+    let (mut app, state) = start_portal(&home);
+    crate::isolated::wait_outside(&mut app, "pending main link", WAIT, || {
+        state.0.lock().unwrap().asked
+    })
+    .unwrap();
+    app.set_environment("a desktop", |e| {
+        e.idiom = nsh_core::platform::Idiom::Desktop;
+        e.os = if cfg!(target_os = "macos") {
+            nsh_core::platform::Os::MacOs
+        } else {
+            nsh_core::platform::Os::Linux
+        };
+    })
+    .unwrap();
+    app.hover("label:Video").unwrap();
+    app.press("label:TV guide").unwrap();
+    let auxiliary = Arc::new(Mutex::new(None));
+    let seen = auxiliary.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::ComponentProps { id, props } = item
+                && props
+                    .iter()
+                    .any(|(key, value)| key.as_ref() == "popupSurface" && *value == Some(json!(1)))
+            {
+                *seen.lock().unwrap() = Some(*id);
+            }
+        }
+    });
+    app.right_click("id:guide-ui >> label:Quick portal channel")
+        .unwrap();
+    app.press("text:Watch in new window").unwrap();
+    crate::isolated::wait_outside(&mut app, "auxiliary link", WAIT, || {
+        state.0.lock().unwrap().quick_calls == 1
+    })
+    .unwrap();
+    app.wait_until("auxiliary source resolved", WAIT, |_| {
+        iptv_app::player_has_source(1)
+    })
+    .unwrap();
+    app.engine().control().dispatch_event(
+        auxiliary.lock().unwrap().unwrap(),
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "error".into(),
+            data: json!({"code": "ERROR_CODE_DECODING_FAILED"}),
+        },
+    );
+    app.wait_for("id:auxiliary-player-1 >> text:Try again")
+        .unwrap();
+    app.press("id:auxiliary-player-1 >> text:Try again")
+        .unwrap();
+    crate::isolated::wait_outside(&mut app, "auxiliary link retried", WAIT, || {
+        state.0.lock().unwrap().quick_calls >= 2
+    })
+    .unwrap();
+    app.idle(Duration::from_millis(150)).unwrap();
+    assert!(
+        !state.0.lock().unwrap().abandoned,
+        "retrying B must not cancel A's runtime slot"
+    );
 }

@@ -17,7 +17,8 @@
 //! do it.
 
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::collections::HashMap;
+use std::rc::{Rc, Weak};
 
 use nsh_platform_linux::gtk4::{self as gtk, glib, prelude::*};
 use nsh_platform_linux::{Components, NativeComponent};
@@ -26,16 +27,23 @@ use serde_json::Value;
 use super::find;
 
 thread_local! {
-    /// The window's view (one window), and the area it holds for a player.
-    static HOST: RefCell<Option<Host>> = const { RefCell::new(None) };
+    static HOSTS: RefCell<Vec<Weak<RefCell<Host>>>> = const { RefCell::new(Vec::new()) };
+    static SURFACES: RefCell<HashMap<usize, u64>> = RefCell::new(HashMap::new());
 }
 
 struct Host {
     frame: gtk::Box,
+    /// None is the existing single-player PiP window.
+    surface: Option<usize>,
+    compact: bool,
     area: Option<(u64, gtk::GLArea)>,
 }
 
-/// Registers `tv.pip`.
+pub(super) fn register_surface(surface: usize, id: u64) {
+    SURFACES.with(|s| s.borrow_mut().insert(surface, id));
+    sync();
+}
+
 pub(super) fn register(components: &Components) {
     components.register(
         super::pip::VIEW,
@@ -43,92 +51,132 @@ pub(super) fn register(components: &Components) {
     );
 }
 
-/// The component NSH holds.
-struct PipView(gtk::Box);
+struct PipView(Rc<RefCell<Host>>);
 
 impl PipView {
     fn new() -> PipView {
         let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
         frame.set_hexpand(true);
         frame.set_vexpand(true);
-        // Presses go to the view (its drag region and controls).
         frame.set_can_target(false);
         frame.set_focusable(false);
-        frame.connect_map(|frame| {
-            let frame = frame.clone();
-            // Once the window's surface is up.
+        let host = Rc::new(RefCell::new(Host {
+            frame,
+            surface: None,
+            compact: false,
+            area: None,
+        }));
+        let weak = Rc::downgrade(&host);
+        host.borrow().frame.connect_map(move |_| {
+            let weak = weak.clone();
             glib::idle_add_local_once(move || {
-                if let Some(window) = frame.root().and_downcast::<gtk::Window>() {
-                    super::x11::keep_above(&window);
+                if let Some(host) = weak.upgrade() {
+                    window_hints(&host.borrow());
                 }
             });
         });
-        HOST.with(|h| {
-            *h.borrow_mut() = Some(Host {
-                frame: frame.clone(),
-                area: None,
-            })
-        });
+        HOSTS.with(|h| h.borrow_mut().push(Rc::downgrade(&host)));
         sync();
-        PipView(frame)
+        PipView(host)
     }
 }
 
 impl Drop for PipView {
     fn drop(&mut self) {
-        let host = HOST.with(|h| h.borrow_mut().take());
-        if let Some(Host {
-            frame,
-            area: Some((_, area)),
-        }) = host
-        {
-            frame.remove(&area);
+        let mut host = self.0.borrow_mut();
+        if let Some((_, area)) = host.area.take() {
+            host.frame.remove(&area);
         }
     }
 }
 
 impl NativeComponent for PipView {
     fn widget(&self) -> gtk::Widget {
-        self.0.clone().upcast()
+        self.0.borrow().frame.clone().upcast()
     }
 
-    fn set_prop(&mut self, _name: &str, _value: Option<&Value>) {}
-}
-
-/// Gives the window's view an area for the wanted player, or takes it
-/// away.
-pub(super) fn sync() {
-    HOST.with(|h| {
-        let mut h = h.borrow_mut();
-        let Some(host) = h.as_mut() else { return };
-        let wanted = super::pip::wanted().filter(|id| find(*id).is_some());
-        if host.area.as_ref().map(|(id, _)| *id) == wanted {
+    fn set_prop(&mut self, name: &str, value: Option<&Value>) {
+        if name == "surface" {
+            self.0.borrow_mut().surface = value.and_then(Value::as_u64).map(|s| s as usize);
+            sync();
+        } else if name == "compact" {
+            self.0.borrow_mut().compact = value.and_then(Value::as_bool).unwrap_or(false);
+        } else {
             return;
         }
-        if let Some((_, area)) = host.area.take() {
-            host.frame.remove(&area);
-        }
-        if let Some(id) = wanted {
-            let area = area_for(id);
-            host.frame.append(&area);
-            host.area = Some((id, area));
-            log::info!("iptv mpv {id}: drawing in the picture-in-picture window");
+        window_hints(&self.0.borrow());
+    }
+}
+
+fn window_hints(host: &Host) {
+    if let Some(window) = host.frame.root().and_downcast::<gtk::Window>() {
+        super::x11::set_keep_above(&window, host.surface.is_none() || host.compact);
+        super::gtk_placement::arrange();
+    }
+}
+
+/// Each host draws only its assigned player's existing render context.
+pub(super) fn sync() {
+    HOSTS.with(|hosts| {
+        hosts.borrow_mut().retain(|host| host.strong_count() > 0);
+        for host in hosts.borrow().iter().filter_map(Weak::upgrade) {
+            let mut host = host.borrow_mut();
+            let wanted = match host.surface {
+                Some(surface) => SURFACES.with(|s| s.borrow().get(&surface).copied()),
+                None => super::pip::wanted(),
+            }
+            .filter(|id| find(*id).is_some_and(|p| p.video.context().is_some()));
+            if host.area.as_ref().map(|(id, _)| *id) == wanted {
+                continue;
+            }
+            if let Some((_, area)) = host.area.take() {
+                host.frame.remove(&area);
+            }
+            if let Some(id) = wanted {
+                let area = area_for(id);
+                host.frame.append(&area);
+                host.area = Some((id, area));
+                log::info!("iptv mpv {id}: drawing in a picture-in-picture window");
+            }
         }
     });
 }
 
-/// Player `id` has a new frame: the window's area draws it too.
 pub(super) fn redraw(id: u64) {
-    HOST.with(|h| {
-        if let Some(Host {
-            area: Some((shown, area)),
-            ..
-        }) = h.borrow().as_ref()
-            && *shown == id
-        {
-            area.queue_render();
+    HOSTS.with(|hosts| {
+        for host in hosts.borrow().iter().filter_map(Weak::upgrade) {
+            if let Some((shown, area)) = &host.borrow().area
+                && *shown == id
+            {
+                area.queue_render();
+            }
         }
     });
+}
+
+/// A player has retired/recreated its GL context. The next sync must
+/// construct fresh areas, even though the player's identity is unchanged.
+pub(super) fn forget_areas(id: u64) {
+    let retired: Vec<_> = HOSTS.with(|hosts| {
+        hosts
+            .borrow()
+            .iter()
+            .filter_map(Weak::upgrade)
+            .filter_map(|host| {
+                let mut host = host.borrow_mut();
+                if host.area.as_ref().is_some_and(|(shown, _)| *shown == id) {
+                    let (_, area) = host.area.take()?;
+                    Some((host.frame.clone(), area))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    });
+    // GTK callbacks run without holding registry or host borrows.
+    for (frame, area) in retired {
+        frame.remove(&area);
+    }
 }
 
 /// An area drawing player `id`'s frames with its area's GL context.

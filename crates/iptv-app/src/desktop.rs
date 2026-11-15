@@ -15,6 +15,7 @@ use nsh_core::element::desktop::{MenuItem, WindowRef, current_window, set_applic
 use crate::Ui;
 
 pub mod pip_window;
+pub mod player_windows;
 /// The desktop backends, where the app owns the window and the sound:
 /// Linux, macOS and Windows.
 pub const DESKTOP: bool = cfg!(any(target_os = "linux", target_os = "macos", windows));

@@ -83,3 +83,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [build-dependencies]
 embed-resource = "3.0"
+
+[[example]]
+name = "guide_window_preview"
+path = "examples/guide_window_preview.rs"
+required-features = ["test-support"]

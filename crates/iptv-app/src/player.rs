@@ -201,6 +201,7 @@ pub fn start(ui: &Ui, channel: usize) {
                 save_last_channel(ui.library.shown.get_untracked(), &key);
             }
             crate::favorites::played(&key);
+            ui.list_version.update(|v| *v += 1);
         }
     }
     open(ui, 0, session);
@@ -208,10 +209,11 @@ pub fn start(ui: &Ui, channel: usize) {
 
 /// Surface `surface` (not 0) plays `channel` live, with a fresh health
 /// session; the channel history is the full-screen player's only.
-pub fn start_surface(ui: Ui, surface: usize, channel: usize) {
+/// Returns false when the provider connection cannot be reserved.
+pub fn start_surface(ui: Ui, surface: usize, channel: usize) -> bool {
     if surface == 0 {
         ui.play(channel, Playback::Live);
-        return;
+        return ui.playing.get_untracked() == Some(channel);
     }
     if !crate::recordings_view::reserve_viewing(ui, surface, channel) {
         let previous = ui.player.stream(surface).channel.get_untracked();
@@ -230,7 +232,7 @@ pub fn start_surface(ui: Ui, surface: usize, channel: usize) {
                 });
             }
         });
-        return;
+        return false;
     }
     let stream = ui.player.stream(surface);
     let now = ui.now_ms();
@@ -240,6 +242,7 @@ pub fn start_surface(ui: Ui, surface: usize, channel: usize) {
     stream.key.set(crate::schedule().channel_key(channel));
     log::info!("iptv player {surface}: starting");
     open(ui, surface, session);
+    true
 }
 
 /// Nothing plays: the player closes.
@@ -545,6 +548,7 @@ fn save_last_channel(source: Option<crate::runtime::model::SourceId>, key: &str)
 /// channel history belong to the old one (channel keys are unique only
 /// within a playlist, so the new one may reuse the playing key).
 pub fn source_changed(ui: Ui) {
+    crate::desktop::player_windows::close_all(ui);
     crate::multiview::close(ui);
     if ui.playing.get_untracked().is_some() {
         log::info!("iptv player: another playlist is shown; stopping");

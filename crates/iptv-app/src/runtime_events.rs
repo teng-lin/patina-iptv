@@ -23,8 +23,12 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::FavoritesChanged { channels, has_vod } => {
             ui.favorites.set(channels);
             ui.has_vod.set(has_vod);
+            ui.list_version.update(|version| *version += 1);
         }
-        RuntimeEvent::FavoriteOrderChanged => crate::lists::favorites_changed(ui),
+        RuntimeEvent::FavoriteOrderChanged => {
+            crate::lists::favorites_changed(ui);
+            ui.list_version.update(|version| *version += 1);
+        }
         RuntimeEvent::RefreshProgress(source, activity) => {
             ui.library.activity.update(|activities| {
                 if let Some(activity) = activity {

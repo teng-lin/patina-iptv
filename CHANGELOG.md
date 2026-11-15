@@ -7,6 +7,23 @@ is below 1.0, a minor release may change behaviour.
 
 ## [Unreleased]
 
+### Added
+
+- Linux and macOS prototype: open a live guide channel in an independent player window
+  with the original player controls, while main playback continues.
+- Independent player windows can switch to compact picture-in-picture and back
+  without opening another stream, with their own pause, return and close controls.
+
+### Fixed
+
+- Auxiliary player windows keep channel browsing and programme clocks independent,
+  target manual retries correctly, release refused sessions, and let the main
+  player's audio controls reclaim sound.
+- Popup players keep keyboard controls and overlays local, refresh channel lists
+  by identity, and preserve pause after a refused channel switch. Hyprland PiP
+  placement handles rotated displays and stream shapes without moving an
+  already arranged window.
+
 ## [0.1.2] - 2026-11-14
 
 ### Added

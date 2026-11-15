@@ -170,7 +170,7 @@ pub fn surface_failed(ui: Ui, surface: usize) -> bool {
 
 /// The viewer's "Try again": at once, with the backoff reset.
 pub fn retry(ui: Ui) {
-    retry_surface(ui, 0);
+    retry_surface(ui, ui.player_surface);
 }
 
 /// "Try again" on `surface`.

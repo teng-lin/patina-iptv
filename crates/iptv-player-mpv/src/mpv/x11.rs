@@ -91,7 +91,9 @@ impl X {
 
 /// Keeps `window` above the others, on every workspace, where the display
 /// is X11 (and its window manager follows EWMH).
-pub fn keep_above(window: &gtk::Window) {
+/// Changes the PiP hints when an existing player window enters/leaves
+/// compact mode. Wayland window levels remain compositor policy.
+pub fn set_keep_above(window: &gtk::Window, above: bool) {
     let Some(surface) = window.surface() else {
         return;
     };
@@ -119,7 +121,7 @@ pub fn keep_above(window: &gtk::Window) {
                 message_type: atom(c"_NET_WM_STATE"),
                 format: 32,
                 data: [
-                    ADD,
+                    if above { ADD } else { 0 }, // EWMH REMOVE is zero.
                     atom(c"_NET_WM_STATE_ABOVE") as c_long,
                     atom(c"_NET_WM_STATE_STICKY") as c_long,
                     FROM_APP,
@@ -131,6 +133,6 @@ pub fn keep_above(window: &gtk::Window) {
             (x.send_event)(display, root, 0, ROOT_MASK, (&raw mut event).cast());
             (x.flush)(display);
         }
-        log::info!("iptv window: asked X11 to keep the picture-in-picture window above");
+        log::info!("iptv window: X11 picture-in-picture hints enabled: {above}");
     });
 }

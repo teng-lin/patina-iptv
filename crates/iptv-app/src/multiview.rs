@@ -108,6 +108,11 @@ pub fn pick_from(ui: Ui) -> Option<usize> {
 /// Whether `surface` is heard: the active tile's (on a detour that is
 /// surface 0), or the full-screen one outside multiview.
 pub fn audible(ui: Ui, surface: usize) -> bool {
+    if let Some(audible) = ui.player_windows.with(|w| w.audible) {
+        return ui
+            .player_windows
+            .with(|w| w.on_surface(surface).is_some_and(|s| s.id == audible));
+    }
     ui.multiview.with(|m| match m {
         None => surface == 0,
         Some(m) => m.tiles().get(m.active_index()).map(|t| t.surface) == Some(surface),
@@ -152,6 +157,15 @@ pub fn surface_rect(ui: Ui, surface: usize) -> Option<(f32, f32, f32, f32)> {
 /// becomes the first tile (live), and adding the next one starts at once.
 /// On a detour it goes back to the grid.
 pub fn open(ui: Ui) {
+    if ui.player_surface != 0 {
+        return;
+    }
+    if ui
+        .player_windows
+        .with_untracked(|w| !w.sessions().is_empty())
+    {
+        return;
+    }
     if untracked(|| detour(ui)) {
         resume(ui);
         return;
@@ -242,6 +256,12 @@ pub fn resume(ui: Ui) -> bool {
 /// Whether the tile on `surface` is paused (the menu's Pause: that player
 /// alone holds).
 pub fn paused(ui: Ui, surface: usize) -> bool {
+    if let Some(paused) = ui
+        .player_windows
+        .with(|w| w.on_surface(surface).map(|s| s.paused))
+    {
+        return paused;
+    }
     ui.multiview.with(|m| {
         m.as_ref()
             .and_then(|m| m.tile_on(surface).map(|t| m.tiles()[t].paused))

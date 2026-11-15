@@ -70,6 +70,9 @@ use win as platform;
 mod gtk;
 #[cfg(all(target_os = "linux", not(test)))]
 mod gtk_pip;
+#[cfg(target_os = "linux")]
+#[cfg_attr(test, allow(dead_code))]
+mod gtk_placement;
 #[cfg(all(target_os = "linux", not(test)))]
 mod x11;
 #[cfg(all(target_os = "linux", not(test)))]

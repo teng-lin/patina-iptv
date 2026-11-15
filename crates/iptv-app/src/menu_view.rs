@@ -17,7 +17,10 @@ use crate::{Ui, ViewMode, channel_name, clock, tint};
 const PANEL_W: f32 = 400.0;
 
 /// The actions this build can perform; the rest show disabled.
-fn implemented(item: MenuItem) -> bool {
+fn implemented(item: MenuItem, surface: usize) -> bool {
+    if item == MenuItem::StartFromBeginning && surface != 0 {
+        return false; // Auxiliary sessions currently play live streams only.
+    }
     matches!(
         item,
         MenuItem::Search
@@ -46,6 +49,7 @@ fn label(item: MenuItem, favorite: bool) -> &'static str {
         Settings => tr("Settings"),
         StartFromBeginning => tr("Play from the beginning"),
         ExternalPlayer => tr("Open in another player"),
+        WatchInNewWindow => tr("Watch in new window"),
         Reminder => tr("Remind me"),
         Record => tr("Record"),
         CustomRecording => tr("Schedule a recording…"),
@@ -85,15 +89,15 @@ pub fn open(ui: Ui) {
         }
     };
     let program = crate::schedule().program_at(channel, minute);
-    let rows = program_menu(
+    let mut rows = program_menu(
         program,
         crate::schedule().catchup_days(channel),
         now,
         |item| {
             if matches!(item, MenuItem::Record | MenuItem::CustomRecording) {
-                return crate::recordings_view::available(channel);
+                return ui.player_surface == 0 && crate::recordings_view::available(channel);
             }
-            implemented(item)
+            implemented(item, ui.player_surface)
                 && (!crate::data::combined::active(&crate::runtime())
                     || matches!(
                         item,
@@ -107,6 +111,17 @@ pub fn open(ui: Ui) {
                     ))
         },
     );
+    if cfg!(any(target_os = "linux", target_os = "macos"))
+        && program.airing(now) == crate::guide::Airing::Live
+    {
+        rows.insert(
+            3,
+            Row::Action {
+                item: MenuItem::WatchInNewWindow,
+                enabled: crate::desktop::player_windows::can_open(ui, channel),
+            },
+        );
+    }
     let origin = Origin {
         channel,
         program_start: program.start,
@@ -142,6 +157,9 @@ pub fn perform(ui: Ui, item: MenuItem) {
         }
         // Details replaces the menu; Back from it returns to the guide.
         MenuItem::Description => ui.description.set(Some(origin)),
+        MenuItem::WatchInNewWindow => {
+            crate::desktop::player_windows::open(ui, origin.channel);
+        }
         MenuItem::StartFromBeginning => {
             close(ui);
             ui.play(
@@ -449,10 +467,31 @@ fn description(ui: Ui) -> impl IntoElement {
                         .text_size(move || size.text_px(HEADER_BODY))
                         .text_color(rgb(LIST_TEXT)),
                 )
-                .child(when(move || program().is_some_and(|(ch, p)|
+                .child(when(move || ui.player_surface == 0 && program().is_some_and(|(ch, p)|
                     crate::recordings_view::available(ch) && crate::guide::unix_of(&*crate::schedule(), p.end) > crate::time::wall_unix()),
                     move || crate::ui_kit::button(ui, size, tr("Record"), || true, move || {
                         if let Some(origin) = ui.description.get_untracked() { crate::recordings_view::programme(ui, origin, false); }
                     }))),
         )
+}
+
+/// Context-click targets a channel without tuning the main player.
+pub fn open_at(ui: Ui, channel: usize, minute: i32) {
+    ui.touched();
+    crate::lists::tap(ui, channel, minute);
+    open(ui);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catch_up_is_available_only_on_the_primary_surface() {
+        assert!(implemented(MenuItem::StartFromBeginning, 0));
+        for surface in 1..crate::player::SURFACES {
+            assert!(!implemented(MenuItem::StartFromBeginning, surface));
+            assert!(implemented(MenuItem::Description, surface));
+        }
+    }
 }

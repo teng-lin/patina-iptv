@@ -30,6 +30,10 @@
 //! closing it (its ✕, the system's close) stops playback. Multiview, or
 //! nothing playing any more, closes it too.
 //!
+//! Auxiliary desktop players use the same core PiP state and compact controls,
+//! changing their own existing window's presentation. Returning restores that
+//! player's window; closing stops only its session, never surface zero.
+//!
 //! As the window opens, the panels, the play bar, the channel list and
 //! any chooser or menu close, and multiview leaves to its active tile,
 //! which plays on in the window (its other tiles stop).
@@ -121,6 +125,17 @@ pub fn exit(ui: Ui, how: Exit) -> bool {
         return false;
     }
     log::info!("iptv pip: {how:?}");
+    if ui.player_surface != 0 {
+        // Auxiliary PiP is a presentation of its own player window. It
+        // never returns to, focuses or stops the main player's surface.
+        batch(|| {
+            report(ui, false);
+            if how == Exit::Close {
+                ui.mode.set(ViewMode::Guide);
+            }
+        });
+        return true;
+    }
     report(ui, false);
     match how {
         Exit::BackToApp => {

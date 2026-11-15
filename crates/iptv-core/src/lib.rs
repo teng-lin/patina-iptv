@@ -25,6 +25,7 @@ pub mod pip;
 pub mod pip_window;
 pub mod play_bar;
 pub mod playback;
+pub mod playback_windows;
 pub mod player_info;
 pub mod player_options;
 pub mod recording;

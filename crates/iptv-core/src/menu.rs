@@ -19,6 +19,7 @@ pub enum MenuItem {
     // Programme.
     StartFromBeginning,
     ExternalPlayer,
+    WatchInNewWindow,
     Reminder,
     Record,
     CustomRecording,

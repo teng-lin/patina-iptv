@@ -63,13 +63,33 @@ pub fn choose(ui: Ui, kind: Kind, value: String) {
 
 pub fn step_volume(ui: Ui, up: bool) {
     let delta = if up { VOLUME_STEP } else { -VOLUME_STEP };
-    ui.media.volume.update(|v| v.step(delta));
+    change_volume(ui, |v| v.step(delta));
     log_volume(ui);
 }
 
 pub fn toggle_mute(ui: Ui) {
-    ui.media.volume.update(Volume::toggle_mute);
+    let muted = !untracked(|| muted(ui));
+    change_volume(ui, |v| v.muted = muted);
     log_volume(ui);
+}
+
+pub fn set_volume(ui: Ui, level: i32) {
+    change_volume(ui, |v| v.set(level));
+}
+
+/// Include audio ownership so the main controls describe what is actually heard.
+pub fn muted(ui: Ui) -> bool {
+    ui.media.volume.with(|v| v.muted)
+        || (ui.player_surface == 0 && ui.player_windows.with(|w| w.audible.is_some()))
+}
+
+fn change_volume(ui: Ui, change: impl FnOnce(&mut Volume)) {
+    batch(|| {
+        ui.media.volume.update(change);
+        if ui.player_surface == 0 && !ui.media.volume.with_untracked(|v| v.muted) {
+            ui.player_windows.update(|w| w.listen_to_main());
+        }
+    });
 }
 
 fn log_volume(ui: Ui) {

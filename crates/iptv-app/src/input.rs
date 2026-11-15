@@ -85,6 +85,9 @@ pub fn bind(ui: Ui) {
     // Back on a PC keyboard: Escape is the platform's (NSH), Backspace ours
     // (it does not fire while a text field edits).
     on_key("backspace", move |_| {
+        if ui.player_surface != 0 && crate::pip::exit(ui, iptv_core::pip_window::Exit::BackToApp) {
+            return;
+        }
         crate::go_back(ui);
     });
     // Desktop sound keys (remotes and tablets use the system volume). F11
@@ -98,11 +101,22 @@ pub fn bind(ui: Ui) {
         on_key("cmd+down", move |_| crate::media::step_volume(ui, false));
     }
     // Spike shortcuts for the view modes.
-    on_key("o", move |_| ui.toggle(ViewMode::Overlay));
-    on_key("f", move |_| ui.toggle(ViewMode::Fullscreen));
+    if ui.player_surface == 0 {
+        on_key("o", move |_| ui.toggle(ViewMode::Overlay));
+        on_key("f", move |_| ui.toggle(ViewMode::Fullscreen));
+    }
 }
 
 fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
+    if ui.player_surface != 0
+        && crate::pip::in_window(ui)
+        && !matches!(
+            key,
+            RemoteKey::PlayPause | RemoteKey::Play | RemoteKey::Pause | RemoteKey::Stop
+        )
+    {
+        return;
+    }
     if phase != Phase::Up {
         crate::browse_playback::activity(ui);
     }
@@ -155,6 +169,10 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     if let Some((key, press, action)) = action {
         act(ui, key, press, action, phase == Phase::Repeat);
     }
+    // Stop/Guide can dispose an auxiliary window before this handler returns.
+    if untracked(|| ui.stats.try_get()).is_none() {
+        return;
+    }
     // IR remotes never auto-repeat: decide long press on a timer too. If the
     // key was released (or a repeat already fired it), the poll finds nothing.
     if let Some(wait_ms) = deadline {
@@ -193,6 +211,18 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
 }
 
 fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
+    if ui.player_surface != 0 {
+        match action {
+            // The guide is in the main window; dismissing this player lets
+            // its owner stop the correct surface. Search has no local screen.
+            Action::Stop | Action::ShowGuide => {
+                ui.mode.set(crate::settings::browse_mode());
+                return;
+            }
+            Action::OpenSearch | Action::Record => return,
+            _ => {}
+        }
+    }
     if !matches!(action, Action::ChannelUp | Action::ChannelDown) {
         ui.pending_zap.set(None);
     }
@@ -282,7 +312,8 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         return;
     }
     if top == Some(Overlay::Description) {
-        if matches!(action, Action::Select | Action::Record)
+        if ui.player_surface == 0
+            && matches!(action, Action::Select | Action::Record)
             && let Some(origin) = ui.description.get_untracked()
         {
             crate::recordings_view::programme(ui, origin, false);
