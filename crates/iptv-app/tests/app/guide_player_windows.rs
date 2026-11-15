@@ -104,6 +104,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     let mut app = crate::Headless::start(config).unwrap();
     let props: Props = Arc::default();
     let observed = props.clone();
+    let control = app.engine().control().clone();
     app.observe(move |_, batch| {
         let mut observed = observed.lock().unwrap();
         for item in &batch.items {
@@ -112,6 +113,24 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
                     let entry = observed.entry(*id).or_default();
                     for (name, value) in props {
                         entry.insert(name.to_string(), value.clone().unwrap_or(Value::Null));
+                    }
+                    // This scenario models successful playback. A headless
+                    // host must acknowledge each load or normal stall recovery
+                    // reopens it after 15 seconds on slower runners.
+                    if entry.contains_key("popupSurface")
+                        && props.iter().any(|(name, value)| {
+                            name.as_ref() == "source"
+                                && value.as_ref().is_some_and(|v| !v.is_null())
+                        })
+                    {
+                        control.dispatch_event(
+                            *id,
+                            EventKind::NativeEvent,
+                            EventPayload::Native {
+                                name: "state".into(),
+                                data: json!({ "state": "ready" }),
+                            },
+                        );
                     }
                 }
                 MountItem::Delete { id } => {
