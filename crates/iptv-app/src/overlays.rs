@@ -16,6 +16,7 @@ use crate::Ui;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Overlay {
     Wizard,
+    Recordings,
     GuideSources,
     GuideInspection,
     GuideRepair,
@@ -46,7 +47,8 @@ impl Overlay {
     pub(crate) fn key_context(self) -> iptv_nav::Context {
         use iptv_nav::Context;
         match self {
-            Self::GuideRepair
+            Self::Recordings
+            | Self::GuideRepair
             | Self::GuideInspection
             | Self::GuideSources
             | Self::Organization
@@ -66,8 +68,9 @@ impl Overlay {
     }
 
     /// Every overlay, topmost layer first.
-    pub(crate) const ALL: [Overlay; 17] = [
+    pub(crate) const ALL: [Overlay; 18] = [
         Overlay::Wizard,
+        Overlay::Recordings,
         Overlay::GuideRepair,
         Overlay::GuideInspection,
         Overlay::GuideSources,
@@ -90,6 +93,7 @@ impl Overlay {
     pub(crate) fn is_open(self, ui: Ui) -> bool {
         match self {
             Overlay::Wizard => crate::wizard_view::is_open(ui),
+            Overlay::Recordings => crate::recordings_view::is_open(ui),
             Overlay::GuideRepair => crate::guide_repair_view::is_open(ui),
             Overlay::GuideInspection => crate::guide_inspect_view::is_open(ui),
             Overlay::GuideSources => crate::epg_sources_view::is_open(ui),
@@ -131,6 +135,7 @@ impl Overlay {
     pub(crate) fn covers_video(self) -> bool {
         match self {
             Overlay::Wizard
+            | Overlay::Recordings
             | Overlay::GuideRepair
             | Overlay::GuideInspection
             | Overlay::GuideSources
@@ -160,6 +165,7 @@ impl Overlay {
         match self {
             Overlay::Description => false,
             Overlay::Wizard
+            | Overlay::Recordings
             | Overlay::GuideRepair
             | Overlay::GuideInspection
             | Overlay::GuideSources
@@ -236,6 +242,7 @@ mod tests {
         // makes adding one without counting it here a compile error.
         let listed = |overlay: Overlay| match overlay {
             Overlay::Wizard
+            | Overlay::Recordings
             | Overlay::GuideRepair
             | Overlay::GuideInspection
             | Overlay::GuideSources
@@ -254,7 +261,7 @@ mod tests {
             | Overlay::ChannelList => Overlay::ALL.contains(&overlay),
         };
         assert!(Overlay::ALL.into_iter().all(listed));
-        assert_eq!(Overlay::ALL.len(), 17);
+        assert_eq!(Overlay::ALL.len(), 18);
     }
 
     #[test]

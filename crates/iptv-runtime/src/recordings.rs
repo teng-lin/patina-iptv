@@ -1,0 +1,808 @@
+//! App-open DVR. Durable intent is committed before acknowledgement; media workers
+//! have no rendered player and use the same connection budget as viewing surfaces.
+#[cfg(test)]
+mod tests;
+use crate::{Error, Runtime, store_service::Services};
+use iptv_core::{
+    playback::PlaySource,
+    recording::{Job, JobId, MAX_BYTES, Request, Status},
+};
+use iptv_import::CancelToken;
+use iptv_library::SourceId;
+use iptv_net::playback::PlaybackPolicy;
+use iptv_providers::{ContentId, model::SourceConfig};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::{
+        Arc, Condvar, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+pub(crate) fn now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs().min(i64::MAX as u64) as i64)
+}
+
+// Private in-memory identities; neither keys nor credentials are logged/persisted.
+#[derive(Clone, PartialEq, Eq)]
+enum Account {
+    Xtream(String, String),
+    Stalker(Vec<String>, String),
+    // M3U cannot establish account equivalence. Conservatively share a budget.
+    Unknown,
+}
+fn account(config: &SourceConfig) -> Account {
+    match config {
+        SourceConfig::Xtream(c) => Account::Xtream(
+            iptv_providers::xtream::normalize_server_url(&c.server_url)
+                .unwrap_or_else(|_| c.server_url.clone()),
+            c.username.expose().into(),
+        ),
+        SourceConfig::Stalker(c) => {
+            let mut endpoints = iptv_providers::stalker::endpoint_candidates(&c.portal_url)
+                .unwrap_or_else(|_| vec![c.portal_url.clone()]);
+            endpoints.sort();
+            Account::Stalker(endpoints, c.mac.expose().into())
+        }
+        SourceConfig::M3u(_) => Account::Unknown,
+    }
+}
+#[derive(Clone)]
+struct Lease {
+    account: Account,
+    limit: u32,
+}
+fn same_account(a: &Account, b: &Account) -> bool {
+    match (a, b) {
+        (Account::Unknown, _) | (_, Account::Unknown) => true,
+        (Account::Stalker(a, mac_a), Account::Stalker(b, mac_b)) => {
+            mac_a == mac_b && a.iter().any(|url| b.contains(url))
+        }
+        _ => a == b,
+    }
+}
+#[derive(Default)]
+struct Data {
+    accounts: HashMap<i64, Account>,
+    limits: HashMap<i64, u32>,
+    provider_limits: HashMap<i64, u32>,
+    viewers: HashMap<usize, Lease>,
+    active: HashMap<JobId, (Lease, CancelToken)>,
+    jobs: Vec<Job>,
+    ready: bool,
+    stopped: bool,
+}
+impl Data {
+    fn lease(&self, source: i64) -> Lease {
+        Lease {
+            account: self
+                .accounts
+                .get(&source)
+                .cloned()
+                .unwrap_or(Account::Unknown),
+            limit: self
+                .provider_limits
+                .get(&source)
+                .copied()
+                .unwrap_or(u32::MAX),
+        }
+    }
+    fn capacity(&self, source: i64, replacing: Option<usize>) -> bool {
+        let wanted = self.lease(source);
+        let same = |lease: &Lease| same_account(&lease.account, &wanted.account);
+        // Existing leases retain their original account and limit when a playlist is edited.
+        let leases = self
+            .viewers
+            .iter()
+            .filter(|(surface, _)| Some(**surface) != replacing)
+            .map(|(_, lease)| lease)
+            .chain(self.active.values().map(|(lease, _)| lease))
+            .filter(|lease| same(lease));
+        let (mut used, mut limit) = (
+            0,
+            wanted
+                .limit
+                .min(self.limits.get(&source).copied().unwrap_or(1)),
+        );
+        for lease in leases {
+            used += 1;
+            limit = limit.min(lease.limit);
+        }
+        for (id, account) in &self.accounts {
+            if same_account(account, &wanted.account) {
+                limit = limit
+                    .min(self.lease(*id).limit)
+                    .min(self.limits.get(id).copied().unwrap_or(1));
+            }
+        }
+        used < limit
+    }
+}
+struct ContextEntry {
+    pointer: usize,
+    config: SourceConfig,
+    value: iptv_guide::playback::PlaybackContext,
+}
+#[derive(Default)]
+pub(crate) struct State {
+    data: Mutex<Data>,
+    changed: Condvar,
+    started: AtomicBool,
+    shutdown: CancelToken,
+    contexts: Mutex<HashMap<i64, ContextEntry>>,
+    playback: Mutex<Option<(JobId, iptv_net::recording_file::RecordingFile)>>,
+}
+impl State {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Data> {
+        self.data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    pub(crate) fn stop(&self) {
+        if !self.started.load(Ordering::SeqCst) {
+            return;
+        }
+        self.shutdown.cancel();
+        let _ = self
+            .changed
+            .wait_timeout_while(self.lock(), Duration::from_secs(5), |d| !d.stopped);
+    }
+}
+
+/// Media lives beside the catalogue directory, so catalogue restore cannot delete
+/// recordings. This app-managed directory is private and excluded from OS backup.
+pub fn media_directory(root: &Path) -> PathBuf {
+    let mut name = root.file_name().unwrap_or_default().to_os_string();
+    name.push("-recordings");
+    root.with_file_name(name)
+}
+fn path(services: &Services, id: JobId, partial: bool) -> PathBuf {
+    media_directory(services.directory()).join(format!(
+        "{}.{}",
+        id.0,
+        if partial { "part" } else { "ts" }
+    ))
+}
+
+impl Runtime {
+    pub fn start_recordings(&self) {
+        if self.recordings.started.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let state = self.recordings.clone();
+        let services = self.services();
+        self.services().spawn(async move {
+            run(services, state.clone()).await;
+            state.lock().stopped = true;
+            state.changed.notify_all();
+        });
+    }
+    /// Synchronize imported sessions/limits without sharing UI-owned Rc state.
+    pub fn sync_recording_contexts(&self) {
+        let mut data = self.recordings.lock();
+        if let (Some(source), Some(limit)) = (self.shown.get(), self.account_streams.get()) {
+            data.provider_limits.insert(source.0, limit);
+        }
+        for (source, limit) in self.limits.borrow().iter() {
+            if let Some(limit) = limit {
+                data.provider_limits.insert(source.0, *limit);
+            }
+        }
+        let mut contexts = self
+            .recordings
+            .contexts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut keep = |source: SourceId, schedule: &iptv_guide::EpgSchedule| {
+            let Some(context) = schedule.shared_playback() else {
+                return;
+            };
+            let Some(config) = crate::library::source_details(self, source).map(|s| s.config)
+            else {
+                return;
+            };
+            let pointer = std::rc::Rc::as_ptr(&context) as usize;
+            if let Some(entry) = contexts
+                .get_mut(&source.0)
+                .filter(|entry| entry.pointer == pointer)
+            {
+                // Reauthentication updates the shared session, but cannot relabel an
+                // old context with credentials edited after that import.
+                entry.value = (*context).clone();
+            } else {
+                contexts.insert(
+                    source.0,
+                    ContextEntry {
+                        pointer,
+                        config,
+                        value: (*context).clone(),
+                    },
+                );
+            }
+        };
+        for (source, schedule) in self.parts.borrow().iter() {
+            keep(*source, schedule);
+        }
+        if let Some(single) = self.single.borrow().as_ref() {
+            keep(single.source, &single.schedule);
+            if let Some(limit) = single.limit {
+                data.provider_limits.insert(single.source.0, limit);
+            }
+        }
+    }
+    /// Called before changing a viewing surface, including multiview. A retry of
+    /// an existing surface retains its reservation; PiP adds no reservation.
+    pub fn reserve_viewing(&self, surface: usize, source: SourceId) -> bool {
+        let mut data = self.recordings.lock();
+        if !data.active.is_empty() && !data.capacity(source.0, Some(surface)) {
+            return false;
+        }
+        let lease = data.lease(source.0);
+        data.viewers.insert(surface, lease);
+        true
+    }
+    pub fn release_viewing(&self, surface: usize) {
+        self.recordings.lock().viewers.remove(&surface);
+    }
+    pub fn recording_snapshot(&self) -> Vec<Job> {
+        self.recordings.lock().jobs.clone()
+    }
+
+    pub async fn schedule_recording(&self, request: Request) -> Result<JobId, Error> {
+        request.validate(now()).map_err(Error::unavailable)?;
+        if self.recordings.shutdown.is_cancelled() || !self.services().is_current() {
+            return Err(Error::unavailable(
+                "Restart Patina before scheduling a recording",
+            ));
+        }
+        self.sync_recording_contexts();
+        self.start_recordings();
+        // Startup reconciliation must precede newly accepted record-now jobs.
+        for _ in 0..100 {
+            if self.recordings.lock().ready {
+                break;
+            }
+            self.services()
+                .spawn(async { tokio::time::sleep(Duration::from_millis(20)).await })
+                .await
+                .map_err(|_| Error::unavailable("Recording service unavailable"))?;
+        }
+        if !self.recordings.lock().ready {
+            return Err(Error::unavailable("Recording service unavailable"));
+        }
+        let duplicate = request.clone();
+        if let Some(id) = self
+            .services()
+            .read(move |store| {
+                Ok(store
+                    .recording_jobs()?
+                    .into_iter()
+                    .find(|j| {
+                        j.status.active()
+                            && j.request.source == duplicate.source
+                            && j.request.channel == duplicate.channel
+                            && j.request.start == duplicate.start
+                            && j.request.end == duplicate.end
+                    })
+                    .map(|j| j.id))
+            })
+            .await?
+        {
+            return Ok(id);
+        }
+        refresh_accounts(&self.services(), &self.recordings)
+            .await
+            .map_err(|_| Error::unavailable("Recording sources unavailable"))?;
+        if request.start <= now() && !self.recordings.lock().capacity(request.source, None) {
+            return Err(Error::unavailable(
+                "No provider connection available; stop another stream or check Streams at once",
+            ));
+        }
+        let mut random = [0u8; 8];
+        getrandom::fill(&mut random)
+            .map_err(|_| Error::unavailable("Recording identity unavailable"))?;
+        let id = JobId((i64::from_ne_bytes(random) & i64::MAX).max(1));
+        let id = self
+            .services()
+            .call(move |store| store.schedule_recording(id, &request, now()))
+            .await
+            .map_err(|_| {
+                Error::unavailable(
+                    "Recording could not be scheduled; check the channel and recording times",
+                )
+            })?;
+        Ok(id)
+    }
+    /// Cancels a future job, or requests that an active recording stop and retain media.
+    pub async fn update_recording(&self, id: JobId, request: Request) -> Result<(), Error> {
+        if !self
+            .services()
+            .call(move |store| store.update_recording(id, &request, now()))
+            .await?
+        {
+            return Err(Error::unavailable(
+                "This recording has already started or was cancelled",
+            ));
+        }
+        Ok(())
+    }
+
+    pub async fn stop_recording(&self, id: JobId) -> Result<(), Error> {
+        if let Some((_, stop)) = self.recordings.lock().active.get(&id) {
+            stop.cancel();
+        }
+        self.services()
+            .call(move |store| {
+                store.transition_recording(
+                    id,
+                    Status::Scheduled,
+                    Status::Cancelled,
+                    0,
+                    "Cancelled",
+                )?;
+                Ok(())
+            })
+            .await?;
+        Ok(())
+    }
+    pub async fn recording_jobs(&self) -> Result<Vec<Job>, Error> {
+        let mut jobs = self.services().read(|store| store.recording_jobs()).await?;
+        let services = self.services();
+        jobs = self
+            .services()
+            .spawn_blocking(move || {
+                for job in &mut jobs {
+                    if job.status == Status::Recording {
+                        job.bytes = std::fs::symlink_metadata(path(&services, job.id, true))
+                            .ok()
+                            .filter(|m| m.is_file() && !m.file_type().is_symlink())
+                            .map_or(0, |m| m.len());
+                        if job.bytes > 0 {
+                            job.message = "Recording started".into();
+                        }
+                    }
+                }
+                jobs
+            })
+            .await
+            .map_err(|_| Error::unavailable("Recordings unavailable"))?;
+        Ok(jobs)
+    }
+    pub async fn open_recording(&self, id: JobId) -> Result<PlaySource, Error> {
+        let file = self.recording_file(id).await?;
+        let relay = self
+            .services()
+            .spawn(async move { iptv_net::recording_file::RecordingFile::start(file) })
+            .await
+            .map_err(|_| Error::unavailable("Recording unavailable"))?
+            .map_err(|_| Error::unavailable("Recording unavailable"))?;
+        let mut source = PlaySource::new(relay.url.clone());
+        source.public_only = false;
+        *self
+            .recordings
+            .playback
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((id, relay));
+        Ok(source)
+    }
+    pub fn close_recording_playback(&self) {
+        self.recordings
+            .playback
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+    }
+    pub async fn recording_file(&self, id: JobId) -> Result<PathBuf, Error> {
+        let job = self
+            .services()
+            .read(move |store| store.recording_job(id))
+            .await?
+            .ok_or_else(|| Error::unavailable("Recording unavailable"))?;
+        if !matches!(job.status, Status::Completed | Status::Partial) || job.bytes == 0 {
+            return Err(Error::unavailable("This recording has no playable media"));
+        }
+        let file = path(&self.services(), id, false);
+        let checked = file.clone();
+        let valid = self
+            .services()
+            .spawn_blocking(move || {
+                std::fs::symlink_metadata(checked)
+                    .is_ok_and(|m| m.is_file() && !m.file_type().is_symlink() && m.len() > 0)
+            })
+            .await
+            .unwrap_or(false);
+        if !valid {
+            return Err(Error::unavailable("The recording file is missing"));
+        }
+        Ok(file)
+    }
+    pub async fn delete_recording(&self, id: JobId) -> Result<(), Error> {
+        if self
+            .recordings
+            .playback
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|(playing, _)| *playing == id)
+        {
+            return Err(Error::unavailable(
+                "Stop playback before deleting this recording",
+            ));
+        }
+        let job = self
+            .services()
+            .read(move |store| store.recording_job(id))
+            .await?
+            .ok_or_else(|| Error::unavailable("Recording unavailable"))?;
+        if job.status.active() {
+            return Err(Error::unavailable("Stop or cancel this recording first"));
+        }
+        let services = self.services();
+        self.services()
+            .spawn_blocking(move || {
+                for partial in [false, true] {
+                    match std::fs::remove_file(path(&services, id, partial)) {
+                        Ok(()) => {}
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(_) => return Err(Error::unavailable("Recording could not be deleted")),
+                    }
+                }
+                Ok(())
+            })
+            .await
+            .map_err(|_| Error::unavailable("Recording could not be deleted"))??;
+        self.services()
+            .call(move |store| store.remove_recording(id))
+            .await?;
+        Ok(())
+    }
+}
+
+async fn refresh_accounts(
+    services: &Services,
+    state: &State,
+) -> Result<(), crate::model::StoreError> {
+    let sources = services
+        .read(|store| {
+            store
+                .sources()?
+                .into_iter()
+                .map(|source| store.source(source.id))
+                .collect::<iptv_store_sqlite::Result<Vec<_>>>()
+        })
+        .await?;
+    let settings = services.settings();
+    let mut data = state.lock();
+    for source in sources.into_iter().flatten() {
+        let limit = match settings.get_in(
+            "playlists.max_connections",
+            &iptv_settings::Target::playlist(source.id.0.to_string()),
+        ) {
+            Ok(iptv_settings::Value::Int(n)) => n.clamp(1, 20) as u32,
+            _ => 1,
+        };
+        data.accounts
+            .insert(source.id.0, account(&source.source.config));
+        data.limits.insert(source.id.0, limit);
+    }
+    Ok(())
+}
+async fn transition(services: &Services, job: &Job, to: Status, bytes: u64, message: &'static str) {
+    let (id, from) = (job.id, job.status);
+    let _ = services
+        .call(move |store| store.transition_recording(id, from, to, bytes, message))
+        .await;
+}
+async fn recover_media(services: &Services, job: &Job) {
+    let p = path(services, job.id, true);
+    let complete = path(services, job.id, false);
+    let bytes = services
+        .spawn_blocking(move || {
+            if !complete.exists() {
+                let _ = std::fs::rename(&p, &complete);
+            }
+            std::fs::symlink_metadata(complete)
+                .ok()
+                .filter(|m| m.is_file() && !m.file_type().is_symlink())
+                .map_or(0, |m| m.len())
+        })
+        .await
+        .unwrap_or(0);
+    transition(
+        services,
+        job,
+        if bytes > 0 {
+            Status::Partial
+        } else {
+            Status::Failed
+        },
+        bytes,
+        "Interrupted when the app closed",
+    )
+    .await;
+}
+async fn recover(services: &Services) -> Result<(), crate::model::StoreError> {
+    for job in services.read(|store| store.recording_jobs()).await? {
+        if job.status == Status::Recording {
+            recover_media(services, &job).await;
+        } else if job.status == Status::Scheduled && job.request.start < now() {
+            transition(
+                services,
+                &job,
+                Status::Missed,
+                0,
+                "The app was closed at the scheduled start",
+            )
+            .await;
+        }
+    }
+    Ok(())
+}
+async fn run(services: Services, state: Arc<State>) {
+    if recover(&services).await.is_err() || refresh_accounts(&services, &state).await.is_err() {
+        return;
+    }
+    state.lock().ready = true;
+    let mut tasks = tokio::task::JoinSet::new();
+    loop {
+        while tasks.try_join_next().is_some() {}
+        if !services.is_current() || state.shutdown.is_cancelled() {
+            state.shutdown.cancel();
+            while tasks.join_next().await.is_some() {}
+            break;
+        }
+        if refresh_accounts(&services, &state).await.is_err() {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            continue;
+        }
+        let Ok(jobs) = services.read(|store| store.recording_jobs()).await else {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            continue;
+        };
+        state.lock().jobs = jobs.clone();
+        for mut job in jobs {
+            if job.status == Status::Recording && !state.lock().active.contains_key(&job.id) {
+                recover_media(&services, &job).await;
+                continue;
+            }
+            if job.status != Status::Scheduled || job.request.start > now() {
+                continue;
+            }
+            if job.request.end <= now() || now().saturating_sub(job.request.start) > 60 {
+                transition(
+                    &services,
+                    &job,
+                    Status::Missed,
+                    0,
+                    "The scheduled recording window was missed",
+                )
+                .await;
+                continue;
+            }
+            let stop = CancelToken::new();
+            let reserved = {
+                let mut data = state.lock();
+                if data.active.len() >= 4 || !data.capacity(job.request.source, None) {
+                    false
+                } else {
+                    let lease = data.lease(job.request.source);
+                    data.active.insert(job.id, (lease, stop.clone()));
+                    true
+                }
+            };
+            if !reserved {
+                transition(
+                    &services,
+                    &job,
+                    Status::Failed,
+                    0,
+                    "No provider connection available; check Streams at once",
+                )
+                .await;
+                continue;
+            }
+            let id = job.id;
+            let claim = job.clone();
+            match services
+                .call(move |store| store.claim_recording(&claim))
+                .await
+            {
+                Ok(true) => {}
+                _ => {
+                    state.lock().active.remove(&id);
+                    continue;
+                }
+            }
+            job.status = Status::Recording;
+            let services = services.clone();
+            let state = state.clone();
+            tasks.spawn(async move {
+                struct Release(Arc<State>, JobId);
+                impl Drop for Release {
+                    fn drop(&mut self) {
+                        self.0.lock().active.remove(&self.1);
+                    }
+                }
+                let _release = Release(state.clone(), job.id);
+                record(&services, &state, &job, &stop).await;
+            });
+        }
+        tokio::select! {
+            _ = state.shutdown.cancelled() => {},
+            _ = tokio::time::sleep(Duration::from_secs(1)) => {},
+        }
+    }
+}
+
+async fn resolve(
+    services: &Services,
+    state: &State,
+    job: &Job,
+    stop: &CancelToken,
+) -> Result<PlaySource, &'static str> {
+    let (source, channel) = (
+        SourceId(job.request.source),
+        ContentId::from_stored(job.request.channel.clone()),
+    );
+    let (source, channel) = services
+        .read(move |store| {
+            if !store.source_policy(source)?.enabled {
+                return Err(iptv_store_sqlite::StoreError::Unavailable(
+                    "Playlist disabled",
+                ));
+            }
+            Ok((store.source(source)?, store.channel(source, &channel)?))
+        })
+        .await
+        .map_err(|_| "Channel unavailable")?;
+    let source = source.ok_or("Playlist unavailable")?;
+    let channel = channel
+        .filter(|c| !c.blocked)
+        .ok_or("Channel unavailable or blocked")?
+        .channel;
+    let context = state
+        .contexts
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&job.request.source)
+        .filter(|entry| entry.config == source.source.config)
+        .map(|entry| entry.value.clone())
+        .or_else(|| crate::playback::stored_context(&source.source.config));
+    let resolution = iptv_guide::playback::resolve(
+        context.as_ref(),
+        &channel,
+        None,
+        iptv_guide::playback::Clock {
+            now: now(),
+            local_offset_secs: 0,
+        },
+    );
+    let mut stream = match resolution {
+        iptv_guide::playback::Resolution::Play(source) => source,
+        iptv_guide::playback::Resolution::StalkerLink(link) => {
+            let iptv_guide::playback::StalkerLink {
+                session: mut portal,
+                cmd,
+                channel_headers,
+            } = *link;
+            let client =
+                iptv_net::NetClient::new(crate::settings::net_config(&services.settings()))
+                    .map_err(|_| "Network unavailable")?;
+            let url = iptv_import::stalker_link(&client, &mut portal, &cmd, false, stop)
+                .await
+                .map_err(|_| "Portal stream unavailable")?;
+            iptv_guide::playback::StalkerLink::source(&portal, url, &channel_headers)
+        }
+        _ => return Err("Refresh the playlist before recording this channel"),
+    };
+    let config = crate::settings::net_config(&services.settings());
+    stream.default_header("User-Agent", &config.user_agent);
+    Ok(stream)
+}
+
+async fn record(services: &Services, state: &State, job: &Job, stop: &CancelToken) {
+    let partial = path(services, job.id, true);
+    let destination = path(services, job.id, false);
+    let directory = media_directory(services.directory());
+    let exclude = services.ports().exclude_from_backup;
+    let reserved = state.lock().active.len() as u64 * MAX_BYTES;
+    let prepared = services
+        .spawn_blocking(move || -> std::io::Result<()> {
+            crate::storage::protect_directory(&directory, exclude)?;
+            let mut total = reserved;
+            for entry in std::fs::read_dir(&directory)? {
+                let metadata = entry?.metadata()?;
+                total = total.saturating_add(metadata.len());
+            }
+            if total > 32 * 1024 * 1024 * 1024 {
+                return Err(std::io::ErrorKind::StorageFull.into());
+            }
+            Ok(())
+        })
+        .await;
+    let result = async {
+        if !matches!(prepared, Ok(Ok(()))) {
+            return Err("Recording storage unavailable");
+        }
+        let source = resolve(services, state, job, stop).await?;
+        let net = crate::settings::net_config(&services.settings());
+        let policy = PlaybackPolicy {
+            public_only: source.public_only,
+            extra_roots_der: net.extra_roots_der,
+            #[cfg(debug_assertions)]
+            allow_private_fixture: net.allow_private_fixture,
+        };
+        iptv_net::recording::capture(&source.url, &source.headers, policy, &partial, MAX_BYTES)
+            .await
+            .map_err(|failure| failure.message())
+    };
+    let remaining = job.request.end.saturating_sub(now()).max(0) as u64;
+    let outcome = tokio::select! {
+        biased;
+        _ = state.shutdown.cancelled() => Err("Interrupted when the app closed"),
+        _ = stop.cancelled() => Ok("Stopped by you"),
+        _ = async {
+            let limit = tokio::time::Instant::now() + Duration::from_secs(remaining);
+            while now() < job.request.end && tokio::time::Instant::now() < limit {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        } => Ok("Recording finished"),
+        result = result => result.map(|_| "Recording finished"),
+    };
+    // capture uses synchronous file writes on this native worker: dropping its
+    // future cannot leave an asynchronous write racing finalization/deletion.
+    let finalized = services
+        .spawn_blocking(move || -> std::io::Result<u64> {
+            let metadata = match std::fs::symlink_metadata(&partial) {
+                Ok(m) => m,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+                Err(e) => return Err(e),
+            };
+            if !metadata.is_file() || metadata.file_type().is_symlink() {
+                return Err(std::io::ErrorKind::InvalidData.into());
+            }
+            let bytes = metadata.len() / 188 * 188;
+            if bytes == 0 {
+                std::fs::remove_file(partial)?;
+                return Ok(0);
+            }
+            let file = std::fs::OpenOptions::new().write(true).open(&partial)?;
+            file.set_len(bytes)?;
+            file.sync_all()?;
+            // Never replace a previous completed file, even after a lost acknowledgement.
+            std::fs::hard_link(&partial, &destination)?;
+            std::fs::remove_file(partial)?;
+            #[cfg(unix)]
+            std::fs::File::open(
+                destination
+                    .parent()
+                    .ok_or(std::io::ErrorKind::InvalidInput)?,
+            )?
+            .sync_all()?;
+            Ok(bytes)
+        })
+        .await;
+    let (bytes, storage_ok) = match finalized {
+        Ok(Ok(n)) => (n, true),
+        _ => (0, false),
+    };
+    let message = if !storage_ok {
+        "Could not finalize the recording; partial media was retained"
+    } else if bytes == 0 && outcome.is_ok() {
+        "No media was recorded"
+    } else {
+        outcome.unwrap_or_else(|m| m)
+    };
+    let status = if bytes == 0 {
+        Status::Failed
+    } else if outcome.is_ok() {
+        Status::Completed
+    } else {
+        Status::Partial
+    };
+    transition(services, job, status, bytes, message).await;
+}

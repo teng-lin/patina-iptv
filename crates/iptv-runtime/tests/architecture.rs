@@ -58,6 +58,8 @@ const STORE_ADAPTER_USERS: &[&str] = &[
     "guide_checks/retry.rs",
     "paging.rs",
     "private_files.rs",
+    "recordings.rs",
+    "recordings/tests.rs",
     "search.rs",
     "state.rs",
     "store_service.rs",

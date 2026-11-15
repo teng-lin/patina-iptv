@@ -50,6 +50,10 @@ custom groups and history.
   picture-in-picture on the desktops, track and picture-size choice.
 - **Library:** favourites, custom groups, reordering, hiding, history and
   channel/programme search.
+- **Recording:** record live TV or schedule a one-off recording, with early/late
+  padding; play, stop, cancel and delete recordings from the Recordings screen.
+  Keep Patina running and the device awake. MPEG-TS and unencrypted MPEG-TS HLS
+  are supported; recordings use private local media storage, outside catalogue backups.
 - **Resilient live playback:** streams that the provider cuts reconnect
   without dropping to an error screen.
 - **Interface languages:** 11 partly translated language options with system-language detection
@@ -261,6 +265,34 @@ mocks: `tools/mock-xtream.py` (Xtream API), `tools/mock-live-cuts.py`
 (multiple audio and subtitle tracks).
 
 ## Keyboard
+
+### Recordings on TV, tablet and desktop
+
+Choose **Record** or **Schedule a recording…** in a programme's menu. The
+programme details and full-screen controls also offer recording. On a TV, use
+the remote's Menu/long OK or Record key; Up/Down chooses a form row and
+Left/Right changes its value. Touch and mouse users have labelled −/+ buttons.
+The navigation rail's **Recordings** entry manages current, scheduled and
+finished recordings. Cancel removes a schedule; Stop retains captured media;
+Delete removes media after confirmation. A dot marks recording programmes in
+the guide, and the recording indicator opens management while watching.
+
+Recordings have fixed start/end times and do not follow later EPG changes.
+The app must remain running and the device awake; boot/wake execution,
+repeating schedules, reminders, network destinations and recording seek/resume
+controls are not included yet. A missed start is reported; interrupted input
+retains a partial recording. Provider accounts need enough connections for
+watching plus recording. **Settings → Other → Streams at once** sets a local
+ceiling (default one); known provider limits still apply. Accounts identified
+as the same Xtream/portal account share their budget. M3U account associations
+are unknown and are counted conservatively against other streams.
+
+Media is stored beside the catalogue directory, in its `-recordings` sibling,
+with a limit of 8 GiB per recording, four simultaneous recorders and a
+conservative 32 GiB media budget. Recordings are not encrypted with the
+catalogue and are excluded from portable and OS backups. Catalogue restore
+clears recording schedules/history; existing media files remain in that
+directory and are never overwritten by restored recording identities.
 
 | Remote | Keyboard |
 | --- | --- |

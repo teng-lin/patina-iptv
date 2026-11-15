@@ -609,3 +609,5 @@ iptv-runtime/src/inspection/probe.rs	probe integrity inspection stopped
 # Native repair cache adapter errors become portable Storage; never rendered verbatim.
 iptv-runtime/src/guide_repair/publication.rs	guide repair commit is missing
 iptv-runtime/src/guide_repair/publication.rs	guide repair was superseded
+
+iptv-app/src/play_bar/icons.rs	<circle cx='12' cy='12' r='6' fill='currentColor' stroke='none'/>

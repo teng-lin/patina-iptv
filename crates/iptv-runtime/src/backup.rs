@@ -597,6 +597,9 @@ fn stage(services: &Services, input: &mut impl Read) -> Result<()> {
         store
             .invalidate_guide_repair_authority()
             .context("Could not check backup library")?;
+        store
+            .discard_recording_jobs()
+            .context("Could not clear host recording jobs")?;
     }
     // Check rewritten local references point to files included in this archive.
     let store =

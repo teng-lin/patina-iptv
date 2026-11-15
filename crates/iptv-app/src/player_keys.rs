@@ -107,6 +107,7 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
         crate::seek::key(ui, step, repeat);
     };
     match action {
+        Action::Record => crate::recordings_view::current(ui),
         Action::MoveLeft if buttons => ui.update_panels(|p, now| p.move_focus(-1, now)),
         Action::MoveRight if buttons => ui.update_panels(|p, now| p.move_focus(1, now)),
         Action::MoveUp | Action::MoveDown if buttons => {}
@@ -157,7 +158,10 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
 pub(crate) fn stop_playback(ui: Ui) {
     let multiview = nsh_core::prelude::untracked(|| crate::multiview::session(ui));
     crate::multiview::close(ui);
-    if ui.playing.get_untracked().is_none() && !multiview {
+    if ui.playing.get_untracked().is_none()
+        && !multiview
+        && ui.player.recorded.with_untracked(Option::is_none)
+    {
         return;
     }
     log::info!("iptv player: stopped by the viewer");
@@ -219,6 +223,8 @@ pub fn press_control(ui: Ui, control: Control) {
         return;
     }
     match control {
+        Control::Recordings => crate::recordings_view::open(ui),
+        Control::Record => crate::recordings_view::current(ui),
         Control::Search => crate::search_view::open(ui),
         Control::Multiview => crate::multiview::open(ui),
         Control::ChannelList => crate::channels_view::open(ui, ListMode::Overlay),

@@ -90,6 +90,7 @@ pub static PAGES: &[Page] = &[
         parts: &[
             Part::Section(Section::Search),
             Part::Section(Section::Recordings),
+            Part::Keys(&["playlists.max_connections"]),
             Part::Section(Section::Vod),
         ],
     },

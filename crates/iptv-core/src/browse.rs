@@ -45,7 +45,11 @@ impl RailItem {
     pub fn enabled(self) -> bool {
         matches!(
             self,
-            RailItem::Search | RailItem::Tv | RailItem::Playlists | RailItem::Settings
+            RailItem::Search
+                | RailItem::Tv
+                | RailItem::Recordings
+                | RailItem::Playlists
+                | RailItem::Settings
         )
     }
 

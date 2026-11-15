@@ -247,7 +247,7 @@ pub fn base_net_config() -> NetConfig {
     #[cfg(debug_assertions)]
     {
         config.allow_private_fixture =
-            cfg!(feature = "test-support") || super::imports::DEV_PLAYLIST.is_some();
+            cfg!(any(test, feature = "test-support")) || super::imports::DEV_PLAYLIST.is_some();
     }
     config
 }

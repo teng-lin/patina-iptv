@@ -141,13 +141,26 @@ pub(super) fn cell(
         // Equal programme minutes on new data still re-read the title.
         ui.guide_data();
         match (channel.get(), program()) {
-            (Some(ch), Some(p)) => crate::schedule().title(ch, p),
+            (Some(ch), Some(p)) => format!(
+                "{}{}",
+                crate::recordings_view::badge(ui, ch, p),
+                crate::schedule().title(ch, p)
+            ),
             _ => String::new(),
         }
     };
     let is_selected = move || match program() {
         Some(p) => focus.selected.get() == Some(p.start),
         None => false,
+    };
+    let open_actions = move || {
+        let Some(p) = program() else {
+            return;
+        };
+        ui.touched();
+        let view = crate::lists::view(ui);
+        ui.focus.update(|f| f.tap(at.index(), p.start, &view));
+        crate::menu_view::open(ui);
     };
     view()
         .test_id("guide-programme")
@@ -158,6 +171,8 @@ pub(super) fn cell(
             ..Default::default()
         })
         .label(title_text)
+        .on_long_press(open_actions)
+        .on_context_menu(move |_: &nsh_core::ContextMenuEvent| open_actions())
         .absolute()
         .top(move || px(((size.whole(ROW_H) - size.whole(CELL_H)) / 2.0).floor()))
         .h(move || px(size.whole(CELL_H)))

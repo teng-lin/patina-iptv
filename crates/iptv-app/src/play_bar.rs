@@ -250,7 +250,10 @@ fn bar(ui: Ui) -> impl IntoElement {
                         .child(centre(ui))
                         .child(right(ui)),
                 )
-                .child(progress::line(ui)),
+                .child(when(
+                    move || ui.player.recorded.with(Option::is_none),
+                    move || progress::line(ui),
+                )),
         )
 }
 
@@ -361,7 +364,11 @@ fn left(ui: Ui) -> impl IntoElement {
         .child(
             text(move || {
                 ui.data_version.get();
-                ui.playing.get().map(channel_name).unwrap_or_default()
+                ui.player
+                    .recorded
+                    .with(|r| r.as_ref().map(|(job, _)| job.request.title.clone()))
+                    .or_else(|| ui.playing.get().map(channel_name))
+                    .unwrap_or_default()
             })
             .flex_shrink(1.0)
             .number_of_lines(1)
@@ -471,7 +478,7 @@ fn right(ui: Ui) -> impl IntoElement {
     let playing = move || ui.playing.get().is_some();
     // Never narrower than its buttons (seven on the desktop, six
     // elsewhere) and the frame rate: they must not slide under the centre.
-    let buttons = if DESKTOP { 7.0 } else { 6.0 };
+    let buttons = if DESKTOP { 8.0 } else { 7.0 };
     view()
         .flex_1()
         .min_w(px(buttons * size + (buttons - 1.0) * 2.0 + FPS_W + 6.0))
@@ -479,6 +486,14 @@ fn right(ui: Ui) -> impl IntoElement {
         .items_center()
         .justify_end()
         .gap(px(2.0))
+        .child(button(
+            ui,
+            "Record",
+            || Icon::Record,
+            playing,
+            size,
+            move || crate::recordings_view::current(ui),
+        ))
         .child(button(
             ui,
             "Favourite",
@@ -625,6 +640,13 @@ fn details(ui: Ui) {
         return;
     }
     let (channel, p) = untracked(|| progress::programme(ui));
+    crate::recordings_view::remember(
+        ui,
+        Origin {
+            channel,
+            program_start: p.start,
+        },
+    );
     ui.description.set(Some(Origin {
         channel,
         program_start: p.start,

@@ -31,6 +31,7 @@ mod events;
 pub mod guide_repair;
 pub mod inspection;
 mod operations;
+pub mod recordings;
 pub use error::Error;
 
 /// Shell observations needed to prioritize reads and avoid replacing active playback.
@@ -89,6 +90,7 @@ type Updates = Vec<(SourceId, Rc<ImportWork>)>;
 type SavedSettings = RefCell<Option<(u64, std::sync::Arc<iptv_settings::Settings>)>>;
 
 pub struct Runtime {
+    recordings: std::sync::Arc<recordings::State>,
     repairs: RefCell<guide_repair::State>,
     account_streams: Slot<Cell<Option<u32>>>,
     resolving: Slot<Resolves>,
@@ -154,6 +156,7 @@ impl Runtime {
         #[cfg(not(feature = "test-support"))]
         let guide_checks = guide_checks::GuideChecks::default();
         Self {
+            recordings: Default::default(),
             repairs: RefCell::default(),
             account_streams: Slot::default(),
             resolving: Slot::default(),
@@ -268,6 +271,7 @@ impl Runtime {
         self.inspection.renew();
     }
     pub fn drain_services(&self) -> bool {
+        self.recordings.stop();
         self.cancel_guide_checks();
         let drained = self
             .store
@@ -341,6 +345,7 @@ impl Runtime {
 
 impl Drop for Runtime {
     fn drop(&mut self) {
+        self.recordings.stop();
         self.store.retire();
         if let Some((_, cancel)) = self.wizard_import.borrow().as_ref() {
             cancel.cancel();

@@ -60,6 +60,7 @@ mod personalization_selection;
 mod personalization_zapping;
 mod pip_control;
 mod pointer;
+mod recordings;
 mod screens_look;
 mod search_history;
 mod stalker_cancel;

@@ -140,6 +140,29 @@ headless, with the synthetic fixtures, each in its own process.
 
 ## The video layer
 
+Recording state and its remote/touch screen model live in
+`iptv-core::recording`; the app's `recordings_view` renders that state and
+calls the experimental `iptv-runtime` recording service. SQLite stores durable,
+source-scoped intent without resolved stream URLs. A scheduler conditionally
+claims the saved time window, so cancellation or editing invalidates an old
+read. Jobs are host-local and are removed from portable snapshots/restores.
+
+Recorders write MPEG-TS independently of rendered players, using the playback
+relay for every upstream request and adaptive child. The runtime reserves
+connections before recording or changing a viewing surface, retaining an
+active lease's account identity across playlist edits. Unknown M3U account
+associations share a conservative budget. Retries retain a surface's existing
+reservation; desktop PiP reserves no additional provider connection.
+
+Media is private but unencrypted in a `-recordings` sibling of the catalogue
+directory, excluded from OS backups and untouched by catalogue directory
+swaps. Playback uses a read-only random-capability HTTP server with byte-range
+support, so both native player hosts keep their guarded HTTP path. Deletion
+refuses the file currently playing. Interrupted jobs recover captured media
+as partial recordings; publication never overwrites an existing media file.
+Scheduling is app-open-only; no background host, wake contract, recurring
+rule or stable recording API is advertised by runtime contract v1.
+
 There is one persistent player surface under the UI
 (`iptv-app/src/video.rs`). It is a native component named `tv.player`:
 

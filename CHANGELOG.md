@@ -9,6 +9,10 @@ is below 1.0, a minor release may change behaviour.
 
 ### Added
 
+- App-open DVR on TV, tablet and desktop: record-now and one-off schedules,
+  timing/padding controls, recording badges, local playback, stop/cancel and
+  confirmed deletion. Durable jobs reconcile interrupted/missed recordings;
+  MPEG-TS/HLS capture shares provider connection accounting with viewing.
 - Headless application runtime extracted into dedicated `iptv-runtime` crate behind explicit platform ports, owning background workers, scheduling, lanes, favourites, search, and backup orchestration.
 - Portable channel organisation and guide state machine extracted into dedicated `iptv-library` crate.
 - Native libmpv desktop and iPad player extracted into dedicated `iptv-player-mpv` crate with typed playback contracts.

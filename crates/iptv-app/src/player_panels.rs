@@ -52,6 +52,7 @@ fn label(ui: Ui, control: Control) -> String {
         Search => tr("Search").to_owned(),
         ChannelList => tr("Channels").to_owned(),
         Recordings => tr("Recordings").to_owned(),
+        Record => tr("Record").to_owned(),
         Multiview if crate::multiview::detour(ui) => tr("Back to multiview").to_owned(),
         Multiview => tr("Multiview").to_owned(),
         PictureInPicture => tr("Picture in picture").to_owned(),
@@ -117,6 +118,11 @@ pub fn enabled(ui: Ui, control: Control) -> bool {
     let choice = |k| ui.player.main().tracks.with(|t| t.has_choice(k));
     match control {
         Control::Multiview => ui.playing.get().is_some(),
+        Control::Record => ui
+            .playing
+            .get()
+            .is_some_and(crate::recordings_view::available),
+        Control::Recordings => true,
         Control::Search
         | Control::ChannelList
         | Control::Favorite
@@ -127,7 +133,7 @@ pub fn enabled(ui: Ui, control: Control) -> bool {
         Control::Captions => choice(Track::Text),
         Control::AudioOffset => crate::media::AUDIO_DELAY && ui.playing.get().is_some(),
         Control::PictureInPicture => crate::pip::can_enter(ui),
-        Control::Recordings | Control::ChannelOptions | Control::Settings => false,
+        Control::ChannelOptions | Control::Settings => false,
     }
 }
 
@@ -178,7 +184,40 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .gap(px(10.0))
                 .pointer_events(move || events(hidden(), PointerEvents::BoxNone))
                 .child(when(banner, move || card::banner(ui, panel)))
-                .child(when(card, move || card::info_card(ui, panel)))
+                .child(when(
+                    move || card() && ui.player.recorded.with(Option::is_none),
+                    move || card::info_card(ui, panel),
+                ))
+                .child(when(
+                    move || card() && ui.player.recorded.with(Option::is_some),
+                    move || {
+                        let size = crate::scale::Scale::new();
+                        crate::ui_kit::card(ui, size, 620.0)
+                            .child(crate::ui_kit::title(size, move || {
+                                ui.player.recorded.with(|r| {
+                                    r.as_ref()
+                                        .map(|(job, _)| job.request.title.clone())
+                                        .unwrap_or_default()
+                                })
+                            }))
+                            .child(crate::ui_kit::body(size, move || {
+                                ui.player.recorded.with(|r| {
+                                    r.as_ref()
+                                        .map(|(job, _)| job.request.channel_name.clone())
+                                        .unwrap_or_default()
+                                })
+                            }))
+                            .child(crate::ui_kit::caption(size, move || {
+                                trf(
+                                    "Recorded video · {seconds} s",
+                                    &[(
+                                        "seconds",
+                                        (ui.player.main().position_ms.get() / 1000).into(),
+                                    )],
+                                )
+                            }))
+                    },
+                ))
                 .child(when(cards, move || quick_row(ui, panel)))
                 .child(
                     // Mounted while hidden: the strip keeps its scroll.
@@ -223,10 +262,16 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
             .text_color(rgb(WHITE)),
         )
         .child(
-            text(move || match (ui.playback.get(), live()) {
-                (Playback::CatchUp { .. }, true) => "CATCH-UP",
-                (_, true) => "LIVE",
-                (_, false) => "PAUSED",
+            text(move || {
+                if ui.player.recorded.with(Option::is_some) {
+                    if live() { tr("Recorded") } else { "PAUSED" }
+                } else {
+                    match (ui.playback.get(), live()) {
+                        (Playback::CatchUp { .. }, true) => "CATCH-UP",
+                        (_, true) => "LIVE",
+                        (_, false) => "PAUSED",
+                    }
+                }
             })
             .px(px(8.0))
             .py(px(2.0))
