@@ -19,11 +19,11 @@ pub(crate) fn schedule(next: i64, _active: bool) {
 mod startup;
 pub(crate) fn command(key: &str) {
     if key == "recordings.background_status" {
-        crate::settings_view::notify(if cfg!(target_os = "android") {
+        crate::settings_view::notify(crate::i18n::tr(if cfg!(target_os = "android") {
             "Android keeps capture in a foreground service. Exact alarms need Special app access. Force stop prevents recordings; Android may limit background recording to six hours."
         } else {
             "Closing the window keeps accepted recordings running. Enable start at login to recover after restart. Linux and macOS cannot wake a sleeping or powered-off computer; leave it awake. Quit stops the recorder."
-        });
+        }));
         return;
     }
     #[cfg(target_os = "android")]
@@ -41,11 +41,11 @@ pub(crate) fn command(key: &str) {
                     tokio::task::spawn_blocking(move || startup::install(&directory, enabled)).await
                 })
                 .await;
-            crate::settings_view::notify(if matches!(result, Ok(Ok(Ok(())))) {
+            crate::settings_view::notify(crate::i18n::tr(if matches!(result, Ok(Ok(Ok(())))) {
                 "Recording startup preference saved"
             } else {
                 "Recording startup preference could not be saved"
-            });
+            }));
         });
     }
 }

@@ -566,18 +566,21 @@ class PlayerComponent(
      * at the live edge, catch-up at its position) or the source the app set
      * meanwhile.
      */
-    fun foreground() {
+    fun foreground(allowed: Boolean = true) {
         if (!away) return
         away = false
         ticker.postDelayed(tick, 1_000)
         val what = reopen
         reopen = Reopen.NONE
         val target = url ?: return
-        when {
-            what == Reopen.NEW -> start(target, null)
-            what == Reopen.SAME && live -> start(target, mime)
-            what == Reopen.SAME -> player.prepare()
+        if (!allowed) {
+            emit(PlayerEvent.Error("ERROR_CODE_IO_BAD_HTTP_STATUS", 429))
+            return
         }
+        // A retained URL is no longer authority to decode: a parental grant
+        // may have expired while away. Rust retries with fresh authorization,
+        // stream reservation and a new source token (and restores position).
+        if (what != Reopen.NONE) emit(PlayerEvent.Error("ERROR_CODE_IO_UNSPECIFIED"))
     }
 
     private fun applyHeaders() {

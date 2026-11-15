@@ -79,3 +79,32 @@ pub(super) fn request_alarm_access() {
         }
     }
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_suspendViewing(
+    mut env: jni::JNIEnv,
+    _class: JClass,
+    path: JString,
+) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if let Ok(path) = env.get_string(&path) {
+            crate::runtime::recordings::host::suspend_viewing(std::path::Path::new(&String::from(
+                path,
+            )));
+        }
+    }));
+}
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_resumeViewing(
+    mut env: jni::JNIEnv,
+    _class: JClass,
+    path: JString,
+) -> jni::sys::jboolean {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let Ok(path) = env.get_string(&path) else {
+            return false;
+        };
+        crate::runtime::recordings::host::resume_viewing(std::path::Path::new(&String::from(path)))
+    }))
+    .unwrap_or(false) as u8
+}

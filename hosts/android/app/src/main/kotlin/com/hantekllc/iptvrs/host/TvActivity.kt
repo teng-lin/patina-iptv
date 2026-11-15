@@ -84,12 +84,14 @@ class TvActivity : Activity() {
     override fun onStart() {
         super.onStart()
         started = true
-        for (p in players.toList()) p.foreground()
+        val allowed = RecordingHost.resumeViewing(filesDir.absolutePath)
+        for (p in players.toList()) p.foreground(allowed)
     }
 
     override fun onStop() {
         started = false
         for (p in players.toList()) p.background()
+        RecordingHost.suspendViewing(filesDir.absolutePath)
         // The process may end in the background without a teardown: the
         // last channel or a setting changed a moment ago must be on disk.
         flushPendingWrites()

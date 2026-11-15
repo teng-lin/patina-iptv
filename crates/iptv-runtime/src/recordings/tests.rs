@@ -315,6 +315,10 @@ async fn restart_resumes_future_windows_and_never_claims_interrupted_media_is_co
     assert_eq!(job.bytes, 188);
     assert!(path(&second.services(), id, true).is_file());
     assert!(second.recording_file(id).await.is_err());
+    second.stop_recording(id).await.unwrap();
+    let retained = until(&second, id, |job| job.status == Status::Partial).await;
+    assert_eq!(retained.bytes, 188);
+    assert!(second.recording_file(id).await.unwrap().is_file());
     assert!(second.drain_services());
 }
 
@@ -396,4 +400,56 @@ async fn native_host_captures_after_its_ui_owner_is_drained_and_dropped() {
     assert!(path(&services, id, false).is_file());
     assert!(state.lock().viewers.is_empty());
     state.stop();
+}
+
+#[test]
+fn mobile_handoff_reserves_all_returning_surfaces_before_any_reconnect() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut ports = crate::Ports::new(directory.path().join("generated-app"), |_| {
+        Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
+    });
+    ports.background_recordings = true;
+    let state = host::acquire(&ports);
+    {
+        let mut data = state.lock();
+        data.accounts.insert(1, Account::Unknown);
+        data.limits.insert(1, 2);
+        let lease = data.lease(1);
+        data.viewers.insert(0, lease.clone());
+        data.viewers.insert(1, lease);
+    }
+    host::suspend_viewing(&ports.directory);
+    assert!(state.lock().viewers.is_empty());
+    {
+        let mut data = state.lock();
+        let lease = data.lease(1);
+        data.active.insert(JobId(90), (lease, CancelToken::new()));
+    }
+    assert!(!host::resume_viewing(&ports.directory));
+    assert!(
+        state.lock().viewers.is_empty(),
+        "a partial return must roll back before native reconnect"
+    );
+    state.lock().active.clear();
+    assert!(host::resume_viewing(&ports.directory));
+    assert_eq!(state.lock().viewers.len(), 2);
+}
+#[test]
+fn a_drained_ui_cannot_release_its_successors_viewing_lease() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut ports = crate::Ports::new(directory.path().join("generated-app"), |_| {
+        Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
+    });
+    ports.background_recordings = true;
+    let old = Runtime::new(ports.clone());
+    old.start_services();
+    old.reserve_viewing(0, SourceId(1));
+    old.drain_services();
+    let new = Runtime::new(ports);
+    new.start_services();
+    assert!(new.reserve_viewing(0, SourceId(1)));
+    old.release_viewing(0);
+    drop(old);
+    assert!(new.recordings.lock().viewers.contains_key(&0));
+    new.drain_services();
 }

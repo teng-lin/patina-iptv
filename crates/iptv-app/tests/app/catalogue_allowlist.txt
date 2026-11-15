@@ -611,3 +611,10 @@ iptv-runtime/src/guide_repair/publication.rs	guide repair commit is missing
 iptv-runtime/src/guide_repair/publication.rs	guide repair was superseded
 
 iptv-app/src/play_bar/icons.rs	<circle cx='12' cy='12' r='6' fill='currentColor' stroke='none'/>
+
+# Native login integration: task/launch-agent identities and serialization.
+iptv-app/src/recording_host/startup.rs	<?xml version="1.0"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>com.hantekllc.patina.recorder</string><key>ProgramArguments</key><array><string>{}</string><string>--background-recordings</string></array><key>RunAtLoad</key><true/></dict></plist>
+iptv-app/src/recording_host/startup.rs	Library/LaunchAgents/com.hantekllc.patina.recorder.plist
+iptv-app/src/recording_host/startup.rs	Patina Recorder
+iptv-app/src/recording_host/startup.rs	[Desktop Entry]\nType=Application\nName=Patina Recorder\nExec={} --background-recordings\nTerminal=false\nNoDisplay=true\n
+iptv-app/src/recording_host/windows.rs	Patina Recorder

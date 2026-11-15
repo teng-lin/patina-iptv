@@ -15,6 +15,8 @@ object RecordingHost {
     @JvmStatic private external fun initialize()
     @JvmStatic external fun start(path: String): Long
     @JvmStatic external fun stop(path: String)
+    @JvmStatic external fun suspendViewing(path: String)
+    @JvmStatic external fun resumeViewing(path: String): Boolean
     fun attach(context: Context) {
         if (context is Activity) activity = java.lang.ref.WeakReference(context)
         this.context = context.applicationContext

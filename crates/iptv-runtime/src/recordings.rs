@@ -55,6 +55,7 @@ fn account(config: &SourceConfig) -> Account {
 }
 #[derive(Clone)]
 struct Lease {
+    source: i64,
     account: Account,
     limit: u32,
 }
@@ -73,6 +74,7 @@ struct Data {
     limits: HashMap<i64, u32>,
     provider_limits: HashMap<i64, u32>,
     viewers: HashMap<usize, Lease>,
+    suspended_viewers: HashMap<usize, Lease>,
     active: HashMap<JobId, (Lease, CancelToken)>,
     jobs: Vec<Job>,
     recurring: bool,
@@ -82,6 +84,7 @@ struct Data {
 impl Data {
     fn lease(&self, source: i64) -> Lease {
         Lease {
+            source,
             account: self
                 .accounts
                 .get(&source)
@@ -306,6 +309,7 @@ impl Runtime {
             return false;
         }
         let lease = data.lease(source.0);
+        data.suspended_viewers.remove(&surface);
         data.viewers.insert(surface, lease);
         true
     }
@@ -313,7 +317,9 @@ impl Runtime {
         if self.recordings_detached.get() {
             return;
         }
-        self.recordings.lock().viewers.remove(&surface);
+        let mut data = self.recordings.lock();
+        data.viewers.remove(&surface);
+        data.suspended_viewers.remove(&surface);
     }
     pub fn recording_snapshot(&self) -> Vec<Job> {
         self.recordings.lock().jobs.clone()
@@ -424,6 +430,16 @@ impl Runtime {
     }
 
     pub async fn stop_recording(&self, id: JobId) -> Result<(), Error> {
+        if let Some(job) = self
+            .services()
+            .read(move |store| store.recording_job(id))
+            .await?
+        {
+            if job.status == Status::Scheduled && job.bytes > 0 {
+                recover_media(&self.services(), &job).await;
+                return Ok(());
+            }
+        }
         if let Some((_, stop)) = self.recordings.lock().active.get(&id) {
             stop.cancel();
         }

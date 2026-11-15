@@ -61,7 +61,10 @@ impl State {
             .is_some()
     }
     pub(crate) fn detach_ui(&self) {
-        self.lock().viewers.clear();
+        let mut data = self.lock();
+        data.viewers.clear();
+        data.suspended_viewers.clear();
+        drop(data);
         self.playback
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -155,4 +158,48 @@ pub fn stop_background_host(directory: &Path) -> bool {
         .get(directory)
         .cloned();
     state.is_none_or(|state| state.stop())
+}
+
+/// Called only after native mobile players have closed their connections.
+pub fn suspend_viewing(directory: &Path) {
+    if let Some(state) = hosts()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(directory)
+        .cloned()
+    {
+        let mut data = state.lock();
+        let viewers = std::mem::take(&mut data.viewers);
+        data.suspended_viewers.extend(viewers);
+    }
+}
+/// Reserve the complete returning set before any native player reconnects.
+/// If it no longer fits, rendered players stay mounted and emit a retry event.
+pub fn resume_viewing(directory: &Path) -> bool {
+    let state = hosts()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(directory)
+        .cloned();
+    let Some(state) = state else { return true };
+    let mut data = state.lock();
+    let mut wanted: Vec<_> = data
+        .suspended_viewers
+        .iter()
+        .map(|(surface, lease)| (*surface, lease.clone()))
+        .collect();
+    wanted.sort_by_key(|(surface, _)| *surface);
+    let mut restored = Vec::new();
+    for (surface, lease) in wanted {
+        if !data.capacity(lease.source, Some(surface)) {
+            for surface in restored {
+                data.viewers.remove(&surface);
+            }
+            return false;
+        }
+        data.viewers.insert(surface, lease);
+        restored.push(surface);
+    }
+    data.suspended_viewers.clear();
+    true
 }

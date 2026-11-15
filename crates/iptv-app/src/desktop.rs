@@ -181,6 +181,8 @@ pub(crate) fn quit() {
     if crate::runtime().shutdown_recording_host() {
         with_window(WindowRef::close);
     } else {
-        crate::settings_view::notify("The recording host is still closing; try quitting again");
+        crate::settings_view::notify(tr(
+            "The recording host is still closing; try quitting again",
+        ));
     }
 }

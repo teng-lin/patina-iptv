@@ -518,7 +518,21 @@ fn draft_row(ui: Ui, size: Scale, row: usize) -> impl IntoElement {
                         "Finish late · {minutes} min",
                         &[("minutes", (d.trail_minutes as u64).into())],
                     ),
-                    _ => format!("Repeat · {}", d.repeat.label()),
+                    _ => trf(
+                        "Repeat · {frequency}",
+                        &[(
+                            "frequency",
+                            match d.repeat {
+                                iptv_core::recording::Repeat::Once => tr("Once"),
+                                iptv_core::recording::Repeat::Daily => tr("Every day"),
+                                iptv_core::recording::Repeat::Weekly => tr("Every week"),
+                                iptv_core::recording::Repeat::Series => {
+                                    tr("Every matching programme")
+                                }
+                            }
+                            .into(),
+                        )],
+                    ),
                 })
                 .unwrap_or_default()
         })

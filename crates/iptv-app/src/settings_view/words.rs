@@ -295,6 +295,13 @@ pub fn label(key: &str) -> &'static str {
 /// this version does.
 pub fn description(key: &str) -> Option<&'static str> {
     Some(match key {
+        "recordings.quit_host" => {
+            tr("Stop background recording and quit; pending schedules remain saved.")
+        }
+        "recordings.background_status" => tr("Background execution and wake capabilities."),
+        "recordings.enable_startup" => tr("Start the recording host at login."),
+        "recordings.disable_startup" => tr("Remove the recording host login hook."),
+        "recordings.alarm_access" => tr("Allow precise recording wakeups in Android settings."),
         "remote.customize" => {
             "Choose a key, press and action per screen; capture keys or restore defaults."
         }
