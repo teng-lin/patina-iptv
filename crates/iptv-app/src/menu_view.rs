@@ -98,6 +98,9 @@ pub fn open(ui: Ui) {
         crate::schedule().catchup_days(channel),
         now,
         |item| {
+            if item == MenuItem::BlockGroup && crate::parental_view::group_target(ui).is_none() {
+                return false;
+            }
             if matches!(item, MenuItem::Record | MenuItem::CustomRecording) {
                 return ui.player_surface == 0 && crate::recordings_view::available(channel);
             }
@@ -112,6 +115,9 @@ pub fn open(ui: Ui) {
                             | MenuItem::StartFromBeginning
                             | MenuItem::ManageFavorites
                             | MenuItem::AssignEpg
+                            | MenuItem::BlockChannel
+                            | MenuItem::BlockGroup
+                            | MenuItem::ManageBlocked
                     ))
         },
     );

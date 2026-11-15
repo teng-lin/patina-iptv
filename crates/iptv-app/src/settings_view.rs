@@ -208,23 +208,17 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
     match effect {
         Effect::None => {}
         Effect::Set { key, value } => {
-            if key.starts_with("parental.")
+            if (key.starts_with("parental.")
+                || crate::settings::choice(keys::EnumKey("parental.require_pin_for"))
+                    == "blocked_content_and_settings")
                 && (!crate::runtime().parental_has_pin()
                     || !crate::runtime().parental_settings_allowed())
             {
-                crate::parental_view::request(
-                    ui,
-                    iptv_core::parental::Target::settings(),
-                    move || {
-                        if !crate::runtime().parental_has_pin() {
-                            crate::parental_view::change_pin(ui);
-                            return;
-                        }
-                        if let Err(e) = crate::settings::set(ui, key, value) {
-                            notify_setting_error(e);
-                        }
-                    },
-                );
+                crate::parental_view::protected_settings(ui, move || {
+                    if let Err(e) = crate::settings::set(ui, key, value) {
+                        notify_setting_error(e);
+                    }
+                });
             } else if let Err(e) = crate::settings::set(ui, key, value) {
                 notify_setting_error(e);
             }
@@ -249,6 +243,14 @@ pub(crate) fn refresh(ui: Ui) {
 
 /// Runs a command (`settings::COMMANDS`).
 fn run(ui: Ui, key: &'static str) {
+    if key != "parental.change_pin"
+        && crate::settings::choice(keys::EnumKey("parental.require_pin_for"))
+            == "blocked_content_and_settings"
+        && !crate::runtime().parental_settings_allowed()
+    {
+        crate::parental_view::protected_settings(ui, move || run(ui, key));
+        return;
+    }
     match key {
         "parental.change_pin" => crate::parental_view::change_pin(ui),
         "recordings.quit_host" => crate::desktop::quit(),

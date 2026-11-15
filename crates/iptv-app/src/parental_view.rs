@@ -67,6 +67,15 @@ pub fn request(ui: Ui, target: Target, done: impl FnOnce() + 'static) {
         }
     });
 }
+pub fn protected_settings(ui: Ui, done: impl FnOnce() + 'static) {
+    request(ui, Target::settings(), move || {
+        if crate::runtime().parental_has_pin() {
+            done();
+        } else {
+            show(ui, Target::settings(), Phase::New, done);
+        }
+    });
+}
 pub fn change_pin(ui: Ui) {
     crate::data::spawn_in_app(async move {
         let owner = crate::runtime();
@@ -115,23 +124,24 @@ pub fn block_channel(ui: Ui, channel: usize) {
         block(ui, target, true);
     }
 }
-pub fn block_group(ui: Ui) {
+pub fn group_target(ui: Ui) -> Option<Target> {
     let group = ui
         .focus
-        .with_untracked(|f| f.group.saturating_sub(iptv_core::lists::FIRST_GROUP));
-    if let Some(source) = ui.library.shown.get_untracked() {
-        let id = crate::schedule().group_key(group);
-        if !id.is_empty() {
-            block(
-                ui,
-                Target {
-                    source: source.0,
-                    kind: ContentKind::Group,
-                    id,
-                },
-                true,
-            );
-        }
+        .with_untracked(|f| f.group.checked_sub(iptv_core::lists::FIRST_GROUP))?;
+    let key = crate::schedule().group_key(group);
+    if key.is_empty() || key.starts_with("playlist:") {
+        return None;
+    }
+    let (source, id) = crate::data::combined::owner(&crate::runtime(), &key)?;
+    Some(Target {
+        source: source.0,
+        kind: ContentKind::Group,
+        id,
+    })
+}
+pub fn block_group(ui: Ui) {
+    if let Some(target) = group_target(ui) {
+        block(ui, target, true);
     }
 }
 pub fn block(ui: Ui, target: Target, blocked: bool) {
@@ -554,25 +564,28 @@ pub fn layer(ui: Ui) -> View {
             }
         })
         .accessibility_elements_hidden(move || !is_open(ui))
-        .child(
-            view()
-                .w(move || size.px(440.0))
-                .p(move || size.px(16.0))
-                .gap(px(8.0))
-                .rounded(px(crate::theme::RADIUS_LARGE))
-                .bg(move || tint(ui.theme.with(|t| t.background.panel), 255))
-                .child(ui_kit::heading(size, move || {
-                    let title = label(ui);
-                    crate::i18n::tr(&title).to_owned()
-                }))
-                .child(when(move || managing(ui), move || manager(ui, size)))
-                .child(when(move || !managing(ui), move || credentials(ui, size)))
-                .child(ui_kit::button(
-                    ui,
-                    size,
-                    crate::i18n::tr("Cancel"),
-                    move || focused(ui, 13),
-                    move || close(ui),
-                )),
-        )
+        .child(when(
+            move || is_open(ui),
+            move || {
+                view()
+                    .w(move || size.px(440.0))
+                    .p(move || size.px(16.0))
+                    .gap(px(8.0))
+                    .rounded(px(crate::theme::RADIUS_LARGE))
+                    .bg(move || tint(ui.theme.with(|t| t.background.panel), 255))
+                    .child(ui_kit::heading(size, move || {
+                        let title = label(ui);
+                        crate::i18n::tr(&title).to_owned()
+                    }))
+                    .child(when(move || managing(ui), move || manager(ui, size)))
+                    .child(when(move || !managing(ui), move || credentials(ui, size)))
+                    .child(ui_kit::button(
+                        ui,
+                        size,
+                        crate::i18n::tr("Cancel"),
+                        move || focused(ui, 13),
+                        move || close(ui),
+                    ))
+            },
+        ))
 }

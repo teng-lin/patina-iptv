@@ -309,10 +309,15 @@ impl Store {
 
     /// Deletes the group and its membership (not the channels).
     pub fn delete_custom_group(&mut self, group: CustomGroupId) -> Result<bool> {
-        Ok(self
-            .conn
-            .execute("DELETE FROM custom_groups WHERE id = ?1", [group.0])?
-            > 0)
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "DELETE FROM parental_blocks WHERE kind='group' AND content_id='custom:'||?1 \
+            AND source_id IN (SELECT source_id FROM custom_groups WHERE id=?1)",
+            [group.0],
+        )?;
+        let deleted = tx.execute("DELETE FROM custom_groups WHERE id=?1", [group.0])? > 0;
+        tx.commit()?;
+        Ok(deleted)
     }
 
     /// Moves a custom group to `index` in its source's list.

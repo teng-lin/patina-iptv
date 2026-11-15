@@ -176,7 +176,6 @@ pub fn program_menu(
         [
             ToggleFavorite,
             BlockChannel,
-            BlockGroup,
             HideChannel,
             AssignEpg,
             ChannelOptions,

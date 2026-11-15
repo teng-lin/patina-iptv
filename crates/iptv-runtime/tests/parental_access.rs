@@ -26,6 +26,31 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
     catalogue.vod[0].is_series = true;
     common::replace(&mut store, source, &catalogue);
     common::replace(&mut store, other, &catalogue);
+    let custom = store
+        .create_custom_group(source, "Generated protected collection")
+        .unwrap();
+    let destination = store
+        .create_custom_group(source, "Generated destination")
+        .unwrap();
+    store
+        .add_to_custom_group(custom, &catalogue.channels[1].id)
+        .unwrap();
+    let custom_target = Target {
+        source: source.0,
+        kind: ContentKind::Group,
+        id: format!("custom:{}", custom.0),
+    };
+    assert!(
+        store
+            .parental_ancestors(&Target::live(source.0, catalogue.channels[1].id.as_str()))
+            .unwrap()
+            .contains(&custom_target)
+    );
+    assert!(
+        store.parental_memberships().unwrap()
+            [&Target::live(source.0, catalogue.channels[1].id.as_str())]
+            .contains(&custom_target)
+    );
     drop(store);
     let owner = Rc::new(Runtime::new(Ports::new(
         directory.path().to_owned(),
@@ -145,6 +170,47 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
     support::block_on(owner.parental_authorize(Target::settings(), Pin::parse("2468").unwrap()))
         .unwrap();
     support::block_on(owner.parental_set_blocked(group, true)).unwrap();
+    support::block_on(owner.parental_set_blocked(custom_target.clone(), true)).unwrap();
+    owner.parental_lock();
+    let public_id = catalogue.channels[1].id.clone();
+    assert!(support::block_on(owner.parental_check(&public)).is_err());
+    assert!(
+        support::block_on(commands::remove_custom_members(
+            &owner,
+            custom,
+            vec![public_id.clone()]
+        ))
+        .is_err()
+    );
+    assert!(support::block_on(commands::delete_custom_group(&owner, custom)).is_err());
+    assert!(
+        support::block_on(commands::transfer_custom_members(
+            &owner,
+            source,
+            Some(custom),
+            destination,
+            vec![public_id.clone()],
+            true
+        ))
+        .is_err()
+    );
+    support::block_on(owner.parental_authorize(Target::settings(), Pin::parse("2468").unwrap()))
+        .unwrap();
+    let stale_delete = commands::delete_custom_group(&owner, custom);
+    owner.parental_lock();
+    assert!(support::block_on(stale_delete).is_err());
+    support::block_on(owner.parental_authorize(Target::settings(), Pin::parse("2468").unwrap()))
+        .unwrap();
+    support::block_on(commands::remove_custom_members(
+        &owner,
+        custom,
+        vec![public_id],
+    ))
+    .unwrap();
+    assert!(support::block_on(owner.parental_check(&public)).is_ok());
+    support::block_on(commands::delete_custom_group(&owner, custom)).unwrap();
+    support::block_on(owner.parental_refresh()).unwrap();
+    assert!(!owner.parental_explicitly_blocked(&custom_target));
     owner.set_foreground(false);
     assert!(!owner.parental_settings_allowed());
     assert!(owner.flush_files(std::time::Duration::from_secs(2)));

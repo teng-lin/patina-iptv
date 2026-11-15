@@ -73,8 +73,12 @@ fn remove_custom_members_native(
     services: &Services,
     group: CustomGroupId,
     members: Vec<ContentId>,
+    access: crate::parental::Snapshot,
 ) -> impl Future<Output = Result<(), StoreError>> + use<> {
-    services.call(move |store| store.remove_custom_members(group, &members))
+    services.call(move |store| {
+        crate::parental::require_group_edit(store, group, &access)?;
+        store.remove_custom_members(group, &members)
+    })
 }
 
 fn transfer_custom_members_native(
@@ -84,15 +88,25 @@ fn transfer_custom_members_native(
     to: CustomGroupId,
     members: Vec<ContentId>,
     moving: bool,
+    access: crate::parental::Snapshot,
 ) -> impl Future<Output = Result<usize, StoreError>> + use<> {
-    services.call(move |store| store.transfer_custom_members(source, from, to, &members, moving))
+    services.call(move |store| {
+        if moving && let Some(group) = from {
+            crate::parental::require_group_edit(store, group, &access)?;
+        }
+        store.transfer_custom_members(source, from, to, &members, moving)
+    })
 }
 
 fn delete_custom_group_native(
     services: &Services,
     group: CustomGroupId,
+    access: crate::parental::Snapshot,
 ) -> impl Future<Output = Result<(), StoreError>> + use<> {
-    services.call(move |store| store.delete_custom_group(group).map(|_| ()))
+    services.call(move |store| {
+        crate::parental::require_group_edit(store, group, &access)?;
+        store.delete_custom_group(group).map(|_| ())
+    })
 }
 
 fn hide_channel_native(
@@ -694,8 +708,9 @@ pub fn remove_custom_members(
     members: Vec<ContentId>,
 ) -> impl Future<Output = Result<(), crate::Error>> + use<> {
     let services = owner.services();
+    let access = owner.parental_snapshot();
     async move {
-        remove_custom_members_native(&services, group, members)
+        remove_custom_members_native(&services, group, members, access)
             .await
             .map_err(crate::Error::from)
     }
@@ -710,8 +725,9 @@ pub fn transfer_custom_members(
     moving: bool,
 ) -> impl Future<Output = Result<usize, crate::Error>> + use<> {
     let services = owner.services();
+    let access = owner.parental_snapshot();
     async move {
-        transfer_custom_members_native(&services, source, from, to, members, moving)
+        transfer_custom_members_native(&services, source, from, to, members, moving, access)
             .await
             .map_err(crate::Error::from)
     }
@@ -722,8 +738,9 @@ pub fn delete_custom_group(
     group: CustomGroupId,
 ) -> impl Future<Output = Result<(), crate::Error>> + use<> {
     let services = owner.services();
+    let access = owner.parental_snapshot();
     async move {
-        delete_custom_group_native(&services, group)
+        delete_custom_group_native(&services, group, access)
             .await
             .map_err(crate::Error::from)
     }

@@ -389,6 +389,9 @@ impl Runtime {
             self.parental_lock();
         }
     }
+    /// Strict administrative authority for parental configuration, backup and
+    /// protected membership edits. Ordinary settings only request this grant
+    /// when `parental.require_pin_for` includes settings.
     pub fn parental_settings_allowed(&self) -> bool {
         self.parental_allowed(&Target::settings())
     }
@@ -420,6 +423,21 @@ pub(crate) struct Snapshot {
     pub access: Access,
     epoch: Arc<AtomicU64>,
     at: u64,
+}
+pub(crate) fn require_group_edit(
+    store: &iptv_store_sqlite::Store,
+    group: iptv_store_sqlite::CustomGroupId,
+    snapshot: &Snapshot,
+) -> iptv_store_sqlite::Result<()> {
+    if store.parental_custom_group_blocked(group)?
+        && (snapshot.epoch.load(Ordering::SeqCst) != snapshot.at
+            || !snapshot.access.granted(&Target::settings(), now_ms()))
+    {
+        return Err(iptv_store_sqlite::StoreError::Unavailable(
+            "Unlock parental controls before changing settings",
+        ));
+    }
+    Ok(())
 }
 pub(crate) fn native_allowed(
     store: &iptv_store_sqlite::Store,

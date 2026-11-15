@@ -121,6 +121,15 @@ impl Store {
         }
         Ok(targets)
     }
+    pub fn parental_custom_group_blocked(&self, group: crate::CustomGroupId) -> Result<bool> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM parental_blocks b \
+            JOIN custom_groups g ON b.source_id=g.source_id AND b.content_id='custom:'||g.id \
+            WHERE g.id=?1 AND b.kind='group' AND b.blocked=1)",
+            [group.0],
+            |r| r.get(0),
+        )?)
+    }
     pub fn parental_name(&self, target: &Target) -> Result<Option<String>> {
         let table = match target.kind {
             ContentKind::Live => "channels",
@@ -130,6 +139,13 @@ impl Store {
             _ => return Ok(None),
         };
         let sql = format!("SELECT name FROM {table} WHERE source_id=?1 AND id=?2");
+        let sql = if target.kind == ContentKind::Group && target.id.starts_with("custom:") {
+            "SELECT name FROM custom_groups WHERE source_id=?1 AND 'custom:'||id=?2".into()
+        } else if target.kind == ContentKind::Series {
+            format!("{sql} UNION SELECT name FROM vod WHERE source_id=?1 AND id=?2 AND is_series=1")
+        } else {
+            sql
+        };
         let name = self
             .conn
             .query_row(&sql, params![target.source, target.id], |r| {
@@ -169,9 +185,16 @@ impl Store {
                 ContentKind::VodCategory,
             ),
         ] {
-            let mut query = self
-                .conn
-                .prepare(&format!("SELECT source_id,{column},group_id FROM {table}"))?;
+            let sql = format!("SELECT source_id,{column},group_id FROM {table}");
+            let sql = if child == ContentKind::Live {
+                format!(
+                    "{sql} UNION SELECT g.source_id,m.channel_id,'custom:'||g.id \
+                FROM custom_groups g JOIN custom_group_members m ON m.group_id=g.id"
+                )
+            } else {
+                sql
+            };
+            let mut query = self.conn.prepare(&sql)?;
             let rows = query.query_map([], |r| {
                 Ok((
                     r.get::<_, i64>(0)?,
@@ -240,6 +263,15 @@ impl Store {
             ContentKind::VodCategory
         };
         let sql = format!("SELECT group_id FROM {table} WHERE source_id=?1 AND {column}=?2");
+        let sql = if target.kind == ContentKind::Live {
+            format!(
+                "{sql} UNION SELECT 'custom:'||g.id \
+            FROM custom_groups g JOIN custom_group_members m ON m.group_id=g.id \
+            WHERE g.source_id=?1 AND m.channel_id=?2"
+            )
+        } else {
+            sql
+        };
         let sql = if target.kind == ContentKind::Series {
             format!(
                 "{sql} UNION SELECT vg.group_id \
