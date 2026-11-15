@@ -785,7 +785,7 @@ mod tests {
         let playlist = format!(
             "#EXTM3U\n#EXT-X-TARGETDURATION:1\n\
              #EXT-X-KEY:METHOD=AES-128,URI=http://{blocked}/synthetic.key\n\
-             #EXTINF:1,\nhttp://{blocked}/segment.ts\n#EXT-X-ENDLIST\n",
+             #EXTINF:1,\nhttp://{origin_address}/segment.ts\n#EXT-X-ENDLIST\n",
             blocked = forbidden.local_addr().unwrap()
         );
         let stop = Arc::new(AtomicBool::new(false));
@@ -801,14 +801,25 @@ mod tests {
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
-                let _ = stream.read(&mut [0; 4096]);
+                let mut request = [0; 4096];
+                let read = stream.read(&mut request).unwrap_or(0);
                 seen_server.store(true, Ordering::Release);
+                // Keep the segment on the trusted origin: otherwise FFmpeg
+                // may refuse that independent request before asking for the
+                // key, depending on its native fetch order. Only the key is
+                // forbidden in this test. Decryption cannot start without it.
+                let ciphertext = [0; 256];
+                let (body, mime) = if request[..read].starts_with(b"GET /segment.ts ") {
+                    (&ciphertext[..], "video/mp2t")
+                } else {
+                    (playlist.as_bytes(), "application/vnd.apple.mpegurl")
+                };
                 let response = format!(
-                    "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-                    playlist.len(),
-                    playlist
+                    "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: {mime}\r\nContent-Length: {}\r\n\r\n",
+                    body.len()
                 );
                 let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(body);
             }
         });
         fn actual_policy(public_only: bool) -> iptv_net::playback::PlaybackPolicy {
@@ -843,7 +854,14 @@ mod tests {
         );
         assert!(
             iptv_net::playback::PlaybackRelay::key_requests_for(&source_url) > keys_before,
-            "the player requested the encryption key through the relay"
+            "the player requested the encryption key through the relay; transport errors: {:?}",
+            notes
+                .iter()
+                .filter_map(|note| match note {
+                    Note::TransportError(code) => Some(code),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
         );
         assert!(
             !notes
