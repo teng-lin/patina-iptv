@@ -249,6 +249,10 @@ impl Runtime {
             .map_err(|_| unavailable())??;
         Ok((playing, source))
     }
+    pub fn queue_vod_progress(&self,key:Key,parent:Option<Key>,progress:Progress) {
+        // Submission is synchronous; the owner's writer persists even if the view closes.
+        let _queued=self.services().call(move |s|s.save_vod_progress(&key,parent.as_ref().map(|p|p.id.as_str()),progress));
+    }
     pub async fn vod_save_progress(
         &self,
         key: Key,

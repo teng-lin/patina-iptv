@@ -303,6 +303,8 @@ pub fn play_recording(ui: Ui, job: iptv_core::recording::Job, source: PlaySource
 }
 
 pub fn play_vod(ui: Ui, playing: iptv_runtime::vod::Playing, source: PlaySource) {
+    crate::on_demand::flush(ui,false);
+    let resume=playing.progress.resume_ms();
     crate::multiview::close(ui);
     cancel_resolve(0);
     crate::runtime().close_recording_playback();
@@ -322,6 +324,7 @@ pub fn play_vod(ui: Ui, playing: iptv_runtime::vod::Playing, source: PlaySource)
         .health
         .update(|h| session = h.start(false, ui.now_ms()));
     load(ui, 0, session, source);
+    if resume>0 {ui.player.main().resume_ms.set(Some(resume));}
     ui.mode.set(ViewMode::Fullscreen);
 }
 

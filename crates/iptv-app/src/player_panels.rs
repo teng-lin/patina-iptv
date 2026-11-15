@@ -188,15 +188,16 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .pointer_events(move || events(hidden(), PointerEvents::BoxNone))
                 .child(when(banner, move || card::banner(ui, panel)))
                 .child(when(
-                    move || card() && ui.player.recorded.with(Option::is_none),
+                    move || card() && ui.player.recorded.with(Option::is_none) && ui.player.vod.with(Option::is_none),
                     move || card::info_card(ui, panel),
                 ))
                 .child(when(
-                    move || card() && ui.player.recorded.with(Option::is_some),
+                    move || card() && (ui.player.recorded.with(Option::is_some) || ui.player.vod.with(Option::is_some)),
                     move || {
                         let size = crate::scale::Scale::new();
                         crate::ui_kit::card(ui, size, 620.0)
                             .child(crate::ui_kit::title(size, move || {
+                                if let Some(title)=crate::vod_view::title(ui) {return title;}
                                 ui.player.recorded.with(|r| {
                                     r.as_ref()
                                         .map(|(job, _)| job.request.title.clone())
@@ -266,7 +267,9 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
         )
         .child(
             text(move || {
-                if ui.player.recorded.with(Option::is_some) {
+                if ui.player.vod.with(Option::is_some) {
+                    if live() {tr("Video")} else {tr("Paused")}
+                } else if ui.player.recorded.with(Option::is_some) {
                     if live() { tr("Recorded") } else { "PAUSED" }
                 } else {
                     match (ui.playback.get(), live()) {

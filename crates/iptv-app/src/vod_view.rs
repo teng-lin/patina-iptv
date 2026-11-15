@@ -265,21 +265,7 @@ pub fn title(ui: Ui) -> Option<String> {
         .vod
         .with(|v| v.as_ref().map(|(p, _)| p.title.clone()))
 }
-pub fn flush(ui: Ui) {
-    let ms = ui.player.main().position_ms.get_untracked();
-    if let Some((p, _)) = ui.player.vod.get_untracked() {
-        let owner = crate::runtime();
-        crate::data::spawn_in_app(async move {
-            let _ = owner
-                .vod_save_progress(
-                    p.key,
-                    p.parent,
-                    Progress::observed(ms, p.progress.duration_ms, false),
-                )
-                .await;
-        });
-    }
-}
+pub fn flush(ui:Ui){crate::on_demand::flush(ui,false);}
 pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) {
     let mut write = None;
     let mut finished = None;
@@ -301,12 +287,7 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
         }
         p.progress = progress;
     });
-    if let Some((key, parent, progress)) = write {
-        let owner = crate::runtime();
-        crate::data::spawn_in_app(async move {
-            let _ = owner.vod_save_progress(key, parent, progress).await;
-        });
-    }
+    if let Some((key,parent,progress))=write {crate::runtime().queue_vod_progress(key,parent,progress);}
     if let Some(p) = finished {
         if let Some(next) = p.details.next_episode(&p.key) {
             if crate::settings::flag(iptv_settings::keys::BoolKey("vod.autoplay_next_episode")) {
