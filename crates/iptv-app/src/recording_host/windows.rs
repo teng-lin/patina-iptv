@@ -1,5 +1,8 @@
 //! Activate the running executable before a second owner opens storage.
-use std::{ffi::c_void, path::PathBuf};
+use std::{
+    ffi::c_void,
+    path::{Path, PathBuf},
+};
 type Handle = *mut c_void;
 #[link(name = "user32")]
 unsafe extern "system" {
@@ -55,7 +58,7 @@ unsafe extern "system" fn visit(window: Handle, data: isize) -> i32 {
     // SAFETY: this owned handle is closed exactly once after the final query.
     unsafe { CloseHandle(handle) };
     if ok != 0
-        && PathBuf::from(String::from_utf16_lossy(&buffer[..size as usize])) == search.executable
+        && Path::new(&String::from_utf16_lossy(&buffer[..size as usize])) == search.executable
     {
         // SAFETY: both APIs accept the enumerated opaque HWND, retain no Rust
         // pointers, and return failure if the window has since disappeared.
