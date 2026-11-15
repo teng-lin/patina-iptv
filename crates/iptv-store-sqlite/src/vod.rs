@@ -38,7 +38,23 @@ v.is_series=1))) ORDER BY g.name COLLATE NOCASE,g.source_id,g.id LIMIT 2000")?;
         .map_err(Into::into)
     }
     pub fn vod_page(&self, query: &Query, offset: u32, limit: u32) -> Result<(Vec<Card>, bool)> {
+        self.vod_page_inner(query, offset, limit, None)
+    }
+    fn vod_page_inner(
+        &self,
+        query: &Query,
+        offset: u32,
+        limit: u32,
+        exact: Option<&Key>,
+    ) -> Result<(Vec<Card>, bool)> {
         let limit = limit.clamp(1, 200);
+        // Explicit equality lets SQLite use each catalogue's source/content key.
+        // An optional OR predicate would still scan every shared-name item.
+        let identity = if exact.is_some() {
+            "v.source_id=?2 AND v.id=?9"
+        } else {
+            "?9 IS NULL"
+        };
         let order = match query.sort {
             iptv_core::vod::Sort::Name => "v.name COLLATE NOCASE",
             iptv_core::vod::Sort::Newest => "v.added DESC",
@@ -55,7 +71,7 @@ FROM series v) SELECT \
 v.source_id,v.id,v.kind,v.name,s.name,v.group_ids,v.poster,v.plot,v.year,v.rating,v.duration_secs,COALESCE(w.position_ms,0),w.duration_ms,COALESCE(w.completed,0) \
 FROM items v JOIN sources s ON s.id=v.source_id LEFT JOIN source_policy p ON p.source_id=s.id LEFT \
 JOIN vod_progress w ON w.source_id=v.source_id AND w.kind=v.kind AND w.content_id=v.id WHERE \
-COALESCE(p.enabled,1)=1 AND v.kind=?1 AND (?2 IS NULL OR v.source_id=?2) AND (?3 IS NULL OR \
+COALESCE(p.enabled,1)=1 AND {identity} AND v.kind=?1 AND (?2 IS NULL OR v.source_id=?2) AND (?3 IS NULL OR \
 (v.source_id=?3 AND EXISTS(SELECT 1 FROM json_each(v.group_ids) x WHERE x.value=?4))) AND \
 instr(lower(v.name),lower(?5))>0 AND (?6=0 OR (w.position_ms>=5000 AND w.completed=0)) ORDER BY \
 {order},v.source_id,v.id LIMIT ?7 OFFSET ?8"
@@ -70,7 +86,8 @@ instr(lower(v.name),lower(?5))>0 AND (?6=0 OR (w.position_ms>=5000 AND w.complet
                 query.text.trim(),
                 query.continue_watching,
                 limit + 1,
-                offset
+                offset,
+                exact.map(|key| key.id.as_str())
             ],
             |r| {
                 Ok((
@@ -177,30 +194,13 @@ v.source_id=?1 AND v.id=?2 AND COALESCE(p.enabled,1)=1 AND ((?3='series' AND v.i
             .map_err(Into::into)
     }
     pub fn vod_card(&self, key: &Key) -> Result<Option<Card>> {
-        let mut query = Query {
+        let query = Query {
             kind: key.kind,
             source: Some(key.source),
             ..Default::default()
         };
-        // Exact identity is resolved in SQL below, not a text/name match.
-        let sql = "SELECT name FROM vod WHERE source_id=?1 AND id=?2 UNION ALL SELECT name FROM series WHERE source_id=?1 AND id=?2 LIMIT 1";
-        let name: Option<String> = self
-            .conn
-            .query_row(sql, params![key.source, key.id], |r| r.get(0))
-            .optional()?;
-        let Some(name) = name else { return Ok(None) };
-        query.text = name;
-        let mut offset = 0;
-        loop {
-            let (cards, more) = self.vod_page(&query, offset, 200)?;
-            if let Some(card) = cards.into_iter().find(|c| c.key == *key) {
-                return Ok(Some(card));
-            }
-            if !more {
-                return Ok(None);
-            }
-            offset += 200;
-        }
+        let (cards, _) = self.vod_page_inner(&query, 0, 1, Some(key))?;
+        Ok(cards.into_iter().next())
     }
     pub fn vod_progress(&self, key: &Key) -> Result<Progress> {
         self.conn.query_row("SELECT position_ms,duration_ms,completed FROM vod_progress WHERE source_id=?1 AND kind=?2 AND content_id=?3",
@@ -331,6 +331,52 @@ mod tests {
         let replacement = store.add_source(&source).unwrap();
         assert_eq!(replacement.0, movie.source);
         assert_eq!(store.vod_resume_episode(&series).unwrap(), None);
+    }
+    #[test]
+    fn exact_lookup_has_a_fixed_work_budget_among_many_shared_names() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let (mut store, key) = fixture();
+        let source = crate::SourceId(key.source);
+        let template = store.load_vod(source, None, 0, Some(1)).unwrap().remove(0);
+        let movies: Vec<_> = (0..5000)
+            .map(|index| {
+                let mut item = template.clone();
+                item.id = iptv_providers::ContentId::from_stored(format!("generated-{index:05}"));
+                item.name = "Generated shared title".into();
+                item.groups.clear();
+                item
+            })
+            .collect();
+        store
+            .replace_catalog(source, &[], &[], &movies, &[])
+            .unwrap();
+        let key = Key {
+            source: source.0,
+            kind: Kind::Movie,
+            id: movies.last().unwrap().id.to_string(),
+        };
+        let budget = Arc::new(AtomicUsize::new(0));
+        let steps = budget.clone();
+        store
+            .conn
+            .progress_handler(
+                1000,
+                Some(move || steps.fetch_add(1, Ordering::Relaxed) > 20),
+            )
+            .unwrap();
+        let result = store.vod_card(&key);
+        store
+            .conn
+            .progress_handler(0, None::<fn() -> bool>)
+            .unwrap();
+        assert_eq!(result.unwrap().unwrap().key, key);
+        assert!(
+            budget.load(Ordering::Relaxed) <= 20,
+            "identity lookup scanned the catalogue"
+        );
     }
     fn fixture() -> (Store, Key) {
         let mut store = Store::open_in_memory().unwrap();
