@@ -427,8 +427,15 @@ class PlayerComponent(
                     emit(PlayerEvent.Position(player.currentPosition.coerceAtLeast(0)))
                 }
                 if (!away && !live && url != null && player.playbackState == Player.STATE_READY) {
-                    emit(PlayerEvent.Timeline(token, seekId, player.currentPosition.coerceAtLeast(0),
-                        player.duration.takeIf { it > 0 }, player.isCurrentMediaItemSeekable))
+                    emit(
+                        PlayerEvent.Timeline(
+                            token,
+                            seekId,
+                            player.currentPosition.coerceAtLeast(0),
+                            player.duration.takeIf { it > 0 },
+                            player.isCurrentMediaItemSeekable,
+                        ),
+                    )
                 }
                 ticker.postDelayed(this, 1_000)
             }

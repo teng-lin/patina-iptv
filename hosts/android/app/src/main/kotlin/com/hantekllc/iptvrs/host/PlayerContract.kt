@@ -77,7 +77,11 @@ internal data class PlayerPip(
 }
 
 /** An idempotent native seek scoped to the exact source. */
-internal data class PlayerSeek(val token: Long, val id: Long, val ms: Long) {
+internal data class PlayerSeek(
+    val token: Long,
+    val id: Long,
+    val ms: Long,
+) {
     companion object {
         fun from(value: Any?): PlayerSeek? {
             val map = value as? Map<*, *> ?: return null
@@ -247,10 +251,14 @@ internal sealed class PlayerEvent(
         val durationMs: Long?,
         val seekable: Boolean,
     ) : PlayerEvent("timeline") {
-        override fun data(): Map<String, Any?> = mapOf(
-            "token" to token, "seekId" to seekId, "ms" to ms,
-            "durationMs" to durationMs, "seekable" to seekable,
-        )
+        override fun data(): Map<String, Any?> =
+            mapOf(
+                "token" to token,
+                "seekId" to seekId,
+                "ms" to ms,
+                "durationMs" to durationMs,
+                "seekable" to seekable,
+            )
     }
 
     /** The open stream's tracks and what plays; a null number is unknown. */
