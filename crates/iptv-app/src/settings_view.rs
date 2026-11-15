@@ -555,7 +555,9 @@ mod tests {
         // Panel timeouts, channel-change info, seek keys and three steps.
         assert_eq!(active, 7);
         let parental = PAGES.iter().find(|p| p.key == "parental").unwrap();
-        assert_eq!(counts(parental).0, 6);
+        // The two enable switches and PIN command are active by default;
+        // protection-dependent preferences activate after protection is enabled.
+        assert_eq!(counts(parental), (3, 6));
     }
 
     #[test]

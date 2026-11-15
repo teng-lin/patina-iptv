@@ -28,6 +28,11 @@ const SHELL_MAY_NAME: &[&str] = &[
     "model",
     // A stored source's playback context before its refresh (pure).
     "playback",
+    // Typed parental errors, on-demand identities, and native recorder lifecycle
+    // entrypoints. OS startup can precede a UI Runtime; all other work is owned.
+    "parental",
+    "recordings",
+    "vod",
     // Effective setting values and the save error.
     "settings",
     // Private-directory protection, before any owner exists.
