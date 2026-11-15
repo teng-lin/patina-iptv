@@ -58,6 +58,303 @@ async fn seed(owner: &Runtime, url: &str) -> Request {
         .await
         .unwrap()
 }
+
+fn seed_series_guide(owner: &Runtime, request: &Request, start: i64, end: i64) {
+    let raw = rusqlite::Connection::open(owner.data_dir().join("iptv.sqlite")).unwrap();
+    raw.pragma_update(None, "key", format!("x'{}'", "11".repeat(32)))
+        .unwrap();
+    raw.pragma_update(None, "foreign_keys", true).unwrap();
+    raw.execute(
+        "INSERT INTO epg_guides(source_id) VALUES(?1)",
+        [request.source],
+    )
+    .unwrap();
+    raw.execute("INSERT INTO epg_feeds(source_id,feed_id,url,priority,fetched_at) VALUES(?1,1,'https://example.test/generated.xmltv',0,?2)", rusqlite::params![request.source, now()]).unwrap();
+    raw.execute(
+        "INSERT INTO epg_channels(id,source_id,feed_id,epg_channel) VALUES(1,?1,1,'generated')",
+        [request.source],
+    )
+    .unwrap();
+    raw.execute("INSERT INTO epg_bindings(source_id,channel_key,epg_channel_id,match_kind) VALUES(?1,?2,1,'tvg-id')", rusqlite::params![request.source, request.channel]).unwrap();
+    for offset in [0, 86400] {
+        raw.execute(
+            "INSERT INTO epg_programmes(channel_id,start,stop,title) VALUES(1,?1,?2,?3)",
+            rusqlite::params![start + offset, end + offset, request.title],
+        )
+        .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn series_padding_is_applied_once_and_raw_occurrence_cancellation_survives_refresh() {
+    use iptv_core::recording::{RecurrenceTiming, Repeat};
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(&directory.path().join("generated-app"));
+    let mut request = seed(&owner, "https://example.test/generated.ts").await;
+    let (start, end) = (request.start, request.end);
+    seed_series_guide(&owner, &request, start, end);
+    request.start -= 300;
+    request.end += 600;
+    let first = owner
+        .schedule_repeating_recording_with_timing(
+            request.clone(),
+            Repeat::Series,
+            Some(RecurrenceTiming {
+                programme_start: start,
+                programme_end: end,
+                lead_seconds: 300,
+                trail_seconds: 600,
+            }),
+        )
+        .await
+        .unwrap();
+    let jobs = owner.recording_jobs().await.unwrap();
+    assert_eq!(
+        jobs.len(),
+        2,
+        "the initial padded episode must not be materialized twice"
+    );
+    assert!(
+        jobs.iter()
+            .any(|job| job.request.start == start - 300 && job.request.end == end + 600)
+    );
+    assert!(jobs.iter().any(
+        |job| job.request.start == start + 86400 - 300 && job.request.end == end + 86400 + 600
+    ));
+    let rule = owner.recording_rules().await.unwrap().pop().unwrap();
+    assert_eq!((rule.lead_seconds, rule.trail_seconds), (300, 600));
+    owner.stop_recording(first).await.unwrap();
+    owner.delete_recording(first).await.unwrap();
+    rules::materialize(&owner.services()).await.unwrap();
+    assert_eq!(
+        owner.recording_jobs().await.unwrap().len(),
+        1,
+        "deleting the initial episode does not rearm its raw guide identity"
+    );
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn a_currently_airing_series_first_capture_does_not_duplicate_the_guide_occurrence() {
+    use iptv_core::recording::Repeat;
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(&directory.path().join("generated-app"));
+    let mut request = seed(&owner, "https://example.test/generated.ts").await;
+    let start = now() - 120;
+    let end = now() + 600;
+    seed_series_guide(&owner, &request, start, end);
+    request.start = now();
+    request.end = end;
+    owner
+        .schedule_repeating_recording(request, Repeat::Series)
+        .await
+        .unwrap();
+    assert_eq!(
+        owner.recording_jobs().await.unwrap().len(),
+        2,
+        "record-now and the raw currently-airing occurrence are the same episode"
+    );
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn current_daily_and_weekly_captures_keep_the_nominal_clock_and_duration() {
+    use iptv_core::recording::{RecurrenceTiming, Repeat};
+    for (repeat, interval) in [(Repeat::Daily, 86400), (Repeat::Weekly, 7 * 86400)] {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = owner(&directory.path().join("generated-app"));
+        let mut request = seed(&owner, "https://example.test/generated.ts").await;
+        let start = now() - 600;
+        let end = now() + 600;
+        request.start = now();
+        request.end = end + 600;
+        let first_start = request.start;
+        let id = owner
+            .schedule_repeating_recording_with_timing(
+                request,
+                repeat,
+                Some(RecurrenceTiming {
+                    programme_start: start,
+                    programme_end: end,
+                    lead_seconds: 300,
+                    trail_seconds: 600,
+                }),
+            )
+            .await
+            .unwrap();
+        let jobs = owner.recording_jobs().await.unwrap();
+        assert_eq!(
+            jobs.iter().find(|job| job.id == id).unwrap().request.start,
+            first_start
+        );
+        let nominal = owner.recording_rules().await.unwrap().pop().unwrap();
+        assert_eq!(
+            nominal.local_start,
+            rules::local_timestamp(start - 300).unwrap()
+        );
+        assert_eq!(
+            nominal.request.end - nominal.request.start,
+            end + 600 - (start - 300)
+        );
+        let local_next = nominal.local_start + interval;
+        if let (Some(next_start), Some(next_end)) = (
+            rules::utc_timestamp(local_next),
+            rules::utc_timestamp(local_next + nominal.request.end - nominal.request.start),
+        ) {
+            assert!(
+                jobs.iter()
+                    .any(|job| job.request.start == next_start && job.request.end == next_end),
+                "the next capture keeps its local clock and full padded duration across DST"
+            );
+        }
+        assert_eq!(
+            jobs.iter().filter(|job| job.request.start < end).count(),
+            1,
+            "the clamped initial capture is the only current occurrence"
+        );
+        assert!(owner.drain_services());
+    }
+}
+
+#[tokio::test]
+async fn overlapping_daily_and_weekly_windows_do_not_abort_later_rule_materialization() {
+    use iptv_core::recording::{Repeat, Rule, RuleId};
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(&directory.path().join("generated-app"));
+    let request = seed(&owner, "https://example.test/generated.ts").await;
+    let (daily, weekly, third, shared, shared_start, third_start) = owner
+        .services()
+        .call(move |store| {
+            let daily = Rule {
+                id: RuleId(100),
+                local_start: rules::local_timestamp(request.start).unwrap(),
+                request: request.clone(),
+                repeat: Repeat::Daily,
+                enabled: true,
+                lead_seconds: 0,
+                trail_seconds: 0,
+            };
+            store.schedule_recording_rule_and_first(&daily, JobId(1001), now())?;
+            let mut third = daily.clone();
+            third.id = RuleId(300);
+            third.request.start += 1800;
+            third.request.end += 1800;
+            third.local_start = rules::local_timestamp(third.request.start).unwrap();
+            store.schedule_recording_rule_and_first(&third, JobId(3001), now())?;
+            let (shared_start, shared_end, third_start) = (1..=7)
+                .find_map(|day| {
+                    Some((
+                        rules::utc_timestamp(daily.local_start + day * 86400)?,
+                        rules::utc_timestamp(
+                            daily.local_start + day * 86400 + request.end - request.start,
+                        )?,
+                        rules::utc_timestamp(third.local_start + day * 86400)?,
+                    ))
+                })
+                .unwrap();
+            let mut weekly = daily.clone();
+            weekly.id = RuleId(200);
+            weekly.repeat = Repeat::Weekly;
+            weekly.request.start = shared_start;
+            weekly.request.end = shared_end;
+            weekly.local_start = rules::local_timestamp(shared_start).unwrap();
+            let shared = store.schedule_recording_rule_and_first(&weekly, JobId(2001), now())?;
+            Ok((
+                daily.id,
+                weekly.id,
+                third.id,
+                shared,
+                shared_start,
+                third_start,
+            ))
+        })
+        .await
+        .unwrap();
+    rules::materialize(&owner.services()).await.unwrap();
+    let jobs = owner.recording_jobs().await.unwrap();
+    assert_eq!(
+        jobs.iter()
+            .filter(|job| job.request.start == shared_start)
+            .count(),
+        1,
+        "one capture satisfies both rules"
+    );
+    assert!(
+        jobs.iter().any(|job| job.request.start == third_start),
+        "a shared earlier window does not starve the third rule"
+    );
+    owner
+        .set_recording_rule_enabled(weekly, false)
+        .await
+        .unwrap();
+    assert_eq!(
+        owner
+            .recording_jobs()
+            .await
+            .unwrap()
+            .iter()
+            .find(|job| job.id == shared)
+            .unwrap()
+            .status,
+        Status::Scheduled,
+        "daily still requires the shared job"
+    );
+    owner
+        .set_recording_rule_enabled(weekly, true)
+        .await
+        .unwrap();
+    owner
+        .set_recording_rule_enabled(daily, false)
+        .await
+        .unwrap();
+    assert_eq!(
+        owner
+            .recording_jobs()
+            .await
+            .unwrap()
+            .iter()
+            .find(|job| job.id == shared)
+            .unwrap()
+            .status,
+        Status::Scheduled,
+        "re-enabled weekly intent keeps the shared capture when daily is paused"
+    );
+    owner.stop_repeating_recording(shared).await.unwrap();
+    let remaining = owner.recording_rules().await.unwrap();
+    assert!(
+        !remaining
+            .iter()
+            .any(|rule| rule.id == daily || rule.id == weekly),
+        "job-level cancellation removes all linked recurring intents"
+    );
+    assert!(remaining.iter().any(|rule| rule.id == third));
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn an_isolated_recording_owner_can_restart_without_a_native_background_service() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(&directory.path().join("generated-app"));
+    let mut request = seed(&owner, &server()).await;
+    owner.start_recordings();
+    for _ in 0..100 {
+        if owner.recordings.lock().ready {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(owner.shutdown_recording_host());
+    request.start = now();
+    request.end = request.start + 20;
+    let id = owner.schedule_recording(request).await.unwrap();
+    until(&owner, id, |job| {
+        job.status == Status::Recording && job.bytes >= 188
+    })
+    .await;
+    owner.stop_recording(id).await.unwrap();
+    until(&owner, id, |job| !job.status.active()).await;
+    assert!(owner.drain_services());
+}
 fn server() -> String {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/generated.ts", listener.local_addr().unwrap());

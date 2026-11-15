@@ -199,6 +199,16 @@ pub fn programme(ui: Ui, origin: Origin, custom: bool) {
         request.start = crate::time::wall_unix();
         request.end = request.start + 3600;
     }
+    let programme = if custom {
+        None
+    } else {
+        let schedule = crate::schedule();
+        let programme = schedule.program_at(origin.channel, origin.program_start);
+        Some((
+            crate::guide::unix_of(&*schedule, programme.start),
+            crate::guide::unix_of(&*schedule, programme.end),
+        ))
+    };
     ui.menu.set(None);
     ui.description.set(None);
     ui.recordings.update(|s| {
@@ -220,7 +230,10 @@ pub fn programme(ui: Ui, origin: Origin, custom: bool) {
             s.action = 0;
             s.draft = None;
         } else {
-            s.draft = Some(Draft::new(request));
+            let mut draft = Draft::new(request);
+            draft.programme_start = programme.map(|(start, _)| start);
+            draft.programme_end = programme.map(|(_, end)| end);
+            s.draft = Some(draft);
         }
     });
 }
@@ -251,7 +264,20 @@ fn save_allowed(ui: Ui, draft: Draft) {
             Some(id) => owner.update_recording(id, request).await.map(|()| id),
             None => {
                 owner
-                    .schedule_repeating_recording(request, draft.repeat)
+                    .schedule_repeating_recording_with_timing(
+                        request,
+                        draft.repeat,
+                        (draft.repeat != iptv_core::recording::Repeat::Once).then_some(
+                            iptv_core::recording::RecurrenceTiming {
+                                programme_start: draft
+                                    .programme_start
+                                    .unwrap_or(draft.request.start),
+                                programme_end: draft.programme_end.unwrap_or(draft.request.end),
+                                lead_seconds: draft.lead_minutes.clamp(0, 60) as u32 * 60,
+                                trail_seconds: draft.trail_minutes.clamp(0, 60) as u32 * 60,
+                            },
+                        ),
+                    )
                     .await
             }
         };

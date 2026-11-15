@@ -85,10 +85,9 @@ impl State {
             .host
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if execution.started {
-            let Some(previous) = host.as_ref() else {
-                return false;
-            };
+        if execution.started
+            && let Some(previous) = host.as_ref()
+        {
             let ports = previous.accept().ports().clone();
             *host = Some(Arc::new(Service::new(ports)));
         }

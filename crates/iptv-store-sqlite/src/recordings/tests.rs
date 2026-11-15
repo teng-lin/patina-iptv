@@ -32,6 +32,146 @@ fn fixture() -> (Store, Request) {
     };
     (store, request)
 }
+
+#[test]
+fn series_occurrences_keep_raw_identity_across_padding_cancellation_and_retry() {
+    use iptv_core::recording::{Repeat, Rule, RuleId};
+    let (mut store, original) = fixture();
+    let mut padded = original.clone();
+    padded.start -= 300;
+    padded.end += 600;
+    let rule = Rule {
+        id: RuleId(400),
+        local_start: original.start,
+        request: padded.clone(),
+        repeat: Repeat::Series,
+        enabled: true,
+        lead_seconds: 300,
+        trail_seconds: 600,
+    };
+    let first = store
+        .schedule_recording_rule_and_first_at(
+            &rule,
+            JobId(401),
+            original.start,
+            original.start - 1000,
+        )
+        .unwrap();
+    let loaded = store.recording_rules().unwrap().pop().unwrap();
+    assert_eq!((loaded.lead_seconds, loaded.trail_seconds), (300, 600));
+    assert!(
+        store
+            .recording_rule_has_occurrence(rule.id, original.start)
+            .unwrap()
+    );
+    assert!(
+        !store
+            .recording_rule_has_occurrence(rule.id, padded.start)
+            .unwrap()
+    );
+    assert_eq!(
+        store
+            .materialize_recording_rule_at(
+                rule.id,
+                JobId(402),
+                &padded,
+                original.start,
+                original.start - 1000
+            )
+            .unwrap(),
+        None
+    );
+    // A retry may have a later clamped record-now start; its raw occurrence is stable.
+    let mut retry = rule.clone();
+    retry.request.start += 10;
+    assert_eq!(
+        store
+            .schedule_recording_rule_and_first_at(
+                &retry,
+                JobId(403),
+                original.start,
+                original.start - 1000
+            )
+            .unwrap(),
+        first
+    );
+    store
+        .transition_recording(first, Status::Scheduled, Status::Cancelled, 0, "Cancelled")
+        .unwrap();
+    store.remove_recording(first).unwrap();
+    assert_eq!(
+        store
+            .materialize_recording_rule_at(
+                rule.id,
+                JobId(404),
+                &padded,
+                original.start,
+                original.start - 1000
+            )
+            .unwrap(),
+        None
+    );
+}
+
+#[test]
+fn cancelling_recurring_schedules_frees_the_rule_quota_without_deleting_job_history() {
+    use iptv_core::recording::{Repeat, Rule, RuleId};
+    let (mut store, request) = fixture();
+    for n in 0..110 {
+        let mut occurrence = request.clone();
+        occurrence.start += n * 86400;
+        occurrence.end += n * 86400;
+        let rule = Rule {
+            id: RuleId(1000 + n),
+            local_start: occurrence.start,
+            request: occurrence,
+            repeat: Repeat::Daily,
+            enabled: true,
+            lead_seconds: 0,
+            trail_seconds: 0,
+        };
+        let job = store
+            .schedule_recording_rule_and_first(&rule, JobId(2000 + n), request.start - 1)
+            .unwrap();
+        store.cancel_recording_rule(rule.id).unwrap();
+        assert!(store.recording_rules().unwrap().is_empty());
+        assert_eq!(
+            store.recording_job(job).unwrap().unwrap().status,
+            Status::Cancelled
+        );
+    }
+    assert_eq!(store.recording_jobs().unwrap().len(), 110);
+}
+
+#[test]
+fn a_colliding_first_job_cannot_silently_attach_a_different_repeating_rule() {
+    use iptv_core::recording::{Repeat, Rule, RuleId};
+    let (mut store, request) = fixture();
+    let mut rule = Rule {
+        id: RuleId(500),
+        local_start: request.start,
+        request: request.clone(),
+        repeat: Repeat::Daily,
+        enabled: true,
+        lead_seconds: 0,
+        trail_seconds: 0,
+    };
+    let first = store
+        .schedule_recording_rule_and_first(&rule, JobId(501), request.start - 1)
+        .unwrap();
+    rule.id = RuleId(502);
+    rule.repeat = Repeat::Weekly;
+    assert!(
+        store
+            .schedule_recording_rule_and_first(&rule, JobId(503), request.start - 1)
+            .is_err()
+    );
+    assert_eq!(store.recording_rules().unwrap().len(), 1);
+    assert_eq!(
+        store.recording_rule_for_job(first).unwrap(),
+        Some(RuleId(500))
+    );
+}
 #[test]
 fn edited_or_cancelled_intent_invalidates_a_scheduler_claim() {
     let (mut store, mut request) = fixture();
@@ -210,6 +350,8 @@ fn recurrence_claim_cancel_and_deletion_never_rearm_an_occurrence() {
         request: request.clone(),
         repeat: Repeat::Daily,
         enabled: true,
+        lead_seconds: 0,
+        trail_seconds: 0,
     };
     let first = store
         .schedule_recording_rule_and_first(&rule, JobId(101), request.start - 1)
@@ -273,6 +415,8 @@ fn stale_recurring_source_has_no_authority_for_a_replacement() {
         request: request.clone(),
         repeat: Repeat::Daily,
         enabled: true,
+        lead_seconds: 0,
+        trail_seconds: 0,
     };
     store
         .schedule_recording_rule(&rule, request.start - 1)
@@ -303,6 +447,8 @@ fn enabling_a_rule_restores_only_future_jobs_cancelled_by_disabling_it() {
         repeat: Repeat::Daily,
         local_start: request.start,
         enabled: true,
+        lead_seconds: 0,
+        trail_seconds: 0,
     };
     let first = store
         .schedule_recording_rule_and_first(&rule, JobId(201), request.start - 1)

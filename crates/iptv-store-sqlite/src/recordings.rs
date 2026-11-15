@@ -27,6 +27,19 @@ fn stored(value: Status) -> &'static str {
         Status::Missed => "missed",
     }
 }
+
+fn cancel_rule(tx: &rusqlite::Transaction<'_>, rule: iptv_core::recording::RuleId) -> Result<()> {
+    tx.execute("UPDATE recording_rules SET enabled=0 WHERE id=?1", [rule.0])?;
+    tx.execute(
+        "UPDATE recording_jobs SET status='cancelled',message='Recurring schedule disabled'
+        WHERE status='scheduled' AND id IN (SELECT job_id FROM recording_rule_jobs WHERE rule_id=?1)
+        AND NOT EXISTS(SELECT 1 FROM recording_rule_jobs j JOIN recording_rules q ON q.id=j.rule_id
+            WHERE j.job_id=recording_jobs.id AND q.enabled=1)",
+        [rule.0],
+    )?;
+    tx.execute("DELETE FROM recording_rules WHERE id=?1", [rule.0])?;
+    Ok(())
+}
 fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
     Ok(Job {
         id: JobId(r.get(0)?),
@@ -110,10 +123,9 @@ fn insert_rule(
         }
     };
     let request = &rule.request;
-    let count: i64 = tx.query_row("SELECT COUNT(*) FROM recording_rules", [], |r| r.get(0))?;
-    if count >= 100 {
-        return Err(StoreError::Unavailable(
-            "Remove older recording rules before adding more",
+    if rule.lead_seconds > 3600 || rule.trail_seconds > 3600 {
+        return Err(StoreError::InvalidData(
+            "Recording padding is too long".into(),
         ));
     }
     let allowed: bool = tx.query_row(
@@ -124,16 +136,35 @@ fn insert_rule(
     if !allowed {
         return Err(StoreError::Unavailable("Channel unavailable or blocked"));
     }
-    let duplicate: Option<i64> = tx.query_row(
+    let duplicate: Option<i64> = tx
+        .query_row(
             "SELECT id FROM recording_rules WHERE source_id=?1 AND channel_id=?2 AND repeat=?3
-             AND local_start=?4 AND title=?5 AND enabled=1 AND source_incarnation=(SELECT incarnation FROM guide_revisions WHERE source_id=?1)",
-            params![request.source, request.channel, repeat, rule.local_start, request.title], |r|r.get(0)).optional()?;
+             AND local_start=?4 AND title=?5 AND enabled=1 AND lead_seconds=?6 AND trail_seconds=?7
+             AND source_incarnation=(SELECT incarnation FROM guide_revisions WHERE source_id=?1)",
+            params![
+                request.source,
+                request.channel,
+                repeat,
+                rule.local_start,
+                request.title,
+                rule.lead_seconds,
+                rule.trail_seconds
+            ],
+            |r| r.get(0),
+        )
+        .optional()?;
     if let Some(id) = duplicate {
         return Ok(iptv_core::recording::RuleId(id));
     }
-    tx.execute("INSERT INTO recording_rules(id,source_id,source_incarnation,channel_id,channel_name,title,starts_at,ends_at,local_start,repeat,enabled)
-            VALUES(?1,?2,(SELECT incarnation FROM guide_revisions WHERE source_id=?2),?3,?4,?5,?6,?7,?8,?9,1)",
-            params![rule.id.0,request.source,request.channel,request.channel_name,request.title,request.start,request.end,rule.local_start,repeat])?;
+    let count: i64 = tx.query_row("SELECT COUNT(*) FROM recording_rules", [], |r| r.get(0))?;
+    if count >= 100 {
+        return Err(StoreError::Unavailable(
+            "Remove older recording rules before adding more",
+        ));
+    }
+    tx.execute("INSERT INTO recording_rules(id,source_id,source_incarnation,channel_id,channel_name,title,starts_at,ends_at,local_start,repeat,enabled,lead_seconds,trail_seconds)
+            VALUES(?1,?2,(SELECT incarnation FROM guide_revisions WHERE source_id=?2),?3,?4,?5,?6,?7,?8,?9,1,?10,?11)",
+            params![rule.id.0,request.source,request.channel,request.channel_name,request.title,request.start,request.end,rule.local_start,repeat,rule.lead_seconds,rule.trail_seconds])?;
     Ok(rule.id)
 }
 
@@ -293,12 +324,74 @@ impl Store {
         job: JobId,
         now: i64,
     ) -> Result<JobId> {
+        self.schedule_recording_rule_and_first_at(rule, job, rule.request.start, now)
+    }
+
+    pub fn schedule_recording_rule_and_first_at(
+        &mut self,
+        rule: &iptv_core::recording::Rule,
+        job: JobId,
+        occurrence_start: i64,
+        now: i64,
+    ) -> Result<JobId> {
+        self.schedule_recording_rule_with_first(rule, job, &rule.request, occurrence_start, now)
+    }
+
+    pub fn schedule_recording_rule_with_first(
+        &mut self,
+        rule: &iptv_core::recording::Rule,
+        job: JobId,
+        first: &Request,
+        occurrence_start: i64,
+        now: i64,
+    ) -> Result<JobId> {
+        if occurrence_start < 0
+            || first.source != rule.request.source
+            || first.channel != rule.request.channel
+        {
+            return Err(StoreError::InvalidData(
+                "Recording occurrence does not match its rule".into(),
+            ));
+        }
         let tx = self.conn.transaction()?;
         let id = insert_rule(&tx, rule, now)?;
-        let job = insert_job(&tx, job, &rule.request, now)?;
+        if let Some(previous) = tx
+            .query_row(
+                "SELECT job_id FROM recording_rule_jobs WHERE rule_id=?1 AND starts_at=?2",
+                params![id.0, occurrence_start],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+        {
+            let retained: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM recording_jobs WHERE id=?1)",
+                [previous],
+                |row| row.get(0),
+            )?;
+            if !retained {
+                return Err(StoreError::Unavailable(
+                    "This recording occurrence was already removed",
+                ));
+            }
+            tx.commit()?;
+            return Ok(JobId(previous));
+        }
+        let job = insert_job(&tx, job, first, now)?;
+        let previous: Option<i64> = tx
+            .query_row(
+                "SELECT rule_id FROM recording_rule_jobs WHERE job_id=?1",
+                [job.0],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if previous.is_some_and(|previous| previous != id.0) {
+            return Err(StoreError::Unavailable(
+                "This recording already belongs to another repeating schedule",
+            ));
+        }
         tx.execute(
             "INSERT OR IGNORE INTO recording_rule_jobs(job_id,rule_id,starts_at) VALUES(?1,?2,?3)",
-            params![job.0, id.0, rule.request.start],
+            params![job.0, id.0, occurrence_start],
         )?;
         tx.commit()?;
         Ok(job)
@@ -307,10 +400,11 @@ impl Store {
     pub fn recording_rules(&self) -> Result<Vec<iptv_core::recording::Rule>> {
         use iptv_core::recording::{Repeat, Rule, RuleId};
         Ok(self.conn.prepare("SELECT q.id,q.source_id,q.channel_id,q.channel_name,q.title,q.starts_at,q.ends_at,q.local_start,q.repeat,
-             q.enabled AND EXISTS(SELECT 1 FROM guide_revisions r WHERE r.source_id=q.source_id AND r.incarnation=q.source_incarnation)
+             q.enabled AND EXISTS(SELECT 1 FROM guide_revisions r WHERE r.source_id=q.source_id AND r.incarnation=q.source_incarnation),q.lead_seconds,q.trail_seconds
              FROM recording_rules q ORDER BY q.id LIMIT 100")?.query_map([], |r| Ok(Rule {
                 id: RuleId(r.get(0)?), request: Request {source:r.get(1)?,channel:r.get(2)?,channel_name:r.get(3)?,title:r.get(4)?,start:r.get(5)?,end:r.get(6)?},
                 local_start:r.get(7)?, repeat:match r.get::<_,String>(8)?.as_str(){"daily"=>Repeat::Daily,"weekly"=>Repeat::Weekly,_=>Repeat::Series},enabled:r.get(9)?,
+                lead_seconds:r.get(10)?,trail_seconds:r.get(11)?,
              }))?.collect::<rusqlite::Result<_>>()?)
     }
 
@@ -336,6 +430,17 @@ impl Store {
         request: &Request,
         now: i64,
     ) -> Result<Option<JobId>> {
+        self.materialize_recording_rule_at(rule, id, request, request.start, now)
+    }
+
+    pub fn materialize_recording_rule_at(
+        &mut self,
+        rule: iptv_core::recording::RuleId,
+        id: JobId,
+        request: &Request,
+        occurrence_start: i64,
+        now: i64,
+    ) -> Result<Option<JobId>> {
         let tx = self.conn.transaction()?;
         let allowed: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM recording_rules q JOIN guide_revisions r
@@ -346,7 +451,7 @@ impl Store {
         )?;
         let exists: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM recording_rule_jobs WHERE rule_id=?1 AND starts_at=?2)",
-            params![rule.0, request.start],
+            params![rule.0, occurrence_start],
             |r| r.get(0),
         )?;
         if !allowed || exists {
@@ -355,7 +460,7 @@ impl Store {
         let id = insert_job(&tx, id, request, now)?;
         tx.execute(
             "INSERT INTO recording_rule_jobs(job_id,rule_id,starts_at) VALUES(?1,?2,?3)",
-            params![id.0, rule.0, request.start],
+            params![id.0, rule.0, occurrence_start],
         )?;
         tx.commit()?;
         Ok(Some(id))
@@ -394,10 +499,36 @@ impl Store {
                 AND source_incarnation=(SELECT incarnation FROM guide_revisions WHERE source_id=recording_jobs.source_id)",[rule.0,now])?;
         } else {
             tx.execute("UPDATE recording_jobs SET status='cancelled',message='Recurring schedule disabled'
-                WHERE status='scheduled' AND id IN (SELECT job_id FROM recording_rule_jobs WHERE rule_id=?1)",[rule.0])?;
+                WHERE status='scheduled' AND id IN (SELECT job_id FROM recording_rule_jobs WHERE rule_id=?1)
+                AND NOT EXISTS(SELECT 1 FROM recording_rule_jobs j JOIN recording_rules q ON q.id=j.rule_id
+                    WHERE j.job_id=recording_jobs.id AND q.enabled=1)",[rule.0])?;
         }
         tx.commit()?;
         Ok(())
+    }
+
+    /// Permanent cancellation removes the rule's authority, while retaining all
+    /// media/history. Pausing via set_recording_rule_enabled retains tombstones.
+    pub fn cancel_recording_rule(&mut self, rule: iptv_core::recording::RuleId) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        cancel_rule(&tx, rule)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The UI's cancellation applies to every recurring intent attached to the
+    /// selected recording, rather than choosing an arbitrary rule after overlap.
+    pub fn cancel_recording_rules_for_job(&mut self, job: JobId) -> Result<bool> {
+        let tx = self.conn.transaction()?;
+        let rules = tx
+            .prepare("SELECT rule_id FROM recording_rule_jobs WHERE job_id=?1")?
+            .query_map([job.0], |row| row.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for rule in &rules {
+            cancel_rule(&tx, iptv_core::recording::RuleId(*rule))?;
+        }
+        tx.commit()?;
+        Ok(!rules.is_empty())
     }
 
     pub fn recording_rule_for_job(
@@ -407,7 +538,7 @@ impl Store {
         Ok(self
             .conn
             .query_row(
-                "SELECT j.rule_id FROM recording_rule_jobs j JOIN recording_rules q ON q.id=j.rule_id WHERE j.job_id=?1 AND q.enabled=1",
+                "SELECT j.rule_id FROM recording_rule_jobs j JOIN recording_rules q ON q.id=j.rule_id WHERE j.job_id=?1 AND q.enabled=1 ORDER BY j.rule_id LIMIT 1",
                 [job.0],
                 |r| r.get(0),
             )

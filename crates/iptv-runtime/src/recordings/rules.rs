@@ -1,7 +1,7 @@
 //! Materialize durable local-time or EPG rules into ordinary bounded jobs.
 use super::*;
 use chrono::{DateTime, Local, TimeZone, Utc};
-use iptv_core::recording::{Repeat, Rule, RuleId};
+use iptv_core::recording::{RecurrenceTiming, Repeat, Rule, RuleId};
 
 fn identity() -> Result<i64, Error> {
     let mut bytes = [0; 8];
@@ -9,7 +9,7 @@ fn identity() -> Result<i64, Error> {
         .map_err(|_| Error::unavailable("Recording identity unavailable"))?;
     Ok((i64::from_ne_bytes(bytes) & i64::MAX).max(1))
 }
-fn local_timestamp(utc: i64) -> Option<i64> {
+pub(super) fn local_timestamp(utc: i64) -> Option<i64> {
     Some(
         DateTime::from_timestamp(utc, 0)?
             .with_timezone(&Local)
@@ -18,7 +18,7 @@ fn local_timestamp(utc: i64) -> Option<i64> {
             .timestamp(),
     )
 }
-fn utc_timestamp(local: i64) -> Option<i64> {
+pub(super) fn utc_timestamp(local: i64) -> Option<i64> {
     let local = DateTime::<Utc>::from_timestamp(local, 0)?.naive_utc();
     // A repeated fall-back hour is recorded once, using its earlier instant.
     // A spring-forward gap is skipped rather than silently changing its hour.
@@ -32,6 +32,16 @@ impl Runtime {
         &self,
         request: Request,
         repeat: Repeat,
+    ) -> Result<JobId, Error> {
+        self.schedule_repeating_recording_with_timing(request, repeat, None)
+            .await
+    }
+
+    pub async fn schedule_repeating_recording_with_timing(
+        &self,
+        request: Request,
+        repeat: Repeat,
+        timing: Option<RecurrenceTiming>,
     ) -> Result<JobId, Error> {
         if repeat == Repeat::Once {
             return self.schedule_recording(request).await;
@@ -48,13 +58,57 @@ impl Runtime {
                 "Restart Patina before scheduling a recording",
             ));
         }
-        let rule = Rule {
+        if timing.is_some_and(|timing| {
+            timing.programme_start < 0
+                || timing.programme_end <= timing.programme_start
+                || timing.lead_seconds > 3600
+                || timing.trail_seconds > 3600
+        }) {
+            return Err(Error::unavailable("Recording time unavailable"));
+        }
+        let mut nominal = request.clone();
+        if let Some(timing) = timing {
+            nominal.start = timing
+                .programme_start
+                .saturating_sub(i64::from(timing.lead_seconds))
+                .max(0);
+            nominal.end = timing
+                .programme_end
+                .saturating_add(i64::from(timing.trail_seconds));
+        }
+        nominal.validate(now()).map_err(Error::unavailable)?;
+        let mut rule = Rule {
             id: RuleId(identity()?),
-            local_start: local_timestamp(request.start)
+            local_start: local_timestamp(nominal.start)
                 .ok_or_else(|| Error::unavailable("Recording time unavailable"))?,
-            request: request.clone(),
+            request: nominal,
             repeat,
             enabled: true,
+            lead_seconds: timing.map_or(0, |timing| timing.lead_seconds),
+            trail_seconds: timing.map_or(0, |timing| timing.trail_seconds),
+        };
+        let occurrence_start = if repeat == Repeat::Series {
+            let first_start = if let Some(timing) = timing {
+                timing.programme_start
+            } else {
+                // Older API callers still get a stable identity for a currently
+                // airing episode whose record-now capture begins at `now`.
+                let query = rule.clone();
+                self.services()
+                    .read(move |store| store.recording_series_windows(&query, now()))
+                    .await?
+                    .into_iter()
+                    .filter(|(start, end)| *start < request.end && *end > request.start)
+                    .min_by_key(|(start, _)| start.abs_diff(request.start))
+                    .map_or(request.start, |(start, _)| start)
+            };
+            rule.local_start = local_timestamp(first_start)
+                .ok_or_else(|| Error::unavailable("Recording time unavailable"))?;
+            first_start
+        } else {
+            rule.lead_seconds = 0;
+            rule.trail_seconds = 0;
+            rule.request.start
         };
         self.sync_recording_contexts();
         self.start_recordings();
@@ -62,7 +116,15 @@ impl Runtime {
         // The first occurrence and the recurring intent are one acknowledgement.
         let first = self
             .services()
-            .call(move |store| store.schedule_recording_rule_and_first(&rule, job, now()))
+            .call(move |store| {
+                store.schedule_recording_rule_with_first(
+                    &rule,
+                    job,
+                    &request,
+                    occurrence_start,
+                    now(),
+                )
+            })
             .await?;
         self.acknowledge_recording(first).await?;
         // Later occurrences may be delayed by storage quotas; accepting the
@@ -107,6 +169,10 @@ impl Runtime {
             self.start_recordings();
             let _ = materialize(&self.services()).await;
         }
+        self.recording_rules_changed().await
+    }
+
+    async fn recording_rules_changed(&self) -> Result<(), Error> {
         let (rules, jobs) = self
             .services()
             .read(|store| Ok((store.recording_rules()?, store.recording_jobs()?)))
@@ -121,12 +187,14 @@ impl Runtime {
         Ok(())
     }
     pub async fn stop_repeating_recording(&self, job: JobId) -> Result<(), Error> {
-        let id = self
+        if !self
             .services()
-            .read(move |store| store.recording_rule_for_job(job))
+            .call(move |store| store.cancel_recording_rules_for_job(job))
             .await?
-            .ok_or_else(|| Error::unavailable("This recording does not repeat"))?;
-        self.set_recording_rule_enabled(id, false).await
+        {
+            return Err(Error::unavailable("This recording does not repeat"));
+        }
+        self.recording_rules_changed().await
     }
     pub async fn repeating_recording_jobs(&self) -> Result<Vec<JobId>, Error> {
         self.services()
@@ -183,8 +251,16 @@ pub(super) async fn materialize(services: &Services) -> Result<(), Error> {
                 continue;
             }
             let mut request = rule.request.clone();
-            request.start = start;
-            request.end = end;
+            request.start = if rule.repeat == Repeat::Series {
+                start.saturating_sub(i64::from(rule.lead_seconds))
+            } else {
+                start
+            };
+            request.end = if rule.repeat == Repeat::Series {
+                end.saturating_add(i64::from(rule.trail_seconds))
+            } else {
+                end
+            };
             if request.validate(current).is_err() {
                 continue;
             }
@@ -192,7 +268,7 @@ pub(super) async fn materialize(services: &Services) -> Result<(), Error> {
             services
                 .call(move |store| {
                     store
-                        .materialize_recording_rule(id, job, &request, current)
+                        .materialize_recording_rule_at(id, job, &request, start, current)
                         .map(|_| ())
                 })
                 .await?;

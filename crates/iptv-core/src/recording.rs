@@ -112,6 +112,16 @@ impl Repeat {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct RuleId(pub i64);
 
+/// A guide occurrence is identified by its original start, independently of
+/// padding or a record-now capture that begins after the programme started.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RecurrenceTiming {
+    pub programme_start: i64,
+    pub programme_end: i64,
+    pub lead_seconds: u32,
+    pub trail_seconds: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rule {
     pub id: RuleId,
@@ -121,6 +131,8 @@ pub struct Rule {
     /// Hosts convert each occurrence separately so DST does not shift its hour.
     pub local_start: i64,
     pub enabled: bool,
+    pub lead_seconds: u32,
+    pub trail_seconds: u32,
 }
 impl Rule {
     /// The first daily/weekly local window whose end is after `local_now`.
@@ -204,6 +216,8 @@ pub struct Draft {
     pub trail_minutes: i64,
     pub editing: Option<JobId>,
     pub repeat: Repeat,
+    pub programme_start: Option<i64>,
+    pub programme_end: Option<i64>,
 }
 impl Draft {
     pub fn new(request: Request) -> Self {
@@ -214,6 +228,8 @@ impl Draft {
             trail_minutes: 0,
             editing: None,
             repeat: Repeat::Once,
+            programme_start: None,
+            programme_end: None,
         }
     }
     pub fn adjust(&mut self, row: usize, step: i64, now: i64) {
@@ -223,10 +239,17 @@ impl Draft {
                 let duration = self.request.end - self.request.start;
                 self.request.start = self.request.start.saturating_add(delta).max(now);
                 self.request.end = self.request.start.saturating_add(duration);
+                // An explicit date/time edit becomes the new nominal window.
+                self.programme_start = None;
+                self.programme_end = None;
             }
             2 => {
+                let previous = self.request.end;
                 self.request.end = self.request.start
-                    + (self.request.end - self.request.start + step * 900).clamp(60, MAX_DURATION)
+                    + (self.request.end - self.request.start + step * 900).clamp(60, MAX_DURATION);
+                if let Some(end) = self.programme_end.as_mut() {
+                    *end = end.saturating_add(self.request.end - previous);
+                }
             }
             3 => self.lead_minutes = (self.lead_minutes + step).clamp(0, 60),
             4 => self.trail_minutes = (self.trail_minutes + step).clamp(0, 60),
@@ -305,6 +328,8 @@ mod tests {
             repeat: Repeat::Daily,
             local_start: 100,
             enabled: true,
+            lead_seconds: 0,
+            trail_seconds: 0,
         };
         assert_eq!(rule.local_window(150), Some((100, 200)));
         assert_eq!(rule.local_window(200), Some((86500, 86600)));

@@ -308,7 +308,8 @@ Use **Repeat** to choose once, daily, weekly or series. Daily and weekly
 schedules keep their local clock time across daylight-saving changes; series
 rules match the programme title on the selected channel as guide data arrives.
 An accepted individual job keeps its start/end times. Cancel repeating schedule
-stops future occurrences without deleting finished recordings.
+stops future occurrences without deleting finished recordings. If multiple
+repeating schedules share the selected recording, this cancels all of them.
 
 On Android, capture runs in a foreground service with a notification. Allow
 precise wakeups in Recordings settings for scheduled starts; boot and package
