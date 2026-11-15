@@ -85,6 +85,8 @@ const STATICS: &[(&str, &str)] = &[
     ("backup/instance.rs", "HELD"),
     // Unique unopened directories of unit-test owners (`cfg(test)`).
     ("ports.rs", "NEXT"),
+    // Per-tree filesystem publication gates shared by independent native services.
+    ("private_files.rs", "TREES"),
     // Serialize native service startup/restore and retain its independent owner.
     ("recordings/host.rs", "ACTIVATION"),
     ("recordings/host.rs", "HOSTS"),
