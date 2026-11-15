@@ -270,16 +270,25 @@ fn unmatched_candidates_have_samples_from_the_exact_encrypted_snapshot_without_l
     assert!(!files[0].exists());
 }
 
+fn assert_probe_cache_empty(directory: &std::path::Path) {
+    let cache = directory.join("guide-probes");
+    if cache.try_exists().unwrap() {
+        assert!(
+            std::fs::read_dir(cache).unwrap().next().is_none(),
+            "probe shutdown must remove its partial stages and owner directory"
+        );
+    }
+}
+
 #[test]
-fn cancellation_and_deadline_end_held_requests_and_remove_partial_stages() {
-    for cancel_request in [false, true] {
+fn end_to_end_deadlines_allow_expiry_before_http_and_remove_partial_stages() {
+    for timeout in [Duration::ZERO, Duration::from_millis(250)] {
         let server = Mock::new(XML.as_bytes().to_vec(), true);
         let directory = tempfile::tempdir().unwrap();
         let source = seed(directory.path(), server.url(), 0);
         let runtime = owner(directory.path());
         let mut options = control();
-        options.timeout = Duration::from_millis(250);
-        let cancel = options.cancel.clone();
+        options.timeout = timeout;
         let request = runtime.probe_feed(
             ProbeRequest {
                 source,
@@ -287,21 +296,50 @@ fn cancellation_and_deadline_end_held_requests_and_remove_partial_stages() {
             },
             options,
         );
-        server.seen.recv_timeout(Duration::from_secs(5)).unwrap();
-        if cancel_request {
-            cancel.cancel();
+        // This budget includes encrypted-store and worker startup. Expiry can
+        // precede the connection; the mock must not be required to see HTTP.
+        assert_eq!(support::block_on(request), Err(InspectionError::Deadline));
+        assert!(runtime.drain_services());
+        assert_probe_cache_empty(directory.path());
+        if timeout.is_zero() {
+            assert_eq!(server.requests.load(Ordering::SeqCst), 0);
         }
-        let result = support::block_on(request);
-        assert_eq!(
-            result,
-            Err(if cancel_request {
-                InspectionError::Cancelled
-            } else {
-                InspectionError::Deadline
-            })
-        );
-        runtime.drain_services();
     }
+}
+
+#[test]
+fn cancellation_ends_an_acknowledged_request_and_removes_its_partial_stage() {
+    let server = Mock::new(XML.as_bytes().to_vec(), true);
+    let directory = tempfile::tempdir().unwrap();
+    let source = seed(directory.path(), server.url(), 0);
+    let runtime = owner(directory.path());
+    let options = control();
+    let cancel = options.cancel.clone();
+    let request = runtime.probe_feed(
+        ProbeRequest {
+            source,
+            target: ProbeTarget::Configured(FeedId(1)),
+        },
+        options,
+    );
+    // Acknowledge transport entry before cancellation, with an operation budget
+    // that leaves room for cold encrypted-store startup on shared runners.
+    server.seen.recv_timeout(Duration::from_secs(30)).unwrap();
+    assert!(
+        std::fs::read_dir(directory.path().join("guide-probes"))
+            .unwrap()
+            .flat_map(|entry| std::fs::read_dir(entry.unwrap().path()).unwrap())
+            .any(|entry| entry
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|ext| ext == "sqlite")),
+        "the acknowledged request must have created a partial stage"
+    );
+    cancel.cancel();
+    assert_eq!(support::block_on(request), Err(InspectionError::Cancelled));
+    assert!(runtime.drain_services());
+    assert_probe_cache_empty(directory.path());
 }
 
 #[test]
