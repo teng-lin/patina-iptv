@@ -24,6 +24,8 @@ pub(crate) fn command(key: &str) {
     if key == "recordings.background_status" {
         crate::settings_view::notify(crate::i18n::tr(if cfg!(target_os = "android") {
             "Android keeps capture in a foreground service. Exact alarms need Special app access. Force stop prevents recordings; Android may limit background recording to six hours."
+        } else if cfg!(target_os = "ios") {
+            "Keep Patina open and this device awake for recordings. Recordings use local app storage and are excluded from backups."
         } else {
             "Closing the window keeps accepted recordings running. Enable start at login to recover after restart. \
              Linux and macOS cannot wake a sleeping or powered-off computer; leave it awake. Quit stops the recorder."

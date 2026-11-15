@@ -651,15 +651,22 @@ fn action_view(ui: Ui, size: Scale) -> impl IntoElement {
 }
 pub fn layer(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
+    let requirements = if cfg!(target_os = "ios") {
+        tr(
+            "Keep Patina open and this device awake for recordings. Recordings use local app storage and are excluded from backups.",
+        )
+    } else {
+        tr("Recordings continue when you close the player. \
+            Check Recordings settings for startup and device wake requirements. \
+            Recordings use local storage and are excluded from backups.")
+    };
     when(
         move || is_open(ui),
         move || {
             ui_kit::screen(ui, size).test_id("recordings-screen")
             .accessibility_elements_hidden(move || crate::overlays::Overlay::Recordings.accessibility_covered(ui))
             .child(ui_kit::header(ui, size, tr("Recordings"), close))
-            .child(ui_kit::caption(size, tr("Recordings continue when you close the player. \
-                Check Recordings settings for startup and device wake requirements. \
-                Recordings use local storage and are excluded from backups.")))
+            .child(ui_kit::caption(size, requirements))
             .child(ui_kit::caption(size,move ||ui.recordings.with(|s|s.background_notice.as_ref().map(|message|tr(message).to_owned()).unwrap_or_default())))
             .child(ui_kit::caption(size, tr("Up/Down selects · Left/Right changes a value or filters the list · Menu shows all recordings · Back returns")))
             .child(ui_kit::body(size, move || ui.recordings.with(|s| s.error.as_ref().map(|message| tr(message).to_owned()).unwrap_or_default())))
