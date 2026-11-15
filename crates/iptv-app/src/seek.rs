@@ -148,9 +148,11 @@ pub fn commit_now(ui: Ui) {
 /// far into it a seek may go now. `None` unless one plays.
 pub fn span(ui: Ui) -> Option<(i32, i32)> {
     if crate::on_demand::active(ui) {
-        return crate::on_demand::seekable(ui)
-            .then(|| elapsed(ui).map(|(_, length)| (length, length)))
-            .flatten();
+        if !crate::on_demand::seekable(ui) {
+            return None;
+        }
+        let (_, length) = elapsed(ui)?;
+        return (length > 0).then_some((length, length));
     }
     programme(ui).map(|(_, length, limit)| (length, limit))
 }
