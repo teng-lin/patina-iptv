@@ -57,7 +57,11 @@ pub(super) fn install(directory: &Path, enabled: bool) -> io::Result<()> {
             std::fs::write(
                 path,
                 format!(
-                    "<?xml version=\"1.0\"?><!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\"><plist version=\"1.0\"><dict><key>Label</key><string>com.hantekllc.patina.recorder</string><key>ProgramArguments</key><array><string>{}</string><string>--background-recordings</string></array><key>RunAtLoad</key><true/></dict></plist>",
+                    "<?xml version=\"1.0\"?>\
+                    <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\
+                    <plist version=\"1.0\"><dict><key>Label</key><string>com.hantekllc.patina.recorder</string>\
+                    <key>ProgramArguments</key><array><string>{}</string><string>--background-recordings</string></array>\
+                    <key>RunAtLoad</key><true/></dict></plist>",
                     xml(&executable.to_string_lossy())
                 ),
             )?;
@@ -110,7 +114,14 @@ pub(super) fn task_xml(executable: &str, next: Option<&str>) -> String {
         )
     });
     format!(
-        "<?xml version=\"1.0\"?><Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"><Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger>{time}</Triggers><Principals><Principal id=\"Author\"><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><WakeToRun>true</WakeToRun><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings><Actions Context=\"Author\"><Exec><Command>{}</Command><Arguments>--background-recordings</Arguments></Exec></Actions></Task>",
+        "<?xml version=\"1.0\"?><Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"><Triggers>\
+                    <LogonTrigger><Enabled>true</Enabled></LogonTrigger>{time}</Triggers><Principals><Principal id=\"Author\">\
+                    <LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings>\
+                    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\
+                    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\
+                    <StartWhenAvailable>true</StartWhenAvailable><WakeToRun>true</WakeToRun>\
+                    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings><Actions Context=\"Author\"><Exec><Command>{}</Command>\
+                    <Arguments>--background-recordings</Arguments></Exec></Actions></Task>",
         xml(executable)
     )
 }
