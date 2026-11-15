@@ -497,12 +497,12 @@ fn right(ui: Ui) -> impl IntoElement {
     let playing = move || ui.playing.get().is_some();
     // Reserve space for every control, including recording and optional
     // native window controls, so none overlap the transport hit targets.
-    let buttons = 8.0
-        + if DESKTOP { 1.0 } else { 0.0 }
-        + if crate::pip::supported(ui) { 1.0 } else { 0.0 };
+    let buttons = move || {
+        8.0 + if DESKTOP { 1.0 } else { 0.0 } + if crate::pip::supported(ui) { 1.0 } else { 0.0 }
+    };
     view()
         .flex_1()
-        .min_w(px(buttons * size + (buttons - 1.0) * 2.0 + FPS_W + 6.0))
+        .min_w(move || px(buttons() * size + (buttons() - 1.0) * 2.0 + FPS_W + 6.0))
         .flex_row()
         .items_center()
         .justify_end()
