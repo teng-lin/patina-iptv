@@ -44,6 +44,7 @@ fn default_explicit_choices_debounce_close_the_guide_and_list_and_cancel_on_back
     assert!(opened.lock().unwrap().is_empty());
     step(app.run_for(Duration::from_millis(1)));
     assert!(full(app));
+    loaded_stream(app, &opened, "http://example.test/a");
     assert_eq!(*opened.lock().unwrap(), ["http://example.test/a"]);
     step(app.back());
     step(app.back());
@@ -62,6 +63,7 @@ fn default_explicit_choices_debounce_close_the_guide_and_list_and_cancel_on_back
     step(app.press_key("enter"));
     step(app.run_for(Duration::from_millis(500)));
     assert!(full(app));
+    loaded_stream(app, &opened, "http://example.test/b");
     assert_eq!(
         opened.lock().unwrap().last().unwrap(),
         "http://example.test/b"
@@ -70,6 +72,7 @@ fn default_explicit_choices_debounce_close_the_guide_and_list_and_cancel_on_back
     step(app.press_key("down"));
     step(app.press_key("enter"));
     step(app.run_for(Duration::from_millis(500)));
+    loaded_stream(app, &opened, "http://example.test/c");
     assert_eq!(
         opened.lock().unwrap().last().unwrap(),
         "http://example.test/c"

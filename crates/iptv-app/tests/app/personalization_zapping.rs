@@ -28,6 +28,7 @@ fn repeated_player_zaps_skip_intermediate_streams_and_menu_cancels_the_last() {
     });
     step(app.press_key("enter"));
     step(app.run_for(Duration::from_millis(500)));
+    loaded_stream(app, &opened, "http://example.test/a");
     opened.lock().unwrap().clear();
     step(app.press_key("down"));
     step(app.run_for(Duration::from_millis(150)));
@@ -35,6 +36,7 @@ fn repeated_player_zaps_skip_intermediate_streams_and_menu_cancels_the_last() {
     step(app.run_for(Duration::from_millis(499)));
     assert!(opened.lock().unwrap().is_empty());
     step(app.run_for(Duration::from_millis(1)));
+    loaded_stream(app, &opened, "http://example.test/c");
     assert_eq!(*opened.lock().unwrap(), ["http://example.test/c"]);
     step(app.press_key("up"));
     step(app.press_key("m"));

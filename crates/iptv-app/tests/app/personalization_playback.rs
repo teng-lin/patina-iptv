@@ -48,6 +48,7 @@ fn rapid_navigation_cancels_tuning_menus_cancel_preview_and_input_extends_fullsc
         }
     });
     step(app.run_for(Duration::from_millis(600)));
+    loaded_stream(app, &opened, "http://example.test/a");
     assert!(preview(app));
     opened.lock().unwrap().clear();
     step(app.press_key("down"));
@@ -56,6 +57,7 @@ fn rapid_navigation_cancels_tuning_menus_cancel_preview_and_input_extends_fullsc
     step(app.run_for(Duration::from_millis(499)));
     assert!(opened.lock().unwrap().is_empty());
     step(app.run_for(Duration::from_millis(1)));
+    loaded_stream(app, &opened, "http://example.test/c");
     assert_eq!(*opened.lock().unwrap(), ["http://example.test/c"]);
     // Browsing a future cell cancels preview work. Returning to now
     // resumes it for the same playing channel without reopening its stream.
@@ -87,6 +89,7 @@ fn rapid_navigation_cancels_tuning_menus_cancel_preview_and_input_extends_fullsc
     );
     step(app.back());
     step(app.run_for(Duration::from_millis(500)));
+    loaded_stream(app, &opened, "http://example.test/b");
     assert_eq!(*opened.lock().unwrap(), ["http://example.test/b"]);
     // An explicit choice on the playing preview goes full screen immediately.
     step(app.press_key("enter"));
@@ -98,6 +101,7 @@ fn rapid_navigation_cancels_tuning_menus_cancel_preview_and_input_extends_fullsc
     opened.lock().unwrap().clear();
     step(app.press_key("enter"));
     step(app.run_for(Duration::from_millis(500)));
+    loaded_stream(app, &opened, "http://example.test/a");
     assert_eq!(*opened.lock().unwrap(), ["http://example.test/a"]);
     assert!(preview(app));
     step(app.back());

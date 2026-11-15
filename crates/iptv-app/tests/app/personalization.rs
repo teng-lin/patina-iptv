@@ -141,3 +141,24 @@ pub fn new_group(app: &mut Headless, name: &str) {
     step(app.type_text("text:Enter text", name));
     step(app.submit(&format!("text:{name}")));
 }
+
+/// Debounce uses the manual UI clock; authorization completes on native workers.
+/// Observe the load acknowledgement without advancing the debounce deadline.
+#[track_caller]
+pub fn loaded_stream(
+    app: &mut Headless,
+    opened: &std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    url: &str,
+) {
+    step(app.wait_until(
+        "authorized synthetic stream",
+        Duration::from_secs(5),
+        |_| {
+            opened
+                .lock()
+                .unwrap()
+                .last()
+                .is_some_and(|last| last == url)
+        },
+    ));
+}
