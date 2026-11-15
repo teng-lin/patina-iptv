@@ -738,7 +738,14 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     // --- The play bar -----------------------------------------------------
     // Desktop pointer movement shows the bar, with what the host
     // reported of the stream (lines, class, frame rate).
-    step(app.set_environment("a desktop", |e| e.idiom = Idiom::Desktop));
+    step(app.set_environment("a desktop", |e| {
+        e.idiom = Idiom::Desktop;
+        e.os = if cfg!(target_os = "macos") {
+            nsh_core::platform::Os::MacOs
+        } else {
+            nsh_core::platform::Os::Linux
+        };
+    }));
     send(&mut app, "size", json!({ "width": 1280, "height": 720 }));
     send(&mut app, "format", json!({ "fps": 50.0 }));
     send(&mut app, "tracks", tracks());
