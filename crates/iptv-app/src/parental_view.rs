@@ -8,11 +8,13 @@ use nsh_core::element::input;
 use nsh_core::prelude::*;
 use std::{cell::RefCell, rc::Rc};
 
+type AfterUnlock = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
+
 #[derive(Clone)]
 pub struct Open {
     dialog: Dialog,
     target: Target,
-    done: Rc<RefCell<Option<Box<dyn FnOnce()>>>>,
+    done: AfterUnlock,
     blocks: Option<Vec<Target>>,
 }
 impl PartialEq for Open {

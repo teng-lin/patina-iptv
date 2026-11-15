@@ -336,14 +336,12 @@ impl Ui {
                 .playing
                 .get_untracked()
                 .is_some_and(|old| old != channel)
-        {
-            if let Some(old) = self
+            && let Some(old) = self
                 .playing
                 .get_untracked()
                 .and_then(|old| parental_view::live_target(*self, old))
-            {
-                crate::runtime().parental_content_left(&old);
-            }
+        {
+            crate::runtime().parental_content_left(&old);
         }
         if !parental_view::allow_play(*self, channel, playback) {
             return;

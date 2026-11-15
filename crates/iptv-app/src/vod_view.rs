@@ -406,19 +406,19 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
             incarnation,
         );
     }
-    if let Some(p) = finished {
-        if let Some(next) = p.details.next_episode(&p.key) {
-            if crate::settings::flag(iptv_settings::keys::BoolKey("vod.autoplay_next_episode")) {
-                play_key(ui, p.details.clone(), next.key.clone(), false);
-            } else {
-                ui.vod.update(|s| {
-                    s.open = true;
-                    s.show_details(p.details.clone());
-                    s.episode = Some(next.key.clone());
-                    s.season = Some(next.season);
-                    s.notice = Some(crate::i18n::key("Ready for the next episode").into());
-                });
-            }
+    if let Some(p) = finished
+        && let Some(next) = p.details.next_episode(&p.key)
+    {
+        if crate::settings::flag(iptv_settings::keys::BoolKey("vod.autoplay_next_episode")) {
+            play_key(ui, p.details.clone(), next.key.clone(), false);
+        } else {
+            ui.vod.update(|s| {
+                s.open = true;
+                s.show_details(p.details.clone());
+                s.episode = Some(next.key.clone());
+                s.season = Some(next.season);
+                s.notice = Some(crate::i18n::key("Ready for the next episode").into());
+            });
         }
     }
 }
