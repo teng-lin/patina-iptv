@@ -77,6 +77,7 @@ struct Data {
     suspended_viewers: HashMap<usize, Lease>,
     active: HashMap<JobId, (Lease, CancelToken)>,
     jobs: Vec<Job>,
+    intent_revision: u64,
     recurring: bool,
     ready: bool,
     stopped: bool,
@@ -145,6 +146,7 @@ pub(crate) struct State {
     host: Mutex<Option<Arc<crate::store_service::Service>>>,
     data: Mutex<Data>,
     changed: Condvar,
+    publication: Mutex<()>,
     execution: Mutex<Execution>,
     contexts: Mutex<HashMap<i64, ContextEntry>>,
     media_ops: tokio::sync::Mutex<()>,
@@ -164,6 +166,25 @@ impl State {
     fn is_stopping(&self) -> bool {
         let execution = self.execution();
         execution.started && execution.shutdown.is_cancelled() && !self.lock().stopped
+    }
+    fn publish_schedule(
+        &self,
+        services: &Services,
+        revision: u64,
+        next: i64,
+        active: bool,
+    ) -> bool {
+        // UI acknowledgements and native polls publish in order. A late poll
+        // cannot replace the alarm belonging to a newly accepted edit.
+        let _publication = self
+            .publication
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.lock().intent_revision != revision {
+            return false;
+        }
+        (services.ports().recording_schedule)(next, active);
+        true
     }
     pub(crate) fn stop(&self) -> bool {
         let generation = {
@@ -430,6 +451,7 @@ impl Runtime {
             let next = job.request.start;
             let mut data = self.recordings.lock();
             let active = next <= now() || !data.active.is_empty();
+            data.intent_revision += 1;
             data.jobs.retain(|existing| existing.id != id);
             data.jobs.push(job);
             let earliest = data
@@ -439,8 +461,10 @@ impl Runtime {
                 .map(|j| j.request.start)
                 .min()
                 .unwrap_or(next);
+            let revision = data.intent_revision;
             drop(data);
-            (self.services().ports().recording_schedule)(earliest, active);
+            self.recordings
+                .publish_schedule(&self.services(), revision, earliest, active);
         }
         Ok(())
     }
@@ -801,6 +825,7 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
             tokio::time::sleep(Duration::from_millis(100)).await;
             continue;
         }
+        let revision = state.lock().intent_revision;
         let Ok(jobs) = services.read(|store| store.recording_jobs()).await else {
             tokio::time::sleep(Duration::from_millis(100)).await;
             continue;
@@ -833,7 +858,10 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
         }
         if now() >= rules_at {
             if let Ok(rules) = services.read(|store| store.recording_rules()).await {
-                state.lock().recurring = rules.iter().any(|rule| rule.enabled);
+                let mut data = state.lock();
+                if data.intent_revision == revision {
+                    data.recurring = rules.iter().any(|rule| rule.enabled);
+                }
             }
             let _ = rules::materialize(&services).await;
             rules_at = now().saturating_add(30);
@@ -862,11 +890,21 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
                         && j.request.end > now()
                 }),
         );
+        if state.lock().intent_revision != revision {
+            continue;
+        }
         if last_schedule != Some(schedule) {
-            (services.ports().recording_schedule)(schedule.0, schedule.1);
+            if !state.publish_schedule(&services, revision, schedule.0, schedule.1) {
+                continue;
+            }
             last_schedule = Some(schedule);
         }
-        state.lock().jobs = jobs.clone();
+        {
+            let mut data = state.lock();
+            if data.intent_revision == revision {
+                data.jobs = jobs.clone();
+            }
+        }
         for mut job in jobs {
             if job.status == Status::Recording && !state.lock().active.contains_key(&job.id) {
                 recover_media(&services, &job).await;

@@ -378,15 +378,23 @@ impl Store {
         &mut self,
         rule: iptv_core::recording::RuleId,
         enabled: bool,
+        now: i64,
     ) -> Result<()> {
         let tx = self.conn.transaction()?;
         tx.execute(
             "UPDATE recording_rules SET enabled=?1 WHERE id=?2",
             params![enabled, rule.0],
         )?;
-        if !enabled {
-            tx.execute("UPDATE recording_jobs SET status='cancelled',message='Cancelled' WHERE status='scheduled'
-                AND id IN (SELECT job_id FROM recording_rule_jobs WHERE rule_id=?1)",[rule.0])?;
+        if enabled {
+            // Only a rule pause can be undone. Manual cancellation and deleted
+            // occurrence tombstones keep their original authority.
+            tx.execute("UPDATE recording_jobs SET status='scheduled',message=''
+                WHERE status='cancelled' AND message='Recurring schedule disabled' AND ends_at>?2
+                AND id IN (SELECT job_id FROM recording_rule_jobs WHERE rule_id=?1)
+                AND source_incarnation=(SELECT incarnation FROM guide_revisions WHERE source_id=recording_jobs.source_id)",[rule.0,now])?;
+        } else {
+            tx.execute("UPDATE recording_jobs SET status='cancelled',message='Recurring schedule disabled'
+                WHERE status='scheduled' AND id IN (SELECT job_id FROM recording_rule_jobs WHERE rule_id=?1)",[rule.0])?;
         }
         tx.commit()?;
         Ok(())

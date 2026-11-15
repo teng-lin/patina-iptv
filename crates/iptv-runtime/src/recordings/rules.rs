@@ -95,9 +95,49 @@ impl Runtime {
             .await
             .map_err(|_| Error::unavailable("Parental access is locked"))?;
         }
+        if enabled && self.recordings.is_stopping() {
+            return Err(Error::unavailable(
+                "Restart Patina before scheduling a recording",
+            ));
+        }
         self.services()
-            .call(move |store| store.set_recording_rule_enabled(id, enabled))
+            .call(move |store| store.set_recording_rule_enabled(id, enabled, now()))
             .await?;
+        if enabled {
+            self.start_recordings();
+            let _ = materialize(&self.services()).await;
+        }
+        let (rules, jobs) = self
+            .services()
+            .read(|store| Ok((store.recording_rules()?, store.recording_jobs()?)))
+            .await?;
+        let mut data = self.recordings.lock();
+        data.intent_revision += 1;
+        data.recurring = rules.iter().any(|rule| rule.enabled);
+        data.jobs = jobs;
+        let next = data
+            .jobs
+            .iter()
+            .filter(|job| job.status == Status::Scheduled)
+            .map(|job| job.request.start)
+            .min()
+            .unwrap_or_else(|| {
+                if data.recurring {
+                    now().saturating_add(30 * 60)
+                } else {
+                    0
+                }
+            });
+        let active = !data.active.is_empty()
+            || data.jobs.iter().any(|job| {
+                job.status == Status::Scheduled
+                    && job.request.start <= now()
+                    && job.request.end > now()
+            });
+        let revision = data.intent_revision;
+        drop(data);
+        self.recordings
+            .publish_schedule(&self.services(), revision, next, active);
         Ok(())
     }
     pub async fn stop_repeating_recording(&self, job: JobId) -> Result<(), Error> {

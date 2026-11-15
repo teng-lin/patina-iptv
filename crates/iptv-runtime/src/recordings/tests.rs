@@ -571,3 +571,26 @@ async fn a_surviving_ui_and_a_restarted_host_keep_one_recording_budget() {
     assert!(owner.shutdown_recording_host());
     assert!(owner.drain_services());
 }
+
+#[tokio::test]
+async fn enabling_a_rule_publishes_background_intent_before_it_returns() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(&directory.path().join("generated-app"));
+    let request = seed(&owner, "https://example.test/generated.ts").await;
+    let id = owner
+        .schedule_repeating_recording(request, iptv_core::recording::Repeat::Daily)
+        .await
+        .unwrap();
+    let rule = owner.recording_rules().await.unwrap()[0].id;
+    owner.set_recording_rule_enabled(rule, false).await.unwrap();
+    assert!(!owner.recording_background_needed());
+    owner.set_recording_rule_enabled(rule, true).await.unwrap();
+    assert!(owner.recording_background_needed());
+    assert!(
+        owner
+            .recording_snapshot()
+            .iter()
+            .any(|job| job.id == id && job.status == Status::Scheduled)
+    );
+    assert!(owner.drain_services());
+}
