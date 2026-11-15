@@ -141,6 +141,9 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
     );
     local.player.streams[0] = parent.player.stream(surface);
     local.player.history = signal(Default::default());
+    local.player.recorded = signal(None);
+    local.recordings = signal(Default::default());
+    local.recordings_open = computed(move || local.recordings.with(|s| s.open));
     local.player_status = signal(String::new());
     local.pending_zap = signal(None);
     local.browse_playback = signal(Default::default());
@@ -207,6 +210,7 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
             back_window.close();
         }
     });
+    crate::browse_playback::bind(local);
     crate::play_bar::bind(local);
     crate::play_bar::pointer_moved(local);
     #[cfg(feature = "test-support")]
@@ -223,6 +227,7 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
     });
     view()
         .flex_1()
+        .test_id("auxiliary-player")
         .bg(rgb(0x000000))
         .on_mouse_move(move |event: &MouseEvent| crate::pointer_moved(local, event))
         .child(

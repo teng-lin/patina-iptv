@@ -92,7 +92,7 @@ pub fn open(ui: Ui) {
         now,
         |item| {
             if matches!(item, MenuItem::Record | MenuItem::CustomRecording) {
-                return crate::recordings_view::available(channel);
+                return ui.player_surface == 0 && crate::recordings_view::available(channel);
             }
             implemented(item)
                 && (!crate::data::combined::active(&crate::runtime())

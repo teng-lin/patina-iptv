@@ -497,7 +497,7 @@ fn right(ui: Ui) -> impl IntoElement {
             ui,
             "Record",
             || Icon::Record,
-            playing,
+            move || ui.player_surface == 0 && playing(),
             size,
             move || crate::recordings_view::current(ui),
         ))

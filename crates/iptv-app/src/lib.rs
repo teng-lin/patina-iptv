@@ -320,6 +320,13 @@ impl Ui {
 
     /// Starts `channel` live or from the archive.
     pub fn play(&self, channel: usize, playback: Playback) {
+        if self.player_surface != 0 {
+            self.pending_zap.set(None);
+            self.playback.set(Playback::Live);
+            self.paused.set(false);
+            player::start_surface(*self, self.player_surface, channel);
+            return;
+        }
         if !recordings_view::reserve_viewing(*self, 0, channel) {
             return;
         }

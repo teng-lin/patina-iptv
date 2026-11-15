@@ -11,6 +11,7 @@ channel navigation and full-screen target. Closing it stops only that session.
 The same auxiliary channel does not open twice. Up to three auxiliary sessions
 are available, subject to known account limits; multiview and auxiliary windows
 are mutually exclusive in this prototype. Changing playlist closes the windows.
+Recording controls are disabled in auxiliary windows pending DVR integration.
 
 ## Reproduce on Linux
 

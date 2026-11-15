@@ -70,10 +70,10 @@ pub(super) fn cell(
             channel.get().map(channel_name).unwrap_or_default()
         })
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
-            if cfg!(target_os = "linux") {
-                if let Some(ch) = channel.get() {
-                    crate::menu_view::open_at(ui, ch, ui.focus.with(|f| f.now));
-                }
+            if cfg!(target_os = "linux")
+                && let Some(ch) = channel.get()
+            {
+                crate::menu_view::open_at(ui, ch, ui.focus.with(|f| f.now));
             }
         })
         .role(AccessibilityRole::Button)

@@ -82,6 +82,25 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     assert_eq!(iptv_app::player_opens(0), main_opens);
     step(app.press("label:Play or pause"));
 
+    // Channel changes use the auxiliary runtime slot, including connection
+    // accounting; aliasing its stream into the original controls is not enough.
+    let auxiliary_opens = iptv_app::player_opens(1);
+    step(app.press("label:Channel list"));
+    step(app.wait_for("id:auxiliary-player >> id:channel-list >> text:/Local A/"));
+    step(app.press("id:auxiliary-player >> id:channel-list >> text:/Local A/"));
+    step(
+        app.wait_until("auxiliary channel changed", Duration::from_secs(5), |_| {
+            iptv_app::player_opens(1) > auxiliary_opens
+        }),
+    );
+    assert_eq!(iptv_app::player_opens(0), main_opens);
+    step(app.hover("id:auxiliary-player >> label:Video"));
+    step(app.wait_for("label:Channel list"));
+    step(app.press("label:Channel list"));
+    step(app.wait_for("id:auxiliary-player >> id:channel-list >> text:/Local B/"));
+    step(app.press("id:auxiliary-player >> id:channel-list >> text:/Local B/"));
+    app.idle(Duration::from_millis(1200)).unwrap();
+
     assert_eq!(
         iptv_app::player_opens(0),
         main_opens,

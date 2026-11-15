@@ -118,11 +118,14 @@ pub fn enabled(ui: Ui, control: Control) -> bool {
     let choice = |k| ui.player.main().tracks.with(|t| t.has_choice(k));
     match control {
         Control::Multiview => ui.player_surface == 0 && ui.playing.get().is_some(),
-        Control::Record => ui
-            .playing
-            .get()
-            .is_some_and(crate::recordings_view::available),
-        Control::Recordings => true,
+        Control::Record => {
+            ui.player_surface == 0
+                && ui
+                    .playing
+                    .get()
+                    .is_some_and(crate::recordings_view::available)
+        }
+        Control::Recordings => ui.player_surface == 0,
         Control::Search
         | Control::ChannelList
         | Control::Favorite
