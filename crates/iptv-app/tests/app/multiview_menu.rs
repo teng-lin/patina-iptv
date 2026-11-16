@@ -584,20 +584,36 @@ fn closing_the_main_window_stops_grid_streams_and_keeps_pending_recordings() {
 #[test]
 fn an_idle_m3u_playlist_does_not_block_a_second_xtream_screen() {
     let Some(home) = isolated!() else { return };
-    account_streams(&home, false, false);
+    account_streams(&home, AccountScenario::IdleM3u);
 }
 
 #[test]
 fn adding_a_screen_from_another_xtream_playlist_uses_its_account() {
     let Some(home) = isolated!() else { return };
-    account_streams(&home, true, false);
+    account_streams(&home, AccountScenario::OtherXtream);
 }
 
 #[test]
 fn a_real_connection_limit_does_not_claim_the_channel_has_no_address() {
     let Some(home) = isolated!() else { return };
-    account_streams(&home, false, true);
+    account_streams(&home, AccountScenario::LimitedHttp);
 }
+
+#[test]
+fn a_native_provider_retry_preserves_the_tile_during_a_capacity_refusal() {
+    let Some(home) = isolated!() else { return };
+    account_streams(&home, AccountScenario::LimitedNative);
+}
+
+#[derive(Clone, Copy)]
+enum AccountScenario {
+    IdleM3u,
+    OtherXtream,
+    LimitedHttp,
+    LimitedNative,
+}
+
+const NATIVE_STREAM: &str = "rtsp://stream.example.test/generated-native";
 
 fn generated_account() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
     use std::io::{BufRead, BufReader, Write};
@@ -651,25 +667,18 @@ fn generated_account() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>
     (url, requests)
 }
 
-fn account_streams(home: &crate::isolated::Home, another_playlist: bool, limited: bool) {
+fn account_streams(home: &crate::isolated::Home, scenario: AccountScenario) {
+    let another_playlist = matches!(scenario, AccountScenario::OtherXtream);
+    let limited = matches!(
+        scenario,
+        AccountScenario::LimitedHttp | AccountScenario::LimitedNative
+    );
+    let native_primary = matches!(scenario, AccountScenario::LimitedNative);
     use iptv_providers::{
         Secret,
         model::{Source, SourceConfig, XtreamCredentials},
     };
     crate::browse_fixture::two_step_preview(home.path());
-    if limited {
-        let path = home.data_dir().join("settings.json");
-        let (mut settings, _) =
-            iptv_settings::Settings::from_json(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        settings
-            .set_in(
-                "playlists.max_connections",
-                &iptv_settings::Target::playlist("1"),
-                iptv_settings::Value::Int(1),
-            )
-            .unwrap();
-        std::fs::write(path, settings.to_json_string()).unwrap();
-    }
     let _ = env_logger::builder()
         .is_test(true)
         .filter_level(log::LevelFilter::Info)
@@ -687,11 +696,29 @@ fn account_streams(home: &crate::isolated::Home, another_playlist: bool, limited
             }),
         })
         .unwrap();
+    if limited {
+        let path = home.data_dir().join("settings.json");
+        let (mut settings, _) =
+            iptv_settings::Settings::from_json(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        settings
+            .set_in(
+                "playlists.max_connections",
+                &iptv_settings::Target::playlist(source.0.to_string()),
+                iptv_settings::Value::Int(1),
+            )
+            .unwrap();
+        std::fs::write(path, settings.to_json_string()).unwrap();
+    }
     store.set_active_source(source).unwrap();
     if !another_playlist {
         let idle = store
             .add_source(&Source {
-                name: "Idle generated playlist".into(),
+                name: if native_primary {
+                    "Native"
+                } else {
+                    "Idle generated playlist"
+                }
+                .into(),
                 config: SourceConfig::M3u(iptv_providers::model::M3uSourceConfig {
                     location: iptv_providers::SecretUrl::new("https://example.test/idle.m3u"),
                     user_agent: None,
@@ -699,9 +726,12 @@ fn account_streams(home: &crate::isolated::Home, another_playlist: bool, limited
                 }),
             })
             .unwrap();
-        let parsed = iptv_providers::m3u::parse_m3u(
-            "#EXTM3U\n#EXTINF:-1,Idle generated channel\nhttps://example.test/idle.ts\n",
-        );
+        let playlist = if native_primary {
+            format!("#EXTM3U\n#EXTINF:-1,Native Channel\n{NATIVE_STREAM}\n")
+        } else {
+            "#EXTM3U\n#EXTINF:-1,Idle generated channel\nhttps://example.test/idle.ts\n".into()
+        };
+        let parsed = iptv_providers::m3u::parse_m3u(&playlist);
         store
             .replace_catalog(idle, &parsed.groups, &parsed.channels.items, &[], &[])
             .unwrap();
@@ -739,13 +769,37 @@ fn account_streams(home: &crate::isolated::Home, another_playlist: bool, limited
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     })
     .unwrap();
+    // A directly published RTSP source proves the fourth scenario reaches the
+    // NativeProvider replacement path, rather than an HTTP relay/probe retry.
+    let native_published = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let observed_native = native_published.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let nsh_core::MountItem::ComponentProps { props, .. } = item {
+                for (name, value) in props {
+                    if name.as_ref() == "source"
+                        && value.as_ref().is_some_and(|v| v["url"] == NATIVE_STREAM)
+                    {
+                        observed_native.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+            }
+        }
+    });
     let step = |result: Result<(), String>| result.unwrap_or_else(|error| panic!("{error}"));
-    let first = "text:/^Test Channel One · Alpha$/";
+    let first = if native_primary {
+        "text:/^Native Channel · Native$/"
+    } else {
+        "text:/^Test Channel One · Alpha$/"
+    };
     step(app.wait_for_within(first, IMPORT));
     step(app.press(first));
     step(app.wait_until("primary account stream", IMPORT, |_| {
         iptv_app::player_has_source(0)
     }));
+    if native_primary {
+        assert!(native_published.load(std::sync::atomic::Ordering::SeqCst));
+    }
     step(app.press(first));
     step(app.wait_for("label:Video"));
     step(app.press("label:Video"));
@@ -773,6 +827,25 @@ fn account_streams(home: &crate::isolated::Home, another_playlist: bool, limited
         );
         assert!(iptv_app::player_has_source(0));
         assert!(!iptv_app::player_has_source(1));
+        // Release the admitted screen; the refused tile must recover through
+        // its scheduled retry without pressing Try again.
+        step(app.press("id:multiview-tile >> nth=0"));
+        step(app.press(if native_primary {
+            "label:Remove screen: Native Channel · Native"
+        } else {
+            "label:Remove screen: Test Channel One · Alpha"
+        }));
+        for _ in 0..35 {
+            step(app.run_for(Duration::from_secs(1)));
+            step(app.wait(Duration::from_millis(20)));
+            if iptv_app::player_has_source(1) {
+                break;
+            }
+        }
+        assert!(
+            iptv_app::player_has_source(1),
+            "the retry recovers after capacity is released"
+        );
         return;
     }
 

@@ -35,6 +35,56 @@ fn an_idle_unknown_playlist_does_not_lower_a_known_accounts_allowance() {
 }
 
 #[test]
+fn registered_unknown_inputs_keep_their_limit_without_a_viewer() {
+    for closing in [false, true] {
+        let mut data = Data::default();
+        data.accounts.insert(
+            1,
+            Account::Xtream("https://example.test".into(), "generated".into()),
+        );
+        data.provider_limits.insert(1, 2);
+        data.limits.insert(1, 2);
+        data.accounts.insert(2, Account::Unknown);
+        data.limits.insert(2, 1);
+        let mut lease = data.lease(2);
+        lease.pending = Some(7);
+        data.inputs.insert(7, shared::Registered { lease, closing });
+        assert!(
+            !data.capacity(1, None),
+            "a pending or closing input still owns its upstream slot"
+        );
+        data.inputs.clear();
+        assert!(
+            data.capacity(1, None),
+            "capacity returns after acknowledged retirement"
+        );
+    }
+}
+
+#[test]
+fn an_idle_known_account_does_not_lower_an_unknown_playlists_configured_limit() {
+    let mut data = Data::default();
+    data.accounts.insert(
+        1,
+        Account::Xtream("https://example.test".into(), "generated".into()),
+    );
+    data.provider_limits.insert(1, 1);
+    data.limits.insert(1, 1);
+    data.accounts.insert(2, Account::Unknown);
+    data.limits.insert(2, 2);
+    data.viewers.insert(0, data.lease(2));
+    assert!(
+        data.capacity(2, None),
+        "an idle known account does not prove an alias for M3U"
+    );
+    data.viewers.insert(1, data.lease(1));
+    assert!(
+        !data.capacity(2, Some(0)),
+        "an occupied known account still shares the conservative budget"
+    );
+}
+
+#[test]
 fn a_reported_connection_allowance_is_not_masked_by_the_default() {
     let mut settings = iptv_settings::Settings::new();
     assert_eq!(connection_limit(&settings, 1, Some(3)), 3);
