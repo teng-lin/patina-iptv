@@ -702,3 +702,38 @@ fn a_provider_group_using_the_reserved_bucket_key_still_keeps_its_name() {
         "Other"
     );
 }
+
+#[test]
+fn the_generated_ungrouped_bucket_localizes_after_prepare_and_organization() {
+    let parsed = parse_m3u(
+        "#EXTM3U\n#EXTINF:-1,Synthetic Ungrouped Channel\nhttps://synthetic.example.test/live\n",
+    );
+    let s = EpgSchedule::from_catalog(
+        &parsed.groups,
+        &parsed.channels.items,
+        GuideStore::new(),
+        NOW,
+    );
+    let ja = iptv_core::i18n::resolve("ja", None);
+    assert_eq!(s.group_name(0), "Other");
+    assert_eq!(
+        s.group_name_in(0, ja),
+        iptv_core::i18n::translate(ja, "Other")
+    );
+    s.set_organization(super::Organization::default());
+    assert_eq!(
+        s.group_name_in(0, ja),
+        iptv_core::i18n::translate(ja, "Other")
+    );
+    let s = EpgSchedule::from_prepared(EpgSchedule::prepare(
+        &parsed.groups,
+        &parsed.channels.items,
+        GuideStore::new(),
+        NOW,
+        None,
+    ));
+    assert_eq!(
+        s.group_name_in(0, ja),
+        iptv_core::i18n::translate(ja, "Other")
+    );
+}

@@ -230,6 +230,10 @@ accessible labels while switching Spanish → Traditional Chinese → system.
 The archive/restart scenario runs in English and Traditional Chinese and replaces
 the current preference before activating the archive, proving that the restored
 choice comes from the backup. A pseudolocalized scenario exercises large app text
-plus system font scaling at TV, tablet and desktop sizes. Headless geometry and
+plus system font scaling at TV, tablet and desktop sizes. Settings list labels
+keep a single line with ellipsis and their complete accessible name; the fixture
+checks on-screen placement and accessible wording rather than claiming that
+every expanded label fits without truncation. A Japanese help fixture measures
+the uncapped text against its available height to detect clipping. Headless geometry and
 synthetic emulator checks do not substitute for native font rendering, TalkBack,
 VoiceOver or real hardware checks; record those results separately.

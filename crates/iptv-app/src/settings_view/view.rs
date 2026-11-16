@@ -336,6 +336,14 @@ fn row_view(
                 AccessibilityRole::Button
             }
         })
+        .accessible(true)
+        .label(move || {
+            [title().to_owned(), current().0, note()]
+                .into_iter()
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ")
+        })
         .accessibility_state(move || {
             if heading() {
                 AccessibilityState::default()

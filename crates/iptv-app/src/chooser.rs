@@ -36,13 +36,15 @@ pub enum Kind {
 }
 
 /// The open chooser.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Open {
     pub kind: Kind,
     pub labels: Vec<String>,
     /// What each entry sets, for tracks (a track id, `auto`, `off`) and
     /// history (a channel key).
     values: Vec<String>,
+    /// Snapshot behind both the translated labels and their opaque pick values.
+    tracks: Option<iptv_core::tracks::Tracks>,
     pub list: Chooser,
 }
 
@@ -159,7 +161,38 @@ fn history(ui: Ui) -> (Vec<String>, Vec<String>, usize) {
     (labels, keys, h.playing.unwrap_or(0))
 }
 
+impl Open {
+    fn for_tracks(kind: Track, tracks: iptv_core::tracks::Tracks) -> Self {
+        let labels = tracks.entries_in(kind, crate::i18n::language());
+        let values = (0..labels.len())
+            .map(|i| tracks.pick(kind, i).unwrap_or_default())
+            .collect();
+        Self {
+            kind: Kind::Track(kind),
+            list: Chooser::new(labels.len(), tracks.selected_entry(kind)),
+            labels,
+            values,
+            tracks: Some(tracks),
+        }
+    }
+
+    fn track_labels_in(&self, language: &iptv_core::i18n::Language) -> Vec<String> {
+        match (self.kind, self.tracks.as_ref()) {
+            (Kind::Track(kind), Some(tracks)) => tracks.entries_in(kind, language),
+            _ => Vec::new(),
+        }
+    }
+}
+
 pub fn open(ui: Ui, kind: Kind) {
+    if let Kind::Track(kind) = kind {
+        let tracks = ui.player.main().tracks.get_untracked();
+        let open = Open::for_tracks(kind, tracks);
+        if !open.labels.is_empty() {
+            ui.chooser.set(Some(open));
+        }
+        return;
+    }
     let (labels, values, selected) = entries(ui, kind);
     if labels.is_empty() {
         return;
@@ -169,6 +202,7 @@ pub fn open(ui: Ui, kind: Kind) {
         list: Chooser::new(labels.len(), selected),
         labels,
         values,
+        tracks: None,
     }));
 }
 
@@ -275,10 +309,13 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             ui.chooser.with(|c| {
                 c.as_ref().and_then(|c| {
                     let index = at.index();
-                    let label = if c.kind == Kind::History {
-                        c.labels.get(index)?.clone()
-                    } else {
-                        entries(ui, c.kind).0.get(index)?.clone()
+                    let label = match c.kind {
+                        Kind::History => c.labels.get(index)?.clone(),
+                        Kind::Track(_) => c
+                            .track_labels_in(crate::i18n::language())
+                            .get(index)?
+                            .clone(),
+                        _ => entries(ui, c.kind).0.get(index)?.clone(),
                     };
                     let checked = c.kind != Kind::History && c.list.selected == index;
                     Some((label, checked, c.list.focus == index))
@@ -404,5 +441,44 @@ mod tests {
         assert_eq!(title(Kind::Track(Track::Text)), "Subtitles");
         let sizes: BTreeSet<_> = PictureSize::ALL.iter().map(|p| picture_label(*p)).collect();
         assert_eq!(sizes.len(), PictureSize::ALL.len());
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+    use iptv_core::tracks::{TextTrack, Tracks};
+
+    #[test]
+    fn live_track_changes_and_locale_switches_keep_open_labels_and_values_aligned() {
+        let mut live = Tracks {
+            text: vec![TextTrack {
+                id: "original-text-track".into(),
+                language: "eng".into(),
+                ..Default::default()
+            }],
+            selected_text: Some("original-text-track".into()),
+            ..Default::default()
+        };
+        let open = Open::for_tracks(Track::Text, live.clone());
+        // A late host report replaces/reorders tracks while this chooser stays open.
+        live.text = vec![TextTrack {
+            id: "late-text-track".into(),
+            label: "Late synthetic subtitles".into(),
+            ..Default::default()
+        }];
+        live.selected_text = Some("late-text-track".into());
+        for tag in ["es", "ja"] {
+            let language = iptv_core::i18n::resolve(tag, None);
+            let labels = open.track_labels_in(language);
+            assert_eq!(
+                labels[1],
+                iptv_core::tracks::language_name_in("eng", language).unwrap()
+            );
+            assert_ne!(labels, live.entries_in(Track::Text, language));
+            assert_eq!(open.values[1], "original-text-track");
+            assert_eq!(open.list.selected, 1);
+            assert_eq!(open.list.len, labels.len());
+        }
     }
 }

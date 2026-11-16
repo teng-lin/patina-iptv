@@ -510,7 +510,7 @@ fn custom_recording_menu_uses_the_selected_interface_language() {
 /// Real catalogue bindings with a deliberately doubled/accented test fixture.
 /// This checks measured headless layout; native font/AT validation is separate.
 #[test]
-fn pseudolocalized_fixed_labels_fit_large_text_on_tv_tablet_and_desktop() {
+fn pseudolocalized_labels_keep_their_accessible_name_at_large_text_sizes() {
     fn here() {}
     let Some(home) = crate::isolated::run_with_env(
         std::any::type_name_of_val(&here),
@@ -526,6 +526,8 @@ fn pseudolocalized_fixed_labels_fit_large_text_on_tv_tablet_and_desktop() {
     let mut fixture = personalization::start(home, settings, false);
     let app = &mut fixture.app;
     let expanded = |source| iptv_app::pseudo_fixed_for_test(source).unwrap();
+    shown(app, "★ Local A");
+    assert!(iptv_app::pseudo_fixed_for_test("Local A").is_none());
     rail(app);
     step(app.press(&format!("label:{}", expanded("Settings"))));
     for (width, height, idiom) in [
@@ -569,8 +571,10 @@ fn pseudolocalized_fixed_labels_fit_large_text_on_tv_tablet_and_desktop() {
             "{idiom:?}"
         );
         assert!(node.bounds.size.height.0 > 0.0);
-        // Synthetic provider content remains outside the expansion map.
-        assert!(!app.shows("⟦Local A Local A⟧"));
+        // List labels intentionally keep one line. Their full wording must
+        // remain accessible even when an expanded label needs an ellipsis.
+        assert_eq!(node.text.as_ref().unwrap().text.max_lines, 1);
+        step(app.wait_for(&format!("label:/{}/", pattern(wanted))));
         step(app.wait_for(&format!("label:{}", expanded("Video"))));
     }
 }
@@ -589,4 +593,22 @@ fn cjk_settings_help_and_live_language_labels_do_not_fall_back_to_english() {
     press(app, &ja.t("Play the last channel on start"));
     shown(app, &ja.t(summary));
     assert!(!app.shows(summary));
+    let nodes = app.screen().layout_nodes();
+    let help = nodes
+        .iter()
+        .find(|node| node.test_id.as_deref() == Some("settings-help"))
+        .and_then(|node| node.text.as_ref())
+        .expect("localized settings help");
+    // Remove the renderer's line cap before measuring, so vertical clipping
+    // or ellipsis cannot make this assertion pass for truncated help.
+    let mut full = (*help.text).clone();
+    full.max_lines = 0;
+    use nsh_core::{ApproxTextEngine, TextEngine};
+    let engine = ApproxTextEngine;
+    let needed = engine.measure(&engine.prepare(&full), Some(help.content.size.width));
+    assert!(
+        needed.height.0 <= help.content.size.height.0 + 1.0,
+        "{needed:?} exceeds {:?}",
+        help.content
+    );
 }
