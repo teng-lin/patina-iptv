@@ -632,6 +632,9 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
     }
 
     crate::settings::add_user_agent(&mut source.headers, crate::settings::user_agent());
+    // Callers set a resume request immediately after load(). Preparation may
+    // finish later, so clear the previous session before that request is set.
+    stream.resume_ms.set(None);
     let identity = if stream.health.with_untracked(|h| h.live()) {
         target(ui, surface)
             .and_then(|(channel, _)| {
@@ -707,7 +710,6 @@ fn publish_source(ui: Ui, surface: usize, session: u64, source: PlaySource) {
         stream.finished.set(false);
         stream.timeline.set(Default::default());
         stream.seek.set(None);
-        stream.resume_ms.set(None);
         // A new stream: its own tracks, from the default choices.
         crate::media::reset(ui, surface);
         stream.source.set(Some(source));
