@@ -227,6 +227,9 @@ struct Execution {
     started: bool,
     shutdown: CancelToken,
 }
+/// Cancellation and serialization for one viewing surface's preparation.
+type SurfacePreparation = (CancelToken, Arc<tokio::sync::Mutex<()>>);
+
 #[derive(Default)]
 pub(crate) struct State {
     host: Mutex<Option<Arc<crate::store_service::Service>>>,
@@ -238,7 +241,7 @@ pub(crate) struct State {
     inputs_changed: tokio::sync::Notify,
     #[cfg(feature = "test-support")]
     source_preparation_gate: Mutex<Option<Arc<crate::testing::GateState>>>,
-    preparations: Mutex<HashMap<usize, (CancelToken, Arc<tokio::sync::Mutex<()>>)>>,
+    preparations: Mutex<HashMap<usize, SurfacePreparation>>,
     media_ops: tokio::sync::Mutex<()>,
     playback: Mutex<Option<(JobId, iptv_net::recording_file::RecordingFile)>>,
 }
