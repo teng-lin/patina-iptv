@@ -365,6 +365,28 @@ fn accepting_automatic_connections_preserves_absence_but_explicit_limits_are_sav
             .stored("playlists.max_connections", &iptv_settings::Target::Global)
             .is_none()
     );
+    // Either choosing the lower boundary or returning to it after stepping up
+    // deliberately selects one; it must not silently retain Automatic.
+    for steps in [&[-1][..], &[1, -1][..]] {
+        screen.tap_row("playlists.max_connections", &context(&settings));
+        for &by in steps {
+            screen.step(by);
+        }
+        let selected = screen.commit();
+        assert_eq!(
+            selected,
+            Effect::Set {
+                key: "playlists.max_connections",
+                value: Value::Int(1)
+            }
+        );
+        let mut explicit = settings.clone();
+        apply(&mut explicit, selected);
+        assert_eq!(
+            explicit.stored("playlists.max_connections", &iptv_settings::Target::Global),
+            Some(&Value::Int(1))
+        );
+    }
     screen.tap_row("playlists.max_connections", &context(&settings));
     screen.step(1);
     let changed = screen.commit();

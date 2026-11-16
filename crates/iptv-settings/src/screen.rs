@@ -238,6 +238,8 @@ pub enum Editor {
         value: i64,
         /// Whether opening the editor read an explicit global value.
         was_stored: bool,
+        /// A deliberate step distinguishes an explicit limit from Automatic.
+        edited: bool,
     },
     /// Text being typed; `invalid` after a rejected OK.
     Text {
@@ -469,6 +471,7 @@ impl Screen {
                 setting: s,
                 value,
                 was_stored: ctx.settings.stored(s.key, &Target::Global).is_some(),
+                edited: false,
             }),
             Value::Text(text) if s.ty.editor_choices().is_some() => {
                 let variants = s.ty.editor_choices().map_or(&[][..], |c| c.variants);
@@ -579,9 +582,15 @@ impl Screen {
 
     /// Moves an open stepper by `steps` (negative: less), within range.
     pub fn step(&mut self, steps: i64) {
-        if let Some(Editor::Number { setting, value, .. }) = &mut self.editor
+        if let Some(Editor::Number {
+            setting,
+            value,
+            edited,
+            ..
+        }) = &mut self.editor
             && let Some((min, max, step)) = grid(&setting.ty)
         {
+            *edited |= steps != 0;
             *value = validate::clamp_to_grid(value.saturating_add(steps * step), min, max, step);
         }
     }
@@ -605,17 +614,15 @@ impl Screen {
                 setting,
                 value,
                 was_stored,
+                edited,
             }) => {
                 let v = match setting.ty {
                     ValueType::Int { .. } => Value::Int(*value),
                     _ => Value::Duration(*value),
                 };
-                // An unchanged schema default must not replace the provider's
-                // automatic connection allowance with an explicit ceiling.
-                if setting.key == "playlists.max_connections"
-                    && !was_stored
-                    && v == setting.default_value()
-                {
+                // Merely accepting Automatic preserves it. Deliberately using
+                // the stepper selects an explicit ceiling, including one.
+                if setting.key == "playlists.max_connections" && !was_stored && !edited {
                     self.editor = None;
                     return Effect::None;
                 }
