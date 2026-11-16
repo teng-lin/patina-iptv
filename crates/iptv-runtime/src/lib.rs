@@ -431,6 +431,15 @@ impl HostHandle {
             service.accept().occupy_writer(duration);
         }
     }
+
+    /// Holds the writer queue until the returned sender is dropped or signalled.
+    /// Unlike a SQLite lock, this cannot turn a deferred write into BUSY_SNAPSHOT.
+    #[cfg(feature = "test-support")]
+    pub fn hold_writer(&self) -> Option<std::sync::mpsc::Sender<()>> {
+        self.0
+            .upgrade()
+            .map(|service| service.accept().hold_writer())
+    }
 }
 
 #[cfg(test)]

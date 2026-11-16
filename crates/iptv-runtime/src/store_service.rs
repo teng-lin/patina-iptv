@@ -453,6 +453,15 @@ impl Services {
             .writer
             .queue(Box::new(move |_| std::thread::sleep(duration)));
     }
+
+    #[cfg(feature = "test-support")]
+    pub(crate) fn hold_writer(&self) -> mpsc::Sender<()> {
+        let (release, held) = mpsc::channel();
+        let _ = self.service.writer.queue(Box::new(move |_| {
+            let _ = held.recv();
+        }));
+        release
+    }
 }
 
 impl Service {

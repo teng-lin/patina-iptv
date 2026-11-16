@@ -297,6 +297,8 @@ cancel recordings that were already authorized.
 
 Choose **Record** on the play bar to start recording the playing live channel
 immediately; playback continues. Repeated presses do not create duplicate jobs.
+On a TV while watching, press Menu or long-press OK to open the control strip,
+then choose **Record**.
 For a future programme, right-click on desktop or long-press on touch/TV, then
 choose **Schedule recording**. It schedules that programme immediately using its
 guide times, without a form. Choose **Edit recording** in Recordings for adjustments.

@@ -1172,3 +1172,11 @@ pub fn occupy_writer(duration: Duration) {
         .expect("occupy_writer needs a started app")
         .occupy_writer(duration);
 }
+
+/// Pauses queued writes deterministically until the returned sender is dropped.
+#[cfg(feature = "test-support")]
+pub fn hold_writer() -> std::sync::mpsc::Sender<()> {
+    platform_data::host_handle()
+        .and_then(|owner| owner.hold_writer())
+        .expect("hold_writer needs a started app")
+}

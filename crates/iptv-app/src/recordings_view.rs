@@ -396,9 +396,6 @@ fn save_allowed(ui: Ui, draft: Draft) {
                     s.filter = Filter::All;
                     s.focus = Some(id);
                     s.actions = false;
-                    if draft.immediate {
-                        s.open = false;
-                    }
                 }
                 Err(error) => {
                     s.error = Some(

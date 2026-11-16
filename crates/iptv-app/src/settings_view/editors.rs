@@ -230,7 +230,7 @@ fn choice(ui: Ui) -> impl IntoElement {
 /// The stepper's value and its range, in the setting's unit.
 fn number_text(ui: Ui) -> (String, String) {
     let Some((s, value)) = editor(ui, |e| match e {
-        Editor::Number { setting, value } => Some((*setting, *value)),
+        Editor::Number { setting, value, .. } => Some((*setting, *value)),
         _ => None,
     })
     .flatten() else {

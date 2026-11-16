@@ -344,6 +344,61 @@ fn a_stepper_moves_in_steps_within_range_and_keeps_on_ok() {
 }
 
 #[test]
+fn accepting_automatic_connections_preserves_absence_but_explicit_limits_are_saved() {
+    static CONNECTIONS: &[Page] = &[Page {
+        key: "connections",
+        parts: &[Part::Keys(&["playlists.max_connections"])],
+    }];
+    let mut settings = Settings::new();
+    fn context(settings: &Settings) -> Ctx<'_> {
+        Ctx {
+            settings,
+            offer: &everything,
+        }
+    }
+    let mut screen = Screen::new(CONNECTIONS, "connections");
+    screen.tap_row("playlists.max_connections", &context(&settings));
+    assert_eq!(screen.commit(), Effect::None);
+    assert!(screen.editor().is_none());
+    assert!(
+        settings
+            .stored("playlists.max_connections", &iptv_settings::Target::Global)
+            .is_none()
+    );
+    screen.tap_row("playlists.max_connections", &context(&settings));
+    screen.step(1);
+    let changed = screen.commit();
+    assert_eq!(
+        changed,
+        Effect::Set {
+            key: "playlists.max_connections",
+            value: Value::Int(2)
+        }
+    );
+    apply(&mut settings, changed);
+    screen.tap_row("playlists.max_connections", &context(&settings));
+    assert_eq!(
+        screen.commit(),
+        Effect::Set {
+            key: "playlists.max_connections",
+            value: Value::Int(2)
+        }
+    );
+    // A previously explicit one must also remain explicit when accepted unchanged.
+    settings
+        .set("playlists.max_connections", Value::Int(1))
+        .unwrap();
+    screen.tap_row("playlists.max_connections", &context(&settings));
+    assert_eq!(
+        screen.commit(),
+        Effect::Set {
+            key: "playlists.max_connections",
+            value: Value::Int(1)
+        }
+    );
+}
+
+#[test]
 fn integers_step_as_integers() {
     let s = Settings::new();
     let mut screen = Screen::new(PAGES, "appearance");

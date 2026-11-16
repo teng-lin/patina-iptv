@@ -30,7 +30,12 @@ fn fixture(
     idiom: Idiom,
     media_url: &str,
     with_guide: bool,
-) -> (Headless, std::path::PathBuf, iptv_library::SourceId) {
+) -> (
+    Headless,
+    std::path::PathBuf,
+    iptv_library::SourceId,
+    Option<(i64, i64)>,
+) {
     let mut settings = Settings::new();
     settings
         .set("general.resume_last_channel", Value::Bool(false))
@@ -75,12 +80,14 @@ fn fixture(
             },
         )
         .unwrap();
+    let mut expected = None;
     if with_guide {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
         let future = now / 60 * 60 + 1200;
+        expected = Some((future, future + 2700));
         let stamp = iptv_epg::format_xmltv_time;
         let xml = format!(
             "<tv><channel id=\"generated\"><display-name>A</display-name></channel>\
@@ -124,11 +131,12 @@ fn fixture(
     step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
     step(app.press("text:/^☰  /"));
     step(app.press_key("right"));
-    (app, path, source)
+    (app, path, source, expected)
 }
 
 fn exercise(home: crate::isolated::Home, idiom: Idiom) {
-    let (mut app, path, source) = fixture(&home, idiom, "https://example.test/generated.ts", false);
+    let (mut app, path, source, _) =
+        fixture(&home, idiom, "https://example.test/generated.ts", false);
     // The custom form works without guide data, with the selected channel retained.
     if idiom == Idiom::Tv {
         step(app.press_key("m"));
@@ -298,7 +306,8 @@ fn desktop_schedules_cancels_and_confirms_deletion() {
 }
 
 fn future_programme(home: crate::isolated::Home, idiom: Idiom) {
-    let (mut app, path, source) = fixture(&home, idiom, "https://example.test/generated.ts", true);
+    let (mut app, path, source, expected) =
+        fixture(&home, idiom, "https://example.test/generated.ts", true);
     step(app.wait_for("text:Generated future programme"));
     step(app.press_key("right"));
     let selected = app
@@ -347,7 +356,10 @@ fn future_programme(home: crate::isolated::Home, idiom: Idiom) {
         jobs[0].request.start > now,
         "future programme must not become record-now"
     );
-    assert_eq!(jobs[0].request.end - jobs[0].request.start, 45 * 60);
+    assert_eq!(
+        (jobs[0].request.start, jobs[0].request.end),
+        expected.unwrap()
+    );
     step(app.press("id:recording-job"));
     step(app.press("text:Edit recording"));
     step(app.wait_for("text:Save recording"));
@@ -382,9 +394,7 @@ fn long_press_on_a_future_programme_schedules_without_a_form() {
     future_programme(home, Idiom::Pad);
 }
 
-#[test]
-fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
-    let Some(home) = isolated!() else { return };
+fn local_capture() -> (String, std::thread::JoinHandle<()>) {
     use std::io::{Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -429,7 +439,14 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
             return;
         }
     });
-    let (mut app, path, _) = fixture(&home, Idiom::Pad, &url, false);
+    (url, server)
+}
+
+#[test]
+fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
+    let Some(home) = isolated!() else { return };
+    let (url, server) = local_capture();
+    let (mut app, path, _, _) = fixture(&home, Idiom::Pad, &url, false);
     step(app.press("text:A"));
     step(app.press("text:A"));
     step(app.wait_for_within("text:▶", Duration::from_secs(15)));
@@ -483,5 +500,33 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
     step(app.press("text:Stop recording"));
     step(app.wait_for_within("text:/Completed ·/", Duration::from_secs(10)));
     assert_eq!(iptv_app::player_opens(0), opens);
+    server.join().unwrap();
+}
+
+#[test]
+fn a_recordings_screen_opened_during_record_now_stays_open_after_save() {
+    let Some(home) = isolated!() else { return };
+    let (url, server) = local_capture();
+    let (mut app, _, _, _) = fixture(&home, Idiom::Pad, &url, false);
+    step(app.press("text:A"));
+    step(app.press("text:A"));
+    step(app.wait_for_within("text:▶", Duration::from_secs(15)));
+    step(app.press("label:Video"));
+    step(app.wait_for("label:Record"));
+    let pending = iptv_app::hold_writer();
+    step(app.press("label:Record"));
+    assert!(!app.screen().matches("id:recordings-screen").unwrap());
+    step(app.press_key("m"));
+    step(app.wait_for("id:player-controls >> text:Recordings"));
+    step(app.press("id:player-controls >> text:Recordings"));
+    step(app.wait_for("id:recordings-screen"));
+    assert!(!app.screen().matches("id:recording-job").unwrap());
+    drop(pending);
+    step(app.wait_for_within("id:recording-job", Duration::from_secs(15)));
+    assert!(app.screen().matches("id:recordings-screen").unwrap());
+    step(app.press("id:recording-job"));
+    step(app.wait_for_within("text:Stop recording", Duration::from_secs(10)));
+    step(app.press("text:Stop recording"));
+    step(app.wait_for_within("text:/Completed ·/", Duration::from_secs(10)));
     server.join().unwrap();
 }
