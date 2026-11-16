@@ -287,9 +287,11 @@ mod tests {
             let listener = UnixListener::bind(&path).unwrap();
             listener.set_nonblocking(true).unwrap();
             let (done, finished) = std::sync::mpsc::channel();
+            let (ready, started) = std::sync::mpsc::sync_channel(0);
             let worker = std::thread::spawn(move || {
                 let deadline = std::time::Instant::now() + Duration::from_secs(5);
                 let mut commands = Vec::new();
+                ready.send(()).unwrap();
                 loop {
                     match listener.accept() {
                         Ok((mut stream, _)) => {
@@ -326,6 +328,11 @@ mod tests {
                 assert_eq!(commands.len(), replies.len(), "missing compositor request");
                 commands
             });
+            // A bound socket can connect before its worker is scheduled.
+            // Acknowledge startup before the request's 500 ms budget begins.
+            started
+                .recv_timeout(Duration::from_secs(5))
+                .expect("compositor fixture worker did not start");
             Self {
                 _directory: directory,
                 path,
@@ -529,14 +536,24 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("slow.sock");
         let listener = UnixListener::bind(&path).unwrap();
+        let (entered, observed) = std::sync::mpsc::channel();
+        let (release, held) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let mut command = [0; 9];
             stream.read_exact(&mut command).unwrap();
             assert_eq!(&command, b"j/clients");
-            std::thread::sleep(Duration::from_millis(650));
+            entered.send(()).unwrap();
+            // Keep the peer open until the bounded client has returned.
+            held.recv_timeout(Duration::from_secs(5))
+                .expect("stalled compositor was not released");
         });
-        assert!(request(&path, "j/clients").is_none());
+        let response = request(&path, "j/clients");
+        observed
+            .recv_timeout(Duration::from_secs(5))
+            .expect("stalled compositor did not receive the request");
+        assert!(response.is_none());
+        release.send(()).unwrap();
         worker.join().unwrap();
         let server = IpcMock::new(vec![("j/clients", b"[]".to_vec())]);
         assert_eq!(request(&server.path, "j/clients"), Some("[]".into()));
