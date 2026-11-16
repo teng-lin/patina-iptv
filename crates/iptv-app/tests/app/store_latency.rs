@@ -119,7 +119,7 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
     });
     let reads = iptv_app::store_reads();
     let opens = iptv_app::player_opens(0);
-    let journey = crate::performance::Sample::start("busy-guide", 0);
+    let mut journey = crate::performance::Sample::start("busy-guide", 0);
     let mut maximum = Duration::ZERO;
     let mut restyled_empty = 0;
     for _ in 0..24 {
@@ -135,6 +135,7 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
     }
     let at_us = journey.elapsed();
     app.idle(Duration::from_millis(500)).unwrap();
+    journey.observe("key_to_mounted_frame_max_us", maximum.as_micros() as u64);
     journey.finish_at(
         "navigation-mounted",
         0,
@@ -151,10 +152,12 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
         restyled_empty, 0,
         "navigation must not restyle unused slots"
     );
-    assert!(
-        maximum < Duration::from_millis(50),
-        "guide input budget exceeded: {maximum:?}"
-    );
+    if std::env::var_os("IPTV_PERF_SAMPLE").is_none() {
+        assert!(
+            maximum < Duration::from_millis(50),
+            "guide input budget exceeded: {maximum:?}"
+        );
+    }
     let end = Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(10));
     loop {
         let saved: i64 = lock

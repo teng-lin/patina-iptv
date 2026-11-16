@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "base_sha256": "f259c8d1863814d8a386f458fb6798c7cd4f8d146148453398905251ce35bf96",
+    "candidate_sha256": "72602c893964f064fc06287d79b78bd47eec5c5be2099703893589d44158be55",
+    "fixture_base_sha256": "6e12ba59ba403bce41154a2048b281931f1ffde17a756dff92ec45edad37cbe2",
+    "fixture_candidate_sha256": "693344105d6f005223cc8fbf5512f03256573b86a088a9a58faf61bed23b3d02",
+    "base_commit": "a4ad9d205b85693b6b1070cc93ee6fd01de1f47c",
+    "rationale": "Scope the initial deterministic profile to action work. Recordings UI polling reloads jobs, progress and rules every second (three reader jobs), despite its screen being closed. Poll-inclusive reference 6bb12957 measured busy 11 and selection 4/7; excluding only that unrelated view loop measures busy 2 and selection 1 while native recorder startup, authorization and execution remain active. Keep the failed raw reference, tighten the ceilings, and require fresh collector-matched invocation IDs plus policy-covered minimum repetitions and completion deadline."
+  }
+]

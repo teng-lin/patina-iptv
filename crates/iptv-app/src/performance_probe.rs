@@ -20,6 +20,12 @@ pub(crate) struct Probe {
     path: PathBuf,
 }
 
+/// Only explicit synthetic journeys exclude unrelated periodic view work.
+pub(crate) fn enabled() -> bool {
+    std::env::var_os("IPTV_PERF_SAMPLE").is_some()
+        || std::env::var_os("IPTV_PERF_NATIVE_SAMPLE").is_some()
+}
+
 pub(crate) fn bind(ui: Ui) {
     let Some(path) = std::env::var_os("IPTV_PERF_NATIVE_SAMPLE") else {
         return;
@@ -28,11 +34,13 @@ pub(crate) fn bind(ui: Ui) {
     let ready = std::env::var_os("IPTV_PERF_NATIVE_READY").map(PathBuf::from);
     let armed = Rc::new(Cell::new(false));
     let _poll = set_interval(Duration::from_millis(25), move || {
+        if armed.get() {
+            return;
+        }
         if ready.as_ref().is_some_and(|path| !path.exists()) {
             return;
         }
-        if armed.get()
-            || !crate::startup::marked("guide frame")
+        if !crate::startup::marked("guide frame")
             || ui.library.shown.get_untracked().is_none()
             || ui.visible_rows.get_untracked().is_none()
         {
@@ -87,6 +95,7 @@ pub(crate) fn rendered(ui: Ui, surface: usize, token: u64) {
         ui.performance.with_untracked(|probe| {
             let probe = probe.as_ref().expect("active synthetic selection probe");
             let sample = json!({
+                "invocation": std::env::var("IPTV_PERF_INVOCATION").ok(),
                 "journey": "selection", "build_commit": env!("IPTV_GIT_HASH"),
                 "build_mode": if cfg!(debug_assertions) { "debug-test-support" } else { "release-test-support" },
                 "events": probe.events, "expected_token": probe.expected,

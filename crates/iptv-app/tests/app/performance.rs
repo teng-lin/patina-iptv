@@ -11,6 +11,7 @@ pub(super) struct Sample {
     journey: &'static str,
     selection: u64,
     started: Instant,
+    observations: BTreeMap<&'static str, u64>,
 }
 impl Sample {
     pub(super) fn start(journey: &'static str, selection: u64) -> Self {
@@ -18,7 +19,12 @@ impl Sample {
             journey,
             selection,
             started: Instant::now(),
+            observations: BTreeMap::new(),
         }
+    }
+
+    pub(super) fn observe(&mut self, name: &'static str, value: u64) {
+        self.observations.insert(name, value);
     }
 
     pub(super) fn elapsed(&self) -> u64 {
@@ -36,6 +42,8 @@ impl Sample {
         };
         let sample = json!({
             "journey": self.journey,
+            "invocation": std::env::var("IPTV_PERF_INVOCATION").ok(),
+            "observations": self.observations,
             "build_commit": env!("IPTV_GIT_HASH"),
             "build_mode": if cfg!(debug_assertions) { "debug-test-support" } else { "release-test-support" },
             "events": [

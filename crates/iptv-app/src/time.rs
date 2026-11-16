@@ -143,9 +143,7 @@ pub fn tick(ui: Ui) {
 pub fn start(ui: Ui) {
     // Synthetic work-counter journeys exclude unrelated minute-boundary work.
     #[cfg(feature = "test-support")]
-    if std::env::var_os("IPTV_PERF_SAMPLE").is_some()
-        || std::env::var_os("IPTV_PERF_NATIVE_SAMPLE").is_some()
-    {
+    if crate::performance_probe::enabled() {
         return;
     }
     let secs = guide::secs_to_next_minute(&*schedule(), wall_unix(), shown_secs());

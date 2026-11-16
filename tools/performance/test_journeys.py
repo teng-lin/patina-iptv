@@ -18,11 +18,11 @@ class Evidence(unittest.TestCase):
         self.spec = j.load(j.HERE / "fixtures.json")
         self.baseline = j.load(j.HERE / "baseline.json")
         self.samples = [
-            {"journey": name, "build_commit": "a" * 8, "build_mode": "debug-test-support", "events": [
+            {"journey": name, "invocation": f"{index:032x}", "expected_invocation": f"{index:032x}", "build_commit": "a" * 8, "build_mode": "debug-test-support", "events": [
                 {"kind": "start", "at_us": 10, "selection": 1, "token": 7},
                 {"kind": self.spec[name]["terminal"], "at_us": 20, "selection": 1, "token": 7}],
              "counters": {"store_reads": 0, "player_opens": 0}}
-            for name in j.CASES
+            for index, name in enumerate(j.CASES)
         ]
 
     def result(self):
@@ -76,6 +76,24 @@ class Evidence(unittest.TestCase):
         sample["events"][-1]["kind"] = "first-render"
         self.assertEqual(j.evidence(sample, "first-render", 100), 10)
 
+    def test_reused_invocations_fail_but_equal_independent_measurements_pass(self):
+        repeated = [copy.deepcopy(sample) for sample in self.samples for _ in range(3)]
+        result = j.summary(repeated, self.spec, self.baseline, 3, 100)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("duplicate invocation" in error for error in result["errors"]))
+        for index, sample in enumerate(repeated):
+            sample["invocation"] = f"{index:032x}"
+            sample["expected_invocation"] = sample["invocation"]
+        self.assertTrue(j.summary(repeated, self.spec, self.baseline, 3, 100)["valid"])
+        sample = copy.deepcopy(self.samples[-1])
+        sample["invocation"] = "f" * 32
+        with self.assertRaisesRegex(ValueError, "stale invocation"):
+            j.evidence(sample, "first-render", 100)
+        sample = copy.deepcopy(self.samples[-1])
+        del sample["invocation"]
+        with self.assertRaisesRegex(ValueError, "invocation identity"):
+            j.evidence(sample, "first-render", 100)
+
     def test_zero_missing_duplicate_and_unknown_samples_are_invalid(self):
         self.assertFalse(j.summary([], self.spec, self.baseline, 0, 100)["valid"])
         self.samples.pop()
@@ -98,17 +116,24 @@ class Evidence(unittest.TestCase):
                 self.assertTrue(any(name in error and counter in error for error in result["errors"]))
 
     def test_persisted_report_revalidates_metadata_and_samples(self):
+        repeated = []
+        for sample in self.samples:
+            for _ in range(3):
+                copy_sample = copy.deepcopy(sample)
+                identity = f"{len(repeated):032x}"
+                copy_sample.update(invocation=identity, expected_invocation=identity)
+                repeated.append(copy_sample)
         report = {"schema": 1, "dirty": False, "commit": "a" * 40, "platform": "linux", "backend": "fabricated",
                   "hardware_class": "host", "build_mode": "debug-test-support", "fixture": self.spec,
                   "fixture_sha256": j.digest((j.HERE / "fixtures.json").read_bytes()),
-                  "repetitions": 1, "timeout_us": 100, "samples": self.samples, "valid": True}
+                  "repetitions": 3, "timeout_us": 100, "samples": repeated, "valid": True}
         self.assertTrue(j.check_report(report, self.baseline)["valid"])
         stale = copy.deepcopy(report)
         stale["samples"][0]["build_commit"] = "b" * 8
         self.assertFalse(j.check_report(stale, self.baseline)["valid"])
         report["samples"] = []
         self.assertFalse(j.check_report(report, self.baseline)["valid"], "stored valid cannot hide lost samples")
-        for field, value in (("schema", 2), ("dirty", True), ("commit", ""), ("fixture_sha256", "b" * 64), ("backend", "")):
+        for field, value in (("schema", 2), ("dirty", True), ("source_changed", True), ("repetitions", 1), ("timeout_us", 301_000_000), ("commit", ""), ("fixture_sha256", "b" * 64), ("backend", "")):
             bad = {**report, field: value}
             with self.subTest(field=field), self.assertRaises(ValueError):
                 j.check_report(bad, self.baseline)
@@ -164,6 +189,47 @@ class MalformedRunner(unittest.TestCase):
                 report = j.load(output)
                 self.assertEqual(len(report["samples"]), 3)
                 self.assertTrue(all("unreadable evidence" in s["failure"] for s in report["samples"]))
+
+
+class SourceStateRunner(unittest.TestCase):
+    def test_collector_identity_and_source_state_stay_bound_during_execution(self):
+        from unittest.mock import patch
+        import argparse
+        import contextlib
+        import io
+        for mode in ("unchanged", "dirty", "head", "invocation"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / "report.json"
+                args = argparse.Namespace(output=str(output), baseline=str(j.HERE / "baseline.json"),
+                                          repetitions=3, timeout=5, harness=sys.executable, native_harness=sys.executable)
+                calls = 0
+                def state():
+                    nonlocal calls
+                    calls += 1
+                    return ("b" * 40 if mode == "head" and calls > 1 else "a" * 40,
+                            mode == "dirty" and calls > 1)
+                spec = j.load(j.HERE / "fixtures.json")
+                def scenario(command, env, timeout):
+                    name = next(name for name in j.CASES if spec[name]["scenario"] in command)
+                    sample = {"journey": name, "invocation": "f" * 32 if mode == "invocation" else env["IPTV_PERF_INVOCATION"],
+                              "build_commit": "a" * 8, "build_mode": "debug-test-support",
+                              "events": [{"kind": "start", "at_us": 0, "selection": 1, "token": 7},
+                                         {"kind": spec[name]["terminal"], "at_us": 10, "selection": 1, "token": 7}],
+                              "counters": {"store_reads": 0, "player_opens": 0}}
+                    Path(env["IPTV_PERF_SAMPLE"]).write_text(json.dumps(sample))
+                    return subprocess.CompletedProcess(command, 0, "")
+                with patch.object(j, "source_state", side_effect=state), patch.object(j, "scenario", side_effect=scenario), \
+                     patch.object(j.platform, "system", return_value="Linux"), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(j.run(args), 0 if mode == "unchanged" else 1)
+                report = j.load(output)
+                self.assertEqual(report["commit"], "a" * 40, "retain original source identity")
+                self.assertEqual(len(report["samples"]), 9)
+                if mode == "unchanged":
+                    self.assertTrue(report["valid"])
+                else:
+                    reason = {"head": "source identity changed", "dirty": "dirty source state",
+                              "invocation": "stale invocation evidence"}[mode]
+                    self.assertTrue(any(reason in error for error in report["errors"]))
 
 
 class Android(unittest.TestCase):

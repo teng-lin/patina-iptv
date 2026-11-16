@@ -15,17 +15,24 @@ sample, including failed samples. Each sample attests the project's compile-time
 (`build_version.rs` explicitly slices the full hash) and build mode, so a stale supplied harness cannot be labeled with the checkout's current commit. `--output`, `--repetitions`, `--timeout` (seconds,
 300 by default), `--harness /absolute/path/to/app-tests`, and `--native-harness` customize a run.
 Do not run another timing workload alongside it. The timeout is an evidence
-completeness deadline, not a performance budget.
+completeness deadline, not a performance budget. The base-compared fixture policy
+requires at least three repetitions and a deadline no longer than 300 seconds;
+short diagnostic runs retain samples but cannot become valid canonical reports.
 
 ## Workloads and endpoints
 
 `tools/performance/fixtures.json` versions the generated workload specification;
 its SHA-256 identifies the report's fixture. Programme times are relative to the
 scenario's clock, and local file paths are deliberately excluded from the hash.
-During opt-in counter journeys, the guide minute ticker is paused and periodic
-EPG checks are disabled; the cached cold profile also disables startup playlist
+During opt-in counter journeys, the guide minute ticker and periodic recordings-screen
+UI reload are paused, and periodic EPG checks are disabled; the cached cold profile also disables startup playlist
 and guide refresh. This excludes unrelated minute-boundary/background work from
-the exact action counters.
+the exact action counters. The native recording executor still starts and playback
+uses its normal authorization and connection reservations. The recordings UI normally
+reloads jobs, progress and repeating rules every second (three reader jobs); including
+that poll made an otherwise identical selection count differ by three when a tick
+crossed the interval. The performance profile excludes that unrelated view poll,
+while ordinary app tests continue to exercise it.
 The base-compared specification also binds each journey to its exact scenario test.
 Changes to fixture generation or scenario identity must update that specification. No provider data,
 network stream, credentials, or real media is needed.
@@ -39,7 +46,9 @@ network stream, credentials, or real media is needed.
 The cold measurement is **headless root startup**, not an OS process launch or
 physical display scanout. Fixture import and harness loading are excluded. The
 busy journey reuses the existing isolated writer-contention scenario and its
-existing latency check, rather than adding a second wall-clock budget. Guide
+deterministic checks. The canonical journey retains its measured maximum key-to-mounted-frame
+as an informational observation; the existing isolated `tools/check.sh` invocation
+continues to enforce its 50 ms limit separately. Guide
 navigation and the pending favourite exercise both UI progress and an actual
 blocked writer. Filtering/read independence remains covered by the existing
 isolated `a_store_read_does_not_wait_for_a_busy_writer` scenario in `tools/check.sh`.
@@ -79,13 +88,17 @@ must retain a callback's originating identity before it can support this metric.
 ## Report and CI policy
 
 Schema 1 records commit, dirty status, platform/backend, hardware class, fixture hash and
-specification, build mode, repetition count, deadline, raw per-sample monotonic
+specification, build mode, repetition count, unique invocation identities, deadline, raw per-sample monotonic
 microsecond events, selection identity, source token, work counts, median, nearest
 rank p95, maximum, and explicit validity/errors. No raw URL, provider name, channel
 label, credential, or resolved address is recorded. Owner reader counters count accepted reader-lane jobs (including queued work),
 not individual SQL queries or writes. They only exist with `test-support`; normal release builds add no counter or file writes.
 Existing native-open counters are reused. The player surface is unchanged.
 
+Each invocation receives its own generated ID, retained separately as the collector's
+expected identity and echoed by its producer; mismatches and reused IDs cannot count as independent
+repetitions even if the number of sample objects is correct. HEAD and tracked-source
+cleanliness are checked again after harness preparation and during sampling.
 Missing, duplicate, stale, non-monotonic, timed-out or zero-sample evidence is
 invalid. Failed scenarios stay in the report even if they wrote a terminal event.
 An invalid run never substitutes a zero duration or quietly drops a failed sample.

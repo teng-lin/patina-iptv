@@ -43,7 +43,7 @@ pub enum PlayerEvent {
     State(PlayerState),
     /// `size` {width, height}: the video's, in pixels.
     Size { width: u64, height: u64 },
-    /// Current-source frame submitted to a native renderer, once per open.
+    /// Current-source frame submitted to a native renderer, once per source identity/token.
     /// This is not a display presentation/scanout timestamp. Unsupported hosts
     /// omit it; ready/size events must never stand in for this evidence.
     FirstRender { token: u64 },

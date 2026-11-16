@@ -415,6 +415,7 @@ fn native_selection_reaches_a_correlated_render_submission() {
     std::fs::write(data.join("settings.json"), settings.to_json_string()).unwrap();
     let mut cleanup = Cleanup::default();
     let (main, view) = window(Root::of::<iptv_app::App>(), directory.path());
+    cleanup.0.push((main.clone(), view.clone()));
     main.set_default_size(1280, 720);
     wait("persistent native surface realized before Enter", || {
         areas(&view.widget())
@@ -422,7 +423,6 @@ fn native_selection_reaches_a_correlated_render_submission() {
             .any(|area| area.is_realized() && area.context().is_some())
     });
     std::fs::write(&ready, "ready").unwrap();
-    cleanup.0.push((main, view));
     wait(
         "actual App Enter selection reaches its current-source render",
         || sample.exists(),

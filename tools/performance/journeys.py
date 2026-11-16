@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
@@ -36,6 +37,10 @@ def evidence(sample, terminal, timeout_us):
         raise ValueError("sample must be an object")
     if sample.get("failure"):
         raise ValueError(sample["failure"])
+    if not isinstance(sample.get("invocation"), str) or not re.fullmatch(r"[0-9a-f]{32}", sample["invocation"]):
+        raise ValueError("missing or invalid invocation identity")
+    if sample.get("expected_invocation") != sample["invocation"]:
+        raise ValueError("stale invocation evidence")
     events = sample.get("events", [])
     if not isinstance(events, list) or not all(isinstance(e, dict) for e in events):
         raise ValueError("events must be an array of objects")
@@ -71,6 +76,7 @@ def evidence(sample, terminal, timeout_us):
 def summary(samples, spec, baseline, repetitions, timeout_us, commit=None):
     result = {}
     errors = []
+    seen = set()
     if repetitions < 1:
         errors.append("zero samples requested")
     if set(baseline.get("journeys", {})) != set(CASES):
@@ -88,6 +94,9 @@ def summary(samples, spec, baseline, repetitions, timeout_us, commit=None):
                     if sample.get("build_commit") != commit[:8] or sample.get("build_mode") != "debug-test-support":
                         raise ValueError("stale executable commit or unexpected build mode")
                 elapsed = evidence(sample, spec[journey]["terminal"], timeout_us)
+                if sample["invocation"] in seen:
+                    raise ValueError("duplicate invocation evidence")
+                seen.add(sample["invocation"])
                 ceilings = baseline["journeys"][journey]
                 if set(ceilings) != {"store_reads", "player_opens"}:
                     raise ValueError("baseline counter set changed")
@@ -140,12 +149,23 @@ def policy(base, candidate, records, base_spec=None, candidate_spec=None):
     return weakened
 
 
+def run_policy(spec):
+    profile = spec.get("run_policy", {})
+    minimum = profile.get("minimum_repetitions")
+    seconds = profile.get("timeout_seconds")
+    if not natural(minimum) or minimum < 1 or not natural(seconds) or seconds < 1:
+        raise ValueError("invalid fixture run policy")
+    return minimum, seconds
+
+
 def check_report(report, baseline):
     """Re-parse a persisted report; stored validity/summary cannot mask lost samples."""
     if not isinstance(report, dict) or not isinstance(baseline, dict):
         raise ValueError("report and baseline must be objects")
     if not isinstance(report.get("samples"), list) or not all(isinstance(s, dict) for s in report["samples"]):
         raise ValueError("samples must be an array of objects")
+    if report.get("source_changed"):
+        raise ValueError("source identity changed during measurement")
     if report.get("dirty") is not False:
         raise ValueError("dirty or unknown source state cannot establish a reproducible report")
     if report.get("schema") != 1 or baseline.get("schema") != 1:
@@ -161,6 +181,9 @@ def check_report(report, baseline):
         raise ValueError("fixture specification mismatch")
     if not natural(report.get("repetitions")) or not natural(report.get("timeout_us")) or report["timeout_us"] == 0:
         raise ValueError("invalid repetition count or deadline")
+    minimum, seconds = run_policy(report["fixture"])
+    if report["repetitions"] < minimum or report["timeout_us"] > seconds * 1_000_000:
+        raise ValueError("report weakens approved repetitions or timeout")
     result = summary(report.get("samples", []), report["fixture"], baseline,
                      report["repetitions"], report["timeout_us"], report["commit"])
     return result
@@ -198,9 +221,28 @@ def scenario(command, env, timeout):
     return subprocess.CompletedProcess(command, process.returncode, stdout)
 
 
+def source_state():
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    dirty = subprocess.run(["git", "diff", "--quiet", "HEAD"], cwd=ROOT).returncode != 0
+    return commit, dirty
+
+
+def recheck_source(report):
+    commit, dirty = source_state()
+    report["dirty"] = report["dirty"] or dirty
+    report["source_changed"] = report.get("source_changed", False) or commit != report["commit"]
+
+
 def update_report(report, baseline):
     result = summary(report["samples"], report["fixture"], baseline, report["repetitions"],
                      report["timeout_us"], report["commit"])
+    minimum, seconds = run_policy(report["fixture"])
+    if report["repetitions"] < minimum or report["timeout_us"] > seconds * 1_000_000:
+        result["valid"] = False
+        result["errors"].append("report weakens approved repetitions or timeout")
+    if report.get("source_changed"):
+        result["valid"] = False
+        result["errors"].append("source identity changed during measurement")
     if report["dirty"]:
         result["valid"] = False
         result["errors"].append("dirty source state cannot establish a reproducible report")
@@ -212,10 +254,12 @@ def run(args):
     import shutil
     spec = load(HERE / "fixtures.json")
     baseline = load(args.baseline)
+    minimum, seconds = run_policy(spec)
+    args.repetitions = minimum if args.repetitions is None else args.repetitions
+    args.timeout = seconds if args.timeout is None else args.timeout
+    commit, dirty = source_state()
     report = {
-        "schema": 1,
-        "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
-        "dirty": subprocess.run(["git", "diff", "--quiet", "HEAD"], cwd=ROOT).returncode != 0,
+        "schema": 1, "commit": commit, "dirty": dirty, "source_changed": False,
         "platform": platform.system().lower(), "backend": "nsh-headless+gtk-app-mpv-render-submission",
         "hardware_class": "host", "build_mode": "debug-test-support", "fixture_sha256": digest((HERE / "fixtures.json").read_bytes()),
         "fixture": spec, "repetitions": args.repetitions, "timeout_us": args.timeout * 1_000_000,
@@ -238,17 +282,20 @@ def run(args):
                 native = Path(temporary) / "native-tests"
                 shutil.copyfile(args.native_harness or build_harness("native_player"), native)
                 native.chmod(0o700)
+            recheck_source(report)
             for journey in CASES:
                 case = spec[journey]["scenario"]
                 for repetition in range(args.repetitions):
                     destination = Path(temporary) / f"{journey}-{repetition}.json"
                     scratch = Path(temporary) / f"scratch-{journey}-{repetition}"
                     scratch.mkdir()
-                    env = {**os.environ, "IPTV_PERF_SAMPLE": str(destination), "IPTV_RS_TEST_JOBS": "1", "TMPDIR": str(scratch)}
+                    env = {**os.environ, "IPTV_PERF_SAMPLE": str(destination), "IPTV_RS_TEST_JOBS": "1", "TMPDIR": str(scratch),
+                           "IPTV_PERF_INVOCATION": uuid.uuid4().hex}
                     try:
                         if journey == "selection":
                             if native is None:
-                                report["samples"].append({"journey": journey, "failure": "missing correlated native first-render backend"})
+                                report["samples"].append({"journey": journey, "expected_invocation": env["IPTV_PERF_INVOCATION"],
+                                                          "failure": "missing correlated native first-render backend"})
                                 continue
                             command = [sys.executable, str(ROOT / "tools/ci/run-xvfb.py"), str(native), case,
                                        "--ignored", "--exact", "--nocapture", "--test-threads=1"]
@@ -259,6 +306,8 @@ def run(args):
                         sample = load(destination) if destination.exists() else {"journey": journey, "failure": "missing terminal evidence"}
                         if not isinstance(sample, dict):
                             raise ValueError("sample file must contain an object")
+                        if sample.get("journey") != journey:
+                            raise ValueError("stale journey identity")
                         if process.returncode:
                             sample["failure"] = f"scenario failed (exit {process.returncode})"
                             print(process.stdout, file=sys.stderr)
@@ -266,9 +315,12 @@ def run(args):
                         sample = {"journey": journey, "failure": "scenario timeout"}
                     except (ValueError, OSError, TypeError) as error:
                         sample = {"journey": journey, "failure": f"unreadable evidence: {error}"}
+                    sample["expected_invocation"] = env["IPTV_PERF_INVOCATION"]
                     report["samples"].append(sample)
+                    recheck_source(report)
                     update_report(report, baseline)
                     output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        recheck_source(report)
         update_report(report, baseline)
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         report["valid"] = False
@@ -285,8 +337,8 @@ def main():
     runner.add_argument("--output", default="target/performance/summary.json")
     runner.add_argument("--harness")
     runner.add_argument("--native-harness")
-    runner.add_argument("--repetitions", type=int, default=3)
-    runner.add_argument("--timeout", type=int, default=300)
+    runner.add_argument("--repetitions", type=int)
+    runner.add_argument("--timeout", type=int)
     runner.add_argument("--baseline", default=str(HERE / "baseline.json"))
     checker = commands.add_parser("check")
     checker.add_argument("report")

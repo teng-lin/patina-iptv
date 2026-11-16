@@ -7,13 +7,13 @@
       "player_opens": 1
     },
     "busy-guide": {
-      "store_reads": 7,
+      "store_reads": 2,
       "player_opens": 0
     },
     "selection": {
-      "store_reads": 7,
+      "store_reads": 1,
       "player_opens": 1
     }
   },
-  "rationale": "Initial Linux reference with startup/periodic refresh excluded: cached guide executes17 reader jobs, busy navigation seven, and actual-App selection seven; one native source open for each selected channel. Exact ceilings; wall-clock data is informational."
+  "rationale": "Initial canonical action ceilings after excluding periodic view reloads: cached guide 17 reader jobs, busy navigation 2, actual App selection 1; native source opens 1/0/1. Native recorder execution remains active. Wall-clock measurements are informational."
 }
