@@ -52,7 +52,7 @@ sys.stderr.write("generated stderr\\n")
         self.assertEqual(result.stdout, b"")
         self.assertEqual(result.stderr, b"")
 
-    def hanging_command(self, parent_ignores_term=True):
+    def hanging_command(self, parent="ignore"):
         state = self.root / "owned-pids.json"
         ready = self.root / "descendant-ready"
         descendant = '''import os, signal, sys
@@ -68,9 +68,10 @@ child = subprocess.Popen([sys.executable, "-c", sys.argv[3], sys.argv[2]])
 deadline = time.monotonic() + 1
 while not Path(sys.argv[2]).exists() and time.monotonic() < deadline: time.sleep(0.01)
 Path(sys.argv[1]).write_text(json.dumps([os.getpid(), child.pid]))
+if sys.argv[4] == "success": raise SystemExit(0)
 while True: signal.pause()
 ''', str(state), str(ready), descendant,
-                               "ignore" if parent_ignores_term else "exit", "generated-private-argument")
+                               parent, "generated-private-argument")
         return command, state
 
     def assert_dead(self, state):
@@ -104,10 +105,21 @@ while True: signal.pause()
             self.kill_owned_group(state)
 
     def test_timeout_kills_descendant_even_when_parent_exits_on_term(self):
-        command, state = self.hanging_command(parent_ignores_term=False)
+        command, state = self.hanging_command(parent="exit")
         try:
             result = subprocess.run(command, capture_output=True, timeout=6, check=False)
             self.assertEqual(result.returncode, 124)
+            self.assert_dead(state)
+        finally:
+            self.kill_owned_group(state)
+
+    def test_normal_exit_releases_stdout_retained_by_an_owned_descendant(self):
+        command, state = self.hanging_command(parent="success")
+        try:
+            result = subprocess.run(command, capture_output=True, timeout=6, check=False)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, b"")
+            self.assertEqual(result.stderr, b"")
             self.assert_dead(state)
         finally:
             self.kill_owned_group(state)

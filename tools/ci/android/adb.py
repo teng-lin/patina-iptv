@@ -95,6 +95,9 @@ def main(argv=None):
                 return 124
             try:
                 status = process.wait(timeout=min(remaining, 0.1))
+                # A successful client can leave an owned child holding output
+                # pipes open. Detached adb servers have a different group.
+                terminate = True
                 return 128 - status if status < 0 else status
             except subprocess.TimeoutExpired:
                 pass
