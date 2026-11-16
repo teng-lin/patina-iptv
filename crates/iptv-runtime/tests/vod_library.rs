@@ -92,6 +92,242 @@ fn movie_playback_progress_survives_restart_and_locked_direct_ids_are_rejected()
     assert!(owner.drain_services());
 }
 
+/// Two playlists carrying the same generated catalogue: identical provider
+/// ids and titles, playable through local direct links.
+fn two_playlists(
+    dir: &std::path::Path,
+    database_key: &iptv_runtime::model::DatabaseKey,
+) -> (Vec<iptv_store_sqlite::SourceId>, common::Catalog) {
+    let mut store =
+        iptv_store_sqlite::Store::open_encrypted(dir.join("iptv.sqlite"), database_key).unwrap();
+    let mut catalog = common::catalog(1, 1, common::XT_PASSWORD);
+    for (index, movie) in catalog.vod.iter_mut().enumerate() {
+        movie.poster = Some(format!("https://example.test/generated-poster-{index}.png"));
+        movie.stream = StreamLocator::Url {
+            url: format!("https://example.test/generated-movie-{index}.mp4"),
+            headers: vec![],
+            properties: vec![],
+        };
+    }
+    let sources = ["Generated alpha", "Generated beta"]
+        .into_iter()
+        .map(|name| {
+            let source = store.add_source(&common::m3u_source(name)).unwrap();
+            common::replace(&mut store, source, &catalog);
+            source
+        })
+        .collect();
+    (sources, catalog)
+}
+
+#[test]
+fn discovery_reaches_unfinished_titles_on_every_playlist_and_resumes_them() {
+    use iptv_core::vod::{DiscoveryQuery, Shelf};
+    let dir = tempfile::tempdir().unwrap();
+    let database_key = iptv_runtime::model::DatabaseKey::from_bytes([0x72; 32]);
+    let (sources, catalog) = two_playlists(dir.path(), &database_key);
+    let owner = Rc::new(Runtime::new(Ports::new(dir.path().to_owned(), {
+        let key = database_key.clone();
+        move |_| Ok(key.clone())
+    })));
+    owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+    owner.start_services();
+    let movie = |source: &iptv_store_sqlite::SourceId| Key {
+        source: source.0,
+        kind: Kind::Movie,
+        id: catalog.vod[1].id.to_string(),
+    };
+    let (alpha, beta) = (movie(&sources[0]), movie(&sources[1]));
+    assert!(
+        support::block_on(owner.vod_discovery(DiscoveryQuery::first(Shelf::ContinueWatching)))
+            .unwrap()
+            .cards
+            .is_empty()
+    );
+    // Watch the same-named title on both playlists, to different points.
+    for (key, ms) in [(&alpha, 37_000), (&beta, 61_000)] {
+        let details = support::block_on(owner.vod_details(key.clone())).unwrap();
+        support::block_on(owner.vod_save_progress(
+            key.clone(),
+            None,
+            Progress::observed(ms, Some(120_000), false),
+            details.incarnation,
+        ))
+        .unwrap();
+    }
+    let page =
+        support::block_on(owner.vod_discovery(DiscoveryQuery::first(Shelf::ContinueWatching)))
+            .unwrap();
+    assert!(!page.more);
+    let keys: Vec<_> = page.cards.iter().map(|c| c.key.clone()).collect();
+    assert_eq!(
+        keys.len(),
+        2,
+        "duplicate ids on two playlists stay separate"
+    );
+    assert!(keys.contains(&alpha) && keys.contains(&beta));
+    let names: Vec<_> = page.cards.iter().map(|c| c.source_name.as_str()).collect();
+    assert!(names.contains(&"Generated alpha") && names.contains(&"Generated beta"));
+    // Discovery → details → resume, for the second playlist's copy.
+    let card = page.cards.iter().find(|c| c.key == beta).unwrap();
+    assert_eq!(card.progress.resume_ms(), 61_000);
+    let details = support::block_on(owner.vod_details(card.key.clone())).unwrap();
+    let (playing, stream) =
+        support::block_on(owner.vod_play(details, card.key.clone(), false)).unwrap();
+    assert_eq!(playing.key, beta);
+    assert_eq!(playing.progress.resume_ms(), 61_000);
+    assert_eq!(stream.url, "https://example.test/generated-movie-1.mp4");
+    // Recently added lists every title of both playlists, movies and the
+    // series together, a bounded page at a time.
+    let mut recent = Vec::new();
+    loop {
+        let page = support::block_on(owner.vod_discovery(DiscoveryQuery {
+            limit: 3,
+            ..DiscoveryQuery::after(Shelf::RecentlyAdded, recent.len())
+        }))
+        .unwrap();
+        assert!(page.cards.len() <= 3);
+        recent.extend(page.cards.into_iter().map(|c| c.key));
+        if !page.more {
+            break;
+        }
+    }
+    assert_eq!(recent.len(), 2 * (catalog.vod.len() + catalog.series.len()));
+    assert!(recent.iter().any(|k| k.kind == Kind::Series));
+    assert_eq!(
+        recent[0].kind,
+        Kind::Series,
+        "the generated series' last-modified time is the newest"
+    );
+    // A protected title keeps its place but not its artwork or plot, and
+    // cannot be opened; the other playlist's copy is untouched.
+    support::block_on(owner.parental_change_pin(None, Pin::parse("2468").unwrap())).unwrap();
+    owner
+        .set_setting("parental.vod_enabled", Value::Bool(true))
+        .unwrap();
+    support::block_on(owner.parental_set_blocked(iptv_runtime::vod::target(&alpha), true)).unwrap();
+    owner.parental_lock();
+    for shelf in [Shelf::ContinueWatching, Shelf::RecentlyAdded] {
+        let page = support::block_on(owner.vod_discovery(DiscoveryQuery {
+            limit: 100,
+            ..DiscoveryQuery::first(shelf)
+        }))
+        .unwrap();
+        let locked = page.cards.iter().find(|c| c.key == alpha).unwrap();
+        assert!(
+            locked.poster.is_none() && locked.plot.is_none(),
+            "{shelf:?}"
+        );
+        let open = page.cards.iter().find(|c| c.key == beta).unwrap();
+        assert!(open.poster.is_some() && open.plot.is_some(), "{shelf:?}");
+    }
+    assert!(support::block_on(owner.vod_details(alpha.clone())).is_err());
+    assert!(support::block_on(owner.vod_details(beta.clone())).is_ok());
+    assert!(owner.drain_services());
+}
+
+#[test]
+fn discovery_drops_a_deleted_playlist_and_refuses_its_stale_progress() {
+    use iptv_core::vod::{DiscoveryQuery, Shelf};
+    let dir = tempfile::tempdir().unwrap();
+    let database_key = iptv_runtime::model::DatabaseKey::from_bytes([0x73; 32]);
+    let (sources, catalog) = two_playlists(dir.path(), &database_key);
+    let make = || {
+        let owner = Rc::new(Runtime::new(Ports::new(dir.path().to_owned(), {
+            let key = database_key.clone();
+            move |_| Ok(key.clone())
+        })));
+        owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+        owner.start_services();
+        owner
+    };
+    let owner = make();
+    let keys: Vec<_> = sources
+        .iter()
+        .map(|source| Key {
+            source: source.0,
+            kind: Kind::Movie,
+            id: catalog.vod[0].id.to_string(),
+        })
+        .collect();
+    let point = Progress::observed(40_000, Some(120_000), false);
+    let mut incarnations = Vec::new();
+    for key in &keys {
+        let details = support::block_on(owner.vod_details(key.clone())).unwrap();
+        support::block_on(owner.vod_save_progress(
+            key.clone(),
+            None,
+            point,
+            details.incarnation.clone(),
+        ))
+        .unwrap();
+        incarnations.push(details.incarnation);
+    }
+    assert!(owner.drain_services());
+    drop(owner);
+    // The second playlist is deleted and added again under the same id.
+    let mut store =
+        iptv_store_sqlite::Store::open_encrypted(dir.path().join("iptv.sqlite"), &database_key)
+            .unwrap();
+    let source = store.source(sources[1]).unwrap().unwrap().source;
+    store.delete_source(sources[1]).unwrap();
+    let recreated = store.add_source(&source).unwrap();
+    assert_eq!(recreated, sources[1]);
+    common::replace(&mut store, recreated, &catalog);
+    drop(store);
+    let owner = make();
+    let continuing = |owner: &Runtime| {
+        support::block_on(owner.vod_discovery(DiscoveryQuery::first(Shelf::ContinueWatching)))
+            .unwrap()
+            .cards
+            .into_iter()
+            .map(|c| c.key)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(continuing(&owner), vec![keys[0].clone()]);
+    // A late writer from before the deletion cannot bring the old progress
+    // back to the new playlist, whether awaited or queued.
+    assert!(
+        support::block_on(owner.vod_save_progress(
+            keys[1].clone(),
+            None,
+            point,
+            incarnations[1].clone()
+        ))
+        .is_err()
+    );
+    owner.queue_vod_progress(keys[1].clone(), None, point, incarnations[1].clone());
+    assert!(owner.drain_services());
+    drop(owner);
+    let owner = make();
+    assert_eq!(continuing(&owner), vec![keys[0].clone()]);
+    assert!(owner.drain_services());
+    drop(owner);
+    // Disabling the remaining playlist removes its titles from both shelves
+    // and from details, though its progress is kept for when it returns.
+    let mut store =
+        iptv_store_sqlite::Store::open_encrypted(dir.path().join("iptv.sqlite"), &database_key)
+            .unwrap();
+    store
+        .set_source_policy(
+            sources[0],
+            iptv_store_sqlite::SourcePolicy {
+                enabled: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    drop(store);
+    let owner = make();
+    assert!(continuing(&owner).is_empty());
+    let recent =
+        support::block_on(owner.vod_discovery(DiscoveryQuery::first(Shelf::RecentlyAdded)))
+            .unwrap();
+    assert!(recent.cards.iter().all(|c| c.key.source == sources[1].0));
+    assert!(support::block_on(owner.vod_details(keys[0].clone())).is_err());
+    assert!(owner.drain_services());
+}
+
 #[test]
 fn stale_observation_cannot_write_to_a_reused_source_id() {
     let dir = tempfile::tempdir().unwrap();

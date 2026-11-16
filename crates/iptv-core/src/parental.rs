@@ -350,6 +350,9 @@ pub struct Dialog {
     old: Option<Pin>,
     new: Option<Pin>,
     pub recovery: zeroize::Zeroizing<String>,
+    // A credential result hidden at an authentication boundary is never
+    // rendered until the shell has verified the current PIN again.
+    held_notice: zeroize::Zeroizing<String>,
     changing: bool,
     setup: bool,
 }
@@ -377,6 +380,7 @@ impl Dialog {
             old: None,
             new: None,
             recovery: zeroize::Zeroizing::new(String::new()),
+            held_notice: zeroize::Zeroizing::new(String::new()),
             changing: phase == Phase::Old,
             setup: phase == Phase::New,
         }
@@ -397,6 +401,7 @@ impl Dialog {
         self.old = None;
         self.new = None;
         self.phase = Phase::Recovery;
+        self.focus = 0;
         self.message.clear();
     }
     pub fn fail(&mut self, message: String) {
@@ -412,14 +417,48 @@ impl Dialog {
         } else {
             Phase::Unlock
         };
+        self.focus = 0;
         self.message = message;
     }
     pub fn notice(&mut self, code: zeroize::Zeroizing<String>) {
+        self.held_notice.clear();
         self.busy = false;
         self.phase = Phase::RecoveryNotice;
         self.recovery = code;
         self.message.clear();
         self.focus = 0;
+    }
+    /// Keep a committed recovery result private while the window is hidden.
+    pub fn hold_notice(&mut self, code: zeroize::Zeroizing<String>) {
+        self.held_notice = code;
+        self.recovery.clear();
+        self.input.clear();
+        self.old = None;
+        self.new = None;
+        self.busy = false;
+        self.phase = Phase::Unlock;
+        self.focus = 0;
+        self.message.clear();
+        self.setup = false;
+        self.changing = false;
+    }
+    pub fn has_held_notice(&self) -> bool {
+        !self.held_notice.is_empty()
+    }
+    pub fn suspend_notice(&mut self) {
+        if self.phase == Phase::RecoveryNotice {
+            let code = std::mem::take(&mut self.recovery);
+            self.hold_notice(code);
+        }
+    }
+    /// The shell calls this only after authoritative PIN verification.
+    pub fn resume_notice(&mut self) -> bool {
+        if self.held_notice.is_empty() {
+            return false;
+        }
+        let code = std::mem::take(&mut self.held_notice);
+        self.notice(code);
+        true
     }
     pub fn submit(&mut self) -> Submission {
         if self.busy {
@@ -434,6 +473,7 @@ impl Dialog {
                 return Submission::None;
             }
             self.phase = Phase::New;
+            self.focus = 0;
             self.input.clear();
             return Submission::None;
         }
@@ -450,11 +490,13 @@ impl Dialog {
             Phase::Old => {
                 self.old = Some(self.input.take());
                 self.phase = Phase::New;
+                self.focus = 0;
                 Submission::None
             }
             Phase::New => {
                 self.new = Some(self.input.take());
                 self.phase = Phase::Confirm;
+                self.focus = 0;
                 Submission::None
             }
             Phase::Confirm => {
@@ -466,6 +508,7 @@ impl Dialog {
                     self.input.clear();
                     self.new = None;
                     self.phase = Phase::New;
+                    self.focus = 0;
                     self.message = "PINs did not match; choose a new PIN".into();
                     return Submission::None;
                 }
@@ -500,11 +543,15 @@ mod dialog_tests {
     fn setup_requires_confirmation_and_clears_mismatch() {
         let mut d = Dialog::new(Phase::New);
         enter(&mut d, "2468");
+        d.focus = 11;
         assert!(matches!(d.submit(), Submission::None));
         assert_eq!(d.phase, Phase::Confirm);
+        assert_eq!(d.focus, 0);
         enter(&mut d, "2469");
+        d.focus = 11;
         assert!(matches!(d.submit(), Submission::None));
         assert_eq!(d.phase, Phase::New);
+        assert_eq!(d.focus, 0);
         assert!(d.input.is_empty());
         enter(&mut d, "1357");
         d.submit();
@@ -512,14 +559,48 @@ mod dialog_tests {
         assert!(matches!(d.submit(), Submission::Change { old: None, .. }));
         assert!(d.input.is_empty());
         assert!(d.busy);
+        d.focus = 11;
+        d.fail("Retry".into());
+        assert_eq!(d.focus, 0);
+        let mut changing = Dialog::new(Phase::Old);
+        enter(&mut changing, "2468");
+        changing.focus = 11;
+        changing.submit();
+        assert_eq!(changing.phase, Phase::New);
+        assert_eq!(changing.focus, 0);
     }
+    #[test]
+    fn hidden_notice_is_private_until_verified_and_survives_a_failed_pin() {
+        let code = "0123456789abcdef0123456789abcdef";
+        let mut d = Dialog::new(Phase::New);
+        d.hold_notice(zeroize::Zeroizing::new(code.into()));
+        assert_eq!(d.phase, Phase::Unlock);
+        assert!(d.recovery.is_empty());
+        d.fail("Incorrect PIN".into());
+        assert_eq!(d.phase, Phase::Unlock);
+        assert!(d.has_held_notice());
+        assert!(d.recovery.is_empty());
+        assert!(d.resume_notice()); // the shell has now verified the PIN
+        assert_eq!(d.phase, Phase::RecoveryNotice);
+        assert_eq!(d.recovery.as_str(), code);
+        d.suspend_notice();
+        assert!(d.recovery.is_empty());
+        assert_eq!(d.phase, Phase::Unlock);
+        assert!(d.resume_notice());
+        assert_eq!(d.recovery.as_str(), code);
+    }
+
     #[test]
     fn recovery_never_disables_protection_without_replacing_pin() {
         let mut d = Dialog::new(Phase::Unlock);
+        d.focus = 12;
         d.recover();
+        assert_eq!(d.focus, 0, "recovery starts at its own first control");
+        d.focus = 1;
         d.recovery.push_str("0123456789abcdef0123456789abcdef");
         assert!(matches!(d.submit(), Submission::None));
         assert_eq!(d.phase, Phase::New);
+        assert_eq!(d.focus, 0, "new PIN starts at its own first control");
         enter(&mut d, "2468");
         d.submit();
         enter(&mut d, "2468");

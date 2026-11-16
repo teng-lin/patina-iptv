@@ -385,7 +385,7 @@ pub struct Focus {
     /// The focused row of that list.
     pub channel: usize,
     /// The focused item of the navigation rail ([`crate::browse::RailItem`]).
-    pub rail: usize,
+    pub rail: crate::browse::RailItem,
     /// The hint card shown after a group was chosen; Back dismisses it
     /// first.
     pub hint: bool,
@@ -424,7 +424,7 @@ impl Focus {
             pane: Pane::Guide,
             group: crate::lists::ALL,
             channel: 0,
-            rail: 0,
+            rail: crate::browse::RailItem::Tv,
             hint: false,
             cursor: now,
             window: home_window(now),

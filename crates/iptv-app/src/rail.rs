@@ -37,6 +37,8 @@ fn label(item: RailItem) -> &'static str {
     match item {
         RailItem::Search => tr("Search"),
         RailItem::Tv => tr("Live TV"),
+        RailItem::Continue => tr("Continue watching"),
+        RailItem::Recent => tr("Recently added"),
         RailItem::Movies => tr("Films"),
         RailItem::Shows => tr("Series"),
         RailItem::Recordings => tr("Recordings"),
@@ -51,6 +53,12 @@ fn icon(item: RailItem) -> ImageSrc {
     let body = match item {
         RailItem::Search => "<circle cx='10.5' cy='10.5' r='6'/><path d='M15 15l5.5 5.5'/>",
         RailItem::Tv => "<rect x='3' y='5' width='18' height='12' rx='2'/><path d='M8 21h8'/>",
+        // A play mark inside an unfinished ring.
+        RailItem::Continue => "<path d='M12 3a9 9 0 1 1-8.5 6'/><path d='M10 8.5v7l5.5-3.5z'/>",
+        // A title card with a new mark beside it.
+        RailItem::Recent => {
+            "<rect x='3' y='7' width='13' height='13' rx='2'/><path d='M19 2v7M15.5 5.5h7'/>"
+        }
         RailItem::Movies => {
             "<rect x='3' y='4' width='18' height='16' rx='2'/><path d='M8 4v16M16 4v16M3 12h18'/>"
         }
@@ -77,9 +85,8 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
     // Its place in the rail now (Movies and Shows come and go with VOD).
     let index = move || crate::lists::rail(ui).iter().position(|&i| i == item);
     let open = move || ui.focus.with(|f| f.pane) == Pane::Rail;
-    let focused = move || {
-        open() && ui.keys_shown() && index().is_some_and(|i| ui.focus.with(|f| f.rail) == i)
-    };
+    let focused =
+        move || open() && ui.keys_shown() && index().is_some() && ui.focus.with(|f| f.rail) == item;
     let colour = move || {
         if !item.enabled() {
             tint(WHITE, TEXT_DISABLED_ALPHA / 2)
@@ -93,6 +100,7 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
     };
     view()
         .role(AccessibilityRole::Tab)
+        .accessibility_elements_hidden(move || index().is_none())
         .accessibility_state(move || AccessibilityState {
             selected: item == RailItem::Tv,
             ..Default::default()
@@ -135,12 +143,24 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
 
 /// The rail: top items, then Playlists and Settings at the bottom.
 pub fn column(ui: Ui) -> impl IntoElement {
+    effect(move || {
+        let items = crate::lists::rail(ui);
+        if ui
+            .focus
+            .with_untracked(|focus| !items.contains(&focus.rail) || !focus.rail.enabled())
+        {
+            ui.focus.update(|focus| focus.retain_rail(&items));
+        }
+    });
     let part = move |bottom: bool| {
         view().children(
-            iptv_core::browse::rail_items(true)
-                .into_iter()
-                .filter(move |i| i.at_bottom() == bottom)
-                .map(move |item| item_view(ui, item)),
+            iptv_core::browse::rail_items(iptv_core::browse::VodAvailability {
+                shown: true,
+                any: true,
+            })
+            .into_iter()
+            .filter(move |i| i.at_bottom() == bottom)
+            .map(move |item| item_view(ui, item)),
         )
     };
     view()

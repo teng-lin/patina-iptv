@@ -26,9 +26,14 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             log::debug!("iptv backup: {phase:?}");
             ui.settings.update(|version| *version += 1);
         }
-        RuntimeEvent::FavoritesChanged { channels, has_vod } => {
+        RuntimeEvent::FavoritesChanged {
+            channels,
+            has_vod,
+            any_vod,
+        } => {
             ui.favorites.set(channels);
             ui.has_vod.set(has_vod);
+            ui.any_vod.set(any_vod);
             ui.list_version.update(|version| *version += 1);
         }
         RuntimeEvent::FavoriteOrderChanged => {

@@ -9,6 +9,19 @@ is below 1.0, a minor release may change behaviour.
 
 ### Added
 
+- Continue watching and Recently added in the navigation rail: movies and
+  series from every enabled playlist in one list, read a bounded page at a
+  time in a stable order, with the playlist named on each row. Continue
+  watching shows one row per series and drops a series once its final episode
+  is finished; Recently added uses the provider's added or last-modified date,
+  never the release year. The guide remains the start screen. Both appear
+  when any enabled playlist has movies or series, and reopening one returns
+  to the same title by identity, however deep, on the page that holds it,
+  with Load previous and Load more around it.
+- A Retry control for failed on-demand lists, details and playback that
+  repeats exactly the failed page, details or episode playback (keeping the
+  episode and a restart), with fresh details, link and parental check; it
+  never plays from a playlist deleted and re-added or edited since.
 - Open the shared playback bar on Android TV with long OK or Menu and navigate
   its enabled controls with the D-pad. Up from the guide's first channel focuses
   the mini-player; OK returns the current stream to full screen.
@@ -29,6 +42,10 @@ is below 1.0, a minor release may change behaviour.
 - Disposing the final UI owner drains its native store connections and accepted
   small-file writes, including during unwinding, to avoid racing SQLCipher's
   process-exit cleanup.
+- Keep enlarged PIN dialogs and recording actions reachable, show D-pad focus
+  after touch entry, announce on-demand selection and recovery fields, and
+  preserve a pending recovery code across a recording-window hide while requiring
+  the PIN again before showing it.
 
 ## [0.1.3] - 2026-11-15
 

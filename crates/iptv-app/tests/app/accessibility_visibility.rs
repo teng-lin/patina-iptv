@@ -3,7 +3,9 @@
 //! mounted nodes, so inspect the actual native props and their ancestors.
 use crate::personalization::{self, Fixture, step};
 use iptv_settings::{Settings, Value};
-use nsh_core::{MountBatch, MountItem, NodeId, ViewKind, ViewProps, platform::Idiom};
+use nsh_core::{
+    MountBatch, MountItem, NodeId, Size, ViewKind, ViewProps, platform::Idiom, prelude::px,
+};
 use nsh_testing::Headless;
 use std::{
     collections::HashMap,
@@ -17,6 +19,7 @@ struct NativeProps {
     players: Vec<NodeId>,
     removed: Vec<NodeId>,
     inserts: HashMap<NodeId, usize>,
+    scrolls: Vec<(NodeId, f32)>,
 }
 
 #[derive(Clone, Default)]
@@ -35,6 +38,12 @@ impl Exposure {
                 }
                 MountItem::Insert { child, .. } => *native.inserts.entry(*child).or_default() += 1,
                 MountItem::Remove { id } | MountItem::Delete { id } => native.removed.push(*id),
+                MountItem::Command {
+                    id,
+                    command: nsh_core::Command::ScrollTo { y, .. },
+                } => {
+                    native.scrolls.push((*id, y.0));
+                }
                 _ => {}
             }
         }
@@ -126,9 +135,15 @@ impl Exposure {
 }
 
 fn fixture(home: crate::isolated::Home) -> (Fixture, Exposure) {
+    fixture_with_settings(home, Settings::new())
+}
+
+fn fixture_with_settings(
+    home: crate::isolated::Home,
+    mut settings: Settings,
+) -> (Fixture, Exposure) {
     let exposure = Exposure::default();
     let observed = exposure.clone();
-    let mut settings = Settings::new();
     settings.set("guide.switch_delay", Value::ms(0)).unwrap();
     settings
         .set("guide.stay_on_guide", Value::Bool(true))
@@ -137,6 +152,285 @@ fn fixture(home: crate::isolated::Home) -> (Fixture, Exposure) {
         app.observe(move |_, batch| observed.record(batch));
     });
     (fixture, exposure)
+}
+
+fn large_text() -> Settings {
+    let mut settings = Settings::new();
+    settings
+        .set("appearance.font_size", Value::Enum("extra_large".into()))
+        .unwrap();
+    settings
+}
+
+fn inside(screen: &nsh_testing::Screen, control: &str, container: &str) -> bool {
+    let nodes = screen.layout_nodes();
+    let bounds = |id: &str| {
+        nodes
+            .iter()
+            .find(|n| n.test_id.as_deref() == Some(id))
+            .unwrap()
+            .bounds
+    };
+    let c = bounds(control);
+    let v = bounds(container);
+    c.size.height.0 > 0.0
+        && c.size.width.0 > 0.0
+        && c.origin.x.0 >= v.origin.x.0 - 1.0
+        && c.origin.y.0 >= v.origin.y.0 - 1.0
+        && c.origin.x.0 + c.size.width.0 <= v.origin.x.0 + v.size.width.0 + 1.0
+        && c.origin.y.0 + c.size.height.0 <= v.origin.y.0 + v.size.height.0 + 1.0
+}
+
+#[test]
+fn largest_text_pin_keeps_cancel_visible_and_dpad_has_no_invisible_stop() {
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, exposure) = fixture_with_settings(home, large_text());
+    let app = &mut fixture.app;
+    let player = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|n| n.kind == ViewKind::Native)
+        .unwrap()
+        .id;
+    step(
+        app.set_environment("enlarged text with a screen reader", |env| {
+            env.screen_reader = true;
+            env.font_scale = 1.3;
+        }),
+    );
+    personalization::menu(app, "Block channel");
+    step(app.wait_for("text:Choose a new PIN"));
+    exposure.shown(app, "parental-layer", true);
+    exposure.shown(app, "guide-ui", false);
+    exposure.shown(app, "menu-layer", false);
+    for (idiom, width, height) in [
+        (Idiom::Tv, 960.0, 540.0),
+        (Idiom::Pad, 1280.0, 800.0),
+        (Idiom::Desktop, 960.0, 540.0),
+    ] {
+        step(app.set_environment("input mode", move |env| env.idiom = idiom));
+        step(app.set_viewport(Size::new(px(width), px(height))));
+        assert!(
+            inside(app.screen(), "parental-card", "parental-layer"),
+            "dialog stays in {width}x{height}"
+        );
+        assert!(
+            inside(app.screen(), "parental-cancel", "parental-card"),
+            "Cancel remains visible"
+        );
+        assert!(app.screen().matches("role:button[/Cancel/]").unwrap());
+    }
+    // Editing a digit in the same phase must not reset a scrolled form.
+    // Use a shorter window to force the keypad's lower row off screen.
+    step(app.set_viewport(Size::new(px(960.0), px(320.0))));
+    for key in ["down", "down", "down", "right", "right"] {
+        step(app.press_key(key));
+    }
+    step(
+        app.wait_until("Continue is revealed", Duration::from_secs(3), |screen| {
+            inside(screen, "parental-continue", "parental-scroll")
+        }),
+    );
+    let scroll = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|n| n.test_id.as_deref() == Some("parental-scroll"))
+        .unwrap()
+        .id;
+    exposure.0.lock().unwrap().scrolls.clear();
+    step(app.press_key("2"));
+    assert!(
+        !exposure
+            .0
+            .lock()
+            .unwrap()
+            .scrolls
+            .iter()
+            .any(|(id, y)| *id == scroll && *y == 0.0),
+        "digit editing must not reset the scroll offset when the phase is unchanged"
+    );
+    step(app.set_viewport(Size::new(px(960.0), px(540.0))));
+    // Saturating Down reaches the actual last control, with a visible focus
+    // marker. An extra non-rendered keypad index used to swallow this focus.
+    for _ in 0..6 {
+        step(app.press_key("down"));
+    }
+    assert_eq!(
+        app.screen()
+            .span_style("id:parental-cancel >> text:Cancel")
+            .unwrap()
+            .color,
+        nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff)
+    );
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("text:Choose a new PIN", Duration::from_secs(3)));
+    exposure.shown(app, "guide-ui", true);
+    exposure.selected_channel(app, "Local A");
+    exposure.persistent_player(app, player);
+}
+
+#[test]
+fn recording_dpad_reveals_save_with_largest_text_and_back_restores_content() {
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, exposure) = fixture_with_settings(home, large_text());
+    let app = &mut fixture.app;
+    step(
+        app.set_environment("TV screen reader and enlarged system text", |env| {
+            env.idiom = Idiom::Tv;
+            env.screen_reader = true;
+            env.font_scale = 1.3;
+        }),
+    );
+    step(app.set_viewport(Size::new(px(960.0), px(540.0))));
+    step(app.press_key("down"));
+    step(app.press_key("m"));
+    step(app.press("text:Schedule a recording…"));
+    step(app.wait_for("id:recording-save"));
+    exposure.shown(app, "guide-ui", false);
+    exposure.shown(app, "recordings-screen", true);
+    for _ in 0..6 {
+        step(app.press_key("down"));
+    }
+    step(app.wait_until(
+        "focused Save is in its scroll viewport",
+        Duration::from_secs(3),
+        |screen| inside(screen, "recording-save", "recording-draft-scroll"),
+    ));
+    assert!(
+        app.screen()
+            .matches("role:button[/Save recording/]")
+            .unwrap()
+    );
+    step(app.back());
+    step(app.back());
+    exposure.shown(app, "guide-ui", true);
+    exposure.selected_channel(app, "Local B");
+}
+
+#[test]
+fn modal_back_restores_channel_identity_after_reordering_and_recovery_can_cancel() {
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, exposure) = fixture(home);
+    let app = &mut fixture.app;
+    step(app.press_key("down"));
+    personalization::menu(app, "Reorder channels");
+    exposure.shown(app, "guide-ui", false);
+    step(app.press("id:organization-row-2"));
+    step(app.press("text:Move to first"));
+    step(app.wait_for("id:organization-row-0 >> text:Local C"));
+    step(app.back());
+    exposure.shown(app, "guide-ui", true);
+    exposure.selected_channel(app, "Local B");
+    // Recovery is a different form, with a different number of controls.
+    // It must reset keypad focus and let D-pad OK activate Cancel.
+    personalization::menu(app, "Block channel");
+    step(app.wait_for("text:Choose a new PIN"));
+    step(app.press("text:Forgot PIN?"));
+    assert!(app.screen().matches("label:Recovery code").unwrap());
+    step(app.press_key("enter"));
+    step(app.press_key("1"));
+    step(app.press_key("2"));
+    assert_eq!(
+        app.screen()
+            .input_text("id:parental-recovery-input")
+            .unwrap(),
+        Some("12"),
+        "D-pad OK focuses the native input and keyboard digits edit recovery text"
+    );
+    // Each vertical arrow visits the next stacked control, including Continue.
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    step(app.wait_for("text:Enter the 32-character recovery code"));
+    step(app.press_key("up"));
+    step(app.wait_until(
+        "recovery field returns into view",
+        Duration::from_secs(3),
+        |screen| inside(screen, "parental-recovery-input", "parental-scroll"),
+    ));
+    step(app.press_key("down"));
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("text:Recover parental PIN", Duration::from_secs(3)));
+    exposure.shown(app, "guide-ui", true);
+    exposure.selected_channel(app, "Local B");
+}
+
+#[test]
+fn first_run_large_text_exposes_source_choices_and_scrolls_focused_fields() {
+    let Some(home) = isolated!() else { return };
+    std::fs::create_dir_all(home.data_dir()).unwrap();
+    std::fs::write(
+        home.data_dir().join("settings.json"),
+        large_text().to_json_string(),
+    )
+    .unwrap();
+    let mut config = nsh_engine::EngineConfig::new(nsh_core::element::Root::of::<iptv_app::App>());
+    config.viewport = Size::new(px(960.0), px(540.0));
+    config.environment.idiom = Idiom::Tv;
+    config.environment.font_scale = 1.3;
+    config.environment.screen_reader = true;
+    let mut app = crate::headless::Headless::start(config).unwrap();
+    step(app.wait_for("text:No playlists yet"));
+    step(app.press("role:button[/^Add playlist$/]"));
+    step(app.wait_for("id:wizard-types-scroll"));
+    assert!(
+        app.screen()
+            .matches("role:button[/Playlist link/]")
+            .unwrap()
+    );
+    assert!(app.screen().matches("role:button[/Xtream Codes/]").unwrap());
+    for _ in 0..3 {
+        step(app.press_key("down"));
+    }
+    step(app.press_key("enter"));
+    step(app.wait_for("id:wizard-form"));
+    let card = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|n| n.test_id.as_deref() == Some("wizard-form"))
+        .unwrap()
+        .bounds;
+    assert!(card.origin.x.0 >= 0.0 && card.origin.y.0 >= 0.0);
+    assert!(card.origin.x.0 + card.size.width.0 <= 960.0);
+    assert!(card.origin.y.0 + card.size.height.0 <= 540.0);
+    for _ in 0..3 {
+        step(app.press_key("down"));
+    }
+    step(app.wait_until(
+        "last field scrolls into view",
+        Duration::from_secs(3),
+        |screen| inside(screen, "wizard-field-EpgUrl", "wizard-fields-scroll"),
+    ));
+    step(app.press_key("down"));
+    assert!(inside(app.screen(), "wizard-submit", "wizard-form"));
+    assert!(app.screen().matches("role:button[/Add playlist/]").unwrap());
+    step(app.press("id:wizard-submit"));
+    assert!(
+        app.screen()
+            .matches("role:button[/Portal.*Fill this in/]")
+            .unwrap(),
+        "the field's validation error remains in its accessible name"
+    );
+    step(app.back());
+    step(app.wait_for("id:wizard-types-scroll"));
+    step(app.press("role:button[/Xtream Codes login/]"));
+    step(app.wait_for("id:wizard-form"));
+    assert!(app.screen().matches("role:button[/^Username$/]").unwrap());
+    assert!(
+        app.screen()
+            .matches("role:button[/^Paste · Password$/]")
+            .unwrap()
+    );
+    assert!(
+        app.screen().matches("role:button[/^Password$/]").unwrap(),
+        "empty credentials must not announce invented bullet values"
+    );
+    step(app.back());
+    step(app.back());
+    step(app.wait_for("text:No playlists yet"));
 }
 
 #[test]
