@@ -29,6 +29,7 @@ fn fixture(
     home: &crate::isolated::Home,
     idiom: Idiom,
     media_url: &str,
+    with_guide: bool,
 ) -> (Headless, std::path::PathBuf, iptv_library::SourceId) {
     let mut settings = Settings::new();
     settings
@@ -39,6 +40,11 @@ fn fixture(
     settings
         .set("playlists.max_connections", Value::Int(3))
         .unwrap();
+    if with_guide {
+        settings
+            .set("epg.update_on_start", Value::Bool(true))
+            .unwrap();
+    }
     let root = crate::isolated::data_dir(home.path());
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("settings.json"), settings.to_json_string()).unwrap();
@@ -55,7 +61,7 @@ fn fixture(
         })
         .unwrap();
     let parsed = iptv_providers::m3u::parse_m3u(&format!(
-        "#EXTM3U\n#EXTINF:-1 group-title=\"Generated group\",A\n{media_url}\n"
+        "#EXTM3U\n#EXTINF:-1 tvg-id=\"generated\" group-title=\"Generated group\",A\n{media_url}\n"
     ));
     store
         .replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
@@ -69,6 +75,38 @@ fn fixture(
             },
         )
         .unwrap();
+    if with_guide {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let future = now / 60 * 60 + 1200;
+        let stamp = iptv_epg::format_xmltv_time;
+        let xml = format!(
+            "<tv><channel id=\"generated\"><display-name>A</display-name></channel>\
+             <programme channel=\"generated\" start=\"{}\" stop=\"{}\"><title>Generated live programme</title></programme>\
+             <programme channel=\"generated\" start=\"{}\" stop=\"{}\"><title>Generated future programme</title></programme></tv>",
+            stamp(now - 1200),
+            stamp(future),
+            stamp(future),
+            stamp(future + 2700)
+        );
+        let guide = home.path().join("generated-guide.xml");
+        std::fs::write(&guide, xml).unwrap();
+        store
+            .set_guide_sources(
+                source,
+                &[iptv_store_sqlite::GuideSource {
+                    feed: iptv_epg::FeedId(1001),
+                    provider_index: None,
+                    url: SecretUrl::new(guide.to_string_lossy()),
+                    name: Some("Generated guide".into()),
+                    enabled: true,
+                    shift_minutes: 0,
+                }],
+            )
+            .unwrap();
+    }
     drop(store);
     let mut config = EngineConfig {
         viewport: Size::new(px(1920.0), px(1080.0)),
@@ -90,7 +128,7 @@ fn fixture(
 }
 
 fn exercise(home: crate::isolated::Home, idiom: Idiom) {
-    let (mut app, path, source) = fixture(&home, idiom, "https://example.test/generated.ts");
+    let (mut app, path, source) = fixture(&home, idiom, "https://example.test/generated.ts", false);
     // The custom form works without guide data, with the selected channel retained.
     if idiom == Idiom::Tv {
         step(app.press_key("m"));
@@ -122,16 +160,15 @@ fn exercise(home: crate::isolated::Home, idiom: Idiom) {
     step(app.wait_for("label:/^Start time · .*:/"));
     // Move the recording to tomorrow through a visible touch/pointer control.
     if idiom == Idiom::Tv {
-        for _ in 0..iptv_core::recording::Draft::SAVE {
+        for _ in 0..5 {
             step(app.press_key("up"));
         }
         step(app.press_key("right"));
-        for _ in 0..iptv_core::recording::Draft::SAVE {
+        for _ in 0..5 {
             step(app.press_key("down"));
         }
         step(app.press_key("enter"));
     } else {
-        step(app.press("label:/^Increase Start day/"));
         step(app.press("label:/^Start day ·/"));
         step(app.wait_for("id:recording-day-option"));
         step(app.press("id:recording-day-option >> nth=1"));
@@ -151,6 +188,15 @@ fn exercise(home: crate::isolated::Home, idiom: Idiom) {
         step(app.clear("id:recording-entry"));
         step(app.type_text("id:recording-entry", "Generated scheduled recording"));
         step(app.press("id:recording-entry >> text:Done"));
+        step(app.press("id:recording-options"));
+        for minutes in ["5", "0"] {
+            step(app.press("label:/^Start early ·/"));
+            step(app.wait_for("id:recording-entry"));
+            step(app.clear("id:recording-entry"));
+            step(app.type_text("id:recording-entry", minutes));
+            step(app.press("id:recording-entry >> text:Done"));
+        }
+        step(app.wait_for("label:Start early · 0 min"));
         step(app.press("text:Save recording"));
     }
     step(app.wait_for_within("text:/Scheduled ·/", Duration::from_secs(15)));
@@ -252,7 +298,8 @@ fn desktop_schedules_cancels_and_confirms_deletion() {
 }
 
 fn future_programme(home: crate::isolated::Home, idiom: Idiom) {
-    let (mut app, path, source) = fixture(&home, idiom, "https://example.test/generated.ts");
+    let (mut app, path, source) = fixture(&home, idiom, "https://example.test/generated.ts", true);
+    step(app.wait_for("text:Generated future programme"));
     step(app.press_key("right"));
     let selected = app
         .screen()
@@ -273,41 +320,64 @@ fn future_programme(home: crate::isolated::Home, idiom: Idiom) {
     } else {
         step(app.long_press(&format!("view:{selected}")));
     }
-    step(app.wait_for("id:menu-panel >> text:Schedule a recording…"));
+    step(app.wait_for("id:menu-panel >> text:Schedule recording"));
     assert!(
         !app.screen()
             .matches("id:menu-panel >> text:Record")
             .unwrap()
     );
-    step(app.press("id:menu-panel >> text:Schedule a recording…"));
-    step(app.wait_for("text:Save recording"));
+    step(app.press("id:menu-panel >> text:Schedule recording"));
+    assert!(
+        !app.screen().matches("text:Save recording").unwrap(),
+        "guide scheduling must skip the custom form"
+    );
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    step(app.press("text:Save recording"));
     step(app.wait_for_within("text:/Scheduled ·/", Duration::from_secs(15)));
-    let jobs = crate::isolated::open_database(path)
+    let jobs = crate::isolated::open_database(&path)
         .unwrap()
         .recording_jobs()
         .unwrap();
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].request.source, source.0);
+    assert_eq!(jobs[0].request.title, "Generated future programme");
     assert!(
         jobs[0].request.start > now,
         "future programme must not become record-now"
     );
-    assert!(jobs[0].request.end > jobs[0].request.start);
+    assert_eq!(jobs[0].request.end - jobs[0].request.start, 45 * 60);
+    step(app.press("id:recording-job"));
+    step(app.press("text:Edit recording"));
+    step(app.wait_for("text:Save recording"));
+    step(app.press("text:Close"));
+    // Repeating the same guide action opens the existing job, never a duplicate.
+    if idiom == Idiom::Desktop {
+        step(app.right_click(&format!("view:{selected}")));
+    } else {
+        step(app.long_press(&format!("view:{selected}")));
+    }
+    step(app.press("id:menu-panel >> text:Schedule recording"));
+    step(app.wait_for("text:Cancel recording"));
+    assert_eq!(
+        crate::isolated::open_database(path)
+            .unwrap()
+            .recording_jobs()
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]
-fn right_click_on_a_future_programme_prefills_its_schedule() {
+fn right_click_on_a_future_programme_schedules_without_a_form() {
     let Some(home) = isolated!() else { return };
     future_programme(home, Idiom::Desktop);
 }
 
 #[test]
-fn long_press_on_a_future_programme_prefills_its_schedule() {
+fn long_press_on_a_future_programme_schedules_without_a_form() {
     let Some(home) = isolated!() else { return };
     future_programme(home, Idiom::Pad);
 }
@@ -359,7 +429,7 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
             return;
         }
     });
-    let (mut app, path, _) = fixture(&home, Idiom::Pad, &url);
+    let (mut app, path, _) = fixture(&home, Idiom::Pad, &url, false);
     step(app.press("text:A"));
     step(app.press("text:A"));
     step(app.wait_for_within("text:▶", Duration::from_secs(15)));

@@ -42,6 +42,10 @@ fn begin(ui: Ui, row: usize) {
             return;
         };
         d.focus = row;
+        if row == Draft::OPTIONS {
+            d.options_open = !d.options_open;
+            return;
+        }
         let (field, text) = match row {
             0 => (EntryField::Day, local(d.request.start).to_string()),
             1 => {
@@ -56,6 +60,8 @@ fn begin(ui: Ui, row: usize) {
                 hours((d.request.end - d.request.start) / 60),
             ),
             3 => (EntryField::Name, d.request.title.clone()),
+            5 => (EntryField::LeadMinutes, d.lead_minutes.to_string()),
+            6 => (EntryField::TrailMinutes, d.trail_minutes.to_string()),
             _ => {
                 let _ = adjust(d, row, 1);
                 return;
@@ -144,8 +150,8 @@ pub(super) fn key(ui: Ui, action: Action) -> bool {
         ui.recordings.update(|s| {
             if let Some(d) = &mut s.draft {
                 match action {
-                    Action::MoveUp => d.focus = d.focus.saturating_sub(1),
-                    Action::MoveDown => d.focus = (d.focus + 1).min(Draft::SAVE),
+                    Action::MoveUp => d.move_field(-1),
+                    Action::MoveDown => d.move_field(1),
                     Action::MoveLeft => s.error = adjust(d, d.focus, -1).err().map(str::to_owned),
                     Action::MoveRight => s.error = adjust(d, d.focus, 1).err().map(str::to_owned),
                     _ => {}
@@ -219,95 +225,69 @@ fn row(ui: Ui, size: Scale, row: usize) -> View {
         ui.recordings
             .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == row))
     };
-    view()
-        .flex_row()
-        .items_center()
-        .gap(move || size.px(8.0))
+    super::style::row(size, 72.0, focused)
+        .label(value)
+        .on_press(move || {
+            ui.touched();
+            begin(ui, row);
+        })
         .child(
-            view()
-                .flex_1()
-                .min_h(move || size.px(crate::list_rows::ROW_TWO))
-                .px(move || size.px(16.0))
-                .justify_center()
-                .rounded(px(crate::theme::RADIUS))
-                .bg(move || ui_kit::field_fill(ui, focused()))
-                .role(AccessibilityRole::Button)
-                .label(value)
-                .on_press(move || {
-                    ui.touched();
-                    begin(ui, row);
-                })
-                .child(ui_kit::caption(size, move || {
-                    value()
-                        .split_once(" · ")
-                        .map(|(label, _)| label.to_owned())
-                        .unwrap_or_default()
-                }))
-                .child(
-                    ui_kit::label(size, move || {
-                        value()
-                            .split_once(" · ")
-                            .map(|(_, value)| value.to_owned())
-                            .unwrap_or_default()
-                    })
-                    .number_of_lines(1),
-                ),
+            ui_kit::body(size, move || {
+                value()
+                    .split_once(" · ")
+                    .map(|(label, _)| label.to_owned())
+                    .unwrap_or_default()
+            })
+            .text_color(rgb(crate::theme::LIST_TEXT)),
         )
-        .child(when(
-            move || row != 3,
-            move || {
-                view()
-                    .flex_row()
-                    .gap(move || size.px(4.0))
-                    .children([-1, 1].into_iter().map(move |step| {
-                        ui_kit::button(
-                            ui,
-                            size,
-                            if step < 0 { "−" } else { "+" },
-                            focused,
-                            move || {
-                                ui.recordings.update(|s| {
-                                    if !s.busy
-                                        && let Some(d) = &mut s.draft
-                                    {
-                                        d.focus = row;
-                                        s.error = adjust(d, row, step).err().map(str::to_owned);
-                                    }
-                                });
-                            },
-                        )
-                        .label(move || {
-                            trf(
-                                if step < 0 {
-                                    "Decrease {field}"
-                                } else {
-                                    "Increase {field}"
-                                },
-                                &[("field", value().as_str().into())],
-                            )
-                        })
-                    }))
-            },
-        ))
+        .child(
+            ui_kit::caption(size, move || {
+                value()
+                    .split_once(" · ")
+                    .map(|(_, value)| value.to_owned())
+                    .unwrap_or_default()
+            })
+            .number_of_lines(1),
+        )
 }
 
 pub(super) fn draft_view(ui: Ui, size: Scale) -> View {
     view()
-        .gap(move || size.px(12.0))
-        .child(ui_kit::heading(size, move || {
-            ui.recordings.with(|s| {
-                s.draft
-                    .as_ref()
-                    .map(|d| d.request.channel_name.clone())
-                    .unwrap_or_default()
-            })
-        }))
         .child(
-            view()
-                .gap(move || size.px(4.0))
-                .children((0..Draft::SAVE).map(move |at| row(ui, size, at))),
+            ui_kit::heading(size, move || {
+                ui.recordings.with(|s| {
+                    s.draft
+                        .as_ref()
+                        .map(|d| d.request.channel_name.clone())
+                        .unwrap_or_default()
+                })
+            })
+            .px(move || size.px(24.0))
+            .pb(move || size.px(16.0)),
         )
-        .child(ui_kit::button(
+        .children((0..4).map(move |at| row(ui, size, at)))
+        .child(
+            super::style::action(
+                ui,
+                size,
+                tr("Recording options"),
+                move || {
+                    ui.recordings
+                        .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == Draft::OPTIONS))
+                },
+                move || begin(ui, Draft::OPTIONS),
+            )
+            .label(tr("Recording options"))
+            .test_id("recording-options"),
+        )
+        .child(when(
+            move || {
+                ui.recordings
+                    .with(|s| s.draft.as_ref().is_some_and(|d| d.options_open))
+            },
+            move || view().children((4..7).map(move |at| row(ui, size, at))),
+        ))
+        .child(super::style::action(
             ui,
             size,
             tr("Save recording"),
@@ -336,19 +316,21 @@ pub(super) fn entry_layer(ui: Ui) -> impl IntoElement {
             if field == EntryField::Day {
                 return day_picker(ui);
             }
-            let label = match field {
-                EntryField::Time => tr("Start time"),
-                EntryField::Duration => tr("Duration"),
-                _ => tr("Name"),
-            };
+            let label = ui.recordings.with_untracked(|s| {
+                let d = s.draft.as_ref().unwrap();
+                row_value(d, d.focus)
+                    .split_once(" · ")
+                    .map(|(label, _)| label.to_owned())
+                    .unwrap_or_default()
+            });
             entry::panel(
                 ui,
                 Sheet {
-                    label: label.to_owned(),
-                    placeholder: if field == EntryField::Name {
-                        tr("Enter text")
-                    } else {
+                    label,
+                    placeholder: if matches!(field, EntryField::Time | EntryField::Duration) {
                         tr("HH:MM")
+                    } else {
+                        tr("Enter text")
                     },
                     keyboard: KeyboardType::Default,
                     masked: false,

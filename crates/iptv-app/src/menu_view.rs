@@ -25,6 +25,7 @@ fn implemented(item: MenuItem, surface: usize) -> bool {
         item,
         MenuItem::Search
             | MenuItem::Record
+            | MenuItem::ScheduleRecording
             | MenuItem::CustomRecording
             | MenuItem::Settings
             | MenuItem::Description
@@ -55,6 +56,7 @@ fn label(item: MenuItem, favorite: bool) -> &'static str {
         WatchInNewWindow => tr("Watch in new window"),
         Reminder => tr("Remind me"),
         Record => tr("Record"),
+        ScheduleRecording => tr("Schedule recording"),
         CustomRecording => tr("Schedule a recording…"),
         SaveToList => "Save to my list",
         Description => tr("Details"),
@@ -101,7 +103,10 @@ pub fn open(ui: Ui) {
             if item == MenuItem::BlockGroup && crate::parental_view::group_target(ui).is_none() {
                 return false;
             }
-            if matches!(item, MenuItem::Record | MenuItem::CustomRecording) {
+            if matches!(
+                item,
+                MenuItem::Record | MenuItem::ScheduleRecording | MenuItem::CustomRecording
+            ) {
                 return ui.player_surface == 0 && crate::recordings_view::available(channel);
             }
             implemented(item, ui.player_surface)
@@ -167,6 +172,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         MenuItem::ManageBlocked => crate::parental_view::manage(ui),
         MenuItem::Record => crate::recordings_view::record_origin(ui, origin),
         MenuItem::CustomRecording => crate::recordings_view::programme(ui, origin, true),
+        MenuItem::ScheduleRecording => crate::recordings_view::schedule_programme(ui, origin),
         // Details replaces the menu; Back from it returns to the guide.
         MenuItem::Description => ui.description.set(Some(origin)),
         MenuItem::WatchInNewWindow => {

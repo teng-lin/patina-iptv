@@ -22,6 +22,7 @@ pub enum MenuItem {
     WatchInNewWindow,
     Reminder,
     Record,
+    ScheduleRecording,
     CustomRecording,
     SaveToList,
     Description,
@@ -142,9 +143,12 @@ pub fn program_actions(program: Program, catchup_days: u8, now: i32) -> Vec<Menu
         Airing::Live => vec![ExternalPlayer, Record],
         Airing::Ended if in_archive => vec![StartFromBeginning, ExternalPlayer],
         Airing::Ended => vec![],
-        Airing::Upcoming => vec![Reminder],
+        Airing::Upcoming => vec![Reminder, ScheduleRecording],
     };
-    items.extend([CustomRecording, SaveToList, Description]);
+    if program.airing(now) != Airing::Upcoming {
+        items.push(CustomRecording);
+    }
+    items.extend([SaveToList, Description]);
     items
 }
 
@@ -254,7 +258,7 @@ mod tests {
         );
         assert_eq!(
             program_actions(FUTURE, 3, 0),
-            [Reminder, CustomRecording, SaveToList, Description]
+            [Reminder, ScheduleRecording, SaveToList, Description]
         );
     }
 

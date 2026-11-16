@@ -221,6 +221,7 @@ pub struct Draft {
     /// A player action starts immediately without opening the scheduling form.
     pub immediate: bool,
     pub entry: Option<Entry>,
+    pub options_open: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -229,6 +230,8 @@ pub enum EntryField {
     Time,
     Duration,
     Name,
+    LeadMinutes,
+    TrailMinutes,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -240,6 +243,7 @@ pub struct Entry {
 
 impl Draft {
     pub const SAVE: usize = 7;
+    pub const OPTIONS: usize = 8;
     pub fn new(request: Request) -> Self {
         Self {
             request,
@@ -252,7 +256,18 @@ impl Draft {
             programme_end: None,
             immediate: false,
             entry: None,
+            options_open: false,
         }
+    }
+    /// Hidden options never receive remote focus. The order matches the form.
+    pub fn move_field(&mut self, step: i32) {
+        let rows: &[usize] = if self.options_open {
+            &[0, 1, 2, 3, Self::OPTIONS, 4, 5, 6, Self::SAVE]
+        } else {
+            &[0, 1, 2, 3, Self::OPTIONS, Self::SAVE]
+        };
+        let at = rows.iter().position(|&row| row == self.focus).unwrap_or(0);
+        self.focus = rows[(at as i32 + step).clamp(0, rows.len() as i32 - 1) as usize];
     }
     pub fn adjust(&mut self, row: usize, step: i64, now: i64) {
         match row {
@@ -329,6 +344,20 @@ impl Draft {
             (minute < 60).then_some(hour * 60 + minute)
         };
         match entry.field {
+            EntryField::LeadMinutes | EntryField::TrailMinutes => {
+                let minutes = entry
+                    .text
+                    .trim()
+                    .parse::<i64>()
+                    .ok()
+                    .filter(|m| (0..=60).contains(m))
+                    .ok_or("Choose padding between 0 and 60 minutes")?;
+                if entry.field == EntryField::LeadMinutes {
+                    self.lead_minutes = minutes;
+                } else {
+                    self.trail_minutes = minutes;
+                }
+            }
             EntryField::Day => {
                 let local = entry
                     .text
@@ -457,6 +486,64 @@ mod tests {
             message: String::new(),
         }
     }
+    #[test]
+    fn draft_focus_skips_collapsed_options_and_follows_the_visible_order() {
+        let mut d = Draft::new(Request {
+            source: 1,
+            channel: "generated".into(),
+            channel_name: "Generated".into(),
+            title: "Generated programme".into(),
+            start: 1000,
+            end: 2000,
+        });
+        d.move_field(-1);
+        assert_eq!(d.focus, Draft::OPTIONS);
+        d.move_field(-1);
+        assert_eq!(d.focus, 3);
+        d.options_open = true;
+        d.move_field(1);
+        assert_eq!(d.focus, Draft::OPTIONS);
+        d.move_field(1);
+        assert_eq!(d.focus, 4);
+        d.move_field(1);
+        d.move_field(1);
+        d.move_field(1);
+        assert_eq!(d.focus, Draft::SAVE);
+    }
+
+    #[test]
+    fn exact_padding_entry_can_reduce_to_zero_and_rejects_out_of_range_values() {
+        let request = Request {
+            source: 1,
+            channel: "generated".into(),
+            channel_name: "Generated".into(),
+            title: "Generated programme".into(),
+            start: 1000,
+            end: 2000,
+        };
+        let mut d = Draft::new(request);
+        for field in [EntryField::LeadMinutes, EntryField::TrailMinutes] {
+            for text in ["5", "0"] {
+                d.entry = Some(Entry {
+                    field,
+                    text: text.into(),
+                    error: None,
+                });
+                d.commit_entry(500, 1000, Some).unwrap();
+            }
+            d.entry = Some(Entry {
+                field,
+                text: "61".into(),
+                error: None,
+            });
+            assert_eq!(
+                d.commit_entry(500, 1000, Some),
+                Err("Choose padding between 0 and 60 minutes")
+            );
+            assert_eq!((d.lead_minutes, d.trail_minutes), (0, 0));
+        }
+    }
+
     #[test]
     fn exact_schedule_entry_keeps_the_date_duration_and_nominal_window_consistent() {
         let mut request = job(1).request;

@@ -9,6 +9,7 @@ use nsh_core::prelude::*;
 use std::time::Duration;
 
 mod draft;
+mod style;
 use draft::draft_view;
 
 pub fn is_open(ui: Ui) -> bool {
@@ -162,10 +163,10 @@ pub fn current(ui: Ui) {
     };
     remember(ui, origin);
     let selected = crate::schedule().program_at(channel, origin.program_start);
-    if selected.airing(crate::time::now_minute()) == crate::guide::Airing::Live {
-        record_origin(ui, origin);
-    } else {
-        programme(ui, origin, false);
+    match selected.airing(crate::time::now_minute()) {
+        crate::guide::Airing::Live => record_origin(ui, origin),
+        crate::guide::Airing::Upcoming => schedule_programme(ui, origin),
+        crate::guide::Airing::Ended => programme(ui, origin, false),
     }
 }
 
@@ -251,9 +252,26 @@ pub fn remember(ui: Ui, origin: Origin) {
     let context = request(origin).map(|request| (origin, request));
     ui.recordings.update(|s| s.context = context);
 }
-pub fn programme(ui: Ui, origin: Origin, custom: bool) {
+/// EPG scheduling needs no manual date/time form: retain the selected occurrence.
+pub fn schedule_programme(ui: Ui, origin: Origin) {
     if ui.recordings.with_untracked(|s| s.busy) {
         return;
+    }
+    if !prepare_programme(ui, origin, false) {
+        return;
+    }
+    let draft = ui.recordings.with_untracked(|s| s.draft.clone());
+    if draft.is_some() {
+        save(ui);
+        ui.recordings.update(|s| s.draft = None);
+    }
+}
+pub fn programme(ui: Ui, origin: Origin, custom: bool) {
+    prepare_programme(ui, origin, custom);
+}
+fn prepare_programme(ui: Ui, origin: Origin, custom: bool) -> bool {
+    if ui.recordings.with_untracked(|s| s.busy) {
+        return false;
     }
     let request = ui
         .recordings
@@ -265,7 +283,7 @@ pub fn programme(ui: Ui, origin: Origin, custom: bool) {
         })
         .or_else(|| request(origin));
     let Some(mut request) = request else {
-        return;
+        return false;
     };
     // A future programme keeps its actual window when opened from its context menu.
     let custom = custom && request.start <= crate::time::wall_unix();
@@ -310,7 +328,9 @@ pub fn programme(ui: Ui, origin: Origin, custom: bool) {
             s.draft = Some(draft);
         }
     });
+    true
 }
+
 fn save(ui: Ui) {
     let draft = ui
         .recordings
@@ -616,55 +636,61 @@ fn job_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
         .gap(move || size.px(6.0))
         .child(when(
             move || !day().is_empty(),
-            move || ui_kit::caption(size, day).pt(move || size.px(12.0)),
+            move || {
+                ui_kit::caption(size, day)
+                    .px(move || size.px(24.0))
+                    .pt(move || size.px(12.0))
+            },
         ))
         .child(
-            crate::list_rows::row(size, ui_kit::ROW_THREE, mark)
-                .test_id("recording-job")
-                .role(AccessibilityRole::Button)
-                .label(move || {
+            style::row(size, ui_kit::ROW_THREE, move || {
+                mark() != crate::list_rows::Mark::Plain
+            })
+            .test_id("recording-job")
+            .role(AccessibilityRole::Button)
+            .label(move || {
+                job()
+                    .map(|j| {
+                        format!(
+                            "{} · {} · {} · {}",
+                            status(&j),
+                            j.request.title,
+                            j.request.channel_name,
+                            date(j.request.start)
+                        )
+                    })
+                    .unwrap_or_default()
+            })
+            .on_press(move || {
+                if let Some(j) = job() {
+                    ui.touched();
+                    select_job(ui, j.id);
+                }
+            })
+            .child(
+                ui_kit::label(size, move || {
+                    job().map(|j| j.request.title).unwrap_or_default()
+                })
+                .number_of_lines(1)
+                .text_color(rgb(crate::theme::LIST_TEXT)),
+            )
+            .child(
+                ui_kit::caption(size, move || {
                     job()
                         .map(|j| {
                             format!(
-                                "{} · {} · {} · {}",
+                                "{} · {} – {} · {}",
                                 status(&j),
-                                j.request.title,
-                                j.request.channel_name,
-                                date(j.request.start)
+                                crate::time::time_only(j.request.start),
+                                crate::time::time_only(j.request.end),
+                                j.request.channel_name
                             )
                         })
                         .unwrap_or_default()
                 })
-                .on_press(move || {
-                    if let Some(j) = job() {
-                        ui.touched();
-                        select_job(ui, j.id);
-                    }
-                })
-                .child(
-                    ui_kit::label(size, move || {
-                        job().map(|j| j.request.title).unwrap_or_default()
-                    })
-                    .number_of_lines(1)
-                    .text_color(move || mark().text()),
-                )
-                .child(
-                    ui_kit::caption(size, move || {
-                        job()
-                            .map(|j| {
-                                format!(
-                                    "{} · {} – {} · {}",
-                                    status(&j),
-                                    crate::time::time_only(j.request.start),
-                                    crate::time::time_only(j.request.end),
-                                    j.request.channel_name
-                                )
-                            })
-                            .unwrap_or_default()
-                    })
-                    .number_of_lines(1)
-                    .text_color(move || mark().secondary()),
-                ),
+                .number_of_lines(1)
+                .text_color(ui_kit::secondary()),
+            ),
         )
 }
 fn status(job: &Job) -> &'static str {
@@ -676,70 +702,192 @@ fn status(job: &Job) -> &'static str {
 }
 
 fn action_view(ui: Ui, size: Scale) -> impl IntoElement {
-    view().gap(move || size.px(12.0))
-        .child(ui_kit::heading(size, move || ui.recordings.with(|s| s.focused().map(|j| j.request.title.clone()).unwrap_or_default())))
-        .child(ui_kit::body(size, move || ui.recordings.with(|s| s.focused().map(|j| format!("{} · {}–{} · {} {}\n{}",
-            tr(j.status.label()), date(j.request.start), date(j.request.end), j.bytes / (1024 * 1024), "MiB", translated_reason(&j.message))).unwrap_or_default())))
-        .child(when(move || ui.recordings.with(|s| s.confirm_delete), move ||
-            ui_kit::body(size, tr("Delete this recording file permanently? Select Delete recording again to confirm. Back cancels."))))
-        .children((0..4).map(move |index| when(move || ui.recordings.with(|s| s.focused().is_some_and(|j| index < actions(ui, j).len())), move || {
-            ui_kit::button(ui, size, move || ui.recordings.with(|s| s.focused().and_then(|j| actions(ui, j).get(index).copied()).map(|name| tr(name).to_owned()).unwrap_or_default()),
-                move || ui.recordings.with(|s| s.action == index), move || perform(ui, index))
-        })))
+    view()
+        .child(ui_kit::title(size, move || {
+            ui.recordings.with(|s| s.focused().map(|j| j.request.title.clone()).unwrap_or_default())
+        }).px(move || size.px(24.0)).py(move || size.px(16.0)))
+        .child(ui_kit::body(size, move || {
+            ui.recordings.with(|s| s.focused().map(|j| {
+                let media = format!("{:.2} {}", j.bytes as f64 / (1024.0 * 1024.0), tr("MiB"));
+                format!("{} · {}\n{}–{} · {}\n{}", tr(j.status.label()), j.request.channel_name,
+                    date(j.request.start), crate::time::time_only(j.request.end), media, translated_reason(&j.message))
+            }).unwrap_or_default())
+        }).px(move || size.px(24.0)).pb(move || size.px(16.0)))
+        .child(when(move || ui.recordings.with(|s| s.confirm_delete), move || {
+            ui_kit::body(size, tr(
+                "Delete this recording file permanently? Select Delete recording again to confirm. Back cancels."
+            )).px(move || size.px(24.0)).py(move || size.px(16.0))
+        }))
+        .children((0..4).map(move |index| when(
+            move || ui.recordings.with(|s| s.focused().is_some_and(|j| index < actions(ui, j).len())),
+            move || style::action(ui, size,
+                move || ui.recordings.with(|s| s.focused()
+                    .and_then(|j| actions(ui, j).get(index).copied())
+                    .map(|name| tr(name).to_owned()).unwrap_or_default()),
+                move || ui.recordings.with(|s| s.action == index),
+                move || perform(ui, index)),
+        )))
 }
-pub fn layer(ui: Ui) -> impl IntoElement {
-    let size = Scale::new();
-    let requirements = if cfg!(target_os = "ios") {
-        tr(
-            "Keep Patina open and this device awake for recordings. Recordings use local app storage and are excluded from backups.",
-        )
+
+fn requirements() -> &'static str {
+    if cfg!(target_os = "ios") {
+        tr("Keep Patina open and this device awake for recordings. \
+             Recordings use local app storage and are excluded from backups.")
     } else {
         tr(
-            "Recordings continue when you close the player. Check Recordings settings for startup and device wake requirements. Recordings use local storage and are excluded from backups.",
+            "Recordings continue when you close the player. Check Recordings settings for startup and device wake requirements. \
+             Recordings use local storage and are excluded from backups.",
         )
-    };
+    }
+}
+
+fn message(ui: Ui) -> String {
+    ui.recordings.with(|s| {
+        s.error
+            .as_ref()
+            .map(|message| tr(message).to_owned())
+            .unwrap_or_default()
+    })
+}
+
+fn schedule_panel(ui: Ui, size: Scale) -> View {
+    view()
+        .absolute()
+        .inset_0()
+        .items_end()
+        .bg(crate::tint(0, 0x55))
+        .child(
+            view()
+                .h_full()
+                .w(move || size.px(400.0))
+                .max_w(percentage(0.9))
+                .accessibility_elements_hidden(move || {
+                    ui.recordings
+                        .with(|s| s.draft.as_ref().is_some_and(|d| d.entry.is_some()))
+                })
+                .pt_safe_area()
+                .pb_safe_area()
+                .bg(rgb(style::PANEL))
+                .child(style::header(ui, size, tr("Schedule a recording…")))
+                .child(scroll().flex_1().child(draft_view(ui, size)))
+                .child(
+                    ui_kit::body(size, move || message(ui))
+                        .text_color(rgb(ui_kit::ERROR))
+                        .px(move || size.px(24.0)),
+                )
+                .child(
+                    ui_kit::caption(size, move || {
+                        if ui.recordings.with(|s| s.busy) {
+                            tr("Saving…")
+                        } else {
+                            ""
+                        }
+                    })
+                    .px(move || size.px(24.0)),
+                )
+                .child(
+                    ui_kit::caption(size, requirements())
+                        .px(move || size.px(24.0))
+                        .py(move || size.px(16.0)),
+                ),
+        )
+}
+
+fn library_content(ui: Ui, size: Scale) -> View {
+    view().absolute().inset_0().pt_safe_area().pb_safe_area().bg(rgb(style::WINDOW))
+        .child(view().flex_row().items_center().px(move || size.px(24.0))
+            .min_h(move || size.px(72.0))
+            .child(when(move || ui.recordings.with(|s| !s.actions), move || style::action(ui, size, tr("Close"), || false, move || close(ui))))
+            .child(view().flex_1())
+            .child(ui_kit::title(size, tr("Recordings"))))
+        .child(view().flex_row().items_start().px(move || size.px(24.0)).min_h(move || size.px(128.0))
+            .child(view().flex_row().children(
+                [(Filter::All, "All"), (Filter::Active, "Active"), (Filter::Finished, "Finished")]
+                    .into_iter().map(move |(filter, name)| {
+                        style::action(ui, size, tr(name), move || ui.recordings.with(|s| s.filter == filter),
+                            move || ui.recordings.update(|s| {
+                                s.set_filter(filter); s.actions = false; s.confirm_delete = false;
+                            }))
+                    })))
+            .child(view().flex_1())
+            .child(when(move || ui.recordings.with(|s| s.focused().is_some()), move || {
+                view().w(percentage(0.45)).gap(move || size.px(8.0))
+                    .child(ui_kit::title(size, move || ui.recordings.with(|s| {
+                        s.focused().map(|j| j.request.title.clone()).unwrap_or_default()
+                    })))
+                    .child(ui_kit::caption(size, move || ui.recordings.with(|s| {
+                        s.focused().map(|j| format!("{} · {} – {}", crate::time::date_only(j.request.start),
+                            crate::time::time_only(j.request.start), crate::time::time_only(j.request.end)))
+                            .unwrap_or_default()
+                    })))
+                    .child(ui_kit::body(size, move || ui.recordings.with(|s| {
+                        s.focused().map(|j| format!("{} · {}", j.request.channel_name, status(j))).unwrap_or_default()
+                    })))
+            })))
+        .child(ui_kit::body(size, move || message(ui)).text_color(rgb(ui_kit::ERROR))
+            .px(move || size.px(24.0)))
+        .child(when(move || ui.keys_shown(), move || ui_kit::caption(size, tr(
+            "Up/Down selects · Left/Right changes a value or filters the list · Menu shows all recordings · Back returns"
+        )).px(move || size.px(24.0))))
+        .child(when(move || ui.recordings.with(|s| s.visible().next().is_none()), move || {
+            ui_kit::body(size, tr(
+                "No recordings here. Choose a programme in the guide, then Record or Schedule a recording."
+            )).px(move || size.px(24.0)).py(move || size.px(24.0))
+        }))
+        .child(recording_list(ui, size))
+        .child(ui_kit::caption(size, move || ui.recordings.with(|s| {
+            s.background_notice.as_ref().map(|message| tr(message).to_owned()).unwrap_or_default()
+        })).px(move || size.px(24.0)))
+        .child(ui_kit::caption(size, requirements()).px(move || size.px(24.0)).py(move || size.px(16.0)))
+}
+
+fn library(ui: Ui, size: Scale) -> View {
+    view()
+        .absolute()
+        .inset_0()
+        .child(
+            library_content(ui, size)
+                .accessibility_elements_hidden(move || ui.recordings.with(|s| s.actions)),
+        )
+        .child(when(
+            move || ui.recordings.with(|s| s.actions),
+            move || {
+                view()
+                    .absolute()
+                    .inset_0()
+                    .items_end()
+                    .bg(crate::tint(0, 0x55))
+                    .child(
+                        view()
+                            .w(move || size.px(400.0))
+                            .max_w(percentage(0.9))
+                            .h_full()
+                            .pt_safe_area()
+                            .pb_safe_area()
+                            .bg(rgb(style::PANEL))
+                            .child(style::header(ui, size, tr("Recordings")))
+                            .child(scroll().flex_1().child(action_view(ui, size))),
+                    )
+            },
+        ))
+}
+
+pub fn layer(ui: Ui) -> impl IntoElement {
+    let size = Scale::new();
     let has_draft = move || ui.recordings.with(|s| s.draft.is_some());
-    let message = move || {
-        ui.recordings.with(|s| {
-            s.error
-                .as_ref()
-                .map(|message| tr(message).to_owned())
-                .unwrap_or_default()
-        })
-    };
     when(
         move || is_open(ui),
         move || {
-            view().absolute().inset_0().test_id("recordings-screen")
-            .accessibility_elements_hidden(move || crate::overlays::Overlay::Recordings.accessibility_covered(ui))
-            .child(when(has_draft, move || view().absolute().inset_0().items_end().bg(crate::tint(0, 0x55))
-                .child(view().h_full().w(move || size.px(640.0)).max_w(percentage(0.9))
-                    .accessibility_elements_hidden(move || ui.recordings.with(|s| s.draft.as_ref().is_some_and(|d| d.entry.is_some())))
-                    .pt_safe_area().px(move || size.px(24.0)).py(move || size.px(20.0)).gap(move || size.px(12.0))
-                    .bg(move || rgb(ui.theme.with(|t| t.background.panel)))
-                    .child(ui_kit::header(ui, size, tr("Schedule a recording…"), close))
-                    .child(scroll().flex_1().child(draft_view(ui, size)))
-                    .child(ui_kit::body(size, message).text_color(rgb(ui_kit::ERROR)))
-                    .child(ui_kit::caption(size, move || if ui.recordings.with(|s| s.busy) { tr("Saving…") } else { "" }))
-                    .child(ui_kit::caption(size, requirements)))))
-            .child(when(move || !has_draft(), move || {
-                ui_kit::screen(ui, size)
-                    .child(ui_kit::header(ui, size, tr("Recordings"), close))
-                    .child(view().flex_row().gap(move || size.px(12.0)).children(
-                        [(Filter::All, "All"), (Filter::Active, "Active"), (Filter::Finished, "Finished")].into_iter().map(move |(filter, name)|
-                            ui_kit::tab(ui, size, tr(name), move || ui.recordings.with(|s| s.filter == filter), || false,
-                                move || ui.recordings.update(|s| { s.set_filter(filter); s.actions = false; s.confirm_delete = false; })))))
-                    .child(ui_kit::body(size, message).text_color(rgb(ui_kit::ERROR)))
-                    .child(when(move || ui.keys_shown(), move || ui_kit::caption(size, tr("Up/Down selects · Left/Right changes a value or filters the list · Menu shows all recordings · Back returns"))))
-                    .child(view().flex_row().flex_1().gap(move || size.px(24.0))
-                        .child(view().flex_1().gap(move || size.px(8.0))
-                            .child(when(move || ui.recordings.with(|s| s.visible().next().is_none()), move || ui_kit::body(size, tr("No recordings here. Choose a programme in the guide, then Record or Schedule a recording."))))
-                            .child(recording_list(ui, size)))
-                        .child(when(move || ui.recordings.with(|s| s.actions), move || scroll().w(percentage(0.4)).child(action_view(ui, size)))))
-                    .child(ui_kit::caption(size, move || ui.recordings.with(|s| s.background_notice.as_ref().map(|message| tr(message).to_owned()).unwrap_or_default())))
-                    .child(ui_kit::caption(size, requirements))
-            }))
-            .child(draft::entry_layer(ui))
+            view()
+                .absolute()
+                .inset_0()
+                .test_id("recordings-screen")
+                .accessibility_elements_hidden(move || {
+                    crate::overlays::Overlay::Recordings.accessibility_covered(ui)
+                })
+                .child(when(has_draft, move || schedule_panel(ui, size)))
+                .child(when(move || !has_draft(), move || library(ui, size)))
+                .child(draft::entry_layer(ui))
         },
     )
 }

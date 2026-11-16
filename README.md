@@ -298,10 +298,13 @@ cancel recordings that were already authorized.
 Choose **Record** on the play bar to start recording the playing live channel
 immediately; playback continues. Repeated presses do not create duplicate jobs.
 For a future programme, right-click on desktop or long-press on touch/TV, then
-choose **Schedule a recording…**. Its date, time, duration and name are prefilled.
+choose **Schedule recording**. It schedules that programme immediately using its
+guide times, without a form. Choose **Edit recording** in Recordings for adjustments.
+For channels without guide data, **Schedule a recording…** opens the manual editor.
 On a TV, Menu/long OK also opens the programme menu. Up/Down chooses a form row,
 Left/Right changes its value, and Select opens an exact date/time/name editor.
-Touch and mouse users can open those fields or use the labelled −/+ buttons.
+Touch and mouse users tap a field to edit it. Repeat and padding are under
+**Recording options**.
 The navigation rail's **Recordings** entry manages current, scheduled and
 finished recordings. Cancel removes a schedule; Stop retains captured media;
 Delete removes media after confirmation. A dot marks recording programmes in
