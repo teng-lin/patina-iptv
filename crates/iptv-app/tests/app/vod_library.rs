@@ -633,7 +633,7 @@ fn recover(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     if tv {
         // The first episode, not the preferred second, from its start.
         // Right on Seasons changes the season; Down enters Episodes.
-        for key in ["right", "right", "down", "up", "left", "up"] {
+        for key in ["down", "down", "left", "up", "up", "right"] {
             step(app.press_key(key));
         }
         step(app.press_key("enter"));
@@ -1151,9 +1151,19 @@ fn exercise_admission(
     let previous_opens = iptv_app::player_opens(0);
     let previous_seek = props.lock().unwrap().get("seek").cloned();
     if idiom == nsh_core::platform::Idiom::Tv {
-        for _ in 0..2 {
+        for label in ["Play from beginning", "Next episode", "Block content"] {
             step(app.press_key("right"));
+            assert!(
+                app.screen()
+                    .accessibility_state(&format!("label:{label}"))
+                    .unwrap()
+                    .selected
+            );
         }
+        step(app.press_key("left"));
+        step(app.press_key("left"));
+        step(app.press_key("left"));
+        step(app.press_key("down"));
         step(app.press_key("down"));
         step(app.press_key("right"));
         // Up escapes the horizontal episodes to Seasons, then Down returns

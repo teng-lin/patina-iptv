@@ -581,6 +581,19 @@ pub fn key(ui: Ui, action: Action) {
         }
         return;
     }
+    if ui.vod.with_untracked(|s| s.details.is_some()) {
+        match action {
+            Action::MoveLeft | Action::MoveRight => ui
+                .vod
+                .update(|s| s.detail_horizontal(if action == Action::MoveLeft { -1 } else { 1 })),
+            Action::MoveUp | Action::MoveDown => ui
+                .vod
+                .update(|s| s.detail_vertical(if action == Action::MoveUp { -1 } else { 1 })),
+            Action::Select => activate(ui),
+            _ => {}
+        }
+        return;
+    }
     match action {
         Action::MoveLeft => ui.vod.update(|s| {
             if control == Control::Seasons {
@@ -1056,6 +1069,7 @@ fn block_label(ui: Ui) -> &'static str {
     }
 }
 fn details(ui: Ui, size: Scale) -> impl IntoElement {
+    let page = ui_kit::FocusScroll::new();
     let play_button = button(
         ui,
         size,
@@ -1084,14 +1098,14 @@ fn details(ui: Ui, size: Scale) -> impl IntoElement {
         .gap(move || size.px(12.0))
         .child(play_button)
         .child(restart)
-        .child(next);
-    let block = button(
-        ui,
-        size,
-        Control::Block,
-        move || block_label(ui),
-        move || toggle_block(ui),
-    );
+        .child(next)
+        .child(button(
+            ui,
+            size,
+            Control::Block,
+            move || block_label(ui),
+            move || toggle_block(ui),
+        ));
     let seasons = when(
         move || {
             ui.vod.with(|s| {
@@ -1100,15 +1114,31 @@ fn details(ui: Ui, size: Scale) -> impl IntoElement {
                     .is_some_and(|d| d.item.key.kind == Kind::Series)
             })
         },
-        move || episodes(ui, size),
+        move || {
+            page.control(
+                view().h(move || size.px(260.0)).child(episodes(ui, size)),
+                move || {
+                    ui.vod
+                        .with(|s| matches!(s.control, Control::Seasons | Control::Episodes))
+                },
+            )
+        },
     );
-    view()
-        .flex_1()
-        .gap(move || size.px(12.0))
-        .child(browser::hero(ui, size).h(percentage(0.55)))
-        .child(actions)
-        .child(block)
-        .child(seasons)
+    page.view().flex_1().child(
+        view()
+            .min_h(move || px(window().height.0 * 0.9))
+            .gap(move || size.px(12.0))
+            .child(browser::hero(ui, size).h(move || px(window().height.0 * 0.75)))
+            .child(page.control(actions, move || {
+                ui.vod.with(|s| {
+                    matches!(
+                        s.control,
+                        Control::Play | Control::Restart | Control::Next | Control::Block
+                    )
+                })
+            }))
+            .child(seasons),
+    )
 }
 fn status_message(ui: Ui) -> String {
     ui.vod.with(|s| {

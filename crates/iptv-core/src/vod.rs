@@ -631,12 +631,7 @@ impl Screen {
         {
             out.extend([Control::Play, Control::Restart, Control::Block]);
         } else if let Some(details) = &self.details {
-            out.extend([
-                Control::Play,
-                Control::Restart,
-                Control::Seasons,
-                Control::Episodes,
-            ]);
+            out.extend([Control::Play, Control::Restart]);
             if self
                 .episode
                 .as_ref()
@@ -644,7 +639,7 @@ impl Screen {
             {
                 out.push(Control::Next);
             }
-            out.push(Control::Block);
+            out.extend([Control::Block, Control::Seasons, Control::Episodes]);
         } else if self.is_shelf() {
             if !self.cards.is_empty() {
                 out.push(Control::Catalogue);
@@ -862,6 +857,49 @@ impl Screen {
         self.details = Some(details);
         self.busy = false;
     }
+    /// Horizontal details actions stay on their row; seasons and episodes
+    /// have their own horizontal content movement.
+    pub fn detail_horizontal(&mut self, step: isize) {
+        match self.control {
+            Control::Seasons => self.cycle_season(step),
+            Control::Episodes => self.move_episode(step),
+            _ => {
+                let controls: Vec<_> = self
+                    .controls()
+                    .into_iter()
+                    .filter(|c| !matches!(c, Control::Seasons | Control::Episodes))
+                    .collect();
+                if controls.is_empty() {
+                    return;
+                }
+                let at = controls
+                    .iter()
+                    .position(|c| *c == self.control)
+                    .unwrap_or(0);
+                self.control = controls[at.saturating_add_signed(step).min(controls.len() - 1)];
+            }
+        }
+    }
+    pub fn detail_vertical(&mut self, step: isize) {
+        if !self
+            .details
+            .as_ref()
+            .is_some_and(|d| d.item.key.kind == Kind::Series)
+        {
+            self.move_control(step);
+            return;
+        }
+        self.control = match (self.control, step < 0) {
+            (Control::Episodes, true) => Control::Seasons,
+            (Control::Episodes, false) => Control::Episodes,
+            (Control::Seasons, true) => Control::Play,
+            (Control::Seasons, false) => Control::Episodes,
+            (Control::Retry, false) => Control::Play,
+            (_, true) if self.retry.is_some() => Control::Retry,
+            (control, true) => control,
+            (_, false) => Control::Seasons,
+        };
+    }
     pub fn move_control(&mut self, delta: isize) {
         let controls = self.controls();
         if controls.is_empty() {
@@ -1016,6 +1054,31 @@ mod tests {
         assert!(s.categories_open);
         assert_eq!(s.focused_index(), Some(8));
         assert_eq!(s.control, Control::Category);
+    }
+    #[test]
+    fn series_actions_follow_the_visible_row_and_vertical_moves_reach_episodes() {
+        let mut s = Screen::default();
+        s.show_details(series_details(3));
+        for control in [
+            Control::Restart,
+            Control::Next,
+            Control::Block,
+            Control::Block,
+        ] {
+            s.detail_horizontal(1);
+            assert_eq!(s.control, control);
+        }
+        s.detail_vertical(1);
+        assert_eq!(s.control, Control::Seasons);
+        s.detail_vertical(1);
+        assert_eq!(s.control, Control::Episodes);
+        let before = s.episode.clone();
+        s.detail_horizontal(1);
+        assert_ne!(s.episode, before);
+        s.detail_vertical(-1);
+        assert_eq!(s.control, Control::Seasons);
+        s.detail_vertical(-1);
+        assert_eq!(s.control, Control::Play);
     }
     #[test]
     fn revoked_metadata_is_removed_from_the_preview_and_catalogue() {
@@ -1414,17 +1477,17 @@ mod tests {
         let details = series_details(2);
         screen.show_details(details.clone());
         screen.episode = Some(details.episodes[1].key.clone());
-        screen.control = Control::Episodes;
-        screen.move_control(1);
+        screen.control = Control::Restart;
+        screen.detail_horizontal(1);
         assert_eq!(
             screen.control,
             Control::Block,
             "Right must reach a visible action, not the absent Next button"
         );
-        screen.move_control(-1);
-        assert_eq!(screen.control, Control::Episodes);
+        screen.detail_horizontal(-1);
+        assert_eq!(screen.control, Control::Restart);
         screen.episode = Some(details.episodes[0].key.clone());
-        screen.move_control(1);
+        screen.detail_horizontal(1);
         assert_eq!(
             screen.control,
             Control::Next,

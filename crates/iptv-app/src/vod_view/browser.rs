@@ -585,7 +585,7 @@ fn grid(ui: Ui, size: Scale) -> impl IntoElement {
         .test_id("vod-poster-grid")
         .on_layout(move |b: &Bounds<Points>| {
             // Seven cards at 960dp on TV, fewer while categories are open.
-            let columns = ((b.size.width.0 + size.of(10.0)) / size.of(160.0))
+            let columns = ((b.size.width.0 + size.of(10.0)) / size.of(150.0))
                 .floor()
                 .clamp(1.0, 12.0) as usize;
             width.set(
@@ -626,6 +626,39 @@ fn grid(ui: Ui, size: Scale) -> impl IntoElement {
             .estimated_item_size(move || px(width.get() * 1.5 + size.of(50.0)))
             .flex_1(),
         )
+}
+
+fn category_heading(ui: Ui, size: Scale) -> View {
+    category_button(
+        ui,
+        size,
+        move || {
+            ui.vod.with(|s| {
+                if s.query.continue_watching {
+                    tr("Continue watching").into()
+                } else {
+                    s.query
+                        .category
+                        .as_ref()
+                        .and_then(|(source, id)| {
+                            s.categories
+                                .iter()
+                                .find(|c| c.source == *source && c.id == *id)
+                        })
+                        .map(|c| c.name.clone())
+                        .unwrap_or_else(|| all_label(ui).into())
+                }
+            })
+        },
+        || false,
+        move || {
+            ui.vod.update(|s| {
+                s.categories_open = true;
+                s.control = Control::Category;
+            })
+        },
+    )
+    .px(px(0.0))
 }
 
 pub(super) fn screen(ui: Ui, size: Scale) -> View {
@@ -675,11 +708,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         .child(view().flex_1().min_w(px(0.0)).px(move || size.px(30.0))
             .child(hero(ui, size))
             .child(view().flex_row().items_center().gap(move || size.px(10.0))
-                .child(ui_kit::button(ui, size, move || ui.vod.with(|s| {
-                    if s.query.continue_watching { tr("Continue watching").into() }
-                    else { s.query.category.as_ref().and_then(|(source,id)| s.categories.iter().find(|c| c.source == *source && c.id == *id))
-                        .map(|c| c.name.clone()).unwrap_or_else(|| all_label(ui).into()) }
-                }), || false, move || ui.vod.update(|s| { s.categories_open = true; s.control = Control::Category; })))
+                .child(category_heading(ui, size))
                 .child(view().flex_1())
                 .child(ui_kit::caption(size, move || ui.vod.with(|s| {
                     s.focused_index().map(|at| format!("{} / {}{}", at + 1, s.cards.len(), if s.has_more { "+" } else { "" })).unwrap_or_default()
