@@ -562,8 +562,6 @@ impl Inner {
                 st.shutter = true;
             }
             st.playing = false;
-            st.width = 0;
-            st.height = 0;
             st.buffering = false;
             st.clues = map::Clues::default();
             st.failed = None;
@@ -764,8 +762,6 @@ impl Inner {
                 && self.current(&st)
                 && st.playing
                 && !st.suspended
-                && st.width > 0
-                && st.height > 0
                 && !st.first_rendered
                 && st.token > 0
             {

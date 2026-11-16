@@ -582,6 +582,7 @@ fn a_source_plays_through_the_render_api() {
         ("/blue.ts", Answer::Body(blue_ts)),
     ]);
     let mut p = Player::new();
+    p.set("paused", json!(true));
     let headers = json!({ "User-Agent": "SyntheticAgent/1.0", "X-Synthetic": "one" });
     p.set(
         "source",
@@ -602,7 +603,13 @@ fn a_source_plays_through_the_render_api() {
     p.wait_picture(&gpu, "red", red);
     assert_eq!(p.events("firstRender"), [json!({"token": 7})]);
     p.draw(&gpu);
-    assert_eq!(p.events("firstRender").len(), 1, "once per selection");
+    assert_eq!(
+        p.events("firstRender").len(),
+        1,
+        "once per selection, including paused first frame"
+    );
+    p.set("paused", json!(false));
+    p.wait_prop(c"pause", "no");
 
     p.wait(Some(&gpu), "size", |p| !p.events("size").is_empty());
     assert_eq!(p.events("size"), [json!({ "width": 320, "height": 180 })]);

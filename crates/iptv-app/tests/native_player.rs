@@ -369,6 +369,7 @@ fn native_selection_reaches_a_correlated_render_submission() {
     let (directory, server) = generated_environment();
     let data = home.path().join(".local/share/iptv-rs");
     std::fs::create_dir_all(&data).unwrap();
+    let _recording_host = RecordingHost(data.clone());
     let playlist = format!(
         "#EXTM3U\n#EXTINF:-1 group-title=\"Synthetic\",Generated channel\nhttp://{}/generated.ts\n",
         server.address
@@ -439,7 +440,6 @@ fn native_selection_reaches_a_correlated_render_submission() {
         "one actual App player open"
     );
     drop(cleanup);
-    assert!(iptv_runtime::recordings::host::stop_background_host(&data));
 }
 
 // GTK/NSH state is process-local. Even `--ignored` without an exact filter must
@@ -468,4 +468,17 @@ fn isolated_native(name: &str) -> bool {
     assert!(status.success(), "native scenario failed: {name}");
     assert!(marker.exists(), "native scenario did not run: {name}");
     false
+}
+
+// Declared before the view cleanup so unwinding stops the UI before its native
+// recording executor, and both stop before the synthetic HOME is removed.
+struct RecordingHost(std::path::PathBuf);
+impl Drop for RecordingHost {
+    fn drop(&mut self) {
+        let stopped = iptv_runtime::recordings::host::stop_background_host(&self.0);
+        assert!(
+            stopped || std::thread::panicking(),
+            "synthetic native host did not stop"
+        );
+    }
 }

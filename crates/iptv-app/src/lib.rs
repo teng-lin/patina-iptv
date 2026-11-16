@@ -1187,5 +1187,7 @@ pub fn occupy_writer(duration: Duration) {
 /// Reader-lane job count for the running synthetic app owner.
 #[cfg(feature = "test-support")]
 pub fn store_reads() -> u64 {
-    platform_data::host_handle().map_or(0, |owner| owner.store_reads())
+    platform_data::host_handle()
+        .expect("store_reads needs a started app")
+        .store_reads()
 }

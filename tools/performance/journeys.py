@@ -146,6 +146,8 @@ def check_report(report, baseline):
         raise ValueError("report and baseline must be objects")
     if not isinstance(report.get("samples"), list) or not all(isinstance(s, dict) for s in report["samples"]):
         raise ValueError("samples must be an array of objects")
+    if report.get("dirty") is not False:
+        raise ValueError("dirty or unknown source state cannot establish a reproducible report")
     if report.get("schema") != 1 or baseline.get("schema") != 1:
         raise ValueError("unsupported report/baseline schema")
     if not re.fullmatch(r"[0-9a-f]{40}", report.get("commit", "")):
@@ -194,6 +196,15 @@ def scenario(command, env, timeout):
         process.communicate()
         raise
     return subprocess.CompletedProcess(command, process.returncode, stdout)
+
+
+def update_report(report, baseline):
+    result = summary(report["samples"], report["fixture"], baseline, report["repetitions"],
+                     report["timeout_us"], report["commit"])
+    if report["dirty"]:
+        result["valid"] = False
+        result["errors"].append("dirty source state cannot establish a reproducible report")
+    report.update(result)
 
 
 def run(args):
@@ -254,9 +265,9 @@ def run(args):
                     except (ValueError, OSError, TypeError) as error:
                         sample = {"journey": journey, "failure": f"unreadable evidence: {error}"}
                     report["samples"].append(sample)
-                    report.update(summary(report["samples"], spec, baseline, args.repetitions, report["timeout_us"], report["commit"]))
+                    update_report(report, baseline)
                     output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-        report.update(summary(report["samples"], spec, baseline, args.repetitions, report["timeout_us"], report["commit"]))
+        update_report(report, baseline)
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         report["valid"] = False
         report["errors"] = [str(error)]

@@ -428,9 +428,11 @@ impl HostHandle {
     /// Reader-lane jobs accepted by this owner; synthetic diagnostics only.
     #[cfg(feature = "test-support")]
     pub fn store_reads(&self) -> u64 {
-        self.0.upgrade().map_or(0, |service| {
-            service.reads.load(std::sync::atomic::Ordering::Relaxed)
-        })
+        self.0
+            .upgrade()
+            .expect("store_reads needs a live owner")
+            .reads
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     #[cfg(feature = "test-support")]

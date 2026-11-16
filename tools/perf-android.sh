@@ -41,6 +41,9 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 if [ -n "$json_output" ]; then
+  if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
+    echo "--json requires Bash 4.4 or newer" >&2; exit 2
+  fi
   observations=$(mktemp)
   python3 tools/performance/android-envelope.py "$json_output" "$serial"
   finish_json() {

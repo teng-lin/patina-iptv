@@ -1,6 +1,6 @@
 # Reproducible performance journeys
 
-Run from the repository with the pinned NSH checkout and native dependencies installed:
+Run from a clean committed source tree with the pinned NSH checkout and native dependencies installed:
 
 ```sh
 python3 tools/performance/journeys.py run
@@ -107,7 +107,7 @@ in `tools/performance/changes.json` containing `base_sha256`, `candidate_sha256`
 and a specific rationale of at least 30 characters. Hashes cover canonical JSON
 (`json.dumps(value, sort_keys=True).encode()`). Fixture specification or endpoint changes also require `fixture_base_sha256`
 and `fixture_candidate_sha256` covering canonical fixture JSON, plus a new rationale.
-Reusing a previous rationale for a new weakening fails. Reviewers must assess the rationale and fixture change; the
+A record for one exact base/candidate hash pair cannot authorize another pair. Reviewers must assess the rationale and fixture change; the
 record is evidence for review, not automatic permission. Counter types and complete
 journey/counter sets are independently checked. There are no adjustable timing
 tolerances. The initial policy is introduced when the base has no baseline file;
@@ -122,7 +122,7 @@ the diagnostic.
 already installed app with a synthetic playlist. Its launch `TotalTime` is an
 activity-launch measure, guide marks are a UI proxy, and size/ready measurements
 are uncorrelated proxies. Printed budgets from earlier versions have been removed.
-Use `--json PATH` to also retain a versioned Android observation envelope. Its
+With Bash 4.4 or newer, use `--json PATH` to also retain a versioned Android observation envelope. Its
 `valid: false` and explicit unsupported measurements prevent an exploratory log
 from being promoted to a valid first-picture journey report. The synthetic profile
 must be prepared outside personal app storage, using the documented generated

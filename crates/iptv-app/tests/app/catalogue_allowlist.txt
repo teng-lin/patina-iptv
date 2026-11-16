@@ -133,6 +133,7 @@ iptv-runtime/src/store_service.rs	request belongs to a closed application
 iptv-runtime/src/store_service.rs	store reply lost
 iptv-runtime/src/store_service.rs	store worker stopped
 iptv-app/src/startup.rs	guide shown
+iptv-app/src/performance_probe.rs	guide frame
 iptv-core/src/import_limits.rs	decoded byte budget exceeded
 iptv-core/src/import_limits.rs	import {:?} limit exceeded ({})
 iptv-core/src/wizard.rs	SecretText(***)

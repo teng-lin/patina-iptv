@@ -98,7 +98,7 @@ class Evidence(unittest.TestCase):
                 self.assertTrue(any(name in error and counter in error for error in result["errors"]))
 
     def test_persisted_report_revalidates_metadata_and_samples(self):
-        report = {"schema": 1, "commit": "a" * 40, "platform": "linux", "backend": "fabricated",
+        report = {"schema": 1, "dirty": False, "commit": "a" * 40, "platform": "linux", "backend": "fabricated",
                   "hardware_class": "host", "build_mode": "debug-test-support", "fixture": self.spec,
                   "fixture_sha256": j.digest((j.HERE / "fixtures.json").read_bytes()),
                   "repetitions": 1, "timeout_us": 100, "samples": self.samples, "valid": True}
@@ -108,7 +108,7 @@ class Evidence(unittest.TestCase):
         self.assertFalse(j.check_report(stale, self.baseline)["valid"])
         report["samples"] = []
         self.assertFalse(j.check_report(report, self.baseline)["valid"], "stored valid cannot hide lost samples")
-        for field, value in (("schema", 2), ("commit", ""), ("fixture_sha256", "b" * 64), ("backend", "")):
+        for field, value in (("schema", 2), ("dirty", True), ("commit", ""), ("fixture_sha256", "b" * 64), ("backend", "")):
             bad = {**report, field: value}
             with self.subTest(field=field), self.assertRaises(ValueError):
                 j.check_report(bad, self.baseline)
