@@ -422,12 +422,13 @@ impl Services {
     {
         let (sender, receiver) = oneshot::channel();
         let queued = self.affinity().and_then(|epoch| {
-            #[cfg(feature = "test-support")]
-            self.service.reads.fetch_add(1, Ordering::Relaxed);
             let owner = self.service.clone();
             self.service.reader.queue(Box::new(move |connection| {
                 let _ = sender.send(owner.read(epoch, connection, operation));
-            }))
+            }))?;
+            #[cfg(feature = "test-support")]
+            self.service.reads.fetch_add(1, Ordering::Relaxed);
+            Ok(())
         });
         async move {
             queued?;
@@ -493,13 +494,13 @@ impl Services {
     ) -> Result<R, StoreError> {
         self.service.assert_off_ui_thread("blocking store read");
         let epoch = self.affinity()?;
-        #[cfg(feature = "test-support")]
-        self.service.reads.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::sync_channel(1);
         let owner = self.service.clone();
         self.service.reader.queue(Box::new(move |connection| {
             let _ = sender.send(owner.read(epoch, connection, operation));
         }))?;
+        #[cfg(feature = "test-support")]
+        self.service.reads.fetch_add(1, Ordering::Relaxed);
         receiver
             .recv()
             .map_err(|_| StoreError::Unavailable("store reply lost"))?

@@ -4,18 +4,24 @@
     "channels": 2,
     "programmes": 144,
     "cache": "cold process; imported SQLite cache; last channel set",
-    "terminal": "guide-mounted"
+    "terminal": "guide-mounted",
+    "scenario": "cold_start::the_last_channel_opens_once_before_the_guide",
+    "periodic_work": "guide minute ticker paused; periodic EPG refresh disabled"
   },
   "busy-guide": {
     "channels": 10000,
     "programmes": 70000,
     "cache": "warm guide; BEGIN IMMEDIATE writer; queued favourite; 24 Down presses",
-    "terminal": "navigation-mounted"
+    "terminal": "navigation-mounted",
+    "scenario": "store_latency::guide_input_stays_under_budget_while_the_database_writer_is_locked",
+    "periodic_work": "guide minute ticker paused; periodic EPG refresh disabled"
   },
   "selection": {
     "channels": 1,
     "programmes": 0,
     "cache": "actual App cached SQLite guide; no previous stream; persistent GTK surface already realized; normal Enter handler; generated 160x90 10fps MPEG2 TS loopback stream",
-    "terminal": "first-render"
+    "terminal": "first-render",
+    "scenario": "native_selection_reaches_a_correlated_render_submission",
+    "periodic_work": "guide minute ticker paused; periodic EPG refresh disabled"
   }
 }

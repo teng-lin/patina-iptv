@@ -10,6 +10,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 /// The app on a generated 10,000-channel playlist with seven days of
 /// programmes, on the guide.
 fn ten_thousand_channels(home: &crate::isolated::Home) -> Headless {
+    crate::performance::prepare(home);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()

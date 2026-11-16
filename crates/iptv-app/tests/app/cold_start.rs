@@ -56,6 +56,7 @@ fn app() -> Headless {
 #[test]
 fn the_last_channel_opens_once_before_the_guide() {
     let Some(home) = isolated!() else { return };
+    crate::performance::prepare(&home);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -101,10 +102,24 @@ fn the_last_channel_opens_once_before_the_guide() {
     step(first.press("text:Watch"));
     step(first.wait_for_within("text:Now Show", IMPORT));
     drop(first);
+    if std::env::var_os("IPTV_PERF_SAMPLE").is_some() {
+        let mut settings = iptv_settings::Settings::new();
+        settings
+            .set("epg.update_on_start", iptv_settings::Value::Bool(false))
+            .unwrap();
+        settings
+            .set("epg.update_interval", iptv_settings::Value::Duration(0))
+            .unwrap();
+        std::fs::write(
+            home.data_dir().join("settings.json"),
+            settings.to_json_string(),
+        )
+        .unwrap();
+    }
 
     // Channel two played last.
     let data = home.data_dir();
-    let store = crate::isolated::open_database(data.join("iptv.sqlite")).unwrap();
+    let mut store = crate::isolated::open_database(data.join("iptv.sqlite")).unwrap();
     let source = store.sources().unwrap()[0].id;
     let two = store
         .load_channels(source, &ChannelQuery::default())
@@ -112,6 +127,17 @@ fn the_last_channel_opens_once_before_the_guide() {
         .into_iter()
         .find(|row| row.name == "Test Channel Two")
         .unwrap();
+    if std::env::var_os("IPTV_PERF_SAMPLE").is_some() {
+        store
+            .set_source_policy(
+                source,
+                iptv_store_sqlite::SourcePolicy {
+                    refresh_on_start: false,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    }
     drop(store);
     std::fs::write(
         data.join(format!("last_channel-{}", source.0)),

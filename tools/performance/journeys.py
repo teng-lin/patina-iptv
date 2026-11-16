@@ -13,11 +13,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
-CASES = {
-    "cached-guide": "cold_start::the_last_channel_opens_once_before_the_guide",
-    "busy-guide": "store_latency::guide_input_stays_under_budget_while_the_database_writer_is_locked",
-    "selection": "native_selection_reaches_a_correlated_render_submission",
-}
+CASES = ("cached-guide", "busy-guide", "selection")
+
 TERMINALS = {"guide-mounted", "navigation-mounted", "acceptance-proxy", "ready-proxy", "size-proxy", "first-render"}
 
 
@@ -85,6 +82,8 @@ def summary(samples, spec, baseline, repetitions, timeout_us, commit=None):
             errors.append(f"{journey}: expected {repetitions} samples, got {len(selected)}")
         for index, sample in enumerate(selected):
             try:
+                if sample.get("failure"):
+                    raise ValueError(sample["failure"])
                 if commit is not None:
                     if sample.get("build_commit") != commit[:8] or sample.get("build_mode") != "debug-test-support":
                         raise ValueError("stale executable commit or unexpected build mode")
@@ -226,7 +225,8 @@ def run(args):
             if platform.system() == "Linux":
                 native = Path(temporary) / "native-tests"
                 shutil.copy2(args.native_harness or build_harness("native_player"), native)
-            for journey, case in CASES.items():
+            for journey in CASES:
+                case = spec[journey]["scenario"]
                 for repetition in range(args.repetitions):
                     destination = Path(temporary) / f"{journey}-{repetition}.json"
                     env = {**os.environ, "IPTV_PERF_SAMPLE": str(destination), "IPTV_RS_TEST_JOBS": "1"}
@@ -242,11 +242,15 @@ def run(args):
                                        "--exact", "--nocapture", "--test-threads=1"]
                         process = scenario(command, env, args.timeout)
                         sample = load(destination) if destination.exists() else {"journey": journey, "failure": "missing terminal evidence"}
+                        if not isinstance(sample, dict):
+                            raise ValueError("sample file must contain an object")
                         if process.returncode:
                             sample["failure"] = f"scenario failed (exit {process.returncode})"
                             print(process.stdout, file=sys.stderr)
                     except subprocess.TimeoutExpired:
                         sample = {"journey": journey, "failure": "scenario timeout"}
+                    except (ValueError, OSError, TypeError) as error:
+                        sample = {"journey": journey, "failure": f"unreadable evidence: {error}"}
                     report["samples"].append(sample)
                     report.update(summary(report["samples"], spec, baseline, args.repetitions, report["timeout_us"], report["commit"]))
                     output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

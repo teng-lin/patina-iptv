@@ -104,3 +104,17 @@ fn channel_selection_has_one_identified_player_acceptance() {
         iptv_app::player_opens(0) - opens,
     );
 }
+
+/// Periodic guide checks do not belong to a single action's work counter.
+pub(super) fn prepare(home: &crate::isolated::Home) {
+    if std::env::var_os("IPTV_PERF_SAMPLE").is_none() {
+        return;
+    }
+    let directory = home.data_dir();
+    std::fs::create_dir_all(&directory).unwrap();
+    let mut settings = iptv_settings::Settings::new();
+    settings
+        .set("epg.update_interval", iptv_settings::Value::Duration(0))
+        .unwrap();
+    std::fs::write(directory.join("settings.json"), settings.to_json_string()).unwrap();
+}

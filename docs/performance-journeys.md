@@ -11,8 +11,8 @@ It builds the debug `test-support` app and native GTK harnesses once, copies the
 to a private temporary directory, and runs each scenario three times, sequentially.
 Every scenario creates a fresh isolated synthetic HOME and removes it afterward.
 `target/performance/summary.json` is written before the build and after every
-sample, including failed samples. Each sample attests its compile-time Git commit
-and build mode, so a stale supplied harness cannot be labeled with the checkout's current commit. `--output`, `--repetitions`, `--timeout` (seconds,
+sample, including failed samples. Each sample attests the project's compile-time eight-character Git hash
+(`build_version.rs` explicitly slices the full hash) and build mode, so a stale supplied harness cannot be labeled with the checkout's current commit. `--output`, `--repetitions`, `--timeout` (seconds,
 300 by default), `--harness /absolute/path/to/app-tests`, and `--native-harness` customize a run.
 Do not run another timing workload alongside it. The timeout is an evidence
 completeness deadline, not a performance budget.
@@ -22,7 +22,12 @@ completeness deadline, not a performance budget.
 `tools/performance/fixtures.json` versions the generated workload specification;
 its SHA-256 identifies the report's fixture. Programme times are relative to the
 scenario's clock, and local file paths are deliberately excluded from the hash.
-Changes to fixture generation must update that specification. No provider data,
+During opt-in counter journeys, the guide minute ticker is paused and periodic
+EPG checks are disabled; the cached cold profile also disables startup playlist
+and guide refresh. This excludes unrelated minute-boundary/background work from
+the exact action counters.
+The base-compared specification also binds each journey to its exact scenario test.
+Changes to fixture generation or scenario identity must update that specification. No provider data,
 network stream, credentials, or real media is needed.
 
 | Journey | Fixture/cache state | Measured interval | Deterministic work |

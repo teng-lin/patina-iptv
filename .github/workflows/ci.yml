@@ -57,6 +57,7 @@ jobs:
           else
             echo 'Initial performance policy: the base revision has no baseline.'
           fi
+          echo '{"schema":1,"valid":false,"errors":["base policy passed; journeys not run because prior validation did not complete"]}' > target/performance/summary.json
           sudo apt-get install -y xvfb libgl1-mesa-dri
       - run: bash tools/check.sh
         env:

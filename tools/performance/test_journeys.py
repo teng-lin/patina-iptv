@@ -35,7 +35,13 @@ class Evidence(unittest.TestCase):
             self.assertEqual((summary["sample_count"], summary["median_us"], summary["p95_us"], summary["max_us"]), (1, 10, 10, 10))
 
     def test_missing_duplicate_stale_and_timeout_are_invalid(self):
-        for defect in ("missing", "duplicate", "stale", "timeout", "clock", "terminal-before-start", "no-token", "wrong-token", "failure"):
+        terminal = self.spec["selection"]["terminal"]
+        self.assertEqual(j.evidence(self.samples[-1], terminal, 100), 10)
+        messages = {"missing": "missing or duplicate", "duplicate": "missing or duplicate",
+                    "stale": "stale selection", "timeout": "journey timeout", "clock": "non-monotonic",
+                    "terminal-before-start": "terminal occurred before start", "no-token": "missing selected source token",
+                    "wrong-token": "stale source token", "failure": "scenario failed"}
+        for defect, message in messages.items():
             with self.subTest(defect=defect):
                 sample = copy.deepcopy(self.samples[-1])
                 if defect == "missing":
@@ -58,8 +64,8 @@ class Evidence(unittest.TestCase):
                     sample["events"][-1].pop("token")
                 else:
                     sample["failure"] = "scenario failed"
-                with self.assertRaises(ValueError):
-                    j.evidence(sample, "acceptance-proxy", 100)
+                with self.assertRaisesRegex(ValueError, message):
+                    j.evidence(sample, terminal, 100)
 
     def test_a_proxy_cannot_supply_first_render_evidence(self):
         for proxy in ("acceptance-proxy", "ready-proxy", "size-proxy"):
@@ -132,6 +138,28 @@ class Runner(unittest.TestCase):
             self.assertEqual(len(report["samples"]), 3)
             self.assertEqual(set(report["journeys"]), set(j.CASES))
             self.assertTrue(all(report["journeys"][name]["median_us"] is None for name in j.CASES))
+
+
+class MalformedRunner(unittest.TestCase):
+    def test_malformed_or_nonobject_sample_files_do_not_drop_other_samples(self):
+        from unittest.mock import patch
+        import contextlib
+        import io
+        import argparse
+        import os
+        for payload in ("{", "[]"):
+            with self.subTest(payload=payload), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / "report.json"
+                args = argparse.Namespace(output=str(output), baseline=str(j.HERE / "baseline.json"),
+                                          repetitions=1, timeout=10, harness=sys.executable, native_harness=sys.executable)
+                def scenario(command, env, timeout):
+                    Path(env["IPTV_PERF_SAMPLE"]).write_text(payload)
+                    return subprocess.CompletedProcess(command, 0, "")
+                with patch.object(j, "scenario", side_effect=scenario), patch.dict(os.environ, {}), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(j.run(args), 1)
+                report = j.load(output)
+                self.assertEqual(len(report["samples"]), 3)
+                self.assertTrue(all("unreadable evidence" in s["failure"] for s in report["samples"]))
 
 
 class Android(unittest.TestCase):
