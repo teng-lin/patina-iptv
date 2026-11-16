@@ -240,6 +240,8 @@ pub(crate) struct State {
     // Connection IDs belong to this directory-owned registry, including retries.
     next_input: AtomicU64,
     preparations: Mutex<HashMap<usize, SurfacePreparation>>,
+    #[cfg(test)]
+    preparation_arrivals: Mutex<HashMap<usize, tokio::sync::oneshot::Sender<()>>>,
     media_ops: tokio::sync::Mutex<()>,
     playback: Mutex<Option<(JobId, iptv_net::recording_file::RecordingFile)>>,
 }

@@ -1258,7 +1258,26 @@ async fn resolved_authority_cannot_be_rebound_to_an_edited_account_or_channel() 
                     authority.clone(),
                 )
             };
-            let queued = (timing == "queued").then(|| tokio::spawn(prepare()));
+            let queued = if timing == "queued" {
+                let (arrived, arrival) = tokio::sync::oneshot::channel();
+                owner
+                    .recordings
+                    .preparation_arrivals
+                    .lock()
+                    .unwrap()
+                    .insert(0, arrived);
+                let queued = tokio::spawn(prepare());
+                // A spawn alone says nothing about the worker's progress. The
+                // actual task must reach the still-held surface gate before
+                // the edit, so this differs from the before-entry case.
+                tokio::time::timeout(Duration::from_secs(5), arrival)
+                    .await
+                    .expect("preparation did not reach the held surface gate")
+                    .expect("preparation exited before reaching the held surface gate");
+                Some(queued)
+            } else {
+                None
+            };
             if mutation == "account" {
                 xtream_account(&owner, &request, &fixture, "generated-account-b").await;
             } else {

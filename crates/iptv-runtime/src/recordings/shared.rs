@@ -438,6 +438,10 @@ impl Runtime {
             let work = services.clone();
             let stopping = cancel.clone();
             let task = services.spawn(async move {
+                #[cfg(test)]
+                if let Some(arrived) = state.preparation_arrivals.lock().unwrap().remove(&surface) {
+                    let _ = arrived.send(());
+                }
                 let _gate = gate.lock().await;
                 #[cfg(feature = "test-support")]
                 if let Some(pause) = pause {
