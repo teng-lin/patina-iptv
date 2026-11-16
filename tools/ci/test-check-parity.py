@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """Every platform's checks and the contributor map agree on workspace ownership.
 
-tools/check.sh (Linux and macOS) is the reference. The Windows check and the
-coverage job each repeat its crate lists, so a crate added to the workspace
-must not be silently tested on one platform only.
+Linux/macOS and Windows delegate shared Rust checks to one command plan.
+Assert features, exact isolated scenarios, test output and delegation as well
+as workspace/portable inventories; coverage uses the same inventory.
 """
 from pathlib import Path
+import importlib.util
 import re
 import tomllib
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = re.compile(r"-p\s+([a-z0-9-]+)")
+SPEC = importlib.util.spec_from_file_location("check_plan", ROOT / "tools/ci/check-plan.py")
+plan = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(plan)
 
 
 def lines_with(path, word):
@@ -37,30 +41,47 @@ class Parity(unittest.TestCase):
         manifest = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
         self.members = {Path(member).name for member in manifest["workspace"]["members"]}
         self.libraries = self.members - {"iptv-app"}
-        check = (ROOT / "tools/check.sh").read_text(encoding="utf-8")
-        self.wasm = set(re.search(r"^for c in ([a-z0-9 -]+); do$", check, re.M)[1].split())
+        self.wasm = set(plan.PORTABLE)
 
     def test_reference_script_tests_and_formats_every_crate(self):
-        self.assertEqual(packages(lines_with("tools/check.sh", "cargo test")), self.members)
-        self.assertEqual(packages(lines_with("tools/check.sh", "cargo fmt")), self.members)
+        self.assertEqual(set(plan.workspace_crates()), self.members)
+        format_argv = plan.format_plan()[0]["argv"]
+        self.assertEqual({format_argv[i + 1] for i, arg in enumerate(format_argv[:-1]) if arg == "-p"}, self.members)
+        script = (ROOT / "tools/check.sh").read_text(encoding="utf-8")
+        self.assertEqual(script.count("python3 tools/ci/check-plan.py run\n"), 1)
+        self.assertEqual(script.count("python3 tools/ci/check-plan.py format\n"), 1)
+        self.assertEqual(lines_with("tools/check.sh", "cargo test"), [])
         self.assertLess(self.wasm, self.libraries)
 
-    def test_windows_check_runs_the_same_crates(self):
-        tested = packages(lines_with("tools/build-windows.ps1", "cargo test"))
-        self.assertEqual(tested - {"nsh-platform-windows"}, self.members)
+    def test_windows_check_delegates_the_same_features_scenarios_and_output(self):
         script = (ROOT / "tools/build-windows.ps1").read_text(encoding="utf-8")
-        loop = re.search(r"foreach \(\$crate in @\(([^)]*)\)\)", script)[1]
-        self.assertEqual(set(re.findall(r"'([a-z0-9-]+)'", loop)), self.wasm)
+        self.assertEqual(script.count('$checkArgs = @("$PSScriptRoot/ci/check-plan.py", \'run\')'), 1)
+        self.assertEqual(script.count("& python @checkArgs"), 1)
+        self.assertIn("if ($Release) { $checkArgs += '--release' }", script)
+        self.assertIn("if (!$Check)", script, "-Check's normal app build must not run twice")
+        native = lines_with("tools/build-windows.ps1", "cargo test")
+        self.assertEqual(len(native), 1)
+        self.assertIn("nsh-platform-windows --lib chrome::tests -- --format=pretty", native[0])
         self.assertIn("pins.py\" check-nsh", script)
+        steps = {step["name"]: step["argv"] for step in plan.plan()}
+        libraries = steps["library-tests"]
+        self.assertEqual(libraries[libraries.index("--features") + 1], "iptv-runtime/test-support")
+        for name in ("repair-display-independence", "guide-input-budget", "busy-store-reader"):
+            argv = steps[name]
+            self.assertEqual(argv[argv.index("--") + 1:], ["--ignored", "--exact", "--format=pretty"])
 
     def test_coverage_measures_every_workspace_crate(self):
-        self.assertEqual(packages(lines_with("tools/ci/coverage.sh", "crates=(")), self.members)
+        args = plan.coverage_args()
+        self.assertEqual({args[i + 1] for i, arg in enumerate(args[:-1]) if arg == "-p"}, self.members)
+        script = (ROOT / "tools/ci/coverage.sh").read_text(encoding="utf-8")
+        self.assertIn("arguments=$(python3 tools/ci/check-plan.py coverage-args)", script)
+        self.assertIn('read -r -a checks <<< "$arguments"', script)
+        self.assertIn('"${checks[@]}" -- --format=pretty', script)
 
     def test_coverage_enables_native_runtime_and_headless_application_scenarios(self):
-        features = lines_with("tools/ci/coverage.sh", "features=(--features")
-        self.assertEqual(len(features), 1)
-        self.assertIn("iptv-runtime/test-support", features[0])
-        self.assertIn("iptv-app/test-support", features[0])
+        args = plan.coverage_args()
+        self.assertEqual(args[args.index("--features") + 1].split(","),
+                         ["iptv-runtime/test-support", "iptv-app/test-support"])
 
     def test_coverage_runs_the_real_native_player_on_an_isolated_display(self):
         script = (ROOT / "tools/ci/coverage.sh").read_text(encoding="utf-8")

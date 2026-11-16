@@ -547,14 +547,28 @@ only on a wrapper environment variable would not protect those nested builds.
 
 ## Windows installer (experimental)
 
-Windows PR checks run `tools/build-windows.ps1 -Check`: the same lints, library
-crate tests, app tests and portable wasm builds as `tools/check.sh`
-(`tools/ci/test-check-parity.py` fails when the crate lists of the two scripts
-differ). The Windows setup action uses the same Rust build cache as the other
-hosts; only master saves it. Formatting and the workspace-wide `cargo deny` run
-once, on Linux and macOS: neither depends on the host, and `cargo deny` without
-a target already covers the Windows-only dependencies. `audit-runners.sh`
-additionally audits the graph the Windows executable ships, for its own target.
+Windows PR checks run `tools/build-windows.ps1 -Check`. It and `tools/check.sh`
+execute `tools/ci/check-plan.py run`: the same Clippy flags, library tests with
+`iptv-runtime/test-support`, ordinary app tests with `test-support`, portable wasm
+builds, normal app build, and exact isolated repair/guide-latency/busy-reader tests.
+Every test passes `--format=pretty`, preserving named results on all three hosts.
+`python tools/ci/check-plan.py list --json` prints the exact plan without running
+Cargo; `-Check -Release` changes only its normal app build to release mode.
+Coverage reads the same package/test-support inventory from the planner.
+
+The planner and parity tests enforce more than crate names: features, target
+selection, exact ignored filters, output flags, wrapper delegation and failure
+propagation. Windows retains its Win32 chrome/pointer and executable-icon checks.
+Linux's EGL/decode unit tests and GTK native-player harness are Linux-only;
+the Xvfb/GTK coverage and performance lanes do not establish Windows or macOS
+real-decoder coverage. `IPTV_REQUIRE_PLAYER_TESTS` does not enable those tests
+on Windows. A Windows native decoder/GUI test is outside this shared plan.
+
+The Windows setup action uses the same Rust build cache as the other hosts;
+only master saves it. Formatting, shell/Python/Kotlin tooling and workspace-wide
+`cargo deny` remain additional Linux/macOS wrapper checks. The untargeted deny
+audit includes Windows dependencies; `audit-runners.sh` additionally audits the
+graph the Windows executable ships, for its own target.
 
 Installer generation runs only in the
 release workflow for tags and manual desktop selections, using

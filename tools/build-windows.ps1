@@ -20,34 +20,24 @@ try {
     & "$PSScriptRoot/fetch-mpv-windows.ps1"
     $env:PATH = "$(Join-Path $root 'target/mpv');$env:PATH"
     if ($Check) {
-        # The same checks as tools/check.sh; tools/ci/test-check-parity.py keeps
-        # the crate lists of the two scripts equal.
+        # The shared Rust plan selects the same features, ignored scenarios and
+        # named libtest output as tools/check.sh. Platform extras stay here.
         & python "$PSScriptRoot/ci/pins.py" check-nsh
         if ($LASTEXITCODE -ne 0) { throw 'The NSH checkout is not at the commit in nsh.rev' }
-        & cargo clippy --locked --workspace --all-targets --features iptv-app/test-support -- -D warnings
-        if ($LASTEXITCODE -ne 0) { throw 'Windows lint checks failed' }
-        & cargo test --locked -p nsh-platform-windows --lib chrome::tests
+        & cargo test --locked -p nsh-platform-windows --lib chrome::tests -- --format=pretty
         if ($LASTEXITCODE -ne 0) { throw 'Windows pointer regression failed' }
-        & cargo test --locked -p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-providers -p iptv-guide -p iptv-import -p iptv-net -p iptv-store-sqlite -p iptv-sqlcipher-init -p iptv-search -p iptv-player-mpv -p iptv-library -p iptv-runtime
-        if ($LASTEXITCODE -ne 0) { throw 'Library crate tests failed' }
-        & cargo test --locked -p iptv-runtime --features test-support --lib guide_repair::tests::repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive -- --ignored --exact
-        if ($LASTEXITCODE -ne 0) { throw 'Repair/display lane independence check failed' }
-        foreach ($crate in @('iptv-core', 'iptv-nav', 'iptv-settings', 'iptv-epg', 'iptv-providers', 'iptv-guide', 'iptv-import', 'iptv-search', 'iptv-library')) {
-            & cargo build --locked -p $crate --target wasm32-unknown-unknown
-            if ($LASTEXITCODE -ne 0) { throw "wasm build of $crate failed" }
-        }
-        & cargo test --locked -p iptv-app --lib --features test-support
-        if ($LASTEXITCODE -ne 0) { throw 'App unit tests failed' }
-        & cargo test --locked -p iptv-app --test app --features test-support
-        if ($LASTEXITCODE -ne 0) { throw 'App scenarios failed' }
-        & cargo test --locked -p iptv-app --test app --features test-support store_latency::guide_input_stays_under_budget_while_the_database_writer_is_locked -- --ignored --exact
-        if ($LASTEXITCODE -ne 0) { throw 'Guide latency check failed' }
+        $checkArgs = @("$PSScriptRoot/ci/check-plan.py", 'run')
+        if ($Release) { $checkArgs += '--release' }
+        & python @checkArgs
+        if ($LASTEXITCODE -ne 0) { throw 'Shared Rust validation failed' }
     }
     $buildArgs = @('build', '--locked', '-p', 'iptv-app')
     $profile = 'debug'
     if ($Release) { $buildArgs += '--release'; $profile = 'release' }
-    & cargo @buildArgs
-    if ($LASTEXITCODE -ne 0) { throw 'Windows app build failed' }
+    if (!$Check) {
+        & cargo @buildArgs
+        if ($LASTEXITCODE -ne 0) { throw 'Windows app build failed' }
+    }
     $output = Join-Path $root "target/$profile"
     Copy-Item -LiteralPath (Join-Path $root 'target/mpv/libmpv-2.dll') -Destination $output
     Write-Host "Built $output/iptv-app.exe"

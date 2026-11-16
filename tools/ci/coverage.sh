@@ -11,28 +11,26 @@ if [ "$#" -eq 0 ] && [ "$(uname -s)" != Linux ]; then
   echo 'The default coverage floors are measured on Linux CI; use -p CRATE for a host-specific report.' >&2
   exit 2
 fi
-# The workspace crates tools/check.sh tests (tools/ci/test-check-parity.py).
-crates=(-p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-providers -p iptv-guide -p iptv-import -p iptv-net -p iptv-store-sqlite -p iptv-sqlcipher-init -p iptv-search -p iptv-player-mpv -p iptv-library -p iptv-runtime -p iptv-app)
-[ "$#" -eq 0 ] || crates=("$@")
-features=()
+# Packages and test-support features come from the shared host-check inventory.
+checks=("$@")
 if [ "$#" -eq 0 ]; then
-  # Match tools/check.sh: include the native mock-provider and admission scenarios.
-  features=(--features "iptv-runtime/test-support,iptv-app/test-support")
+  arguments=$(python3 tools/ci/check-plan.py coverage-args)
+  read -r -a checks <<< "$arguments"
 fi
 out=target/coverage
 rm -rf "$out"
 mkdir -p "$out"
 cargo llvm-cov clean --workspace
-cargo llvm-cov --locked --no-report "${features[@]}" "${crates[@]}"
+cargo llvm-cov --locked --no-report "${checks[@]}" -- --format=pretty
 if [ "$#" -eq 0 ]; then
   if [ "$(uname -s)" = Linux ]; then
     python3 tools/ci/run-xvfb.py cargo llvm-cov test --locked --no-report \
       -p iptv-app --features test-support --test native_player -- \
-      --ignored --exact native_gtk_player_shares_pip_frames_and_recreates_only_after_context_loss
+      --ignored --exact native_gtk_player_shares_pip_frames_and_recreates_only_after_context_loss --format=pretty
   fi
   cargo llvm-cov test --locked --no-report -p iptv-runtime --features test-support --lib \
     guide_repair::tests::repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive \
-    -- --ignored --exact
+    -- --ignored --exact --format=pretty
 fi
 cargo llvm-cov report --lcov --output-path "$out/lcov.info"
 cargo llvm-cov report --html --output-dir "$out"

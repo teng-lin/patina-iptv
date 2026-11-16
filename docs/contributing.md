@@ -97,7 +97,27 @@ Before finishing, run the required minimum from [AGENTS.md](../AGENTS.md),
 plus the affected checks and Android run above.
 For host-side merge validation, [tools/check.sh](../tools/check.sh) runs the
 full lint, library/app test, dependency, tooling and portable-build suite.
-[Windows validation](../tools/build-windows.ps1) is kept in parity with it.
+[Windows validation](../tools/build-windows.ps1) uses the same
+[Rust command plan](../tools/ci/check-plan.py). Both select the same library
+and app test-support features, ordinary app targets, exact isolated repair,
+guide-latency and busy-reader scenarios, portable wasm builds and normal app build.
+Every Rust test invocation explicitly uses `--format=pretty`, so Linux, macOS
+and Windows logs show each test name and its result instead of quiet progress dots.
+
+Inspect the shared commands without running Cargo:
+
+```sh
+python3 tools/ci/check-plan.py list
+python3 tools/ci/check-plan.py list --json
+```
+
+The runner streams child output directly and stops at the first failed command.
+The wrappers retain platform setup and additional gates: Linux/macOS run formatting,
+dependency auditing and shell/Python/Kotlin tooling checks; Windows keeps its
+Win32 chrome/pointer and executable-icon checks. Equal command plans do not imply
+equal native coverage. The real EGL/decode unit tests and the GTK native-player
+integration harness are compiled only on Linux; Xvfb/GTK coverage and performance
+journeys remain Linux lanes. This consolidation adds no Windows decoder/GUI test.
 Packaging/release changes additionally follow the release contract; targeted
 commands do not replace those gates.
 Additional workflows validate Android builds, Windows, coverage, parser fuzzing,
@@ -113,10 +133,12 @@ The portable crates built by the full check are:
 `iptv-guide`, `iptv-import`, `iptv-search`, `iptv-library`.
 <!-- portable-crates:end -->
 
-The [check-parity tests](../tools/ci/test-check-parity.py) verify this list
-against the actual build loop and check this map's local file links. They run
-on Linux, macOS and Windows; they do not execute the commands printed here or
-prove the semantic completeness of an impact assessment.
+The [planner tests](../tools/ci/test-check-plan.py) check features, locked
+commands, named output, exact ignored filters, streamed execution and fail-fast
+behavior without invoking Cargo. The [check-parity tests](../tools/ci/test-check-parity.py)
+verify wrapper delegation, this portable inventory, coverage arguments and this
+map's local links. They run on Linux, macOS and Windows; they do not execute
+the Rust commands or prove the semantic completeness of an impact assessment.
 
 ## Place new behavior
 
