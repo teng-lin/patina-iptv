@@ -156,13 +156,14 @@ mod clock_tests {
         });
         assert_eq!(clock.now, 0);
         assert_eq!(clock.local_offset_secs, 19_800);
+        let live = "https://example.test/generated/{lutc:H_M}.ts";
         assert_eq!(
-            iptv_providers::m3u::expand_live_url(
-                "https://example.test/generated/{lutc:H_M}/{utc:H_M}.ts",
-                clock.now,
-                clock.local_offset_secs,
-            ),
-            "https://example.test/generated/05_30/00_00.ts"
+            iptv_providers::m3u::expand_live_url(live, clock.now, clock.local_offset_secs),
+            "https://example.test/generated/05_30.ts"
+        );
+        assert_eq!(
+            iptv_providers::m3u::expand_live_url(live, clock.now, 0),
+            "https://example.test/generated/00_00.ts"
         );
         let archive = clock_with_offset(172_800, Some(86_400), |instant| {
             assert_eq!(instant, 86_400);
