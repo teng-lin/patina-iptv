@@ -112,7 +112,7 @@ async fn source(owner: &Runtime, request: &Request) -> PlaySource {
         .await
         .unwrap();
     let context = crate::playback::stored_context(&config).unwrap();
-    let iptv_guide::playback::Resolution::Play(mut source) = iptv_guide::playback::resolve(
+    let iptv_guide::playback::Resolution::Play(source) = iptv_guide::playback::resolve(
         Some(&context),
         &channel,
         None,
@@ -123,10 +123,6 @@ async fn source(owner: &Runtime, request: &Request) -> PlaySource {
     ) else {
         panic!("generated direct source")
     };
-    source.default_header(
-        "User-Agent",
-        &crate::settings::net_config(&owner.services().settings()).user_agent,
-    );
     source
 }
 async fn open(owner: &Runtime, request: &Request) -> PlaySource {
@@ -532,7 +528,11 @@ async fn adaptive_master_retires_probe_then_preserves_native_handoff_and_capture
     let dir = tempfile::tempdir().unwrap();
     let owner = owner(dir.path());
     let mut request = seed(&owner, &fixture.url).await;
-    let original = source(&owner, &request).await;
+    let mut original = source(&owner, &request).await;
+    original.default_header(
+        "User-Agent",
+        &crate::settings::net_config(&owner.services().settings()).user_agent,
+    );
     let fallback = open(&owner, &request).await;
     assert_eq!(
         fallback, original,
@@ -577,6 +577,86 @@ async fn adaptive_master_retires_probe_then_preserves_native_handoff_and_capture
     );
     assert_eq!(fixture.requests.load(Ordering::SeqCst), 2);
     drop(native);
+    owner.release_viewing(0);
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn actual_app_source_without_a_user_agent_shares_with_recording_defaults() {
+    let fixture = Fixture::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let owner = owner(dir.path());
+    let request = seed(&owner, &fixture.url).await;
+    refresh_accounts(&owner.services(), &owner.recordings)
+        .await
+        .unwrap();
+    assert!(owner.reserve_live_viewing(0, SourceId(request.source), &request.channel));
+    let original = PlaySource::new(&fixture.url);
+    assert!(original.header("User-Agent").is_none());
+    let local = owner
+        .prepare_live_source(
+            0,
+            SourceId(request.source),
+            request.channel.clone(),
+            original,
+        )
+        .await
+        .unwrap();
+    let playback = player(&local).await;
+    let id = record_now(&owner, request).await;
+    assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.peak.load(Ordering::SeqCst), 1);
+    owner.stop_recording(id).await.unwrap();
+    until(&owner, id, |job| !job.status.active()).await;
+    drop(playback);
+    owner.release_viewing(0);
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn per_channel_user_agent_precedes_playlist_and_network_defaults_when_sharing() {
+    let fixture = Fixture::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let owner = owner(dir.path());
+    let request = seed(&owner, &fixture.url).await;
+    let source_id = SourceId(request.source);
+    let channel_id = ContentId::from_stored(request.channel.clone());
+    owner
+        .services()
+        .call(move |store| {
+            let mut stored = store.source(source_id)?.unwrap().source;
+            if let SourceConfig::M3u(config) = &mut stored.config {
+                config.user_agent = Some("GeneratedPlaylist/1".into());
+            }
+            store.update_source(source_id, &stored)?;
+            let mut channel = store.channel(source_id, &channel_id)?.unwrap().channel;
+            if let iptv_providers::model::StreamLocator::Url { headers, .. } = &mut channel.stream {
+                headers.push(("user-agent".into(), "GeneratedChannel/1".into()));
+            }
+            store.replace_catalog(source_id, &[], &[channel], &[], &[])
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        source(&owner, &request).await.header("User-Agent"),
+        Some("GeneratedChannel/1")
+    );
+    let local = open(&owner, &request).await;
+    let playback = player(&local).await;
+    assert_eq!(
+        owner.recordings.lock().viewers[&0]
+            .input
+            .as_ref()
+            .unwrap()
+            .source
+            .header("User-Agent"),
+        Some("GeneratedChannel/1")
+    );
+    let id = record_now(&owner, request).await;
+    assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
+    owner.stop_recording(id).await.unwrap();
+    until(&owner, id, |job| !job.status.active()).await;
+    drop(playback);
     owner.release_viewing(0);
     assert!(owner.drain_services());
 }

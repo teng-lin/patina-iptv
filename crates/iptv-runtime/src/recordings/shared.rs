@@ -203,7 +203,7 @@ impl Runtime {
         surface: usize,
         source_id: SourceId,
         channel: String,
-        source: PlaySource,
+        mut source: PlaySource,
     ) -> impl std::future::Future<Output = Result<PlaySource, Error>> + use<> {
         let disabled = self.recordings_detached.get()
             || self.shutdown_requested.get()
@@ -261,6 +261,7 @@ impl Runtime {
                     channel,
                 };
                 let net = crate::settings::net_config(&work.settings());
+                source.default_header("User-Agent", &net.user_agent);
                 let policy = PlaybackPolicy {
                     public_only: source.public_only,
                     extra_roots_der: net.extra_roots_der,
