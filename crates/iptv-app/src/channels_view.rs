@@ -171,8 +171,8 @@ pub fn key(ui: Ui, action: Action) {
 fn empty_text(ui: Ui) -> String {
     match ui.list.with(|l| (l.is_empty(), l.entry())) {
         (false, _) => String::new(),
-        (true, FAVORITES) => "No favourites yet".to_owned(),
-        (true, _) => "No channels here".to_owned(),
+        (true, FAVORITES) => tr("No favourites yet").to_owned(),
+        (true, _) => tr("No channels here").to_owned(),
     }
 }
 
@@ -378,7 +378,11 @@ fn channel_row(
                 Rows::number(at.index()),
                 s.channel_name(ch)
             ),
-            format!("{}  {}", clock(p.start), s.title(ch, p)),
+            format!(
+                "{}  {}",
+                clock(p.start),
+                s.title_in(ch, p, crate::i18n::language())
+            ),
         ))
     };
     let focus = move || focus.get().filter(|f| f.0 == at.index());
@@ -425,7 +429,7 @@ fn preview_info(ui: Ui, size: Scale) -> impl IntoElement {
         let p = s.program_at(ch, now);
         Some((
             format!("{}  {}", Rows::number(row), s.channel_name(ch)),
-            s.title(ch, p),
+            s.title_in(ch, p, crate::i18n::language()),
             format!("{}–{}", clock(p.start), clock(p.end)),
         ))
     };

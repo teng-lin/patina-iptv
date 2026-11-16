@@ -652,3 +652,34 @@ fn a_prepared_schedule_crosses_threads_and_matches_one_organised_in_place() {
     let fresh = EpgSchedule::from_catalog(&groups, &channels, GuideStore::default(), NOW);
     assert_eq!(view(&plain), view(&fresh));
 }
+
+#[test]
+fn generated_guide_placeholders_localize_but_provider_titles_do_not() {
+    let ja = iptv_core::i18n::resolve("ja", None);
+    let s = schedule();
+    assert_eq!(s.title_in(1, s.program_at(1, 0), ja), "情報なし");
+    assert_eq!(s.title_in(0, s.program_at(0, 0), ja), "Alpha News");
+    // The same bytes can be a genuine provider title or an app placeholder.
+    let a = ChannelKey::new("a");
+    let xml = xmltv().replace("Alpha News", "No information");
+    let store = store_from(&xml, &[(&a, Some("a.test"), "Alpha")], true);
+    let s = EpgSchedule::new(
+        vec![(
+            "Other".into(),
+            vec![GuideChannel {
+                key: a,
+                name: "Alpha".into(),
+                number: 1,
+                catchup_days: 0,
+            }],
+        )],
+        store,
+        NOW,
+    );
+    assert_eq!(s.title_in(0, s.program_at(0, 0), ja), "No information");
+    assert_eq!(
+        s.group_name_in(0, ja),
+        "Other",
+        "provider group name stays opaque"
+    );
+}

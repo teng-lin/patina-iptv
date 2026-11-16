@@ -316,6 +316,22 @@ impl Schedule for CombinedSchedule {
             .map(|(s, c)| s.schedule.title(c, self.local(&s.schedule, p)))
             .unwrap_or_default()
     }
+    fn title_in(&self, c: usize, p: Program, language: &iptv_core::i18n::Language) -> String {
+        self.channel_source(c)
+            .map(|(s, c)| s.schedule.title_in(c, self.local(&s.schedule, p), language))
+            .unwrap_or_default()
+    }
+    fn group_name_in(&self, g: usize, language: &iptv_core::i18n::Language) -> String {
+        self.groups
+            .get(g)
+            .map(|&(s, g)| {
+                g.map_or_else(
+                    || self.sources[s].name.clone(),
+                    |g| self.sources[s].schedule.group_name_in(g, language),
+                )
+            })
+            .unwrap_or_default()
+    }
     fn stream_url(&self, c: usize) -> Option<String> {
         let (s, c) = self.channel_source(c)?;
         s.schedule.stream_url(c)

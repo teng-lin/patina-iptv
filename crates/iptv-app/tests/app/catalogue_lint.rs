@@ -71,7 +71,7 @@ use iptv_core::i18n::is_catalogued;
 
 /// How many `[untranslated]` entries there are. Lower it with the list;
 /// it is never raised.
-const UNTRANSLATED: usize = 242;
+const UNTRANSLATED: usize = 169;
 
 /// Source directories read, relative to the workspace's `crates/`.
 const ROOTS: &[&str] = &[
@@ -119,7 +119,7 @@ const TRANSLATING_HELPERS: &[(&str, &str, usize)] = &[
     ("iptv-app/src/parental_view.rs", "notify_message", 0),
     ("iptv-app/src/fav_editor.rs", "button", 0),
     // `.label(move || tr(name))`, and the tile buttons' `tr(what)`.
-    ("iptv-app/src/multiview_view/chrome.rs", "pill", 1),
+    ("iptv-app/src/multiview_view/chrome.rs", "pill", 0),
     ("iptv-app/src/multiview_view/chrome.rs", "label", 0),
     ("iptv-app/src/play_bar.rs", "button", 1),
     ("iptv-app/src/search_view/view.rs", "button", 2),
@@ -1996,12 +1996,12 @@ fn a_translating_helper_and_a_message_type_are_followed_like_tr() {
         (chrome, "view().label(|| describe(tile))", &[], &[], 0),
         (
             chrome,
-            "pill(\"+  Add\", \"Add screen\", add)",
+            "pill(\"Add screen\", add, true)",
             &["Add screen"],
             &[],
             0,
         ),
-        (chrome, "pill(\"+  Add\", name, add)", &[], &["name"], 0),
+        (chrome, "pill(name, add, false)", &[], &["name"], 0),
         // A message type.
         (
             view,

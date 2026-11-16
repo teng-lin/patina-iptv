@@ -277,12 +277,12 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
                 if ui.player.vod.with(Option::is_some) {
                     if live() { tr("Video") } else { tr("Paused") }
                 } else if ui.player.recorded.with(Option::is_some) {
-                    if live() { tr("Recorded") } else { "PAUSED" }
+                    if live() { tr("Recorded") } else { tr("PAUSED") }
                 } else {
                     match (ui.playback.get(), live()) {
-                        (Playback::CatchUp { .. }, true) => "CATCH-UP",
-                        (_, true) => "LIVE",
-                        (_, false) => "PAUSED",
+                        (Playback::CatchUp { .. }, true) => tr("CATCH-UP"),
+                        (_, true) => tr("LIVE"),
+                        (_, false) => tr("PAUSED"),
                     }
                 }
             })

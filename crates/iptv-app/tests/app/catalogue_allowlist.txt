@@ -8,85 +8,12 @@
 # translate. A new line here says why by the group it joins.
 
 [untranslated]
-iptv-app/src/channels_view.rs	No channels here
-iptv-app/src/channels_view.rs	No favourites yet
-iptv-app/src/desktop.rs	Settings…
-iptv-app/src/desktop.rs	View
-iptv-app/src/desktop.rs	Window
-iptv-app/src/fav_editor.rs	OK add or remove   ◀ remove all in this list   ▶ add all in this list   Back done
-iptv-app/src/fav_editor.rs	Tap a channel to add or remove it
-iptv-app/src/grid.rs	Channels you watch will appear here.
-iptv-app/src/grid.rs	Hold OK  ·  menu
-iptv-app/src/grid.rs	Hold ◀  ·  groups      Search  ·  search
-iptv-app/src/grid.rs	Home  ·  now      Shift ◀ ▶  ·  hours      Ctrl ◀ ▶  ·  days
-iptv-app/src/grid.rs	Home  ·  now      Shift ◀ ▶  ·  hours      ⌘ ◀ ▶  ·  days
-iptv-app/src/grid.rs	No favourite channels yet.\nHold OK (or press Menu) on a channel and choose “Add to favourites”, or star channels with “Manage favourites…”.
-iptv-app/src/grid.rs	Tab  ·  groups      / or Ctrl+F  ·  search
-iptv-app/src/grid.rs	Tab  ·  groups      / or ⌘F  ·  search
-iptv-app/src/grid.rs	This group has no channels.
-iptv-app/src/grid.rs	◀  ·  replays (catch-up), then groups
-iptv-app/src/grid.rs	◀ in the groups  ·  search
-iptv-app/src/grid.rs	◀ in the groups  ·  search      m  ·  menu
-iptv-app/src/grid/ruler.rs	Now
-iptv-app/src/header.rs	Nothing playing
-iptv-app/src/menu_view.rs	Copy channels to a group…
-iptv-app/src/menu_view.rs	Manage hidden channels…
-iptv-app/src/menu_view.rs	Save to my list
-iptv-app/src/multiview_picker.rs	Choose a group or search its channels, then tap a channel
-iptv-app/src/multiview_picker.rs	No channels in this group. Choose another group.
-iptv-app/src/multiview_picker.rs	No matching channels. Clear the search or choose another group.
-iptv-app/src/multiview_picker.rs	Search this group by channel or number
-iptv-app/src/multiview_picker.rs	▲▼ move   ◀▶ groups / channels   OK choose   Back clear search or close
-iptv-app/src/multiview_view.rs	Add it anyway
-iptv-app/src/multiview_view.rs	Another one may not play, or may stop one that is playing.
-iptv-app/src/multiview_view/chrome.rs	+  Add screen
-iptv-app/src/multiview_view/chrome.rs	Exit multiview
-iptv-app/src/multiview_view/chrome.rs	OK: menu · Back: full screen
-iptv-app/src/player.rs	no account
-iptv-app/src/player.rs	no channel
-iptv-app/src/player.rs	no stream
-iptv-app/src/player_panels.rs	CATCH-UP
-iptv-app/src/player_panels.rs	LIVE
-iptv-app/src/player_panels.rs	PAUSED
-iptv-app/src/player_panels/status.rs	Can't play {}
-iptv-app/src/player_panels/status.rs	Next (⏭) returns to live.
-iptv-app/src/player_panels/status.rs	OK  Try again
-iptv-app/src/player_panels/status.rs	The programme has ended
-iptv-app/src/player_panels/words.rs	The provider is refusing this stream for now.
-iptv-app/src/player_panels/words.rs	⏪ ⏩ seek
-iptv-app/src/player_panels/words.rs	▼ ▲ seek   Enter play or pause
-iptv-app/src/player_panels/words.rs	▼ ▲ seek (hold: faster)   OK play or pause
-iptv-app/src/player_panels/words.rs	◀ ▶ actions   Enter hide   M more controls
-iptv-app/src/player_panels/words.rs	◀ ▶ actions   OK hide   Hold OK more controls
-iptv-app/src/player_panels/words.rs	◀ ▶ move   Enter choose   Esc hide
-iptv-app/src/player_panels/words.rs	◀ ▶ move   Enter choose   M or Esc hide
-iptv-app/src/player_panels/words.rs	◀ ▶ move   OK choose   Back hide
-iptv-app/src/player_panels/words.rs	◀ ▶ move   OK choose   Menu or Back hide
-iptv-app/src/player_panels/words.rs	◀ ▶ seek   Enter play or pause
-iptv-app/src/player_panels/words.rs	◀ ▶ seek (hold: faster)   OK play or pause
-iptv-runtime/src/wizard_map.rs	Playlist
-iptv-app/src/search_view.rs	Earlier
-iptv-app/src/search_view.rs	Later
-iptv-app/src/search_view.rs	On now
-iptv-app/src/search_view.rs	{when} · no replay
-iptv-app/src/search_view.rs	{when} · ↺ replay
-iptv-app/src/search_view/view.rs	Nothing found for “{}”
-iptv-app/src/search_view/view.rs	OK type   ▼ recent searches   Back close
-iptv-app/src/search_view/view.rs	Tap a result to add its channel to multiview
-iptv-app/src/search_view/view.rs	Tap a result to watch it
-iptv-app/src/search_view/view.rs	Type a channel or programme, or tap a recent search
-iptv-app/src/search_view/view.rs	▲▼ move   ◀▶ channels / programmes   OK add   Back keyboard, then close
-iptv-app/src/search_view/view.rs	▲▼ move   ◀▶ channels / programmes   OK watch   Back keyboard, then close
 iptv-app/src/settings_view/words.rs	Add an XMLTV guide link to the playlist on screen.
 iptv-app/src/settings_view/words.rs	Add, choose, refresh, rename and delete playlists, and arrange their guide sources.
 iptv-app/src/settings_view/words.rs	Choose a key, press and action per screen; capture keys or restore defaults.
 iptv-app/src/settings_view/words.rs	Download every guide source of the playlist on screen now.
 iptv-app/src/settings_view/words.rs	The playlist's guide sources: switch on or off, order (the first with a channel wins), time shift, how each last downloaded.
 iptv-app/src/settings_view/words.rs	The version of this app. Text is set in Roboto and Roboto Condensed (Google, SIL Open Font License 1.1).
-iptv-core/src/pip_window.rs	Picture-in-Picture
-iptv-guide/src/lib.rs	Loading…
-iptv-guide/src/lib.rs	No information
-iptv-guide/src/lib.rs	Other
 iptv-settings/src/catalogue/commands.rs	Add an XMLTV guide source.
 iptv-settings/src/catalogue/commands.rs	Arrange playlists by hand.
 iptv-settings/src/catalogue/commands.rs	Assign, prioritise and remove guide sources.

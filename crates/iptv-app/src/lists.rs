@@ -57,7 +57,7 @@ pub fn rail(ui: Ui) -> Vec<RailItem> {
 pub fn entry_name(entry: usize, catalog: &dyn Schedule) -> String {
     let name = iptv_core::lists::entry_name(entry, catalog);
     match Entry::at(entry) {
-        Entry::Group(_) => name,
+        Entry::Group(group) => catalog.group_name_in(group, crate::i18n::language()),
         _ => tr(&name).to_owned(),
     }
 }

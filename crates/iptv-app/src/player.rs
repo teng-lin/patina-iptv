@@ -20,6 +20,8 @@
 //! that kept one `last_channel` file, still read when a playlist has none.
 //! It moves to the store's history once the store keeps one for playback.
 
+use crate::i18n::key;
+
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -561,7 +563,7 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
                 surface,
                 session,
                 ErrorKind::Unavailable,
-                "no stream".into(),
+                key("no stream").into(),
             ),
         }
         return;
@@ -581,8 +583,8 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
         Resolution::StalkerLink(link) => resolve_link(ui, surface, session, link, schedule.clone()),
         Resolution::Unavailable(why) => {
             let detail = match why {
-                Unavailable::NoChannel => "no channel".to_owned(),
-                Unavailable::NeedsAccount => "no account".to_owned(),
+                Unavailable::NoChannel => key("no channel").to_owned(),
+                Unavailable::NeedsAccount => key("no account").to_owned(),
                 Unavailable::NoArchive(e) => format!("{e:?}"),
             };
             fail(ui, surface, session, ErrorKind::Unavailable, detail);

@@ -415,6 +415,36 @@ mod tests {
     }
 
     #[test]
+    fn localized_tracks_preserve_provider_labels_and_ids() {
+        let mut tracks = sample();
+        let japanese = i18n::resolve("ja", None);
+        assert_eq!(
+            tracks.entries_in(Kind::Audio, japanese)[0],
+            "英語 · ステレオ · AAC"
+        );
+        tracks.selected_text = Some("t1".into());
+        assert_eq!(
+            tracks.summary_in(Kind::Text, japanese).as_deref(),
+            Some("ドイツ語")
+        );
+        tracks.text[0].language.clear();
+        tracks.text[0].label = "French".into();
+        assert_eq!(
+            tracks.entries_in(Kind::Text, japanese)[1],
+            "French",
+            "provider labels that happen to match a catalogue key stay unchanged"
+        );
+        tracks.text[0].label.clear();
+        assert_eq!(tracks.entries_in(Kind::Text, japanese)[1], "トラック1");
+        assert_eq!(tracks.pick(Kind::Text, 1).as_deref(), Some("t1"));
+        for language in i18n::LANGUAGES {
+            assert_eq!(tracks.entries_in(Kind::Text, language).len(), 2);
+            assert!(!audio_layout_in(1, language).is_empty());
+            assert!(!language_name_in("eng", language).unwrap().is_empty());
+        }
+    }
+
+    #[test]
     fn choosers_list_automatic_tracks_and_off() {
         let t = sample();
         assert_eq!(

@@ -172,13 +172,13 @@ fn display_minute(t: UnixTime, epoch: UnixTime) -> i32 {
 /// The airing and replay marker of a programme result.
 fn badge(hit: &ProgrammeHit) -> String {
     let when = match hit.airing {
-        Airing::Live => "On now",
-        Airing::Upcoming => "Later",
-        Airing::Ended => "Earlier",
+        Airing::Live => tr("On now"),
+        Airing::Upcoming => tr("Later"),
+        Airing::Ended => tr("Earlier"),
     };
     match (hit.airing, hit.catchup) {
-        (_, true) => format!("{when} · ↺ replay"),
-        (Airing::Ended, false) => format!("{when} · no replay"),
+        (_, true) => trf("{when} · ↺ replay", &[("when", when.into())]),
+        (Airing::Ended, false) => trf("{when} · no replay", &[("when", when.into())]),
         _ => when.to_owned(),
     }
 }

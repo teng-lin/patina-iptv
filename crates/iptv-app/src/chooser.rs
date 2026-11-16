@@ -147,7 +147,7 @@ fn history(ui: Ui) -> (Vec<String>, Vec<String>, usize) {
                 "{}  {}{marker} · {}",
                 crate::lists::number(ui, ch),
                 s.channel_name(ch),
-                s.title(ch, p)
+                s.title_in(ch, p, crate::i18n::language())
             )
         })
         .collect();
@@ -275,7 +275,11 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             ui.chooser.with(|c| {
                 c.as_ref().and_then(|c| {
                     let index = at.index();
-                    let label = c.labels.get(index)?.clone();
+                    let label = if c.kind == Kind::History {
+                        c.labels.get(index)?.clone()
+                    } else {
+                        entries(ui, c.kind).0.get(index)?.clone()
+                    };
                     let checked = c.kind != Kind::History && c.list.selected == index;
                     Some((label, checked, c.list.focus == index))
                 })

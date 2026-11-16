@@ -13,6 +13,8 @@
 //! the programmes of a band a little wider than the window and slide them,
 //! with the ruler's times and the now line, by one animated offset.
 
+use crate::i18n::tr;
+
 mod cell;
 mod channel;
 use cell::RowFocus;
@@ -175,12 +177,11 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
 fn empty_state(ui: Ui) -> impl IntoElement {
     let empty = move || ui.list.with(|l| l.is_empty());
     let message = move || match ui.list.with(|l| l.entry()) {
-        FAVORITES => {
-            "No favourite channels yet.\nHold OK (or press Menu) on a channel and choose \
-             “Add to favourites”, or star channels with “Manage favourites…”."
-        }
-        RECENT => "Channels you watch will appear here.",
-        _ => "This group has no channels.",
+        FAVORITES => tr(
+            "No favourite channels yet. Hold OK (or press Menu) on a channel and choose “Add to favourites”, or star channels with “Manage favourites…”.",
+        ),
+        RECENT => tr("Channels you watch will appear here."),
+        _ => tr("This group has no channels."),
     };
     view()
         .absolute()
@@ -214,7 +215,11 @@ fn hint_card(ui: Ui) -> impl IntoElement {
         .accessibility_elements_hidden(move || !shown())
         .opacity(move || if shown() { 1.0_f32 } else { 0.0 })
         .pointer_events(PointerEvents::None)
-        .children(hint_lines().map(|line| text(line).text_size(px(13.0)).text_color(rgb(WHITE))))
+        .children((0..4).map(|i| {
+            text(move || hint_lines()[i])
+                .text_size(px(13.0))
+                .text_color(rgb(WHITE))
+        }))
 }
 
 /// What the keys do in the guide: a remote's, or a desktop keyboard's
@@ -222,22 +227,22 @@ fn hint_card(ui: Ui) -> impl IntoElement {
 fn hint_lines() -> [&'static str; 4] {
     match crate::input::PROFILE {
         iptv_nav::Profile::Remote => [
-            "◀  ·  replays (catch-up), then groups",
-            "◀ in the groups  ·  search",
-            "Hold ◀  ·  groups      Search  ·  search",
-            "Hold OK  ·  menu",
+            tr("◀  ·  replays (catch-up), then groups"),
+            tr("◀ in the groups  ·  search"),
+            tr("Hold ◀  ·  groups      Search  ·  search"),
+            tr("Hold OK  ·  menu"),
         ],
         iptv_nav::Profile::Keyboard if cfg!(target_os = "macos") => [
-            "◀  ·  replays (catch-up), then groups",
-            "Tab  ·  groups      / or ⌘F  ·  search",
-            "Home  ·  now      Shift ◀ ▶  ·  hours      ⌘ ◀ ▶  ·  days",
-            "◀ in the groups  ·  search      m  ·  menu",
+            tr("◀  ·  replays (catch-up), then groups"),
+            tr("Tab  ·  groups      / or ⌘F  ·  search"),
+            tr("Home  ·  now      Shift ◀ ▶  ·  hours      ⌘ ◀ ▶  ·  days"),
+            tr("◀ in the groups  ·  search      m  ·  menu"),
         ],
         iptv_nav::Profile::Keyboard => [
-            "◀  ·  replays (catch-up), then groups",
-            "Tab  ·  groups      / or Ctrl+F  ·  search",
-            "Home  ·  now      Shift ◀ ▶  ·  hours      Ctrl ◀ ▶  ·  days",
-            "◀ in the groups  ·  search      m  ·  menu",
+            tr("◀  ·  replays (catch-up), then groups"),
+            tr("Tab  ·  groups      / or Ctrl+F  ·  search"),
+            tr("Home  ·  now      Shift ◀ ▶  ·  hours      Ctrl ◀ ▶  ·  days"),
+            tr("◀ in the groups  ·  search      m  ·  menu"),
         ],
     }
 }

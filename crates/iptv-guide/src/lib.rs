@@ -36,9 +36,9 @@ const SLOT: i64 = 3600;
 /// Minutes the guide can be browsed past its last programme.
 pub const PAST_END: i32 = 60;
 /// Title of a gap slot.
-pub const NO_INFORMATION: &str = "No information";
+pub const NO_INFORMATION: &str = iptv_core::i18n::key("No information");
 /// Title of a slot whose day is still being read from the store.
-pub const LOADING: &str = "Loading…";
+pub const LOADING: &str = iptv_core::i18n::key("Loading…");
 /// A channel in no group (`EpgSchedule::group_index`).
 const NO_GROUP: u32 = u32::MAX;
 
@@ -609,7 +609,10 @@ impl Catalog {
         let labels = groups
             .iter()
             .map(|g| (g.id.as_str().to_owned(), g.name.clone()))
-            .chain([("__other__".to_owned(), "Other".to_owned())]);
+            .chain([(
+                "__other__".to_owned(),
+                iptv_core::i18n::key("Other").to_owned(),
+            )]);
         // Where each playlist position lands once grouped.
         let mut stored_at = vec![0; channels.len()];
         for (at, &(position, _)) in buckets.iter().flatten().enumerate() {
@@ -1005,9 +1008,29 @@ impl Schedule for EpgSchedule {
         Some(self)
     }
 
+    fn group_name_in(&self, group: usize, language: &iptv_core::i18n::Language) -> String {
+        let name = self.group_name(group);
+        // This reserved bucket is synthesized for channels with no provider
+        // group. Provider/custom groups, including ones named Other, stay opaque.
+        if self.group_key(group) == "__other__" && name == iptv_core::i18n::key("Other") {
+            iptv_core::i18n::translate(language, "Other").to_owned()
+        } else {
+            name
+        }
+    }
+
     fn title(&self, channel: usize, program: Program) -> String {
+        self.title_in(channel, program, &iptv_core::i18n::LANGUAGES[0])
+    }
+
+    fn title_in(
+        &self,
+        channel: usize,
+        program: Program,
+        language: &iptv_core::i18n::Language,
+    ) -> String {
         let Some(key) = self.key(channel) else {
-            return NO_INFORMATION.to_owned();
+            return iptv_core::i18n::translate(language, "No information").to_owned();
         };
         let t = self.probe(program);
         let found = self.channel_store(Some(key), t, |s| {
@@ -1017,8 +1040,10 @@ impl Schedule for EpgSchedule {
                 .map(|p| iptv_epg::fold_superscripts(p.title()).into_owned())
         });
         match found {
-            None => LOADING.to_owned(),
-            Some(title) => title.unwrap_or_else(|| NO_INFORMATION.to_owned()),
+            None => iptv_core::i18n::translate(language, "Loading…").to_owned(),
+            Some(title) => title.unwrap_or_else(|| {
+                iptv_core::i18n::translate(language, "No information").to_owned()
+            }),
         }
     }
 }

@@ -14,6 +14,14 @@ use iptv_providers::{Secret, SecretUrl};
 
 /// The source to import for `draft`, and the guide URL the user typed.
 pub fn source_from_draft(draft: &PlaylistDraft) -> (Source, Option<SecretUrl>) {
+    source_from_draft_in(draft, &iptv_core::i18n::LANGUAGES[0])
+}
+
+/// An empty source name gets a localized generated default at creation time.
+pub fn source_from_draft_in(
+    draft: &PlaylistDraft,
+    language: &iptv_core::i18n::Language,
+) -> (Source, Option<SecretUrl>) {
     let m3u = |location: &str| {
         SourceConfig::M3u(M3uSourceConfig {
             location: SecretUrl::new(location),
@@ -51,7 +59,7 @@ pub fn source_from_draft(draft: &PlaylistDraft) -> (Source, Option<SecretUrl>) {
     let name = draft
         .name
         .clone()
-        .unwrap_or_else(|| default_name(&draft.source));
+        .unwrap_or_else(|| default_name(&draft.source, language));
     let epg = draft.epg_url.as_ref().map(|u| SecretUrl::new(u.expose()));
     (Source { name, config }, epg)
 }
@@ -67,7 +75,7 @@ fn with_scheme(address: &str) -> String {
 
 /// A name when the user gave none: the server's host, or the file's name.
 /// Never the path or query, which may carry credentials.
-fn default_name(source: &DraftSource) -> String {
+fn default_name(source: &DraftSource, language: &iptv_core::i18n::Language) -> String {
     let host = |url: &str| {
         let rest = url.split_once("://").map_or(url, |(_, r)| r);
         let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
@@ -91,7 +99,7 @@ fn default_name(source: &DraftSource) -> String {
             .to_owned(),
     };
     if name.is_empty() {
-        "Playlist".to_owned()
+        iptv_core::i18n::translate(language, "Playlist").to_owned()
     } else {
         name
     }
@@ -159,6 +167,23 @@ mod tests {
             name: None,
             epg_url: None,
         }
+    }
+
+    #[test]
+    fn only_generated_fallback_names_use_the_interface_language() {
+        let ja = iptv_core::i18n::resolve("ja", None);
+        let empty = draft(DraftSource::M3uFile { path: "/".into() });
+        assert_eq!(source_from_draft_in(&empty, ja).0.name, "プレイリスト");
+        let mut named = empty.clone();
+        named.name = Some("Playlist".into());
+        assert_eq!(source_from_draft_in(&named, ja).0.name, "Playlist");
+        let host = draft(DraftSource::M3uUrl {
+            url: UrlText::new("https://synthetic.example.test/catalog"),
+        });
+        assert_eq!(
+            source_from_draft_in(&host, ja).0.name,
+            "synthetic.example.test"
+        );
     }
 
     #[test]
