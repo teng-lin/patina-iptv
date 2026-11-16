@@ -1096,6 +1096,13 @@ fn details(ui: Ui, size: Scale) -> impl IntoElement {
         .flex_row()
         .flex_wrap()
         .gap(move || size.px(12.0))
+        .child(when(
+            move || ui.vod.with(|s| s.retry.is_some() && !s.busy),
+            move || {
+                button(ui, size, Control::Retry, tr("Retry"), move || retry(ui))
+                    .test_id("vod-retry")
+            },
+        ))
         .child(play_button)
         .child(restart)
         .child(next)
@@ -1133,7 +1140,11 @@ fn details(ui: Ui, size: Scale) -> impl IntoElement {
                 ui.vod.with(|s| {
                     matches!(
                         s.control,
-                        Control::Play | Control::Restart | Control::Next | Control::Block
+                        Control::Retry
+                            | Control::Play
+                            | Control::Restart
+                            | Control::Next
+                            | Control::Block
                     )
                 })
             }))
@@ -1184,13 +1195,6 @@ fn detail_screen(ui: Ui, size: Scale) -> View {
                 )),
         )
         .child(ui_kit::body(size, move || status_message(ui)))
-        .child(when(
-            move || ui.vod.with(|s| s.retry.is_some() && !s.busy),
-            move || {
-                button(ui, size, Control::Retry, tr("Retry"), move || retry(ui))
-                    .test_id("vod-retry")
-            },
-        ))
 }
 fn library_screen(ui: Ui, size: Scale) -> View {
     let header = ui_kit::header(

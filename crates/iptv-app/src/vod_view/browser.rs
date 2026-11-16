@@ -684,9 +684,13 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
                 return;
             }
             if let Ok(details) = owner.vod_preview(key, cancel).await {
-                ui.vod.update(|s| {
-                    s.publish_preview(generation, details);
-                });
+                // No await between the access check and UI publication: a
+                // revoked grant must not restore metadata after redaction.
+                if owner.parental_allowed(&iptv_runtime::vod::target(&details.item.key)) {
+                    ui.vod.update(|s| {
+                        s.publish_preview(generation, details);
+                    });
+                }
             }
         });
     });
@@ -723,7 +727,10 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
             }))
             .child(ui_kit::caption(size, move || status_message(ui)))
             .child(when(move || ui.vod.with(|s| s.retry.is_some() && !s.busy), move || button(ui, size, Control::Retry, tr("Retry"), move || retry(ui)).test_id("vod-retry")))
-            .child(when(move || ui.vod.with(|s| s.cards.is_empty() && !s.busy && s.error.is_none()), move || ui_kit::body(size, tr("No titles found. Enable movie and series imports in playlist settings, then refresh your playlist."))))
+            .child(when(move || ui.vod.with(|s| s.cards.is_empty() && !s.busy && s.error.is_none()), move || {
+                let message = tr("No titles found. Enable movie and series imports in playlist settings, then refresh your playlist.");
+                ui_kit::body(size, message)
+            }))
             .child(grid(ui, size))
             .child(when(move || ui.vod.with(|s| s.has_more), move || ui_kit::button(ui, size, tr("Load more"), || false, move || { if !ui.vod.with_untracked(|s| s.busy) { reload(ui, true); } }))))
 }

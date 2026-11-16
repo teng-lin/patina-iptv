@@ -555,7 +555,9 @@ url,
                     && s.source_policy(SourceId(lookup.source))?.enabled)
             })
             .await?;
-        if !current {
+        // Keep the source read last, then check access without yielding:
+        // an expired or revoked grant cannot survive that final store await.
+        if !current || !self.parental_allowed(&target(&key)) {
             return Err(unavailable());
         }
         Ok(result)

@@ -886,7 +886,6 @@ impl Screen {
             .as_ref()
             .is_some_and(|d| d.item.key.kind == Kind::Series)
         {
-            self.move_control(step);
             return;
         }
         self.control = match (self.control, step < 0) {
@@ -894,8 +893,6 @@ impl Screen {
             (Control::Episodes, false) => Control::Episodes,
             (Control::Seasons, true) => Control::Play,
             (Control::Seasons, false) => Control::Episodes,
-            (Control::Retry, false) => Control::Play,
-            (_, true) if self.retry.is_some() => Control::Retry,
             (control, true) => control,
             (_, false) => Control::Seasons,
         };
@@ -1079,6 +1076,40 @@ mod tests {
         assert_eq!(s.control, Control::Seasons);
         s.detail_vertical(-1);
         assert_eq!(s.control, Control::Play);
+    }
+    #[test]
+    fn movie_vertical_keys_keep_the_action_row_and_retry_is_horizontal() {
+        let mut s = Screen::default();
+        let mut details = series_details(0);
+        details.item.key.kind = Kind::Movie;
+        s.show_details(details);
+        let key = s.details.as_ref().unwrap().item.key.clone();
+        s.fail("Playback unavailable", Operation::Details(key));
+        s.control = Control::Play;
+        for step in [-1, 1] {
+            s.detail_vertical(step);
+            assert_eq!(s.control, Control::Play);
+        }
+        s.detail_horizontal(-1);
+        assert_eq!(s.control, Control::Retry);
+        s.detail_vertical(1);
+        assert_eq!(s.control, Control::Retry);
+        s.detail_horizontal(1);
+        assert_eq!(s.control, Control::Play);
+    }
+    #[test]
+    fn series_retry_shares_the_action_row_above_seasons() {
+        let mut s = Screen::default();
+        s.show_details(series_details(2));
+        let key = s.details.as_ref().unwrap().item.key.clone();
+        s.fail("Playback unavailable", Operation::Details(key));
+        s.control = Control::Play;
+        s.detail_vertical(-1);
+        assert_eq!(s.control, Control::Play);
+        s.detail_horizontal(-1);
+        assert_eq!(s.control, Control::Retry);
+        s.detail_vertical(1);
+        assert_eq!(s.control, Control::Seasons);
     }
     #[test]
     fn revoked_metadata_is_removed_from_the_preview_and_catalogue() {

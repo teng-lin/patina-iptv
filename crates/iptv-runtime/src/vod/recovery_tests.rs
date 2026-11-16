@@ -359,9 +359,10 @@ fn cancelling_a_focused_preview_closes_its_pending_provider_request() {
 
 #[test]
 fn focused_movie_preview_enriches_missing_metadata_without_registering_playback() {
-    let mut provider = Provider::new(vec![
-        r#"{"info":{"plot":"Generated detailed plot","releasedate":"2024-02-01","rating":"8.2","duration_secs":5400},"movie_data":{"stream_id":1,"name":"Generated movie","container_extension":"mp4"}}"#,
-    ]);
+    let mut provider = Provider::new(vec![concat!(
+        r#"{"info":{"plot":"Generated detailed plot","releasedate":"2024-02-01","rating":"8.2","duration_secs":5400},"#,
+        r#""movie_data":{"stream_id":1,"name":"Generated movie","container_extension":"mp4"}}"#,
+    )]);
     let directory = tempfile::tempdir().unwrap();
     let database_key = crate::model::DatabaseKey::from_bytes([0x79; 32]);
     let mut store = iptv_store_sqlite::Store::open_encrypted(
