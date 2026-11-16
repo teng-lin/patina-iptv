@@ -70,6 +70,7 @@ const STORE_ADAPTER_USERS: &[&str] = &[
     "store_service.rs",
     "stored.rs",
     "vod.rs",
+    "vod/recovery_tests.rs",
 ];
 
 /// Process-lifetime facts and explicitly opted-in native recording services.

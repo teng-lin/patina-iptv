@@ -826,7 +826,27 @@ async fn native_host_captures_after_its_ui_owner_is_drained_and_dropped() {
     assert!(owner.drain_services());
     drop(owner);
     let services = state.host.lock().unwrap().as_ref().unwrap().accept();
-    tokio::time::sleep(Duration::from_secs(7)).await;
+    // Native scheduler publication is the acknowledgement; elapsed time is
+    // only a watchdog, never evidence that a capture has finished.
+    {
+        let (observed, _) = state
+            .changed
+            .wait_timeout_while(state.lock(), Duration::from_secs(12), |data| {
+                !data
+                    .jobs
+                    .iter()
+                    .any(|job| job.id == id && !job.status.active())
+            })
+            .unwrap();
+        assert!(
+            observed
+                .jobs
+                .iter()
+                .any(|job| job.id == id && job.status == Status::Completed)
+        );
+        assert_eq!(observed.jobs.iter().filter(|job| job.id == id).count(), 1);
+        assert!(observed.viewers.is_empty());
+    }
     let job = services
         .read(move |store| store.recording_job(id))
         .await

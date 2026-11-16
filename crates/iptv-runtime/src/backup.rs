@@ -172,7 +172,14 @@ fn private_dir(services: &Services, path: &Path) -> io::Result<()> {
         builder.mode(0o700);
     }
     builder.create(path)?;
-    (services.ports().exclude_from_backup)(path)
+    let result = (services.ports().exclude_from_backup)(path);
+    if result.is_err() {
+        // Scratch ownership starts only after admission succeeds. This directory
+        // was just created, but no guard exists yet to clean a refused one.
+        // Remove only an empty directory, never an unexpected foreign entry.
+        let _ = fs::remove_dir(path);
+    }
+    result
 }
 fn private_file(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();

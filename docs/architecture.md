@@ -139,6 +139,8 @@ saved the same way, by its content key.
 
 The scenario tests in `crates/iptv-app/tests/app/` run this whole loop
 headless, with the synthetic fixtures, each in its own process.
+The [runtime recovery validation matrix](runtime-recovery-validation.md) maps
+service failure/restart scenarios and distinguishes headless, decoder and device evidence.
 
 ## The video layer
 

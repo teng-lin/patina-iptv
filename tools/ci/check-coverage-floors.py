@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check line coverage floors for each library crate."""
+"""Check source-line coverage floors for library and application crates."""
 from collections import defaultdict
 from pathlib import Path
 import re
@@ -18,7 +18,8 @@ FLOORS = {
     "iptv-search": 94.0,
     "iptv-player-mpv": 94.0,
     "iptv-library": 91.0,
-    "iptv-runtime": 49.5,
+    "iptv-runtime": 90.0,
+    "iptv-app": 90.0,
 }
 
 
@@ -77,7 +78,7 @@ def main(summary_path="target/coverage/summary.txt"):
         for crate, cov, floor in failed:
             print(f"  {crate}: {cov:.2f}% < floor {floor:.1f}%", file=sys.stderr)
         sys.exit(1)
-    print("\nAll library crates met or exceeded their coverage floors.")
+    print("\nAll measured crates met or exceeded their coverage floors.")
 
 
 if __name__ == "__main__":

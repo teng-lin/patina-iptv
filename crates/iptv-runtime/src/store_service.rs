@@ -24,13 +24,14 @@
 use std::future::Future;
 use std::path::Path;
 use std::sync::{
-    Arc, OnceLock,
+    Arc, Mutex, OnceLock,
     atomic::{AtomicU64, Ordering},
     mpsc,
 };
 use std::thread::ThreadId;
 
 use futures_channel::oneshot;
+use iptv_import::CancelToken;
 use iptv_store_sqlite::{Store, StoreError};
 
 /// What a lane's thread keeps between jobs: its connection, and when a
@@ -56,9 +57,14 @@ struct Lane {
 struct Epochs {
     next: AtomicU64,
     active: AtomicU64,
+    /// Closing admission must wake queries before accepted FIFO writes drain.
+    closed: Mutex<CancelToken>,
 }
 impl Epochs {
     fn begin(&self) -> u64 {
+        let mut closed = self.closed.lock().unwrap_or_else(|e| e.into_inner());
+        closed.cancel();
+        *closed = CancelToken::new();
         let epoch = self.next.fetch_add(1, Ordering::SeqCst) + 1;
         self.active.store(epoch, Ordering::SeqCst);
         epoch
@@ -67,9 +73,21 @@ impl Epochs {
         epoch != 0 && self.active.load(Ordering::SeqCst) == epoch
     }
     fn close(&self, epoch: u64) -> bool {
-        self.active
+        let closed = self.closed.lock().unwrap_or_else(|e| e.into_inner());
+        let retired = self
+            .active
             .compare_exchange(epoch, 0, Ordering::SeqCst, Ordering::SeqCst)
-            .is_ok()
+            .is_ok();
+        if retired {
+            closed.cancel();
+        }
+        retired
+    }
+    fn close_admission(&self, epoch: u64) {
+        let closed = self.closed.lock().unwrap_or_else(|e| e.into_inner());
+        if self.permits(epoch) {
+            closed.cancel();
+        }
     }
 }
 
@@ -135,14 +153,16 @@ impl Service {
     /// A handle for work accepted now. It stays bound to this owner and to
     /// the application epoch of this moment, on whichever thread it runs.
     pub(crate) fn accept(self: &Arc<Self>) -> Services {
+        let closed = self.epochs.closed.lock().unwrap_or_else(|e| e.into_inner());
         Services {
             service: self.clone(),
             epoch: self.epochs.active.load(Ordering::SeqCst),
+            closed: closed.clone(),
         }
     }
 
     pub(crate) fn retire(&self) {
-        self.epochs.active.store(0, Ordering::SeqCst);
+        self.epochs.close(self.epochs.active.load(Ordering::SeqCst));
         #[cfg(feature = "test-support")]
         self.hooks.release();
         self.files.close();
@@ -178,13 +198,30 @@ impl Service {
     }
 
     pub(crate) fn drain_on_shutdown_with(self: &Arc<Self>, after_writer: impl FnOnce()) -> bool {
+        let limit = std::time::Duration::from_secs(10);
+        #[cfg(feature = "test-support")]
+        let limit = self.hooks.drain_limit().unwrap_or(limit);
+        self.drain_on_shutdown_with_limit(limit, after_writer)
+    }
+
+    fn drain_on_shutdown_with_limit(
+        self: &Arc<Self>,
+        limit: std::time::Duration,
+        after_writer: impl FnOnce(),
+    ) -> bool {
         let epoch = self.epochs.active.load(Ordering::SeqCst);
+        // No new work may enter now. Queries observe owner closure immediately,
+        // while queued writer jobs retain their epoch until the FIFO barrier.
+        self.epochs.close_admission(epoch);
+        #[cfg(feature = "test-support")]
+        self.hooks.admission_closed();
         if self.writer.jobs.get().is_none() {
             self.epochs.close(epoch);
             after_writer();
+            #[cfg(feature = "test-support")]
+            self.hooks.drained();
             return true;
         }
-        let limit = std::time::Duration::from_secs(10);
         // The writer first: once it closed the epoch, a late read cannot open
         // the reader's connection again.
         let owner = self.clone();
@@ -204,7 +241,12 @@ impl Service {
         let analysis = self.analysis.barrier(limit, |connection| {
             *connection = Connection::default();
         });
-        writer && reader && analysis
+        let drained = writer && reader && analysis;
+        #[cfg(feature = "test-support")]
+        if drained {
+            self.hooks.drained();
+        }
+        drained
     }
 }
 
@@ -215,6 +257,7 @@ impl Service {
 pub(crate) struct Services {
     service: Arc<Service>,
     epoch: u64,
+    closed: CancelToken,
 }
 
 fn stale() -> StoreError {
@@ -233,7 +276,7 @@ impl Services {
     }
 
     fn affinity(&self) -> Result<u64, StoreError> {
-        if self.service.epochs.permits(self.epoch) {
+        if !self.closed.is_cancelled() && self.service.epochs.permits(self.epoch) {
             Ok(self.epoch)
         } else {
             Err(stale())
@@ -243,6 +286,10 @@ impl Services {
     /// The application that accepted this work is still the open one.
     pub(crate) fn is_current(&self) -> bool {
         self.affinity().is_ok()
+    }
+
+    pub(crate) fn closed(&self) -> impl Future<Output = ()> + '_ {
+        self.closed.cancelled()
     }
 
     pub(crate) fn directory(&self) -> &Path {
@@ -323,6 +370,11 @@ impl Services {
     #[cfg(feature = "test-support")]
     pub(crate) fn before_report(&self) {
         self.service.hooks.before_report();
+    }
+
+    #[cfg(feature = "test-support")]
+    pub(crate) fn before_publication(&self) {
+        self.service.hooks.before_publication();
     }
 
     /// Queues `operation` on the writer and returns its reply. Transfers
@@ -452,6 +504,17 @@ impl Services {
             .service
             .writer
             .queue(Box::new(move |_| std::thread::sleep(duration)));
+    }
+
+    #[cfg(feature = "test-support")]
+    pub(crate) fn hold_writer(&self) -> crate::TestGate {
+        let gate = crate::TestGate::new();
+        let pause = gate.0.clone();
+        self.service
+            .writer
+            .queue(Box::new(move |_| pause.pause()))
+            .unwrap();
+        gate
     }
 }
 
@@ -637,6 +700,25 @@ impl Services {
 mod tests {
     use super::{Connection, Service};
     use std::sync::Arc;
+
+    #[test]
+    #[cfg(feature = "test-support")]
+    fn a_timed_out_drain_does_not_acknowledge_connection_closure() {
+        use std::time::Duration;
+        let directory = tempfile::tempdir().unwrap();
+        let owner = service(directory.path(), 0x46);
+        owner.epochs.begin();
+        owner.accept().blocking(|_| Ok(())).unwrap();
+        let held = owner.accept().hold_writer();
+        assert!(held.wait_entered(Duration::from_secs(5)));
+        let observed = owner.hooks.observe_drain();
+        assert!(!owner.drain_on_shutdown_with_limit(Duration::ZERO, || {}));
+        assert!(!observed.wait_entered(Duration::ZERO));
+        held.release();
+        assert!(owner.drain_on_shutdown());
+        assert!(observed.wait_entered(Duration::ZERO));
+        owner.retire();
+    }
 
     fn service(directory: &std::path::Path, key: u8) -> Arc<Service> {
         Arc::new(Service::new(crate::Ports::new(
