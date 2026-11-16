@@ -3,8 +3,8 @@
 import copy
 import importlib.util
 import json
+import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -124,12 +124,15 @@ class Evidence(unittest.TestCase):
 
 
 class Runner(unittest.TestCase):
-    @unittest.skipUnless(shutil.which("true"), "requires a no-op executable")
+    @unittest.skipUnless(os.name == "posix", "requires POSIX executable scripts")
     def test_missing_evidence_writes_every_failed_sample_and_a_failure_report(self):
         with tempfile.TemporaryDirectory(prefix="patina-fabricated-run-") as directory:
             output = Path(directory) / "report.json"
+            harness = Path(directory) / "no-evidence"
+            harness.write_text("#!/bin/sh\nexit 0\n")
+            harness.chmod(0o700)
             result = subprocess.run([sys.executable, str(j.HERE / "journeys.py"), "run",
-                                     "--harness", shutil.which("true"), "--native-harness", shutil.which("true"),
+                                     "--harness", str(harness), "--native-harness", str(harness),
                                      "--repetitions", "1", "--output", str(output)],
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
@@ -155,7 +158,8 @@ class MalformedRunner(unittest.TestCase):
                 def scenario(command, env, timeout):
                     Path(env["IPTV_PERF_SAMPLE"]).write_text(payload)
                     return subprocess.CompletedProcess(command, 0, "")
-                with patch.object(j, "scenario", side_effect=scenario), patch.dict(os.environ, {}), contextlib.redirect_stdout(io.StringIO()):
+                with patch.object(j, "scenario", side_effect=scenario), patch.object(j.platform, "system", return_value="Linux"), \
+                     patch.dict(os.environ, {}), contextlib.redirect_stdout(io.StringIO()):
                     self.assertEqual(j.run(args), 1)
                 report = j.load(output)
                 self.assertEqual(len(report["samples"]), 3)

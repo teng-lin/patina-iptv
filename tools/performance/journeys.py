@@ -231,11 +231,13 @@ def run(args):
         with tempfile.TemporaryDirectory(prefix="patina-journeys-") as temporary:
             # Immutable executable: another worktree's build cannot change this run.
             executable = Path(temporary) / "app-tests"
-            shutil.copy2(harness, executable)
+            shutil.copyfile(harness, executable)
+            executable.chmod(0o700)
             native = None
             if platform.system() == "Linux":
                 native = Path(temporary) / "native-tests"
-                shutil.copy2(args.native_harness or build_harness("native_player"), native)
+                shutil.copyfile(args.native_harness or build_harness("native_player"), native)
+                native.chmod(0o700)
             for journey in CASES:
                 case = spec[journey]["scenario"]
                 for repetition in range(args.repetitions):
