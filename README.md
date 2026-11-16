@@ -126,7 +126,7 @@ packages are signed. Verify the download as above first.
 
 - Rust (the version pinned in `rust-toolchain.toml`) with the
   `wasm32-unknown-unknown` target, and for Android also
-  `aarch64-linux-android` and `x86_64-linux-android`.
+  `aarch64-linux-android`, `armv7-linux-androideabi` and `x86_64-linux-android`.
 - The NSH fork checked out next to this repository at the commit recorded
   in [`nsh.rev`](nsh.rev), and its CLI built:
 

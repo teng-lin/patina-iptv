@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Rust-only changes must still be compiled for Android on pull requests."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 
 SCRIPT = Path(__file__).with_name("android-changes.py")
@@ -58,6 +60,61 @@ class NdkVersion(unittest.TestCase):
         recipe = (root / ".github/actions/android/action.yml").read_text()
         self.assertIn(f'"ndk;{version}"', recipe)
         self.assertIn(f"ANDROID_NDK_HOME=$ANDROID_HOME/ndk/{version}", recipe)
+
+
+class Prerequisites(unittest.TestCase):
+    """Execute the composite action's shell with SDK/Cargo stand-ins."""
+
+    def test_arm_targets_runtime_arguments_and_cache_key(self):
+        self.run_action("arm64-v8a,armeabi-v7a", ["aarch64-linux-android", "armv7-linux-androideabi"])
+
+    def test_emulator_override(self):
+        self.run_action("x86_64", ["x86_64-linux-android"])
+
+    def run_action(self, abis, targets):
+        root = Path(__file__).resolve().parents[2]
+        recipe = (root / ".github/actions/android/action.yml").read_text()
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            checkout = temporary / "checkout"
+            script_directory = checkout / "tools/ci"
+            script_directory.mkdir(parents=True)
+            (script_directory / "nsh-tool-key.py").write_text('print("a" * 64)\n')
+            (temporary / "nsh").mkdir()
+            binaries = temporary / "bin"
+            binaries.mkdir()
+            recorder = ('#!' + sys.executable + '\nimport json,os,sys\nfrom pathlib import Path\n'
+                        'with open(os.environ["COMMAND_LOG"], "a") as out:\n'
+                        '    out.write(json.dumps([Path(sys.argv[0]).name, *sys.argv[1:]]) + "\\n")\n')
+            for command in ("sdkmanager", "rustup", "cargo"):
+                stub = binaries / command
+                stub.write_text(recorder)
+                stub.chmod(0o755)
+            record = temporary / "commands"
+            output = temporary / "outputs"
+            environment = dict(os.environ, PATH=str(binaries) + os.pathsep + os.environ["PATH"],
+                               ABI=abis, COMMAND_LOG=str(record), GITHUB_OUTPUT=str(output),
+                               GITHUB_ENV=str(temporary / "environment"), ANDROID_HOME=str(temporary / "sdk"))
+            for name in ("Install Android build tools", "Identify Android runtime inputs", "Build pinned Android runtime"):
+                step = recipe.split("    - name: " + name + "\n", 1)[1].split("    - ", 1)[0]
+                script = textwrap.dedent(step.split("      run: |\n", 1)[1])
+                subprocess.run(["bash", "-e", "-o", "pipefail", "-c", script], env=environment,
+                               cwd=checkout, check=True, capture_output=True, text=True)
+            commands = [json.loads(line) for line in record.read_text().splitlines()]
+            self.assertEqual([command[1:] for command in commands if command[0] == "rustup"],
+                             [["target", "add", target] for target in targets])
+            expected = ["cargo", "run", "--locked", "-p", "xtask", "--", "android", "--release"]
+            for abi in abis.split(","):
+                expected.extend(["--abi", abi])
+            self.assertEqual(commands[-1], expected)
+            outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+            self.assertEqual(outputs["abis"], abis.replace(",", "-"))
+            self.assertNotIn(",", outputs["abis"])
+            # Restore and save must both use the normalized identity.
+            cache_keys = [line.strip() for line in recipe.splitlines() if line.strip().startswith("key: nsh-android-")]
+            self.assertEqual(len(cache_keys), 2)
+            self.assertEqual(cache_keys[0], cache_keys[1])
+            self.assertIn("${{ steps.identity.outputs.abis }}", cache_keys[0])
 
 
 class CommandLine(unittest.TestCase):
