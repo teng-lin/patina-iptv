@@ -414,10 +414,19 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     virtual_list(count, row)
                         .estimated_item_size(list_rows::pitch(size, ROW))
                         .element_ref(&list)
+                        .test_id("chooser-items")
                         .h(move || {
-                            px(count().clamp(1, MAX_ROWS) as f32 * list_rows::pitch(size, ROW)().0)
-                        })
-                        .max_h(move || px(window().height.0 * 0.7)),
+                            let content =
+                                count().clamp(1, MAX_ROWS) as f32 * list_rows::pitch(size, ROW)().0;
+                            // An auxiliary window can mount before its host
+                            // publishes a viewport. Never collapse its list.
+                            let available = window().height.0;
+                            px(if available > 0.0 {
+                                content.min(available * 0.7)
+                            } else {
+                                content
+                            })
+                        }),
                 ),
         )
 }

@@ -333,6 +333,13 @@ fn modal_back_restores_channel_identity_after_reordering_and_recovery_can_cancel
     step(app.press_key("down"));
     step(app.press_key("enter"));
     step(app.wait_for("text:Enter the 32-character recovery code"));
+    step(app.press_key("up"));
+    step(app.wait_until(
+        "recovery field returns into view",
+        Duration::from_secs(3),
+        |screen| inside(screen, "parental-recovery-input", "parental-scroll"),
+    ));
+    step(app.press_key("down"));
     step(app.press_key("down"));
     step(app.press_key("enter"));
     step(app.wait_for_gone("text:Recover parental PIN", Duration::from_secs(3)));
@@ -399,6 +406,19 @@ fn first_run_large_text_exposes_source_choices_and_scrolls_focused_fields() {
     );
     step(app.back());
     step(app.wait_for("id:wizard-types-scroll"));
+    step(app.press("role:button[/Xtream Codes login/]"));
+    step(app.wait_for("id:wizard-form"));
+    assert!(app.screen().matches("role:button[/^Username$/]").unwrap());
+    assert!(
+        app.screen()
+            .matches("role:button[/^Paste · Password$/]")
+            .unwrap()
+    );
+    assert!(
+        app.screen().matches("role:button[/^Password$/]").unwrap(),
+        "empty credentials must not announce invented bullet values"
+    );
+    step(app.back());
     step(app.back());
     step(app.wait_for("text:No playlists yet"));
 }

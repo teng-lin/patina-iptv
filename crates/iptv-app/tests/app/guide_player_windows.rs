@@ -256,6 +256,13 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
         },
     ));
     step(app.press("id:auxiliary-player-1 >> label:Subtitles and tracks"));
+    let chooser = app.screen().layout_nodes().into_iter().find(|node| {
+        node.test_id.as_deref() == Some("chooser-items") && node.bounds.size.height.0 > 0.0
+    });
+    assert!(
+        chooser.is_some(),
+        "the auxiliary chooser keeps a non-zero viewport"
+    );
     step(app.wait_for("text:/Second synthetic audio/"));
     step(app.press_key("escape"));
     assert!(app.window_state("player-window-1").unwrap().is_some());

@@ -417,6 +417,9 @@ fn choose_type(ui: Ui) -> impl IntoElement {
 }
 
 fn shown_value(field: Field, value: &str) -> String {
+    if value.is_empty() {
+        return String::new();
+    }
     match field {
         // The file field holds the app's copy; its name is what matters.
         Field::PlaylistFile => value.rsplit(['/', '\\']).next().unwrap_or(value).to_owned(),
@@ -438,12 +441,11 @@ fn field_row(ui: Ui, size: Scale, field: Field) -> View {
             mark,
             move || send(ui, WizardEvent::PasteInto(field)),
         )
+        .label(move || format!("{} · {}", tr("Paste"), words::label(field)))
     });
-    list_rows::row(size, ROW, mark)
-        .test_id(match field {
-            Field::EpgUrl => "wizard-field-EpgUrl",
-            _ => "wizard-field",
-        })
+    let control = view()
+        .flex_1()
+        .h_full()
         .role(AccessibilityRole::Button)
         .accessible(true)
         .label(move || {
@@ -499,7 +501,18 @@ fn field_row(ui: Ui, size: Scale, field: Field) -> View {
                         .text_color(rgb(ERROR))
                         .h(move || size.px(if error().is_some() { 18.0 } else { 0.0 })),
                 ),
-        )
+        );
+    list_rows::row(size, ROW, mark)
+        .test_id(match field {
+            Field::EpgUrl => "wizard-field-EpgUrl",
+            _ => "wizard-field",
+        })
+        .role(AccessibilityRole::None)
+        .accessible(false)
+        .flex_row()
+        .items_center()
+        .gap(move || size.px(12.0))
+        .child(control)
         .children(paste)
 }
 
@@ -668,6 +681,8 @@ mod tests {
 
     #[test]
     fn secrets_and_file_paths_are_not_shown_in_full() {
+        assert_eq!(shown_value(Field::Password, ""), "");
+        assert_eq!(shown_value(Field::Username, ""), "");
         assert_eq!(shown_value(Field::Password, "ab"), "••••");
         assert_eq!(shown_value(Field::Mac, "00:1A:79:00:00:01"), "•".repeat(16));
         assert_eq!(

@@ -620,7 +620,7 @@ fn credentials(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
                 .child(scrolling.control(ui_kit::button(ui,size,tr("I saved the code"),move||focused(ui,0),move||finish(ui)),move||focused(ui,0)))
         }))
         .child(when(move||phase(ui)==Some(Phase::Recovery),move||{
-            view().gap(px(8.0)).child(ui_kit::field(size,input())
+            view().gap(px(8.0)).child(scrolling.control(view().child(ui_kit::field(size,input())
                 .test_id("parental-recovery-input").masked(true).max_length(32)
                 .label(move || tr("Recovery code").to_owned())
                 .border(px(1.0)).border_color(move||ui_kit::field_border(ui,focused(ui,0)))
@@ -630,7 +630,7 @@ fn credentials(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
                 .on_change(move|text:&str|ui.parental.update(|o|{
                     if let Some(o)=o {o.dialog.recovery.clear();
                         o.dialog.recovery.push_str(&text.to_ascii_lowercase());}
-                })).on_submit(move|_:&str|submit(ui)))
+                })).on_submit(move|_:&str|submit(ui))),move||focused(ui,0)))
                 .child(scrolling.control(ui_kit::button(ui,size,tr("Continue"),move||focused(ui,1),move||submit(ui))
                     .disabled(move||busy(ui)),move||focused(ui,1)))
         }))
