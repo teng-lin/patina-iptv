@@ -71,7 +71,7 @@ use iptv_core::i18n::is_catalogued;
 
 /// How many `[untranslated]` entries there are. Lower it with the list;
 /// it is never raised.
-const UNTRANSLATED: usize = 437;
+const UNTRANSLATED: usize = 242;
 
 /// Source directories read, relative to the workspace's `crates/`.
 const ROOTS: &[&str] = &[

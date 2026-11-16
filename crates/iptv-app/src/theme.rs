@@ -3,6 +3,8 @@
 //! dark accent fills keep white control labels readable. Saved colour names
 //! remain stable so existing preferences select the corresponding new tones.
 
+use crate::i18n::key;
+
 /// An accent bundle: lighter tone and main accent (`0xRRGGBB`). The focus
 /// fill is an opaque dark main accent.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -34,43 +36,43 @@ const fn b(name: &'static str, panel: u32, window: u32, alt: u32) -> Background 
 }
 
 pub const ACCENTS: [Accent; 16] = [
-    a("Amber", 0xF2CE8C, 0x72521F),
-    a("Black", 0xCED8DE, 0x394650),
-    a("Blue", 0x9CCBEB, 0x285575),
-    a("Blue grey", 0xB6CBD7, 0x405564),
-    a("Brown", 0xDEC1A7, 0x614C3C),
-    a("Cyan", 0x99DEDF, 0x265E62),
-    a("Green", 0xACD7AE, 0x3B593F),
-    a("Grey", 0xCDD2D8, 0x4D545C),
-    a("Indigo", 0xBCC1EE, 0x4A4F75),
-    a("Lime", 0xD0DB9B, 0x535E32),
-    a("Orange", 0xEFBE97, 0x704C30),
-    a("Pink", 0xE8B8CF, 0x684354),
-    a("Purple", 0xD2BBE9, 0x5D4872),
-    a("Red", 0xEDB3AB, 0x70463F),
-    a("Teal", 0xA2DACC, 0x315E53),
-    a("Yellow", 0xE5D494, 0x635827),
+    a(key("Amber"), 0xF2CE8C, 0x72521F),
+    a(key("Black"), 0xCED8DE, 0x394650),
+    a(key("Blue"), 0x9CCBEB, 0x285575),
+    a(key("Blue grey"), 0xB6CBD7, 0x405564),
+    a(key("Brown"), 0xDEC1A7, 0x614C3C),
+    a(key("Cyan"), 0x99DEDF, 0x265E62),
+    a(key("Green"), 0xACD7AE, 0x3B593F),
+    a(key("Grey"), 0xCDD2D8, 0x4D545C),
+    a(key("Indigo"), 0xBCC1EE, 0x4A4F75),
+    a(key("Lime"), 0xD0DB9B, 0x535E32),
+    a(key("Orange"), 0xEFBE97, 0x704C30),
+    a(key("Pink"), 0xE8B8CF, 0x684354),
+    a(key("Purple"), 0xD2BBE9, 0x5D4872),
+    a(key("Red"), 0xEDB3AB, 0x70463F),
+    a(key("Teal"), 0xA2DACC, 0x315E53),
+    a(key("Yellow"), 0xE5D494, 0x635827),
 ];
 
 pub const BACKGROUNDS: [Background; 18] = [
-    b("Amber", 0x24211B, 0x1C1913, 0x2E2B25),
-    b("Black", 0x171C20, 0x0F1418, 0x21262A),
-    b("Blue", 0x19232C, 0x111B24, 0x232D36),
-    b("Blue grey", 0x20262D, 0x181E25, 0x2A3037),
-    b("Brown", 0x25211E, 0x1D1916, 0x2F2B28),
-    b("Cyan", 0x192728, 0x111F20, 0x233132),
-    b("Dark", 0x1C2429, 0x141C21, 0x262E33),
-    b("Dark grey", 0x222529, 0x1A1D21, 0x2C2F33),
-    b("Green", 0x1D271F, 0x151F17, 0x273129),
-    b("Grey", 0x282B2F, 0x202327, 0x323539),
-    b("Indigo", 0x212330, 0x191B28, 0x2B2D3A),
-    b("Lime", 0x25281C, 0x1D2014, 0x2F3226),
-    b("Orange", 0x29221C, 0x211A14, 0x332C26),
-    b("Pink", 0x2B2026, 0x23181E, 0x352A30),
-    b("Purple", 0x27212D, 0x1F1925, 0x312B37),
-    b("Red", 0x2D211F, 0x251917, 0x372B29),
-    b("Teal", 0x1C2825, 0x14201D, 0x26322F),
-    b("Yellow", 0x29271D, 0x211F15, 0x333127),
+    b(key("Amber"), 0x24211B, 0x1C1913, 0x2E2B25),
+    b(key("Black"), 0x171C20, 0x0F1418, 0x21262A),
+    b(key("Blue"), 0x19232C, 0x111B24, 0x232D36),
+    b(key("Blue grey"), 0x20262D, 0x181E25, 0x2A3037),
+    b(key("Brown"), 0x25211E, 0x1D1916, 0x2F2B28),
+    b(key("Cyan"), 0x192728, 0x111F20, 0x233132),
+    b(key("Dark"), 0x1C2429, 0x141C21, 0x262E33),
+    b(key("Dark grey"), 0x222529, 0x1A1D21, 0x2C2F33),
+    b(key("Green"), 0x1D271F, 0x151F17, 0x273129),
+    b(key("Grey"), 0x282B2F, 0x202327, 0x323539),
+    b(key("Indigo"), 0x212330, 0x191B28, 0x2B2D3A),
+    b(key("Lime"), 0x25281C, 0x1D2014, 0x2F3226),
+    b(key("Orange"), 0x29221C, 0x211A14, 0x332C26),
+    b(key("Pink"), 0x2B2026, 0x23181E, 0x352A30),
+    b(key("Purple"), 0x27212D, 0x1F1925, 0x312B37),
+    b(key("Red"), 0x2D211F, 0x251917, 0x372B29),
+    b(key("Teal"), 0x1C2825, 0x14201D, 0x26322F),
+    b(key("Yellow"), 0x29271D, 0x211F15, 0x333127),
 ];
 
 /// Opaque focus fills keep control contrast independent of the video.

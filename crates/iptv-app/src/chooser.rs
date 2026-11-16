@@ -48,11 +48,11 @@ pub struct Open {
 
 fn picture_label(size: PictureSize) -> &'static str {
     match size {
-        PictureSize::Normal => "Normal",
-        PictureSize::Full => "Stretch to fill",
-        PictureSize::Zoom => "Zoom",
-        PictureSize::CinemaZoom => "Zoom wide films",
-        PictureSize::Reduced => "Smaller",
+        PictureSize::Normal => tr("Normal"),
+        PictureSize::Full => tr("Stretch to fill"),
+        PictureSize::Zoom => tr("Zoom"),
+        PictureSize::CinemaZoom => tr("Zoom wide films"),
+        PictureSize::Reduced => tr("Smaller"),
         PictureSize::Ratio4x3 => "4:3",
         PictureSize::Ratio16x9 => "16:9",
         PictureSize::Ratio235 => "2.35:1",
@@ -86,7 +86,7 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
             let labels = PictureSize::ALL
                 .iter()
                 .map(|p| picture_label(*p).to_owned())
-                .chain(["Use for all channels".to_owned()])
+                .chain([tr("Use for all channels").to_owned()])
                 .collect();
             let at = PictureSize::ALL.iter().position(|p| *p == size);
             (labels, Vec::new(), at.unwrap_or(0))
@@ -109,7 +109,7 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
             (labels, Vec::new(), at)
         }
         Kind::Track(k) => ui.player.main().tracks.with_untracked(|t| {
-            let labels = t.entries(k);
+            let labels = t.entries_in(k, crate::i18n::language());
             let values = (0..labels.len())
                 .map(|i| t.pick(k, i).unwrap_or_default())
                 .collect();

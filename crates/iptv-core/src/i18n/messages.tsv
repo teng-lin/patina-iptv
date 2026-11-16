@@ -1025,3 +1025,185 @@ Close the extra player windows before opening multiview	Cierra las ventanas adic
 No additional player surface is available	No hay otra superficie de reproducción disponible	Aucune surface de lecture supplémentaire n’est disponible	Keine weitere Wiedergabefläche verfügbar	Nessuna superficie di riproduzione aggiuntiva disponibile	Não está disponível outra superfície de reprodução	Нет доступной дополнительной области воспроизведения	没有可用的额外播放画面	沒有可用的額外播放畫面	追加の再生画面を利用できません	추가 재생 화면을 사용할 수 없습니다
 Picture in picture is already open	Imagen en imagen ya está abierta	Le mode image dans l’image est déjà ouvert	Bild im Bild ist bereits geöffnet	Picture in picture è già aperto	A imagem na imagem já está aberta	Режим «картинка в картинке» уже открыт	画中画已打开	子母畫面已開啟	ピクチャーインピクチャーは既に開いています	화면 속 화면이 이미 열려 있습니다
 Use the main player for multiview	Usa el reproductor principal para la vista múltiple	Utilisez le lecteur principal pour la multivue	Für die Mehrfachansicht den Hauptplayer verwenden	Usa il lettore principale per la multivisione	Utilize o leitor principal para a vista múltipla	Используйте основной проигрыватель для мультипросмотра	请在主播放器中使用多画面	請在主播放器中使用多畫面	マルチビューにはメインプレーヤーを使用してください	멀티뷰는 기본 플레이어에서 사용하세요
+Decoding	Decodificación	Décodage	Dekodierung	Decodifica	Descodificação	Декодирование	解码	解碼	デコード	디코딩
+Start when the device turns on	Iniciar al encender el dispositivo	Démarrer à l’allumage de l’appareil	Beim Einschalten des Geräts starten	Avvia all’accensione del dispositivo	Iniciar ao ligar o dispositivo	Запускать при включении устройства	设备开机时启动	裝置開機時啟動	端末の起動時に開始	기기가 켜질 때 시작
+Start when the device wakes	Iniciar al activar el dispositivo	Démarrer à la sortie de veille	Beim Aufwecken des Geräts starten	Avvia al risveglio del dispositivo	Iniciar ao sair da suspensão	Запускать при выходе из сна	设备唤醒时启动	裝置喚醒時啟動	端末の復帰時に開始	기기가 깨어날 때 시작
+Time for the second Back	Plazo para pulsar Atrás otra vez	Délai du second appui sur Retour	Zeit für den zweiten Zurück-Tastendruck	Tempo per il secondo Indietro	Prazo para premir Voltar novamente	Время до второго нажатия «Назад»	第二次按返回的时限	第二次按返回的時限	2回目の戻る操作の猶予	두 번째 뒤로 누르기 제한 시간
+UDP relay	Retransmisión UDP	Relais UDP	UDP-Relay	Relay UDP	Retransmissão UDP	Ретранслятор UDP	UDP 中继	UDP 中繼	UDPリレー	UDP 릴레이
+Share anonymous usage counts	Compartir recuentos de uso anónimos	Partager des statistiques d’utilisation anonymes	Anonyme Nutzungszahlen teilen	Condividi conteggi di utilizzo anonimi	Partilhar contagens de utilização anónimas	Делиться анонимной статистикой использования	分享匿名使用统计	分享匿名使用統計	匿名の利用回数を共有	익명 사용 통계 공유
+Update by itself	Actualizar automáticamente	Mettre à jour automatiquement	Automatisch aktualisieren	Aggiorna automaticamente	Atualizar automaticamente	Обновлять автоматически	自动更新	自動更新	自動更新	자동 업데이트
+Offer test versions	Ofrecer versiones de prueba	Proposer les versions de test	Testversionen anbieten	Proponi versioni di prova	Disponibilizar versões de teste	Предлагать тестовые версии	提供测试版本	提供測試版本	テスト版を表示	테스트 버전 제공
+Forget viewing time	Borrar el tiempo de visualización	Effacer le temps de visionnage	Sehzeiten löschen	Cancella il tempo di visione	Apagar o tempo de visualização	Удалить время просмотра	清除观看时长	清除觀看時長	視聴時間を消去	시청 시간 삭제
+Send a diagnostic log	Enviar un registro de diagnóstico	Envoyer un journal de diagnostic	Diagnoseprotokoll senden	Invia un registro diagnostico	Enviar um registo de diagnóstico	Отправить журнал диагностики	发送诊断日志	傳送診斷記錄	診断ログを送信	진단 로그 보내기
+Look for a new version	Buscar una versión nueva	Rechercher une nouvelle version	Nach neuer Version suchen	Cerca una nuova versione	Procurar uma nova versão	Проверить новую версию	检查新版本	檢查新版本	新しいバージョンを確認	새 버전 확인
+Refresh playlists every	Actualizar las listas cada	Actualiser les listes toutes les	Wiedergabelisten aktualisieren alle	Aggiorna le playlist ogni	Atualizar listas a cada	Обновлять плейлисты каждые	播放列表刷新间隔	播放清單重新整理間隔	プレイリストの更新間隔	재생목록 새로고침 간격
+Refresh when the app starts	Actualizar al iniciar la aplicación	Actualiser au démarrage	Beim App-Start aktualisieren	Aggiorna all’avvio dell’app	Atualizar ao iniciar a aplicação	Обновлять при запуске приложения	应用启动时刷新	應用程式啟動時重新整理	アプリ起動時に更新	앱 시작 시 새로고침
+Refresh all playlists now	Actualizar todas las listas ahora	Actualiser toutes les listes maintenant	Alle Wiedergabelisten jetzt aktualisieren	Aggiorna tutte le playlist ora	Atualizar todas as listas agora	Обновить все плейлисты сейчас	立即刷新所有播放列表	立即重新整理所有播放清單	すべてのプレイリストを今すぐ更新	모든 재생목록 지금 새로고침
+Group order	Orden de grupos	Ordre des groupes	Gruppenreihenfolge	Ordine dei gruppi	Ordem dos grupos	Порядок групп	分组顺序	群組順序	グループの順序	그룹 순서
+Channel order	Orden de canales	Ordre des chaînes	Senderreihenfolge	Ordine dei canali	Ordem dos canais	Порядок каналов	频道顺序	頻道順序	チャンネルの順序	채널 순서
+Show groups that appear later	Mostrar los grupos nuevos	Afficher les nouveaux groupes	Später hinzugekommene Gruppen anzeigen	Mostra i gruppi aggiunti in seguito	Mostrar grupos adicionados depois	Показывать новые группы	显示之后出现的分组	顯示之後出現的群組	後から追加されたグループを表示	나중에 추가된 그룹 표시
+All channels category	Categoría de todos los canales	Catégorie de toutes les chaînes	Kategorie für alle Sender	Categoria di tutti i canali	Categoria de todos os canais	Категория всех каналов	所有频道分类	所有頻道分類	全チャンネルのカテゴリ	모든 채널 카테고리
+Favourites category	Categoría de favoritos	Catégorie des favoris	Favoritenkategorie	Categoria preferiti	Categoria de favoritos	Категория избранного	收藏分类	收藏分類	お気に入りのカテゴリ	즐겨찾기 카테고리
+All playlists category	Categoría de todas las listas	Catégorie de toutes les listes	Kategorie für alle Wiedergabelisten	Categoria di tutte le playlist	Categoria de todas as listas	Категория всех плейлистов	所有播放列表分类	所有播放清單分類	全プレイリストのカテゴリ	모든 재생목록 카테고리
+Keep each playlist together	Mantener cada lista agrupada	Garder chaque liste groupée	Sender je Wiedergabeliste zusammenhalten	Mantieni unita ogni playlist	Manter cada lista agrupada	Не разделять каналы плейлиста	保持各播放列表的频道相邻	保持各播放清單的頻道相鄰	プレイリストごとにまとめる	재생목록별로 묶기
+A playlist opens on	Categoría al abrir una lista	Catégorie à l’ouverture d’une liste	Startkategorie einer Wiedergabeliste	Categoria all’apertura della playlist	Categoria ao abrir uma lista	Категория при открытии плейлиста	打开播放列表时的分类	開啟播放清單時的分類	プレイリストを開くカテゴリ	재생목록을 열 때 표시할 카테고리
+Channels of hidden groups	Canales de grupos ocultos	Chaînes des groupes masqués	Sender ausgeblendeter Gruppen	Canali dei gruppi nascosti	Canais de grupos ocultos	Каналы скрытых групп	隐藏分组中的频道	隱藏群組中的頻道	非表示グループのチャンネル	숨긴 그룹의 채널
+Remove from the start of names	Quitar del inicio de los nombres	Retirer au début des noms	Vom Namensanfang entfernen	Rimuovi dall’inizio dei nomi	Remover do início dos nomes	Удалять из начала названий	移除名称开头的文字	移除名稱開頭的文字	名前の先頭から削除	이름 앞부분에서 제거
+Remove from the end of names	Quitar del final de los nombres	Retirer à la fin des noms	Vom Namensende entfernen	Rimuovi dalla fine dei nomi	Remover do fim dos nomes	Удалять из конца названий	移除名称末尾的文字	移除名稱結尾的文字	名前の末尾から削除	이름 뒷부분에서 제거
+Manage groups	Gestionar grupos	Gérer les groupes	Gruppen verwalten	Gestisci gruppi	Gerir grupos	Управление группами	管理分组	管理群組	グループを管理	그룹 관리
+Thorough channel matching	Coincidencia exhaustiva de canales	Correspondance approfondie des chaînes	Gründliche Senderzuordnung	Abbinamento approfondito dei canali	Correspondência exaustiva de canais	Тщательное сопоставление каналов	全面匹配频道	全面比對頻道	チャンネルを詳細に照合	채널 정밀 매칭
+Shift guide times by	Desplazar los horarios de la guía	Décaler les horaires du guide	Programmzeiten verschieben um	Sposta gli orari della guida di	Deslocar horários do guia em	Сдвигать время программы на	指南时间偏移	指南時間偏移	番組表の時刻の補正	편성표 시간 보정
+Focus fill	Relleno del foco	Fond de la sélection	Fokusfüllung	Riempimento del focus	Preenchimento do foco	Заливка фокуса	焦点填充	焦點填色	フォーカスの塗りつぶし	포커스 채우기
+See-through player panels	Paneles del reproductor transparentes	Panneaux du lecteur transparents	Transparente Player-Bedienfelder	Pannelli del lettore trasparenti	Painéis do leitor transparentes	Прозрачные панели плеера	播放器面板透明度	播放器面板透明度	プレーヤーパネルの透明度	플레이어 패널 투명도
+Channel names on two lines	Nombres de canales en dos líneas	Noms des chaînes sur deux lignes	Sendernamen auf zwei Zeilen	Nomi dei canali su due righe	Nomes dos canais em duas linhas	Названия каналов в две строки	频道名称显示为两行	頻道名稱顯示為兩行	チャンネル名を2行で表示	채널 이름 두 줄 표시
+Programme titles on two lines	Títulos de programas en dos líneas	Titres des programmes sur deux lignes	Sendungstitel auf zwei Zeilen	Titoli dei programmi su due righe	Títulos dos programas em duas linhas	Названия передач в две строки	节目标题显示为两行	節目標題顯示為兩行	番組名を2行で表示	프로그램 제목 두 줄 표시
+Animated scrolling	Desplazamiento animado	Défilement animé	Animiertes Scrollen	Scorrimento animato	Deslocação animada	Анимация прокрутки	滚动动画	捲動動畫	スクロールのアニメーション	스크롤 애니메이션
+Animated transitions	Transiciones animadas	Transitions animées	Animierte Übergänge	Transizioni animate	Transições animadas	Анимация переходов	过渡动画	過場動畫	画面切り替えのアニメーション	전환 애니메이션
+Programme on air in the list	Programa en emisión en la lista	Programme en cours dans la liste	Laufende Sendung in der Liste	Programma in onda nell’elenco	Programa em emissão na lista	Текущая передача в списке	列表中显示正在播出的节目	清單中顯示正在播出的節目	リストに放送中の番組を表示	목록에 방송 중인 프로그램 표시
+Programme grid	Cuadrícula de programas	Grille des programmes	Programmraster	Griglia dei programmi	Grelha de programas	Сетка передач	节目网格	節目網格	番組グリッド	프로그램 격자
+Programme description	Descripción del programa	Description du programme	Sendungsbeschreibung	Descrizione del programma	Descrição do programa	Описание передачи	节目简介	節目簡介	番組の説明	프로그램 설명
+Playlist and group of channels	Lista y grupo de los canales	Liste et groupe des chaînes	Wiedergabeliste und Sendergruppe	Playlist e gruppo dei canali	Lista e grupo dos canais	Плейлист и группа каналов	频道所属播放列表和分组	頻道所屬播放清單與群組	チャンネルのプレイリストとグループ	채널의 재생목록 및 그룹
+Replay mark	Indicador de repetición	Indicateur de replay	Wiederholungsmarkierung	Indicatore di replay	Marca de repetição	Метка повтора	回看标记	回看標記	見逃し配信の印	다시보기 표시
+Dim finished programmes	Atenuar programas terminados	Atténuer les programmes terminés	Beendete Sendungen abdunkeln	Attenua i programmi terminati	Atenuar programas terminados	Затемнять завершённые передачи	淡化已结束的节目	淡化已結束的節目	終了した番組を暗くする	종료된 프로그램 흐리게 표시
+Colour the playing channel	Colorear el canal en reproducción	Colorer la chaîne en cours	Wiedergegebenen Sender einfärben	Colora il canale in riproduzione	Colorir o canal em reprodução	Выделять цветом текущий канал	用颜色标记正在播放的频道	以顏色標記正在播放的頻道	再生中のチャンネルを色で表示	재생 중인 채널 색상 표시
+Emphasise programmes on air	Resaltar programas en emisión	Mettre en valeur les programmes en cours	Laufende Sendungen hervorheben	Evidenzia i programmi in onda	Destacar programas em emissão	Выделять передачи в эфире	突出显示正在播出的节目	突顯正在播出的節目	放送中の番組を強調	방송 중인 프로그램 강조
+On-air emphasis	Resaltado de programas en emisión	Mise en valeur des programmes en cours	Hervorhebung laufender Sendungen	Evidenziazione dei programmi in onda	Destaque de programas em emissão	Выделение передач в эфире	在播节目强调方式	播出中節目的強調方式	放送中の強調方法	방송 중 강조 방식
+Time line across the grid	Línea de tiempo en toda la cuadrícula	Ligne de l’heure sur toute la grille	Zeitlinie über das gesamte Raster	Linea dell’ora su tutta la griglia	Linha da hora por toda a grelha	Линия времени через всю сетку	时间线贯穿网格	時間線貫穿網格	グリッド全体に時刻線を表示	격자 전체에 시간선 표시
+Preferred logos	Logotipos preferidos	Logos préférés	Bevorzugte Logos	Loghi preferiti	Logótipos preferidos	Предпочтительные логотипы	首选台标	偏好台標	優先するロゴ	선호 로고
+Logo folder	Carpeta de logotipos	Dossier des logos	Logoordner	Cartella dei loghi	Pasta de logótipos	Папка логотипов	台标文件夹	台標資料夾	ロゴのフォルダー	로고 폴더
+Near matches of file names	Coincidencias aproximadas de nombres de archivo	Correspondance approchée des noms de fichiers	Ähnliche Dateinamen zuordnen	Corrispondenze approssimative dei nomi dei file	Correspondências aproximadas de nomes de ficheiros	Неточное совпадение имён файлов	近似匹配文件名	近似比對檔案名稱	ファイル名のあいまい照合	파일 이름 유사 매칭
+Forget downloaded logos	Borrar logotipos descargados	Effacer les logos téléchargés	Heruntergeladene Logos löschen	Cancella i loghi scaricati	Apagar logótipos transferidos	Удалить загруженные логотипы	清除已下载的台标	清除已下載的台標	ダウンロード済みロゴを消去	다운로드한 로고 삭제
+That info along the bottom	Información en la parte inferior	Informations en bas de l’écran	Senderinfo am unteren Rand	Informazioni lungo il bordo inferiore	Informação junto ao fundo	Информация вдоль нижнего края	在底部显示频道信息	在底部顯示頻道資訊	情報を画面下部に表示	하단에 정보 표시
+Description only on a channel change	Descripción solo al cambiar de canal	Description seulement au changement de chaîne	Beschreibung nur beim Senderwechsel	Descrizione solo al cambio di canale	Descrição apenas ao mudar de canal	Описание только при смене канала	仅切换频道时显示简介	僅切換頻道時顯示簡介	チャンネル変更時のみ説明を表示	채널 변경 시에만 설명 표시
+Stream properties	Propiedades de la emisión	Propriétés du flux	Stream-Eigenschaften	Proprietà del flusso	Propriedades do fluxo	Свойства потока	流媒体属性	串流屬性	ストリームの情報	스트림 속성
+Resolution in pixels	Resolución en píxeles	Résolution en pixels	Auflösung in Pixeln	Risoluzione in pixel	Resolução em píxeis	Разрешение в пикселях	以像素显示分辨率	以像素顯示解析度	解像度をピクセルで表示	해상도를 픽셀로 표시
+Date with the clock	Fecha junto al reloj	Date avec l’horloge	Datum neben der Uhr	Data con l’orologio	Data junto ao relógio	Дата рядом с часами	时钟旁显示日期	時鐘旁顯示日期	時計に日付を表示	시계에 날짜 표시
+Clock corner	Esquina del reloj	Coin de l’horloge	Uhrposition	Angolo dell’orologio	Canto do relógio	Угол для часов	时钟所在角落	時鐘所在角落	時計を置く隅	시계 표시 모서리
+Clock size	Tamaño del reloj	Taille de l’horloge	Uhrgröße	Dimensione dell’orologio	Tamanho do relógio	Размер часов	时钟大小	時鐘大小	時計の大きさ	시계 크기
+History button	Botón de historial	Bouton d’historique	Verlaufstaste	Pulsante cronologia	Botão de histórico	Кнопка истории	历史按钮	歷史按鈕	履歴ボタン	기록 버튼
+Guide button	Botón de guía	Bouton du guide	Programmtaste	Pulsante guida	Botão do guia	Кнопка программы	指南按钮	指南按鈕	番組表ボタン	편성표 버튼
+Video decoding	Decodificación de vídeo	Décodage vidéo	Videodekodierung	Decodifica video	Descodificação de vídeo	Декодирование видео	视频解码	影片解碼	映像のデコード	비디오 디코딩
+Audio decoding	Decodificación de audio	Décodage audio	Audiodekodierung	Decodifica audio	Descodificação de áudio	Декодирование звука	音频解码	音訊解碼	音声のデコード	오디오 디코딩
+Tunnelled video	Vídeo por túnel	Vidéo en mode tunnel	Tunnel-Videowiedergabe	Video in modalità tunnel	Vídeo em modo túnel	Туннельный вывод видео	隧道模式视频	隧道模式影片	トンネルモード映像	터널 모드 비디오
+Amlogic workaround	Solución para Amlogic	Contournement Amlogic	Amlogic-Problemumgehung	Correzione per Amlogic	Solução alternativa para Amlogic	Обход проблемы Amlogic	Amlogic 兼容性修正	Amlogic 相容性修正	Amlogicの互換性対策	Amlogic 호환성 우회
+Black picture while tuning	Imagen negra al sintonizar	Image noire pendant le changement	Schwarzes Bild beim Umschalten	Immagine nera durante la sintonizzazione	Imagem preta ao mudar de canal	Чёрный экран при переключении	切台时显示黑屏	切台時顯示黑畫面	選局中は黒い画面を表示	채널 전환 중 검은 화면
+Surround audio to the receiver	Audio envolvente al receptor	Son surround vers le récepteur	Surround-Ton an den Receiver	Audio surround al ricevitore	Áudio surround para o recetor	Объёмный звук на ресивер	将环绕音频传至接收器	將環繞音訊傳至接收器	サラウンド音声を受信機に出力	서라운드 오디오를 리시버로 전송
+Prefer surround audio tracks	Preferir pistas de audio envolvente	Préférer les pistes surround	Surround-Tonspuren bevorzugen	Preferisci tracce audio surround	Preferir faixas de áudio surround	Предпочитать объёмные звуковые дорожки	优先使用环绕音轨	優先使用環繞音軌	サラウンド音声を優先	서라운드 오디오 트랙 우선
+Buffer	Búfer	Tampon	Puffer	Buffer	Memória intermédia	Буфер	缓冲	緩衝	バッファー	버퍼
+Match the content's frame rate	Ajustar a la frecuencia de fotogramas del contenido	Adapter à la cadence du contenu	Bildrate an den Inhalt anpassen	Adatta alla frequenza dei fotogrammi del contenuto	Adaptar à taxa de fotogramas do conteúdo	Согласовывать частоту кадров с содержимым	匹配内容帧率	符合內容影格率	コンテンツのフレームレートに合わせる	콘텐츠 프레임 속도에 맞추기
+May change the refresh rate	Permitir cambiar la frecuencia de actualización	Autoriser le changement de fréquence	Bildwiederholrate darf geändert werden	Consenti di cambiare la frequenza di aggiornamento	Permitir alterar a taxa de atualização	Разрешить смену частоты обновления	允许更改刷新率	允許更改更新率	リフレッシュレートの変更を許可	새로고침 빈도 변경 허용
+May change the resolution	Permitir cambiar la resolución	Autoriser le changement de résolution	Auflösung darf geändert werden	Consenti di cambiare la risoluzione	Permitir alterar a resolução	Разрешить смену разрешения	允许更改分辨率	允許更改解析度	解像度の変更を許可	해상도 변경 허용
+Only for 50 and 60 fps	Solo para 50 y 60 fps	Seulement pour 50 et 60 i/s	Nur bei 50 und 60 fps	Solo per 50 e 60 fps	Apenas para 50 e 60 fps	Только для 50 и 60 кадров/с	仅用于每秒 50 和 60 帧	僅用於每秒 50 和 60 影格	50・60fpsの場合のみ	50 및 60fps에만 적용
+Play in another app	Reproducir en otra aplicación	Lire dans une autre application	In anderer App wiedergeben	Riproduci in un’altra app	Reproduzir noutra aplicação	Воспроизводить в другом приложении	在其他应用中播放	在其他應用程式中播放	別のアプリで再生	다른 앱에서 재생
+Replay addresses	Direcciones de repetición	Adresses de replay	Wiederholungsadressen	Indirizzi di replay	Endereços de repetição	Адреса повтора	回看地址	回看位址	見逃し配信のアドレス	다시보기 주소
+Replay window	Periodo de repetición	Période de replay	Wiederholungszeitraum	Periodo di replay	Período de repetição	Период повтора	回看时段	回看時段	見逃し配信の期間	다시보기 기간
+Correct replay start by	Corregir el inicio de repetición en	Corriger le début du replay de	Wiederholungsstart korrigieren um	Correggi l’inizio del replay di	Corrigir o início da repetição em	Корректировать начало повтора на	回看起始时间校正	回看起始時間校正	見逃し配信の開始を補正	다시보기 시작 시간 보정
+Rewind live channels with	Rebobinar canales en directo con	Revenir en arrière en direct avec	Live-Sender zurückspulen mit	Riavvolgi i canali in diretta con	Recuar canais em direto com	Перематывать прямой эфир кнопкой	直播回退按键	直播倒轉按鍵	ライブ映像を巻き戻すキー	실시간 채널 되감기 키
+Keep history for	Conservar el historial durante	Conserver l’historique pendant	Verlauf aufbewahren für	Conserva la cronologia per	Manter histórico durante	Хранить историю в течение	历史记录保留时长	歷史記錄保留時長	履歴の保存期間	기록 보관 기간
+Add to history after	Añadir al historial después de	Ajouter à l’historique après	Zum Verlauf hinzufügen nach	Aggiungi alla cronologia dopo	Adicionar ao histórico após	Добавлять в историю через	加入历史记录前的观看时长	加入歷史記錄前的觀看時長	履歴に追加するまでの時間	기록에 추가하기까지 시간
+Recent channels kept	Canales recientes conservados	Nombre de chaînes récentes conservées	Gespeicherte letzte Sender	Canali recenti conservati	Canais recentes guardados	Число недавних каналов	保留的最近频道数	保留的最近頻道數	保存する最近のチャンネル数	보관할 최근 채널 수
+Add to recent channels after	Añadir a canales recientes después de	Ajouter aux chaînes récentes après	Zu letzten Sendern hinzufügen nach	Aggiungi ai canali recenti dopo	Adicionar aos canais recentes após	Добавлять в недавние каналы через	加入最近频道前的观看时长	加入最近頻道前的觀看時長	最近のチャンネルに追加するまでの時間	최근 채널에 추가하기까지 시간
+Clear history	Borrar historial	Effacer l’historique	Verlauf löschen	Cancella cronologia	Limpar histórico	Очистить историю	清除历史记录	清除歷史記錄	履歴を消去	기록 지우기
+Start with voice input	Iniciar con entrada de voz	Commencer par la saisie vocale	Mit Spracheingabe beginnen	Inizia con l’input vocale	Começar com entrada de voz	Начинать с голосового ввода	以语音输入开始	以語音輸入開始	音声入力で開始	음성 입력으로 시작
+Clear recent searches	Borrar búsquedas recientes	Effacer les recherches récentes	Letzte Suchanfragen löschen	Cancella ricerche recenti	Limpar pesquisas recentes	Очистить недавние поиски	清除最近搜索	清除最近搜尋	最近の検索を消去	최근 검색 지우기
+Recording folder	Carpeta de grabaciones	Dossier des enregistrements	Aufnahmeordner	Cartella delle registrazioni	Pasta de gravações	Папка записей	录制文件夹	錄影資料夾	録画フォルダー	녹화 폴더
+File type	Tipo de archivo	Type de fichier	Dateityp	Tipo di file	Tipo de ficheiro	Тип файла	文件类型	檔案類型	ファイル形式	파일 형식
+Start early by	Iniciar antes por	Commencer en avance de	Früher starten um	Inizia prima di	Começar mais cedo em	Начинать раньше на	提前开始	提早開始	開始を早める時間	시작 앞당기기
+Stop late by	Terminar más tarde por	Terminer plus tard de	Später beenden um	Termina dopo di	Terminar mais tarde em	Заканчивать позже на	延后结束	延後結束	終了を遅らせる時間	종료 늦추기
+Remind me before the start	Avisar antes del inicio	Rappeler avant le début	Vor Beginn erinnern	Ricorda prima dell’inizio	Lembrar antes do início	Напоминать до начала	开始前提醒	開始前提醒	開始前に通知	시작 전 알림
+When a reminder is due	Al llegar un recordatorio	À l’heure d’un rappel	Bei fälliger Erinnerung	Quando scatta un promemoria	Quando chegar um lembrete	Когда наступает напоминание	提醒到时的操作	提醒到時的操作	通知時の動作	알림 시간의 동작
+Reminder closes after	Cerrar recordatorio después de	Fermer le rappel après	Erinnerung schließen nach	Chiudi il promemoria dopo	Fechar lembrete após	Закрывать напоминание через	提醒关闭延时	提醒關閉延遲	通知を閉じるまでの時間	알림 자동 닫기 시간
+Wake the device for reminders	Activar el dispositivo para recordatorios	Réveiller l’appareil pour les rappels	Gerät für Erinnerungen aufwecken	Riattiva il dispositivo per i promemoria	Acordar o dispositivo para lembretes	Будить устройство для напоминаний	唤醒设备以显示提醒	喚醒裝置以顯示提醒	通知のため端末を復帰	알림을 위해 기기 깨우기
+Protect live channels	Proteger canales en directo	Protéger les chaînes en direct	Live-Sender schützen	Proteggi i canali in diretta	Proteger canais em direto	Защищать прямые каналы	保护直播频道	保護直播頻道	ライブチャンネルを保護	실시간 채널 보호
+Protect movies and series	Proteger películas y series	Protéger les films et séries	Filme und Serien schützen	Proteggi film e serie	Proteger filmes e séries	Защищать фильмы и сериалы	保护电影和剧集	保護電影和影集	映画とシリーズを保護	영화 및 시리즈 보호
+The PIN guards	El PIN protege	Le code PIN protège	Die PIN schützt	Il PIN protegge	O PIN protege	PIN защищает	PIN 码保护范围	PIN 碼保護範圍	PINで保護する対象	PIN 보호 대상
+Enter the PIN with	Introducir el PIN con	Saisir le code PIN avec	PIN eingeben mit	Inserisci il PIN con	Introduzir o PIN com	Вводить PIN с помощью	PIN 码输入方式	PIN 碼輸入方式	PINの入力方法	PIN 입력 방법
+Stay unlocked	Mantener desbloqueado	Rester déverrouillé	Entsperrt bleiben	Resta sbloccato	Manter desbloqueado	Оставаться разблокированным	保持解锁	保持解鎖	ロック解除を維持	잠금 해제 유지
+Set the PIN	Establecer el PIN	Définir le code PIN	PIN festlegen	Imposta il PIN	Definir o PIN	Задать PIN	设置 PIN 码	設定 PIN 碼	PINを設定	PIN 설정
+Changed keys	Teclas modificadas	Touches modifiées	Geänderte Tasten	Tasti modificati	Teclas alteradas	Изменённые кнопки	已更改的按键	已變更的按鍵	変更したキー	변경한 키
+Restore the original keys	Restaurar las teclas originales	Rétablir les touches d’origine	Ursprüngliche Tasten wiederherstellen	Ripristina i tasti originali	Restaurar as teclas originais	Восстановить исходные кнопки	恢复原始按键	還原原始按鍵	元のキー設定に戻す	기본 키 복원
+Movies by category	Películas por categoría	Films par catégorie	Filme nach Kategorie	Film per categoria	Filmes por categoria	Фильмы по категориям	按分类显示电影	按分類顯示電影	カテゴリ別の映画	카테고리별 영화
+Series by category	Series por categoría	Séries par catégorie	Serien nach Kategorie	Serie per categoria	Séries por categoria	Сериалы по категориям	按分类显示剧集	按分類顯示影集	カテゴリ別のシリーズ	카테고리별 시리즈
+Tile shape	Forma de las tarjetas	Forme des vignettes	Kachelform	Forma delle schede	Forma dos mosaicos	Форма плиток	卡片形状	卡片形狀	タイルの形	타일 모양
+Movie and series order	Orden de películas y series	Ordre des films et séries	Reihenfolge von Filmen und Serien	Ordine di film e serie	Ordem de filmes e séries	Порядок фильмов и сериалов	电影和剧集顺序	電影和影集順序	映画とシリーズの順序	영화 및 시리즈 순서
+Play the next episode	Reproducir el siguiente episodio	Lire l’épisode suivant	Nächste Folge wiedergeben	Riproduci l’episodio successivo	Reproduzir o episódio seguinte	Воспроизводить следующую серию	播放下一集	播放下一集	次のエピソードを再生	다음 에피소드 재생
+From the playlist	De la lista	Depuis la liste	Aus der Wiedergabeliste	Dalla playlist	Da lista de reprodução	Из плейлиста	来自播放列表	來自播放清單	プレイリストから	재생목록에서
+From the guide data	De los datos de la guía	Depuis les données du guide	Aus den Programmdaten	Dai dati della guida	Dos dados do guia	Из телепрограммы	来自指南数据	來自指南資料	番組表データから	편성표 데이터에서
+From the logo folder	De la carpeta de logotipos	Depuis le dossier des logos	Aus dem Logoordner	Dalla cartella dei loghi	Da pasta de logótipos	Из папки логотипов	来自台标文件夹	來自台標資料夾	ロゴフォルダーから	로고 폴더에서
+Movies and series only	Solo películas y series	Films et séries seulement	Nur Filme und Serien	Solo film e serie	Apenas filmes e séries	Только фильмы и сериалы	仅电影和剧集	僅電影和影集	映画とシリーズのみ	영화 및 시리즈만
+As the playlist says	Según la lista	Selon la liste	Wie in der Wiedergabeliste	Come indicato dalla playlist	Conforme a lista	Как указано в плейлисте	按照播放列表	依照播放清單	プレイリストの指定どおり	재생목록 설정대로
+Time shift	Desplazamiento temporal	Décalage horaire	Zeitverschiebung	Spostamento temporale	Desvio de tempo	Сдвиг времени	时间偏移	時間偏移	タイムシフト	시간 이동
+Appended	Añadido al final	Ajouté à la fin	Angehängt	Aggiunto in coda	Acrescentado	Добавление к адресу	附加到地址	附加至位址	末尾に追加	주소 끝에 추가
+Flussonic	Flussonic	Flussonic	Flussonic	Flussonic	Flussonic	Flussonic	Flussonic	Flussonic	Flussonic	Flussonic
+No replay	Sin repetición	Sans replay	Keine Wiederholung	Nessun replay	Sem repetição	Без повтора	无回看	無回看	見逃し配信なし	다시보기 없음
+The rewind key	La tecla de rebobinado	La touche de retour rapide	Die Rückspultaste	Il tasto di riavvolgimento	A tecla de recuo	Кнопка перемотки назад	回退键	倒轉鍵	巻き戻しキー	되감기 키
+Left and Right	Izquierda y Derecha	Gauche et Droite	Links und Rechts	Sinistra e Destra	Esquerda e Direita	Влево и Вправо	左和右	左和右	左と右	왼쪽 및 오른쪽
+Down and Up	Abajo y Arriba	Bas et Haut	Unten und Oben	Giù e Su	Baixo e Cima	Вниз и Вверх	下和上	下和上	下と上	아래 및 위
+Rewind and fast-forward keys	Teclas de rebobinado y avance rápido	Touches de retour et d’avance rapides	Rückspul- und Vorspultasten	Tasti di riavvolgimento e avanzamento rapido	Teclas de recuo e avanço rápido	Кнопки перемотки назад и вперёд	回退和快进键	倒轉與快轉鍵	巻き戻しと早送りのキー	되감기 및 빨리 감기 키
+Matroska	Matroska	Matroska	Matroska	Matroska	Matroska	Matroska	Matroska	Matroska	Matroska	Matroska
+Ask	Preguntar	Demander	Nachfragen	Chiedi	Perguntar	Спрашивать	询问	詢問	確認する	확인 요청
+Switch to the channel	Cambiar al canal	Passer à la chaîne	Zum Sender wechseln	Passa al canale	Mudar para o canal	Переключить на канал	切换到频道	切換至頻道	チャンネルを切り替える	채널로 전환
+Only tell me	Solo avisar	Notifier seulement	Nur benachrichtigen	Avvisa soltanto	Apenas avisar	Только уведомлять	仅通知	僅通知	通知のみ	알림만 표시
+Blocked content and settings	Contenido bloqueado y ajustes	Contenu verrouillé et paramètres	Gesperrte Inhalte und Einstellungen	Contenuti bloccati e impostazioni	Conteúdo bloqueado e definições	Заблокированное содержимое и настройки	已锁定的内容和设置	已鎖定的內容與設定	ロックしたコンテンツと設定	잠긴 콘텐츠 및 설정
+Ask every time	Preguntar siempre	Demander à chaque fois	Jedes Mal nachfragen	Chiedi ogni volta	Perguntar sempre	Спрашивать каждый раз	每次询问	每次詢問	毎回確認	매번 확인
+10 minutes	10 minutos	10 minutes	10 Minuten	10 minuti	10 minutos	10 минут	10 分钟	10 分鐘	10分	10분
+30 minutes	30 minutos	30 minutes	30 Minuten	30 minuti	30 minutos	30 минут	30 分钟	30 分鐘	30分	30분
+1 hour	1 hora	1 heure	1 Stunde	1 ora	1 hora	1 час	1 小时	1 小時	1時間	1시간
+2 hours	2 horas	2 heures	2 Stunden	2 ore	2 horas	2 часа	2 小时	2 小時	2時間	2시간
+Until the app restarts	Hasta reiniciar la aplicación	Jusqu’au redémarrage de l’application	Bis zum Neustart der App	Fino al riavvio dell’app	Até reiniciar a aplicação	До перезапуска приложения	直到应用重启	直到應用程式重新啟動	アプリの再起動まで	앱을 다시 시작할 때까지
+Until an open channel plays	Hasta reproducir un canal sin bloqueo	Jusqu’à la lecture d’une chaîne non verrouillée	Bis ein ungesperrter Sender läuft	Finché non viene riprodotto un canale sbloccato	Até reproduzir um canal desbloqueado	До воспроизведения открытого канала	直到播放未锁定的频道	直到播放未鎖定的頻道	ロックされていないチャンネルの再生まで	잠기지 않은 채널을 재생할 때까지
+On-screen keypad	Teclado numérico en pantalla	Pavé numérique à l’écran	Bildschirm-Ziffernblock	Tastierino sullo schermo	Teclado numérico no ecrã	Экранная цифровая клавиатура	屏幕数字键盘	螢幕數字鍵盤	画面上のテンキー	화면 숫자 키패드
+Number keys	Teclas numéricas	Touches numériques	Zifferntasten	Tasti numerici	Teclas numéricas	Цифровые кнопки	数字键	數字鍵	数字キー	숫자 키
+As the provider says	Según el proveedor	Selon le fournisseur	Nach Anbieterangabe	Come indicato dal fornitore	Conforme o fornecedor	Как указано провайдером	按照提供商	依照供應商	プロバイダーの指定どおり	제공업체 설정대로
+Amber	Ámbar	Ambre	Bernstein	Ambra	Âmbar	Янтарный	琥珀色	琥珀色	アンバー	호박색
+Black	Negro	Noir	Schwarz	Nero	Preto	Чёрный	黑色	黑色	黒	검정
+Blue grey	Gris azulado	Bleu gris	Blaugrau	Grigio blu	Cinzento azulado	Серо-синий	蓝灰色	藍灰色	ブルーグレー	청회색
+Brown	Marrón	Marron	Braun	Marrone	Castanho	Коричневый	棕色	棕色	茶	갈색
+Cyan	Cian	Cyan	Cyan	Ciano	Ciano	Голубой	青色	青色	シアン	청록
+Dark	Oscuro	Sombre	Dunkel	Scuro	Escuro	Тёмный	深色	深色	ダーク	어두움
+Dark grey	Gris oscuro	Gris foncé	Dunkelgrau	Grigio scuro	Cinzento-escuro	Тёмно-серый	深灰色	深灰色	ダークグレー	진회색
+Grey	Gris	Gris	Grau	Grigio	Cinzento	Серый	灰色	灰色	グレー	회색
+Indigo	Índigo	Indigo	Indigo	Indaco	Índigo	Индиго	靛蓝色	靛藍色	藍	남색
+Lime	Verde lima	Vert citron	Limettengrün	Verde lime	Verde-lima	Лаймовый	青柠色	萊姆色	ライム	라임
+Orange	Naranja	Orange	Orange	Arancione	Laranja	Оранжевый	橙色	橙色	オレンジ	주황
+Pink	Rosa	Rose	Rosa	Rosa	Rosa	Розовый	粉色	粉紅色	ピンク	분홍
+Purple	Morado	Violet	Violett	Viola	Roxo	Фиолетовый	紫色	紫色	紫	보라
+Teal	Verde azulado	Sarcelle	Petrol	Verde petrolio	Verde-azulado	Сине-зелёный	蓝绿色	藍綠色	ティール	틸
+Arabic	Árabe	Arabe	Arabisch	Arabo	Árabe	Арабский	阿拉伯语	阿拉伯語	アラビア語	아랍어
+Chinese	Chino	Chinois	Chinesisch	Cinese	Chinês	Китайский	中文	中文	中国語	중국어
+Czech	Checo	Tchèque	Tschechisch	Ceco	Checo	Чешский	捷克语	捷克語	チェコ語	체코어
+Danish	Danés	Danois	Dänisch	Danese	Dinamarquês	Датский	丹麦语	丹麥語	デンマーク語	덴마크어
+Dutch	Neerlandés	Néerlandais	Niederländisch	Olandese	Neerlandês	Нидерландский	荷兰语	荷蘭語	オランダ語	네덜란드어
+English	Inglés	Anglais	Englisch	Inglese	Inglês	Английский	英语	英語	英語	영어
+Finnish	Finés	Finnois	Finnisch	Finlandese	Finlandês	Финский	芬兰语	芬蘭語	フィンランド語	핀란드어
+French	Francés	Français	Französisch	Francese	Francês	Французский	法语	法語	フランス語	프랑스어
+German	Alemán	Allemand	Deutsch	Tedesco	Alemão	Немецкий	德语	德語	ドイツ語	독일어
+Greek	Griego	Grec	Griechisch	Greco	Grego	Греческий	希腊语	希臘語	ギリシャ語	그리스어
+Hebrew	Hebreo	Hébreu	Hebräisch	Ebraico	Hebraico	Иврит	希伯来语	希伯來語	ヘブライ語	히브리어
+Hindi	Hindi	Hindi	Hindi	Hindi	Hindi	Хинди	印地语	印地語	ヒンディー語	힌디어
+Hungarian	Húngaro	Hongrois	Ungarisch	Ungherese	Húngaro	Венгерский	匈牙利语	匈牙利語	ハンガリー語	헝가리어
+Italian	Italiano	Italien	Italienisch	Italiano	Italiano	Итальянский	意大利语	義大利語	イタリア語	이탈리아어
+Japanese	Japonés	Japonais	Japanisch	Giapponese	Japonês	Японский	日语	日語	日本語	일본어
+Korean	Coreano	Coréen	Koreanisch	Coreano	Coreano	Корейский	韩语	韓語	韓国語	한국어
+Norwegian	Noruego	Norvégien	Norwegisch	Norvegese	Norueguês	Норвежский	挪威语	挪威語	ノルウェー語	노르웨이어
+Persian	Persa	Persan	Persisch	Persiano	Persa	Персидский	波斯语	波斯語	ペルシア語	페르시아어
+Polish	Polaco	Polonais	Polnisch	Polacco	Polaco	Польский	波兰语	波蘭語	ポーランド語	폴란드어
+Portuguese	Portugués	Portugais	Portugiesisch	Portoghese	Português	Португальский	葡萄牙语	葡萄牙語	ポルトガル語	포르투갈어
+Romanian	Rumano	Roumain	Rumänisch	Rumeno	Romeno	Румынский	罗马尼亚语	羅馬尼亞語	ルーマニア語	루마니아어
+Russian	Ruso	Russe	Russisch	Russo	Russo	Русский	俄语	俄語	ロシア語	러시아어
+Spanish	Español	Espagnol	Spanisch	Spagnolo	Espanhol	Испанский	西班牙语	西班牙語	スペイン語	스페인어
+Swedish	Sueco	Suédois	Schwedisch	Svedese	Sueco	Шведский	瑞典语	瑞典語	スウェーデン語	스웨덴어
+Turkish	Turco	Turc	Türkisch	Turco	Turco	Турецкий	土耳其语	土耳其語	トルコ語	튀르키예어
+Ukrainian	Ucraniano	Ukrainien	Ukrainisch	Ucraino	Ucraniano	Украинский	乌克兰语	烏克蘭語	ウクライナ語	우크라이나어
+Mono	Mono	Mono	Mono	Mono	Mono	Моно	单声道	單聲道	モノラル	모노
+Stereo	Estéreo	Stéréo	Stereo	Stereo	Estéreo	Стерео	立体声	立體聲	ステレオ	스테레오
+Track {number}	Pista {number}	Piste {number}	Spur {number}	Traccia {number}	Faixa {number}	Дорожка {number}	音轨 {number}	軌道 {number}	トラック{number}	트랙 {number}
+Normal	Normal	Normal	Normal	Normale	Normal	Обычный	正常	一般	標準	기본
+Smaller	Más pequeño	Plus petit	Kleiner	Più piccolo	Mais pequeno	Уменьшенный	缩小	縮小	縮小	축소
+Stretch to fill	Estirar para llenar	Étirer pour remplir	Auf Bildschirmgröße strecken	Allunga per riempire	Esticar para preencher	Растянуть на весь экран	拉伸填满	拉伸填滿	画面全体に引き伸ばす	화면에 맞게 늘리기
+Use for all channels	Usar en todos los canales	Appliquer à toutes les chaînes	Für alle Sender verwenden	Usa per tutti i canali	Usar em todos os canais	Применить ко всем каналам	应用到所有频道	套用至所有頻道	全チャンネルに適用	모든 채널에 적용
+Zoom	Ampliar	Zoom	Vergrößern	Zoom	Ampliar	Увеличить	放大	放大	拡大	확대
+Zoom wide films	Ampliar películas panorámicas	Agrandir les films larges	Breitbildfilme vergrößern	Ingrandisci i film panoramici	Ampliar filmes panorâmicos	Увеличить широкоформатные фильмы	放大宽屏电影	放大寬螢幕電影	ワイド映画を拡大	와이드 영화 확대
+Opus	Opus	Opus	Opus	Opus	Opus	Opus	Opus	Opus	Opus	Opus
+Vorbis	Vorbis	Vorbis	Vorbis	Vorbis	Vorbis	Vorbis	Vorbis	Vorbis	Vorbis	Vorbis
+{rate} Mb/s	{rate} Mb/s	{rate} Mb/s	{rate} Mb/s	{rate} Mb/s	{rate} Mb/s	{rate} Mb/s	{rate} Mb/s	{rate} Mb/s	{rate} Mb/s	{rate} Mb/s
