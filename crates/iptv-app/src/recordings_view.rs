@@ -65,7 +65,7 @@ fn reload(ui: Ui) {
         let result = owner.recording_jobs().await;
         let points = owner.recording_progress_points().await.unwrap_or_default();
         let repeating = owner.repeating_recording_jobs().await.unwrap_or_default();
-        let background_notice = owner.recording_wake_notice().map(str::to_owned);
+        let background_notice = owner.recording_capabilities().notice().map(str::to_owned);
         ui.recordings.update(|s| {
             if s.read_generation != generation {
                 return;

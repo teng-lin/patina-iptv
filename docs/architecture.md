@@ -5,6 +5,8 @@ explains are stated in [AGENTS.md](../AGENTS.md); the storage and transport
 security model is in [security.md](security.md). The declared native application
 service boundary and compatibility policy are in
 [runtime-api-v1.md](runtime-api-v1.md).
+For task-to-owner links and targeted checks, use the
+[contributor map](contributing.md).
 
 ## Crates and the direction of dependencies
 

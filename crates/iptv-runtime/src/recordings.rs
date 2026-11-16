@@ -81,13 +81,46 @@ struct Data {
     active: HashMap<JobId, (Lease, CancelToken)>,
     jobs: Vec<Job>,
     wake_capability: iptv_core::recording::WakeCapability,
+    wake_reported: bool,
+    published_schedule: Option<(i64, bool)>,
     intent_revision: u64,
     recurring: bool,
+    guide_check_at: i64,
     ready: bool,
     stopped: bool,
     completed_run: u64,
 }
 impl Data {
+    fn schedule(&self, at: i64) -> (i64, bool) {
+        let next = self
+            .jobs
+            .iter()
+            .filter(|job| job.status == Status::Scheduled)
+            .map(|job| job.request.start)
+            .min()
+            .unwrap_or(0);
+        let next = if self.recurring {
+            // Before the first guide poll, request an immediate wake rather
+            // than postpone a series check by another thirty minutes.
+            let guides = if self.guide_check_at > 0 {
+                self.guide_check_at
+            } else {
+                at
+            };
+            if next > 0 { next.min(guides) } else { guides }
+        } else {
+            next
+        };
+        (
+            next,
+            !self.active.is_empty()
+                || self.jobs.iter().any(|job| {
+                    job.status == Status::Scheduled
+                        && job.request.start <= at
+                        && job.request.end > at
+                }),
+        )
+    }
     fn lease(&self, source: i64) -> Lease {
         Lease {
             source,
@@ -171,26 +204,63 @@ impl State {
         let execution = self.execution();
         execution.started && execution.shutdown.is_cancelled() && !self.lock().stopped
     }
-    fn publish_schedule(
-        &self,
-        services: &Services,
-        revision: u64,
-        next: i64,
-        active: bool,
-    ) -> bool {
+    fn publish_schedule(&self, services: &Services, revision: u64, force: bool) -> bool {
+        // The common poll must not wait for an unchanged, slow OS permission
+        // refresh before it can start due captures.
+        if !force {
+            let data = self.lock();
+            if data.intent_revision == revision
+                && data.published_schedule == Some(data.schedule(now()))
+            {
+                return true;
+            }
+        }
         // UI acknowledgements and native polls publish in order. A late poll
         // cannot replace the alarm belonging to a newly accepted edit.
         let _publication = self
             .publication
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if self.lock().intent_revision != revision {
+        if !services.is_current() {
             return false;
         }
+        let (generation, stopping) = {
+            let execution = self.execution();
+            (
+                execution.generation,
+                execution.started && execution.shutdown.is_cancelled(),
+            )
+        };
+        let (next, active) = {
+            let data = self.lock();
+            if data.intent_revision != revision {
+                return false;
+            }
+            // A cold/restarted host first reconciles durable jobs and rules.
+            // An early foreground callback must leave its saved alarm intact.
+            // Its first successful poll will publish after loading the snapshot.
+            if !data.ready || stopping {
+                return true;
+            }
+            if data.recurring && data.guide_check_at <= now() {
+                return true;
+            }
+            let schedule = data.schedule(now());
+            if !force && data.published_schedule == Some(schedule) {
+                return true;
+            }
+            schedule
+        };
         let capability = (services.ports().recording_schedule)(next, active);
+        let execution = self.execution();
+        if !services.is_current() || execution.generation != generation {
+            return false;
+        }
         let mut data = self.lock();
         if data.intent_revision == revision {
             data.wake_capability = capability;
+            data.wake_reported = true;
+            data.published_schedule = Some((next, active));
         }
         true
     }
@@ -466,49 +536,55 @@ impl Runtime {
         }
         Ok(())
     }
+    /// Current OS registration, not a promise about content or provider capacity.
+    pub fn recording_capabilities(&self) -> iptv_core::capabilities::Recording {
+        let services = self.services();
+        let background = services.ports().background_recordings;
+        let data = self.recordings.lock();
+        iptv_core::capabilities::Recording {
+            background,
+            wake: (services.is_current() && data.wake_reported && !data.stopped)
+                .then_some(data.wake_capability),
+        }
+    }
     pub fn recording_wake_notice(&self) -> Option<&'static str> {
         let data = self.recordings.lock();
-        (data.recurring || data.jobs.iter().any(|job| job.status.active()))
-            .then(|| data.wake_capability.notice())
+        let active = data.recurring || data.jobs.iter().any(|job| job.status.active());
+        drop(data);
+        active
+            .then(|| {
+                self.recording_capabilities()
+                    .wake
+                    .and_then(|wake| wake.notice())
+            })
             .flatten()
     }
     pub async fn refresh_recording_wake(&self) -> Result<(), Error> {
+        self.refresh_recording_wake_with_notice(true).await
+    }
+    /// Recheck permission on foreground return; the recording screen keeps the
+    /// current explanation visible without repeating a toast on every return.
+    pub async fn resume_recording_wake(&self) -> Result<(), Error> {
+        self.refresh_recording_wake_with_notice(false).await
+    }
+    async fn refresh_recording_wake_with_notice(&self, notify: bool) -> Result<(), Error> {
+        let services = self.services();
         loop {
-            let (revision, next, active) = {
-                let data = self.recordings.lock();
-                let next = data
-                    .jobs
-                    .iter()
-                    .filter(|job| job.status == Status::Scheduled)
-                    .map(|job| job.request.start)
-                    .min()
-                    .unwrap_or_else(|| {
-                        if data.recurring {
-                            now().saturating_add(30 * 60)
-                        } else {
-                            0
-                        }
-                    });
-                let active = !data.active.is_empty()
-                    || data.jobs.iter().any(|job| {
-                        job.status == Status::Scheduled
-                            && job.request.start <= now()
-                            && job.request.end > now()
-                    });
-                (data.intent_revision, next, active)
-            };
+            if !services.is_current() {
+                return Err(Error::unavailable("Recording service unavailable"));
+            }
+            let revision = self.recordings.lock().intent_revision;
             let state = self.recordings.clone();
-            let services = self.services();
-            let published = self
-                .services()
-                .spawn_blocking(move || state.publish_schedule(&services, revision, next, active))
+            let work = services.clone();
+            let published = services
+                .spawn_blocking(move || state.publish_schedule(&work, revision, true))
                 .await
                 .map_err(|_| Error::unavailable("Recording service unavailable"))?;
             if published && self.recordings.lock().intent_revision == revision {
                 break;
             }
         }
-        if let Some(notice) = self.recording_wake_notice() {
+        if notify && let Some(notice) = self.recording_wake_notice() {
             self.emit(crate::RuntimeEvent::Notify(notice));
         }
         Ok(())
@@ -895,11 +971,8 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
         }
         retry = (retry * 2).min(Duration::from_secs(5));
     }
-    state.lock().ready = true;
     let mut tasks = tokio::task::JoinSet::new();
-    let mut last_schedule = None;
     let mut rules_at = 0;
-    let mut guides_at = 0;
     loop {
         while tasks.try_join_next().is_some() {}
         if !services.is_current() || shutdown.is_cancelled() {
@@ -916,7 +989,7 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
             tokio::time::sleep(Duration::from_millis(100)).await;
             continue;
         };
-        if now() >= guides_at {
+        if now() >= state.lock().guide_check_at {
             if let Ok(rules) = services.read(|store| store.recording_rules()).await {
                 let sources: std::collections::BTreeSet<_> = rules
                     .into_iter()
@@ -940,10 +1013,14 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
                     });
                 }
             }
-            guides_at = now().saturating_add(30 * 60);
+            state.lock().guide_check_at = now().saturating_add(30 * 60);
         }
         if now() >= rules_at {
-            if let Ok(rules) = services.read(|store| store.recording_rules()).await {
+            let Ok(rules) = services.read(|store| store.recording_rules()).await else {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            };
+            {
                 let mut data = state.lock();
                 if data.intent_revision == revision {
                     data.recurring = rules.iter().any(|rule| rule.enabled);
@@ -952,44 +1029,16 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
             let _ = rules::materialize(&services).await;
             rules_at = now().saturating_add(30);
         }
-        let next = jobs
-            .iter()
-            .filter(|j| j.status == Status::Scheduled)
-            .map(|j| j.request.start)
-            .min()
-            .unwrap_or(0);
-        let next = if state.lock().recurring {
-            if next > 0 {
-                next.min(guides_at)
-            } else {
-                guides_at
-            }
-        } else {
-            next
-        };
-        let schedule = (
-            next,
-            !state.lock().active.is_empty()
-                || jobs.iter().any(|j| {
-                    j.status == Status::Scheduled
-                        && j.request.start <= now()
-                        && j.request.end > now()
-                }),
-        );
-        if state.lock().intent_revision != revision {
-            continue;
-        }
-        if last_schedule != Some(schedule) {
-            if !state.publish_schedule(&services, revision, schedule.0, schedule.1) {
-                continue;
-            }
-            last_schedule = Some(schedule);
-        }
         {
             let mut data = state.lock();
-            if data.intent_revision == revision {
-                data.jobs = jobs.clone();
+            if data.intent_revision != revision {
+                continue;
             }
+            data.jobs = jobs.clone();
+            data.ready = true;
+        }
+        if !state.publish_schedule(&services, revision, false) {
+            continue;
         }
         for mut job in jobs {
             if job.status == Status::Recording && !state.lock().active.contains_key(&job.id) {

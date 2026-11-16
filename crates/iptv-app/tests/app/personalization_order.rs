@@ -8,7 +8,11 @@ fn reorder(app: &mut crate::headless::Headless, row: usize) {
     step(app.press(&format!("id:organization-row-{row}")));
     step(app.wait_for("text:Move to first"));
     step(app.press("text:Move to first"));
+    // Saving and reloading the order closes the action sheet asynchronously.
+    // Until that acknowledgement, Back would dismiss only the sheet.
+    step(app.wait_for_gone("text:Move to first", Duration::from_secs(5)));
     step(app.back());
+    step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
 }
 #[test]
 fn the_guide_uses_independent_favorite_and_provider_group_orders() {
@@ -72,7 +76,10 @@ fn the_guide_uses_independent_favorite_and_provider_group_orders() {
         step(app.press_key("down"));
     }
     step(app.press_key("enter"));
+    step(app.wait_for_gone("text:Restore provider order", Duration::from_secs(5)));
+    step(app.wait_for("id:organization-row-0 >> text:Local A"));
     step(app.back());
+    step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
     menu(app, "Reorder channels");
     step(app.wait_for("id:organization-row-0 >> text:Local A"));
 }

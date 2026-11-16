@@ -7,6 +7,11 @@ is below 1.0, a minor release may change behaviour.
 
 ## [Unreleased]
 
+### Changed
+
+- Explain unavailable PiP/multiview actions and use current player and recording
+  wake reports for feature availability, including awake-only recording limits.
+
 ## [0.1.3] - 2026-11-15
 
 ### Added

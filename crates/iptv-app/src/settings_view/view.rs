@@ -269,6 +269,22 @@ fn row_view(
     };
     let note = move || {
         let settings = crate::settings::read(ui);
+        if row().is_some_and(|row| row.key() == Some(iptv_settings::keys::PIP_ON_LEAVE.0)) {
+            let unavailable = ui.pip.with(|pip| {
+                iptv_core::capabilities::pip(pip, true)
+                    .reason()
+                    .filter(|reason| {
+                        matches!(
+                            reason,
+                            iptv_core::capabilities::Reason::WaitingForPlayer
+                                | iptv_core::capabilities::Reason::UnsupportedPip
+                        )
+                    })
+            });
+            if let Some(reason) = unavailable {
+                return crate::capabilities::reason(reason).to_owned();
+            }
+        }
         row().map(|r| note(&settings, &r)).unwrap_or_default()
     };
     let current = move || {

@@ -6,13 +6,13 @@ the headless app scenarios and portable crates' wasm builds.
 The Android workflow (`.github/workflows/android.yml`) has two jobs behind one
 lightweight change check, `tools/ci/android-changes.py`:
 
-- `android` builds the arm64 native library and the Gradle host. On PRs it runs
-  only when Android host files, Cargo manifests/lockfile, app build or package
+- `android` builds the ARM64 and ARMv7 native libraries and the Gradle host.
+  On PRs it runs only when Android host files, Cargo manifests/lockfile, app build or package
   metadata/assets, packaging tooling, the NSH or Rust pin, or its workflow/setup
   actions change.
 - `android-check` runs `tools/ci/check-android.sh`, a `cargo check` of the app
-  library for `aarch64-linux-android`. On PRs it runs when Rust sources or
-  manifests change and `android` does not already build them. The host checks
+  library for `aarch64-linux-android` and `armv7-linux-androideabi`. On PRs it
+  runs when Rust sources or manifests change and `android` does not already build them. The host checks
   never compile `cfg(target_os = "android")` code, so this is the check that
   stops a Rust-only change from breaking the Android build.
 
@@ -72,8 +72,8 @@ Desktop Package checks likewise run only for package/build inputs on PRs and
 support manual dispatch. Signed release packaging still runs on tags or manual
 requests.
 
-Android packages builds the arm64 native library and the Gradle host's debug APK/AAB,
-verifies the APK signature, and uploads both as the android-debug artifact.
+Android packages builds ARM64 and ARMv7 native libraries and the Gradle host's
+debug APK/AAB, verifies the APK signature, and uploads both as the android-debug artifact.
 It uses a generated debug key and does not receive release secrets.
 NSH is checked
 out beside the repository at the commit in `nsh.rev` (from the fork's tv-keys
@@ -96,10 +96,11 @@ the distribution key, `IPTV_UNSIGNED_RELEASE=1` asks for an unsigned build (as
 Release runs repeat the host checks while packaging runs in parallel; the
 signed Android build takes the place of the PR's debug build. Publication
 waits for both the checks and packaging to pass.
-Tags and manual runs default to platforms=android-desktop: Android arm64,
+Tags and manual runs default to platforms=android-desktop: Android ARM64 and ARMv7,
 Linux x86_64 and macOS Apple silicon. Android produces one distribution-signed
-APK and AAB for tablets and TVs. Both signing certificates are checked against
-the configured keystore before upload. Manual runs also offer platforms=android
+APK and AAB for tablets and TVs, each containing both ARM architectures.
+Packaging fails if either native library or the notices are missing. Both
+signing certificates are checked against the configured keystore before upload. Manual runs also offer platforms=android
 or platforms=desktop independently. platforms=all adds an iPad device IPA;
 only that option requires Apple signing secrets and still needs iPad validation.
 

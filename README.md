@@ -34,6 +34,8 @@ your IPTV provider gave you.
 
 The [internal runtime API contract](docs/runtime-api-v1.md) documents source-scoped
 inspection, guide repair, verification and undo for native application clients.
+The [feature availability matrix](docs/capabilities.md) explains host limits,
+player reports and background recording requirements.
 
 ### Why "Patina"
 
@@ -126,7 +128,7 @@ packages are signed. Verify the download as above first.
 
 - Rust (the version pinned in `rust-toolchain.toml`) with the
   `wasm32-unknown-unknown` target, and for Android also
-  `aarch64-linux-android` and `x86_64-linux-android`.
+  `aarch64-linux-android`, `armv7-linux-androideabi` and `x86_64-linux-android`.
 - The NSH fork checked out next to this repository at the commit recorded
   in [`nsh.rev`](nsh.rev), and its CLI built:
 
@@ -416,6 +418,8 @@ Useful environment variables: `IPTV_RS_AUDIO=null` (mute),
 `IPTV_RS_HWDEC` (mpv `hwdec`), `RUST_LOG=info` (player state, never stream
 addresses).
 
+[docs/contributing.md](docs/contributing.md) maps changes to subsystem owners,
+contracts and validation commands.
 [docs/architecture.md](docs/architecture.md) explains the crate layering, the
 sans-IO ports, the state and video-layer rules, the import pipeline and the
 NSH boundary. [CONTRIBUTING.md](CONTRIBUTING.md) covers setup, checks and

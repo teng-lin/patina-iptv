@@ -60,7 +60,12 @@ fn label(ui: Ui, control: Control) -> String {
         .to_owned(),
         Multiview if crate::multiview::detour(ui) => tr("Back to multiview").to_owned(),
         Multiview => tr("Multiview").to_owned(),
-        PictureInPicture => tr("Picture in picture").to_owned(),
+        PictureInPicture => with(
+            tr("Picture in picture"),
+            ui.pip
+                .with(|pip| iptv_core::capabilities::pip(pip, crate::pip::playing(ui)).reason())
+                .map(|reason| crate::capabilities::reason(reason).to_owned()),
+        ),
         VideoTracks => {
             let playing = main.size.get().map(|(_, h)| format!("{h}p"));
             with(
@@ -122,11 +127,7 @@ fn is_favorite(ui: Ui) -> bool {
 pub fn enabled(ui: Ui, control: Control) -> bool {
     let choice = |k| ui.player.main().tracks.with(|t| t.has_choice(k));
     match control {
-        Control::Multiview => {
-            ui.player_surface == 0
-                && ui.playing.get().is_some()
-                && ui.player_windows.with(|w| w.sessions().is_empty())
-        }
+        Control::Multiview => crate::capabilities::multiview(ui).available(),
         Control::Record => {
             ui.player_surface == 0
                 && ui.playback.get() == crate::Playback::Live

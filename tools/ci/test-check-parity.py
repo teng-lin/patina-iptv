@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Every platform's check script covers every workspace crate.
+"""Every platform's checks and the contributor map agree on workspace ownership.
 
 tools/check.sh (Linux and macOS) is the reference. The Windows check and the
 coverage job each repeat its crate lists, so a crate added to the workspace
@@ -20,6 +20,16 @@ def lines_with(path, word):
 
 def packages(lines):
     return {name for line in lines for name in PACKAGE.findall(line)}
+
+
+def local_targets(markdown):
+    """File/directory links only; external links and section anchors are excluded."""
+    return {
+        target.split("#", 1)[0]
+        for target in re.findall(r"\]\(([^\s)]+)\)", markdown)
+        if not re.match(r"[a-zA-Z][a-zA-Z0-9+.-]*:", target)
+        and not target.startswith("#")
+    }
 
 
 class Parity(unittest.TestCase):
@@ -45,6 +55,40 @@ class Parity(unittest.TestCase):
 
     def test_coverage_measures_every_library_crate(self):
         self.assertEqual(packages(lines_with("tools/ci/coverage.sh", "crates=(")), self.libraries)
+
+    def test_contributor_map_lists_the_portable_builds(self):
+        text = (ROOT / "docs/contributing.md").read_text(encoding="utf-8")
+        block = re.search(
+            r"<!-- portable-crates:start -->(.*?)<!-- portable-crates:end -->",
+            text,
+            re.S,
+        )
+        self.assertIsNotNone(block, "contributor map needs the portable crate inventory")
+        self.assertEqual(set(re.findall(r"`(iptv-[a-z-]+)`", block[1])), self.wasm)
+
+    def test_contributor_map_local_links_exist(self):
+        page = ROOT / "docs/contributing.md"
+        targets = local_targets(page.read_text(encoding="utf-8"))
+        self.assertTrue(targets, "the ownership map must link to implementation/tests")
+        for target in sorted(targets):
+            with self.subTest(target=target):
+                self.assertTrue((page.parent / target).exists(), f"broken map link: {target}")
+
+    def test_documented_packages_and_scenario_modules_exist(self):
+        text = (ROOT / "docs/contributing.md").read_text(encoding="utf-8")
+        self.assertLessEqual(set(PACKAGE.findall(text)), self.members)
+        modules = re.findall(r"--test app ([a-z_]+)", text)
+        self.assertTrue(modules)
+        for module in modules:
+            self.assertTrue((ROOT / f"crates/iptv-app/tests/app/{module}.rs").is_file())
+
+    def test_local_target_parser_ignores_external_links_and_sections(self):
+        self.assertEqual(
+            local_targets("[a](../tools/check.sh#example) [b](architecture.md) "
+                          "[c](#section) [d](https://example.test/path) "
+                          "[e](mailto:generated@example.test)"),
+            {"../tools/check.sh", "architecture.md"},
+        )
 
 
 if __name__ == "__main__":

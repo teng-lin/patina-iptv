@@ -13,3 +13,6 @@ export RANLIB_x86_64_linux_android=${RANLIB_x86_64_linux_android:-$toolchain/llv
 export CC_aarch64_linux_android=${CC_aarch64_linux_android:-$toolchain/aarch64-linux-android26-clang}
 export AR_aarch64_linux_android=${AR_aarch64_linux_android:-$toolchain/llvm-ar}
 export RANLIB_aarch64_linux_android=${RANLIB_aarch64_linux_android:-$toolchain/llvm-ranlib}
+export CC_armv7_linux_androideabi=${CC_armv7_linux_androideabi:-$toolchain/armv7a-linux-androideabi26-clang}
+export AR_armv7_linux_androideabi=${AR_armv7_linux_androideabi:-$toolchain/llvm-ar}
+export RANLIB_armv7_linux_androideabi=${RANLIB_armv7_linux_androideabi:-$toolchain/llvm-ranlib}
