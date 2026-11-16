@@ -4,6 +4,8 @@ Thank you for helping. This page covers setup, the checks to run, and the
 rules a change has to meet. [AGENTS.md](AGENTS.md) states the project rules in
 short form, and [docs/architecture.md](docs/architecture.md) explains how the
 code is laid out and why.
+The [subsystem ownership and validation map](docs/contributing.md) locates
+the domain owner, adapter and nearest checks for a proposed change.
 
 ## Set up
 

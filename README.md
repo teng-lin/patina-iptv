@@ -397,6 +397,8 @@ Useful environment variables: `IPTV_RS_AUDIO=null` (mute),
 `IPTV_RS_HWDEC` (mpv `hwdec`), `RUST_LOG=info` (player state, never stream
 addresses).
 
+[docs/contributing.md](docs/contributing.md) maps changes to subsystem owners,
+contracts and validation commands.
 [docs/architecture.md](docs/architecture.md) explains the crate layering, the
 sans-IO ports, the state and video-layer rules, the import pipeline and the
 NSH boundary. [CONTRIBUTING.md](CONTRIBUTING.md) covers setup, checks and
