@@ -17,7 +17,7 @@ crates=(-p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-providers 
 features=()
 if [ "$#" -eq 0 ]; then
   # Match tools/check.sh: include the native mock-provider and admission scenarios.
-  features=(--features iptv-runtime/test-support,iptv-app/test-support)
+  features=(--features "iptv-runtime/test-support,iptv-app/test-support")
 fi
 out=target/coverage
 rm -rf "$out"
