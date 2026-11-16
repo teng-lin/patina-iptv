@@ -372,6 +372,9 @@ impl Runtime {
 
 impl Drop for Runtime {
     fn drop(&mut self) {
+        // An abandoned reply can leave its discovery query on the analysis lane.
+        // Cancel it before fallback draining waits for that lane's barrier.
+        self.vod.cancel_discovery();
         if !self.recordings_detached.replace(true) {
             self.recordings.detach_ui();
         }

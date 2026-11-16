@@ -1127,6 +1127,46 @@ mod tests {
         assert!(owner.drain_services());
     }
     #[test]
+    fn dropping_the_owner_cancels_abandoned_discovery_before_its_fallback_drain() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let directory = tempfile::tempdir().unwrap();
+        let key = crate::model::DatabaseKey::from_bytes([0x75; 32]);
+        let owner = Runtime::new(crate::Ports::new(directory.path().into(), move |_| {
+            Ok(key.clone())
+        }));
+        owner.start_services();
+        let services = owner.services();
+        // Make the writer and its shutdown barrier real, not an unopened lane.
+        services.block_on(services.call(|_| Ok(()))).unwrap();
+        let cancel = owner.vod.begin_discovery();
+        let (started, running) = mpsc::channel();
+        let (finished, result) = mpsc::channel();
+        let waiting = services.clone();
+        let abandoned = services.analyze(move |_| {
+            started.send(()).unwrap();
+            // An abandoned query still occupies the real analysis worker.
+            // Owner closure wakes it at the start of fallback draining; the
+            // query cancellation must already have happened by that boundary.
+            let closed = waiting.block_on(async {
+                tokio::time::timeout(Duration::from_secs(10), waiting.closed()).await
+            });
+            finished
+                .send(closed.is_ok() && cancel.is_cancelled())
+                .unwrap();
+            Ok(())
+        });
+        running.recv_timeout(Duration::from_secs(10)).unwrap();
+        drop(abandoned);
+        drop(owner);
+        assert!(
+            result.recv_timeout(Duration::from_secs(10)).unwrap(),
+            "owner disposal must cancel discovery before awaiting its analysis barrier"
+        );
+        assert!(!services.is_current());
+    }
+
+    #[test]
     fn retry_cannot_contact_credentials_changed_after_its_preflight() {
         use iptv_providers::{
             HttpResponse, Secret,
