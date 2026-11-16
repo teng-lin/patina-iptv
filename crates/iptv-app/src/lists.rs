@@ -12,7 +12,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use iptv_core::browse::{Columns, Outcome, RailItem, rail_items};
+use iptv_core::browse::{Columns, Outcome, RailItem, VodAvailability, rail_items};
 use iptv_core::guide::{Focus, Move, Pane, Schedule};
 use iptv_core::lists::{
     ALL, ChannelList, Entry, FAVORITES, ListId, ListView, entry_count, group_of,
@@ -48,9 +48,20 @@ pub fn number(ui: Ui, channel: usize) -> u32 {
     ui.list.with(|l| l.number_of(channel, &*catalog))
 }
 
-/// The rail's items for the source on screen.
+/// The rail's items for the source on screen. The cross-source shelves
+/// follow every enabled playlist, Movies and Shows the one on screen.
 pub fn rail(ui: Ui) -> Vec<RailItem> {
-    rail_items(ui.has_vod.get())
+    rail_items(VodAvailability {
+        shown: ui.has_vod.get(),
+        any: ui.any_vod.get(),
+    })
+}
+
+fn rail_untracked(ui: Ui) -> Vec<RailItem> {
+    rail_items(VodAvailability {
+        shown: ui.has_vod.get_untracked(),
+        any: ui.any_vod.get_untracked(),
+    })
 }
 
 /// Localize built-in lists by identity; provider group names are opaque.
@@ -202,7 +213,7 @@ pub fn tap(ui: Ui, channel: usize, minute: i32) {
 
 /// Runs a focus step with the columns and the list on screen.
 fn step(ui: Ui, f: impl FnOnce(&mut Focus, &Columns, &ListView) -> Outcome) -> Outcome {
-    let rail = rail_items(ui.has_vod.get_untracked());
+    let rail = rail_untracked(ui);
     let view = view(ui);
     let cols = Columns {
         entries: entry_count(&**view.catalog()),
@@ -294,6 +305,10 @@ fn follow(ui: Ui, outcome: Outcome) {
 fn open(ui: Ui, item: RailItem) {
     match item {
         RailItem::Search => crate::search_view::open(ui),
+        RailItem::Continue => {
+            crate::vod_view::open_shelf(ui, iptv_core::vod::Shelf::ContinueWatching)
+        }
+        RailItem::Recent => crate::vod_view::open_shelf(ui, iptv_core::vod::Shelf::RecentlyAdded),
         RailItem::Movies => crate::vod_view::open(ui, iptv_core::vod::Kind::Movie),
         RailItem::Shows => crate::vod_view::open(ui, iptv_core::vod::Kind::Series),
         RailItem::Recordings => crate::recordings_view::open(ui),

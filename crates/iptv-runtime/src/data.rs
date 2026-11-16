@@ -537,6 +537,7 @@ fn source_changed(owner: &std::rc::Rc<crate::Runtime>, source: Option<SourceId>)
     owner.emit(crate::RuntimeEvent::FavoritesChanged {
         channels: BTreeSet::new(),
         has_vod: owner.browser().has_vod,
+        any_vod: owner.browser().any_vod,
     });
     crate::library::set_shown(owner, source);
     if let Some(id) = source {

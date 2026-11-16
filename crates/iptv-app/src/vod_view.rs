@@ -1,11 +1,16 @@
 //! Movies and series share one portable catalogue state and the persistent player.
+//! The cross-source shelves (Continue watching, Recently added) use the same
+//! state, details and playback; only their list is read differently.
 use crate::{
     Ui,
     i18n::{tr, trf},
     scale::Scale,
     ui_kit,
 };
-use iptv_core::vod::{Control, Details, Key, Kind, Progress, Sort};
+use iptv_core::vod::{
+    Control, Details, DiscoveryPage, DiscoveryQuery, Key, Kind, Operation, Progress, Retried,
+    Shelf, Sort,
+};
 use iptv_nav::Action;
 use nsh_base::input;
 use nsh_core::prelude::*;
@@ -35,10 +40,21 @@ pub fn open(ui: Ui, kind: Kind) {
     reload(ui, false);
 }
 
+/// Opens a cross-source shelf from the rail: movies and series of every
+/// enabled playlist in one list. The guide stays underneath, unchanged.
+pub fn open_shelf(ui: Ui, shelf: Shelf) {
+    ui.vod.update(|s| {
+        s.begin_shelf(shelf);
+    });
+    reload(ui, false);
+}
+
 pub fn close(ui: Ui) {
     if ui.player.vod.with_untracked(Option::is_none) {
         crate::runtime().parental_content_closed();
     }
+    // A shelf page or focus lookup still being read is no longer wanted.
+    crate::runtime().vod_discovery_cancel();
     ui.vod.update(|s| {
         s.open = false;
         s.generation = s.generation.wrapping_add(1);
@@ -49,44 +65,252 @@ pub fn back(ui: Ui) -> bool {
     if ui.player.vod.with_untracked(Option::is_none) {
         crate::runtime().parental_content_closed();
     }
-    ui.vod.update(|s| {
+    let closed = edit(ui, |s| {
         s.back();
         s.control = Control::Catalogue;
+        !s.open
     });
+    if closed {
+        crate::runtime().vod_discovery_cancel();
+    }
     true
 }
 
+/// Loads the list: from its top (a shelf: the window around its focused
+/// title), or (`append`) the page after the titles shown, which stay with
+/// the focus.
 fn reload(ui: Ui, append: bool) {
-    let (query, generation, offset) = edit(ui, |s| {
-        if !append {
-            s.reload();
+    let (query, shelf, generation, offset, anchor) = edit(ui, |s| {
+        let offset = if append {
+            s.begin_more()
         } else {
-            s.busy = true;
-        }
-        (
-            s.query.clone(),
-            s.generation,
-            if append { s.cards.len() as u32 } else { 0 },
-        )
+            s.reload();
+            0
+        };
+        // A shelf that kept its focused title (reopened, retried) finds it
+        // again by identity, however deep it is.
+        let anchor = if append {
+            None
+        } else {
+            s.shelf.and(s.focused.clone())
+        };
+        (s.query.clone(), s.shelf, s.generation, offset, anchor)
     });
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
-        let result = owner.vod_catalogue(query, offset).await;
+        // A shelf reads one bounded page across every playlist; a
+        // catalogue also refreshes its filter choices.
+        let result = match (shelf, anchor) {
+            (Some(shelf), Some(key)) => owner
+                .vod_discovery_around(shelf, key)
+                .await
+                .map(|page| (page, None)),
+            (Some(shelf), None) => owner
+                .vod_discovery(DiscoveryQuery::after(shelf, offset as usize))
+                .await
+                .map(|page| (page, None)),
+            (None, _) => owner.vod_catalogue(query, offset).await.map(
+                |(cards, more, sources, categories)| {
+                    (
+                        DiscoveryPage {
+                            cards,
+                            more,
+                            start: offset,
+                        },
+                        Some((sources, categories)),
+                    )
+                },
+            ),
+        };
         ui.vod.update(|s| {
             if s.generation != generation || !s.open {
                 return;
             }
             match result {
-                Ok((cards, more, sources, categories)) => {
-                    s.sources = sources;
-                    s.categories = categories;
-                    s.publish(generation, cards, more, append);
+                Ok((page, filters)) => {
+                    if let Some((sources, categories)) = filters {
+                        s.sources = sources;
+                        s.categories = categories;
+                    }
+                    if append {
+                        s.publish(generation, page.cards, page.more, true);
+                    } else {
+                        s.publish_window(generation, page);
+                    }
                 }
-                Err(_) => {
-                    s.busy = false;
-                    s.error =
-                        Some(crate::i18n::key("On-demand library could not be loaded").into());
+                // The focused title is kept: Retry looks for it again.
+                Err(_) => s.fail(
+                    crate::i18n::key("On-demand library could not be loaded"),
+                    if append {
+                        Operation::More { offset }
+                    } else {
+                        Operation::List
+                    },
+                ),
+            }
+        });
+    });
+}
+
+/// Loads the shelf page before the titles shown (Load previous, or Up on
+/// the first title with `step_up`, which then focuses the title above).
+fn load_previous(ui: Ui, step_up: bool) {
+    let Some((query, start, generation)) = edit(ui, |s| {
+        let start = s.start;
+        s.begin_previous().map(|query| (query, start, s.generation))
+    }) else {
+        return;
+    };
+    let owner = crate::runtime();
+    crate::data::spawn_in_app(async move {
+        let result = owner.vod_discovery(query).await;
+        ui.vod.update(|s| {
+            if s.generation != generation || !s.open {
+                return;
+            }
+            match result {
+                Ok(page) => {
+                    if !s.publish_previous(generation, start, page, step_up) {
+                        s.busy = false;
+                    }
                 }
+                Err(_) => s.fail(
+                    crate::i18n::key("On-demand library could not be loaded"),
+                    Operation::Previous { start, step_up },
+                ),
+            }
+        });
+    });
+}
+
+/// Retry: runs exactly the operation that failed again. A list page reads
+/// that page; details open the same title; playback reads the title's
+/// details afresh (parental lock, playlist incarnation and policy checked
+/// again) and resolves a fresh provider link for the same episode, from
+/// its start if that was asked.
+fn retry(ui: Ui) {
+    let Some(operation) = ui.vod.with_untracked(|s| s.retry_operation()) else {
+        return;
+    };
+    match operation {
+        Operation::List => reload(ui, false),
+        Operation::More { .. } => reload(ui, true),
+        Operation::Previous { step_up, .. } => load_previous(ui, step_up),
+        Operation::Details(key) => retry_details(ui, key),
+        Operation::Play {
+            item,
+            key,
+            restart,
+            incarnation,
+        } => retry_play(ui, item, key, restart, incarnation),
+    }
+}
+
+/// Opens the title whose details failed. The viewer has not left it, so
+/// its parental check is asked again (a PIN if the lock requires one now)
+/// without first closing the content as choosing another title does.
+fn retry_details(ui: Ui, key: Key) {
+    let generation = ui.vod.with_untracked(|s| s.generation);
+    crate::parental_view::request(ui, iptv_runtime::vod::target(&key), move || {
+        if ui
+            .vod
+            .with_untracked(|s| s.open && s.generation == generation)
+        {
+            select_authorized(ui, key);
+        }
+    });
+}
+
+/// Plays `key` of `item` again after playback failed: fresh details first,
+/// keeping the chosen episode, then the ordinary authorized playback. The
+/// fresh details must come from the same playlist `incarnation` the title
+/// was chosen from: a playlist deleted and added again, or edited, under
+/// the same id is refused, and its title must be chosen again.
+fn retry_play(ui: Ui, item: Key, key: Key, restart: bool, incarnation: String) {
+    let generation = ui.vod.with_untracked(|s| s.generation);
+    crate::parental_view::request(ui, iptv_runtime::vod::target(&item), move || {
+        if !ui
+            .vod
+            .with_untracked(|s| s.open && s.generation == generation)
+        {
+            return;
+        }
+        let generation = edit(ui, |s| s.begin_operation());
+        let owner = crate::runtime();
+        crate::data::spawn_in_app(async move {
+            // The preflight gives an immediate stale-action explanation.
+            // The runtime also binds the credentials snapshot to this same
+            // incarnation before I/O, so an edit racing this check cannot
+            // redirect a stale retry to the replacement provider.
+            let result = match owner
+                .vod_is_incarnation(item.source, incarnation.clone())
+                .await
+            {
+                Ok(true) => {
+                    owner
+                        .vod_retry_details(item.clone(), incarnation.clone())
+                        .await
+                }
+                Ok(false) => {
+                    ui.vod.update(|s| {
+                        if s.generation == generation && s.open {
+                            // The stale details close and nothing plays.
+                            s.playlist_changed();
+                            s.error = Some(
+                                crate::i18n::key(
+                                    "Playback unavailable; refresh the playlist and try again",
+                                )
+                                .into(),
+                            );
+                        }
+                    });
+                    return;
+                }
+                Err(error) => Err(error),
+            };
+            let ready = edit(ui, |s| {
+                if s.generation != generation || !s.open {
+                    return None;
+                }
+                s.busy = false;
+                match result {
+                    Ok(details) => {
+                        match s.show_details_keeping(details.clone(), &key, &incarnation) {
+                            Retried::Ready => Some(details),
+                            // A refresh removed the episode: the fresh details
+                            // are shown to choose another. The playlist changed:
+                            // the stale details closed, nothing is played, and
+                            // the title must be chosen again. Neither offers a
+                            // Retry that could not succeed.
+                            Retried::EpisodeGone | Retried::PlaylistChanged => {
+                                s.error = Some(
+                                    crate::i18n::key(
+                                        "Playback unavailable; refresh the playlist and try again",
+                                    )
+                                    .into(),
+                                );
+                                None
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        s.fail(
+                            crate::i18n::key(
+                                "Playback unavailable; refresh the playlist and try again",
+                            ),
+                            Operation::Play {
+                                item: item.clone(),
+                                key: key.clone(),
+                                restart,
+                                incarnation: incarnation.clone(),
+                            },
+                        );
+                        None
+                    }
+                }
+            });
+            if let Some(details) = ready {
+                play_key(ui, details, key, restart);
             }
         });
     });
@@ -114,14 +338,11 @@ fn select(ui: Ui, key: Key) {
 fn select_authorized(ui: Ui, key: Key) {
     let generation = edit(ui, |s| {
         s.focused = Some(key.clone());
-        s.busy = true;
-        s.error = None;
-        s.generation = s.generation.wrapping_add(1);
-        s.generation
+        s.begin_operation()
     });
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
-        let result = owner.vod_details(key).await;
+        let result = owner.vod_details(key.clone()).await;
         ui.vod.update(|s| {
             if s.generation != generation || !s.open {
                 return;
@@ -129,12 +350,10 @@ fn select_authorized(ui: Ui, key: Key) {
             s.busy = false;
             match result {
                 Ok(details) => s.show_details(details),
-                Err(_) => {
-                    s.error = Some(
-                        crate::i18n::key("Details unavailable; refresh the playlist and try again")
-                            .into(),
-                    )
-                }
+                Err(_) => s.fail(
+                    crate::i18n::key("Details unavailable; refresh the playlist and try again"),
+                    Operation::Details(key),
+                ),
             }
         });
     });
@@ -174,12 +393,15 @@ fn play_key(ui: Ui, details: Details, key: Key, restart: bool) {
 }
 
 fn play_authorized(ui: Ui, details: Details, key: Key, restart: bool) {
-    let generation = edit(ui, |s| {
-        s.busy = true;
-        s.error = None;
-        s.generation = s.generation.wrapping_add(1);
-        s.generation
-    });
+    let generation = edit(ui, |s| s.begin_operation());
+    // Retry plays the same title or episode the same way, after reading
+    // its details and link afresh.
+    let failed = Operation::Play {
+        item: details.item.key.clone(),
+        key: key.clone(),
+        restart,
+        incarnation: details.incarnation.clone(),
+    };
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
         let result = owner.vod_play(details, key, restart).await;
@@ -190,7 +412,15 @@ fn play_authorized(ui: Ui, details: Details, key: Key, restart: bool) {
         match result {
             Ok((playing, source)) => {
                 if !owner.reserve_viewing(0, iptv_library::SourceId(playing.key.source)) {
-                    ui.vod.update(|s|s.error=Some(crate::i18n::key("No provider connection available while recording; stop a recording or check Streams at once").into()));
+                    // Once a recording stops, Retry resolves a new link.
+                    ui.vod.update(|s| {
+                        s.fail(
+                            crate::i18n::key(
+                                "No provider connection available while recording; stop a recording or check Streams at once",
+                            ),
+                            failed,
+                        )
+                    });
                     return;
                 }
                 flush(ui);
@@ -199,11 +429,11 @@ fn play_authorized(ui: Ui, details: Details, key: Key, restart: bool) {
             }
             Err(_) => {
                 ui.vod.update(|s| {
-                    s.error = Some(
+                    s.fail(
                         crate::i18n::key(
                             "Playback unavailable; refresh the playlist and try again",
-                        )
-                        .into(),
+                        ),
+                        failed,
                     )
                 });
             }
@@ -276,6 +506,7 @@ fn activate(ui: Ui) {
         Control::Seasons => ui.vod.update(|s| s.cycle_season(1)),
         Control::Next => next(ui),
         Control::Block => toggle_block(ui),
+        Control::Retry => retry(ui),
         Control::Search => {}
     }
 }
@@ -304,18 +535,26 @@ pub fn key(ui: Ui, action: Action) {
                 s.move_control(1)
             }
         }),
-        Action::MoveUp => ui.vod.update(|s| match control {
-            Control::Catalogue
-                if s.cards
-                    .first()
-                    .is_some_and(|c| Some(&c.key) == s.focused.as_ref()) =>
-            {
-                s.move_control(-1)
+        Action::MoveUp => {
+            let at_top = ui.vod.with_untracked(|s| {
+                control == Control::Catalogue
+                    && s.cards
+                        .first()
+                        .is_some_and(|c| Some(&c.key) == s.focused.as_ref())
+            });
+            // Up on a shelf window's first title reads the titles above it
+            // and steps onto the one just above.
+            if at_top && ui.vod.with_untracked(|s| s.has_previous()) {
+                load_previous(ui, true);
+                return;
             }
-            Control::Catalogue => s.move_focus(-1),
-            Control::Episodes => s.move_episode(-1),
-            _ => s.move_control(-1),
-        }),
+            ui.vod.update(|s| match control {
+                Control::Catalogue if at_top => s.move_control(-1),
+                Control::Catalogue => s.move_focus(-1),
+                Control::Episodes => s.move_episode(-1),
+                _ => s.move_control(-1),
+            })
+        }
         Action::MoveDown => {
             ui.vod.update(|s| match control {
                 Control::Catalogue => s.move_focus(1),
@@ -444,7 +683,7 @@ fn button(
     control: Control,
     label: impl IntoReactive<SharedString>,
     callback: impl Fn() + 'static,
-) -> impl IntoElement {
+) -> View {
     ui_kit::button(
         ui,
         size,
@@ -540,30 +779,50 @@ fn toolbar(ui: Ui, size: Scale) -> impl IntoElement {
                         reload(ui, false);
                     },
                 ))
-                .child(button(
-                    ui,
-                    size,
-                    Control::Continue,
-                    move || {
-                        if ui.vod.with(|s| s.query.continue_watching) {
-                            format!("✓ {}", tr("Continue watching"))
-                        } else {
-                            tr("Continue watching").into()
-                        }
-                    },
-                    move || {
-                        ui.vod
-                            .update(|s| s.query.continue_watching = !s.query.continue_watching);
-                        reload(ui, false);
-                    },
-                )),
+                .child(
+                    button(
+                        ui,
+                        size,
+                        Control::Continue,
+                        move || {
+                            if ui.vod.with(|s| s.query.continue_watching) {
+                                format!("✓ {}", tr("Continue watching"))
+                            } else {
+                                tr("Continue watching").into()
+                            }
+                        },
+                        move || {
+                            ui.vod
+                                .update(|s| s.query.continue_watching = !s.query.continue_watching);
+                            reload(ui, false);
+                        },
+                    )
+                    // The rail's Continue watching entry shares the words.
+                    .test_id("vod-continue"),
+                ),
         )
 }
 
-fn card_label(card: &iptv_core::vod::Card) -> String {
+/// What a card is, for a shelf that mixes movies and series.
+fn kind_name(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Movie => tr("Film"),
+        Kind::Series | Kind::Episode => tr("Series"),
+    }
+}
+
+/// A card's line: its name, then on a mixed shelf whether it is a film or a
+/// series, the year, the playlist it comes from (titles shared by playlists
+/// stay apart) and its progress.
+fn card_label(card: &iptv_core::vod::Card, kind: bool) -> String {
     format!(
-        "{}{} · {}{}",
+        "{}{}{} · {}{}",
         card.name,
+        if kind {
+            format!(" · {}", kind_name(card.key.kind))
+        } else {
+            String::new()
+        },
         card.year.map(|y| format!(" · {y}")).unwrap_or_default(),
         card.source_name,
         if card.progress.completed {
@@ -581,10 +840,16 @@ fn card_label(card: &iptv_core::vod::Card) -> String {
 
 fn card_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
     let card = move || ui.vod.with(|s| s.cards.get(at.index()).cloned());
+    let mixed = move || ui.vod.with(|s| s.is_shelf());
     ui_kit::button(
         ui,
         size,
-        move || card().as_ref().map(card_label).unwrap_or_default(),
+        move || {
+            card()
+                .as_ref()
+                .map(|c| card_label(c, mixed()))
+                .unwrap_or_default()
+        },
         move || {
             card().is_some_and(|c| {
                 ui.vod
@@ -612,15 +877,27 @@ fn catalogue(ui: Ui, size: Scale) -> impl IntoElement {
         }
     });
     let empty = when(
-        move || ui.vod.with(|s| s.cards.is_empty() && !s.busy),
         move || {
-            ui_kit::body(
-                size,
-                tr(
-                    "No titles found. Enable movie and series imports in playlist settings, then refresh your playlist.",
-                ),
-            )
+            ui.vod
+                .with(|s| s.cards.is_empty() && !s.busy && s.error.is_none())
         },
+        move || {
+            ui_kit::body(size, move || {
+                if ui.vod.with(|s| s.shelf == Some(Shelf::ContinueWatching)) {
+                    tr("Nothing to continue yet. Titles you start on any playlist appear here.")
+                } else {
+                    tr(
+                        "No titles found. Enable movie and series imports in playlist settings, then refresh your playlist.",
+                    )
+                }
+            })
+        },
+    );
+    // A shelf has no search, filter or sort: its titles come from every
+    // playlist in a fixed order, so the toolbar would only add stops.
+    let filters = when(
+        move || !ui.vod.with(|s| s.is_shelf()),
+        move || toolbar(ui, size),
     );
     let titles = virtual_list(
         move || ui.vod.with(|s| s.cards.len()),
@@ -644,11 +921,32 @@ fn catalogue(ui: Ui, size: Scale) -> impl IntoElement {
             )
         },
     );
+    // A shelf reopened deep down starts at its focused title's page; the
+    // titles above are a tap or click away (Up on the first title with a
+    // remote). The focus stays where it is.
+    let previous = when(
+        move || ui.vod.with(|s| s.has_previous() && s.details.is_none()),
+        move || {
+            ui_kit::button(
+                ui,
+                size,
+                tr("Load previous"),
+                || false,
+                move || {
+                    if !ui.vod.with_untracked(|s| s.busy) {
+                        load_previous(ui, false);
+                    }
+                },
+            )
+            .test_id("vod-previous")
+        },
+    );
     view()
         .flex_1()
         .gap(move || size.px(8.0))
-        .child(toolbar(ui, size))
+        .child(filters)
         .child(empty)
+        .child(previous)
         .child(titles)
         .child(more)
 }
@@ -781,7 +1079,7 @@ fn metadata(ui: Ui, size: Scale) -> impl IntoElement {
         ui.vod.with(|s| {
             s.details
                 .as_ref()
-                .map(|d| card_label(&d.item))
+                .map(|d| card_label(&d.item, s.is_shelf()))
                 .unwrap_or_default()
         })
     });
@@ -806,16 +1104,13 @@ fn metadata(ui: Ui, size: Scale) -> impl IntoElement {
         .child(words)
 }
 fn play_label(ui: Ui) -> &'static str {
-    let resume = ui.vod.with(|s| {
-        s.details.as_ref().is_some_and(|d| {
-            d.item.progress.resume_ms() > 0
-                || d.episodes
-                    .iter()
-                    .find(|e| Some(&e.key) == s.episode.as_ref())
-                    .is_some_and(|e| e.progress.resume_ms() > 0)
-        })
-    });
-    if resume { tr("Resume") } else { tr("Play") }
+    // A series resumes only its chosen episode: after a finished episode the
+    // next one plays from its start.
+    if ui.vod.with(|s| s.resumes()) {
+        tr("Resume")
+    } else {
+        tr("Play")
+    }
 }
 fn has_next(ui: Ui) -> bool {
     ui.vod.with(|s| {
@@ -901,19 +1196,39 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 ui,
                 size,
                 move || {
-                    if ui.vod.with(|s| s.query.kind == Kind::Series) {
-                        tr("Series")
-                    } else {
-                        tr("Films")
-                    }
+                    ui.vod.with(|s| match s.shelf {
+                        Some(Shelf::ContinueWatching) => tr("Continue watching"),
+                        Some(Shelf::RecentlyAdded) => tr("Recently added"),
+                        None if s.query.kind == Kind::Series => tr("Series"),
+                        None => tr("Films"),
+                    })
                 },
                 close,
             );
-            let hint = ui_kit::caption(
-                size,
-                tr(
-                    "Choose a title, then play or resume. Left/Right changes controls; Up/Down browses titles and episodes.",
-                ),
+            let hint = ui_kit::caption(size, move || {
+                ui.vod.with(|s| match s.shelf {
+                    Some(_) if s.details.is_some() => tr(
+                        "Choose a title, then play or resume. Left/Right changes controls; Up/Down browses titles and episodes.",
+                    ),
+                    Some(Shelf::ContinueWatching) => tr(
+                        "Titles you have started on any playlist, most recent first. Choose one to resume it.",
+                    ),
+                    Some(Shelf::RecentlyAdded) => tr(
+                        "Newest titles from every playlist first, by the date each playlist added them; titles without a date follow by name.",
+                    ),
+                    None => tr(
+                        "Choose a title, then play or resume. Left/Right changes controls; Up/Down browses titles and episodes.",
+                    ),
+                })
+            });
+            // Shown with a failed operation: OK, a tap or a click runs that
+            // same operation again (see `retry`).
+            let retry_button = when(
+                move || ui.vod.with(|s| s.retry.is_some() && !s.busy),
+                move || {
+                    button(ui, size, Control::Retry, tr("Retry"), move || retry(ui))
+                        .test_id("vod-retry")
+                },
             );
             let error = ui_kit::body(size, move || {
                 ui.vod.with(|s| {
@@ -951,6 +1266,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .child(header)
                 .child(hint)
                 .child(error)
+                .child(retry_button)
                 .child(notice)
                 .child(busy)
                 .child(content)

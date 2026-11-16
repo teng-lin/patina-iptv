@@ -23,6 +23,34 @@ struct Entry {
 pub(crate) struct State {
     entries: Mutex<BTreeMap<Key, Entry>>,
     sessions: Mutex<BTreeMap<i64, (SourceConfig, iptv_providers::stalker::StalkerSession)>>,
+    /// The discovery read in progress: one shelf is shown at a time, so a
+    /// newer read, a closed shelf or a closed application cancels it.
+    discovery: Mutex<Option<iptv_import::CancelToken>>,
+}
+impl State {
+    /// A token for a new discovery read, cancelling the one before.
+    fn begin_discovery(&self) -> iptv_import::CancelToken {
+        let token = iptv_import::CancelToken::new();
+        if let Some(previous) = self
+            .discovery
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .replace(token.clone())
+        {
+            previous.cancel();
+        }
+        token
+    }
+    pub(crate) fn cancel_discovery(&self) {
+        if let Some(token) = self
+            .discovery
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            token.cancel();
+        }
+    }
 }
 pub use iptv_core::vod::Playing;
 fn session_matches(
@@ -117,18 +145,101 @@ impl Runtime {
                 Ok((cards, more, s.vod_sources()?, s.vod_categories(&query)?))
             })
             .await?;
-        self.parental_refresh_targets(result.0.iter().map(|card| target(&card.key)).collect())
+        self.vod_redact_protected(&mut result.0).await?;
+        Ok(result)
+    }
+    /// One bounded page of a cross-source discovery shelf (Continue
+    /// watching, Recently added). The page size is clamped by the store.
+    ///
+    /// Continue watching follows the progress records and Recently added
+    /// sorts the enabled library. Both use the query-only analysis lane:
+    /// even a large watch history cannot queue guide reads behind a sort.
+    /// A newer discovery read, [`Runtime::vod_discovery_cancel`] (the shelf
+    /// closed) or closing the application cancels a read still running.
+    ///
+    /// Protected titles keep their identity and name, as in the catalogue,
+    /// but lose poster and plot until unlocked; opening or playing one goes
+    /// through [`Runtime::vod_details`] and [`Runtime::vod_play`], which
+    /// check the parental lock, the source's current incarnation and policy,
+    /// and resolve a fresh provider link. No playback URL is part of a card.
+    pub async fn vod_discovery(
+        &self,
+        query: iptv_core::vod::DiscoveryQuery,
+    ) -> Result<iptv_core::vod::DiscoveryPage, Error> {
+        let token = self.vod.begin_discovery();
+        let services = self.services();
+        let mut page = services
+            .analyze(move |s| s.vod_discovery_cancellable(query, &token))
+            .await?;
+        self.vod_redact_protected(&mut page.cards).await?;
+        Ok(page)
+    }
+    /// The bounded page of `shelf` holding `key` at its current place, or
+    /// the first page when the shelf no longer lists it
+    /// ([`iptv_core::vod::DiscoveryQuery::around`]). A reopened shelf
+    /// focuses its title again by identity this way, however deep it is.
+    /// The place and the page come from one read transaction on the
+    /// analysis lane, cancelled like the shelf's other pages; a failure is
+    /// reported, never mistaken for a title that has gone.
+    pub async fn vod_discovery_around(
+        &self,
+        shelf: iptv_core::vod::Shelf,
+        key: Key,
+    ) -> Result<iptv_core::vod::DiscoveryPage, Error> {
+        let token = self.vod.begin_discovery();
+        let services = self.services();
+        let mut page = services
+            .analyze(move |s| s.vod_discovery_around_cancellable(shelf, &key, &token))
+            .await?;
+        self.vod_redact_protected(&mut page.cards).await?;
+        Ok(page)
+    }
+    /// Whether playlist `source` is still the incarnation `incarnation` (an
+    /// opaque value from [`Details::incarnation`]): false once it was
+    /// deleted and added again under the same id, or its provider settings
+    /// were edited. A retried playback checks this before contacting the
+    /// provider, so a stale failure is never rebound to another playlist.
+    pub async fn vod_is_incarnation(
+        &self,
+        source: i64,
+        incarnation: String,
+    ) -> Result<bool, Error> {
+        Ok(self
+            .services()
+            .read(move |s| {
+                Ok(s.source_incarnation(SourceId(source))
+                    .is_ok_and(|current| current == incarnation))
+            })
+            .await?)
+    }
+    /// The shelf closed: stop its discovery read if one is still running.
+    pub fn vod_discovery_cancel(&self) {
+        self.vod.cancel_discovery();
+    }
+    /// Removes poster and plot from every card the parental policy hides
+    /// now (its own block or a protected category or source).
+    async fn vod_redact_protected(&self, cards: &mut [Card]) -> Result<(), Error> {
+        self.parental_refresh_targets(cards.iter().map(|card| target(&card.key)).collect())
             .await
             .map_err(|_| unavailable())?;
-        for card in &mut result.0 {
+        for card in cards.iter_mut() {
             if !self.parental_allowed(&target(&card.key)) {
                 card.plot = None;
                 card.poster = None;
             }
         }
-        Ok(result)
+        Ok(())
     }
     pub async fn vod_details(&self, key: Key) -> Result<Details, Error> {
+        self.vod_details_for(key, None).await
+    }
+    /// Retry remains bound to the playlist whose original details failed.
+    /// Check its incarnation in the same snapshot that captures credentials,
+    /// before any provider request; a replacement cannot inherit this action.
+    pub async fn vod_retry_details(&self, key: Key, incarnation: String) -> Result<Details, Error> {
+        self.vod_details_for(key, Some(incarnation)).await
+    }
+    async fn vod_details_for(&self, key: Key, expected: Option<String>) -> Result<Details, Error> {
         self.parental_check(&target(&key))
             .await
             .map_err(|_| unavailable())?;
@@ -136,19 +247,27 @@ impl Runtime {
         let lookup = key.clone();
         let (source, mut item, locator, provider, embedded, incarnation) = services
             .read(move |s| {
-                if !s.source_policy(SourceId(lookup.source))?.enabled {
-                    return Err(iptv_store_sqlite::StoreError::Unavailable(
-                        "Playlist disabled",
-                    ));
-                }
-                Ok((
-                    s.source(SourceId(lookup.source))?,
-                    s.vod_card(&lookup)?,
-                    s.vod_locator(&lookup)?,
-                    s.vod_series_provider_id(&lookup)?,
-                    s.vod_episode_numbers(&lookup)?,
-                    s.source_incarnation(SourceId(lookup.source))?,
-                ))
+                s.vod_read_snapshot(|s| {
+                    let incarnation = s.source_incarnation(SourceId(lookup.source))?;
+                    if expected.as_ref().is_some_and(|value| *value != incarnation) {
+                        return Err(iptv_store_sqlite::StoreError::Unavailable(
+                            "Playlist changed",
+                        ));
+                    }
+                    if !s.source_policy(SourceId(lookup.source))?.enabled {
+                        return Err(iptv_store_sqlite::StoreError::Unavailable(
+                            "Playlist disabled",
+                        ));
+                    }
+                    Ok((
+                        s.source(SourceId(lookup.source))?,
+                        s.vod_card(&lookup)?,
+                        s.vod_locator(&lookup)?,
+                        s.vod_series_provider_id(&lookup)?,
+                        s.vod_episode_numbers(&lookup)?,
+                        incarnation,
+                    ))
+                })
             })
             .await?;
         let config = source.ok_or_else(unavailable)?.source.config;
@@ -857,6 +976,264 @@ mod tests {
         assert!(
             !owner.parental_allowed(&live),
             "a VOD page must not populate unrelated live-channel ancestry"
+        );
+        assert!(owner.drain_services());
+    }
+    /// Holds the analysis lane, then checks that `read` (a discovery page
+    /// or window) waits behind it while the guide's reader still answers,
+    /// and that closing the shelf cancels it before it runs.
+    fn waits_off_the_guide_reader(
+        owner: &Runtime,
+        read: impl std::future::Future<Output = Result<iptv_core::vod::DiscoveryPage, Error>>,
+    ) {
+        use std::{
+            task::{Context, Waker},
+            time::Duration,
+        };
+        // A long analysis (another sort, an inspection) holds its lane.
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let (started, running) = std::sync::mpsc::channel::<()>();
+        let _occupied = owner.services().analyze(move |_| {
+            let _ = started.send(());
+            let _ = held.recv_timeout(Duration::from_secs(20));
+            Ok(())
+        });
+        running.recv_timeout(Duration::from_secs(10)).unwrap();
+        let mut read = std::pin::pin!(read);
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(
+            std::future::Future::poll(read.as_mut(), &mut context).is_pending(),
+            "the read waits behind the analysis lane"
+        );
+        // The guide's reader is not queued behind it.
+        let sources = owner
+            .services()
+            .block_on(owner.services().read(|s| s.vod_sources()))
+            .unwrap();
+        assert_eq!(sources.len(), 1);
+        // The shelf closes before the read ran: it is cancelled, not run.
+        owner.vod_discovery_cancel();
+        release.send(()).unwrap();
+        assert!(owner.services().block_on(read).is_err());
+    }
+    /// Both shelves can be expensive (a large library to sort, a long
+    /// watch history to rank): their pages and their windows around a
+    /// focused title wait on the analysis lane, so the reader that serves
+    /// guide pages stays free, and closing the shelf cancels a read that
+    /// has not finished.
+    #[test]
+    fn discovery_leaves_the_guide_reader_free_and_is_cancelled_with_its_shelf() {
+        use iptv_core::vod::{DiscoveryQuery, Shelf};
+        use iptv_providers::{
+            HttpResponse, SecretUrl,
+            model::{M3uSourceConfig, Source},
+        };
+        use std::rc::Rc;
+        let directory = tempfile::tempdir().unwrap();
+        let database_key = crate::model::DatabaseKey::from_bytes([0x72; 32]);
+        let mut store = iptv_store_sqlite::Store::open_encrypted(
+            directory.path().join("iptv.sqlite"),
+            &database_key,
+        )
+        .unwrap();
+        let source = store
+            .add_source(&Source {
+                name: "Generated discovery playlist".into(),
+                config: SourceConfig::M3u(M3uSourceConfig {
+                    location: SecretUrl::new("https://example.test/generated-discovery.m3u"),
+                    user_agent: None,
+                    referrer: None,
+                }),
+            })
+            .unwrap();
+        let movies = iptv_providers::xtream::parse_vod_streams(&HttpResponse::ok(
+            r#"[{"stream_id":1,"name":"Generated newer","added":"1700000200"},{"stream_id":2,"name":"Generated older","added":"1700000100"}]"#,
+        ))
+        .unwrap();
+        store
+            .replace_catalog(source, &[], &[], &movies.items, &[])
+            .unwrap();
+        let older = Key {
+            source: source.0,
+            kind: Kind::Movie,
+            id: movies.items[1].id.to_string(),
+        };
+        store
+            .save_vod_progress(
+                &older,
+                None,
+                Progress::observed(30_000, Some(120_000), false),
+            )
+            .unwrap();
+        drop(store);
+        let owner = Rc::new(Runtime::new(crate::Ports::new(
+            directory.path().to_owned(),
+            move |_| Ok(database_key.clone()),
+        )));
+        owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+        owner.start_services();
+        crate::settings::load(&owner);
+        let names = |page: iptv_core::vod::DiscoveryPage| {
+            page.cards.into_iter().map(|c| c.name).collect::<Vec<_>>()
+        };
+        for (shelf, expected) in [
+            (Shelf::ContinueWatching, vec!["Generated older"]),
+            (
+                Shelf::RecentlyAdded,
+                vec!["Generated newer", "Generated older"],
+            ),
+        ] {
+            let first = DiscoveryQuery::first(shelf);
+            let page = owner
+                .services()
+                .block_on(owner.vod_discovery(first))
+                .unwrap();
+            assert_eq!(names(page), expected, "{shelf:?}");
+            waits_off_the_guide_reader(&owner, owner.vod_discovery(first));
+            waits_off_the_guide_reader(&owner, owner.vod_discovery_around(shelf, older.clone()));
+            // A later shelf reads normally, its window around the title too.
+            let window = owner
+                .services()
+                .block_on(owner.vod_discovery_around(shelf, older.clone()))
+                .unwrap();
+            assert_eq!(window.start, 0);
+            assert!(window.cards.iter().any(|c| c.key == older), "{shelf:?}");
+            assert_eq!(
+                names(
+                    owner
+                        .services()
+                        .block_on(owner.vod_discovery(first))
+                        .unwrap()
+                ),
+                expected
+            );
+        }
+        assert!(owner.drain_services());
+    }
+    #[test]
+    fn retry_cannot_contact_credentials_changed_after_its_preflight() {
+        use iptv_providers::{
+            HttpResponse, Secret,
+            model::{Source, XtreamCredentials},
+        };
+        use std::rc::Rc;
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+            time::{Duration, Instant},
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let database_key = crate::model::DatabaseKey::from_bytes([0x72; 32]);
+        let mut store = iptv_store_sqlite::Store::open_encrypted(
+            directory.path().join("iptv.sqlite"),
+            &database_key,
+        )
+        .unwrap();
+        let source = store
+            .add_source(&Source {
+                name: "Generated retry authority".into(),
+                config: SourceConfig::Xtream(XtreamCredentials {
+                    server_url: format!("http://{address}"),
+                    username: Secret::new("generated-original"),
+                    password: Secret::new("generated-password"),
+                    user_agent: None,
+                }),
+            })
+            .unwrap();
+        let series = iptv_providers::xtream::parse_series_list(&HttpResponse::ok(
+            r#"[{"series_id":41,"name":"Generated retry series"}]"#,
+        ))
+        .unwrap();
+        store
+            .replace_catalog(source, &[], &[], &[], &series.items)
+            .unwrap();
+        let incarnation = store.source_incarnation(source).unwrap();
+        let key = Key {
+            source: source.0,
+            kind: Kind::Series,
+            id: series.items[0].id.to_string(),
+        };
+        drop(store);
+        let owner = Rc::new(Runtime::new(crate::Ports::new(
+            directory.path().to_owned(),
+            move |_| Ok(database_key.clone()),
+        )));
+        owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+        owner.start_services();
+        assert!(
+            owner
+                .services()
+                .block_on(owner.vod_is_incarnation(source.0, incarnation.clone()))
+                .unwrap()
+        );
+        // The edit commits after the UI preflight but before its details lookup.
+        owner
+            .services()
+            .block_on(owner.services().call(move |store| {
+                let mut changed = store.source(source)?.unwrap().source;
+                let SourceConfig::Xtream(credentials) = &mut changed.config else {
+                    unreachable!()
+                };
+                credentials.username = Secret::new("generated-replacement");
+                store.update_source(source, &changed)
+            }))
+            .unwrap();
+        assert!(
+            owner
+                .services()
+                .block_on(owner.vod_retry_details(key.clone(), incarnation))
+                .is_err()
+        );
+        assert!(
+            matches!(listener.accept(), Err(error)
+            if error.kind() == std::io::ErrorKind::WouldBlock),
+            "a stale retry must not even connect to the replacement provider"
+        );
+        // Prove the replacement fixture is reachable for an explicit fresh selection.
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            Instant::now() < deadline,
+                            "fresh selection did not contact fixture"
+                        );
+                        std::thread::park_timeout(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("fixture accept: {error}"),
+                }
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 1024];
+            while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                let count = stream.read(&mut buffer).unwrap();
+                assert!(count > 0 && request.len() + count < 16_384);
+                request.extend_from_slice(&buffer[..count]);
+            }
+            let request = String::from_utf8(request).unwrap();
+            assert!(request.contains("username=generated-replacement"));
+            assert!(request.contains("action=get_series_info"));
+            let body = r#"{"info":{"name":"Generated retry series"},"episodes":{}}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        });
+        let selected = owner.services().block_on(owner.vod_details(key));
+        server.join().unwrap();
+        assert!(
+            selected.is_ok(),
+            "an explicit fresh selection remains usable"
         );
         assert!(owner.drain_services());
     }

@@ -99,6 +99,7 @@ pub fn start(ui: Ui) {
             .and_then(|channel| crate::schedule().channel_key(channel)),
         playing: ui.playing.get_untracked().is_some(),
         has_vod: ui.has_vod.get_untracked(),
+        any_vod: ui.any_vod.get_untracked(),
     });
     spawn_in_app(async move {
         let owner = crate::runtime();

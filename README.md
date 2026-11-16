@@ -287,6 +287,47 @@ continue into the next season. Availability and metadata depend on the provider.
 M3U imports remain channel playlists; Patina does not guess a movie catalogue
 from channel names or URL extensions.
 
+**Continue watching** and **Recently added**, below Live TV in the rail, list
+movies and series from every enabled playlist in one place; the app still
+starts on the guide. They appear whenever any enabled playlist has movies or
+series, even while a live-only playlist is shown (Films and Series follow the
+playlist on screen). Each row names its playlist, so titles that two
+playlists share stay separate. Choosing a row opens the same details as Films
+and Series: play, resume, seasons and episodes, on the same player. Leaving
+and reopening a shelf returns to the same title, found by identity wherever
+it now is, however deep: the shelf shows the page of 40 holding it. **Load
+more** continues below and **Load previous** (or Up on the first title with a
+remote) above, a page at a time. If the title has left the shelf, it opens at
+the top; if the lookup fails, an error and **Retry** keep the title to find.
+
+- *Continue watching* holds movies started for at least five seconds and not
+  finished, the most recently watched first. A series appears once and
+  follows the episode watched last. It stays while you are watching it, even
+  if the next episode was stopped within five seconds, but a series only
+  glanced at does not appear. When the episode watched last was finished, the
+  row offers the next episode from its start. Finishing the final episode
+  removes the series, and an older half-watched episode does not bring it
+  back; playing one of its episodes again does.
+- *Recently added* sorts by the date the provider reports adding a movie or
+  last changing a series, newest first. Titles without such a date follow by
+  name. The release year is never used as that date. No index serves this
+  order across both catalogues, so each page sorts the enabled library.
+- Both shelves can take a while on a large library or a long watch history,
+  so the app reads them, and the place of a focused title, on a separate
+  store lane from the one the guide reads from, and stops a read when the
+  shelf closes.
+- Disabled playlists are left out, and a deleted playlist's progress goes
+  with it. Protected titles keep their row but not their poster or plot, and
+  open only after the parental PIN. Playing always asks the provider for a
+  fresh link.
+- When something fails, **Retry** repeats exactly that: the same page (the
+  titles already shown stay), the same title's details, or the same episode
+  played the same way (resumed or from its start), after reading its details
+  and link afresh and checking the parental lock and the playlist again. A
+  playlist deleted and added again, or whose provider settings were edited,
+  since the title was chosen is not used by Retry: nothing plays, and the
+  title has to be chosen again.
+
 Use **Block channel**, **Block group** or the on-demand block control to protect
 content. The first protected action sets a four-to-eight-digit PIN and displays
 a recovery code. Parental settings control live/on-demand protection, unlock

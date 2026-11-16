@@ -30,6 +30,26 @@ pub(crate) struct State {
     index: KeyIndex,
     /// The source has movies or shows.
     has_vod: bool,
+    /// Some enabled source has movies or shows (the cross-source shelves).
+    any_vod: bool,
+}
+
+/// Whether `source` has movies or shows by its last import's counts.
+fn source_has_vod(store: &Store, source: SourceId) -> bool {
+    store
+        .import_status(source)
+        .is_ok_and(|status| status.counts.vod + status.counts.series > 0)
+}
+
+/// Whether any enabled source has movies or shows: one status read per
+/// configured playlist, never a catalogue scan.
+fn any_enabled_vod(store: &Store) -> Result<bool, StoreError> {
+    for source in store.sources()? {
+        if store.source_policy(source.id)?.enabled && source_has_vod(store, source.id) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// A store write, in the order made.
@@ -118,9 +138,10 @@ pub async fn prepare_source(
     let generation = owner.generation.get();
     let id = source?;
     let loaded = load(owner, move |store| {
-        let has_vod = store
-            .import_status(id)
-            .is_ok_and(|s| s.counts.vod + s.counts.series > 0);
+        let has_vod = source_has_vod(store, id);
+        // Another enabled playlist's films keep the cross-source shelves
+        // reachable while a live-only playlist is on screen.
+        let any_vod = has_vod || any_enabled_vod(store)?;
         let rows = store.load_channels(
             id,
             &ChannelQuery {
@@ -131,13 +152,13 @@ pub async fn prepare_source(
             },
         )?;
         let recent = store.recent(Some(id), Some(ContentKind::Live), RECENT_LIMIT as u32)?;
-        Ok((has_vod, rows, recent))
+        Ok(((has_vod, any_vod), rows, recent))
     })
     .await;
     if owner.generation.get() != generation {
         return None;
     }
-    let (has_vod, rows, recent) = match loaded {
+    let ((has_vod, any_vod), rows, recent) = match loaded {
         Ok(loaded) => loaded,
         Err(error) => {
             log::warn!("iptv favourites: store unavailable ({error})");
@@ -149,6 +170,7 @@ pub async fn prepare_source(
         owner.favorites.with(|state| {
             let mut state = state.borrow_mut();
             state.has_vod = has_vod;
+            state.any_vod = any_vod;
             if state.source == source {
                 return;
             }
@@ -178,9 +200,7 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
         for source in store.sources()? {
             if store.source_policy(source.id)?.enabled {
                 ids.push(source.id);
-                has_vod |= store
-                    .import_status(source.id)
-                    .is_ok_and(|status| status.counts.vod + status.counts.series > 0);
+                has_vod |= source_has_vod(store, source.id);
                 let rows = store.load_channels(
                     source.id,
                     &ChannelQuery {
@@ -242,7 +262,9 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
                         .map(|row| qualified_key(row.source_id.0, row.item_id.as_str())),
                 );
             }
+            // Every enabled playlist is on screen.
             state.has_vod = has_vod;
+            state.any_vod = has_vod;
         })
     })
 }
@@ -268,13 +290,14 @@ pub fn catalog_changed(owner: &super::Runtime, catalog: &dyn Schedule) {
 }
 
 pub fn publish(owner: &super::Runtime) {
-    let (set, has_vod) = owner.favorites.with(|s| {
+    let (set, has_vod, any_vod) = owner.favorites.with(|s| {
         let s = s.borrow();
-        (s.favorites.set_of(&s.index), s.has_vod)
+        (s.favorites.set_of(&s.index), s.has_vod, s.any_vod)
     });
     owner.emit(super::RuntimeEvent::FavoritesChanged {
         channels: set,
         has_vod,
+        any_vod,
     });
 }
 

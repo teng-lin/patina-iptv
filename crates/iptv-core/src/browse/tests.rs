@@ -33,7 +33,7 @@ impl Screen {
             catalog,
             index,
             favorites: Favorites::default(),
-            rail: rail_items(false),
+            rail: rail_items(VodAvailability::default()),
             view,
             focus,
             back_to_now: true,
@@ -323,19 +323,42 @@ fn the_rail_skips_items_without_a_screen() {
 #[test]
 fn rail_items_follow_the_playlist() {
     use RailItem::*;
+    let none = VodAvailability::default();
+    let both = VodAvailability {
+        shown: true,
+        any: true,
+    };
     assert_eq!(
-        rail_items(false),
+        rail_items(none),
         [Search, Tv, Recordings, MyList, Playlists, Settings]
     );
     assert_eq!(
-        rail_items(true),
+        rail_items(both),
         [
-            Search, Tv, Movies, Shows, Recordings, MyList, Playlists, Settings
+            Search, Tv, Continue, Recent, Movies, Shows, Recordings, MyList, Playlists, Settings
+        ]
+    );
+    // A live-only playlist on screen while another enabled playlist has
+    // films: the cross-source shelves stay reachable, the per-playlist
+    // Movies and Shows do not.
+    assert_eq!(
+        rail_items(VodAvailability {
+            shown: false,
+            any: true,
+        }),
+        [
+            Search, Tv, Continue, Recent, Recordings, MyList, Playlists, Settings
         ]
     );
     assert!(Settings.at_bottom() && Playlists.at_bottom() && !Search.at_bottom());
+    assert!(Continue.enabled() && Recent.enabled() && !Continue.at_bottom());
     let mut f = Focus::at(0);
-    let items = rail_items(true);
+    let items = rail_items(both);
+    assert_eq!(
+        rail_home(&items),
+        1,
+        "TV stays home: discovery entries do not replace the guide"
+    );
     let cols = Columns {
         entries: 3,
         rail: &items,
@@ -343,6 +366,16 @@ fn rail_items_follow_the_playlist() {
     };
     assert_eq!(
         f.tap_rail(2, &cols, &SyntheticList),
+        Outcome::Open(Continue),
+        "Continue watching, one below TV"
+    );
+    assert_eq!(
+        f.tap_rail(3, &cols, &SyntheticList),
+        Outcome::Open(Recent),
+        "Recently added"
+    );
+    assert_eq!(
+        f.tap_rail(4, &cols, &SyntheticList),
         Outcome::Open(Movies),
         "Movies"
     );

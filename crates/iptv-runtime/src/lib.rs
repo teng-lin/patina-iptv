@@ -44,6 +44,8 @@ pub struct BrowserState {
     pub focused_key: Option<String>,
     pub playing: bool,
     pub has_vod: bool,
+    /// Some enabled playlist has movies or shows.
+    pub any_vod: bool,
 }
 
 mod guide_checks;
@@ -287,6 +289,9 @@ impl Runtime {
             self.recordings.detach_ui();
         }
         self.cancel_guide_checks();
+        // A Recently added sort still running must not hold the analysis
+        // lane's teardown barrier.
+        self.vod.cancel_discovery();
         let drained = self
             .store
             .drain_on_shutdown_with(|| self.inspection.cancel_requests());

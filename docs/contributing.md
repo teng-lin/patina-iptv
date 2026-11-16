@@ -14,7 +14,7 @@ in [CONTRIBUTING.md](../CONTRIBUTING.md).
 | Provider parsing/import | [providers](../crates/iptv-providers/src/lib.rs), [import](../crates/iptv-import/src/lib.rs), [runtime imports](../crates/iptv-runtime/src/imports.rs) | [network](../crates/iptv-net/src/lib.rs) | `cargo test -p iptv-providers -p iptv-import -p iptv-net`; synthetic mock import and cancellation scenarios |
 | Guide and focus | [core](../crates/iptv-core/src/lib.rs), [guide](../crates/iptv-guide/src/lib.rs), [navigation](../crates/iptv-nav/src/lib.rs), [runtime guides](../crates/iptv-runtime/src/guides.rs) | [app input](../crates/iptv-app/src/input.rs) | `cargo test -p iptv-core -p iptv-guide -p iptv-nav`; app guide navigation/refresh scenarios |
 | XMLTV and guide repair | [EPG parser](../crates/iptv-epg/src/lib.rs), [runtime checks](../crates/iptv-runtime/src/guide_checks.rs), [repair](../crates/iptv-runtime/src/guide_repair.rs) | [network](../crates/iptv-net/src/lib.rs), [store](../crates/iptv-store-sqlite/src/lib.rs) | `cargo test -p iptv-epg`; runtime guide-check/repair scenarios and the selected parser fuzz workflow |
-| Library and search | [library](../crates/iptv-library/src/lib.rs), [search](../crates/iptv-search/src/lib.rs), [runtime search](../crates/iptv-runtime/src/search.rs), [VOD](../crates/iptv-runtime/src/vod.rs) | [store](../crates/iptv-store-sqlite/src/lib.rs) | `cargo test -p iptv-library -p iptv-search`; runtime VOD/source-identity tests |
+| Library and search | [library](../crates/iptv-library/src/lib.rs), [search](../crates/iptv-search/src/lib.rs), [runtime search](../crates/iptv-runtime/src/search.rs), [VOD](../crates/iptv-runtime/src/vod.rs) | [store](../crates/iptv-store-sqlite/src/lib.rs) | `cargo test -p iptv-library -p iptv-search`; runtime VOD/source-identity tests; [on-demand discovery store queries](../crates/iptv-store-sqlite/src/vod.rs) and [runtime discovery scenarios](../crates/iptv-runtime/tests/vod_library.rs) |
 | Settings | [schema](../crates/iptv-settings/src/lib.rs), [runtime](../crates/iptv-runtime/src/settings.rs) | [settings view](../crates/iptv-app/src/settings_view.rs) | `cargo test -p iptv-settings`; app settings, persistence and backup/restore scenarios |
 | Persistence and migrations | [service ownership](../crates/iptv-runtime/src/store_service.rs) | [SQLite](../crates/iptv-store-sqlite/src/lib.rs), [SQLCipher initialization](../crates/iptv-sqlcipher-init/src/lib.rs) | `cargo test -p iptv-store-sqlite -p iptv-sqlcipher-init`; [historical migration fixtures](../crates/iptv-store-sqlite/tests/it/migrations.rs) |
 | Parental policy | [portable policy](../crates/iptv-core/src/parental.rs), [runtime admission](../crates/iptv-runtime/src/parental.rs) | [PIN UI](../crates/iptv-app/src/parental_view.rs) | `cargo test -p iptv-core parental`; [runtime parental-access scenarios](../crates/iptv-runtime/tests/parental_access.rs) and app parental scenarios; revocation during queued work |
@@ -42,6 +42,11 @@ Useful exact commands for the map's domains include:
 cargo test -p iptv-runtime --test persistence_safety
 cargo test -p iptv-runtime --test data_startup
 cargo test -p iptv-runtime --test parental_access
+cargo test -p iptv-runtime --test vod_library
+cargo test -p iptv-runtime --lib vod::
+cargo test -p iptv-runtime --features test-support --test vod_import_pipeline
+cargo test -p iptv-store-sqlite --lib vod::
+cargo test -p iptv-store-sqlite --lib -- --ignored --nocapture discovery_latency
 cargo test -p iptv-app --features test-support --test app vod_library
 cargo test -p iptv-app --features test-support --test app library_management
 cargo test -p iptv-app --features test-support --test app cov_settings_screen

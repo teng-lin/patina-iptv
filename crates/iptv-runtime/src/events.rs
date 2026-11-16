@@ -16,7 +16,11 @@ pub enum RuntimeEvent {
     BackupProgress(super::backup::Progress),
     FavoritesChanged {
         channels: std::collections::BTreeSet<usize>,
+        /// The source on screen has movies or shows (Movies, Shows).
         has_vod: bool,
+        /// Some enabled source has movies or shows (the cross-source
+        /// Continue watching and Recently added shelves).
+        any_vod: bool,
     },
     FavoriteOrderChanged,
     RefreshProgress(SourceId, Option<super::library::Activity>),

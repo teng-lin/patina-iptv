@@ -223,6 +223,9 @@ pub struct Ui {
     pub favorites: Signal<BTreeSet<usize>>,
     /// The source has movies or shows (the rail lists them).
     pub has_vod: Signal<bool>,
+    /// Some enabled playlist has movies or shows: the rail's cross-source
+    /// Continue watching and Recently added entries.
+    pub any_vod: Signal<bool>,
     /// Live or catch-up for the playing channel.
     pub playback: Signal<Playback>,
     /// Bumped when the guide data changes (views re-read `schedule()`).
@@ -736,6 +739,7 @@ fn ready_app() -> impl IntoElement {
         recordings_open,
         favorites: signal(BTreeSet::new()),
         has_vod: signal(false),
+        any_vod: signal(false),
         playback: signal(Playback::Live),
         data_version: signal(0),
         guide_pages: signal(0),
