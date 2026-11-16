@@ -33,6 +33,7 @@ class ToolCache(unittest.TestCase):
         ACTION.write_text(RECIPE, encoding="utf-8")
         self.environment = {
             "RUNNER_TEMP": str(self.root / "runner"),
+            "RUNNER_OS": "Windows" if os.name == "nt" else "Linux",
             "CARGO_HOME": str(self.root / "cargo"),
             "TOOL_NAME": "cargo-about",
             "TOOL_VERSION": "0.9.3",
@@ -51,7 +52,15 @@ class ToolCache(unittest.TestCase):
         Path("Cargo.lock").write_text("generated dependency change\n")
         Path("app.rs").write_text("generated application change\n")
         self.assertEqual(self.identity(), before)
-        self.assertEqual(Path(before["path"]), Path(before["root"]) / "bin/cargo-about")
+        executable = "cargo-about.exe" if os.name == "nt" else "cargo-about"
+        self.assertEqual(Path(before["path"]), Path(before["root"]) / "bin" / executable)
+
+    def test_tool_cache_targets_the_installed_executable_on_each_platform(self):
+        for platform, executable in (("Windows", "cargo-about.exe"), ("Linux", "cargo-about"),
+                                     ("macOS", "cargo-about")):
+            with self.subTest(platform=platform):
+                identity = self.identity(RUNNER_OS=platform)
+                self.assertEqual(Path(identity["path"]), Path(identity["root"]) / "bin" / executable)
 
     def test_explicit_cargo_home_never_requires_a_system_home_directory(self):
         with patch.object(Path, "home", side_effect=RuntimeError("no system home")):

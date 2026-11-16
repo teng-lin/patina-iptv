@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[2]
 LANES = ("host", "windows", "android", "packages", "windows-package", "coverage", "fuzz", "smoke", "stress")
 BUILD = ("Cargo.toml", "Cargo.lock", "crates/**/Cargo.toml", "rust-toolchain.toml", "nsh.rev", ".cargo/**")
 CI = (".github/workflows/**", ".github/actions/**", "tools/ci/validation-plan.py", "tools/ci/check-plan.py",
-      "tools/ci/pins.py", "tools/ci/locked-build-env.sh", "tools/ci/locked-cargo.py", "tools/check.sh")
+      "tools/ci/pins.py", "tools/ci/locked-build-env.sh", "tools/ci/locked-cargo.py", "tools/check.sh",
+      "tools/ci/native-candidates.json", "tools/ci/native_candidates.py", "tools/ci/run-xvfb.py")
 NOTICES = ("about.toml", "LICENSE", "tools/ci/notices.hbs", "tools/ci/component-inventory.py",
            "tools/ci/crypto-native-notices.py", "tools/ci/check-notices.py", "tools/ci/notices.sh",
            "tools/ci/package.Cargo.lock", "tools/ci/check-package-lock.py", "tools/ci/audit-runners.sh")
@@ -26,7 +27,7 @@ ANDROID_PACKAGE = (*NOTICES, *BUILD, "hosts/android/**", "crates/iptv-app/build.
                    "tools/sync-host.sh", "tools/ci/android-ndk-env.sh", "tools/ci/check-android*",
                    "tools/ci/sign-android.sh", "tools/ci/prepare-android.sh", "tools/ci/package-android.sh", "tools/ci/sbom.py",
                    "tools/mpv-runtime/**", "tools/mpv-runtime-unix/**", "crates/iptv-player-mpv/fixtures/**")
-LINUX_PACKAGE = ("tools/ci/*linux*.sh", "tools/ci/*linux*.py", "hosts/linux/**")
+LINUX_PACKAGE = ("tools/ci/*linux*.sh", "tools/ci/*linux*.py", "tools/ci/Dockerfile.*-smoke", "hosts/linux/**")
 MACOS_PACKAGE = ("tools/package-macos.sh", "tools/bundle-macos.py", "tools/ci/*macos*.sh", "tools/ci/*macos*.py", "hosts/macos/**")
 PACKAGES = (*NOTICES, *LINUX_PACKAGE, *MACOS_PACKAGE, *BUILD, "about.toml", "LICENSE", "crates/iptv-app/build.rs", "crates/iptv-app/nsh.json",
             "crates/iptv-app/icon.png", "crates/iptv-app/fonts/**", "tools/package-*.sh",
@@ -42,8 +43,10 @@ SMOKE = (*BUILD, "hosts/android/**", "crates/iptv-app/**", "crates/iptv-runtime/
          "crates/iptv-player-mpv/**", "crates/iptv-net/**", "crates/iptv-nav/**", "tools/sync-host.sh",
          "tools/ci/android/**", "tools/ci/android-smoke.sh", "tools/ci/*hls-fixtures.py",
          "tools/ci/android-ndk-env.sh", "tools/make-*fixtures*", "tools/mock-server.py", "tools/mpv-runtime/**")
-STRESS = (*BUILD, "crates/iptv-store-sqlite/**", "crates/iptv-import/**", "crates/iptv-epg/**",
-          "tools/ci/import-stress.sh")
+# Include the parsers, schedules, and models exercised by the allocation fixtures.
+STRESS_CRATES = ("iptv-store-sqlite", "iptv-sqlcipher-init", "iptv-import", "iptv-epg",
+                 "iptv-providers", "iptv-guide", "iptv-core", "iptv-library", "iptv-settings")
+STRESS = (*BUILD, *(f"crates/{crate}/**" for crate in STRESS_CRATES), "tools/ci/import-stress.sh")
 COVERAGE = ("tools/ci/coverage.sh", "tools/ci/*coverage*.py")
 DOCS = ("docs/**", ".gitignore", ".editorconfig")
 
@@ -60,7 +63,8 @@ def documentation(path):
 def fuzz_targets(paths, full=False, root=ROOT):
     names = sorted(target["name"] for target in tomllib.loads((root / "fuzz/Cargo.toml").read_text())["bin"])
     if full or matches(paths, (*BUILD, *CI, "fuzz/Cargo.toml", "fuzz/Cargo.lock", "tools/ci/fuzz*",
-                              "tools/ci/locked-cargo.py", "crates/iptv-core/**", "crates/iptv-settings/**")):
+                              "tools/ci/run-fuzz.py", "tools/ci/locked-cargo.py",
+                              "crates/iptv-core/**", "crates/iptv-settings/**")):
         return names
     selected = set()
     for path in paths:

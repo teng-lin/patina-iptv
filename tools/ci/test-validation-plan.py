@@ -34,9 +34,10 @@ class Selection(unittest.TestCase):
         plan = v.select(["crates/iptv-core/src/guide.rs"])
         for lane in ("host", "windows", "android"):
             self.assertTrue(plan[lane], lane)
-        for lane in ("android_package", "packages", "windows-package", "coverage", "smoke", "stress"):
+        for lane in ("android_package", "packages", "windows-package", "coverage", "smoke"):
             self.assertFalse(plan[lane], lane)
         self.assertTrue(plan["fuzz"])
+        self.assertTrue(plan["stress"])
 
     def test_ci_helper_change_does_not_build_installers(self):
         plan = v.select(["tools/ci/test-sbom.py"])
@@ -46,7 +47,8 @@ class Selection(unittest.TestCase):
             self.assertFalse(plan[lane], lane)
 
     def test_graph_changes_validate_every_lane(self):
-        for path in (".github/workflows/validation.yml", ".github/actions/setup/action.yml", "tools/ci/check-plan.py"):
+        for path in (".github/workflows/validation.yml", ".github/actions/setup/action.yml", "tools/ci/check-plan.py",
+                     "tools/ci/native-candidates.json", "tools/ci/native_candidates.py", "tools/ci/run-xvfb.py"):
             plan = v.select([path])
             self.assertTrue(all(plan[lane] for lane in v.LANES), path)
 
@@ -64,8 +66,22 @@ class Selection(unittest.TestCase):
             self.assertTrue(v.select([path])["smoke"], path)
 
     def test_storage_and_epg_changes_keep_large_regressions(self):
-        for path in ("crates/iptv-store-sqlite/src/lib.rs", "crates/iptv-import/src/lib.rs", "crates/iptv-epg/src/lib.rs"):
+        for path in ("crates/iptv-store-sqlite/src/lib.rs", "crates/iptv-import/src/lib.rs", "crates/iptv-epg/src/lib.rs",
+                     "crates/iptv-providers/src/xtream/parse.rs", "crates/iptv-guide/src/combined.rs",
+                     "crates/iptv-core/src/lib.rs", "crates/iptv-library/src/lib.rs",
+                     "crates/iptv-settings/src/lib.rs", "crates/iptv-sqlcipher-init/src/lib.rs"):
             self.assertTrue(v.select([path])["stress"], path)
+
+    def test_execution_wrappers_exercise_their_lanes(self):
+        self.assertTrue(v.select(["tools/ci/run-xvfb.py"])["host"])
+        self.assertEqual(v.select(["tools/ci/run-fuzz.py"])["fuzz"], v.fuzz_targets([], True))
+
+    def test_linux_smoke_images_select_only_linux_packaging(self):
+        images = list((v.ROOT / "tools/ci").glob("Dockerfile.*-smoke"))
+        self.assertTrue(images)
+        for image in images:
+            path = image.relative_to(v.ROOT).as_posix()
+            self.assertEqual([entry["platform"] for entry in v.select([path])["package_matrix"]["include"]], ["linux"], path)
 
     def test_parser_changes_select_related_targets(self):
         self.assertEqual(v.fuzz_targets(["crates/iptv-providers/src/m3u/parser.rs"]), ["catchup", "gzip", "m3u"])
