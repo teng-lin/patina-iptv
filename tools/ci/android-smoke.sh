@@ -171,7 +171,13 @@ $adb shell am start -W -n $act >/dev/null
 expect 'iptv startup: fonts registered' 60
 # The last start-up step: until then a slow emulator may drop keys.
 expect 'iptv pip: supported' 60
-is_tv=$($adb shell pm has-feature android.software.leanback | tr -d '\r')
+# pm returns a nonzero status for a valid false result. Validate its output
+# so tablets proceed while an adb/query failure still fails the smoke.
+is_tv=$($adb shell pm has-feature android.software.leanback | tr -d '\r' || true)
+case "$is_tv" in
+  true|false) ;;
+  *) fail "could not determine the Android TV feature" ;;
+esac
 pause 3
 shot 01-first-run
 
