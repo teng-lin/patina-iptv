@@ -6,6 +6,8 @@
 //! reported them; a new stream starts again from the defaults (video
 //! automatic, the player's audio, subtitles off).
 
+use crate::i18n::{self, Language, translate};
+
 /// A video rendition.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct VideoTrack {
@@ -102,23 +104,33 @@ impl Tracks {
     /// renditions for video, the tracks for audio, "Off" then the tracks
     /// for subtitles.
     pub fn entries(&self, kind: Kind) -> Vec<String> {
+        self.entries_in(kind, &i18n::LANGUAGES[0])
+    }
+
+    /// Localized app-owned names; provider track labels remain unchanged.
+    pub fn entries_in(&self, kind: Kind, language: &Language) -> Vec<String> {
         match kind {
-            Kind::Video => std::iter::once("Automatic".to_owned())
+            Kind::Video => std::iter::once(translate(language, "Automatic").to_owned())
                 .chain(
                     self.video
                         .iter()
                         .enumerate()
-                        .map(|(i, t)| video_label(t, i)),
+                        .map(|(i, t)| video_label(t, i, language)),
                 )
                 .collect(),
             Kind::Audio => self
                 .audio
                 .iter()
                 .enumerate()
-                .map(|(i, t)| audio_label(t, i))
+                .map(|(i, t)| audio_label(t, i, language))
                 .collect(),
-            Kind::Text => std::iter::once("Off".to_owned())
-                .chain(self.text.iter().enumerate().map(|(i, t)| text_label(t, i)))
+            Kind::Text => std::iter::once(translate(language, "Off").to_owned())
+                .chain(
+                    self.text
+                        .iter()
+                        .enumerate()
+                        .map(|(i, t)| text_label(t, i, language)),
+                )
                 .collect(),
         }
     }
@@ -163,6 +175,11 @@ impl Tracks {
     /// The control row's short value for `kind`: the playing resolution,
     /// audio layout or subtitle language.
     pub fn summary(&self, kind: Kind) -> Option<String> {
+        self.summary_in(kind, &i18n::LANGUAGES[0])
+    }
+
+    /// A localized summary without translating provider-originated text.
+    pub fn summary_in(&self, kind: Kind, language: &Language) -> Option<String> {
         match kind {
             Kind::Video => {
                 let id = self.selected_video.as_deref()?;
@@ -172,18 +189,21 @@ impl Tracks {
             Kind::Audio => {
                 let id = self.selected_audio.as_deref()?;
                 let t = self.audio.iter().find(|t| t.id == id)?;
-                let lang = language_name(&t.language);
+                let lang = language_name_in(&t.language, language);
                 match (lang, t.channels) {
                     (Some(l), 0) => Some(l),
-                    (Some(l), n) => Some(format!("{l} {}", audio_layout(n))),
+                    (Some(l), n) => Some(format!("{l} {}", audio_layout_in(n, language))),
                     (None, 0) => None,
-                    (None, n) => Some(audio_layout(n)),
+                    (None, n) => Some(audio_layout_in(n, language)),
                 }
             }
             Kind::Text => {
                 let id = self.selected_text.as_deref()?;
                 let t = self.text.iter().find(|t| t.id == id)?;
-                Some(language_name(&t.language).unwrap_or_else(|| "On".to_owned()))
+                Some(
+                    language_name_in(&t.language, language)
+                        .unwrap_or_else(|| translate(language, "On").to_owned()),
+                )
             }
         }
     }
@@ -206,9 +226,14 @@ pub fn fps_label(fps: f32) -> Option<String> {
 
 /// "Mono", "Stereo", "5.1", "7.1", else the channel count.
 pub fn audio_layout(channels: u32) -> String {
+    audio_layout_in(channels, &i18n::LANGUAGES[0])
+}
+
+/// Localized channel layout, preserving standard surround notation.
+pub fn audio_layout_in(channels: u32, language: &Language) -> String {
     match channels {
-        1 => "Mono".to_owned(),
-        2 => "Stereo".to_owned(),
+        1 => translate(language, "Mono").to_owned(),
+        2 => translate(language, "Stereo").to_owned(),
         6 => "5.1".to_owned(),
         8 => "7.1".to_owned(),
         n => format!("{n} ch"),
@@ -226,8 +251,8 @@ pub fn codec_name(codec: &str) -> Option<String> {
         "eac3" | "e-ac-3" => "E-AC-3",
         "mpeg" | "mp3" | "mpeg-l3" => "MP3",
         "mp2" | "mpeg-l2" | "mp2a" => "MP2",
-        "opus" => "Opus",
-        "vorbis" => "Vorbis",
+        "opus" => i18n::key("Opus"),
+        "vorbis" => i18n::key("Vorbis"),
         "flac" => "FLAC",
         "dts" | "vnd.dts" => "DTS",
         other => return Some(other.to_ascii_uppercase()),
@@ -239,7 +264,11 @@ pub fn codec_name(codec: &str) -> Option<String> {
 pub fn bitrate_label(bps: u32) -> Option<String> {
     match bps {
         0 => None,
-        b if b >= 1_000_000 => Some(format!("{:.1} Mb/s", b as f64 / 1e6)),
+        b if b >= 1_000_000 => Some(i18n::format(
+            &i18n::LANGUAGES[0],
+            "{rate} Mb/s",
+            &[("rate", format!("{:.1}", b as f64 / 1e6).as_str().into())],
+        )),
         b => Some(format!("{} kb/s", b.div_ceil(1000))),
     }
 }
@@ -247,36 +276,41 @@ pub fn bitrate_label(bps: u32) -> Option<String> {
 /// English names of common ISO 639-1/639-2 codes; `None` for none.
 /// Unknown codes read as themselves, upper case.
 pub fn language_name(code: &str) -> Option<String> {
+    language_name_in(code, &i18n::LANGUAGES[0])
+}
+
+/// An ISO track language in the interface language. Unknown tags stay uppercase.
+pub fn language_name_in(code: &str, language: &Language) -> Option<String> {
     let c = code.trim().to_ascii_lowercase();
     let base = c.split(['-', '_']).next().unwrap_or("");
     let name = match base {
         "" | "und" | "unk" | "mis" | "zxx" => return None,
-        "en" | "eng" => "English",
-        "fr" | "fra" | "fre" => "French",
-        "de" | "deu" | "ger" => "German",
-        "es" | "spa" => "Spanish",
-        "it" | "ita" => "Italian",
-        "pt" | "por" => "Portuguese",
-        "nl" | "nld" | "dut" => "Dutch",
-        "ru" | "rus" => "Russian",
-        "uk" | "ukr" => "Ukrainian",
-        "pl" | "pol" => "Polish",
-        "cs" | "ces" | "cze" => "Czech",
-        "hu" | "hun" => "Hungarian",
-        "ro" | "ron" | "rum" => "Romanian",
-        "el" | "ell" | "gre" => "Greek",
-        "tr" | "tur" => "Turkish",
-        "ar" | "ara" => "Arabic",
-        "he" | "heb" => "Hebrew",
-        "fa" | "fas" | "per" => "Persian",
-        "hi" | "hin" => "Hindi",
-        "zh" | "zho" | "chi" => "Chinese",
-        "ja" | "jpn" => "Japanese",
-        "ko" | "kor" => "Korean",
-        "sv" | "swe" => "Swedish",
-        "da" | "dan" => "Danish",
-        "no" | "nor" | "nb" | "nob" => "Norwegian",
-        "fi" | "fin" => "Finnish",
+        "en" | "eng" => translate(language, "English"),
+        "fr" | "fra" | "fre" => translate(language, "French"),
+        "de" | "deu" | "ger" => translate(language, "German"),
+        "es" | "spa" => translate(language, "Spanish"),
+        "it" | "ita" => translate(language, "Italian"),
+        "pt" | "por" => translate(language, "Portuguese"),
+        "nl" | "nld" | "dut" => translate(language, "Dutch"),
+        "ru" | "rus" => translate(language, "Russian"),
+        "uk" | "ukr" => translate(language, "Ukrainian"),
+        "pl" | "pol" => translate(language, "Polish"),
+        "cs" | "ces" | "cze" => translate(language, "Czech"),
+        "hu" | "hun" => translate(language, "Hungarian"),
+        "ro" | "ron" | "rum" => translate(language, "Romanian"),
+        "el" | "ell" | "gre" => translate(language, "Greek"),
+        "tr" | "tur" => translate(language, "Turkish"),
+        "ar" | "ara" => translate(language, "Arabic"),
+        "he" | "heb" => translate(language, "Hebrew"),
+        "fa" | "fas" | "per" => translate(language, "Persian"),
+        "hi" | "hin" => translate(language, "Hindi"),
+        "zh" | "zho" | "chi" => translate(language, "Chinese"),
+        "ja" | "jpn" => translate(language, "Japanese"),
+        "ko" | "kor" => translate(language, "Korean"),
+        "sv" | "swe" => translate(language, "Swedish"),
+        "da" | "dan" => translate(language, "Danish"),
+        "no" | "nor" | "nb" | "nob" => translate(language, "Norwegian"),
+        "fi" | "fin" => translate(language, "Finnish"),
         _ => return Some(code.trim().to_ascii_uppercase()),
     };
     Some(name.to_owned())
@@ -286,32 +320,46 @@ fn joined(parts: impl IntoIterator<Item = Option<String>>) -> String {
     parts.into_iter().flatten().collect::<Vec<_>>().join(" · ")
 }
 
-fn video_label(t: &VideoTrack, index: usize) -> String {
+fn video_label(t: &VideoTrack, index: usize, language: &Language) -> String {
     let size = (t.height > 0).then(|| format!("{}p", t.height));
     let label = joined([size, fps_label(t.fps), bitrate_label(t.bitrate)]);
     match (label.is_empty(), t.label.trim()) {
         (false, _) => label,
-        (true, "") => format!("Track {}", index + 1),
+        (true, "") => i18n::format(
+            language,
+            "Track {number}",
+            &[("number", (index + 1).into())],
+        ),
         (true, own) => own.to_owned(),
     }
 }
 
-fn audio_label(t: &AudioTrack, index: usize) -> String {
+fn audio_label(t: &AudioTrack, index: usize, language: &Language) -> String {
     let own = Some(t.label.trim().to_owned()).filter(|l| !l.is_empty());
-    let name = language_name(&t.language)
+    let name = language_name_in(&t.language, language)
         .or(own)
-        .unwrap_or_else(|| format!("Track {}", index + 1));
-    let layout = (t.channels > 0).then(|| audio_layout(t.channels));
+        .unwrap_or_else(|| {
+            i18n::format(
+                language,
+                "Track {number}",
+                &[("number", (index + 1).into())],
+            )
+        });
+    let layout = (t.channels > 0).then(|| audio_layout_in(t.channels, language));
     joined([Some(name), layout, codec_name(&t.codec)])
 }
 
-fn text_label(t: &TextTrack, index: usize) -> String {
+fn text_label(t: &TextTrack, index: usize, language: &Language) -> String {
     let own = Some(t.label.trim().to_owned()).filter(|l| !l.is_empty());
-    match (language_name(&t.language), own) {
+    match (language_name_in(&t.language, language), own) {
         (Some(lang), Some(own)) if !own.eq_ignore_ascii_case(&lang) => format!("{lang} · {own}"),
         (Some(lang), _) => lang,
         (None, Some(own)) => own,
-        (None, None) => format!("Track {}", index + 1),
+        (None, None) => i18n::format(
+            language,
+            "Track {number}",
+            &[("number", (index + 1).into())],
+        ),
     }
 }
 
@@ -363,6 +411,36 @@ mod tests {
             selected_video: None,
             selected_audio: Some("a2".into()),
             selected_text: None,
+        }
+    }
+
+    #[test]
+    fn localized_tracks_preserve_provider_labels_and_ids() {
+        let mut tracks = sample();
+        let japanese = i18n::resolve("ja", None);
+        assert_eq!(
+            tracks.entries_in(Kind::Audio, japanese)[0],
+            "英語 · ステレオ · AAC"
+        );
+        tracks.selected_text = Some("t1".into());
+        assert_eq!(
+            tracks.summary_in(Kind::Text, japanese).as_deref(),
+            Some("ドイツ語")
+        );
+        tracks.text[0].language.clear();
+        tracks.text[0].label = "French".into();
+        assert_eq!(
+            tracks.entries_in(Kind::Text, japanese)[1],
+            "French",
+            "provider labels that happen to match a catalogue key stay unchanged"
+        );
+        tracks.text[0].label.clear();
+        assert_eq!(tracks.entries_in(Kind::Text, japanese)[1], "トラック1");
+        assert_eq!(tracks.pick(Kind::Text, 1).as_deref(), Some("t1"));
+        for language in i18n::LANGUAGES {
+            assert_eq!(tracks.entries_in(Kind::Text, language).len(), 2);
+            assert!(!audio_layout_in(1, language).is_empty());
+            assert!(!language_name_in("eng", language).unwrap().is_empty());
         }
     }
 

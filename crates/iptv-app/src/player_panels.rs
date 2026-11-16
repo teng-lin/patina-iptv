@@ -16,7 +16,7 @@ use crate::i18n::{tr, trf};
 use iptv_core::panels::{CONTROLS, Control, QUICK_ACTIONS, Shown};
 use iptv_core::player_info::date_time;
 use iptv_core::sound::delay_label;
-use iptv_core::tracks::{Kind as Track, audio_layout};
+use iptv_core::tracks::{Kind as Track, audio_layout_in};
 use nsh_core::prelude::*;
 
 use crate::fonts::{OSD_BADGE, OSD_DETAIL, OSD_TEXT};
@@ -65,15 +65,19 @@ fn label(ui: Ui, control: Control) -> String {
             let playing = main.size.get().map(|(_, h)| format!("{h}p"));
             with(
                 tr("Video"),
-                tracks.with(|t| t.summary(Track::Video)).or(playing),
+                tracks
+                    .with(|t| t.summary_in(Track::Video, crate::i18n::language()))
+                    .or(playing),
             )
         }
         AudioTracks => {
             let ch = main.format.with(|f| f.channels);
-            let layout = (ch > 0).then(|| audio_layout(ch));
+            let layout = (ch > 0).then(|| audio_layout_in(ch, crate::i18n::language()));
             with(
                 tr("Audio"),
-                tracks.with(|t| t.summary(Track::Audio)).or(layout),
+                tracks
+                    .with(|t| t.summary_in(Track::Audio, crate::i18n::language()))
+                    .or(layout),
             )
         }
         AudioOffset => with(
@@ -87,7 +91,7 @@ fn label(ui: Ui, control: Control) -> String {
             tr("Subtitles"),
             Some(
                 tracks
-                    .with(|t| t.summary(Track::Text))
+                    .with(|t| t.summary_in(Track::Text, crate::i18n::language()))
                     .unwrap_or_else(|| tr("Off").to_owned()),
             ),
         ),
@@ -273,12 +277,12 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
                 if ui.player.vod.with(Option::is_some) {
                     if live() { tr("Video") } else { tr("Paused") }
                 } else if ui.player.recorded.with(Option::is_some) {
-                    if live() { tr("Recorded") } else { "PAUSED" }
+                    if live() { tr("Recorded") } else { tr("PAUSED") }
                 } else {
                     match (ui.playback.get(), live()) {
-                        (Playback::CatchUp { .. }, true) => "CATCH-UP",
-                        (_, true) => "LIVE",
-                        (_, false) => "PAUSED",
+                        (Playback::CatchUp { .. }, true) => tr("CATCH-UP"),
+                        (_, true) => tr("LIVE"),
+                        (_, false) => tr("PAUSED"),
                     }
                 }
             })

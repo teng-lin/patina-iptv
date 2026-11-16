@@ -318,6 +318,23 @@ impl Schedule for ListView {
         self.channel(row)
             .map_or_else(String::new, |c| self.catalog.title(c, program))
     }
+    fn title_in(&self, row: usize, program: Program, language: &crate::i18n::Language) -> String {
+        self.channel(row)
+            .map_or_else(String::new, |c| self.catalog.title_in(c, program, language))
+    }
+    fn group_name_in(&self, _group: usize, language: &crate::i18n::Language) -> String {
+        use crate::i18n::translate;
+        match Entry::at(self.list.entry()) {
+            Entry::Favorites => translate(language, "Favourites").to_owned(),
+            Entry::Recent => translate(language, "Recently watched").to_owned(),
+            Entry::Group(group) => self.catalog.group_name_in(group, language),
+            Entry::All => match self.catalog.all_channels_name().as_str() {
+                "All channels" => translate(language, "All channels").to_owned(),
+                "All playlists" => translate(language, "All playlists").to_owned(),
+                name => name.to_owned(),
+            },
+        }
+    }
     fn stream_url(&self, row: usize) -> Option<String> {
         self.catalog.stream_url(self.channel(row)?)
     }

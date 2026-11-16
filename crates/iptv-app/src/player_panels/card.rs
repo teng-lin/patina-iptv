@@ -24,7 +24,8 @@ fn secondary() -> Rgba {
 /// The group the playing channel is in (groups start in ascending order).
 pub(super) fn group_of(channel: usize) -> String {
     let s = crate::schedule();
-    iptv_core::lists::group_of(&*s, channel).map_or_else(String::new, |g| s.group_name(g))
+    iptv_core::lists::group_of(&*s, channel)
+        .map_or_else(String::new, |g| s.group_name_in(g, crate::i18n::language()))
 }
 
 /// The channel's logo address (imported channels with an http(s) logo).
@@ -236,7 +237,13 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
                         ui.player
                             .recorded
                             .with(|r| r.as_ref().map(|(j, _)| j.request.title.clone()))
-                            .unwrap_or_else(|| crate::schedule().title(channel(), now()))
+                            .unwrap_or_else(|| {
+                                crate::schedule().title_in(
+                                    channel(),
+                                    now(),
+                                    crate::i18n::language(),
+                                )
+                            })
                     })
                     .number_of_lines(1)
                     .text_size(px(OSD_TITLE))
@@ -254,7 +261,15 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
                             "Next  {time}  {title}",
                             &[
                                 ("time", (&clock(p.start)).into()),
-                                ("title", (&crate::schedule().title(channel(), p)).into()),
+                                (
+                                    "title",
+                                    (&crate::schedule().title_in(
+                                        channel(),
+                                        p,
+                                        crate::i18n::language(),
+                                    ))
+                                        .into(),
+                                ),
                             ],
                         )
                     })
@@ -289,11 +304,17 @@ pub(super) fn banner(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> impl 
                         .text_color(rgb(WHITE)),
                 )
                 .child(
-                    text(move || crate::schedule().title(channel(), programme(ui).1))
-                        .flex_1()
-                        .number_of_lines(1)
-                        .text_size(px(OSD_TEXT))
-                        .text_color(rgb(WHITE)),
+                    text(move || {
+                        crate::schedule().title_in(
+                            channel(),
+                            programme(ui).1,
+                            crate::i18n::language(),
+                        )
+                    })
+                    .flex_1()
+                    .number_of_lines(1)
+                    .text_size(px(OSD_TEXT))
+                    .text_color(rgb(WHITE)),
                 ),
         )
         .child(time_line(ui))

@@ -56,7 +56,7 @@ fn label(item: MenuItem, favorite: bool) -> &'static str {
         Reminder => tr("Remind me"),
         Record => tr("Record"),
         CustomRecording => tr("Schedule a recording…"),
-        SaveToList => "Save to my list",
+        SaveToList => tr("Save to my list"),
         Description => tr("Details"),
         ToggleFavorite if favorite => tr("Remove from favourites"),
         ToggleFavorite => tr("Add to favourites"),
@@ -67,16 +67,16 @@ fn label(item: MenuItem, favorite: bool) -> &'static str {
         ChannelOptions => tr("Channel options…"),
         ManageFavorites => tr("Manage favourites…"),
         ManageBlocked => tr("Manage blocked channels…"),
-        ManageHidden => "Manage hidden channels…",
+        ManageHidden => tr("Manage hidden channels…"),
         ReorderChannels => tr("Reorder channels"),
-        CopyChannels => "Copy channels to a group…",
+        CopyChannels => tr("Copy channels to a group…"),
         CreateGroup => tr("New group…"),
         GroupOptions => tr("Group options…"),
     }
 }
 
 fn title(channel: usize, p: crate::guide::Program) -> String {
-    crate::schedule().title(channel, p)
+    crate::schedule().title_in(channel, p, crate::i18n::language())
 }
 
 /// Long OK / Menu: the menu for the focused programme (in full screen, the

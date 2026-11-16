@@ -83,7 +83,11 @@ impl Mark {
 
 /// A list's virtual-list estimate: the pitch `pitch` at the scale now.
 pub fn pitch(size: Scale, pitch: f32) -> impl Fn() -> Points + Copy {
-    move || px(size.whole(pitch))
+    move || px(size.whole(text_pitch(pitch)))
+}
+
+fn text_pitch(pitch: f32) -> f32 {
+    pitch * (crate::settings::font_factor() * font_scale()).max(1.0)
 }
 
 /// A row `pitch` apart from the next (its fill [`GAP`] in from both), its
@@ -100,7 +104,7 @@ pub fn row_with(
 ) -> View {
     view()
         .role(AccessibilityRole::Row)
-        .h(move || px(size.whole(pitch()) - 2.0 * size.whole(GAP)))
+        .h(move || px(size.whole(text_pitch(pitch())) - 2.0 * size.whole(GAP)))
         .my(move || px(size.whole(GAP)))
         .px(move || size.px(INSET))
         .justify_center()

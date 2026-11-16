@@ -40,6 +40,12 @@ fn status_of(ui: Ui) -> Status {
     if crate::multiview::is_open(ui) {
         return Status::Hidden; // each tile shows its own
     }
+    let detail_text = |detail: &str| match detail {
+        "no stream" => tr("no stream").to_owned(),
+        "no channel" => tr("no channel").to_owned(),
+        "no account" => tr("no account").to_owned(),
+        _ => detail.to_owned(),
+    };
     let catch_up = matches!(ui.playback.get(), Playback::CatchUp { .. });
     let now = ui.now_ms();
     ui.player
@@ -49,19 +55,30 @@ fn status_of(ui: Ui) -> Status {
             (Phase::Idle, _) if catch_up || demand => Status::Over,
             // Retries may go on behind the card: it goes once the stream plays.
             (_, Some(f)) => Status::Failed {
-                title: format!(
-                    "Can't play {}",
-                    crate::on_demand::title(ui)
-                        .unwrap_or_else(|| channel_name(channel.unwrap_or(0)))
+                title: trf(
+                    "Can't play {name}",
+                    &[(
+                        "name",
+                        crate::on_demand::title(ui)
+                            .unwrap_or_else(|| channel_name(channel.unwrap_or(0)))
+                            .as_str()
+                            .into(),
+                    )],
                 ),
                 message: failure_message(&f.kind, catch_up),
                 detail: match (f.attempts, f.retrying) {
-                    (_, true) => trf("{detail} · still trying", &[("detail", (&f.detail).into())]),
-                    (0, false) => f.detail.clone(),
+                    (_, true) => trf(
+                        "{detail} · still trying",
+                        &[("detail", detail_text(&f.detail).as_str().into())],
+                    ),
+                    (0, false) => detail_text(&f.detail),
                     (n, false) => trf(
                         "{count, plural, one {{detail} · tried # time} \
                          other {{detail} · tried # times}}",
-                        &[("detail", (&f.detail).into()), ("count", n.into())],
+                        &[
+                            ("detail", detail_text(&f.detail).as_str().into()),
+                            ("count", n.into()),
+                        ],
                     ),
                 },
             },
@@ -120,7 +137,7 @@ pub fn status(ui: Ui) -> impl IntoElement {
                     text(move || match status.get() {
                         Status::Failed { title, .. } => title,
                         _ if crate::on_demand::active(ui) => tr("Playback finished").into(),
-                        _ => "The programme has ended".to_owned(),
+                        _ => tr("The programme has ended").to_owned(),
                     })
                     .text_size(move || size(OSD_TITLE))
                     .font_weight(FontWeight::BOLD)
@@ -130,7 +147,7 @@ pub fn status(ui: Ui) -> impl IntoElement {
                     text(move || match status.get() {
                         Status::Failed { message, .. } => message,
                         _ if crate::on_demand::active(ui) => String::new(),
-                        _ => "Next (⏭) returns to live.".to_owned(),
+                        _ => tr("Next (⏭) returns to live.").to_owned(),
                     })
                     .text_size(move || size(OSD_TEXT))
                     .text_color(secondary()),
@@ -148,7 +165,7 @@ pub fn status(ui: Ui) -> impl IntoElement {
                         if crate::on_demand::active(ui) && !failed() {
                             tr("Play again").to_owned()
                         } else if ui.keys_shown() {
-                            "OK  Try again".to_owned()
+                            tr("OK  Try again").to_owned()
                         } else {
                             tr("Try again").to_owned()
                         }

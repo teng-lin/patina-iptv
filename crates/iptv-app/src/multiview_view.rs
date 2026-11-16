@@ -34,7 +34,7 @@ const LONG_PRESS_MS: f32 = 800.0;
 
 fn warning_label(choice: WarningChoice) -> &'static str {
     match choice {
-        WarningChoice::AddAnyway => "Add it anyway",
+        WarningChoice::AddAnyway => tr("Add it anyway"),
         WarningChoice::Cancel => tr("Cancel"),
     }
 }
@@ -247,7 +247,7 @@ fn warning_content(ui: Ui) -> (String, String, usize) {
                  other {Your account allows # streams at once}}",
                 &[("count", (*allowed).into())],
             ),
-            "Another one may not play, or may stop one that is playing.".to_owned(),
+            tr("Another one may not play, or may stop one that is playing.").to_owned(),
             *focus,
         ),
         _ => (String::new(), String::new(), 0),

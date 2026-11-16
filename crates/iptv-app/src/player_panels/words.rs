@@ -32,18 +32,18 @@ pub(crate) fn hint(
 ) -> &'static str {
     let remote = profile == Profile::Remote;
     match (shown, card_focused) {
-        (Shown::Card, false) if remote => "◀ ▶ actions   OK hide   Hold OK more controls",
-        (Shown::Card, false) => "◀ ▶ actions   Enter hide   M more controls",
-        (Shown::Card, true) if remote => "◀ ▶ move   OK choose   Back hide",
-        (Shown::Card, true) => "◀ ▶ move   Enter choose   Esc hide",
-        (Shown::Controls, _) if remote => "◀ ▶ move   OK choose   Menu or Back hide",
-        (Shown::Controls, _) => "◀ ▶ move   Enter choose   M or Esc hide",
+        (Shown::Card, false) if remote => tr("◀ ▶ actions   OK hide   Hold OK more controls"),
+        (Shown::Card, false) => tr("◀ ▶ actions   Enter hide   M more controls"),
+        (Shown::Card, true) if remote => tr("◀ ▶ move   OK choose   Back hide"),
+        (Shown::Card, true) => tr("◀ ▶ move   Enter choose   Esc hide"),
+        (Shown::Controls, _) if remote => tr("◀ ▶ move   OK choose   Menu or Back hide"),
+        (Shown::Controls, _) => tr("◀ ▶ move   Enter choose   M or Esc hide"),
         (Shown::Info, _) => match seek {
-            Some("left_right") if remote => "◀ ▶ seek (hold: faster)   OK play or pause",
-            Some("left_right") => "◀ ▶ seek   Enter play or pause",
-            Some("down_up") if remote => "▼ ▲ seek (hold: faster)   OK play or pause",
-            Some("down_up") => "▼ ▲ seek   Enter play or pause",
-            Some(_) => "⏪ ⏩ seek",
+            Some("left_right") if remote => tr("◀ ▶ seek (hold: faster)   OK play or pause"),
+            Some("left_right") => tr("◀ ▶ seek   Enter play or pause"),
+            Some("down_up") if remote => tr("▼ ▲ seek (hold: faster)   OK play or pause"),
+            Some("down_up") => tr("▼ ▲ seek   Enter play or pause"),
+            Some(_) => tr("⏪ ⏩ seek"),
             None => "",
         },
         _ => "",
@@ -79,7 +79,7 @@ fn refused_message() -> String {
              other {Your provider allows # streams at once — another device may be using one.}}",
             &[("count", n.into())],
         ),
-        None => "The provider is refusing this stream for now.".into(),
+        None => tr("The provider is refusing this stream for now.").into(),
     }
 }
 

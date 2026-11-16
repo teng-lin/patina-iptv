@@ -167,6 +167,19 @@ pub trait Schedule {
     }
 
     fn title(&self, channel: usize, program: Program) -> String;
+    /// Translate generated gap/loading labels only; provider titles stay opaque.
+    fn title_in(
+        &self,
+        channel: usize,
+        program: Program,
+        _language: &crate::i18n::Language,
+    ) -> String {
+        self.title(channel, program)
+    }
+    /// Generated group labels may be translated by adapters that know their origin.
+    fn group_name_in(&self, group: usize, _language: &crate::i18n::Language) -> String {
+        self.group_name(group)
+    }
     /// The channel's live stream URL, when the schedule knows it.
     fn stream_url(&self, _channel: usize) -> Option<String> {
         None

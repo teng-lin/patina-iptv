@@ -4,7 +4,7 @@
 //! Default provenance markers as in `general.rs`. The parental PIN itself
 //! is a secret, not a setting: it lives in the platform's secret store.
 
-use super::choices::*;
+use super::{choices::*, key};
 use crate::schema::*;
 use crate::scope::Scope;
 
@@ -63,28 +63,28 @@ pub static HISTORY: &[Setting] = &[
         "history",
         "history.keep_days",
         days(1, 90, 1, 30),
-        "Watched channels and programmes are forgotten after this many days.",
+        key("Watched channels and programmes are forgotten after this many days."),
     ),
     // default: ours
     history(
         "history",
         "history.add_after",
         secs(0, 600, 5, 60),
-        "A channel enters history only after playing this long.",
+        key("A channel enters history only after playing this long."),
     ),
     // default: ours
     history(
         "recent",
         "history.recent_count",
         int(1, 20, 1, IntUnit::Count, 10),
-        "Length of the quick-switch list of recent channels.",
+        key("Length of the quick-switch list of recent channels."),
     ),
     // default: ours
     history(
         "recent",
         "history.recent_add_after",
         secs(0, 120, 1, 10),
-        "A channel enters the recent list only after playing this long.",
+        key("A channel enters the recent list only after playing this long."),
     ),
 ];
 
@@ -93,31 +93,31 @@ pub static SEARCH: &[Setting] = &[
     search(
         "search.prefer_voice",
         boolean(false),
-        "Open search with voice input focused instead of the text field.",
+        key("Open search with voice input focused instead of the text field."),
     ),
     // default: ours
     search(
         "search.favorites_first",
         boolean(true),
-        "Rank favourite channels above other matches.",
+        key("Rank favourite channels above other matches."),
     ),
     // default: ours
     search(
         "search.show_history",
         boolean(true),
-        "Offer earlier queries before typing starts.",
+        key("Offer earlier queries before typing starts."),
     ),
     // default: ours
     search(
         "search.include_past_without_catchup",
         boolean(false),
-        "Also match finished programmes that cannot be replayed.",
+        key("Also match finished programmes that cannot be replayed."),
     ),
     // default: ours
     search(
         "search.stay_on_search",
         boolean(false),
-        "Return to the results, keeping query and focus, after choosing a channel.",
+        key("Return to the results, keeping query and focus, after choosing a channel."),
     ),
 ];
 
@@ -127,49 +127,49 @@ pub static RECORDINGS: &[Setting] = &[
         "recording",
         "recordings.folder",
         text(TextKind::Path, 1024, ""),
-        "Where recordings are written; empty uses app storage.",
+        key("Where recordings are written; empty uses app storage."),
     ),
     // default: ours
     recordings(
         "recording",
         "recordings.format",
         choice(&RECORDING_FORMAT, "ts"),
-        "Container recordings are saved in.",
+        key("Container recordings are saved in."),
     ),
     // default: ours
     recordings(
         "recording",
         "recordings.lead_padding",
         mins(0, 60, 1, 1),
-        "Start a programme recording this early.",
+        key("Start a programme recording this early."),
     ),
     // default: ours
     recordings(
         "recording",
         "recordings.trail_padding",
         mins(0, 120, 1, 5),
-        "Keep recording this long after the programme's scheduled end.",
+        key("Keep recording this long after the programme's scheduled end."),
     ),
     // default: ours
     recordings(
         "reminders",
         "recordings.reminder_lead",
         mins(0, 60, 1, 5),
-        "A reminder fires this long before its programme starts.",
+        key("A reminder fires this long before its programme starts."),
     ),
     // default: ours
     recordings(
         "reminders",
         "recordings.reminder_action",
         choice(&REMINDER_ACTION, "ask"),
-        "What a due reminder does: ask, tune straight away, or only notify.",
+        key("What a due reminder does: ask, tune straight away, or only notify."),
     ),
     // default: ours
     recordings(
         "reminders",
         "recordings.reminder_popup_timeout",
         secs(5, 120, 5, 30),
-        "How long a reminder prompt waits before dismissing itself.",
+        key("How long a reminder prompt waits before dismissing itself."),
     )
     .depends(&[visible_if(&[when(
         "recordings.reminder_action",
@@ -180,7 +180,7 @@ pub static RECORDINGS: &[Setting] = &[
         "reminders",
         "recordings.reminder_wake",
         boolean(false),
-        "Wake the device from standby for a reminder, where the platform allows it.",
+        key("Wake the device from standby for a reminder, where the platform allows it."),
     ),
 ];
 
@@ -195,21 +195,21 @@ pub static PARENTAL: &[Setting] = &[
         "scope",
         "parental.live_enabled",
         boolean(false),
-        "Blocked live channels and groups need the PIN.",
+        key("Blocked live channels and groups need the PIN."),
     ),
     // default: ours
     parental(
         "scope",
         "parental.vod_enabled",
         boolean(false),
-        "Blocked movies and series need the PIN.",
+        key("Blocked movies and series need the PIN."),
     ),
     // default: ours
     parental(
         "scope",
         "parental.require_pin_for",
         choice(&PIN_SCOPE, "blocked_content"),
-        "What the PIN guards: blocked content only, or settings as well.",
+        key("What the PIN guards: blocked content only, or settings as well."),
     )
     .depends(IF_PARENTAL),
     // default: ours
@@ -217,7 +217,7 @@ pub static PARENTAL: &[Setting] = &[
         "scope",
         "parental.pin_input",
         choice(&PIN_INPUT, "keypad"),
-        "Enter the PIN on an on-screen keypad or with the remote's number keys.",
+        key("Enter the PIN on an on-screen keypad or with the remote's number keys."),
     )
     .depends(IF_PARENTAL),
     // default: ours
@@ -225,7 +225,7 @@ pub static PARENTAL: &[Setting] = &[
         "unlock",
         "parental.unlock_window",
         choice(&UNLOCK_WINDOW, "every_time"),
-        "How long a correct PIN keeps blocked content unlocked.",
+        key("How long a correct PIN keeps blocked content unlocked."),
     )
     .depends(IF_PARENTAL),
 ];
@@ -236,28 +236,30 @@ pub static REMOTE: &[Setting] = &[
         "timing",
         "remote.long_press",
         dur(TimeUnit::Millis, 200, 2_000, 50, 400),
-        "Hold a key this long for its long-press action.",
+        key("Hold a key this long for its long-press action."),
     ),
     // default: ours
     remote(
         "timing",
         "remote.digit_timeout",
         dur(TimeUnit::Millis, 500, 5_000, 100, 1_500),
-        "Typed channel numbers are committed after this pause.",
+        key("Typed channel numbers are committed after this pause."),
     ),
     // default: the reference's (Up/Down switch channels in full screen)
     remote(
         "mapping",
         "remote.player_up_down",
         choice(&PLAYER_UP_DOWN, "switch_channels"),
-        "What Up and Down do over full-screen video: switch channels or open the channel list.",
+        key(
+            "What Up and Down do over full-screen video: switch channels or open the channel list.",
+        ),
     ),
     // default: ours — empty: only the built-in map applies
     remote(
         "mapping",
         "remote.key_overrides",
         bindings(256),
-        "User changes to the key → action map, applied over the built-in defaults.",
+        key("User changes to the key → action map, applied over the built-in defaults."),
     ),
 ];
 
@@ -267,28 +269,28 @@ pub static VOD: &[Setting] = &[
         "catalogue",
         "vod.movies_by_category",
         boolean(true),
-        "Split the full movie list into its categories.",
+        key("Split the full movie list into its categories."),
     ),
     // default: ours
     vod(
         "catalogue",
         "vod.shows_by_category",
         boolean(true),
-        "Split the full series list into its categories.",
+        key("Split the full series list into its categories."),
     ),
     // default: ours
     vod(
         "catalogue",
         "vod.card_style",
         choice(&CARD_STYLE, "poster"),
-        "Shape of movie and series tiles.",
+        key("Shape of movie and series tiles."),
     ),
     // default: ours
     vod(
         "catalogue",
         "vod.sort",
         choice(&VOD_SORT, "playlist_order"),
-        "Order of movies and series; a playlist may override it.",
+        key("Order of movies and series; a playlist may override it."),
     )
     .scope(Scope::Playlist),
     // default: ours
@@ -296,7 +298,7 @@ pub static VOD: &[Setting] = &[
         "playback",
         "vod.autoplay_next_episode",
         boolean(true),
-        "Continue with the next episode when one ends.",
+        key("Continue with the next episode when one ends."),
     ),
 ];
 

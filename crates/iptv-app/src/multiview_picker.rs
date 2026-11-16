@@ -257,9 +257,9 @@ fn screen(ui: Ui) -> impl IntoElement {
         .child(header(ui, size))
         .child(ui_kit::caption(size, move || {
             if ui.keys_shown() {
-                "▲▼ move   ◀▶ groups / channels   OK choose   Back clear search or close"
+                tr("▲▼ move   ◀▶ groups / channels   OK choose   Back clear search or close")
             } else {
-                "Choose a group or search its channels, then tap a channel"
+                tr("Choose a group or search its channels, then tap a channel")
             }
         }))
         .child(
@@ -291,9 +291,9 @@ fn screen(ui: Ui) -> impl IntoElement {
                             move || state(ui, |p| p.channels().is_empty()).unwrap_or(false),
                             move || ui_kit::body(size, move || {
                                 if state(ui, |p| p.query().trim().is_empty()).unwrap_or(true) {
-                                    "No channels in this group. Choose another group."
+                                    tr("No channels in this group. Choose another group.")
                                 } else {
-                                    "No matching channels. Clear the search or choose another group."
+                                    tr("No matching channels. Clear the search or choose another group.")
                                 }
                             }),
                         ))
@@ -346,7 +346,7 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
                 .flex_1()
                 .test_id("multiview-channel-search")
                 .value(move || state(ui, |p| p.query().to_owned()).unwrap_or_default())
-                .placeholder("Search this group by channel or number")
+                .placeholder(move || tr("Search this group by channel or number"))
                 .auto_capitalize(AutoCapitalize::None)
                 .auto_correct(false)
                 .return_key_type(ReturnKeyType::Search)
@@ -444,7 +444,7 @@ fn channel_row(ui: Ui, at: Position, size: Scale, row: Memo<Option<usize>>) -> i
                     format!(
                         "{}  {}",
                         clock(programme.start),
-                        catalog.title(channel.index, programme)
+                        catalog.title_in(channel.index, programme, crate::i18n::language())
                     )
                 },
                 CONDENSED,

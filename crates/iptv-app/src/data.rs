@@ -7,8 +7,8 @@ pub(crate) mod stored;
 use crate::Ui;
 pub use crate::runtime::data::{
     Activity, DEV_PLAYLIST, Job, Playlist, Purpose, Update, delete, edit_guides, refresh,
-    refresh_all, rename, set_policy, set_user_agent, source_from_draft, start_import, switch_all,
-    switch_to, try_details,
+    refresh_all, rename, set_policy, set_user_agent, source_from_draft_in, start_import,
+    switch_all, switch_to, try_details,
 };
 pub use crate::runtime::data::{assign, combined, organization};
 pub use crate::runtime::guides;

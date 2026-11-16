@@ -4,6 +4,8 @@
 //! (grey) over the programmes and the now line's dot, sliding with them
 //! (`pan.rs`); and a thin line under it all.
 
+use crate::i18n::tr;
+
 use super::BAND;
 use iptv_core::timeline::MARGIN;
 use nsh_core::prelude::*;
@@ -32,7 +34,7 @@ pub(super) fn ruler(
     now_x: Memo<Option<f32>>,
     width: Signal<f32>,
 ) -> impl IntoElement {
-    let button = move |label: &'static str| {
+    let button = move |label: fn() -> &'static str| {
         text(label)
             .role(AccessibilityRole::Button)
             .px(move || size.px(10.0))
@@ -42,7 +44,7 @@ pub(super) fn ruler(
             .font_family(SANS)
             .text_size(move || size.text_px(RULER))
     };
-    let shift = move |label: &'static str, minutes: i32| {
+    let shift = move |label: fn() -> &'static str, minutes: i32| {
         button(label).on_press(move || {
             ui.touched();
             let view = crate::lists::view(ui);
@@ -52,7 +54,7 @@ pub(super) fn ruler(
     // Back to now, once the view left it.
     let now_button = when(
         move || pan.away(),
-        move || button("Now").on_press(move || pan.to_now()),
+        move || button(|| tr("Now")).on_press(move || pan.to_now()),
     );
     // Enlarged text needs room for localized 12-hour labels (including
     // the day period). Use hourly ticks rather than ellipsizing minutes.
@@ -111,7 +113,7 @@ pub(super) fn ruler(
                         .child(now_button)
                         .children(
                             (!crate::IOS)
-                                .then(|| [shift("‹", -STEP), shift("›", STEP)])
+                                .then(|| [shift(|| "‹", -STEP), shift(|| "›", STEP)])
                                 .into_iter()
                                 .flatten(),
                         ),
