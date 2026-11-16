@@ -280,7 +280,20 @@ fn row_view(
                     Value::Colour(v) => swatch_colour(&s.ty, v),
                     _ => None,
                 };
-                (words::value(s, &value), swatch)
+                (
+                    if s.key == "playlists.max_connections"
+                        && settings
+                            .source(s.key, &iptv_settings::Target::Global)
+                            .ok()
+                            .flatten()
+                            .is_none()
+                    {
+                        tr("Automatic").to_owned()
+                    } else {
+                        words::value(s, &value)
+                    },
+                    swatch,
+                )
             }
             Some(Row::Command(c)) => {
                 ui.data_version.get();

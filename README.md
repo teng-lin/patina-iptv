@@ -295,10 +295,13 @@ cancel recordings that were already authorized.
 
 ## Recordings on TV, tablet and desktop
 
-Choose **Record** or **Schedule a recording…** in a programme's menu. The
-programme details and full-screen controls also offer recording. On a TV, use
-the remote's Menu/long OK or Record key; Up/Down chooses a form row and
-Left/Right changes its value. Touch and mouse users have labelled −/+ buttons.
+Choose **Record** on the play bar to start recording the playing live channel
+immediately; playback continues. Repeated presses do not create duplicate jobs.
+For a future programme, right-click on desktop or long-press on touch/TV, then
+choose **Schedule a recording…**. Its date, time, duration and name are prefilled.
+On a TV, Menu/long OK also opens the programme menu. Up/Down chooses a form row,
+Left/Right changes its value, and Select opens an exact date/time/name editor.
+Touch and mouse users can open those fields or use the labelled −/+ buttons.
 The navigation rail's **Recordings** entry manages current, scheduled and
 finished recordings. Cancel removes a schedule; Stop retains captured media;
 Delete removes media after confirmation. A dot marks recording programmes in
@@ -329,8 +332,10 @@ the player uses its normal pause, rewind, fast-forward and seek bar controls.
 Interrupted jobs retain captured media and recover the remaining window when
 possible; gaps and missed windows are reported. Reminders and network recording
 destinations remain outside this feature. Provider accounts need enough
-connections for watching plus recording. **Settings → Other → Streams at once** sets a local
-ceiling (default one); known provider limits still apply. Accounts identified
+connections for watching plus recording. **Settings → Other → Streams at once**
+uses the reported provider allowance automatically, or one connection when the
+allowance is unknown. An explicit local ceiling and known provider limits still
+apply. Watching and recording currently use separate upstream connections. Accounts identified
 as the same Xtream/portal account share their budget. M3U account associations
 are unknown and are counted conservatively against other streams.
 

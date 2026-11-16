@@ -115,6 +115,17 @@ pub fn label(unix: i64, now: i64) -> String {
     iptv_core::clock::label(unix, now, offset_minutes, crate::i18n::clock_style())
 }
 
+/// A calendar date without a time, for date selectors.
+pub fn date_only(unix: i64) -> String {
+    iptv_core::clock::date(unix, offset_minutes(unix), crate::i18n::clock_style())
+}
+
+/// A local clock time without a date, respecting the chosen hour cycle.
+pub fn time_only(unix: i64) -> String {
+    let minute = unix.div_euclid(60) + i64::from(offset_minutes(unix));
+    iptv_core::clock::time(minute, crate::i18n::clock_style())
+}
+
 /// Moves the guide's now when the minute changed.
 pub fn tick(ui: Ui) {
     reload_time_zone();

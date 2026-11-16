@@ -507,9 +507,11 @@ fn right(ui: Ui) -> impl IntoElement {
             ui,
             "Record",
             || Icon::Record,
-            move || ui.player_surface == 0 && playing(),
+            move || {
+                ui.player_surface == 0 && playing() && ui.playback.get() == crate::Playback::Live
+            },
             size,
-            move || crate::recordings_view::current(ui),
+            move || crate::recordings_view::record_now(ui),
         ))
         .child(button(
             ui,

@@ -142,7 +142,7 @@ pub fn program_actions(program: Program, catchup_days: u8, now: i32) -> Vec<Menu
         Airing::Live => vec![ExternalPlayer, Record],
         Airing::Ended if in_archive => vec![StartFromBeginning, ExternalPlayer],
         Airing::Ended => vec![],
-        Airing::Upcoming => vec![Reminder, Record],
+        Airing::Upcoming => vec![Reminder],
     };
     items.extend([CustomRecording, SaveToList, Description]);
     items
@@ -254,7 +254,7 @@ mod tests {
         );
         assert_eq!(
             program_actions(FUTURE, 3, 0),
-            [Reminder, Record, CustomRecording, SaveToList, Description]
+            [Reminder, CustomRecording, SaveToList, Description]
         );
     }
 
