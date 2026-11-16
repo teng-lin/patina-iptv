@@ -1167,7 +1167,20 @@ fn exercise_preparing(
             seek["ms"], 37_000,
             "the authoritative new timeline receives the preserved resume request"
         );
-        app.engine().control().dispatch_event(surface, EventKind::NativeEvent, EventPayload::Native { name:"timeline".into(), data:json!({"token":token,"seekId":seek["id"],"ms":37000,"durationMs":120000,"seekable":true}) });
+        app.engine().control().dispatch_event(
+            surface,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: "timeline".into(),
+                data: json!({
+                    "token": token,
+                    "seekId": seek["id"],
+                    "ms": 37000,
+                    "durationMs": 120000,
+                    "seekable": true
+                }),
+            },
+        );
         app.settle();
         step(app.wait_until(
             "seek controls re-enable after publication",
