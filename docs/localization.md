@@ -233,7 +233,10 @@ choice comes from the backup. A pseudolocalized scenario exercises large app tex
 plus system font scaling at TV, tablet and desktop sizes. Settings list labels
 keep a single line with ellipsis and their complete accessible name; the fixture
 checks on-screen placement and accessible wording rather than claiming that
-every expanded label fits without truncation. A Japanese help fixture measures
+every expanded label fits without truncation. Rows and virtual-list estimates
+scale with both app and system text size; the stress fixture measures uncapped
+single-line height for a two-line settings row to catch vertical overlap.
+A Japanese help fixture measures
 the uncapped text against its available height to detect clipping. Headless geometry and
 synthetic emulator checks do not substitute for native font rendering, TalkBack,
 VoiceOver or real hardware checks; record those results separately.

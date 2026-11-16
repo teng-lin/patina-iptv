@@ -545,6 +545,46 @@ fn pseudolocalized_labels_keep_their_accessible_name_at_large_text_sizes() {
             nsh_core::prelude::px(width),
             nsh_core::prelude::px(height),
         )));
+        // Focus/scroll through the real settings model. Larger rows can put
+        // the desired control below the fold; identity-based focus reveals it.
+        step(app.press_key("right"));
+        for _ in 0..20 {
+            step(app.press_key("up"));
+        }
+        step(app.press_key("down")); // Restore: a title plus a second-line note.
+        shown(
+            app,
+            expanded("Replace everything with a backup's contents."),
+        );
+        let rows = app.screen().layout_nodes();
+        for source in ["Restore a backup", "Takes effect after a restart"] {
+            let label = expanded(source);
+            let text = rows
+                .iter()
+                .filter_map(|node| node.text.as_ref())
+                .find(|text| text.text.text == label)
+                .expect("two-line settings row");
+            let mut full = (*text.text).clone();
+            full.max_lines = 0;
+            full.no_wrap = true; // Horizontal ellipsis is intentional; vertical clipping is not.
+            use nsh_core::{ApproxTextEngine, TextEngine};
+            let engine = ApproxTextEngine;
+            let needed = engine.measure(&engine.prepare(&full), None);
+            assert!(
+                needed.height.0 <= text.content.size.height.0 + 1.0,
+                "{idiom:?}: {source} needs {needed:?}, given {:?}",
+                text.content
+            );
+        }
+        let summary =
+            expanded("Start playing the channel that was on when the app was last closed.");
+        for _ in 0..20 {
+            if app.shows(summary) {
+                break;
+            }
+            step(app.press_key("down"));
+        }
+        shown(app, summary);
         let wanted = expanded("Play the last channel on start");
         shown(app, wanted);
         let nodes = app.screen().layout_nodes();
