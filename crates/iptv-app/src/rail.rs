@@ -27,7 +27,7 @@ const ICON: f32 = 22.0;
 /// The rail's width now (0 while the guide has the focus).
 pub fn width(ui: Ui) -> f32 {
     match ui.focus.with(|f| f.pane) {
-        Pane::Guide => 0.0,
+        Pane::Guide | Pane::Preview => 0.0,
         Pane::Groups => RAIL_W,
         Pane::Rail => RAIL_OPEN_W,
     }

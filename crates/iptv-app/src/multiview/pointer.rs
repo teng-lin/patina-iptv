@@ -63,7 +63,7 @@ pub fn chrome_shows(ui: Ui) -> bool {
     ui.mode.get() == ViewMode::Fullscreen
         && !ui.keys_shown()
         && ui.play_bar.with(|b| b.shown)
-        && crate::play_bar::available()
+        && crate::play_bar::pointer_available()
         && ui.multiview.with(|m| {
             m.as_ref()
                 .is_some_and(|m| m.detour().is_none() && m.dialog().is_none() && m.pick().is_none())
@@ -72,7 +72,7 @@ pub fn chrome_shows(ui: Ui) -> bool {
 
 /// A tap on a tile shows the chrome (a tablet has no moving pointer).
 fn show_chrome(ui: Ui) {
-    if crate::play_bar::available() {
+    if crate::play_bar::pointer_available() {
         crate::play_bar::pointer_moved(ui);
     }
 }

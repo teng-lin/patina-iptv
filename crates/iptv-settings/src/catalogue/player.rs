@@ -2,7 +2,7 @@
 //!
 //! Default provenance markers as in `general.rs`.
 
-use super::choices::*;
+use super::{choices::*, key};
 use crate::schema::*;
 use crate::scope::Scope;
 
@@ -42,28 +42,28 @@ pub static PLAYER: &[Setting] = &[
         "panels",
         "player.info_panel_timeout",
         secs(1, 30, 1, 4),
-        "The info panel hides itself after this long without input.",
+        key("The info panel hides itself after this long without input."),
     ),
     // default: ours (iptv-core panels::Timeouts)
     player(
         "panels",
         "player.controls_panel_timeout",
         secs(1, 60, 1, 7),
-        "The control panel hides itself after this long without input.",
+        key("The control panel hides itself after this long without input."),
     ),
     // default: ours
     player(
         "panels",
         "player.info_on_switch",
         boolean(true),
-        "Flash the info panel whenever the channel changes in full screen.",
+        key("Flash the info panel whenever the channel changes in full screen."),
     ),
     // default: ours
     player(
         "panels",
         "player.switch_info_at_bottom",
         boolean(true),
-        "Place that channel-change info panel along the bottom edge.",
+        key("Place that channel-change info panel along the bottom edge."),
     )
     .depends(&[visible_if(&[when("player.info_on_switch", Test::IsTrue)])]),
     // default: ours
@@ -71,21 +71,21 @@ pub static PLAYER: &[Setting] = &[
         "panels",
         "player.description_on_switch_only",
         boolean(false),
-        "Include the programme description only in the channel-change panel.",
+        key("Include the programme description only in the channel-change panel."),
     ),
     // default: ours
     player(
         "info",
         "player.show_media_info",
         boolean(true),
-        "List stream properties (resolution, frame rate, audio format) in the info panel.",
+        key("List stream properties (resolution, frame rate, audio format) in the info panel."),
     ),
     // default: ours
     player(
         "info",
         "player.numeric_resolution",
         boolean(false),
-        "Write resolution as pixel dimensions rather than a quality tag.",
+        key("Write resolution as pixel dimensions rather than a quality tag."),
     )
     .depends(&[visible_if(&[when("player.show_media_info", Test::IsTrue)])]),
     // default: ours
@@ -93,14 +93,14 @@ pub static PLAYER: &[Setting] = &[
         "clock",
         "player.clock",
         boolean(true),
-        "Keep a clock on screen.",
+        key("Keep a clock on screen."),
     ),
     // default: ours
     player(
         "clock",
         "player.clock_date",
         boolean(false),
-        "Add the date to the clock.",
+        key("Add the date to the clock."),
     )
     .depends(&[enabled_if(&[when("player.clock", Test::IsTrue)])]),
     // default: ours
@@ -108,7 +108,7 @@ pub static PLAYER: &[Setting] = &[
         "clock",
         "player.clock_position",
         choice(&CORNER, "top_right"),
-        "Screen corner the clock sits in.",
+        key("Screen corner the clock sits in."),
     )
     .depends(IF_CLOCK),
     // default: ours
@@ -116,7 +116,7 @@ pub static PLAYER: &[Setting] = &[
         "clock",
         "player.clock_size",
         choice(&CLOCK_SIZE, "medium"),
-        "Clock text scale.",
+        key("Clock text scale."),
     )
     .depends(IF_CLOCK),
     // default: ours
@@ -124,14 +124,14 @@ pub static PLAYER: &[Setting] = &[
         "buttons",
         "player.history_button",
         boolean(true),
-        "Offer a history shortcut in the control panel.",
+        key("Offer a history shortcut in the control panel."),
     ),
     // default: ours
     player(
         "buttons",
         "player.guide_button",
         boolean(true),
-        "Offer a guide shortcut in the control panel.",
+        key("Offer a guide shortcut in the control panel."),
     ),
     // default: ours (iptv-core pip::OnLeave::Auto: on phones and tablets,
     // off on a TV)
@@ -139,7 +139,7 @@ pub static PLAYER: &[Setting] = &[
         "pip",
         "player.pip_on_leave",
         choice(&PIP_ON_LEAVE, "auto"),
-        "Keep a channel playing full screen in a small window when you leave the app.",
+        key("Keep a channel playing full screen in a small window when you leave the app."),
     ),
 ];
 
@@ -149,7 +149,7 @@ pub static PLAYBACK: &[Setting] = &[
         "decoding",
         "playback.video_decoder",
         choice(&DECODER, "hardware"),
-        "Decode video in hardware, or in software when a device's decoder misbehaves.",
+        key("Decode video in hardware, or in software when a device's decoder misbehaves."),
     )
     .scope(Scope::Group),
     // default: observed (07) — Hardware
@@ -157,7 +157,7 @@ pub static PLAYBACK: &[Setting] = &[
         "decoding",
         "playback.audio_decoder",
         choice(&DECODER, "hardware"),
-        "Decode audio with the platform's decoders or the bundled software ones.",
+        key("Decode audio with the platform's decoders or the bundled software ones."),
     )
     .scope(Scope::Group),
     // default: ours
@@ -165,7 +165,7 @@ pub static PLAYBACK: &[Setting] = &[
         "decoding",
         "playback.tunneling",
         boolean(false),
-        "Hand video straight to the display pipeline where the device supports it.",
+        key("Hand video straight to the display pipeline where the device supports it."),
     )
     .advanced(),
     // default: ours
@@ -173,7 +173,7 @@ pub static PLAYBACK: &[Setting] = &[
         "decoding",
         "playback.amlogic_workaround",
         boolean(false),
-        "Work around stutter and freezes seen with some Amlogic decoders.",
+        key("Work around stutter and freezes seen with some Amlogic decoders."),
     )
     .advanced()
     .restart(),
@@ -182,49 +182,49 @@ pub static PLAYBACK: &[Setting] = &[
         "decoding",
         "playback.black_frame_on_switch",
         boolean(true),
-        "Blank the picture while a new channel tunes instead of holding the old frame.",
+        key("Blank the picture while a new channel tunes instead of holding the old frame."),
     ),
     // default: ours
     playback(
         "audio",
         "playback.passthrough",
         boolean(false),
-        "Send compressed surround audio to the receiver undecoded.",
+        key("Send compressed surround audio to the receiver undecoded."),
     ),
     // default: ours
     playback(
         "audio",
         "playback.prefer_surround",
         boolean(false),
-        "Pick a multichannel audio track first when a stream has one.",
+        key("Pick a multichannel audio track first when a stream has one."),
     ),
     // default: ours
     playback(
         "audio",
         "playback.audio_offset",
         dur(TimeUnit::Millis, -2_000, 2_000, 10, 0),
-        "Delay (positive) or advance (negative) audio against video.",
+        key("Delay (positive) or advance (negative) audio against video."),
     ),
     // default: observed (07) — Small
     playback(
         "buffering",
         "playback.buffer",
         choice(&SIZE, "small"),
-        "Buffer size: larger rides out network hiccups but makes switching slower.",
+        key("Buffer size: larger rides out network hiccups but makes switching slower."),
     ),
     // default: observed (07) — off
     playback(
         "frame_rate",
         "playback.afr",
         boolean(false),
-        "Change the display mode to match the content's frame rate; device support varies.",
+        key("Change the display mode to match the content's frame rate; device support varies."),
     ),
     // default: ours
     playback(
         "frame_rate",
         "playback.afr_refresh_rate",
         boolean(true),
-        "Frame-rate matching may change the refresh rate.",
+        key("Frame-rate matching may change the refresh rate."),
     )
     .depends(IF_AFR),
     // default: ours
@@ -232,7 +232,7 @@ pub static PLAYBACK: &[Setting] = &[
         "frame_rate",
         "playback.afr_resolution",
         boolean(false),
-        "Frame-rate matching may also change the resolution.",
+        key("Frame-rate matching may also change the resolution."),
     )
     .depends(IF_AFR),
     // default: ours
@@ -240,7 +240,7 @@ pub static PLAYBACK: &[Setting] = &[
         "frame_rate",
         "playback.afr_50_60_only",
         boolean(false),
-        "Only switch refresh rate for 50 and 60 fps content.",
+        key("Only switch refresh rate for 50 and 60 fps content."),
     )
     .depends(&[
         enabled_if(&[when("playback.afr", Test::IsTrue)]),
@@ -251,7 +251,7 @@ pub static PLAYBACK: &[Setting] = &[
         "external",
         "playback.external_player",
         choice(&EXTERNAL_PLAYER, "never"),
-        "Hand streams to another installed player: never, for movies and series only, or always.",
+        key("Hand streams to another installed player: never, for movies and series only, or always."),
     )
     .scope(Scope::Group),
 ];
@@ -262,7 +262,7 @@ pub static CATCHUP: &[Setting] = &[
         "source",
         "catchup.scheme",
         choice(&CATCHUP_SCHEME, "auto"),
-        "How replay URLs are built; auto follows what the playlist declares.",
+        key("How replay URLs are built; auto follows what the playlist declares."),
     )
     .scope(Scope::Playlist),
     // default: ours
@@ -270,7 +270,7 @@ pub static CATCHUP: &[Setting] = &[
         "source",
         "catchup.archive_days",
         days(0, 30, 1, 0),
-        "Replay window to assume; 0 uses what the provider reports.",
+        key("Replay window to assume; 0 uses what the provider reports."),
     )
     .scope(Scope::Playlist),
     // default: ours
@@ -278,7 +278,7 @@ pub static CATCHUP: &[Setting] = &[
         "source",
         "catchup.start_offset",
         offset_hms(-3_600, 3_600, 1, 0),
-        "Correction added to a replayed programme's start time.",
+        key("Correction added to a replayed programme's start time."),
     )
     .scope(Scope::Playlist),
     // default: ours
@@ -286,35 +286,35 @@ pub static CATCHUP: &[Setting] = &[
         "seeking",
         "catchup.rewind_live_key",
         choice(&REWIND_LIVE_KEY, "rewind"),
-        "Which key starts rewinding a live channel that has replay.",
+        key("Which key starts rewinding a live channel that has replay."),
     ),
     // default: ours
     catchup(
         "seeking",
         "catchup.seek_keys",
         choice(&SEEK_KEYS, "left_right"),
-        "Which keys seek while replaying: Left/Right, Down/Up, or the transport keys.",
+        key("Which keys seek while replaying: Left/Right, Down/Up, or the transport keys."),
     ),
     // default: ours
     catchup(
         "steps",
         "catchup.forward_step",
         secs(5, 600, 5, 30),
-        "Jump made by one fast-forward press.",
+        key("Jump made by one fast-forward press."),
     ),
     // default: ours
     catchup(
         "steps",
         "catchup.rewind_step",
         secs(5, 600, 5, 10),
-        "Jump made by one rewind press.",
+        key("Jump made by one rewind press."),
     ),
     // default: ours
     catchup(
         "steps",
         "catchup.timebar_step",
         mins(1, 60, 1, 5),
-        "Jump made by one step along the time bar, both directions.",
+        key("Jump made by one step along the time bar, both directions."),
     ),
 ];
 

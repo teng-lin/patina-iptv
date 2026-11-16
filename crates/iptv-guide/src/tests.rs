@@ -652,3 +652,101 @@ fn a_prepared_schedule_crosses_threads_and_matches_one_organised_in_place() {
     let fresh = EpgSchedule::from_catalog(&groups, &channels, GuideStore::default(), NOW);
     assert_eq!(view(&plain), view(&fresh));
 }
+
+#[test]
+fn generated_guide_placeholders_localize_but_provider_titles_do_not() {
+    let ja = iptv_core::i18n::resolve("ja", None);
+    let s = schedule();
+    assert_eq!(s.title_in(1, s.program_at(1, 0), ja), "情報なし");
+    assert_eq!(s.title_in(0, s.program_at(0, 0), ja), "Alpha News");
+    // The same bytes can be a genuine provider title or an app placeholder.
+    let a = ChannelKey::new("a");
+    let xml = xmltv().replace("Alpha News", "No information");
+    let store = store_from(&xml, &[(&a, Some("a.test"), "Alpha")], true);
+    let s = EpgSchedule::new(
+        vec![(
+            "Other".into(),
+            vec![GuideChannel {
+                key: a,
+                name: "Alpha".into(),
+                number: 1,
+                catchup_days: 0,
+            }],
+        )],
+        store,
+        NOW,
+    );
+    assert_eq!(s.title_in(0, s.program_at(0, 0), ja), "No information");
+    assert_eq!(
+        s.group_name_in(0, ja),
+        "Other",
+        "provider group name stays opaque"
+    );
+}
+
+#[test]
+fn a_provider_group_using_the_reserved_bucket_key_still_keeps_its_name() {
+    let mut parsed = parse_m3u(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"Other\",Synthetic Channel\nhttps://synthetic.example.test/live\n",
+    );
+    parsed.groups[0].id = iptv_providers::id::GroupId::from_stored("__other__");
+    parsed.channels.items[0].groups = vec![parsed.groups[0].id.clone()];
+    let s = EpgSchedule::from_catalog(
+        &parsed.groups,
+        &parsed.channels.items,
+        GuideStore::new(),
+        NOW,
+    );
+    assert_eq!(
+        s.group_name_in(0, iptv_core::i18n::resolve("ja", None)),
+        "Other"
+    );
+}
+
+#[test]
+fn the_generated_ungrouped_bucket_localizes_after_prepare_and_organization() {
+    let parsed = parse_m3u(
+        "#EXTM3U\n#EXTINF:-1,Synthetic Ungrouped Channel\nhttps://synthetic.example.test/live\n",
+    );
+    let s = EpgSchedule::from_catalog(
+        &parsed.groups,
+        &parsed.channels.items,
+        GuideStore::new(),
+        NOW,
+    );
+    let ja = iptv_core::i18n::resolve("ja", None);
+    assert_eq!(s.group_name(0), "Other");
+    assert_eq!(
+        s.group_name_in(0, ja),
+        iptv_core::i18n::translate(ja, "Other")
+    );
+    s.set_organization(super::Organization::default());
+    assert_eq!(
+        s.group_name_in(0, ja),
+        iptv_core::i18n::translate(ja, "Other")
+    );
+    let s = EpgSchedule::from_prepared(EpgSchedule::prepare(
+        &parsed.groups,
+        &parsed.channels.items,
+        GuideStore::new(),
+        NOW,
+        None,
+    ));
+    assert_eq!(
+        s.group_name_in(0, ja),
+        iptv_core::i18n::translate(ja, "Other")
+    );
+    // The app renders guide rows through ListView; that adapter must retain
+    // generated text provenance and the requested language too.
+    use iptv_core::lists::{ChannelList, FIRST_GROUP, ListView};
+    let list = ChannelList::build(FIRST_GROUP, &s, &[], &[]);
+    let view = ListView::new(std::rc::Rc::new(s), std::rc::Rc::new(list));
+    assert_eq!(
+        view.group_name_in(0, ja),
+        iptv_core::i18n::translate(ja, "Other")
+    );
+    assert_eq!(
+        view.title_in(0, view.program_at(0, 0), ja),
+        iptv_core::i18n::translate(ja, "No information")
+    );
+}

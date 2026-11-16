@@ -470,11 +470,23 @@ fn closing_an_owner_with_a_held_open_rejects_its_late_query() {
     owner.start_services();
     let query = owner.query_channels(Query::source(SourceId(1)), InspectionControl::default());
     opening.recv_timeout(Duration::from_secs(10)).unwrap();
-    // Retire the owner while its accepted credential call is still held.
-    // Do not let a graceful writer-drain deadline decide this race instead.
+    // Release the credential broker only after the query acknowledges closure.
+    // This lets disposal drain the worker without a sleep or a drain timeout
+    // deciding which result wins. The query owns no Runtime reference.
+    let closing = std::time::Instant::now();
+    let completed = std::thread::spawn(move || {
+        let result = block_on(query);
+        let elapsed = closing.elapsed();
+        release.send(()).unwrap();
+        (result, elapsed)
+    });
     drop(owner);
-    release.send(()).unwrap();
-    assert_eq!(block_on(query), Err(InspectionError::OwnerClosed));
+    let (result, elapsed) = completed.join().unwrap();
+    assert_eq!(result, Err(InspectionError::OwnerClosed));
+    assert!(
+        elapsed < iptv_runtime::inspection::QUERY_DEADLINE,
+        "owner closure must wake the query before its normal deadline"
+    );
 }
 
 #[test]

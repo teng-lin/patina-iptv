@@ -45,7 +45,7 @@ fn panel(ui: Ui) -> Rgba {
 pub fn toolbar(ui: Ui) -> impl IntoElement {
     let shown = computed(move || multiview::chrome_shows(ui));
     let limit = move || with_state(ui, device_limit).flatten();
-    let pill = move |words: &'static str, name: &'static str, act: fn(Ui)| {
+    let pill = move |name: &'static str, act: fn(Ui), add: bool| {
         view()
             .role(AccessibilityRole::Button)
             .px(px(16.0))
@@ -59,7 +59,17 @@ pub fn toolbar(ui: Ui) -> impl IntoElement {
                 log::info!("iptv multiview toolbar: {name}");
                 act(ui);
             })
-            .child(text(words).text_size(px(OSD_DETAIL)).text_color(rgb(WHITE)))
+            .child(
+                text(move || {
+                    if add {
+                        format!("+  {}", tr(name))
+                    } else {
+                        tr(name).to_owned()
+                    }
+                })
+                .text_size(px(OSD_DETAIL))
+                .text_color(rgb(WHITE)),
+            )
     };
     when(
         move || shown.get(),
@@ -88,7 +98,7 @@ pub fn toolbar(ui: Ui) -> impl IntoElement {
                         .on_mouse_leave(move |_: &MouseEvent| crate::play_bar::hover(ui, false))
                         .child(when(
                             move || limit().is_none(),
-                            move || pill("+  Add screen", "Add screen", multiview::add),
+                            move || pill("Add screen", multiview::add, true),
                         ))
                         .child(when(
                             move || limit().is_some(),
@@ -99,7 +109,7 @@ pub fn toolbar(ui: Ui) -> impl IntoElement {
                                     .text_color(tint(WHITE, TEXT_SECONDARY_ALPHA))
                             },
                         ))
-                        .child(pill("Exit multiview", "Exit multiview", multiview::exit)),
+                        .child(pill("Exit multiview", multiview::exit, false)),
                 )
         },
     )
@@ -212,7 +222,7 @@ pub fn hint(ui: Ui) -> impl IntoElement {
             .items_center()
             .pointer_events(PointerEvents::None)
             .child(
-                text("OK: menu · Back: full screen")
+                text(move || tr("OK: menu · Back: full screen"))
                     .px(px(14.0))
                     .py(px(5.0))
                     .rounded(px(RADIUS_LARGE))

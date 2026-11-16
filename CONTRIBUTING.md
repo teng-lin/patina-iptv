@@ -55,7 +55,13 @@ Two extra checks are worth running when they apply:
 - `tools/ci/check-android.sh` type-checks the app for Android (needs the NDK
   and `rustup target add aarch64-linux-android`). CI runs it for every pull
   request that changes Rust sources.
-- `tools/ci/coverage.sh` measures test coverage of the library crates.
+- `tools/ci/coverage.sh` measures the library crates and headless application
+  scenarios together on Linux, plus an actual GTK player scenario on a private
+  Xvfb display. It needs Xvfb, a Mesa software OpenGL driver and `ffmpeg`.
+  The enforced floors are calibrated on Linux CI; explicit `-p CRATE` measurements
+  can be run on other hosts without enforcing those Linux floors.
+  [Runtime recovery validation](docs/runtime-recovery-validation.md) records the
+  journey matrix and the limits of this evidence.
 
 ### When a device run is needed
 

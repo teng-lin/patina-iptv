@@ -11,6 +11,15 @@ use iptv_core::clock::{HourCycle, Style};
 use iptv_core::i18n::{self, Args, Language};
 use iptv_settings::{Target, keys};
 
+#[cfg(feature = "test-support")]
+mod pseudo;
+
+/// A deliberately expanded fixed catalogue label for synthetic layout scenarios.
+#[cfg(feature = "test-support")]
+pub fn pseudo_fixed_for_test(source: &str) -> Option<&'static str> {
+    pseudo::fixed(source)
+}
+
 fn system() -> Option<&'static str> {
     static SYSTEM: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     SYSTEM.get_or_init(system_locale).as_deref()
@@ -78,6 +87,12 @@ fn system_locale() -> Option<String> {
 
 /// Only call for application-owned messages, never provider content.
 pub fn tr(source: &str) -> &str {
+    #[cfg(feature = "test-support")]
+    if pseudo::enabled()
+        && let Some(expanded) = pseudo::fixed(source)
+    {
+        return expanded;
+    }
     i18n::translate(language(), source)
 }
 
@@ -140,6 +155,50 @@ mod tests {
     use iptv_core::clock::HourCycle;
 
     const CHANNELS: &str = "{count, plural, one {# channel} other {# channels}}";
+
+    #[test]
+    fn every_settings_help_message_has_real_locale_cells_without_copied_english_phrases() {
+        use iptv_settings::catalogue;
+        let words = |text: &str| {
+            text.split(|c: char| !c.is_ascii_alphabetic())
+                .filter(|part| !part.is_empty())
+                .map(str::to_ascii_lowercase)
+                .collect::<Vec<_>>()
+        };
+        let rows: std::collections::HashMap<_, _> =
+            include_str!("../../iptv-core/src/i18n/messages.tsv")
+                .lines()
+                .map(|line| {
+                    let mut cells = line.split('\t');
+                    (cells.next().unwrap(), cells.collect::<Vec<_>>())
+                })
+                .collect();
+        for source in catalogue::settings()
+            .map(|setting| setting.summary)
+            .chain(catalogue::commands().map(|command| command.summary))
+        {
+            let cells = rows
+                .get(source)
+                .unwrap_or_else(|| panic!("missing {source}"));
+            assert_eq!(cells.len(), iptv_core::i18n::LANGUAGES.len() - 1);
+            let english = words(source);
+            for (cell, language) in cells.iter().zip(&iptv_core::i18n::LANGUAGES[1..]) {
+                assert!(!cell.trim().is_empty(), "{}: {source}", language.tag);
+                // Font family and license proper names intentionally keep English.
+                if source.starts_with("The version of this app.") {
+                    continue;
+                }
+                let translated = words(cell);
+                for phrase in english.windows(4).filter(|p| p.join(" ").len() >= 16) {
+                    assert!(
+                        !translated.windows(4).any(|candidate| candidate == phrase),
+                        "{} copied an English phrase in {source}: {cell}",
+                        language.tag
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn wording_fixtures_restore_nested_preferences_after_unwinding() {

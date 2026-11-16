@@ -6,6 +6,7 @@
 //! full screen" and do nothing.
 
 use crate::i18n::tr;
+use nsh_core::prelude::effect;
 
 use std::cell::{Cell, RefCell};
 
@@ -52,8 +53,7 @@ pub fn bind(ui: Ui) {
             crate::player::stop(ui);
             close_window.hide();
         } else {
-            crate::runtime().shutdown_recording_host();
-            close_window.close();
+            quit();
         }
     });
     if recorder_only_startup() {
@@ -89,49 +89,51 @@ pub fn menus(ui: Ui) {
     if !cfg!(target_os = "macos") {
         return;
     }
-    let role = MenuItem::role;
-    set_application_menu(vec![
-        // The app menu (AppKit titles it with the app's name).
-        MenuItem::submenu(
-            "Patina",
-            [
-                role(MenuRole::About),
-                MenuItem::separator(),
-                MenuItem::new("Settings…")
-                    .shortcut("mod+,")
-                    .on_select(move || crate::settings_view::open(ui)),
-                MenuItem::separator(),
-                role(MenuRole::Hide),
-                role(MenuRole::HideOthers),
-                role(MenuRole::ShowAll),
-                MenuItem::separator(),
-                role(MenuRole::Quit),
-            ],
-        ),
-        MenuItem::submenu(
-            tr("Edit"),
-            [
-                role(MenuRole::Undo),
-                role(MenuRole::Redo),
-                MenuItem::separator(),
-                role(MenuRole::Cut),
-                role(MenuRole::Copy),
-                role(MenuRole::Paste),
-                role(MenuRole::SelectAll),
-            ],
-        ),
-        // Ctrl+Cmd+F, as every macOS app.
-        MenuItem::submenu("View", [role(MenuRole::ToggleFullScreen)]),
-        MenuItem::submenu(
-            "Window",
-            [
-                role(MenuRole::Minimize),
-                role(MenuRole::Zoom),
-                MenuItem::separator(),
-                role(MenuRole::Close),
-            ],
-        ),
-    ]);
+    effect(move || {
+        let role = MenuItem::role;
+        set_application_menu(vec![
+            // The app menu (AppKit titles it with the app's name).
+            MenuItem::submenu(
+                "Patina",
+                [
+                    role(MenuRole::About),
+                    MenuItem::separator(),
+                    MenuItem::new(tr("Settings…"))
+                        .shortcut("mod+,")
+                        .on_select(move || crate::settings_view::open(ui)),
+                    MenuItem::separator(),
+                    role(MenuRole::Hide),
+                    role(MenuRole::HideOthers),
+                    role(MenuRole::ShowAll),
+                    MenuItem::separator(),
+                    role(MenuRole::Quit),
+                ],
+            ),
+            MenuItem::submenu(
+                tr("Edit"),
+                [
+                    role(MenuRole::Undo),
+                    role(MenuRole::Redo),
+                    MenuItem::separator(),
+                    role(MenuRole::Cut),
+                    role(MenuRole::Copy),
+                    role(MenuRole::Paste),
+                    role(MenuRole::SelectAll),
+                ],
+            ),
+            // Ctrl+Cmd+F, as every macOS app.
+            MenuItem::submenu(tr("View"), [role(MenuRole::ToggleFullScreen)]),
+            MenuItem::submenu(
+                tr("Window"),
+                [
+                    role(MenuRole::Minimize),
+                    role(MenuRole::Zoom),
+                    MenuItem::separator(),
+                    role(MenuRole::Close),
+                ],
+            ),
+        ]);
+    });
 }
 
 pub fn set_fullscreen(on: bool) {

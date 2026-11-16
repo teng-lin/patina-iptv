@@ -3,8 +3,9 @@
 //! A key with no long binding in the current context acts immediately on
 //! press (and again on each auto-repeat, so holding a direction scrolls).
 //! A key with a long binding defers: it becomes `Long` once held for the
-//! threshold — detected on an auto-repeat (Android remotes) or by [`poll`]
-//! (IR remotes that never repeat) — and `Short` on release otherwise, so the
+//! threshold — detected on an auto-repeat (Android remotes), by [`poll`]
+//! (IR remotes that never repeat), or on release if the timer was delayed —
+//! and `Short` on an earlier release, so the
 //! short action never fires before or alongside the long one.
 //!
 //! [`poll`]: PressDetector::poll
@@ -90,8 +91,17 @@ impl PressDetector {
             }
             Phase::Up => {
                 let held = self.held.take()?;
-                (held.key == key && held.deferred && !held.long_fired)
-                    .then_some((key, Press::Short))
+                if held.key != key || !held.deferred || held.long_fired {
+                    return None;
+                }
+                // A repeat can precede the threshold by a millisecond and the
+                // release can arrive before a busy host runs its timer.
+                let press = if now_ms.saturating_sub(held.since_ms) >= self.threshold_ms {
+                    Press::Long
+                } else {
+                    Press::Short
+                };
+                Some((key, press))
             }
         }
     }

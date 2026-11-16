@@ -2,9 +2,8 @@
 //! desktop the mouse moving over the video shows it, on a tablet a tap
 //! (a click on the desktop) shows it and another hides it; it hides after
 //! a few seconds without input, but not while the mouse rests on it
-//! (`iptv_core::play_bar`). A TV never shows it: its remote keeps the info
-//! card and the control row (`player_panels.rs`), and any key hides the
-//! bar.
+//! (`iptv_core::play_bar`). A TV opens this same bar with long OK or Menu
+//! and traverses its controls with the D-pad. Short OK keeps the info card.
 //!
 //! Left: mute and (desktop) volume, the stream's quality, the channel.
 //! Centre: rewind, play/pause, fast-forward (catch-up only; `seek.rs`).
@@ -28,8 +27,9 @@ use std::time::Duration;
 use iptv_core::channel_list::ListMode;
 use iptv_core::menu::Origin;
 use iptv_core::panels::QuickAction;
-use iptv_core::play_bar::PlayBar;
+use iptv_core::play_bar::{Control, PlayBar};
 use iptv_core::tracks::{Kind as Track, fps_label, resolution_class};
+use iptv_nav::{Action, RemoteKey};
 use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
 use nsh_core::{Checked, TouchEvent};
@@ -50,6 +50,10 @@ const DESKTOP: bool = crate::desktop::DESKTOP;
 /// Whether the device has a pointer for the bar: anything but a TV (its
 /// remote has the panels) and a terminal.
 pub fn available() -> bool {
+    idiom() != Idiom::Terminal
+}
+/// Pointer gestures retain their existing TV info-card behavior.
+pub fn pointer_available() -> bool {
     !matches!(idiom(), Idiom::Tv | Idiom::Terminal)
 }
 
@@ -66,7 +70,7 @@ fn target() -> f32 {
 /// Whether the bar is on screen.
 pub fn shows(ui: Ui) -> bool {
     ui.mode.get() == ViewMode::Fullscreen
-        && !ui.keys_shown()
+        && (idiom() == Idiom::Tv || !ui.keys_shown())
         && ui.play_bar.with(|b| b.shown)
         && !crate::multiview::is_open(ui)
         && available()
@@ -76,7 +80,8 @@ pub fn shows(ui: Ui) -> bool {
 /// over the video (a chooser, the programme details) is open.
 pub fn bind(ui: Ui) {
     effect(move || {
-        let away = ui.mode.get() != ViewMode::Fullscreen || ui.keys_shown();
+        let away =
+            ui.mode.get() != ViewMode::Fullscreen || (idiom() != Idiom::Tv && ui.keys_shown());
         if away && ui.play_bar.with_untracked(|b| b.shown) {
             ui.play_bar.update(PlayBar::hide);
         }
@@ -135,7 +140,7 @@ fn show(ui: Ui, f: impl FnOnce(&mut PlayBar, u64)) {
 /// The mouse moved over full-screen video (a TV's air mouse leaves the
 /// remote's panels as they are: no bar there).
 pub fn pointer_moved(ui: Ui) {
-    if !available() {
+    if !pointer_available() {
         return;
     }
     show(ui, PlayBar::pointer_moved);
@@ -268,66 +273,304 @@ fn bar(ui: Ui) -> impl IntoElement {
         )
 }
 
-/// An icon button; `enabled` dims it and keeps it from acting.
-fn button(
-    ui: Ui,
-    name: &'static str,
-    icon: impl Fn() -> Icon + 'static,
-    enabled: impl Fn() -> bool + Copy + 'static,
-    size: f32,
-    act: impl Fn() + 'static,
-) -> View {
-    icon_button(
-        ui,
-        move || tr(name),
-        icon,
-        enabled,
-        size,
-        move || tint(WHITE, if enabled() { 0xFF } else { TEXT_DISABLED_ALPHA }),
-        act,
-    )
-}
-
-fn icon_button(
-    ui: Ui,
-    name: impl Fn() -> &'static str + 'static,
-    icon: impl Fn() -> Icon + 'static,
-    enabled: impl Fn() -> bool + Copy + 'static,
-    size: f32,
-    color: impl Fn() -> Rgba + 'static,
-    act: impl Fn() + 'static,
-) -> View {
+/// An icon button shared by touch, pointer and D-pad. Admission and actions
+/// are resolved from the same stable identity on every input path.
+fn button(ui: Ui, control: Control, icon: impl Fn() -> Icon + 'static, size: f32) -> View {
+    let target_window =
+        (control == Control::Fullscreen).then(nsh_core::element::desktop::current_window);
     view()
         .role(AccessibilityRole::Button)
+        .accessible(true)
+        .test_id(control_id(control))
         .accessibility_state(move || AccessibilityState {
-            disabled: !enabled(),
+            disabled: !enabled(ui, control),
+            selected: focused(ui, control),
+            pressed: (control == Control::Record).then(|| {
+                if crate::recordings_view::recording_active(ui) {
+                    Checked::True
+                } else {
+                    Checked::False
+                }
+            }),
             ..Default::default()
         })
         .flex_shrink_0()
         .w(px(size))
         .h(px(size))
         .rounded(px(size / 2.0))
+        .border(px(2.0))
+        .border_color(move || {
+            tint(
+                ui.theme.with(|t| t.accent.light),
+                if focused(ui, control) { 255 } else { 0 },
+            )
+        })
         .items_center()
         .justify_center()
-        .label(name)
+        .label(move || {
+            if control == Control::Record && crate::recordings_view::recording_active(ui) {
+                tr("Stop recording")
+            } else {
+                tr(control_label(control))
+            }
+        })
         .hover(|s| s.bg(tint(WHITE, RESTING_ALPHA * 2)))
         .on_press(move || {
             ui.touched();
-
-            if enabled() {
-                act();
-            }
-            used(ui);
+            activate(ui, control, target_window.clone());
         })
         .child(
             svg(move || icons::src(icon()))
                 .size(px(size * 0.55))
-                .text_color(color),
+                .text_color(move || {
+                    tint(
+                        if control == Control::Record
+                            && crate::recordings_view::recording_active(ui)
+                        {
+                            crate::theme::RECORDING
+                        } else {
+                            WHITE
+                        },
+                        if enabled(ui, control) {
+                            0xFF
+                        } else {
+                            TEXT_DISABLED_ALPHA
+                        },
+                    )
+                }),
         )
 }
 
-fn always() -> bool {
+fn control_label(control: Control) -> &'static str {
+    match control {
+        Control::Mute => crate::i18n::key("Mute"),
+        Control::Rewind => crate::i18n::key("Rewind"),
+        Control::PlayPause => crate::i18n::key("Play or pause"),
+        Control::Forward => crate::i18n::key("Fast-forward"),
+        Control::Record => crate::i18n::key("Record"),
+        Control::Favourite => crate::i18n::key("Favourite"),
+        Control::Tracks => crate::i18n::key("Subtitles and tracks"),
+        Control::Details => crate::i18n::key("Programme details"),
+        Control::Picture => crate::i18n::key("Picture size"),
+        Control::Channels => crate::i18n::key("Channel list"),
+        Control::Multiview => crate::i18n::key("Multiview"),
+        Control::Pip => crate::i18n::key("Picture in picture"),
+        Control::Guide => crate::i18n::key("TV guide"),
+        Control::Fullscreen => crate::i18n::key("Full screen"),
+        Control::Timeline => crate::i18n::key("Playback position"),
+    }
+}
+fn control_id(control: Control) -> &'static str {
+    match control {
+        Control::Mute => "play-bar-mute",
+        Control::Rewind => "play-bar-rewind",
+        Control::PlayPause => "play-bar-play-pause",
+        Control::Forward => "play-bar-forward",
+        Control::Record => "play-bar-record",
+        Control::Favourite => "play-bar-favourite",
+        Control::Tracks => "play-bar-tracks",
+        Control::Details => "play-bar-details",
+        Control::Picture => "play-bar-picture",
+        Control::Channels => "play-bar-channels",
+        Control::Multiview => "play-bar-multiview",
+        Control::Pip => "play-bar-pip",
+        Control::Guide => "play-bar-guide",
+        Control::Fullscreen => "play-bar-fullscreen",
+        Control::Timeline => "play-bar-seek",
+    }
+}
+
+fn tracks(ui: Ui) -> Option<Track> {
+    [Track::Text, Track::Audio, Track::Video]
+        .into_iter()
+        .find(|k| ui.player.main().tracks.with(|t| t.has_choice(*k)))
+}
+fn enabled(ui: Ui, control: Control) -> bool {
+    match control {
+        Control::Rewind | Control::Forward | Control::Timeline => {
+            matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::seekable(ui)
+        }
+        Control::Record => crate::player_panels::enabled(ui, iptv_core::panels::Control::Record),
+        Control::Favourite | Control::Details => ui.playing.get().is_some(),
+        Control::Tracks => tracks(ui).is_some(),
+        Control::Multiview => crate::capabilities::multiview(ui).available(),
+        Control::Pip => crate::pip::can_enter(ui),
+        Control::Fullscreen => DESKTOP && idiom() != Idiom::Tv,
+        _ => true,
+    }
+}
+fn activate(
+    ui: Ui,
+    control: Control,
+    target_window: Option<nsh_core::element::desktop::WindowRef>,
+) {
+    used(ui);
+    if !enabled(ui, control) {
+        return;
+    }
+    log::info!("iptv play bar: {}", control_label(control));
+    use crate::chooser::{self, Kind};
+    match control {
+        Control::Mute => crate::media::toggle_mute(ui),
+        Control::Rewind | Control::Forward => {
+            let steps = crate::seek::steps();
+            crate::seek::step(
+                ui,
+                if control == Control::Forward {
+                    steps.forward
+                } else {
+                    -steps.rewind
+                },
+            );
+        }
+        Control::PlayPause => crate::player::toggle_pause(ui),
+        Control::Record => crate::recordings_view::toggle_current(ui),
+        Control::Favourite => {
+            if let Some(ch) = ui.playing.get_untracked() {
+                crate::favorites::toggle(ui, ch);
+            }
+        }
+        Control::Tracks => {
+            let open = ui
+                .chooser
+                .with_untracked(|c| c.as_ref().is_some_and(|c| matches!(c.kind, Kind::Track(_))));
+            if open {
+                chooser::close(ui);
+            } else if let Some(kind) = untracked(|| tracks(ui)) {
+                chooser::open(ui, Kind::Track(kind));
+            }
+        }
+        Control::Details => details(ui),
+        Control::Picture => chooser::toggle(ui, Kind::Picture),
+        Control::Channels => {
+            crate::channels_view::open(ui, ListMode::Overlay);
+            ui.play_bar.update(PlayBar::hide);
+        }
+        Control::Multiview => {
+            ui.play_bar.update(PlayBar::hide);
+            crate::multiview::open(ui);
+        }
+        Control::Pip => {
+            ui.play_bar.update(PlayBar::hide);
+            crate::pip::enter(ui);
+        }
+        Control::Guide => crate::player_keys::press_quick(ui, QuickAction::Guide),
+        Control::Fullscreen => {
+            let Some(window) = target_window else {
+                return;
+            };
+            let full = window
+                .state()
+                .is_some_and(|s| s.mode == nsh_core::desktop::WindowMode::FullScreen);
+            window.set_mode(if full {
+                nsh_core::desktop::WindowMode::Normal
+            } else {
+                nsh_core::desktop::WindowMode::FullScreen
+            });
+        }
+        Control::Timeline => {
+            if crate::seek::pending(ui) {
+                crate::seek::commit_now(ui);
+            }
+            ui.play_bar
+                .update(|b| b.focus_control(Control::PlayPause, ui.now_ms()));
+        }
+    }
+    used(ui);
+}
+
+pub(super) fn focused(ui: Ui, control: Control) -> bool {
+    idiom() == Idiom::Tv && ui.keys_shown() && ui.play_bar.with(|b| b.focus == Some(control))
+}
+/// Explicit TV long OK/Menu: keep short OK's info-card semantics intact.
+pub fn remote(ui: Ui) {
+    show(ui, PlayBar::remote);
+}
+pub fn captures(ui: Ui) -> bool {
+    idiom() == Idiom::Tv && shows(ui)
+}
+/// Returns true for D-pad actions owned by the visible shared bar.
+pub fn key(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> bool {
+    if !captures(ui) {
+        return false;
+    }
+    // Context::Controls already maps arrows to moves. Use the physical arrows
+    // too so player-specific zap/seek preferences cannot steal bar navigation.
+    let direction = match key {
+        RemoteKey::Left => Some(Action::MoveLeft),
+        RemoteKey::Right => Some(Action::MoveRight),
+        RemoteKey::Up => Some(Action::MoveUp),
+        RemoteKey::Down => Some(Action::MoveDown),
+        _ => None,
+    };
+    let action = direction.unwrap_or(action);
+    if repeat
+        && matches!(
+            action,
+            Action::Select | Action::ShowPanels | Action::ShowControls
+        )
+    {
+        used(ui);
+        return true;
+    }
+    match action {
+        Action::MoveLeft | Action::MoveRight => {
+            let forward = action == Action::MoveRight;
+            if focused(ui, Control::Timeline) && enabled(ui, Control::Timeline) {
+                seek_timeline(ui, forward);
+            } else {
+                let enabled = [
+                    Control::Mute,
+                    Control::Rewind,
+                    Control::PlayPause,
+                    Control::Forward,
+                    Control::Record,
+                    Control::Favourite,
+                    Control::Tracks,
+                    Control::Details,
+                    Control::Picture,
+                    Control::Channels,
+                    Control::Multiview,
+                    Control::Pip,
+                    Control::Guide,
+                ]
+                .into_iter()
+                .filter(|c| (*c != Control::Pip || crate::pip::supported(ui)) && enabled(ui, *c))
+                .collect::<Vec<_>>();
+                update(ui, |b, now| {
+                    b.move_focus(if forward { 1 } else { -1 }, &enabled, now)
+                });
+            }
+        }
+        Action::MoveDown => {
+            if enabled(ui, Control::Timeline) {
+                update(ui, |b, now| b.focus_control(Control::Timeline, now));
+            } else {
+                used(ui);
+            }
+        }
+        Action::MoveUp => {
+            update(ui, |b, now| b.focus_control(Control::PlayPause, now));
+        }
+        Action::Select | Action::ShowPanels => {
+            if let Some(control) = ui.play_bar.with_untracked(|b| b.focus) {
+                activate(ui, control, None);
+            }
+        }
+        Action::ShowControls if key == RemoteKey::Menu => ui.play_bar.update(PlayBar::hide),
+        Action::ShowControls => remote(ui),
+        _ => return false,
+    }
     true
+}
+
+/// D-pad and native adjustable actions use the same seek admission and step.
+pub(super) fn seek_timeline(ui: Ui, forward: bool) {
+    if enabled(ui, Control::Timeline) {
+        let step = crate::seek::steps().timebar;
+        crate::seek::step(ui, if forward { step } else { -step });
+        used(ui);
+    }
 }
 
 fn badge(value: impl Fn() -> Option<String> + Copy + 'static) -> impl IntoElement {
@@ -382,13 +625,11 @@ fn left(ui: Ui) -> impl IntoElement {
         .gap(px(8.0))
         .child(button(
             ui,
-            "Mute",
+            Control::Mute,
             move || if muted() { Icon::Muted } else { Icon::Volume },
-            always,
             size,
-            move || crate::media::toggle_mute(ui),
         ))
-        .child(when(|| DESKTOP, move || volume(ui)))
+        .child(when(|| DESKTOP && idiom() != Idiom::Tv, move || volume(ui)))
         .child(badge(lines))
         .child(badge(class))
         .child(
@@ -447,34 +688,15 @@ fn volume(ui: Ui) -> impl IntoElement {
 /// Rewind, play/pause, fast-forward.
 fn centre(ui: Ui) -> impl IntoElement {
     let size = target();
-    let catch_up = move || {
-        matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::seekable(ui)
-    };
-    let seek = move |forward: bool| {
-        let steps = crate::seek::steps();
-        let delta = if forward {
-            steps.forward
-        } else {
-            -steps.rewind
-        };
-        crate::seek::step(ui, delta);
-    };
     view()
         .flex_shrink_0()
         .flex_row()
         .items_center()
         .gap(px(6.0))
+        .child(button(ui, Control::Rewind, || Icon::Rewind, size))
         .child(button(
             ui,
-            "Rewind",
-            || Icon::Rewind,
-            catch_up,
-            size,
-            move || seek(false),
-        ))
-        .child(button(
-            ui,
-            "Play or pause",
+            Control::PlayPause,
             move || {
                 if ui.paused.get() {
                     Icon::Play
@@ -482,48 +704,29 @@ fn centre(ui: Ui) -> impl IntoElement {
                     Icon::Pause
                 }
             },
-            always,
             size + 8.0,
-            move || crate::player::toggle_pause(ui),
         ))
-        .child(button(
-            ui,
-            "Fast-forward",
-            || Icon::Forward,
-            catch_up,
-            size,
-            move || seek(true),
-        ))
+        .child(button(ui, Control::Forward, || Icon::Forward, size))
 }
 
 /// Favourite, tracks, details, picture size, channels, multiview, guide,
 /// window full screen, frame rate.
 fn right(ui: Ui) -> impl IntoElement {
-    let target_window = nsh_core::element::desktop::current_window();
-    let icon_window = target_window.clone();
-    use crate::chooser::{self, Kind};
+    let icon_window = nsh_core::element::desktop::current_window();
     let size = target();
     let favourite = move || {
         ui.playing
             .get()
             .is_some_and(|ch| ui.favorites.with(|f| f.contains(&ch)))
     };
-    let tracks = move || {
-        [Track::Text, Track::Audio, Track::Video]
-            .into_iter()
-            .find(|k| ui.player.main().tracks.with(|t| t.has_choice(*k)))
-    };
-    let playing = move || ui.playing.get().is_some();
-    let recordable = move || {
-        ui.player_surface == 0
-            && playing()
-            && ui.playback.get() == crate::Playback::Live
-            && !ui.recordings.with(|s| s.busy || s.starting.is_some())
-    };
     // Reserve space for every control, including recording and optional
     // native window controls, so none overlap the transport hit targets.
     let buttons = move || {
-        8.0 + if DESKTOP { 1.0 } else { 0.0 } + if crate::pip::supported(ui) { 1.0 } else { 0.0 }
+        8.0 + if DESKTOP && idiom() != Idiom::Tv {
+            1.0
+        } else {
+            0.0
+        } + if crate::pip::supported(ui) { 1.0 } else { 0.0 }
     };
     view()
         .flex_1()
@@ -532,49 +735,10 @@ fn right(ui: Ui) -> impl IntoElement {
         .items_center()
         .justify_end()
         .gap(px(2.0))
-        .child(
-            icon_button(
-                ui,
-                move || {
-                    if crate::recordings_view::recording_active(ui) {
-                        tr("Stop recording")
-                    } else {
-                        tr("Record")
-                    }
-                },
-                || Icon::Record,
-                recordable,
-                size,
-                move || {
-                    if crate::recordings_view::recording_active(ui) {
-                        rgb(crate::theme::RECORDING)
-                    } else {
-                        tint(
-                            WHITE,
-                            if recordable() {
-                                0xFF
-                            } else {
-                                TEXT_DISABLED_ALPHA
-                            },
-                        )
-                    }
-                },
-                move || crate::recordings_view::toggle_current(ui),
-            )
-            .test_id("record-toggle")
-            .accessibility_state(move || AccessibilityState {
-                pressed: Some(if crate::recordings_view::recording_active(ui) {
-                    Checked::True
-                } else {
-                    Checked::False
-                }),
-                disabled: !recordable(),
-                ..Default::default()
-            }),
-        )
+        .child(button(ui, Control::Record, || Icon::Record, size))
         .child(button(
             ui,
-            "Favourite",
+            Control::Favourite,
             move || {
                 if favourite() {
                     Icon::StarFilled
@@ -582,113 +746,37 @@ fn right(ui: Ui) -> impl IntoElement {
                     Icon::Star
                 }
             },
-            playing,
             size,
-            move || {
-                if let Some(ch) = ui.playing.get_untracked() {
-                    crate::favorites::toggle(ui, ch);
-                }
-            },
         ))
-        .child(button(
-            ui,
-            "Subtitles and tracks",
-            || Icon::Subtitles,
-            move || tracks().is_some(),
-            size,
-            move || {
-                let open = ui.chooser.with_untracked(|c| {
-                    c.as_ref().is_some_and(|c| matches!(c.kind, Kind::Track(_)))
-                });
-                if open {
-                    chooser::close(ui);
-                } else if let Some(kind) = untracked(tracks) {
-                    chooser::open(ui, Kind::Track(kind));
-                }
-            },
-        ))
-        .child(button(
-            ui,
-            "Programme details",
-            || Icon::Info,
-            playing,
-            size,
-            move || details(ui),
-        ))
-        .child(button(
-            ui,
-            "Picture size",
-            || Icon::PictureSize,
-            always,
-            size,
-            move || chooser::toggle(ui, Kind::Picture),
-        ))
-        .child(button(
-            ui,
-            "Channel list",
-            || Icon::ChannelList,
-            always,
-            size,
-            move || {
-                crate::channels_view::open(ui, ListMode::Overlay);
-                ui.play_bar.update(PlayBar::hide);
-            },
-        ))
+        .child(button(ui, Control::Tracks, || Icon::Subtitles, size))
+        .child(button(ui, Control::Details, || Icon::Info, size))
+        .child(button(ui, Control::Picture, || Icon::PictureSize, size))
+        .child(button(ui, Control::Channels, || Icon::ChannelList, size))
         .child(
-            button(
-                ui,
-                "Multiview",
-                || Icon::Multiview,
-                move || crate::capabilities::multiview(ui).available(),
-                size,
-                move || {
-                    ui.play_bar.update(PlayBar::hide);
-                    crate::multiview::open(ui);
-                },
-            )
-            // On a detour it returns to the grid.
-            .label(move || {
-                if crate::multiview::detour(ui) {
-                    tr("Back to multiview")
-                } else {
-                    tr("Multiview")
-                }
-            }),
+            button(ui, Control::Multiview, || Icon::Multiview, size)
+                // On a detour it returns to the grid.
+                .label(move || {
+                    if crate::multiview::detour(ui) {
+                        tr("Back to multiview")
+                    } else {
+                        tr("Multiview")
+                    }
+                }),
         )
         // Picture in picture, where the device has the window (the
         // control strip has it too, but touch has no way to that strip).
         .child(when(
             move || crate::pip::supported(ui),
-            move || {
-                button(
-                    ui,
-                    "Picture in picture",
-                    || Icon::PictureInPicture,
-                    move || crate::pip::can_enter(ui),
-                    size,
-                    move || {
-                        ui.play_bar.update(PlayBar::hide);
-                        crate::pip::enter(ui);
-                    },
-                )
-            },
+            move || button(ui, Control::Pip, || Icon::PictureInPicture, size),
         ))
-        .child(button(
-            ui,
-            "TV guide",
-            || Icon::Guide,
-            always,
-            size,
-            move || crate::player_keys::press_quick(ui, QuickAction::Guide),
-        ))
+        .child(button(ui, Control::Guide, || Icon::Guide, size))
         .child(when(
-            || DESKTOP,
+            || DESKTOP && idiom() != Idiom::Tv,
             move || {
                 let icon_window = icon_window.clone();
-                let target_window = target_window.clone();
                 button(
                     ui,
-                    "Full screen",
+                    Control::Fullscreen,
                     move || {
                         if icon_window
                             .state()
@@ -699,18 +787,7 @@ fn right(ui: Ui) -> impl IntoElement {
                             Icon::FullScreen
                         }
                     },
-                    always,
                     size,
-                    move || {
-                        let full = target_window
-                            .state()
-                            .is_some_and(|s| s.mode == nsh_core::desktop::WindowMode::FullScreen);
-                        target_window.set_mode(if full {
-                            nsh_core::desktop::WindowMode::Normal
-                        } else {
-                            nsh_core::desktop::WindowMode::FullScreen
-                        });
-                    },
                 )
             },
         ))

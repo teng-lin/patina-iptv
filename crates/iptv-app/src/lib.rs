@@ -36,6 +36,8 @@ mod guide_inspect_view;
 mod guide_repair_view;
 mod header;
 mod i18n;
+#[cfg(feature = "test-support")]
+pub use i18n::pseudo_fixed_for_test;
 mod input;
 mod list_rows;
 mod lists;
@@ -786,6 +788,7 @@ fn ready_app() -> impl IntoElement {
     player::bind(ui);
     data::pages::bind(ui);
     play_bar::bind(ui);
+    lists::bind(ui);
     multiview::bind(ui);
     pip::bind(ui);
     desktop::player_windows::bind(ui);
@@ -976,12 +979,12 @@ fn toggle_panels(ui: Ui) {
         if multiview::dismiss(ui) {
             return;
         }
-        if play_bar::available() {
+        if play_bar::pointer_available() {
             play_bar::tapped(ui);
         }
         return;
     }
-    if play_bar::available() {
+    if play_bar::pointer_available() {
         play_bar::tapped(ui);
         return;
     }
@@ -1172,9 +1175,9 @@ pub fn occupy_writer(duration: Duration) {
         .occupy_writer(duration);
 }
 
-/// Pauses queued writes deterministically until the returned sender is dropped.
+/// Pauses queued writes; the gate acknowledges entry and releases on drop.
 #[cfg(feature = "test-support")]
-pub fn hold_writer() -> std::sync::mpsc::Sender<()> {
+pub fn hold_writer() -> runtime::TestGate {
     platform_data::host_handle()
         .and_then(|owner| owner.hold_writer())
         .expect("hold_writer needs a started app")

@@ -27,7 +27,11 @@ fn current(ui: Ui) -> Option<Target> {
             }
             (ui.list.with(|l| l.channel(c.row))?, Surface::List)
         }
-        Context::Guide if ui.mode.get() != ViewMode::Fullscreen && !ui.guide_panning.get() => {
+        Context::Guide
+            if ui.mode.get() != ViewMode::Fullscreen
+                && ui.focus.with(|f| f.pane == crate::guide::Pane::Guide)
+                && !ui.guide_panning.get() =>
+        {
             let v = crate::lists::view(ui);
             if ui.focus.with(|f| f.program(&v).airing(f.now)) != Airing::Live {
                 return None;

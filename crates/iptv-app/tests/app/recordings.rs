@@ -469,7 +469,7 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
     step(
         app.wait_until("active record toggle", Duration::from_secs(15), |screen| {
             screen
-                .accessibility_state("id:record-toggle")
+                .accessibility_state("id:play-bar-record")
                 .is_ok_and(|s| s.pressed == Some(nsh_core::Checked::True) && !s.disabled)
         }),
     );
@@ -481,11 +481,11 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
             .iter()
             .any(|n| n.id == surface && n.kind == nsh_core::ViewKind::Native)
     );
-    step(app.press("id:record-toggle"));
+    step(app.press("id:play-bar-record"));
     step(
         app.wait_until("idle record toggle", Duration::from_secs(15), |screen| {
             screen
-                .accessibility_state("id:record-toggle")
+                .accessibility_state("id:play-bar-record")
                 .is_ok_and(|s| s.pressed == Some(nsh_core::Checked::False) && !s.disabled)
         }),
     );
@@ -514,6 +514,7 @@ fn a_recordings_screen_opened_during_record_now_stays_open_after_save() {
     step(app.press("label:Video"));
     step(app.wait_for("label:Record"));
     let pending = iptv_app::hold_writer();
+    assert!(pending.wait_entered(Duration::from_secs(5)));
     step(app.press("label:Record"));
     assert!(!app.screen().matches("id:recordings-screen").unwrap());
     step(app.press_key("m"));

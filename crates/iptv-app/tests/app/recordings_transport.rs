@@ -248,6 +248,64 @@ fn saved_recording_resumes_seeks_paused_and_starts_again_without_changing_surfac
 }
 
 #[test]
+fn tv_saved_playback_returns_through_guide_preview_without_reopening_the_player() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, _, _, props) = saved_fixture(&home);
+    step(app.press("id:recording-job"));
+    step(app.wait_for_gone("id:recordings-screen", Duration::from_secs(10)));
+    let source = props.lock().unwrap()["source"].clone();
+    let opens = iptv_app::player_opens(0);
+    let player = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|n| n.kind == ViewKind::Native)
+        .unwrap()
+        .id;
+    step(app.press_key("m"));
+    step(app.wait_for("id:play-bar-layer"));
+    for _ in 0..16 {
+        if app
+            .screen()
+            .accessibility_state("id:play-bar-guide")
+            .is_ok_and(|s| s.selected)
+        {
+            break;
+        }
+        step(app.press_key("right"));
+    }
+    assert!(
+        app.screen()
+            .accessibility_state("id:play-bar-guide")
+            .unwrap()
+            .selected
+    );
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("id:play-bar-layer", Duration::from_secs(2)));
+    step(app.wait_for("id:guide-preview"));
+    // Recordings was opened from the rail: enter groups, then the guide,
+    // without changing its selected group while moving towards the preview.
+    step(app.press_key("right"));
+    step(app.press_key("right"));
+    step(app.press_key("up"));
+    assert!(
+        app.screen()
+            .accessibility_state("id:guide-preview")
+            .is_ok_and(|s| s.selected && !s.disabled)
+    );
+    step(app.press_key("enter"));
+    step(app.wait_for("id:player-banner"));
+    assert_eq!(iptv_app::player_opens(0), opens);
+    assert_eq!(props.lock().unwrap()["source"], source);
+    assert!(
+        app.screen()
+            .layout_nodes()
+            .into_iter()
+            .any(|n| n.id == player && !n.hidden)
+    );
+}
+
+#[test]
 fn back_returns_to_the_library_and_delete_handles_the_playing_file_after_consent() {
     let Some(home) = isolated!() else { return };
     let (mut app, database, id, props) = saved_fixture(&home);
@@ -275,13 +333,13 @@ fn back_returns_to_the_library_and_delete_handles_the_playing_file_after_consent
     step(app.wait_for_gone("id:recordings-screen", Duration::from_secs(2)));
     assert_eq!(iptv_app::player_opens(0), opens);
     step(app.press("label:TV guide"));
-    step(app.wait_for("id:guide-video-preview"));
+    step(app.wait_for("id:guide-preview"));
     assert!(
         !app.screen()
-            .matches("id:guide-video-preview >> text:Nothing playing")
+            .matches("id:guide-preview >> text:Nothing playing")
             .unwrap()
     );
-    step(app.press("id:guide-video-preview"));
+    step(app.press("id:guide-preview"));
     step(app.press("id:video"));
     assert_eq!(iptv_app::player_opens(0), opens);
     step(app.press("id:play-bar-back"));

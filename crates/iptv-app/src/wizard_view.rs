@@ -157,7 +157,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
             send(ui, WizardEvent::FilePicked(path));
         }),
         WizardEffect::StartImport { id, draft } => {
-            let (source, epg_url) = data::source_from_draft(&draft);
+            let (source, epg_url) = data::source_from_draft_in(&draft, crate::i18n::language());
             log::info!("iptv wizard: import {id:?} of {:?}", source.kind());
             let job = Job {
                 source,

@@ -178,9 +178,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .child(
             text(move || {
                 if ui.keys_shown() {
-                    "OK add or remove   ◀ remove all in this list   ▶ add all in this list   Back done"
+                    tr("OK add or remove   ◀ remove all in this list   ▶ add all in this list   Back done")
                 } else {
-                    "Tap a channel to add or remove it"
+                    tr("Tap a channel to add or remove it")
                 }
             })
             .font_family(SANS)

@@ -842,7 +842,17 @@ mod staged {
             ))
             .unwrap();
         assert!(!before.configuration_effective && !before.verified_coverage);
-        // Advance only the injected settle timer; no wall-clock sleeping or UI.
+        // The publication task registers its debounce only after its store
+        // reply. A fast verification reply can arrive before that task is polled.
+        // Acknowledge registration before releasing the injected settle timer.
+        fixture.drive(std::future::poll_fn(|cx| {
+            if fixture.delays.borrow().is_empty() {
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            } else {
+                Poll::Ready(())
+            }
+        }));
         for delay in fixture.delays.borrow_mut().drain(..) {
             let _ = delay.send(());
         }

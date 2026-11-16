@@ -7,10 +7,28 @@ is below 1.0, a minor release may change behaviour.
 
 ## [Unreleased]
 
+### Added
+
+- Open the shared playback bar on Android TV with long OK or Menu and navigate
+  its enabled controls with the D-pad. Up from the guide's first channel focuses
+  the mini-player; OK returns the current stream to full screen.
+
 ### Changed
 
 - Explain unavailable PiP/multiview actions and use current player and recording
   wake reports for feature availability, including awake-only recording limits.
+- Complete the known interface-text catalogue in eleven languages, including
+  settings help, guide/search/multiview hints and track names. New translations
+  remain drafts pending fluent-speaker review.
+
+### Fixed
+
+- Cancelled imports and stale work from a replaced source cannot publish a
+  staged catalogue over committed data. Refused private backup storage is
+  removed immediately without changing an existing archive.
+- Disposing the final UI owner drains its native store connections and accepted
+  small-file writes, including during unwinding, to avoid racing SQLCipher's
+  process-exit cleanup.
 
 ## [0.1.3] - 2026-11-15
 

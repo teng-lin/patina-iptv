@@ -122,6 +122,10 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     step(app.wait_for("text:☰  Todos los canales"));
     step(app.wait_for("text:TV en directo"));
     step(app.wait_for("text:Reproducir el último canal al iniciar"));
+    let language_help =
+        "Interface language: `system` follows the device, otherwise a language tag.";
+    shown(app, &Words::of("es").t(language_help).replace('`', ""));
+    shown(app, &Words::of("es").t("Keep history for"));
     // Accessibility labels of mounted views follow: the rail's item, the
     // video's tap target and the chooser's backdrop.
     step(app.wait_for("label:Ajustes"));
@@ -140,6 +144,8 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     step(app.wait_for("text:語言"));
     step(app.wait_for("text:直播電視"));
     step(app.wait_for("text:啟動時播放上次頻道"));
+    shown(app, &Words::of("zh-Hant").t(language_help).replace('`', ""));
+    shown(app, &Words::of("zh-Hant").t("Keep history for"));
     step(app.wait_for("label:關閉選擇器"));
     let path = fixture.path.parent().unwrap().join("settings.json");
     let stored = personalization::saved_settings(app, &path, |settings| {
@@ -499,4 +505,150 @@ fn custom_recording_menu_uses_the_selected_interface_language() {
     shown(&mut fixture.app, &schedule);
     step(fixture.app.press(&format!("text:{schedule}")));
     shown(&mut fixture.app, &words.t("Save recording"));
+}
+
+/// Real catalogue bindings with a deliberately doubled/accented test fixture.
+/// This checks measured headless layout; native font/AT validation is separate.
+#[test]
+fn pseudolocalized_labels_keep_their_accessible_name_at_large_text_sizes() {
+    fn here() {}
+    let Some(home) = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[("IPTV_RS_TEST_PSEUDOLOCALE", "1")],
+    ) else {
+        return;
+    };
+    let mut settings = Settings::new();
+    settings.set("general.language", Value::text("en")).unwrap();
+    settings
+        .set("appearance.font_size", Value::choice("extra_large"))
+        .unwrap();
+    let mut fixture = personalization::start(home, settings, false);
+    let app = &mut fixture.app;
+    let expanded = |source| iptv_app::pseudo_fixed_for_test(source).unwrap();
+    shown(app, "★ Local A");
+    assert!(iptv_app::pseudo_fixed_for_test("Local A").is_none());
+    rail(app);
+    step(app.press(&format!("label:{}", expanded("Settings"))));
+    for (width, height, idiom) in [
+        (960.0, 540.0, nsh_core::platform::Idiom::Tv),
+        (1280.0, 800.0, nsh_core::platform::Idiom::Pad),
+        (960.0, 540.0, nsh_core::platform::Idiom::Desktop),
+    ] {
+        step(
+            app.set_environment("large synthetic translated interface", |env| {
+                env.idiom = idiom;
+                env.font_scale = 1.3;
+            }),
+        );
+        step(app.set_viewport(nsh_core::Size::new(
+            nsh_core::prelude::px(width),
+            nsh_core::prelude::px(height),
+        )));
+        // Focus/scroll through the real settings model. Larger rows can put
+        // the desired control below the fold; identity-based focus reveals it.
+        step(app.press_key("right"));
+        for _ in 0..20 {
+            step(app.press_key("up"));
+        }
+        step(app.press_key("down")); // Restore: a title plus a second-line note.
+        shown(
+            app,
+            expanded("Replace everything with a backup's contents."),
+        );
+        let rows = app.screen().layout_nodes();
+        for source in ["Restore a backup", "Takes effect after a restart"] {
+            let label = expanded(source);
+            let text = rows
+                .iter()
+                .filter_map(|node| node.text.as_ref())
+                .find(|text| text.text.text == label)
+                .expect("two-line settings row");
+            let mut full = (*text.text).clone();
+            full.max_lines = 0;
+            full.no_wrap = true; // Horizontal ellipsis is intentional; vertical clipping is not.
+            use nsh_core::{ApproxTextEngine, TextEngine};
+            let engine = ApproxTextEngine;
+            let needed = engine.measure(&engine.prepare(&full), None);
+            assert!(
+                needed.height.0 <= text.content.size.height.0 + 1.0,
+                "{idiom:?}: {source} needs {needed:?}, given {:?}",
+                text.content
+            );
+        }
+        let summary =
+            expanded("Start playing the channel that was on when the app was last closed.");
+        for _ in 0..20 {
+            if app.shows(summary) {
+                break;
+            }
+            step(app.press_key("down"));
+        }
+        shown(app, summary);
+        let wanted = expanded("Play the last channel on start");
+        shown(app, wanted);
+        let nodes = app.screen().layout_nodes();
+        let node = nodes
+            .iter()
+            .find(|node| {
+                !node.hidden
+                    && node
+                        .text
+                        .as_ref()
+                        .is_some_and(|text| text.text.text == wanted)
+            })
+            .expect("localized setting label");
+        assert!(
+            node.bounds.origin.x.0 >= 0.0 && node.bounds.origin.y.0 >= 0.0,
+            "{idiom:?}"
+        );
+        assert!(
+            node.bounds.origin.x.0 + node.bounds.size.width.0 <= width + 1.0,
+            "{idiom:?}"
+        );
+        assert!(
+            node.bounds.origin.y.0 + node.bounds.size.height.0 <= height + 1.0,
+            "{idiom:?}"
+        );
+        assert!(node.bounds.size.height.0 > 0.0);
+        // List labels intentionally keep one line. Their full wording must
+        // remain accessible even when an expanded label needs an ellipsis.
+        assert_eq!(node.text.as_ref().unwrap().text.max_lines, 1);
+        step(app.wait_for(&format!("label:/{}/", pattern(wanted))));
+        step(app.wait_for(&format!("label:{}", expanded("Video"))));
+    }
+}
+
+#[test]
+fn cjk_settings_help_and_live_language_labels_do_not_fall_back_to_english() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start_in(home, "ja", "auto");
+    let app = &mut fixture.app;
+    let ja = Words::of("ja");
+    rail(app);
+    step(app.press(&format!("label:{}", ja.t("Settings"))));
+    shown(app, &ja.t("Keep history for"));
+    // A focused row's explanation uses the same locale, not the schema's English.
+    let summary = "Start playing the channel that was on when the app was last closed.";
+    press(app, &ja.t("Play the last channel on start"));
+    shown(app, &ja.t(summary));
+    assert!(!app.shows(summary));
+    let nodes = app.screen().layout_nodes();
+    let help = nodes
+        .iter()
+        .find(|node| node.test_id.as_deref() == Some("settings-help"))
+        .and_then(|node| node.text.as_ref())
+        .expect("localized settings help");
+    // Remove the renderer's line cap before measuring, so vertical clipping
+    // or ellipsis cannot make this assertion pass for truncated help.
+    let mut full = (*help.text).clone();
+    full.max_lines = 0;
+    use nsh_core::{ApproxTextEngine, TextEngine};
+    let engine = ApproxTextEngine;
+    let needed = engine.measure(&engine.prepare(&full), Some(help.content.size.width));
+    assert!(
+        needed.height.0 <= help.content.size.height.0 + 1.0,
+        "{needed:?} exceeds {:?}",
+        help.content
+    );
 }

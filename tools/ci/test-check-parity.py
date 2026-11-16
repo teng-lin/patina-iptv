@@ -53,8 +53,20 @@ class Parity(unittest.TestCase):
         self.assertEqual(set(re.findall(r"'([a-z0-9-]+)'", loop)), self.wasm)
         self.assertIn("pins.py\" check-nsh", script)
 
-    def test_coverage_measures_every_library_crate(self):
-        self.assertEqual(packages(lines_with("tools/ci/coverage.sh", "crates=(")), self.libraries)
+    def test_coverage_measures_every_workspace_crate(self):
+        self.assertEqual(packages(lines_with("tools/ci/coverage.sh", "crates=(")), self.members)
+
+    def test_coverage_enables_native_runtime_and_headless_application_scenarios(self):
+        features = lines_with("tools/ci/coverage.sh", "features=(--features")
+        self.assertEqual(len(features), 1)
+        self.assertIn("iptv-runtime/test-support", features[0])
+        self.assertIn("iptv-app/test-support", features[0])
+
+    def test_coverage_runs_the_real_native_player_on_an_isolated_display(self):
+        script = (ROOT / "tools/ci/coverage.sh").read_text(encoding="utf-8")
+        self.assertIn("python3 tools/ci/run-xvfb.py cargo llvm-cov test", script)
+        self.assertIn("--test native_player", script)
+        self.assertIn("--ignored --exact native_gtk_player_shares_pip_frames_and_recreates_only_after_context_loss", script)
 
     def test_contributor_map_lists_the_portable_builds(self):
         text = (ROOT / "docs/contributing.md").read_text(encoding="utf-8")

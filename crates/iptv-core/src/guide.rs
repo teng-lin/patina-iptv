@@ -167,6 +167,19 @@ pub trait Schedule {
     }
 
     fn title(&self, channel: usize, program: Program) -> String;
+    /// Translate generated gap/loading labels only; provider titles stay opaque.
+    fn title_in(
+        &self,
+        channel: usize,
+        program: Program,
+        _language: &crate::i18n::Language,
+    ) -> String {
+        self.title(channel, program)
+    }
+    /// Generated group labels may be translated by adapters that know their origin.
+    fn group_name_in(&self, group: usize, _language: &crate::i18n::Language) -> String {
+        self.group_name(group)
+    }
     /// The channel's live stream URL, when the schedule knows it.
     fn stream_url(&self, _channel: usize) -> Option<String> {
         None
@@ -344,6 +357,8 @@ pub enum Pane {
     Rail,
     Groups,
     Guide,
+    /// The existing playing video above the first guide row.
+    Preview,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -471,7 +486,7 @@ impl Focus {
     /// the groups column move through [`Focus::navigate`].
     pub fn apply(&mut self, m: Move, s: &dyn Schedule) {
         match (self.pane, m) {
-            (Pane::Rail | Pane::Groups, _) => return,
+            (Pane::Rail | Pane::Groups | Pane::Preview, _) => return,
             // Rows keep the time column, but not before a row's floor: on a
             // row without catch-up the focus is on now's programme at least.
             (Pane::Guide, Move::Up) => {
