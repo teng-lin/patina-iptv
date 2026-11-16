@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Measures the product plan's budgets on an Android device or emulator with
+# Collects exploratory performance evidence on an Android device or emulator with
 # the app installed and a playlist already added (synthetic data only; the
 # large fixture: tools/make-iptv-fixtures.py --channels 10000 --days-back 7).
 # Install the `profile` build: a release build (not debuggable, so ART
@@ -9,14 +9,14 @@
 #   (cd hosts/android && ./gradlew assembleProfile)
 #   adb install -r hosts/android/app/build/outputs/apk/profile/app-profile.apk
 #
-#   tools/perf-android.sh [serial] [--cold]   (default: the only device)
+#   tools/perf-android.sh [serial] [--cold] [--json PATH]   (explicit device required)
 #
 # --cold: only the cold starts (no zaps, keys or memory), for quick runs.
 # Each cold start prints the app's startup phases (`iptv startup:` lines,
 # `crates/iptv-app/src/startup.rs`): ms since the process started.
 #
-# Reports: cold start to the stored guide on screen, zap to first picture
-# (channel down in full screen), guide key handling and frame times during
+# Reports: activity launch, stored guide mount proxy, zap to reported size/ready
+# (channel down in full screen; these are not first-render events), guide key handling and frame times during
 # a burst of Down keys and a held Down key, and memory. Mutes the device
 # first. Frame times depend on the display's refresh rate, which the video
 # in the preview can lower (29.97 Hz for a 30 fps channel). Emulator numbers
@@ -24,7 +24,39 @@
 set -uo pipefail
 export PATH="${ANDROID_HOME:-$HOME/Android/Sdk}/platform-tools:$PATH"
 serial=${1:-}
-cold_only=${2:-}
+if [ -z "$serial" ] || [[ "$serial" == --* ]]; then
+  echo "An explicit authorized synthetic-profile device serial is required" >&2
+  exit 2
+fi
+shift "$(( $# > 0 ? 1 : 0 ))"
+cold_only=
+json_output=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --cold) cold_only=--cold; shift ;;
+    --json)
+      if [ "$#" -lt 2 ] || [ -z "$2" ]; then echo '--json requires a path' >&2; exit 2; fi
+      json_output=$2; shift 2 ;;
+    *) echo "usage: $0 [serial] [--cold] [--json PATH]" >&2; exit 2 ;;
+  esac
+done
+if [ -n "$json_output" ]; then
+  if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
+    echo "--json requires Bash 4.4 or newer" >&2; exit 2
+  fi
+  observations=$(mktemp)
+  python3 tools/performance/android-envelope.py "$json_output" "$serial"
+  finish_json() {
+    exec 1>&3 2>&4 3>&- 4>&-
+    wait "$tee_pid"
+    python3 tools/performance/android-envelope.py "$json_output" "$serial" "$observations"
+    rm -f "$observations"
+  }
+  trap finish_json EXIT
+  exec 3>&1 4>&2
+  exec > >(tee "$observations") 2>&1
+  tee_pid=$!
+fi
 adb="adb${serial:+ -s $serial}"
 pkg=com.hantekllc.iptvrs
 act=$pkg/.host.TvActivity
@@ -53,20 +85,26 @@ for run in 1 2 3; do
   done
   # The resumed channel's first picture, when one resumes.
   for _ in $(seq 1 24); do
-    $adb logcat -d | grep -qE 'iptv startup: video frame|iptv player 0 error' && break
+    $adb logcat -d | grep -qE 'iptv startup: video size|iptv player 0 error' && break
     pause 0.25
   done
   guide=$($adb logcat -v epoch -d | grep -m1 'iptv data: guide switched' | ms)
   played=$($adb logcat -v epoch -d | grep -m1 'iptv player 0 state: ready' | ms)
-  echo "run $run: first frame ${total} ms, guide on screen $((guide - t0)) ms${played:+, resumed channel ready $((played - t0)) ms}"
+  if [ -n "$guide" ]; then
+    echo "run $run: activity launch ${total} ms, guide mount proxy $((guide - t0)) ms${played:+, resumed channel ready $((played - t0)) ms}"
+  fi
   $adb logcat -d | sed -n 's/.*iptv startup: /   /p' | tr -d '\r'
-  starts+=($((guide - t0)))
+  if [ -n "$guide" ]; then
+    starts+=("$((guide - t0))")
+  else
+    echo "INVALID run $run: missing guide terminal evidence" >&2
+  fi
   pause 3
 done
-echo "median guide on screen: $(printf '%s\n' "${starts[@]}" | median) ms (budget 2000)"
+echo "median guide mount proxy: $(printf '%s\n' "${starts[@]}" | median) ms"
 [ "$cold_only" = "--cold" ] && exit 0
 
-echo "== zap to picture (channel down x5): key to first decoded frame (size) and to ready"
+echo "== selection proxies (channel down x5): uncorrelated reported size and ready"
 pause 5
 zaps=()
 for z in 1 2 3 4 5; do
@@ -81,11 +119,13 @@ for z in 1 2 3 4 5; do
   ready=$($adb logcat -v epoch -d | grep -m1 'iptv player 0 state: ready' | ms)
   if [ -n "$down" ] && [ -n "$frame" ]; then
     zaps+=($((frame - down)))
-    echo "zap $z: picture $((frame - down)) ms${ready:+, ready $((ready - down)) ms}"
+    echo "zap $z: reported size proxy $((frame - down)) ms${ready:+, ready $((ready - down)) ms}"
+  else
+    echo "INVALID selection $z: missing key/size evidence" >&2
   fi
   pause 3
 done
-echo "median zap to picture: $(printf '%s\n' "${zaps[@]}" | median) ms (budget 1500)"
+echo "median reported size proxy: $(printf '%s\n' "${zaps[@]}" | median) ms (uncorrelated; not first picture)"
 
 echo "== guide keys (30 x Down)"
 key 4; pause 2
@@ -96,7 +136,7 @@ pause 2
 handler=$($adb logcat -d | sed -n 's/.*iptv key=down phase=Down.*handler_us=\([0-9]*\).*/\1/p')
 echo "key handler: median $(printf '%s\n' "$handler" | median) us, max $(printf '%s\n' "$handler" | sort -n | tail -1) us"
 $adb shell dumpsys gfxinfo $pkg | grep -E "Total frames rendered|Janky frames|50th percentile|90th percentile|99th percentile" | sed 's/^ *//'
-echo "(budget: key to frame under 50 ms)"
+echo "(handler and gfxinfo are separate observations, not key-to-display latency)"
 
 echo "== guide keys, held (60 x Down about 58 ms apart, as a remote repeats)"
 # One monkey script: adb's input spawns a process per key (~0.25 s apart).

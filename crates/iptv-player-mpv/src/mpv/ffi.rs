@@ -48,6 +48,23 @@ pub const MPV_RENDER_PARAM_OPENGL_FBO: c_int = 3;
 #[cfg(not(windows))]
 pub const MPV_RENDER_PARAM_FLIP_Y: c_int = 4;
 pub const MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME: c_int = 12;
+#[cfg(not(windows))]
+pub const MPV_RENDER_PARAM_NEXT_FRAME_INFO: c_int = 11;
+#[cfg(not(windows))]
+pub const MPV_RENDER_UPDATE_FRAME: u64 = 1;
+#[cfg(not(windows))]
+pub const MPV_RENDER_FRAME_INFO_PRESENT: u64 = 1;
+#[cfg(not(windows))]
+pub const MPV_RENDER_FRAME_INFO_REDRAW: u64 = 2;
+#[cfg(not(windows))]
+pub const MPV_RENDER_FRAME_INFO_REPEAT: u64 = 4;
+
+#[cfg(not(windows))]
+#[repr(C)]
+pub struct mpv_render_frame_info {
+    pub flags: u64,
+    pub target_time: i64,
+}
 
 #[repr(C)]
 pub struct mpv_event {
@@ -174,6 +191,13 @@ unsafe extern "C" {
         callback: Option<Callback>,
         callback_ctx: *mut c_void,
     );
+    #[cfg(not(windows))]
+    pub fn mpv_render_context_update(ctx: *mut mpv_render_context) -> u64;
+    #[cfg(not(windows))]
+    pub fn mpv_render_context_get_info(
+        ctx: *mut mpv_render_context,
+        param: mpv_render_param,
+    ) -> c_int;
     pub fn mpv_render_context_render(
         ctx: *mut mpv_render_context,
         params: *mut mpv_render_param,

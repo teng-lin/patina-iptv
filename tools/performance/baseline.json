@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "policy": "exact counter ceilings; no timing tolerance or wall-clock CI gate",
+  "journeys": {
+    "cached-guide": {
+      "store_reads": 17,
+      "player_opens": 1
+    },
+    "busy-guide": {
+      "store_reads": 2,
+      "player_opens": 0
+    },
+    "selection": {
+      "store_reads": 1,
+      "player_opens": 1
+    }
+  },
+  "rationale": "Initial canonical action ceilings after excluding periodic view reloads: cached guide 17 reader jobs, busy navigation 2, actual App selection 1; native source opens 1/0/1. Native recorder execution remains active. Wall-clock measurements are informational."
+}
