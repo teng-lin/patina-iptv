@@ -9,6 +9,7 @@ on:
       - 'crates/**'
       - 'rust-toolchain.toml'
       - 'tools/ci/coverage.sh'
+      - 'tools/ci/run-xvfb.py'
       - 'tools/ci/check-coverage-floors.py'
       - 'tools/ci/test-coverage-floors.py'
   push:
@@ -25,23 +26,27 @@ jobs:
   coverage:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      IPTV_REQUIRE_PLAYER_TESTS: '1'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      - name: Prepare the isolated native player display
+        run: sudo apt-get install -y xvfb libgl1-mesa-dri
       - name: Test coverage floor enforcement
         run: python3 tools/ci/test-coverage-floors.py
       - name: Install cargo-llvm-cov
         run: |
           rustup component add llvm-tools
           cargo install cargo-llvm-cov --version 0.9.1 --locked
-      - name: Measure line coverage of the library crates
+      - name: Measure library and headless application integration coverage
         run: bash tools/ci/coverage.sh
       - name: Show the summary
         run: |
           {
-            echo '### Line coverage of the library crates'
+            echo '### Library and headless application line coverage'
             echo
             echo '```'
             cat target/coverage/summary.txt
