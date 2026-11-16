@@ -459,10 +459,13 @@ fn a_saved_recording_grant_revoked_during_preparation_never_reaches_the_native_p
         step(app.press_key(digit));
     }
     step(app.press("id:parental-layer >> text:Continue"));
-    step(app.wait_until(
+    // Gate entry is an external worker acknowledgement and need not produce a
+    // UI batch after the PIN/library transition has finished rendering.
+    step(crate::isolated::wait_outside(
+        &mut app,
         "authorized saved source waiting for retirement",
         Duration::from_secs(10),
-        |_| preparation.wait_entered(Duration::ZERO),
+        || preparation.wait_entered(Duration::ZERO),
     ));
     // The playback task reaches preparation before the recording action's
     // follow-up jobs read has closed its busy library overlay. Back belongs
