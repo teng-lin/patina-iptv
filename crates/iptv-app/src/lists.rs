@@ -247,7 +247,13 @@ pub fn bind(ui: Ui) {
 
 /// A direction on the guide screen.
 pub fn navigate(ui: Ui, m: Move) {
-    if m == Move::Up && ui.mode.get_untracked() == crate::ViewMode::Guide {
+    if m == Move::Up
+        && matches!(
+            nsh_core::prelude::idiom(),
+            nsh_core::platform::Idiom::Tv | nsh_core::platform::Idiom::Desktop
+        )
+        && ui.mode.get_untracked() == crate::ViewMode::Guide
+    {
         let mut moved = false;
         ui.focus.update(|f| {
             moved = f.focus_preview(

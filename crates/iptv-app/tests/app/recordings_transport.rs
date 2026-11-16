@@ -316,7 +316,14 @@ fn tv_saved_playback_returns_through_guide_preview_without_reopening_the_player(
     // A recording also owns the preview when no live channel is playing.
     // Search and the empty Favourites group remain valid origins on TV/desktop.
     for idiom in [Idiom::Desktop, Idiom::Tv] {
-        step(app.set_environment("saved preview navigation", |env| env.idiom = idiom));
+        step(app.set_environment("saved preview navigation", |env| {
+            env.idiom = idiom;
+            env.os = if idiom == Idiom::Desktop {
+                nsh_core::platform::Os::Linux
+            } else {
+                nsh_core::platform::Os::Android
+            };
+        }));
         let (w, h) = if idiom == Idiom::Tv {
             (960.0, 540.0)
         } else {

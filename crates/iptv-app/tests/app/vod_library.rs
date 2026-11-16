@@ -1513,7 +1513,14 @@ fn movies_and_shows_stay_visible_with_an_empty_catalogue_on_desktop_and_tv() {
         nsh_core::platform::Idiom::Desktop,
         nsh_core::platform::Idiom::Tv,
     ] {
-        step(app.set_environment("library discovery", |env| env.idiom = idiom));
+        step(app.set_environment("library discovery", |env| {
+            env.idiom = idiom;
+            env.os = if idiom == nsh_core::platform::Idiom::Desktop {
+                nsh_core::platform::Os::Linux
+            } else {
+                nsh_core::platform::Os::Android
+            };
+        }));
         let (w, h) = if idiom == nsh_core::platform::Idiom::Tv {
             (960.0, 540.0)
         } else {

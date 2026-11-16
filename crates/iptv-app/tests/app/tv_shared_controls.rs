@@ -224,9 +224,15 @@ fn sidebar_up_reaches_preview_on_desktop_and_tv_without_reopening_video() {
         }),
     );
     let opens = iptv_app::player_opens(0);
-    step(app.press_key("up"));
     for idiom in [Idiom::Desktop, Idiom::Tv] {
-        step(app.set_environment("shared preview navigation", |env| env.idiom = idiom));
+        step(app.set_environment("shared preview navigation", |env| {
+            env.idiom = idiom;
+            env.os = if idiom == Idiom::Desktop {
+                nsh_core::platform::Os::Linux
+            } else {
+                nsh_core::platform::Os::Android
+            };
+        }));
         let (w, h) = if idiom == Idiom::Tv {
             (960.0, 540.0)
         } else {
@@ -236,6 +242,12 @@ fn sidebar_up_reaches_preview_on_desktop_and_tv_without_reopening_video() {
             nsh_core::prelude::px(w),
             nsh_core::prelude::px(h),
         )));
+        step(app.press("text:/^☰  /"));
+        step(app.press("id:guide-groups >> text:Favourites"));
+        step(app.press("id:guide-groups >> text:All channels"));
+        step(app.press_key("right"));
+        step(app.press_key("down"));
+        step(app.press_key("up"));
         // Guide A is focused while B keeps playing. Up must cancel A's pending autoplay.
         step(app.press_key("up"));
         assert!(selected(app, "guide-preview"), "first guide row, {idiom:?}");
@@ -277,7 +289,5 @@ fn sidebar_up_reaches_preview_on_desktop_and_tv_without_reopening_video() {
         step(app.wait_for_gone("id:search-screen", Duration::from_secs(2)));
         assert_eq!(iptv_app::player_opens(0), opens);
         persistent(app, &lifetime, player);
-        step(app.press_key("right"));
-        step(app.press_key("right"));
     }
 }
