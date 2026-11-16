@@ -464,6 +464,12 @@ fn a_saved_recording_grant_revoked_during_preparation_never_reaches_the_native_p
         Duration::from_secs(10),
         |_| preparation.wait_entered(Duration::ZERO),
     ));
+    // The playback task reaches preparation before the recording action's
+    // follow-up jobs read has closed its busy library overlay. Back belongs
+    // to that overlay until it acknowledges the move to full-screen playback.
+    step(app.wait_for_gone("id:parental-continue", Duration::from_secs(10)));
+    step(app.wait_for_gone("id:recordings-screen", Duration::from_secs(10)));
+    assert_eq!(iptv_app::player_opens(0), before, "source is still held");
     step(app.back());
     step(app.wait_for("id:recording-return-to-player"));
     let surface = app
