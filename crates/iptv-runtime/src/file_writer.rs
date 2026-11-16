@@ -68,6 +68,8 @@ struct Writer {
     ready: Condvar,
     /// The queue ran empty.
     idle: Condvar,
+    #[cfg(feature = "test-support")]
+    pause: Mutex<Option<Arc<crate::testing::GateState>>>,
 }
 
 #[derive(Default)]
@@ -84,6 +86,8 @@ impl Files {
                     queue: Mutex::default(),
                     ready: Condvar::new(),
                     idle: Condvar::new(),
+                    #[cfg(feature = "test-support")]
+                    pause: Mutex::default(),
                 });
                 let work = writer.clone();
                 std::thread::Builder::new()
@@ -120,6 +124,12 @@ fn lock(writer: &Writer) -> MutexGuard<'_, Queue> {
 }
 
 impl Files {
+    #[cfg(feature = "test-support")]
+    pub(crate) fn hold_write(&self) -> crate::TestGate {
+        let gate = crate::TestGate::new();
+        *self.writer().pause.lock().unwrap() = Some(gate.0.clone());
+        gate
+    }
     /// Queues `bytes` for `path`; the future answers when they (or newer
     /// content for the same path) are on disk. Dropping it does not cancel
     /// the write.
@@ -239,6 +249,13 @@ fn run(writer: &Writer) {
                     .unwrap_or_else(PoisonError::into_inner);
             }
         };
+        #[cfg(feature = "test-support")]
+        {
+            let pause = writer.pause.lock().unwrap().take();
+            if let Some(pause) = pause {
+                pause.pause();
+            }
+        }
         let result = std::panic::catch_unwind(|| match &content {
             Some(bytes) => publish(&path, bytes, sync_directory),
             None => unlink(&path),

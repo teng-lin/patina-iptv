@@ -114,9 +114,21 @@ pub(crate) struct Hooks {
     refusals: std::sync::atomic::AtomicUsize,
     reports: Mutex<(bool, usize)>,
     released: Condvar,
+    publication: Mutex<Option<Arc<crate::testing::GateState>>>,
 }
 #[cfg(feature = "test-support")]
 impl Hooks {
+    pub(crate) fn hold_publication(&self) -> crate::TestGate {
+        let gate = crate::TestGate::new();
+        *self.publication.lock().unwrap() = Some(gate.0.clone());
+        gate
+    }
+    pub(crate) fn before_publication(&self) {
+        let pause = self.publication.lock().unwrap().take();
+        if let Some(pause) = pause {
+            pause.pause();
+        }
+    }
     pub(crate) fn refuse(&self) -> bool {
         use std::sync::atomic::Ordering::SeqCst;
         self.refusals

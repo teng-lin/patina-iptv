@@ -12,6 +12,12 @@ is below 1.0, a minor release may change behaviour.
 - Explain unavailable PiP/multiview actions and use current player and recording
   wake reports for feature availability, including awake-only recording limits.
 
+### Fixed
+
+- Cancelled imports and stale work from a replaced source cannot publish a
+  staged catalogue over committed data. Refused private backup storage is
+  removed immediately without changing an existing archive.
+
 ## [0.1.3] - 2026-11-15
 
 ### Added

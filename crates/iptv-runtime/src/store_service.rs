@@ -325,6 +325,11 @@ impl Services {
         self.service.hooks.before_report();
     }
 
+    #[cfg(feature = "test-support")]
+    pub(crate) fn before_publication(&self) {
+        self.service.hooks.before_publication();
+    }
+
     /// Queues `operation` on the writer and returns its reply. Transfers
     /// ownership immediately in FIFO order, even if the caller drops its reply
     /// future. Bulk producers are bounded by the refresh pool; no SQLite work
@@ -452,6 +457,17 @@ impl Services {
             .service
             .writer
             .queue(Box::new(move |_| std::thread::sleep(duration)));
+    }
+
+    #[cfg(feature = "test-support")]
+    pub(crate) fn hold_writer(&self) -> crate::TestGate {
+        let gate = crate::TestGate::new();
+        let pause = gate.0.clone();
+        self.service
+            .writer
+            .queue(Box::new(move |_| pause.pause()))
+            .unwrap();
+        gate
     }
 }
 

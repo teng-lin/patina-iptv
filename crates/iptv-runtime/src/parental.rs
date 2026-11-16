@@ -658,7 +658,13 @@ mod source_tests {
         let snapshot = snapshot.clone();
         services
             .spawn_blocking(move || {
-                imports::save(&worker, &job, &catalog(), &[], stage(&worker), &snapshot)
+                let publication = imports::Publication::capture(
+                    &worker,
+                    &job,
+                    &iptv_import::CancelToken::new(),
+                    &snapshot,
+                )?;
+                imports::save(&worker, &job, &catalog(), &[], stage(&worker), &publication)
             })
             .await
             .unwrap()

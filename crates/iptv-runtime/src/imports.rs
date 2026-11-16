@@ -21,6 +21,56 @@ use iptv_store_sqlite::{
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::UnboundedSender as Sender;
+#[cfg(all(test, feature = "test-support"))]
+mod recovery_tests;
+
+/// Authority captured before I/O, checked again on the writer before mutation.
+/// A reused numeric source ID or an edit cannot inherit an old import's result.
+#[derive(Clone)]
+pub(crate) struct Publication {
+    cancel: CancelToken,
+    source: Option<(SourceId, String, iptv_providers::model::SourceConfig)>,
+    authorization: crate::parental::Snapshot,
+}
+
+impl Publication {
+    pub(crate) fn capture(
+        services: &Services,
+        job: &Job,
+        cancel: &CancelToken,
+        authorization: &crate::parental::Snapshot,
+    ) -> Result<Self, StoreError> {
+        let job = job.clone();
+        let auth = authorization.clone();
+        let source = services.blocking(move |store| {
+            crate::parental::require_import(store, &job, &auth)?;
+            job.stored
+                .map(|id| {
+                    let stored = store.source(id)?.ok_or(StoreError::SourceNotFound(id))?;
+                    Ok((id, store.source_incarnation(id)?, stored.source.config))
+                })
+                .transpose()
+        })?;
+        Ok(Self {
+            cancel: cancel.clone(),
+            source,
+            authorization: authorization.clone(),
+        })
+    }
+
+    fn check(&self, store: &Store) -> Result<(), StoreError> {
+        if self.cancel.is_cancelled() {
+            return Err(StoreError::Unavailable("import was cancelled"));
+        }
+        if let Some((id, incarnation, config)) = &self.source {
+            let current = store.source(*id)?.ok_or(StoreError::SourceNotFound(*id))?;
+            if store.source_incarnation(*id)? != *incarnation || current.source.config != *config {
+                return Err(StoreError::Unavailable("import source changed"));
+            }
+        }
+        Ok(())
+    }
+}
 /// An import to run.
 #[derive(Clone)]
 pub struct Job {
@@ -318,14 +368,10 @@ pub(crate) async fn pipeline(
     let fail = |failure: ImportFailure| {
         let _ = tx.send(Msg::Playlist(Err(failure)));
     };
-    let auth = authorization.clone();
-    let admission = job.clone();
-    if services
-        .blocking(move |store| crate::parental::require_import(store, &admission, &auth))
-        .is_err()
-    {
-        return fail(ImportFailure::new(FailureKind::Auth));
-    }
+    let publication = match Publication::capture(services, &job, cancel, authorization) {
+        Ok(publication) => publication,
+        Err(_) => return fail(ImportFailure::new(FailureKind::Auth)),
+    };
     let now = now_unix();
     if let Some(id) = job
         .stored
@@ -485,7 +531,7 @@ pub(crate) async fn pipeline(
             log::warn!("iptv data: {:?} import failed: {e}", job.source.kind());
             // New details that failed say nothing about the stored ones.
             if !matches!(e, ImportError::Cancelled) && !job.edit {
-                record_failure(services, job.stored, stored::error_kind(&e));
+                record_failure(services, job.stored, stored::error_kind(&e), &publication);
             }
             // The stored guide stays on screen: keep it current.
             if let Some(id) = job.stored.filter(|_| stored_guide.is_some()) {
@@ -501,7 +547,7 @@ pub(crate) async fn pipeline(
     };
     if catalog.is_empty() {
         if !job.edit {
-            record_failure(services, job.stored, ImportErrorKind::Other);
+            record_failure(services, job.stored, ImportErrorKind::Other, &publication);
         }
         return fail(ImportFailure::new(FailureKind::EmptyPlaylist));
     }
@@ -575,11 +621,16 @@ pub(crate) async fn pipeline(
         done: 0,
         total: None,
     }));
-    let (id, counts, sources) = match save(services, &job, &catalog, &planned, stage, authorization)
+    #[cfg(feature = "test-support")]
+    services.before_publication();
+    let (id, counts, sources) = match save(services, &job, &catalog, &planned, stage, &publication)
     {
         Ok(saved) => saved,
         Err(e) => {
             log::warn!("iptv data: store: {e}");
+            if cancel.is_cancelled() {
+                return fail(ImportFailure::new(FailureKind::Cancelled));
+            }
             return fail(ImportFailure::new(FailureKind::Storage));
         }
     };
@@ -753,14 +804,15 @@ pub(crate) fn save(
     catalog: &Catalog,
     planned: &[GuideSource],
     stage: CatalogStage,
-    authorization: &crate::parental::Snapshot,
+    publication: &Publication,
 ) -> Result<(SourceId, CatalogCounts, Vec<GuideSource>), StoreError> {
     let job = job.clone();
     let guide_urls = catalog.guide_urls();
     let planned = planned.to_vec();
-    let authorization = authorization.clone();
+    let publication = publication.clone();
     services.blocking(move |store| {
-        crate::parental::require_import(store, &job, &authorization)?;
+        publication.check(store)?;
+        crate::parental::require_import(store, &job, &publication.authorization)?;
         save_in(store, &job, guide_urls, planned, stage)
     })
 }
@@ -796,11 +848,20 @@ pub(crate) fn save_in(
 }
 
 /// Notes a failed refresh on the stored source (kind only).
-pub(crate) fn record_failure(services: &Services, stored: Option<SourceId>, kind: ImportErrorKind) {
+pub(crate) fn record_failure(
+    services: &Services,
+    stored: Option<SourceId>,
+    kind: ImportErrorKind,
+    publication: &Publication,
+) {
     let Some(id) = stored else {
         return;
     };
-    if let Err(e) = services.blocking(move |store| store.record_import_failure(id, kind)) {
+    let publication = publication.clone();
+    if let Err(e) = services.blocking(move |store| {
+        publication.check(store)?;
+        store.record_import_failure(id, kind)
+    }) {
         log::warn!("iptv data: could not record the failure: {e}");
     }
 }

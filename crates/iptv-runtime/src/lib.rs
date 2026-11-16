@@ -37,6 +37,10 @@ pub mod parental;
 pub mod recordings;
 pub mod vod;
 pub use error::Error;
+#[cfg(feature = "test-support")]
+mod testing;
+#[cfg(feature = "test-support")]
+pub use testing::TestGate;
 
 /// Shell observations needed to prioritize reads and avoid replacing active playback.
 #[derive(Default)]
@@ -420,6 +424,28 @@ impl HostHandle {
         self.0
             .upgrade()
             .map_or(0, |service| service.hooks.reports_waiting())
+    }
+
+    /// Pause a FIFO writer job; the returned gate acknowledges actual entry.
+    #[cfg(feature = "test-support")]
+    pub fn hold_writer(&self) -> Option<TestGate> {
+        self.0
+            .upgrade()
+            .map(|service| service.accept().hold_writer())
+    }
+
+    /// Pause the next file write immediately before filesystem publication.
+    #[cfg(feature = "test-support")]
+    pub fn hold_file_write(&self) -> Option<TestGate> {
+        self.0.upgrade().map(|service| service.files().hold_write())
+    }
+
+    /// Pause an import after staging and before its writer request is accepted.
+    #[cfg(feature = "test-support")]
+    pub fn hold_import_publication(&self) -> Option<TestGate> {
+        self.0
+            .upgrade()
+            .map(|service| service.hooks.hold_publication())
     }
 
     /// Occupies this owner's store writer for `duration` after the work

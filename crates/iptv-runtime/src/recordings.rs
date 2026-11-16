@@ -1004,6 +1004,8 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
         if !state.publish_schedule(&services, revision, false) {
             continue;
         }
+        #[cfg(test)]
+        state.changed.notify_all();
         for mut job in jobs {
             if job.status == Status::Recording && !state.lock().active.contains_key(&job.id) {
                 recover_media(&services, &job).await;
