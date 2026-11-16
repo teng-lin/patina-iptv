@@ -64,9 +64,12 @@ class Parity(unittest.TestCase):
         self.assertIn("nsh-platform-windows --lib chrome::tests -- --format=pretty", native[0])
         self.assertIn("pins.py\" check-nsh", script)
         steps = {step["name"]: step["argv"] for step in plan.plan()}
-        libraries = steps["library-tests"]
-        self.assertEqual(libraries[libraries.index("--features") + 1], "iptv-runtime/test-support")
-        for name in ("repair-display-independence", "guide-input-budget", "busy-store-reader"):
+        tests = steps["workspace-tests"]
+        self.assertEqual(tests[tests.index("--features") + 1], plan.COVERAGE_FEATURES)
+        self.assertIn("--tests", tests)
+        self.assertIn("--doc", steps["workspace-doctests"])
+        for name in ("repair-display-independence", "inspection-display-budget",
+                     "guide-input-budget", "busy-store-reader"):
             argv = steps[name]
             self.assertEqual(argv[argv.index("--") + 1:], ["--ignored", "--exact", "--format=pretty"])
 
@@ -77,6 +80,7 @@ class Parity(unittest.TestCase):
         self.assertIn("arguments=$(python3 tools/ci/check-plan.py coverage-args)", script)
         self.assertIn('read -r -a checks <<< "$arguments"', script)
         self.assertIn('"${checks[@]}" -- --format=pretty', script)
+        self.assertIn(plan.INSPECTION + " \\\n    -- --ignored --exact --format=pretty", script)
 
     def test_coverage_enables_native_runtime_and_headless_application_scenarios(self):
         args = plan.coverage_args()

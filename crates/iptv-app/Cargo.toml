@@ -7,6 +7,13 @@ rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
 
+# The desktop entry point only wires the library; its tests live in the library
+# and integration harnesses, so it needs no separate empty libtest executable.
+[[bin]]
+name = "iptv-app"
+path = "src/main.rs"
+test = false
+
 [features]
 # Synthetic fixture transport and key injection; never enabled in packages.
 test-support = ["iptv-runtime/test-support"]

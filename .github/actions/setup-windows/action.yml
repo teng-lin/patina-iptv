@@ -38,6 +38,7 @@ runs:
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       if: inputs.cache == 'true'
       with:
+        key: host-v2-${{ hashFiles('nsh.rev', 'tools/ci/check-plan.py', 'tools/build-windows.ps1', '.github/actions/setup-windows/action.yml') }}
         # Per-PR copies of these gigabyte-sized caches evict each other.
         # PRs can restore master caches; only master refreshes them.
         save-if: ${{ github.ref == 'refs/heads/master' }}

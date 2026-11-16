@@ -28,6 +28,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Shared Rust validation parity checks failed.' }
           python tools/ci/test-check-plan.py
           if ($LASTEXITCODE -ne 0) { throw 'Shared Rust plan runner tests failed.' }
+          python tools/ci/test-ci-cache.py
+          if ($LASTEXITCODE -ne 0) { throw 'CI tool cache identity checks failed.' }
           python tools/mpv-runtime/test_prepare.py
           if ($LASTEXITCODE -ne 0) { throw 'Source preparation tests failed.' }
           python tools/mpv-runtime/test_package.py
@@ -44,3 +46,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Generated runner lock is stale.' }
           python tools/ci/test-package-lock.py
           if ($LASTEXITCODE -ne 0) { throw 'Runner lock regression tests failed.' }
+      - name: Rust compilation and linking timings
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: rust-timings-windows
+          path: target/cargo-timings/*.html
+          if-no-files-found: warn
+          retention-days: 7

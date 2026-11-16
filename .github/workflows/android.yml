@@ -49,6 +49,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        with:
+          cache-key: android-check-v2-${{ hashFiles('tools/ci/check-android.sh', 'tools/ci/android-ndk-env.sh') }}
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
       - name: Install the NDK and the Android Rust targets
         run: |
@@ -77,14 +79,20 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        with:
+          cache-key: android-v2-${{ hashFiles('tools/sync-host.sh', 'tools/ci/android-ndk-env.sh', '.github/actions/android/action.yml') }}
       - uses: ./.github/actions/android
       - name: Build Android native library
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target
         run: ABIS=arm64-v8a,armeabi-v7a bash tools/sync-host.sh
+      - uses: ./.github/actions/cargo-tool
+        with:
+          name: cargo-about
+          version: 0.9.3
+          features: cli
       - name: Generate and stage Android notices
         run: |
-          cargo install cargo-about --version 0.9.3 --features cli --locked
           bash tools/ci/notices.sh
           (cd hosts/android && ./gradlew --no-daemon :app:generateLicenseReport)
           mkdir -p hosts/android/app/build/nsh/assets/notices

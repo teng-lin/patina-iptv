@@ -20,6 +20,7 @@ PORTABLE = (
     "iptv-guide", "iptv-import", "iptv-search", "iptv-library",
 )
 REPAIR = "guide_repair::tests::repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive"
+INSPECTION = "foundation_inspection::a_hundred_thousand_channel_analysis_keeps_display_reads_responsive"
 LATENCY = "store_latency::guide_input_stays_under_budget_while_the_database_writer_is_locked"
 BUSY_READER = "store_latency::a_store_read_does_not_wait_for_a_busy_writer"
 COVERAGE_FEATURES = "iptv-runtime/test-support,iptv-app/test-support"
@@ -49,29 +50,33 @@ def step(name, *argv):
 
 
 def plan(root=ROOT, release=False):
-    libraries = tuple(crate for crate in workspace_crates(root) if crate != "iptv-app")
+    workspace = package_args(workspace_crates(root))
+    test_args = ["--locked", "--features", COVERAGE_FEATURES, *workspace]
     steps = [
         step("workspace-clippy", "cargo", "clippy", "--locked", "--workspace", "--all-targets",
-             "--features", "iptv-app/test-support", "--", "-D", "warnings"),
-        step("library-tests", "cargo", "test", "--locked", "--features", "iptv-runtime/test-support",
-             *package_args(libraries), "--", "--format=pretty"),
-        step("repair-display-independence", "cargo", "test", "--locked", "-p", "iptv-runtime",
-             "--features", "test-support", "--lib", REPAIR, "--", "--ignored", "--exact", "--format=pretty"),
+             "--features", COVERAGE_FEATURES, "--", "-D", "warnings"),
+        # One feature-unified graph, without linking the examples Clippy checks.
+        step("workspace-tests", "cargo", "test", *test_args, "--tests", "--timings", "--", "--format=pretty"),
+        step("repair-display-independence", "cargo", "test", *test_args,
+             "--lib", REPAIR, "--", "--ignored", "--exact", "--format=pretty"),
+        step("inspection-display-budget", "cargo", "test", *test_args,
+             "--test", "it", INSPECTION, "--", "--ignored", "--exact", "--format=pretty"),
     ]
     steps.extend(
         step(f"wasm-{crate}", "cargo", "build", "--locked", "-p", crate, "--target", "wasm32-unknown-unknown")
         for crate in PORTABLE
     )
     steps.extend([
-        step("app-tests", "cargo", "test", "--locked", "-p", "iptv-app", "--features", "test-support",
-             "--", "--format=pretty"),
-        step("guide-input-budget", "cargo", "test", "--locked", "-p", "iptv-app", "--features", "test-support",
+        step("guide-input-budget", "cargo", "test", *test_args,
              "--test", "app", LATENCY, "--", "--ignored", "--exact", "--format=pretty"),
-        step("busy-store-reader", "cargo", "test", "--locked", "-p", "iptv-app", "--features", "test-support",
+        step("busy-store-reader", "cargo", "test", *test_args,
              "--test", "app", BUSY_READER, "--", "--ignored", "--exact", "--format=pretty"),
+        # --tests excludes doctests; keep their compilation and execution explicit.
+        step("workspace-doctests", "cargo", "test", *test_args, "--doc", "--", "--format=pretty"),
         # Leave the normal executable as the final artifact: integration tests
         # may build Cargo's app binary with test-support enabled.
-        step("app-build", "cargo", "build", "--locked", "-p", "iptv-app", *(["--release"] if release else [])),
+        step("app-build", "cargo", "build", "--locked", "-p", "iptv-app", "--timings",
+             *(["--release"] if release else [])),
     ])
     return steps
 
@@ -82,7 +87,7 @@ def format_plan(root=ROOT):
 
 
 def coverage_args(root=ROOT):
-    return ["--features", COVERAGE_FEATURES, *package_args(workspace_crates(root))]
+    return ["--tests", "--features", COVERAGE_FEATURES, *package_args(workspace_crates(root))]
 
 
 def run(steps, root=ROOT, runner=subprocess.run):

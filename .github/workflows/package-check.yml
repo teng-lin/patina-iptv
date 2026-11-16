@@ -4,6 +4,7 @@ on:
     paths:
       - '.github/workflows/package-check.yml'
       - '.github/actions/setup/**'
+      - '.github/actions/cargo-tool/**'
       - '.github/actions/nsh-cli/**'
       - '.cargo/config'
       - '.cargo/config.toml'
@@ -22,6 +23,21 @@ on:
       - 'tools/bundle-macos.py'
       - 'tools/mpv-runtime-unix/**'
       - 'tools/mpv-runtime/prepare.py'
+  # Populate the master caches PRs restore when dependency/build recipes change.
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/package-check.yml'
+      - '.github/actions/**'
+      - '.cargo/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**/Cargo.toml'
+      - 'rust-toolchain.toml'
+      - 'nsh.rev'
+      - 'tools/ci/check-plan.py'
+      - 'tools/ci/package-linux.sh'
+      - 'tools/package-macos.sh'
   workflow_dispatch:
 # Superseded PR checks need not keep occupying runners. Releases are never cancelled.
 concurrency:
@@ -47,15 +63,17 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        with:
+          cache-key: packages-v2-${{ hashFiles('.github/workflows/package-check.yml', 'tools/ci/package-linux.sh', 'tools/package-macos.sh') }}
       - name: Package prerequisites
         shell: bash
         run: |
           python3 tools/ci/version.py
-          cargo install cargo-about --version 0.9.3 --features cli --locked
-        env:
-          CARGO_PROFILE_RELEASE_LTO: 'false'
-          CARGO_PROFILE_RELEASE_OPT_LEVEL: '1'
-          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+      - uses: ./.github/actions/cargo-tool
+        with:
+          name: cargo-about
+          version: 0.9.3
+          features: cli
       - uses: ./.github/actions/nsh-cli
       - name: Linux package installation and smoke tests
         if: matrix.platform == 'linux'

@@ -1,17 +1,16 @@
 //! The store's integration tests.
 //!
-//! One test binary for the crate's integration tests (`tests/it/`, one
-//! module per topic): each extra binary costs a link. Tests here share
-//! a process, so none may rely on process-wide state (environment,
-//! working directory, a global allocator); such a test is a binary of its
-//! own in `tests/`: `epg_memory` and `epg_stream_memory`, which count
-//! allocations through a global allocator. The helper modules stay beside
-//! them in `tests/` and are shared.
+//! Ordinary scenarios share this executable, with one module per topic.
+//! Native initialization runs in fresh child processes. Allocation scenarios
+//! share the separate `memory` executable and also isolate each measurement
+//! in a child, so global allocator and SQLite counters cannot overlap.
 
 #[path = "../common/mod.rs"]
 mod common;
 #[path = "../epg_synth/mod.rs"]
 mod epg_synth;
+#[path = "../initialization_support/mod.rs"]
+mod initialization_support;
 #[path = "../staged/mod.rs"]
 mod staged;
 #[path = "../stream_support/mod.rs"]
@@ -19,7 +18,10 @@ mod stream_support;
 
 mod backup;
 mod catalog;
+mod child_output;
+mod cipher_initialization;
 mod concurrency;
+mod custom_group_reset_scale;
 mod epg;
 mod epg_stream;
 mod guide_assign;
@@ -31,6 +33,7 @@ mod perf;
 mod personalization;
 mod playlists;
 mod redaction;
+mod relative_moves;
 mod search;
 
 mod catalog_stage;

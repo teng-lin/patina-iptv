@@ -1,7 +1,6 @@
 //! Synthetic catalogue exercises direct-ID gates independently of shell menus.
-#[path = "../../iptv-store-sqlite/tests/common/mod.rs"]
-mod common;
-mod support;
+use crate::common;
+use crate::support;
 use iptv_core::parental::{ContentKind, Pin, Target};
 use iptv_runtime::{Ports, Runtime, commands};
 use iptv_settings::Value;

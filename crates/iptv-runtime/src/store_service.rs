@@ -202,10 +202,14 @@ impl Service {
     }
 
     pub(crate) fn drain_on_shutdown_with(self: &Arc<Self>, after_writer: impl FnOnce()) -> bool {
+        self.drain_on_shutdown_with_limit(self.drain_limit(), after_writer)
+    }
+
+    pub(crate) fn drain_limit(&self) -> std::time::Duration {
         let limit = std::time::Duration::from_secs(10);
         #[cfg(feature = "test-support")]
         let limit = self.hooks.drain_limit().unwrap_or(limit);
-        self.drain_on_shutdown_with_limit(limit, after_writer)
+        limit
     }
 
     fn drain_on_shutdown_with_limit(

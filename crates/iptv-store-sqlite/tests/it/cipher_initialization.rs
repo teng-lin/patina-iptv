@@ -1,5 +1,5 @@
 //! Owned readiness against foreign native initialization, without a fake provider.
-mod initialization_support;
+use crate::initialization_support;
 use rusqlite::ffi;
 
 // Pinned SQLCipher 4.20 declares this exact C ABI in sqlcipher.c. The
@@ -14,9 +14,11 @@ fn native_initialization_finishes_before_concurrent_key_attachment() {
     if std::env::var_os(CHILD).is_none() {
         for _ in 0..16 {
             let output = initialization_support::child(
-                "native_initialization_finishes_before_concurrent_key_attachment",
+                "cipher_initialization::native_initialization_finishes_before_concurrent_key_attachment",
                 CHILD,
-            );
+                std::time::Duration::from_secs(20),
+            )
+            .expect("native initialization child could not complete");
             assert!(
                 output.status.success(),
                 "native concurrent initialization failed:\n{}\n{}",

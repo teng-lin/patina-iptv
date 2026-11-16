@@ -1,0 +1,88 @@
+name: Cached Cargo tool
+description: Reuse a finished pinned tool independently of application dependencies
+inputs:
+  name:
+    description: Cargo package and executable name
+    required: true
+  version:
+    description: Exact package version
+    required: true
+  features:
+    description: Comma-separated Cargo features
+    default: ''
+  cache:
+    description: Restore and save the finished tool (disabled for release builds)
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - name: Identify the tool and its build recipe
+      id: identity
+      shell: bash
+      env:
+        TOOL_NAME: ${{ inputs.name }}
+        TOOL_VERSION: ${{ inputs.version }}
+        TOOL_FEATURES: ${{ inputs.features }}
+      run: |
+        python3 - <<'PY' >> "$GITHUB_OUTPUT"
+        import hashlib, json, os, re, subprocess
+        from pathlib import Path
+        name = os.environ['TOOL_NAME']
+        if not re.fullmatch(r'[a-z][a-z0-9-]*', name):
+            raise SystemExit('invalid Cargo tool name')
+        root = Path(os.environ['RUNNER_TEMP']) / 'patina-cargo-tools' / name
+        cargo_home = Path(os.environ.get('CARGO_HOME') or Path.home() / '.cargo')
+        inputs = {
+            'name': name,
+            'version': os.environ['TOOL_VERSION'],
+            'features': os.environ['TOOL_FEATURES'],
+            'rustc': subprocess.check_output(['rustc', '-vV'], text=True),
+            'recipe': Path('.github/actions/cargo-tool/action.yml').read_text(),
+            'flags': {k: v for k, v in os.environ.items()
+                      if k.startswith(('RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'CARGO_BUILD_',
+                                       'CARGO_TARGET_', 'CC', 'CFLAGS', 'CXX', 'AR'))},
+            'config': {str(path): path.read_text() if path.exists() else None
+                       for directory in (cargo_home, Path('.cargo'))
+                       for name in ('config', 'config.toml')
+                       for path in (directory / name,)},
+        }
+        key = hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
+        print(f'key={key}')
+        print(f'root={root}')
+        print(f'path={root / "bin" / name}')
+        PY
+    - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      if: inputs.cache == 'true'
+      id: tool
+      with:
+        path: ${{ steps.identity.outputs.path }}
+        key: cargo-tool-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}
+    - name: Build the pinned tool
+      if: steps.tool.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        TOOL_NAME: ${{ inputs.name }}
+        TOOL_VERSION: ${{ inputs.version }}
+        TOOL_FEATURES: ${{ inputs.features }}
+        TOOL_ROOT: ${{ steps.identity.outputs.root }}
+        CARGO_PROFILE_RELEASE_LTO: 'false'
+        CARGO_PROFILE_RELEASE_OPT_LEVEL: '1'
+        CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+      run: |
+        args=()
+        if [ -n "$TOOL_FEATURES" ]; then args+=(--features "$TOOL_FEATURES"); fi
+        cargo install "$TOOL_NAME" --version "$TOOL_VERSION" --locked --root "$TOOL_ROOT" "${args[@]}"
+    # A later test/package failure must not discard a successful tool build.
+    - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      if: inputs.cache == 'true' && github.ref == 'refs/heads/master' && steps.tool.outputs.cache-hit != 'true'
+      with:
+        path: ${{ steps.identity.outputs.path }}
+        key: cargo-tool-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}
+    - name: Select the tool
+      shell: bash
+      env:
+        TOOL_ROOT: ${{ steps.identity.outputs.root }}
+        TOOL_BIN: ${{ steps.identity.outputs.path }}
+      run: |
+        test -x "$TOOL_BIN"
+        echo "$TOOL_ROOT/bin" >> "$GITHUB_PATH"

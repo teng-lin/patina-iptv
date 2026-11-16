@@ -7,6 +7,9 @@ inputs:
   cache-on-failure:
     description: Preserve compiled dependencies when a package validation fails
     default: 'false'
+  cache-key:
+    description: Additional identity for mode-specific build recipes
+    default: host-v2
 runs:
   using: composite
   steps:
@@ -46,6 +49,9 @@ runs:
       if: inputs.cache == 'true'
       with:
         cache-on-failure: ${{ inputs.cache-on-failure }}
+        key: ${{ inputs.cache-key }}-${{ hashFiles('nsh.rev', 'tools/ci/check-plan.py', '.github/actions/setup/action.yml') }}
+        # Finished tools have smaller, independently keyed caches.
+        cache-bin: 'false'
         # Per-PR copies of these gigabyte-sized caches evict the reusable tools.
         # PRs can restore master caches; only master refreshes bulk dependencies.
         save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -65,5 +71,8 @@ runs:
         echo "LD_LIBRARY_PATH=$destination/lib" >> "$GITHUB_ENV"
         echo "IPTV_RS_MPV_LIB_DIR=$destination/lib" >> "$GITHUB_ENV"
         echo "DYLD_LIBRARY_PATH=$destination/lib" >> "$GITHUB_ENV"
-    - shell: bash
-      run: cargo install cargo-deny --version 0.20.2 --locked
+    - uses: ./.github/actions/cargo-tool
+      with:
+        name: cargo-deny
+        version: 0.20.2
+        cache: ${{ inputs.cache }}

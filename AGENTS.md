@@ -16,6 +16,16 @@
   restored by content identity, never by list index.
 - **NSH fork.** NSH comes from `~/src/nsh`, branch `tv-keys`. Keep
   patches small with tests; they go upstream later.
+- **Minimize test executables.** Each test target costs a separate link. Add
+  integration scenarios as modules in an existing harness (`tests/it/` or
+  `tests/app/`), rather than new top-level `tests/*.rs` targets. Prefer one
+  integration executable per crate; allow at most two when allocator or native
+  display isolation requires it. Use child processes of the same executable for
+  fresh process state. Keep private unit tests in their owning crate and disable
+  empty binary test harnesses. CI checks examples with Clippy's `--all-targets`,
+  runs ordinary tests with `--tests`, and runs doctests separately. Run strict
+  timing gates alone through the shared CI plan, reusing the same harness. The
+  target budget is enforced by `tools/ci/test-check-plan.py`.
 - **Video layer.** One persistent player surface under the UI; modes change
   layout only. Never hide, detach or re-parent the player view: on Android
   hiding or detaching it destroys its video surface.

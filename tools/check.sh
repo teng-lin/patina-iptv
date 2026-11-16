@@ -21,6 +21,7 @@ python3 tools/ci/check-plan.py run
 IPTV_REAL_CARGO="$(command -v cargo)" python3 tools/ci/test-locked-cargo.py
 python3 tools/ci/test-mpvkit-notices.py
 python3 tools/ci/test-macos-source-notices.py
+python3 tools/ci/test-macos-dmg.py
 python3 tools/ci/test-linux-native-notices.py
 python3 tools/ci/test-crypto-native-notices.py
 python3 tools/ci/check-package-lock.py
@@ -28,6 +29,7 @@ python3 tools/ci/test-package-lock.py
 python3 tools/ci/test-ios-entitlements.py
 python3 tools/ci/test-unpack-signing-input.py
 python3 tools/ci/test-nsh-tool-key.py
+python3 tools/ci/test-ci-cache.py
 python3 tools/ci/test-pins.py
 python3 tools/ci/test-android-changes.py
 python3 tools/ci/test-adb-timeout.py

@@ -1,6 +1,5 @@
-#[path = "../../iptv-store-sqlite/tests/common/mod.rs"]
-mod common;
-mod support;
+use crate::common;
+use crate::support;
 
 use iptv_core::organization::{Action, Editor};
 use iptv_library::OrganizationScope;

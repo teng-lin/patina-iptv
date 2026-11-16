@@ -34,7 +34,7 @@ if [ -n "${MACOS_CERTIFICATE:-}" ]; then
   xcrun stapler staple "$dmg"
   xcrun stapler validate "$dmg"
 fi
-hdiutil verify "$dmg"
+python3 tools/ci/verify-macos-dmg.py "$dmg"
 mount="$PWD/target/dmg-mounted"
 mkdir -p "$mount"
 hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mount"

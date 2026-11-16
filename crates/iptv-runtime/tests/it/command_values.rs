@@ -1,8 +1,7 @@
 //! Compile-checked command contracts catch adapter types even through aliases
 //! and inferred call sites. The inventory ensures a new command gets a contract.
-#[path = "../../iptv-store-sqlite/tests/common/mod.rs"]
-mod common;
-mod support;
+use crate::common;
+use crate::support;
 
 use iptv_core::{
     membership::Member,
@@ -55,7 +54,7 @@ fn every_public_command_returns_its_declared_application_value() {
     check!(combined_resume_key() => Option<String>);
     check!(stored_guide(source, 1_800_000_000) => iptv_epg::GuideStore);
 
-    let source = include_str!("../src/commands.rs");
+    let source = include_str!("../../src/commands.rs");
     let exported: BTreeSet<_> = source
         .lines()
         .filter_map(|line| {

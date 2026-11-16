@@ -1,5 +1,5 @@
 //! Public backup service against encrypted stores and managed documents.
-mod support;
+use crate::support;
 use iptv_providers::{
     SecretUrl,
     model::{M3uSourceConfig, Source, SourceConfig},

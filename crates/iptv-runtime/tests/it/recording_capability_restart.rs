@@ -1,5 +1,5 @@
 //! A restarted native host cannot advertise the previous run's OS permission.
-mod support;
+use crate::support;
 
 use iptv_core::recording::WakeCapability;
 use iptv_runtime::{Ports, Runtime, model::DatabaseKey};

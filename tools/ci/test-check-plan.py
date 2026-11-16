@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate command selection and execution without launching Cargo."""
+"""Validate command selection, execution and target budgets without compiling Rust."""
 from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import io
@@ -51,51 +51,69 @@ class Plan(unittest.TestCase):
         workspace = checks.workspace_crates()
         self.assertEqual(len(workspace), len(set(workspace)))
         self.assertEqual(packages(checks.format_plan()[0]["argv"]), list(workspace))
-        libraries = packages(self.by_name["library-tests"])
-        self.assertEqual(libraries, [crate for crate in workspace if crate != "iptv-app"])
-        self.assertEqual(packages(self.by_name["app-tests"]), ["iptv-app"])
-        self.assertNotIn("--lib", self.by_name["app-tests"])
-        self.assertNotIn("--test", self.by_name["app-tests"], "default tests include all ordinary app targets/doc tests")
+        for name in ("workspace-tests", "workspace-doctests"):
+            self.assertEqual(packages(self.by_name[name]), list(workspace))
+        self.assertIn("--tests", self.by_name["workspace-tests"])
+        self.assertNotIn("--lib", self.by_name["workspace-tests"])
+        self.assertNotIn("--test", self.by_name["workspace-tests"])
+        self.assertIn("--doc", self.by_name["workspace-doctests"])
+        self.assertIn("--timings", self.by_name["workspace-tests"])
+        self.assertIn("--timings", self.by_name["app-build"])
+
+    def test_integration_scenarios_share_at_most_two_executables_per_crate(self):
+        metadata = json.loads(subprocess.check_output(
+            ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
+            cwd=checks.ROOT, text=True,
+        ))
+        for package in metadata["packages"]:
+            targets = [target["name"] for target in package["targets"] if "test" in target["kind"]]
+            with self.subTest(crate=package["name"]):
+                self.assertLessEqual(
+                    len(targets), 2,
+                    f"each integration target costs a link; add scenarios to existing harnesses: {targets}",
+                )
 
     def test_shared_commands_preserve_features_locks_and_named_libtest_output(self):
         self.assertEqual(
             self.by_name["workspace-clippy"],
             ["cargo", "clippy", "--locked", "--workspace", "--all-targets",
-             "--features", "iptv-app/test-support", "--", "-D", "warnings"],
+             "--features", checks.COVERAGE_FEATURES, "--", "-D", "warnings"],
         )
-        library = self.by_name["library-tests"]
-        self.assertEqual(library[library.index("--features") + 1], "iptv-runtime/test-support")
         for name, argv in self.by_name.items():
             with self.subTest(name=name):
                 self.assertIn("--locked", argv)
                 self.assertNotIn("--quiet", argv)
                 if argv[1] == "test":
                     self.assertIn("--format=pretty", argv[argv.index("--") + 1:])
-        for name in ["app-tests", "guide-input-budget", "busy-store-reader"]:
+        for name in ["workspace-tests", "workspace-doctests", "repair-display-independence",
+                     "inspection-display-budget", "guide-input-budget", "busy-store-reader"]:
             argv = self.by_name[name]
-            self.assertEqual(argv[argv.index("--features") + 1], "test-support")
+            self.assertEqual(argv[argv.index("--features") + 1], checks.COVERAGE_FEATURES)
+            self.assertEqual(packages(argv), list(checks.workspace_crates()))
 
     def test_isolated_scenarios_have_exact_targets_and_are_not_in_parallel_suite(self):
         expected = {
-            "repair-display-independence": ("iptv-runtime", ["--lib"], checks.REPAIR),
-            "guide-input-budget": ("iptv-app", ["--test", "app"], checks.LATENCY),
-            "busy-store-reader": ("iptv-app", ["--test", "app"], checks.BUSY_READER),
+            "repair-display-independence": (["--lib"], checks.REPAIR),
+            "inspection-display-budget": (["--test", "it"], checks.INSPECTION),
+            "guide-input-budget": (["--test", "app"], checks.LATENCY),
+            "busy-store-reader": (["--test", "app"], checks.BUSY_READER),
         }
-        for name, (package, target, test) in expected.items():
+        for name, (target, test) in expected.items():
             argv = self.by_name[name]
             with self.subTest(name=name):
-                self.assertEqual(packages(argv), [package])
+                self.assertEqual(packages(argv), list(checks.workspace_crates()))
                 self.assertIn(target[0], argv[:argv.index("--")])
                 if len(target) == 2:
                     self.assertEqual(argv[argv.index(target[0]) + 1], target[1])
                 self.assertEqual(argv.count(test), 1)
                 self.assertEqual(argv[argv.index("--") + 1:], ["--ignored", "--exact", "--format=pretty"])
-        for name in ["library-tests", "app-tests"]:
+        for name in ["workspace-tests", "workspace-doctests"]:
             self.assertNotIn("--ignored", self.by_name[name])
 
     def test_exact_filters_name_existing_ignored_tests(self):
         sources = {
             checks.REPAIR: "crates/iptv-runtime/src/guide_repair/tests.rs",
+            checks.INSPECTION: "crates/iptv-runtime/tests/it/foundation_inspection.rs",
             checks.LATENCY: "crates/iptv-app/tests/app/store_latency.rs",
             checks.BUSY_READER: "crates/iptv-app/tests/app/store_latency.rs",
         }
@@ -127,6 +145,7 @@ class Plan(unittest.TestCase):
 
     def test_coverage_uses_every_workspace_crate_and_both_test_support_features(self):
         argv = checks.coverage_args()
+        self.assertIn("--tests", argv, "coverage must not link unused examples")
         self.assertEqual(packages(argv), list(checks.workspace_crates()))
         self.assertEqual(argv[argv.index("--features") + 1].split(","),
                          ["iptv-runtime/test-support", "iptv-app/test-support"])

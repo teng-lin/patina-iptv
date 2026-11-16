@@ -1,8 +1,7 @@
 //! Independent application consumer: generated catalogue/guide fixtures and
 //! public runtime queries, without an NSH root, renderer or native key broker.
-#[path = "../../iptv-store-sqlite/tests/common/mod.rs"]
-mod common;
-mod support;
+use crate::common;
+use crate::support;
 
 use iptv_epg::{
     ChannelKey, EpgRef, FeedId, GuideStore, MatchKind, SourceBuilder, StoreOptions, XmltvChannel,
@@ -718,6 +717,7 @@ fn audit_cursor_cannot_mix_different_guide_snapshots() {
 
 #[test]
 #[cfg(feature = "test-support")]
+#[ignore = "50 ms display budget runs alone through tools/ci/check-plan.py"]
 fn a_hundred_thousand_channel_analysis_keeps_display_reads_responsive() {
     let mut f = Fixture::new();
     let source = f.sources[0];

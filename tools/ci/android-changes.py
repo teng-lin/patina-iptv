@@ -20,6 +20,7 @@ import subprocess
 PACKAGE = (
     ".github/workflows/android.yml", ".github/actions/android/**",
     ".github/actions/setup/**", ".github/actions/nsh-cli/**",
+    ".github/actions/cargo-tool/**",
     ".cargo/config", ".cargo/config.toml", "hosts/android/**", "Cargo.toml",
     "Cargo.lock", "crates/**/Cargo.toml", "crates/iptv-app/build.rs",
     "crates/iptv-app/nsh.json", "crates/iptv-app/icon.png",

@@ -14,10 +14,10 @@ in [CONTRIBUTING.md](../CONTRIBUTING.md).
 | Provider parsing/import | [providers](../crates/iptv-providers/src/lib.rs), [import](../crates/iptv-import/src/lib.rs), [runtime imports](../crates/iptv-runtime/src/imports.rs) | [network](../crates/iptv-net/src/lib.rs) | `cargo test -p iptv-providers -p iptv-import -p iptv-net`; synthetic mock import and cancellation scenarios |
 | Guide and focus | [core](../crates/iptv-core/src/lib.rs), [guide](../crates/iptv-guide/src/lib.rs), [navigation](../crates/iptv-nav/src/lib.rs), [runtime guides](../crates/iptv-runtime/src/guides.rs) | [app input](../crates/iptv-app/src/input.rs) | `cargo test -p iptv-core -p iptv-guide -p iptv-nav`; app guide navigation/refresh scenarios |
 | XMLTV and guide repair | [EPG parser](../crates/iptv-epg/src/lib.rs), [runtime checks](../crates/iptv-runtime/src/guide_checks.rs), [repair](../crates/iptv-runtime/src/guide_repair.rs) | [network](../crates/iptv-net/src/lib.rs), [store](../crates/iptv-store-sqlite/src/lib.rs) | `cargo test -p iptv-epg`; runtime guide-check/repair scenarios and the selected parser fuzz workflow |
-| Library and search | [library](../crates/iptv-library/src/lib.rs), [search](../crates/iptv-search/src/lib.rs), [runtime search](../crates/iptv-runtime/src/search.rs), [VOD](../crates/iptv-runtime/src/vod.rs) | [store](../crates/iptv-store-sqlite/src/lib.rs) | `cargo test -p iptv-library -p iptv-search`; runtime VOD/source-identity tests; [on-demand discovery store queries](../crates/iptv-store-sqlite/src/vod.rs) and [runtime discovery scenarios](../crates/iptv-runtime/tests/vod_library.rs) |
+| Library and search | [library](../crates/iptv-library/src/lib.rs), [search](../crates/iptv-search/src/lib.rs), [runtime search](../crates/iptv-runtime/src/search.rs), [VOD](../crates/iptv-runtime/src/vod.rs) | [store](../crates/iptv-store-sqlite/src/lib.rs) | `cargo test -p iptv-library -p iptv-search`; runtime VOD/source-identity tests; [on-demand discovery store queries](../crates/iptv-store-sqlite/src/vod.rs) and [runtime discovery scenarios](../crates/iptv-runtime/tests/it/vod_library.rs) |
 | Settings | [schema](../crates/iptv-settings/src/lib.rs), [runtime](../crates/iptv-runtime/src/settings.rs) | [settings view](../crates/iptv-app/src/settings_view.rs) | `cargo test -p iptv-settings`; app settings, persistence and backup/restore scenarios |
 | Persistence and migrations | [service ownership](../crates/iptv-runtime/src/store_service.rs) | [SQLite](../crates/iptv-store-sqlite/src/lib.rs), [SQLCipher initialization](../crates/iptv-sqlcipher-init/src/lib.rs) | `cargo test -p iptv-store-sqlite -p iptv-sqlcipher-init`; [historical migration fixtures](../crates/iptv-store-sqlite/tests/it/migrations.rs) |
-| Parental policy | [portable policy](../crates/iptv-core/src/parental.rs), [runtime admission](../crates/iptv-runtime/src/parental.rs) | [PIN UI](../crates/iptv-app/src/parental_view.rs) | `cargo test -p iptv-core parental`; [runtime parental-access scenarios](../crates/iptv-runtime/tests/parental_access.rs) and app parental scenarios; revocation during queued work |
+| Parental policy | [portable policy](../crates/iptv-core/src/parental.rs), [runtime admission](../crates/iptv-runtime/src/parental.rs) | [PIN UI](../crates/iptv-app/src/parental_view.rs) | `cargo test -p iptv-core parental`; [runtime parental-access scenarios](../crates/iptv-runtime/tests/it/parental_access.rs) and app parental scenarios; revocation during queued work |
 | Recording lifecycle | [portable model](../crates/iptv-core/src/recording.rs), [runtime](../crates/iptv-runtime/src/recordings.rs), [native ownership](../crates/iptv-runtime/src/recordings/host.rs) | [recording host adapter](../crates/iptv-app/src/recording_host.rs), [Android host](../hosts/android) | [runtime recording recovery](../crates/iptv-runtime/src/recordings/recovery_tests.rs) and app recorder-startup/transport scenarios; device background/resume checks |
 | Playback and native controls | [core playback](../crates/iptv-core/src/playback.rs), [runtime playback](../crates/iptv-runtime/src/playback.rs), [opening](../crates/iptv-runtime/src/opening.rs) | [player adapter](../crates/iptv-player-mpv/src/lib.rs), [persistent surface](../crates/iptv-app/src/video.rs), [Android host](../hosts/android) | `cargo test -p iptv-player-mpv`; app playback/PiP/multiview scenarios; native playback on each changed host |
 | Localization/accessibility | [portable messages](../crates/iptv-core/src/i18n.rs), [contrast policy](../crates/iptv-app/src/theme.rs) | [message adapter](../crates/iptv-app/src/i18n.rs), [assistive-technology checklist](../CONTRIBUTING.md#screen-readers-and-large-text) | core catalogue tests, app catalogue/interface-language/accessibility scenarios; actual assistive-technology checks for host changes |
@@ -39,12 +39,12 @@ Runtime test-support scenarios use
 Useful exact commands for the map's domains include:
 
 ```sh
-cargo test -p iptv-runtime --test persistence_safety
-cargo test -p iptv-runtime --test data_startup
-cargo test -p iptv-runtime --test parental_access
-cargo test -p iptv-runtime --test vod_library
+cargo test -p iptv-runtime --test it persistence_safety::
+cargo test -p iptv-runtime --test it data_startup::
+cargo test -p iptv-runtime --test it parental_access::
+cargo test -p iptv-runtime --test it vod_library::
 cargo test -p iptv-runtime --lib vod::
-cargo test -p iptv-runtime --features test-support --test vod_import_pipeline
+cargo test -p iptv-runtime --features test-support --test it vod_import_pipeline::
 cargo test -p iptv-store-sqlite --lib vod::
 cargo test -p iptv-store-sqlite --lib -- --ignored --nocapture discovery_latency
 cargo test -p iptv-app --features test-support --test app vod_library
@@ -100,7 +100,13 @@ full lint, library/app test, dependency, tooling and portable-build suite.
 [Windows validation](../tools/build-windows.ps1) uses the same
 [Rust command plan](../tools/ci/check-plan.py). Both select the same library
 and app test-support features, ordinary app targets, exact isolated repair,
-guide-latency and busy-reader scenarios, portable wasm builds and normal app build.
+inspection-display, guide-latency and busy-reader scenarios, portable wasm builds
+and normal app build.
+Ordinary tests share one Cargo invocation and feature graph. Examples are checked
+by Clippy's `--all-targets` pass, without linking them in the test or coverage pass;
+doctests run explicitly in the host checks.
+Host workflows upload `rust-timings-*` artifacts with Cargo's compilation/linking
+reports so cache and build-plan changes can be compared on subsequent runs.
 Every Rust test invocation explicitly uses `--format=pretty`, so Linux, macOS
 and Windows logs show each test name and its result instead of quiet progress dots.
 
@@ -135,7 +141,10 @@ The portable crates built by the full check are:
 
 The [planner tests](../tools/ci/test-check-plan.py) check features, locked
 commands, named output, exact ignored filters, streamed execution and fail-fast
-behavior without invoking Cargo. The [check-parity tests](../tools/ci/test-check-parity.py)
+behavior without compiling Rust. Cargo metadata also enforces at most two
+integration-test executables per crate: add scenarios as modules in an existing
+harness. Memory cases use child processes to retain isolated allocation counters
+while sharing one link. The [check-parity tests](../tools/ci/test-check-parity.py)
 verify wrapper delegation, this portable inventory, coverage arguments and this
 map's local links. They run on Linux, macOS and Windows; they do not execute
 the Rust commands or prove the semantic completeness of an impact assessment.
@@ -157,7 +166,7 @@ Before review, identify which of these contracts the change affects:
 - Focus restoration, accessibility labels, translations and enlarged text.
 - Persistent player lifetime and provider connection accounting.
 
-Use the existing [runtime boundary tests](../crates/iptv-runtime/tests/architecture.rs)
+Use the existing [runtime boundary tests](../crates/iptv-runtime/tests/it/architecture.rs)
 and [shell boundary tests](../crates/iptv-app/tests/app/architecture.rs) to guard
 concrete ownership decisions. Change an allowlist only with an explanation of
 why that dependency belongs there. Extract coordination incrementally when a
