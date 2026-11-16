@@ -9,6 +9,8 @@ on:
       - 'crates/**'
       - 'rust-toolchain.toml'
       - 'tools/ci/coverage.sh'
+      - 'tools/ci/check-plan.py'
+      - 'tools/ci/test-check-plan.py'
       - 'tools/ci/run-xvfb.py'
       - 'tools/ci/check-coverage-floors.py'
       - 'tools/ci/test-coverage-floors.py'

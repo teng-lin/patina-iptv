@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # macOS strips DYLD_* when starting a protected shell. Restore the selected
-# runtime inside this shell before Cargo launches the real player tests.
+# runtime inside this shell; the Python planner also restores it for Cargo.
 if [ "$(uname -s)" = Darwin ] && [ -n "${IPTV_RS_MPV_LIB_DIR:-}" ]; then
   export DYLD_LIBRARY_PATH="$IPTV_RS_MPV_LIB_DIR"
 fi
@@ -13,31 +13,11 @@ fi
 python3 tools/ci/pins.py check-nsh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools -p test_version.py
 # Only our packages: `--all` would also format path dependencies (the NSH checkout).
-cargo fmt -p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-providers -p iptv-guide -p iptv-import -p iptv-net -p iptv-store-sqlite -p iptv-sqlcipher-init -p iptv-search -p iptv-player-mpv -p iptv-library -p iptv-runtime -p iptv-app --check
+python3 tools/ci/check-plan.py format
 bash tools/ci/check-line-length.sh
 bash tools/ci/lint.sh
-cargo clippy --locked --workspace --all-targets --features iptv-app/test-support -- -D warnings
 cargo deny --locked check
-cargo test --locked --features iptv-runtime/test-support -p iptv-core -p iptv-nav -p iptv-settings -p iptv-epg -p iptv-providers -p iptv-guide -p iptv-import -p iptv-net -p iptv-store-sqlite -p iptv-sqlcipher-init -p iptv-search -p iptv-player-mpv -p iptv-library -p iptv-runtime --quiet
-# Run the large repair/display lane independence scenario in isolation.
-cargo test --locked -p iptv-runtime --features test-support --lib \
-  guide_repair::tests::repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive \
-  -- --ignored --exact
-for c in iptv-core iptv-nav iptv-settings iptv-epg iptv-providers iptv-guide iptv-import iptv-search iptv-library; do
-  cargo build --locked -p "$c" --target wasm32-unknown-unknown --quiet
-done
-cargo build --locked -p iptv-app --quiet
-# The app's own tests, among them headless runs of the whole app (tests/).
-cargo test --locked -p iptv-app --features test-support --quiet
-# Measure the wall-clock input budget without competing app scenarios. Keep
-# the 50 ms limit: shared runners otherwise measure our parallel test load too.
-cargo test --locked -p iptv-app --features test-support --quiet --test app \
-  store_latency::guide_input_stays_under_budget_while_the_database_writer_is_locked \
-  -- --ignored --exact
-# A UI read must not queue behind a busy store writer (the read-only connection).
-cargo test --locked -p iptv-app --features test-support --quiet --test app \
-  store_latency::a_store_read_does_not_wait_for_a_busy_writer \
-  -- --ignored --exact
+python3 tools/ci/check-plan.py run
 IPTV_REAL_CARGO="$(command -v cargo)" python3 tools/ci/test-locked-cargo.py
 python3 tools/ci/test-mpvkit-notices.py
 python3 tools/ci/test-macos-source-notices.py
@@ -61,6 +41,7 @@ python3 tools/ci/test-native-sources.py
 python3 tools/ci/test-native-candidates.py
 python3 tools/mpv-runtime-ios/test_build.py
 python3 tools/ci/test-check-parity.py
+python3 tools/ci/test-check-plan.py
 python3 tools/ci/test-fuzz-targets.py
 python3 tools/performance/test_journeys.py
 echo "all checks passed"
