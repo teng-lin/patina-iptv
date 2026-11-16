@@ -34,6 +34,7 @@ const CHANNELS: &str = concat!(
 /// What the portal saw of the slow channel's link request.
 #[derive(Default)]
 struct Slow {
+    requests: usize,
     asked: bool,
     /// The app closed the connection before an answer.
     abandoned: bool,
@@ -65,6 +66,7 @@ fn answer(mut stream: TcpStream, state: &(Mutex<Slow>, Condvar)) {
             Ok(n) => request.extend_from_slice(&buffer[..n]),
         }
     }
+    state.0.lock().unwrap().requests += 1;
     let request = String::from_utf8_lossy(&request);
     let path = request.split_whitespace().nth(1).unwrap_or("");
     let action = path
@@ -144,7 +146,6 @@ fn start_portal(home: &crate::isolated::Home) -> (Headless, Arc<(Mutex<Slow>, Co
     settings
         .set("general.resume_last_channel", Value::Bool(true))
         .unwrap();
-    std::fs::write(data.join("settings.json"), settings.to_json_string()).unwrap();
     let (url, state) = serve();
     let mut store = crate::isolated::open_database(data.join("iptv.sqlite")).unwrap();
     let source = store
@@ -174,6 +175,15 @@ fn start_portal(home: &crate::isolated::Home) -> (Headless, Arc<(Mutex<Slow>, Co
         .unwrap();
     store.set_active_source(source).unwrap();
     drop(store);
+    // The cancellation scenario holds main playback while resolving an auxiliary.
+    settings
+        .set_in(
+            "playlists.max_connections",
+            &iptv_settings::Target::playlist(source.0.to_string()),
+            Value::Int(2),
+        )
+        .unwrap();
+    std::fs::write(data.join("settings.json"), settings.to_json_string()).unwrap();
     std::fs::write(data.join(format!("last_channel-{}", source.0)), slow).unwrap();
 
     let app = Headless::start(EngineConfig {
@@ -284,5 +294,111 @@ fn retrying_an_auxiliary_player_keeps_the_main_stalker_request_alive() {
     assert!(
         !state.0.lock().unwrap().abandoned,
         "retrying B must not cancel A's runtime slot"
+    );
+}
+
+#[test]
+fn cached_static_stalker_playback_keeps_its_origin_without_a_portal_session() {
+    let Some(home) = isolated!() else { return };
+    let data = home.data_dir();
+    std::fs::create_dir_all(&data).unwrap();
+    let mut settings = Settings::new();
+    settings
+        .set("general.resume_last_channel", Value::Bool(false))
+        .unwrap();
+    settings.set("guide.autoplay", Value::Bool(false)).unwrap();
+    std::fs::write(data.join("settings.json"), settings.to_json_string()).unwrap();
+    let (portal, requests) = serve();
+    let mut store = crate::isolated::open_database(data.join("iptv.sqlite")).unwrap();
+    let source = store
+        .add_source(&Source {
+            name: "Generated cached portal".into(),
+            config: SourceConfig::Stalker(StalkerCredentials {
+                portal_url: format!("{portal}/portal.php"),
+                mac: MacAddress::parse("00:1A:79:00:00:81").unwrap(),
+                serial: None,
+                device_id: None,
+                device_id2: None,
+                signature: None,
+                signature2: None,
+                login: None,
+                password: None,
+            }),
+        })
+        .unwrap();
+    let groups = parse_genres(&HttpResponse::ok(GENRES), ContentKind::Live).unwrap();
+    let channels = parse_channel_page(&HttpResponse::ok(concat!(
+        r#"{"js":{"total_items":"1","max_page_items":"14","data":["#,
+        r#"{"id":"181","name":"Generated static channel","number":"1","#,
+        r#""cmd":"ffmpeg http://stream.example.test/generated-static.ts","#,
+        r#""tv_genre_id":"1","use_http_tmp_link":"0","use_load_balancing":"0"}]}}"#,
+    )))
+    .unwrap();
+    store
+        .replace_catalog(source, &groups.items, &channels.items.items, &[], &[])
+        .unwrap();
+    store
+        .set_source_policy(
+            source,
+            SourcePolicy {
+                refresh_on_start: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    store.set_active_source(source).unwrap();
+    drop(store);
+    let mut app = Headless::start(EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    let opened = Arc::new(Mutex::new(Vec::new()));
+    let observed = opened.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let nsh_core::MountItem::ComponentProps { props, .. } = item {
+                for (name, value) in props {
+                    if name.as_ref() == "source"
+                        && let Some(native) = value
+                        && native["url"].is_string()
+                    {
+                        observed
+                            .lock()
+                            .unwrap()
+                            .push(crate::support::upstream_source(native));
+                    }
+                }
+            }
+        }
+    });
+    app.wait_for_within("text:Generated static channel", WAIT)
+        .unwrap();
+    assert_eq!(
+        requests.0.lock().unwrap().requests,
+        0,
+        "cached catalogue needs no portal session"
+    );
+    let before = iptv_app::player_opens(0);
+    app.press_key("home").unwrap();
+    app.press_key("enter").unwrap();
+    app.wait_until(
+        "the cached static source reaches the native player",
+        WAIT,
+        |_| !opened.lock().unwrap().is_empty(),
+    )
+    .unwrap();
+    let opened = opened.lock().unwrap();
+    assert_eq!(opened.len(), 1);
+    assert_eq!(
+        opened[0]["url"],
+        "http://stream.example.test/generated-static.ts"
+    );
+    assert!(opened[0]["headers"]["Authorization"].is_null());
+    assert_eq!(iptv_app::player_opens(0), before + 1);
+    assert_eq!(
+        requests.0.lock().unwrap().requests,
+        0,
+        "static playback must not start a portal handshake or create_link"
     );
 }

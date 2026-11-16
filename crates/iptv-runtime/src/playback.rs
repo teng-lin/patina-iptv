@@ -1,4 +1,15 @@
 //! Playback metadata and per-source resume persistence.
+/// Attach the exact stored source snapshot without another store job.
+pub fn source_authority(
+    stored: &iptv_library::StoredSource,
+) -> iptv_guide::playback::SourceAuthority {
+    iptv_guide::playback::SourceAuthority::new(
+        stored.id.0,
+        stored.incarnation.clone(),
+        stored.source.config.clone(),
+    )
+}
+
 use iptv_guide::playback::PlaybackContext;
 use iptv_import::SourceMeta;
 use iptv_library::SourceId;
@@ -113,4 +124,63 @@ pub(crate) fn load_combined_channel(services: &Services) -> Option<String> {
         .read(&services.directory().join(COMBINED_CHANNEL_FILE))?;
     let key = String::from_utf8(bytes).ok()?;
     (!key.trim().is_empty()).then(|| key.trim().to_owned())
+}
+
+/// Common resolver clock for viewing and recording. `at` selects the local
+/// offset at a programme's start for catch-up; live callers use `None`.
+pub fn clock(now: i64, at: Option<i64>) -> iptv_guide::playback::Clock {
+    clock_with_offset(now, at, |instant| {
+        #[cfg(all(windows, feature = "test-support"))]
+        if let Some(offset) = std::env::var("IPTV_TEST_UTC_OFFSET_MINUTES")
+            .ok()
+            .and_then(|value| value.parse::<i32>().ok())
+            .filter(|minutes| (-720..=720).contains(minutes))
+        {
+            return offset * 60;
+        }
+        use chrono::{Local, TimeZone};
+        Local
+            .timestamp_opt(instant, 0)
+            .single()
+            .map_or(0, |time| time.offset().local_minus_utc() / 60 * 60)
+    })
+}
+fn clock_with_offset(
+    now: i64,
+    at: Option<i64>,
+    offset: impl FnOnce(i64) -> i32,
+) -> iptv_guide::playback::Clock {
+    iptv_guide::playback::Clock {
+        now,
+        local_offset_secs: offset(at.unwrap_or(now)),
+    }
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+    #[test]
+    fn shared_live_resolver_uses_the_same_nonzero_local_offset_as_viewing() {
+        let clock = clock_with_offset(0, None, |instant| {
+            assert_eq!(instant, 0);
+            5 * 3600 + 30 * 60
+        });
+        assert_eq!(clock.now, 0);
+        assert_eq!(clock.local_offset_secs, 19_800);
+        let live = "https://example.test/generated/{lutc:H_M}.ts";
+        assert_eq!(
+            iptv_providers::m3u::expand_live_url(live, clock.now, clock.local_offset_secs),
+            "https://example.test/generated/05_30.ts"
+        );
+        assert_eq!(
+            iptv_providers::m3u::expand_live_url(live, clock.now, 0),
+            "https://example.test/generated/00_00.ts"
+        );
+        let archive = clock_with_offset(172_800, Some(86_400), |instant| {
+            assert_eq!(instant, 86_400);
+            -4 * 3600
+        });
+        assert_eq!(archive.now, 172_800);
+        assert_eq!(archive.local_offset_secs, -14_400);
+    }
 }

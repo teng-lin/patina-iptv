@@ -54,6 +54,62 @@ fn a_resumed_episode_ending_before_its_first_timeline_still_advances() {
 }
 
 #[test]
+fn old_native_events_cannot_consume_resume_while_the_next_source_is_preparing() {
+    let Some(home) = isolated!() else { return };
+    exercise_preparing(
+        home,
+        nsh_core::platform::Idiom::Pad,
+        ResumeCase::Unseekable,
+        true,
+    );
+}
+
+#[test]
+fn prior_eof_play_pause_during_preparation_preserves_the_next_titles_resume() {
+    let Some(home) = isolated!() else { return };
+    exercise_preparing(
+        home,
+        nsh_core::platform::Idiom::Pad,
+        ResumeCase::PriorEndedDuringPreparation,
+        true,
+    );
+}
+
+#[test]
+fn disabling_a_vod_source_during_preparation_rejects_its_resolved_url() {
+    let Some(home) = isolated!() else { return };
+    exercise_admission(
+        home,
+        nsh_core::platform::Idiom::Pad,
+        ResumeCase::Unseekable,
+        true,
+        Some(SourceMutation::Disable),
+    );
+}
+#[test]
+fn editing_vod_credentials_during_preparation_does_not_rebind_the_old_url() {
+    let Some(home) = isolated!() else { return };
+    exercise_admission(
+        home,
+        nsh_core::platform::Idiom::Pad,
+        ResumeCase::Unseekable,
+        true,
+        Some(SourceMutation::Edit),
+    );
+}
+#[test]
+fn deleting_a_vod_source_during_preparation_rejects_its_resolved_url() {
+    let Some(home) = isolated!() else { return };
+    exercise_admission(
+        home,
+        nsh_core::platform::Idiom::Pad,
+        ResumeCase::Unseekable,
+        true,
+        Some(SourceMutation::Delete),
+    );
+}
+
+#[test]
 fn tablet_reaches_unfinished_titles_of_two_playlists_from_the_rail() {
     let Some(home) = isolated!() else { return };
     discover(home, nsh_core::platform::Idiom::Pad);
@@ -800,14 +856,39 @@ fn discover(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     assert_eq!(player(&app), surface);
 }
 
+#[derive(Clone, Copy)]
+enum SourceMutation {
+    Disable,
+    Edit,
+    Delete,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ResumeCase {
     Seekable,
     Unseekable,
     EndedBeforeTimeline,
+    PriorEndedDuringPreparation,
 }
 
 fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resume: ResumeCase) {
+    exercise_preparing(home, idiom, resume, false);
+}
+fn exercise_preparing(
+    home: crate::isolated::Home,
+    idiom: nsh_core::platform::Idiom,
+    resume: ResumeCase,
+    hold_preparation: bool,
+) {
+    exercise_admission(home, idiom, resume, hold_preparation, None)
+}
+fn exercise_admission(
+    home: crate::isolated::Home,
+    idiom: nsh_core::platform::Idiom,
+    resume: ResumeCase,
+    hold_preparation: bool,
+    mutation: Option<SourceMutation>,
+) {
     let server = Server::start(&[(
         "/player_api.php",
         r#"{
@@ -1039,6 +1120,21 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resum
         selected, 1,
         "the episode selection has one content identity"
     );
+    if resume == ResumeCase::PriorEndedDuringPreparation {
+        app.engine().control().dispatch_event(
+            surface,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: "state".into(),
+                data: json!({"state":"ended"}),
+            },
+        );
+        app.settle();
+    }
+    let held = hold_preparation.then(iptv_app::hold_source_preparation);
+    let previous_source = props.lock().unwrap()["source"].clone();
+    let previous_opens = iptv_app::player_opens(0);
+    let previous_seek = props.lock().unwrap().get("seek").cloned();
     if idiom == nsh_core::platform::Idiom::Tv {
         for _ in 0..2 {
             step(app.press_key("right"));
@@ -1049,7 +1145,133 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resum
     } else {
         step(app.press("text:/Generated Second/"));
     }
+    if let Some(held) = &held {
+        step(crate::isolated::wait_outside(
+            &mut app,
+            "source preparation acknowledged",
+            Duration::from_secs(5),
+            || held.wait_entered(Duration::ZERO),
+        ));
+        assert_eq!(props.lock().unwrap()["source"], previous_source);
+        if app.screen().count("label:Rewind").unwrap() == 0 {
+            step(app.press("label:Video"));
+        }
+        step(app.wait_for("label:Rewind"));
+        step(app.wait_until(
+            "seek controls disabled for unpublished source",
+            Duration::from_secs(5),
+            |screen| {
+                screen
+                    .accessibility_state("label:Rewind")
+                    .is_ok_and(|state| state.disabled)
+            },
+        ));
+        for (name, data) in [
+            (
+                "timeline",
+                json!({"token":previous_source["token"],"seekId":0,"ms":117000,"durationMs":120000,"seekable":true}),
+            ),
+            ("firstRender", json!({"token":previous_source["token"]})),
+            ("position", json!({"ms":119000})),
+            ("state", json!({"state":"ended"})),
+            (
+                "error",
+                json!({"code":"ERROR_CODE_IO_NETWORK_CONNECTION_FAILED","http":503}),
+            ),
+        ] {
+            app.engine().control().dispatch_event(
+                surface,
+                EventKind::NativeEvent,
+                EventPayload::Native {
+                    name: name.into(),
+                    data,
+                },
+            );
+            app.settle();
+        }
+        if resume == ResumeCase::PriorEndedDuringPreparation {
+            step(app.press("id:play-bar-play-pause"));
+            assert_eq!(
+                iptv_app::player_opens(0),
+                previous_opens,
+                "PlayPause during preparation cannot replay prior EOF or replace this preparation"
+            );
+        }
+        assert_eq!(
+            props.lock().unwrap()["source"],
+            previous_source,
+            "old media events cannot publish or retry the new selection"
+        );
+        assert_eq!(
+            props.lock().unwrap().get("seek").cloned(),
+            previous_seek,
+            "old timeline cannot consume the new resume request"
+        );
+        let point = crate::isolated::open_database(&path)
+            .unwrap()
+            .vod_progress(&second_key)
+            .unwrap();
+        assert_eq!(point.position_ms, 37_000);
+        assert!(!point.completed, "old EOF cannot complete the new episode");
+        if let Some(mutation) = mutation {
+            let mut store = crate::isolated::open_database(&path).unwrap();
+            match mutation {
+                SourceMutation::Disable => {
+                    let mut policy = store.source_policy(source).unwrap();
+                    policy.enabled = false;
+                    store.set_source_policy(source, policy).unwrap();
+                }
+                SourceMutation::Edit => {
+                    let mut edited = store.source(source).unwrap().unwrap().source;
+                    if let SourceConfig::Xtream(credentials) = &mut edited.config {
+                        credentials.password = Secret::new("generated-replacement-password");
+                    }
+                    store.update_source(source, &edited).unwrap();
+                }
+                SourceMutation::Delete => {
+                    assert!(store.delete_source(source).unwrap());
+                }
+            }
+            drop(store);
+            held.release();
+            step(app.wait_until(
+                "stale VOD authority rejected",
+                Duration::from_secs(5),
+                |_| {
+                    props
+                        .lock()
+                        .unwrap()
+                        .get("source")
+                        .is_none_or(Value::is_null)
+                },
+            ));
+            assert_eq!(
+                iptv_app::player_opens(0),
+                previous_opens,
+                "a stale resolved source must never reach the decoder"
+            );
+            assert_eq!(
+                player(&app),
+                surface,
+                "rejection retains the persistent native surface"
+            );
+            return;
+        }
+        held.release();
+    }
     step(app.wait_for_gone("id:vod-screen", Duration::from_secs(5)));
+    step(app.wait_until(
+        "new episode source published",
+        Duration::from_secs(5),
+        |_| {
+            props
+                .lock()
+                .unwrap()
+                .get("source")
+                .and_then(|source| source["url"].as_str())
+                .is_some_and(|url| url.ends_with("/series/generated-user/generated-pass/102.mp4"))
+        },
+    ));
     assert_eq!(player(&app), surface);
     let opened = props.lock().unwrap()["source"].clone();
     assert!(
@@ -1058,7 +1280,55 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resum
             .unwrap()
             .ends_with("/series/generated-user/generated-pass/102.mp4")
     );
+    if held.is_some() {
+        assert_eq!(
+            iptv_app::player_opens(0),
+            previous_opens + 1,
+            "the prepared title publishes exactly one new native source"
+        );
+    }
     let token = opened["token"].clone();
+    if held.is_some() {
+        app.engine().control().dispatch_event(
+            surface,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: "timeline".into(),
+                data: json!({"token":token,"seekId":0,"ms":0,"durationMs":120000,"seekable":true}),
+            },
+        );
+        app.settle();
+        let seek = props.lock().unwrap()["seek"].clone();
+        assert_eq!(seek["token"], token);
+        assert_eq!(
+            seek["ms"], 37_000,
+            "the authoritative new timeline receives the preserved resume request"
+        );
+        app.engine().control().dispatch_event(
+            surface,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: "timeline".into(),
+                data: json!({
+                    "token": token,
+                    "seekId": seek["id"],
+                    "ms": 37000,
+                    "durationMs": 120000,
+                    "seekable": true
+                }),
+            },
+        );
+        app.settle();
+        step(app.wait_until(
+            "seek controls re-enable after publication",
+            Duration::from_secs(5),
+            |screen| {
+                screen
+                    .accessibility_state("label:Rewind")
+                    .is_ok_and(|state| !state.disabled)
+            },
+        ));
+    }
     if resume != ResumeCase::Seekable {
         assert_eq!(
             crate::isolated::open_database(&path)
@@ -1085,7 +1355,7 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resum
         );
         app.settle();
     }
-    if resume != ResumeCase::Seekable {
+    if resume != ResumeCase::Seekable && held.is_none() {
         assert!(props.lock().unwrap().get("seek").is_none_or(Value::is_null));
     }
     app.engine().control().dispatch_event(
@@ -1186,6 +1456,10 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resum
             })
             .unwrap()
             .resume_ms(),
-        37_000
+        if resume == ResumeCase::PriorEndedDuringPreparation {
+            0
+        } else {
+            37_000
+        }
     );
 }

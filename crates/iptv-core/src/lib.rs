@@ -18,6 +18,7 @@ pub mod guide;
 pub mod i18n;
 pub mod import_limits;
 pub mod lists;
+pub mod live;
 pub mod membership;
 pub mod menu;
 pub mod multiview;

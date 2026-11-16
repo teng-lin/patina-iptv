@@ -28,7 +28,7 @@ use crate::browse_fixture;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
@@ -77,7 +77,7 @@ fn guide(now: i64) -> String {
 /// The app's log lines so far. The scenario's process has no other logger:
 /// they are printed as the app prints them (into the test's output) and
 /// kept, for what an event does that only its log line shows.
-struct Lines(Mutex<Vec<String>>);
+struct Lines(Mutex<Vec<(Instant, String)>>);
 
 static LOG: Lines = Lines(Mutex::new(Vec::new()));
 
@@ -92,7 +92,7 @@ impl log::Log for Lines {
         }
         let line = record.args().to_string();
         eprintln!("[{} {}] {line}", record.level(), record.target());
-        self.0.lock().unwrap().push(line);
+        self.0.lock().unwrap().push((nsh_core::time::now(), line));
     }
 
     fn flush(&self) {}
@@ -100,7 +100,7 @@ impl log::Log for Lines {
 
 /// Whether the app logged exactly `line`.
 fn logged(line: &str) -> bool {
-    LOG.0.lock().unwrap().iter().any(|l| l == line)
+    LOG.0.lock().unwrap().iter().any(|(_, l)| l == line)
 }
 
 fn step(r: Result<(), String>) {
@@ -208,6 +208,39 @@ fn wait_live_reload(app: &mut Headless, props: &Props, previous: &Value, reconne
     prop(app, props, "source")
 }
 
+/// The retry-timing fixture holds its manual clock during external I/O.
+fn wait_live_reload_fixed(
+    app: &mut Headless,
+    props: &Props,
+    previous: &Value,
+    reconnect: bool,
+) -> Value {
+    // External authorization runs in real time. Pump its actual native props
+    // at the current manual time, so a slow worker cannot manufacture stalls.
+    let deadline = Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(5));
+    loop {
+        app.catch_up();
+        let source = native_source(app.screen(), props);
+        if iptv_app::player_has_source(0)
+            && source["live"] == json!(true)
+            && source["reconnect"] == json!(reconnect)
+            && source["token"].as_u64().is_some()
+            && source["token"] != previous["token"]
+            && source["url"] == previous["url"]
+        {
+            break;
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "new native retry token was not published"
+        );
+        app.engine().control().frame();
+        app.next_batch(remaining);
+    }
+    prop(app, props, "source")
+}
+
 fn wait_archive_source(
     app: &mut Headless,
     props: &Props,
@@ -282,6 +315,39 @@ fn run(app: &mut Headless, time: Duration) {
     step(app.run_for(time));
 }
 
+/// Advance only to the next stall/backoff boundary. Each fired retry must
+/// publish a new native token before its next stall is simulated.
+fn run_published_retries(app: &mut Headless, props: &Props, clock: &Clock, time: Duration) {
+    let end = clock.now() + time;
+    while clock.now() < end {
+        let now = clock.now();
+        let previous = prop(app, props, "source");
+        let (retry, stall) = {
+            let lines = LOG.0.lock().unwrap();
+            let retry = lines.iter().rev().find_map(|(at, line)| {
+                let (_, wait) = line
+                    .strip_prefix("iptv player 0 retry ")?
+                    .split_once(" in ")?;
+                Some(*at + Duration::from_millis(wait.strip_suffix(" ms")?.parse().ok()?))
+            });
+            let stall = lines.iter().rev().find_map(|(at, line)| {
+                line.starts_with("iptv player 0 open:")
+                    .then_some(*at + Duration::from_secs(15))
+            });
+            (retry, stall)
+        };
+        let until = retry
+            .into_iter()
+            .chain(stall)
+            .filter(|at| *at > now)
+            .fold(end, Instant::min);
+        run(app, until.saturating_duration_since(now));
+        if retry.is_some_and(|at| at > now && at <= clock.now()) {
+            wait_live_reload_fixed(app, props, &previous, true);
+        }
+    }
+}
+
 #[test]
 fn the_player_follows_its_host_through_waits_failures_and_replays() {
     let Some(home) = isolated!() else { return };
@@ -307,9 +373,10 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
         guide_path.display()
     );
     let size = Size::new(px(960.0), px(540.0));
+    let clock = Clock::manual(SystemTime::now());
     let mut config = EngineConfig {
         viewport: size,
-        clock: Clock::manual(SystemTime::now()),
+        clock: clock.clone(),
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     };
     // The window full screen video fills.
@@ -324,7 +391,13 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
                 if let MountItem::ComponentProps { id, props: changed } = item {
                     let entry = props.entry(*id).or_default();
                     for (name, value) in changed {
-                        entry.insert(name.to_string(), value.clone().unwrap_or(Value::Null));
+                        let value = value.clone().unwrap_or(Value::Null);
+                        let value = if name.as_ref() == "source" {
+                            crate::support::upstream_source(&value)
+                        } else {
+                            value
+                        };
+                        entry.insert(name.to_string(), value);
                     }
                 }
             }
@@ -445,12 +518,13 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for("id:player-banner"));
     let before = opens();
     network_error(&mut app);
-    let mut down = Duration::ZERO;
+    let outage = clock.now();
     while !seen(&app, "text:/^Can't play/") {
+        let down = clock.now().saturating_duration_since(outage);
         assert!(down < Duration::from_secs(200), "no card after {down:?}");
-        run(&mut app, Duration::from_secs(5));
-        down += Duration::from_secs(5);
+        run_published_retries(&mut app, &props, &clock, Duration::from_secs(5));
     }
+    let down = clock.now().saturating_duration_since(outage);
     assert!(down >= Duration::from_secs(150), "the card after {down:?}");
     step(app.wait_for("text:Can't play Test Channel One"));
     // The last failure was a stall.
@@ -480,7 +554,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     assert!(opens() >= before + 6, "{} retries", opens() - before);
     // Behind the card retries go on (every 30 s, each stalling in 15).
     let behind = opens();
-    run(&mut app, Duration::from_secs(46));
+    run_published_retries(&mut app, &props, &clock, Duration::from_secs(46));
     assert!(opens() > behind, "a retry behind the card");
     assert!(seen(&app, "text:/^Can't play/"), "the card stays");
 

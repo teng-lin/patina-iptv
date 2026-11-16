@@ -9,12 +9,17 @@
 //!
 //! Synthetic data only: a three-channel playlist "picked" from a file.
 
-use std::time::Duration;
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use crate::headless::Headless;
 use nsh_core::picker::PickedFile;
 use nsh_core::platform::Idiom;
-use nsh_core::{ImageData, Point, Size, element::Root, prelude::*};
+use nsh_core::{
+    EventKind, EventPayload, ImageData, MountItem, Point, Size, element::Root, prelude::*,
+};
 use nsh_engine::EngineConfig;
 
 const PLAYLIST: &str = "#EXTM3U
@@ -31,13 +36,68 @@ const IMPORT: Duration = Duration::from_secs(20);
 #[test]
 fn clicks_reach_the_guide_under_the_hidden_layers() {
     // The app keeps its files under $HOME: a fresh, empty one.
-    let Some(_home) = isolated!() else { return };
+    let Some(home) = isolated!() else { return };
+    let root = home.data_dir();
+    std::fs::create_dir_all(&root).unwrap();
+    let mut settings = iptv_settings::Settings::new();
+    // The first imported synthetic source intentionally permits two tiles.
+    settings
+        .set_in(
+            "playlists.max_connections",
+            &iptv_settings::Target::playlist("1"),
+            iptv_settings::Value::Int(2),
+        )
+        .unwrap();
+    std::fs::write(root.join("settings.json"), settings.to_json_string()).unwrap();
 
     let config = EngineConfig {
         viewport: Size::new(px(1280.0), px(720.0)),
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     };
     let mut app = Headless::start(config).unwrap();
+    let opened: Arc<Mutex<Vec<String>>> = Arc::default();
+    let seen = opened.clone();
+    let control = app.engine().control().clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::ComponentProps { id, props } = item {
+                for (name, value) in props {
+                    if name.as_ref() == "source"
+                        && let Some(source) = value.as_ref().map(crate::support::upstream_source)
+                        && let Some(url) = source["url"].as_str()
+                    {
+                        seen.lock().unwrap().push(url.into());
+                        // Model a loaded player with actual track choices so
+                        // the enabled chooser and pointer hit targets are tested.
+                        for (name, data) in [
+                            ("state", serde_json::json!({"state": "ready"})),
+                            (
+                                "tracks",
+                                serde_json::json!({
+                                    "video": [],
+                                    "audio": [
+                                        {"id": "a1", "label": "First synthetic audio"},
+                                        {"id": "a2", "label": "Second synthetic audio"}
+                                    ],
+                                    "text": [],
+                                    "selected": {"video": "auto", "audio": "a1", "text": "off"}
+                                }),
+                            ),
+                        ] {
+                            control.dispatch_event(
+                                *id,
+                                EventKind::NativeEvent,
+                                EventPayload::Native {
+                                    name: name.into(),
+                                    data,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    });
     app.on_pick(|_| {
         vec![PickedFile::new(
             "synthetic.m3u",
@@ -62,8 +122,16 @@ fn clicks_reach_the_guide_under_the_hidden_layers() {
     // The guide: a channel's name plays it (the name column lies under
     // the hidden channel list's panel).
     step(app.wait_for("text:Test Channel Two"));
+    let store = crate::isolated::open_database(root.join("iptv.sqlite")).unwrap();
+    assert_eq!(
+        store.sources().unwrap()[0].id.0,
+        1,
+        "fixture allowance source"
+    );
+    drop(store);
     step(app.press("text:Test Channel Two"));
     step(app.wait_for("text:▶"));
+    crate::personalization::loaded_stream(&mut app, &opened, "http://stream.example.test/two.m3u8");
 
     // The playing channel's name again: full screen. A tap on the video
     // shows the play bar, whose buttons act; another tap hides it.
@@ -77,8 +145,8 @@ fn clicks_reach_the_guide_under_the_hidden_layers() {
     step(app.wait_for("text:★ Test Channel Two"));
     step(app.press("label:Video"));
     step(app.wait_for_gone("label:Mute", Duration::from_secs(2)));
-    // Every button of the bar is reachable on a narrow and a wide window,
-    // and the popups it opens close on a second press or a press beside
+    // Every enabled button of the bar is reachable on a narrow and a wide
+    // window; seeking this live-only stream stays disabled. The popups it opens close on a second press or a press beside
     // them while the bar stays.
     for (w, h) in [(760.0, 480.0), (1600.0, 900.0)] {
         step(app.set_viewport(Size::new(px(w), px(h))));
@@ -161,21 +229,39 @@ fn moving_mouse(app: &mut Headless, step: impl Fn(Result<(), String>)) {
     step(app.wait_for_gone("label:Mute", Duration::from_secs(2)));
 }
 
-/// Presses every button of the play bar over full-screen video (shown by
-/// a tap), checking what the popups do.
+/// Presses each enabled play-bar button over full-screen video (shown by
+/// a tap), checking the popups and disabled live-only seeking.
 fn bar_buttons(app: &mut Headless, step: impl Fn(Result<(), String>)) {
     let gone = |app: &mut Headless, s: &str| app.wait_for_gone(s, Duration::from_secs(2));
     if !app.screen().matches("label:Mute").unwrap() {
         step(app.press("label:Video"));
     }
     step(app.wait_for("label:Mute"));
+    let opens = iptv_app::player_opens(0);
+    for name in ["Rewind", "Fast-forward"] {
+        let selector = format!("label:{name}");
+        assert!(
+            app.screen()
+                .accessibility_state(&selector)
+                .unwrap()
+                .disabled,
+            "live-only seeking stays disabled"
+        );
+        let error = app
+            .press(&selector)
+            .expect_err("disabled seeking cannot receive a press");
+        assert!(error.contains("is disabled"), "{error}");
+    }
+    assert_eq!(
+        iptv_app::player_opens(0),
+        opens,
+        "disabled seeking does not reopen playback"
+    );
     for name in [
         "Mute",
         "Mute",
-        "Rewind",
         "Play or pause",
         "Play or pause",
-        "Fast-forward",
         "Favourite",
         "Favourite",
         "Subtitles and tracks",
@@ -292,6 +378,11 @@ fn multiview(app: &mut Headless, step: impl Fn(Result<(), String>) + Copy) {
     step(app.press(ROW_THREE));
     step(app.wait_for(TILE_THREE));
     assert_eq!(tiles(app), 2);
+    step(
+        app.wait_until("both synthetic tile sources are published", IMPORT, |_| {
+            iptv_app::player_has_source(0) && iptv_app::player_has_source(1)
+        }),
+    );
     assert!(!app.screen().matches("text:Add a channel").unwrap());
     assert!(
         !app.screen().matches("label:Exit multiview").unwrap(),
@@ -369,6 +460,11 @@ fn multiview(app: &mut Headless, step: impl Fn(Result<(), String>) + Copy) {
     let opens = iptv_app::player_opens(0);
     step(app.press("label:Exit multiview"));
     step(gone(app, TILE));
+    step(app.wait_until(
+        "the selected tile source moves to surface zero",
+        IMPORT,
+        |_| iptv_app::player_has_source(0) && iptv_app::player_opens(0) > opens,
+    ));
     assert_eq!(
         iptv_app::player_opens(0),
         opens + 1,

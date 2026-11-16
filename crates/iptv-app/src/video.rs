@@ -256,12 +256,17 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
     for (prop, value) in props.into_wire() {
         player = player.prop(prop.wire(), value);
     }
-    player.on_native_event(
-        move |e: &NativeEvent| match PlayerEvent::decode(&e.name, &e.data) {
+    player.on_native_event(move |e: &NativeEvent| {
+        #[cfg(feature = "test-support")]
+        if e.name.as_ref() == "test.parental.lock" {
+            crate::runtime().parental_lock();
+            return;
+        }
+        match PlayerEvent::decode(&e.name, &e.data) {
             Ok(event) => on_event(ui, surface, event),
             Err(error) => on_unread(ui, surface, error),
-        },
-    )
+        }
+    })
 }
 
 /// An event the contract does not have, from surface `surface`'s player. It
@@ -270,6 +275,9 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
 /// `size` without its two numbers still marks reported size (the
 /// stream's size stays), and the rest sets nothing.
 fn on_unread(ui: Ui, surface: usize, error: PlayerEventError) {
+    if !ui.player.stream(surface).accepts_native(None) {
+        return;
+    }
     let (kind, status) = match error {
         // Another component's event or a later host's, and a `position`
         // without its `ms`: not logged.
@@ -304,6 +312,15 @@ fn report(ui: Ui, surface: usize, kind: PlayerEventKind, status: String) {
 /// One event from surface `surface`'s player.
 fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
     let stream = ui.player.stream(surface);
+    let token = match &event {
+        PlayerEvent::Timeline { token, .. } | PlayerEvent::FirstRender { token } => Some(*token),
+        _ => None,
+    };
+    if !matches!(&event, PlayerEvent::Pip { .. } | PlayerEvent::PipAction(_))
+        && !stream.accepts_native(token)
+    {
+        return;
+    }
     let kind = event.kind();
     let status = match event {
         // Once a second while playing: not logged.

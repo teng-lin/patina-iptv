@@ -200,7 +200,19 @@ fn changing_picker_group_or_query_reveals_selection_after_touch_scrolling() {
 
 #[test]
 fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
-    let Some(_home) = isolated!() else { return };
+    let Some(home) = isolated!() else { return };
+    let root = home.data_dir();
+    std::fs::create_dir_all(&root).unwrap();
+    let mut settings = iptv_settings::Settings::new();
+    // Four generated streams are allowed for this tile-menu fixture.
+    settings
+        .set_in(
+            "playlists.max_connections",
+            &iptv_settings::Target::playlist("1"),
+            iptv_settings::Value::Int(4),
+        )
+        .unwrap();
+    std::fs::write(root.join("settings.json"), settings.to_json_string()).unwrap();
     let config = EngineConfig {
         viewport: Size::new(px(W), px(H)),
         ..EngineConfig::new(Root::of::<iptv_app::App>())
@@ -227,6 +239,13 @@ fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
     step(app.wait_for_within("text:Playlist added", IMPORT));
     step(app.press("text:Watch"));
     step(app.wait_for("text:Test Channel One"));
+    let store = crate::isolated::open_database(root.join("iptv.sqlite")).unwrap();
+    assert_eq!(
+        store.sources().unwrap()[0].id.0,
+        1,
+        "fixture allowance source"
+    );
+    drop(store);
 
     // Multiview from full-screen video (the play bar's button: the
     // harness starts as a desktop), Channel One the first tile; then a
@@ -265,6 +284,11 @@ fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
     step(gone(&mut app, picker));
     step(app.wait_for(&format!("{TILE} >> text:/Test Channel Three$/")));
     assert_eq!(tiles(&app), 2);
+    step(
+        app.wait_until("both synthetic tile sources are published", IMPORT, |_| {
+            iptv_app::player_has_source(0) && iptv_app::player_has_source(1)
+        }),
+    );
 
     // OK: the panel at the right edge, centred, with the reference's items.
     step(app.press_key("enter"));
@@ -552,5 +576,310 @@ fn closing_the_main_window_stops_grid_streams_and_keeps_pending_recordings() {
     assert_eq!(
         store.recording_job(id).unwrap().unwrap().status,
         iptv_core::recording::Status::Scheduled
+    );
+}
+
+/// Account-backed locators need the source context on every surface. Checking
+/// tile labels alone cannot establish that the decoder received a stream.
+#[test]
+fn an_idle_m3u_playlist_does_not_block_a_second_xtream_screen() {
+    let Some(home) = isolated!() else { return };
+    account_streams(&home, AccountScenario::IdleM3u);
+}
+
+#[test]
+fn adding_a_screen_from_another_xtream_playlist_uses_its_account() {
+    let Some(home) = isolated!() else { return };
+    account_streams(&home, AccountScenario::OtherXtream);
+}
+
+#[test]
+fn a_real_connection_limit_does_not_claim_the_channel_has_no_address() {
+    let Some(home) = isolated!() else { return };
+    account_streams(&home, AccountScenario::LimitedHttp);
+}
+
+#[test]
+fn a_native_provider_retry_preserves_the_tile_during_a_capacity_refusal() {
+    let Some(home) = isolated!() else { return };
+    account_streams(&home, AccountScenario::LimitedNative);
+}
+
+#[derive(Clone, Copy)]
+enum AccountScenario {
+    IdleM3u,
+    OtherXtream,
+    LimitedHttp,
+    LimitedNative,
+}
+
+const NATIVE_STREAM: &str = "rtsp://stream.example.test/generated-native";
+
+fn generated_account() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = requests.clone();
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let observed = observed.clone();
+            std::thread::spawn(move || {
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let path = line.split_whitespace().nth(1).unwrap_or("/").to_owned();
+                while reader.read_line(&mut String::new()).unwrap_or(0) > 2 {}
+                let action = path
+                    .split(['?', '&'])
+                    .find_map(|s| s.strip_prefix("action="))
+                    .unwrap_or("");
+                let (status, body) = if path.starts_with("/live/") {
+                    observed.lock().unwrap().push(path);
+                    ("404 Not Found", "Generated native fallback".to_owned())
+                } else if path.starts_with("/xmltv.php") {
+                    ("200 OK", "<tv/>".to_owned())
+                } else {
+                    let body = match action {
+                        "" | "get_account_info" => serde_json::json!({
+                            "user_info": {"auth":1,"status":"Active","max_connections":"2","allowed_output_formats":["ts"]},
+                            "server_info": {"timezone":"UTC"}
+                        }),
+                        "get_live_categories" => {
+                            serde_json::json!([{"category_id":"1","category_name":"News"}])
+                        }
+                        "get_live_streams" => serde_json::json!([
+                            {"name":"Test Channel One","stream_id":1,"stream_type":"live","category_id":"1"},
+                            {"name":"Test Channel Two","stream_id":2,"stream_type":"live","category_id":"1"}
+                        ]),
+                        _ => serde_json::json!([]),
+                    };
+                    ("200 OK", body.to_string())
+                };
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            });
+        }
+    });
+    (url, requests)
+}
+
+fn account_streams(home: &crate::isolated::Home, scenario: AccountScenario) {
+    let another_playlist = matches!(scenario, AccountScenario::OtherXtream);
+    let limited = matches!(
+        scenario,
+        AccountScenario::LimitedHttp | AccountScenario::LimitedNative
+    );
+    let native_primary = matches!(scenario, AccountScenario::LimitedNative);
+    use iptv_providers::{
+        Secret,
+        model::{Source, SourceConfig, XtreamCredentials},
+    };
+    crate::browse_fixture::two_step_preview(home.path());
+    let _ = env_logger::builder()
+        .is_test(true)
+        .filter_level(log::LevelFilter::Info)
+        .try_init();
+    let mut store = crate::isolated::open_database(home.data_dir().join("iptv.sqlite")).unwrap();
+    let (url, requests) = generated_account();
+    let source = store
+        .add_source(&Source {
+            name: "Alpha".into(),
+            config: SourceConfig::Xtream(XtreamCredentials {
+                server_url: url,
+                username: Secret::new("generated-viewer"),
+                password: Secret::new("generated-password"),
+                user_agent: None,
+            }),
+        })
+        .unwrap();
+    if limited {
+        let path = home.data_dir().join("settings.json");
+        let (mut settings, _) =
+            iptv_settings::Settings::from_json(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        settings
+            .set_in(
+                "playlists.max_connections",
+                &iptv_settings::Target::playlist(source.0.to_string()),
+                iptv_settings::Value::Int(1),
+            )
+            .unwrap();
+        std::fs::write(path, settings.to_json_string()).unwrap();
+    }
+    store.set_active_source(source).unwrap();
+    if !another_playlist {
+        let idle = store
+            .add_source(&Source {
+                name: if native_primary {
+                    "Native"
+                } else {
+                    "Idle generated playlist"
+                }
+                .into(),
+                config: SourceConfig::M3u(iptv_providers::model::M3uSourceConfig {
+                    location: iptv_providers::SecretUrl::new("https://example.test/idle.m3u"),
+                    user_agent: None,
+                    referrer: None,
+                }),
+            })
+            .unwrap();
+        let playlist = if native_primary {
+            format!("#EXTM3U\n#EXTINF:-1,Native Channel\n{NATIVE_STREAM}\n")
+        } else {
+            "#EXTM3U\n#EXTINF:-1,Idle generated channel\nhttps://example.test/idle.ts\n".into()
+        };
+        let parsed = iptv_providers::m3u::parse_m3u(&playlist);
+        store
+            .replace_catalog(idle, &parsed.groups, &parsed.channels.items, &[], &[])
+            .unwrap();
+        store
+            .set_source_policy(
+                idle,
+                iptv_store_sqlite::SourcePolicy {
+                    refresh_on_start: false,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    }
+    let other_requests = if another_playlist {
+        let (url, requests) = generated_account();
+        store
+            .add_source(&Source {
+                name: "Beta".into(),
+                config: SourceConfig::Xtream(XtreamCredentials {
+                    server_url: url,
+                    username: Secret::new("generated-viewer"),
+                    password: Secret::new("generated-password"),
+                    user_agent: None,
+                }),
+            })
+            .unwrap();
+        Some(requests)
+    } else {
+        None
+    };
+    drop(store);
+    let mut app = Headless::start(EngineConfig {
+        viewport: Size::new(px(1280.0), px(720.0)),
+        clock: nsh_core::time::Clock::manual(std::time::SystemTime::now()),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    // A directly published RTSP source proves the fourth scenario reaches the
+    // NativeProvider replacement path, rather than an HTTP relay/probe retry.
+    let native_published = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let observed_native = native_published.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let nsh_core::MountItem::ComponentProps { props, .. } = item {
+                for (name, value) in props {
+                    if name.as_ref() == "source"
+                        && value.as_ref().is_some_and(|v| v["url"] == NATIVE_STREAM)
+                    {
+                        observed_native.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+            }
+        }
+    });
+    let step = |result: Result<(), String>| result.unwrap_or_else(|error| panic!("{error}"));
+    let first = if native_primary {
+        "text:/^Native Channel · Native$/"
+    } else {
+        "text:/^Test Channel One · Alpha$/"
+    };
+    step(app.wait_for_within(first, IMPORT));
+    step(app.press(first));
+    step(
+        app.wait_until("primary account stream and native delivery", IMPORT, |_| {
+            // Source calculation precedes delivery of the mount batch to the test
+            // observer. Both acknowledgements must arrive before checking ownership.
+            iptv_app::player_has_source(0)
+                && (!native_primary || native_published.load(std::sync::atomic::Ordering::SeqCst))
+        }),
+    );
+    step(app.press(first));
+    step(app.wait_for("label:Video"));
+    step(app.press("label:Video"));
+    step(app.wait_for("label:Multiview"));
+    step(app.press("label:Multiview"));
+    step(app.wait_for("id:multiview-picker"));
+    let second = if another_playlist {
+        "id:multiview-picker >> text:/Test Channel Two · Beta$/"
+    } else {
+        "id:multiview-picker >> text:/Test Channel Two · Alpha$/"
+    };
+    step(app.press(second));
+    if limited {
+        // Give each asynchronous refusal time to reach the health machine
+        // between advancing retry deadlines. A genuine limit stays retryable.
+        for _ in 0..20 {
+            step(app.run_for(Duration::from_secs(1)));
+            step(app.wait(Duration::from_millis(20)));
+        }
+        step(app.wait_for("text:The provider is refusing this stream for now."));
+        assert!(
+            !app.screen()
+                .matches("text:This channel has no stream address.")
+                .unwrap()
+        );
+        assert!(iptv_app::player_has_source(0));
+        assert!(!iptv_app::player_has_source(1));
+        // Release the admitted screen; the refused tile must recover through
+        // its scheduled retry without pressing Try again.
+        step(app.press("id:multiview-tile >> nth=0"));
+        step(app.press(if native_primary {
+            "label:Remove screen: Native Channel · Native"
+        } else {
+            "label:Remove screen: Test Channel One · Alpha"
+        }));
+        for _ in 0..35 {
+            step(app.run_for(Duration::from_secs(1)));
+            step(app.wait(Duration::from_millis(20)));
+            if iptv_app::player_has_source(1) {
+                break;
+            }
+        }
+        assert!(
+            iptv_app::player_has_source(1),
+            "the retry recovers after capacity is released"
+        );
+        return;
+    }
+
+    step(app.wait_until("second account stream", IMPORT, |_| {
+        iptv_app::player_has_source(1)
+    }));
+    assert!(
+        iptv_app::player_has_source(0),
+        "adding a screen preserves the primary stream"
+    );
+    assert_eq!(tiles(&app), 2);
+    assert!(
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| p.ends_with("/1.ts")),
+        "the first channel resolves through its account"
+    );
+    assert!(
+        other_requests
+            .as_ref()
+            .unwrap_or(&requests)
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| p.ends_with("/2.ts")),
+        "the second channel resolves through its account"
+    );
+    assert!(
+        !app.screen()
+            .matches("text:This channel has no stream address.")
+            .unwrap()
     );
 }

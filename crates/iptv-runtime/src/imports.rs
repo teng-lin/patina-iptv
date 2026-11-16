@@ -194,7 +194,11 @@ pub struct Imported {
 /// Where a new schedule gets its playback context.
 pub enum Streams {
     /// Its own, with the streams the account allows at once (when it says).
-    New(Option<PlaybackContext>, Option<u32>),
+    New(
+        Option<PlaybackContext>,
+        Option<u32>,
+        std::sync::Arc<iptv_guide::playback::SourceAuthority>,
+    ),
     /// The schedule on screen's (a refreshed guide of the same source).
     Current,
 }
@@ -421,7 +425,7 @@ pub(crate) async fn pipeline(
     let now = now_unix();
     if let Some(id) = job
         .stored
-        .filter(|id| !network_due(services, *id, job.purpose))
+        .filter(|id| !job.edit && !network_due(services, *id, job.purpose))
         && let Ok((groups, channels)) = stored::catalog(services, id)
         && !channels.is_empty()
     {
@@ -433,6 +437,13 @@ pub(crate) async fn pipeline(
         };
         let guide = stored::load_guide(services, id, now).unwrap_or_default();
         let context = super::playback::stored_context(&job.source.config);
+        let (source, incarnation, config) =
+            publication.source.as_ref().expect("stored publication");
+        let authority = std::sync::Arc::new(iptv_guide::playback::SourceAuthority::new(
+            source.0,
+            incarnation.clone(),
+            config.clone(),
+        ));
         let _ = tx.send(Msg::Playlist(Ok((
             counts,
             Box::new(Imported {
@@ -442,7 +453,7 @@ pub(crate) async fn pipeline(
                 now,
                 source: id,
                 resume: context.is_some(),
-                playback: Streams::New(context, None),
+                playback: Streams::New(context, None, authority),
             }),
         ))));
         // The guide's own inputs, read again as one: an unreadable part
@@ -669,17 +680,17 @@ pub(crate) async fn pipeline(
     }));
     #[cfg(feature = "test-support")]
     services.before_publication();
-    let (id, counts, sources) = match save(services, &job, &catalog, &planned, stage, &publication)
-    {
-        Ok(saved) => saved,
-        Err(e) => {
-            log::warn!("iptv data: store: {e}");
-            if cancel.is_cancelled() || !services.is_current() {
-                return fail(ImportFailure::new(FailureKind::Cancelled));
+    let (id, counts, sources, authority) =
+        match save(services, &job, &catalog, &planned, stage, &publication) {
+            Ok(saved) => saved,
+            Err(e) => {
+                log::warn!("iptv data: store: {e}");
+                if cancel.is_cancelled() || !services.is_current() {
+                    return fail(ImportFailure::new(FailureKind::Cancelled));
+                }
+                return fail(e.failure(FailureKind::Storage));
             }
-            return fail(e.failure(FailureKind::Storage));
-        }
-    };
+        };
     let matching = stored::Matching {
         channels: &catalog.channels,
         overrides: &overrides,
@@ -697,6 +708,7 @@ pub(crate) async fn pipeline(
             playback: Streams::New(
                 super::playback::context_for(&job.source.config, &catalog.source),
                 super::playback::account_streams(&catalog.source),
+                std::sync::Arc::new(authority.clone()),
             ),
             guide,
             now,
@@ -844,6 +856,12 @@ pub(crate) async fn download_guide<P: ProgressSink>(
 /// were edited), and the guide sources with the provider's guides of now
 /// (`planned` for a new source; a stored one's are read again, as the user
 /// may have changed them meanwhile). Returns the guide sources saved.
+type SavedCatalog = (
+    SourceId,
+    CatalogCounts,
+    Vec<GuideSource>,
+    iptv_guide::playback::SourceAuthority,
+);
 pub(crate) fn save(
     services: &Services,
     job: &Job,
@@ -851,7 +869,7 @@ pub(crate) fn save(
     planned: &[GuideSource],
     stage: CatalogStage,
     publication: &Publication,
-) -> Result<(SourceId, CatalogCounts, Vec<GuideSource>), PublicationError> {
+) -> Result<SavedCatalog, PublicationError> {
     let job = job.clone();
     let guide_urls = catalog.guide_urls();
     let planned = planned.to_vec();
@@ -861,7 +879,17 @@ pub(crate) fn save(
             return Ok(Err(PublicationError::Superseded));
         }
         crate::parental::require_import(store, &job, &publication.authorization)?;
-        Ok(Ok(save_in(store, &job, guide_urls, planned, stage)?))
+        let (id, counts, sources) = save_in(store, &job, guide_urls, planned, stage)?;
+        let stored = store.source(id)?.ok_or(StoreError::SourceNotFound(id))?;
+        if stored.source.config != job.source.config {
+            return Ok(Err(PublicationError::Superseded));
+        }
+        Ok(Ok((
+            id,
+            counts,
+            sources,
+            super::playback::source_authority(&stored),
+        )))
     })??;
     Ok(saved)
 }

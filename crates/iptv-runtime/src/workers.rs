@@ -115,12 +115,21 @@ pub(crate) struct Hooks {
     reports: Mutex<(bool, usize)>,
     released: Condvar,
     publication: Mutex<Option<Arc<crate::testing::GateState>>>,
+    source_preparation: Mutex<Option<Arc<crate::testing::GateState>>>,
     drained: Mutex<Option<Arc<crate::testing::GateState>>>,
     admission_closed: Mutex<Option<Arc<crate::testing::GateState>>>,
     drain_limit: Mutex<Option<std::time::Duration>>,
 }
 #[cfg(feature = "test-support")]
 impl Hooks {
+    pub(crate) fn hold_source_preparation(&self) -> crate::TestGate {
+        let gate = crate::TestGate::new();
+        *self.source_preparation.lock().unwrap() = Some(gate.0.clone());
+        gate
+    }
+    pub(crate) fn take_source_preparation(&self) -> Option<Arc<crate::testing::GateState>> {
+        self.source_preparation.lock().unwrap().take()
+    }
     pub(crate) fn observe_admission_close(&self) -> crate::TestGate {
         let gate = crate::TestGate::new();
         *self.admission_closed.lock().unwrap() = Some(gate.0.clone());

@@ -67,7 +67,6 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     settings
         .set("guide.stay_on_guide", iptv_settings::Value::Bool(true))
         .unwrap();
-    std::fs::write(root.join("settings.json"), settings.to_json_string()).unwrap();
     let mut store = crate::isolated::open_database(root.join("iptv.sqlite")).unwrap();
     let source = store
         .add_source(&Source {
@@ -94,6 +93,15 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
         .unwrap();
     store.set_active_source(source).unwrap();
     drop(store);
+    // This fixture intentionally plays three independent synthetic channels.
+    settings
+        .set_in(
+            "playlists.max_connections",
+            &iptv_settings::Target::playlist(source.0.to_string()),
+            iptv_settings::Value::Int(3),
+        )
+        .unwrap();
+    std::fs::write(root.join("settings.json"), settings.to_json_string()).unwrap();
     let mut config = EngineConfig::new(Root::of::<iptv_app::App>());
     config.viewport = Size::new(px(1920.0), px(1080.0));
     config.environment.os = if cfg!(target_os = "macos") {
@@ -152,7 +160,11 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     step(app.wait_for("text:Watch in new window"));
     let main_opens = iptv_app::player_opens(0);
     step(app.press("text:Watch in new window"));
-    app.idle(Duration::from_millis(300)).unwrap();
+    step(app.wait_until(
+        "the auxiliary source is published",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(1),
+    ));
     assert!(app.window_state("player-window-1").unwrap().is_some());
     assert!(iptv_app::player_has_source(1));
     step(app.wait_for("label:Play or pause"));
@@ -393,7 +405,11 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     step(app.right_click("id:guide-ui >> text:Local C"));
     step(app.wait_for("text:Watch in new window"));
     step(app.press("text:Watch in new window"));
-    app.idle(Duration::from_millis(300)).unwrap();
+    step(app.wait_until(
+        "the third source is published",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(2),
+    ));
     assert!(app.window_state("player-window-2").unwrap().is_some());
     assert!(iptv_app::player_has_source(1) && iptv_app::player_has_source(2));
     let third_source = prop(&props, 2, "source");

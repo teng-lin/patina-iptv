@@ -6,16 +6,53 @@
 //!
 //! Synthetic data only.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    sync::Mutex,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
 use iptv_store_sqlite::ChannelQuery;
 use nsh_core::picker::PickedFile;
-use nsh_core::{ImageData, Size, element::Root, prelude::*};
+use nsh_core::{
+    ImageData, Size,
+    element::{Component, Root, Scope},
+    prelude::*,
+};
 use nsh_engine::EngineConfig;
 
 const IMPORT: Duration = Duration::from_secs(20);
+
+// Installed by the test root before bootstrap's asynchronous continuation runs.
+static PREPARATION: Mutex<Option<iptv_runtime::TestGate>> = Mutex::new(None);
+static OPEN_SESSIONS: OpenSessions = OpenSessions(Mutex::new(Vec::new()));
+
+struct OpenSessions(Mutex<Vec<String>>);
+impl log::Log for OpenSessions {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+    fn log(&self, record: &log::Record) {
+        let line = record.args().to_string();
+        if line.starts_with("iptv player 0 open: session ") {
+            self.0.lock().unwrap().push(line);
+        }
+    }
+    fn flush(&self) {}
+}
+
+struct HeldEarlyApp;
+impl Component for HeldEarlyApp {
+    type Props = <iptv_app::App as Component>::Props;
+    type Event = <iptv_app::App as Component>::Event;
+
+    fn view(props: Self::Props, cx: Scope<Self::Event>) -> impl IntoElement {
+        let app = iptv_app::App::view(props, cx);
+        *PREPARATION.lock().unwrap() = Some(iptv_app::hold_source_preparation());
+        app
+    }
+}
 
 /// Hour-long programmes from a day back to two days ahead: "Now Show" on
 /// air now, "Late Show" ten hours on (past the first screen).
@@ -56,6 +93,18 @@ fn app() -> Headless {
 #[test]
 fn the_last_channel_opens_once_before_the_guide() {
     let Some(home) = isolated!() else { return };
+    cold_start(home, false);
+}
+
+#[test]
+fn the_guide_adopts_the_original_early_preparation_before_native_publication() {
+    let Some(home) = isolated!() else { return };
+    log::set_logger(&OPEN_SESSIONS).expect("this process's only logger");
+    log::set_max_level(log::LevelFilter::Info);
+    cold_start(home, true);
+}
+
+fn cold_start(home: crate::isolated::Home, hold_preparation: bool) {
     crate::performance::prepare(&home);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -149,10 +198,59 @@ fn the_last_channel_opens_once_before_the_guide() {
     // at once, before the guide is read.
     let opens = iptv_app::player_opens(0);
     let journey = crate::performance::Sample::start("cached-guide", 0);
-    let mut app = app();
+    OPEN_SESSIONS.0.lock().unwrap().clear();
+    let mut app = if hold_preparation {
+        Headless::start(EngineConfig {
+            viewport: Size::new(px(1280.0), px(720.0)),
+            ..EngineConfig::new(Root::of::<HeldEarlyApp>())
+        })
+        .unwrap()
+    } else {
+        app()
+    };
+    if hold_preparation {
+        step(
+            app.wait_until("test root installed the preparation gate", IMPORT, |_| {
+                PREPARATION.lock().unwrap().is_some()
+            }),
+        );
+    }
+    let preparation = hold_preparation.then(|| PREPARATION.lock().unwrap().take().unwrap());
+    if let Some(preparation) = &preparation {
+        step(crate::isolated::wait_outside(
+            &mut app,
+            "early preparation entered",
+            IMPORT,
+            || preparation.wait_entered(Duration::ZERO),
+        ));
+        // Programme cells only arrive with the catalogue/guide, so this passes
+        // the actual adoption boundary while the first request is still held.
+        step(app.wait_for_within("text:Now Show", IMPORT));
+        step(app.idle(Duration::from_millis(500)).map(|_| ()));
+        assert_eq!(
+            iptv_app::player_opens(0),
+            opens,
+            "preparation remains unpublished"
+        );
+        assert!(!iptv_app::player_has_source(0));
+        preparation.release();
+    }
     assert!(!app.shows("text:Channel 1"), "the synthetic guide showed");
     step(app.wait_for_within("text:Test Channel Two", IMPORT));
+    step(
+        app.wait_until("the last channel source is published", IMPORT, |_| {
+            iptv_app::player_has_source(0) && iptv_app::player_opens(0) > opens
+        }),
+    );
     assert_eq!(iptv_app::player_opens(0), opens + 1, "opened once");
+    if hold_preparation {
+        let sessions = OPEN_SESSIONS.0.lock().unwrap();
+        assert_eq!(sessions.len(), 1, "one native publication");
+        assert!(
+            sessions[0].starts_with("iptv player 0 open: session 1,"),
+            "adoption must keep the original health request: {sessions:?}"
+        );
+    }
     // The guide arrives (first screen, then the whole window) and the
     // playing channel is found in it: back to the guide shows it, with
     // programmes past the first screen. Its first screen is on the tree

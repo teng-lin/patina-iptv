@@ -334,3 +334,32 @@ pub fn now() -> i64 {
         .unwrap()
         .as_secs() as i64
 }
+/// Expand an observed native capability only for routing/auth assertions. The
+/// player still receives no provider headers and uses the real owned transport.
+pub fn upstream_source(native: &serde_json::Value) -> serde_json::Value {
+    let Some(url) = native["url"].as_str() else {
+        return native.clone();
+    };
+    let Some(original) = iptv_app::original_player_source(url) else {
+        return native.clone();
+    };
+    assert_eq!(
+        native["headers"],
+        serde_json::json!({}),
+        "provider headers stay behind the relay"
+    );
+    assert_eq!(
+        native["publicOnly"], false,
+        "only the owned loopback capability is trusted"
+    );
+    let mut source = native.clone();
+    source["url"] = serde_json::json!(original.url);
+    source["headers"] = serde_json::json!(
+        original
+            .headers
+            .into_iter()
+            .collect::<std::collections::BTreeMap<_, _>>()
+    );
+    source["publicOnly"] = serde_json::json!(original.public_only);
+    source
+}

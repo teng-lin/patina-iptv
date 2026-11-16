@@ -450,3 +450,56 @@ async fn an_empty_refresh_records_a_failure_but_an_empty_edit_preserves_committe
         assert!(owner.drain_services());
     }
 }
+
+#[tokio::test]
+async fn added_and_edited_playback_contexts_retain_the_committed_source_authority() {
+    for edit in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let (url, _, _, server) = server(false);
+        let (owner, mut job) = fixture(directory.path(), &url).await;
+        if !edit {
+            job.stored = None;
+        }
+        job.edit = edit;
+        if let SourceConfig::M3u(config) = &mut job.source.config {
+            config.user_agent = Some("GeneratedContext/81".into());
+        }
+        let (task, mut messages) = start(&owner, job, &CancelToken::new());
+        tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
+        let mut checked = 0;
+        while let Ok(message) = messages.try_recv() {
+            if let Msg::Playlist(result) = message {
+                let (_, imported) = result.unwrap();
+                let Streams::New(Some(context), _, origin) = imported.playback else {
+                    panic!("successful import carries its own playback context");
+                };
+                let channel = &imported.channels[0];
+                let authority = origin.resolve(channel);
+                let source = imported.source;
+                let committed = owner
+                    .services()
+                    .read(move |store| store.source(source))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(authority.source(), committed.id.0);
+                assert_eq!(authority.incarnation(), committed.incarnation);
+                assert_eq!(authority.config(), &committed.source.config);
+                assert_eq!(authority.channel(), channel);
+                let iptv_guide::playback::Resolution::Play(stream) = iptv_guide::playback::resolve(
+                    Some(&context),
+                    channel,
+                    None,
+                    crate::playback::clock(now_unix(), None),
+                ) else {
+                    panic!("generated direct stream");
+                };
+                assert_eq!(stream.header("User-Agent"), Some("GeneratedContext/81"));
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 1, "one committed catalogue context");
+        server.join().unwrap();
+        assert!(owner.drain_services());
+    }
+}

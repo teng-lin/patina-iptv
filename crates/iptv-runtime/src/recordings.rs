@@ -4,6 +4,9 @@ pub mod host;
 #[cfg(test)]
 mod recovery_tests;
 mod rules;
+mod shared;
+#[cfg(test)]
+mod shared_tests;
 #[cfg(test)]
 mod tests;
 use crate::{Error, Runtime, store_service::Services};
@@ -20,7 +23,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Condvar, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -60,6 +63,13 @@ struct Lease {
     source: i64,
     account: Account,
     limit: u32,
+    input: Option<Arc<shared::Incoming>>,
+    pending: Option<u64>,
+}
+impl Lease {
+    fn connection(&self) -> Option<u64> {
+        self.input.as_ref().map(|input| input.id).or(self.pending)
+    }
 }
 fn same_account(a: &Account, b: &Account) -> bool {
     match (a, b) {
@@ -73,10 +83,13 @@ fn same_account(a: &Account, b: &Account) -> bool {
 #[derive(Default)]
 struct Data {
     accounts: HashMap<i64, Account>,
+    scopes: HashMap<i64, (String, SourceConfig)>,
+    viewer_revision: HashMap<usize, u64>,
     source_incarnations: HashMap<i64, String>,
     limits: HashMap<i64, u32>,
     provider_limits: HashMap<i64, u32>,
     viewers: HashMap<usize, Lease>,
+    inputs: HashMap<u64, shared::Registered>,
     suspended_viewers: HashMap<usize, Lease>,
     active: HashMap<JobId, (Lease, CancelToken)>,
     jobs: Vec<Job>,
@@ -134,11 +147,36 @@ impl Data {
                 .get(&source)
                 .copied()
                 .unwrap_or(u32::MAX),
+            input: None,
+            pending: None,
         }
     }
     fn capacity(&self, source: i64, replacing: Option<usize>) -> bool {
-        let wanted = self.lease(source);
+        self.capacity_with(source, replacing, None)
+    }
+    fn capacity_with(&self, source: i64, replacing: Option<usize>, input: Option<u64>) -> bool {
+        self.capacity_for(&self.lease(source), replacing, input)
+    }
+    fn capacity_for(&self, wanted: &Lease, replacing: Option<usize>, input: Option<u64>) -> bool {
+        let source = wanted.source;
         let same = |lease: &Lease| same_account(&lease.account, &wanted.account);
+        // A replacement may retire its sole old viewer owner before opening.
+        // Other admissions still count that registry entry until closure joins.
+        let superseded = replacing
+            .and_then(|surface| self.viewers.get(&surface))
+            .and_then(Lease::connection)
+            .filter(|id| {
+                !self.viewers.iter().any(|(surface, lease)| {
+                    Some(*surface) != replacing && lease.connection() == Some(*id)
+                }) && !self
+                    .active
+                    .values()
+                    .any(|(lease, _)| lease.connection() == Some(*id))
+                    && !self
+                        .suspended_viewers
+                        .values()
+                        .any(|lease| lease.connection() == Some(*id))
+            });
         // Existing leases retain their original account and limit when a playlist is edited.
         let leases = self
             .viewers
@@ -146,25 +184,43 @@ impl Data {
             .filter(|(surface, _)| Some(**surface) != replacing)
             .map(|(_, lease)| lease)
             .chain(self.active.values().map(|(lease, _)| lease))
+            .chain(
+                self.inputs
+                    .values()
+                    .filter(|registered| registered.lease.connection() != superseded)
+                    .map(|input| &input.lease),
+            )
+            .chain(
+                self.suspended_viewers
+                    .values()
+                    .filter(|lease| lease.input.is_some()),
+            )
             .filter(|lease| same(lease));
-        let (mut used, mut limit) = (
-            0,
-            wanted
-                .limit
-                .min(self.limits.get(&source).copied().unwrap_or(1)),
-        );
+        let mut inputs = vec![input];
+        let mut limit = wanted
+            .limit
+            .min(self.limits.get(&source).copied().unwrap_or(1));
+        let mut occupied = std::collections::HashSet::new();
         for lease in leases {
-            used += 1;
+            occupied.insert(lease.source);
+            inputs.push(lease.connection());
             limit = limit.min(lease.limit);
         }
         for (id, account) in &self.accounts {
-            if same_account(account, &wanted.account) {
+            // Unknown M3U association matters while it owns a connection. An
+            // idle playlist cannot establish an alias or lower another account's
+            // allowance just by being present in the library.
+            let known =
+                !matches!(account, Account::Unknown) && !matches!(wanted.account, Account::Unknown);
+            if same_account(account, &wanted.account)
+                && (*id == source || occupied.contains(id) || known)
+            {
                 limit = limit
                     .min(self.lease(*id).limit)
                     .min(self.limits.get(id).copied().unwrap_or(1));
             }
         }
-        used < limit
+        iptv_core::live::upstream_count(inputs) <= limit as usize
     }
 }
 struct ContextEntry {
@@ -178,6 +234,9 @@ struct Execution {
     started: bool,
     shutdown: CancelToken,
 }
+/// Cancellation and serialization for one viewing surface's preparation.
+type SurfacePreparation = (CancelToken, Arc<tokio::sync::Mutex<()>>);
+
 #[derive(Default)]
 pub(crate) struct State {
     host: Mutex<Option<Arc<crate::store_service::Service>>>,
@@ -186,6 +245,12 @@ pub(crate) struct State {
     publication: Mutex<()>,
     execution: Mutex<Execution>,
     contexts: Mutex<HashMap<i64, ContextEntry>>,
+    inputs_changed: tokio::sync::Notify,
+    // Connection IDs belong to this directory-owned registry, including retries.
+    next_input: AtomicU64,
+    preparations: Mutex<HashMap<usize, SurfacePreparation>>,
+    #[cfg(test)]
+    preparation_arrivals: Mutex<HashMap<usize, tokio::sync::oneshot::Sender<()>>>,
     media_ops: tokio::sync::Mutex<()>,
     playback: Mutex<Option<(JobId, iptv_net::recording_file::RecordingFile)>>,
 }
@@ -265,6 +330,7 @@ impl State {
         true
     }
     pub(crate) fn stop(&self) -> bool {
+        self.cancel_all_preparations();
         let generation = {
             let execution = self.execution();
             if !execution.started {
@@ -430,18 +496,26 @@ impl Runtime {
         if !data.active.is_empty() && !data.capacity(source.0, Some(surface)) {
             return false;
         }
+        self.recordings.cancel_preparation(surface);
         let lease = data.lease(source.0);
         data.suspended_viewers.remove(&surface);
+        *data.viewer_revision.entry(surface).or_default() += 1;
         data.viewers.insert(surface, lease);
+        drop(data);
+        self.retire_previous_viewing(surface);
         true
     }
     pub fn release_viewing(&self, surface: usize) {
+        self.recordings.cancel_preparation(surface);
         if self.recordings_detached.get() {
             return;
         }
         let mut data = self.recordings.lock();
+        *data.viewer_revision.entry(surface).or_default() += 1;
         data.viewers.remove(&surface);
         data.suspended_viewers.remove(&surface);
+        drop(data);
+        self.retire_previous_viewing(surface);
     }
     pub fn recording_snapshot(&self) -> Vec<Job> {
         self.recordings.lock().jobs.clone()
@@ -499,7 +573,8 @@ impl Runtime {
         refresh_accounts(&self.services(), &self.recordings)
             .await
             .map_err(|_| Error::unavailable("Recording sources unavailable"))?;
-        if request.start <= now() && !self.recordings.lock().capacity(request.source, None) {
+        self.recordings.retire_unused().await;
+        if request.start <= now() && !self.recordings.lock().recording_capacity(&request) {
             return Err(Error::unavailable(
                 "No provider connection available; stop another stream or check Streams at once",
             ));
@@ -838,6 +913,7 @@ async fn refresh_accounts(
     let previous_accounts = std::mem::take(&mut data.accounts);
     let previous_incarnations = std::mem::take(&mut data.source_incarnations);
     data.limits.clear();
+    data.scopes.clear();
     for (source, incarnation) in sources.into_iter().flatten() {
         let account = account(&source.source.config);
         if previous_incarnations
@@ -853,6 +929,10 @@ async fn refresh_accounts(
             &settings,
             source.id.0,
             data.provider_limits.get(&source.id.0).copied(),
+        );
+        data.scopes.insert(
+            source.id.0,
+            (incarnation.clone(), source.source.config.clone()),
         );
         data.accounts.insert(source.id.0, account);
         data.source_incarnations.insert(source.id.0, incarnation);
@@ -975,9 +1055,11 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
     let mut rules_at = 0;
     loop {
         while tasks.try_join_next().is_some() {}
+        state.retire_unused().await;
         if !services.is_current() || shutdown.is_cancelled() {
             shutdown.cancel();
             while tasks.join_next().await.is_some() {}
+            state.retire_unused().await;
             break;
         }
         if refresh_accounts(&services, &state).await.is_err() {
@@ -1063,10 +1145,11 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
             let stop = CancelToken::new();
             let reserved = {
                 let mut data = state.lock();
-                if data.active.len() >= 4 || !data.capacity(job.request.source, None) {
+                if data.active.len() >= 4 || !data.recording_capacity(&job.request) {
                     false
                 } else {
-                    let lease = data.lease(job.request.source);
+                    let mut lease = data.lease(job.request.source);
+                    lease.input = data.shared_for(job.request.source, &job.request.channel);
                     data.active.insert(job.id, (lease, stop.clone()));
                     true
                 }
@@ -1115,25 +1198,35 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
     }
 }
 
+struct Resolved {
+    source: PlaySource,
+    identity: iptv_core::live::Identity,
+    config: SourceConfig,
+}
+
 async fn resolve(
     services: &Services,
     state: &State,
     job: &Job,
     stop: &CancelToken,
-) -> Result<PlaySource, &'static str> {
+) -> Result<Resolved, &'static str> {
     let (source, channel) = (
         SourceId(job.request.source),
         ContentId::from_stored(job.request.channel.clone()),
     );
     let id = job.id;
-    let (source, channel) = services
+    let (source, channel, incarnation) = services
         .read(move |store| {
             if !store.source_policy(source)?.enabled {
                 return Err(iptv_store_sqlite::StoreError::Unavailable(
                     "Playlist disabled",
                 ));
             }
-            let result = (store.source(source)?, store.channel(source, &channel)?);
+            let result = (
+                store.source(source)?,
+                store.channel(source, &channel)?,
+                store.source_incarnation(source)?,
+            );
             if !store.recording_source_is_current(id)? {
                 return Err(iptv_store_sqlite::StoreError::Unavailable(
                     "Playlist unavailable",
@@ -1170,10 +1263,7 @@ async fn resolve(
         context.as_ref(),
         &channel,
         None,
-        iptv_guide::playback::Clock {
-            now: now(),
-            local_offset_secs: 0,
-        },
+        crate::playback::clock(now(), None),
     );
     let mut stream = match resolution {
         iptv_guide::playback::Resolution::Play(source) => source,
@@ -1195,7 +1285,37 @@ async fn resolve(
     };
     let config = crate::settings::net_config(&services.settings());
     stream.default_header("User-Agent", &config.user_agent);
-    Ok(stream)
+    let config = source.source.config;
+    let expected_config = config.clone();
+    let expected_incarnation = incarnation.clone();
+    let expected_channel = channel.clone();
+    let source_id = SourceId(job.request.source);
+    let current = services
+        .read(move |store| {
+            Ok(store.recording_source_is_current(id)?
+                && store.source_policy(source_id)?.enabled
+                && store.source_incarnation(source_id)? == expected_incarnation
+                && store
+                    .source(source_id)?
+                    .is_some_and(|source| source.source.config == expected_config)
+                && store
+                    .channel(source_id, &expected_channel.id)?
+                    .is_some_and(|current| !current.blocked && current.channel == expected_channel))
+        })
+        .await
+        .map_err(|_| "Playlist unavailable")?;
+    if !current {
+        return Err("Playlist unavailable");
+    }
+    Ok(Resolved {
+        source: stream,
+        identity: iptv_core::live::Identity {
+            source: source_id.0,
+            incarnation,
+            channel: job.request.channel.clone(),
+        },
+        config,
+    })
 }
 
 async fn record(
@@ -1235,15 +1355,18 @@ async fn record(
         let mut retry = Duration::from_secs(1);
         let mut capture = iptv_net::recording::CaptureState::default();
         loop {
-            let source = match resolve(services, state, job, stop).await {
+            let resolved = match resolve(services, state, job, stop).await {
                 Ok(source) => source,
                 Err(_) => {
+                    state.detach_capture(job.id);
+                    state.retire_unused().await;
                     gap.store(true, Ordering::SeqCst);
                     tokio::time::sleep(retry).await;
                     retry = (retry * 2).min(Duration::from_secs(15));
                     continue;
                 }
             };
+            let source = resolved.source;
             let net = crate::settings::net_config(&services.settings());
             let policy = PlaybackPolicy {
                 public_only: source.public_only,
@@ -1251,16 +1374,77 @@ async fn record(
                 #[cfg(debug_assertions)]
                 allow_private_fixture: net.allow_private_fixture,
             };
-            match iptv_net::recording::capture_resume_with_state(
-                &source.url,
-                &source.headers,
-                policy,
-                &partial,
-                MAX_BYTES,
-                &mut capture,
-            )
-            .await
-            {
+            let shared = {
+                let mut data = state.lock();
+                let matching = data
+                    .shared_resolved(&resolved.identity, &resolved.config, &source, &policy)
+                    .or_else(|| {
+                        // Preserve partial/failure if the retained shared owner
+                        // ended and no live owner can replace it; playback keeps
+                        // its normal retry slot.
+                        data.active
+                            .get(&job.id)
+                            .and_then(|(lease, _)| lease.input.clone())
+                            .filter(|incoming| {
+                                incoming.identity == resolved.identity
+                                    && incoming.config == resolved.config
+                                    && incoming.source == source
+                                    && incoming.policy == policy
+                                    && incoming.input.shared().is_some()
+                                    && !incoming.input.is_running()
+                            })
+                    });
+                // Reservation may have retained a different authentication or
+                // trust context before resolution. Search every eligible owner
+                // before asking for another provider connection.
+                if let Some(incoming) = &matching
+                    && let Some((lease, _)) = data.active.get_mut(&job.id)
+                {
+                    lease.input = Some(incoming.clone());
+                }
+                matching
+            };
+            let outcome = if let Some(incoming) = shared {
+                if !incoming.input.is_running() {
+                    return Err(iptv_net::recording::Failure::Network.message());
+                }
+                // A shared input ending before stop/deadline retains partial
+                // media and frees capture's lease for playback's normal retry.
+                // An independent capture retry must not strand that viewer.
+                return iptv_net::recording::capture_shared(
+                    incoming.input.shared().expect("shared capture lease"),
+                    &partial,
+                    MAX_BYTES,
+                )
+                .await
+                .map_err(|error| error.message());
+            } else {
+                // A reauthentication/link change or failed incoming stream is
+                // never allowed to inherit its sharing discount. A fresh
+                // independent request needs its own permitted connection.
+                state.detach_capture(job.id);
+                state.retire_unused().await;
+                {
+                    let mut data = state.lock();
+                    if let Some((lease, token)) = data.active.remove(&job.id) {
+                        let allowed = data.capacity(job.request.source, None);
+                        data.active.insert(job.id, (lease, token));
+                        if !allowed {
+                            return Err("No provider connection available; check Streams at once");
+                        }
+                    }
+                }
+                iptv_net::recording::capture_resume_with_state(
+                    &source.url,
+                    &source.headers,
+                    policy,
+                    &partial,
+                    MAX_BYTES,
+                    &mut capture,
+                )
+                .await
+            };
+            match outcome {
                 Err(iptv_net::recording::Failure::Network | iptv_net::recording::Failure::Gap) => {
                     gap.store(true, Ordering::SeqCst);
                     tokio::time::sleep(retry).await;

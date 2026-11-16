@@ -14,6 +14,7 @@ on:
       - 'rust-toolchain.toml'
       - 'tools/sync-host.sh'
       - 'tools/ci/android-smoke.sh'
+      - 'tools/ci/test-adb-timeout.py'
       - 'tools/ci/android/**'
       - 'tools/ci/*-hls-fixtures.py'
       - 'tools/ci/android-ndk-env.sh'
@@ -97,6 +98,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Serve the fixtures
         run: |
+          python3 -I tools/ci/test-adb-timeout.py
           python3 -I tools/ci/test-repeat-hls-fixtures.py
           # Each encoded channel is 30s. Reuse its segments for an hour so
           # natural fixture EOF cannot overlap the no-reopen refresh check.
@@ -109,6 +111,7 @@ jobs:
           done
           exit 1
       - name: Smoke test on the ${{ matrix.form }} emulator
+        timeout-minutes: 20
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         env:
           IPTV_SMOKE_OUT: target/android-smoke
@@ -125,7 +128,14 @@ jobs:
           emulator-options: -no-window -no-snapshot -no-audio -no-boot-anim -gpu swiftshader_indirect
           # If the emulator's own system dies (not the app: the script fails
           # at once on an app crash), reboot it and run once more.
-          script: bash tools/ci/android-smoke.sh "" hosts/android/app/build/outputs/apk/debug/app-debug.apk || { grep -q DeadSystemException target/android-smoke/crash.log && echo "emulator system died; rebooting for one more run" && adb reboot && adb wait-for-device && bash tools/ci/android-smoke.sh "" hosts/android/app/build/outputs/apk/debug/app-debug.apk; }
+          script: >-
+            bash tools/ci/android-smoke.sh "" hosts/android/app/build/outputs/apk/debug/app-debug.apk || {
+            grep -q DeadSystemException target/android-smoke/crash.log &&
+            echo "emulator system died; rebooting for one more run" &&
+            python3 tools/ci/android/adb.py --phase "system recovery" --category reboot --timeout 30 -- adb reboot &&
+            python3 tools/ci/android/adb.py --phase "system recovery" --category wait-for-device --timeout 120 -- adb wait-for-device &&
+            bash tools/ci/android-smoke.sh "" hosts/android/app/build/outputs/apk/debug/app-debug.apk;
+            }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

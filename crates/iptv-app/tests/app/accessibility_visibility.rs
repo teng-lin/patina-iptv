@@ -17,6 +17,7 @@ use std::{
 struct NativeProps {
     views: HashMap<NodeId, ViewProps>,
     players: Vec<NodeId>,
+    sources: Vec<String>,
     removed: Vec<NodeId>,
     inserts: HashMap<NodeId, usize>,
     scrolls: Vec<(NodeId, f32)>,
@@ -35,6 +36,17 @@ impl Exposure {
                 }
                 MountItem::Component { id, name } if name.as_ref() == "tv.player" => {
                     native.players.push(*id)
+                }
+                MountItem::ComponentProps { props, .. } => {
+                    for (name, value) in props {
+                        if name.as_ref() == "source"
+                            && let Some(source) =
+                                value.as_ref().map(crate::support::upstream_source)
+                            && let Some(url) = source["url"].as_str()
+                        {
+                            native.sources.push(url.into());
+                        }
+                    }
                 }
                 MountItem::Insert { child, .. } => *native.inserts.entry(*child).or_default() += 1,
                 MountItem::Remove { id } | MountItem::Delete { id } => native.removed.push(*id),
@@ -465,6 +477,19 @@ fn inactive_player_ui_stays_out_of_accessibility_and_returns_without_recreating_
     exposure.selected_channel(app, "Local B");
     step(app.press_key("enter"));
     step(app.wait_for("text:▶"));
+    step(app.wait_until(
+        "Local B source is published",
+        Duration::from_secs(5),
+        |_| {
+            exposure
+                .0
+                .lock()
+                .unwrap()
+                .sources
+                .last()
+                .is_some_and(|url| url == "http://example.test/b")
+        },
+    ));
     let opens = iptv_app::player_opens(0);
     step(app.press_key("enter"));
     step(app.wait_for("id:player-banner"));

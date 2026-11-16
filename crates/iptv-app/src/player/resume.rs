@@ -26,6 +26,7 @@ pub struct Early {
     pub key: String,
     pub source_id: i64,
     pub source: PlaySource,
+    pub authority: iptv_guide::playback::ResolutionAuthority,
 }
 
 /// Startup, with the store open: starts `stored`'s last channel full
@@ -68,7 +69,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
         Resolution::Play(source) => source,
         Resolution::StalkerLink(_) | Resolution::Unavailable(_) => return false,
     };
-    if !crate::runtime().reserve_viewing(0, stored.id) {
+    if !crate::runtime().reserve_live_viewing(0, stored.id, &key) {
         return false;
     }
     log::info!("iptv player: resuming the last channel before the guide");
@@ -79,12 +80,14 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     main.health.update(|h| session = h.start(true, now));
     ui.player.resume.set(false);
     ui.playback.set(Playback::Live);
+    let authority = crate::runtime::playback::source_authority(stored).resolve(&row.channel);
     ui.player.early.set(Some(Early {
+        authority: authority.clone(),
         source_id: stored.id.0,
         key,
         source: source.clone(),
     }));
-    super::load(ui, 0, session, source);
+    super::load_authorized(ui, 0, session, source, Some(authority));
     ui.mode.set(ViewMode::Fullscreen);
     true
 }
@@ -114,7 +117,13 @@ pub fn adopt(ui: Ui) -> bool {
         ui.mode.set(crate::settings::browse_mode());
         return true;
     };
-    let open = main.source.with_untracked(Option::is_some);
+    // Preparing the early stream already owns this request, even before a
+    // native source is published. Adopting its catalogue identity keeps that
+    // health session and its in-flight preparation.
+    let requested = main.source.with_untracked(Option::is_some)
+        || main.health.with_untracked(|health| {
+            matches!(health.phase(), iptv_core::playback::Phase::Resolving)
+        });
     nsh_core::prelude::batch(|| {
         main.key.set(Some(early.key.clone()));
         ui.player.history.update(|h| h.played(&early.key));
@@ -123,7 +132,7 @@ pub fn adopt(ui: Ui) -> bool {
     });
     crate::favorites::played(&early.key);
     super::show_channel(ui, channel);
-    if !open {
+    if !requested {
         // It closed meanwhile (stopped, or failed for good): start it as
         // the guide has it.
         ui.play(channel, Playback::Live);

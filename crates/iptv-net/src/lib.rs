@@ -41,6 +41,7 @@ mod client;
 mod cross_origin;
 mod error;
 mod file;
+pub mod live;
 pub mod playback;
 pub mod recording;
 pub mod recording_file;

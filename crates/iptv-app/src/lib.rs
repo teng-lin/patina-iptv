@@ -364,7 +364,8 @@ impl Ui {
             }
             return;
         }
-        if !recordings_view::reserve_viewing(*self, 0, channel) {
+        if !recordings_view::reserve_viewing(*self, 0, channel, matches!(playback, Playback::Live))
+        {
             return;
         }
         crate::on_demand::flush(*self, false);
@@ -1154,6 +1155,9 @@ pub(crate) fn go_back(ui: Ui) -> bool {
 /// Explicit synthetic-key injection for the headless test binary only.
 #[cfg(feature = "test-support")]
 pub use credential_key::install_test_key;
+/// Use a fresh explicit synthetic profile without changing the process home.
+#[cfg(feature = "test-support")]
+pub use platform_data::install_test_data_dir;
 /// Whether a stored source has a guide timer or an in-flight guide read,
 /// for the headless tests of what keeps its periodic checks alive.
 #[cfg(feature = "test-support")]
@@ -1202,4 +1206,18 @@ pub fn hold_writer() -> runtime::TestGate {
     platform_data::host_handle()
         .and_then(|owner| owner.hold_writer())
         .expect("hold_writer needs a started app")
+}
+
+/// Hold the next source preparation for deterministic old-native-event tests.
+#[cfg(feature = "test-support")]
+pub fn hold_source_preparation() -> runtime::TestGate {
+    platform_data::host_handle()
+        .and_then(|owner| owner.hold_source_preparation())
+        .expect("source preparation gate needs a started app")
+}
+
+/// Read-only synthetic-source observation keyed by the actually published URL.
+#[cfg(feature = "test-support")]
+pub fn original_player_source(url: &str) -> Option<iptv_core::playback::PlaySource> {
+    platform_data::host_handle().and_then(|owner| owner.original_player_source(url))
 }

@@ -10,6 +10,13 @@
 [untranslated]
 
 [not-shown]
+# Opaque authority type names in redacted Rust diagnostics, never rendered.
+iptv-guide/src/playback.rs	ResolutionAuthority
+iptv-guide/src/playback.rs	SourceAuthority
+# Explicit synthetic profile injection diagnostics, absent from production builds.
+iptv-app/src/platform_data.rs	test storage was already installed or resolved
+iptv-app/src/platform_data.rs	test storage directory must be absolute
+iptv-app/src/platform_data.rs	synthetic database key was not installed
 # Persisted locale token; shown by the picker as the translated System language label.
 iptv-settings/src/catalogue/general.rs	system
 # CLDR territory codes used to choose the automatic clock.
@@ -29,6 +36,7 @@ iptv-core/src/guide.rs	Group {:02}
 iptv-core/src/guide.rs	Show {}
 # HTTP header names.
 iptv-runtime/src/settings.rs	User-Agent
+iptv-runtime/src/recordings/shared.rs	User-Agent
 iptv-guide/src/playback.rs	Referer
 iptv-guide/src/playback.rs	User-Agent
 # Markup: icons drawn as SVG.

@@ -91,8 +91,20 @@ async fn send_stored_after(
     let settings = services.settings();
     let started = Instant::now();
     let ms = |t: Instant| t.elapsed().as_millis();
-    let (groups, channels) = match services
-        .read(move |store| stored::catalog_in(store, id))
+    let expected_config = job.source.config.clone();
+    let (groups, channels, authority) = match services
+        .read(move |store| {
+            let stored = store
+                .source(id)?
+                .ok_or(iptv_store_sqlite::StoreError::SourceNotFound(id))?;
+            if stored.source.config != expected_config {
+                return Err(iptv_store_sqlite::StoreError::Unavailable(
+                    iptv_core::i18n::key("Playlist unavailable"),
+                ));
+            }
+            let (groups, channels) = stored::catalog_in(store, id)?;
+            Ok((groups, channels, super::playback::source_authority(&stored)))
+        })
         .await
     {
         Ok(catalog) => catalog,
@@ -113,7 +125,7 @@ async fn send_stored_after(
             groups,
             channels,
             resume: context.is_some(),
-            playback: Streams::New(context, None),
+            playback: Streams::New(context, None, std::sync::Arc::new(authority.clone())),
             guide,
             now,
             source: id,

@@ -292,20 +292,28 @@ pub(super) async fn show(
         return;
     }
     schedule = match playback {
-        Streams::New(context, allowed) => {
+        Streams::New(context, allowed, authority) => {
             owner.limits.with(|l| {
                 let mut l = l.borrow_mut();
                 if allowed.is_some() || !l.contains_key(&source) {
                     l.insert(source, allowed);
                 }
             });
-            schedule.with_playback(context)
+            schedule
+                .with_playback(context)
+                .with_source_authority(Some(authority))
         }
-        Streams::Current => schedule.with_shared_playback(
-            owner
-                .parts
-                .with(|p| p.borrow().get(&source).and_then(|s| s.shared_playback())),
-        ),
+        Streams::Current => {
+            let (context, authority) = owner.parts.with(|p| {
+                p.borrow()
+                    .get(&source)
+                    .map(|s| (s.shared_playback(), s.source_authority()))
+                    .unwrap_or_default()
+            });
+            schedule
+                .with_shared_playback(context)
+                .with_source_authority(authority)
+        }
     };
     if let Some(lookup) = stored::description_lookup(owner, source) {
         schedule = schedule.with_description_lookup(lookup);

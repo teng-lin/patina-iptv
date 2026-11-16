@@ -26,6 +26,16 @@ static HOSTS: OnceLock<Mutex<HashMap<PathBuf, Arc<State>>>> = OnceLock::new();
 fn hosts() -> &'static Mutex<HashMap<PathBuf, Arc<State>>> {
     HOSTS.get_or_init(Mutex::default)
 }
+#[cfg(feature = "test-support")]
+pub(crate) fn original_player_source(directory: &Path, url: &str) -> Option<PlaySource> {
+    let state = hosts()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(directory)
+        .cloned()?;
+    state.original_player_source(url)
+}
+
 pub(crate) fn acquire(ports: &crate::Ports) -> Arc<State> {
     if !ports.background_recordings {
         return Arc::default();
@@ -61,6 +71,7 @@ impl State {
             .is_some()
     }
     pub(crate) fn detach_ui(&self) {
+        self.cancel_all_preparations();
         let mut data = self.lock();
         data.viewers.clear();
         data.suspended_viewers.clear();
@@ -201,6 +212,7 @@ pub fn suspend_viewing(directory: &Path) {
         .get(directory)
         .cloned()
     {
+        state.cancel_all_preparations();
         let mut data = state.lock();
         let viewers = std::mem::take(&mut data.viewers);
         data.suspended_viewers.extend(viewers);
@@ -224,7 +236,11 @@ pub fn resume_viewing(directory: &Path) -> bool {
     wanted.sort_by_key(|(surface, _)| *surface);
     let mut restored = Vec::new();
     for (surface, lease) in wanted {
-        if !data.capacity(lease.source, Some(surface)) {
+        if !data.capacity_with(
+            lease.source,
+            Some(surface),
+            lease.input.as_ref().map(|input| input.id),
+        ) {
             for surface in restored {
                 data.viewers.remove(&surface);
             }

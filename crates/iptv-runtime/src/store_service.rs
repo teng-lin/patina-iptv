@@ -516,6 +516,15 @@ impl Services {
     }
 
     #[cfg(feature = "test-support")]
+    pub(crate) fn hold_source_preparation(&self) -> crate::TestGate {
+        self.service.hooks.hold_source_preparation()
+    }
+    #[cfg(feature = "test-support")]
+    pub(crate) fn take_source_preparation(&self) -> Option<Arc<crate::testing::GateState>> {
+        self.service.hooks.take_source_preparation()
+    }
+
+    #[cfg(feature = "test-support")]
     pub(crate) fn hold_writer(&self) -> crate::TestGate {
         let gate = crate::TestGate::new();
         let pause = gate.0.clone();
