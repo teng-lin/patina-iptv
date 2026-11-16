@@ -464,18 +464,13 @@ fn a_saved_recording_grant_revoked_during_preparation_never_reaches_the_native_p
         Duration::from_secs(10),
         |_| preparation.wait_entered(Duration::ZERO),
     ));
+    step(app.back());
+    step(app.wait_for("id:recording-return-to-player"));
     iptv_app::lock_parental_content();
     preparation.release();
     // The selected playback is cleared by final admission. This follows the
     // actual unlock dialog, so the test revokes a real verified content grant.
-    step(
-        app.wait_until("revoked source rejected", Duration::from_secs(5), |app| {
-            app.screen()
-                .count("id:recordings-return-playback")
-                .is_ok_and(|count| count == 0)
-        }),
-    );
-    app.run_for(Duration::from_millis(100)).unwrap();
+    step(app.wait_for_gone("id:recording-return-to-player", Duration::from_secs(5)));
     assert_eq!(
         iptv_app::player_opens(0),
         before,

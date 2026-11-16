@@ -1172,8 +1172,8 @@ fn exercise_preparing(
         step(app.wait_until(
             "seek controls re-enable after publication",
             Duration::from_secs(5),
-            |app| {
-                app.screen()
+            |screen| {
+                screen
                     .accessibility_state("label:Rewind")
                     .is_ok_and(|state| !state.disabled)
             },
