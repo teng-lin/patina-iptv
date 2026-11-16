@@ -968,6 +968,7 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resum
     step(app.press("text:/^☰  /"));
     step(app.press("label:Films"));
     step(app.wait_for("id:vod-screen"));
+    step(app.wait_for("id:vod-title >> nth=1"));
     assert!(
         app.screen()
             .accessibility_state("id:vod-title >> nth=0")
