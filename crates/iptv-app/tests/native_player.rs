@@ -350,6 +350,9 @@ fn native_selection_reaches_a_correlated_render_submission() {
     let sample = std::env::var_os("IPTV_PERF_SAMPLE")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| home.path().join("selection.json"));
+    if sample.exists() {
+        std::fs::remove_file(&sample).unwrap();
+    }
     // SAFETY: this exact native test runs in a fresh process; configure it before
     // GTK, the real application, or its workers can read the environment.
     unsafe {

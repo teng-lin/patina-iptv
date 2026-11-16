@@ -93,7 +93,11 @@ pub(crate) fn rendered(ui: Ui, surface: usize, token: u64) {
                 "counters": {"store_reads": crate::store_reads() - probe.reads,
                              "player_opens": crate::player_opens(0) - probe.opens},
             });
-            std::fs::write(&probe.path, serde_json::to_vec_pretty(&sample).unwrap()).unwrap();
+            // Publish only complete JSON: the native test observes path existence
+            // from GTK's main thread while this runs on the engine thread.
+            let pending = probe.path.with_extension("pending");
+            std::fs::write(&pending, serde_json::to_vec_pretty(&sample).unwrap()).unwrap();
+            std::fs::rename(pending, &probe.path).unwrap();
         });
     });
 }
