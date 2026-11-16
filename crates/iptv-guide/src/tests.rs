@@ -736,4 +736,17 @@ fn the_generated_ungrouped_bucket_localizes_after_prepare_and_organization() {
         s.group_name_in(0, ja),
         iptv_core::i18n::translate(ja, "Other")
     );
+    // The app renders guide rows through ListView; that adapter must retain
+    // generated text provenance and the requested language too.
+    use iptv_core::lists::{ChannelList, FIRST_GROUP, ListView};
+    let list = ChannelList::build(FIRST_GROUP, &s, &[], &[]);
+    let view = ListView::new(std::rc::Rc::new(s), std::rc::Rc::new(list));
+    assert_eq!(
+        view.group_name_in(0, ja),
+        iptv_core::i18n::translate(ja, "Other")
+    );
+    assert_eq!(
+        view.title_in(0, view.program_at(0, 0), ja),
+        iptv_core::i18n::translate(ja, "No information")
+    );
 }
