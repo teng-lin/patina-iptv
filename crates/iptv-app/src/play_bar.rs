@@ -271,6 +271,8 @@ fn bar(ui: Ui) -> impl IntoElement {
 /// An icon button shared by touch, pointer and D-pad. Admission and actions
 /// are resolved from the same stable identity on every input path.
 fn button(ui: Ui, control: Control, icon: impl Fn() -> Icon + 'static, size: f32) -> View {
+    let target_window =
+        (control == Control::Fullscreen).then(nsh_core::element::desktop::current_window);
     view()
         .role(AccessibilityRole::Button)
         .accessible(true)
