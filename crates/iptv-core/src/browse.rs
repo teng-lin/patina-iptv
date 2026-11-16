@@ -22,7 +22,7 @@
 //! An empty list (no favourites yet) cannot be entered: the focus stays in
 //! the groups column while the guide explains how to add some.
 
-use crate::guide::{Focus, Move, Pane, Schedule};
+use crate::guide::{Focus, Move, Pane, PreviewOrigin, Schedule};
 
 /// An item of the navigation rail.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,24 +72,27 @@ impl RailItem {
 /// Which on-demand content the rail can offer.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct VodAvailability {
-    /// The playlist (or combined playlists) on screen has movies or shows:
-    /// catalogue entries stay available while any enabled source has VOD.
+    /// The playlist (or combined playlists) on screen has movies or shows,
+    /// so its cross-source discovery shelves can be offered.
     pub shown: bool,
     /// Any enabled playlist has movies or shows: the cross-source Continue
     /// watching and Recently added shelves, whichever playlist is on screen.
     pub any: bool,
 }
 
-/// The rail's items, top to bottom: the cross-source on-demand shelves
-/// (Continue watching and Recently added) when any enabled playlist has
-/// video on demand, then Movies and Shows across enabled playlists. TV
-/// stays the rail's home and the screen the app starts on.
+/// Movies and Shows stay discoverable directly below Live TV, including
+/// when no on-demand content has been imported. Discovery shelves follow
+/// when an enabled playlist has VOD. TV remains the rail's home.
 pub fn rail_items(vod: VodAvailability) -> Vec<RailItem> {
-    let mut items = vec![RailItem::Search, RailItem::Tv];
+    let mut items = vec![
+        RailItem::Search,
+        RailItem::Tv,
+        RailItem::Movies,
+        RailItem::Shows,
+    ];
     // The shown playlist is one of the enabled ones.
     if vod.any || vod.shown {
         items.extend([RailItem::Continue, RailItem::Recent]);
-        items.extend([RailItem::Movies, RailItem::Shows]);
     }
     items.extend([
         RailItem::Recordings,
@@ -164,29 +167,54 @@ impl Focus {
         }
     }
 
+    /// The column layout retained while the existing preview owns focus.
+    pub fn layout_pane(&self) -> Pane {
+        if self.pane != Pane::Preview {
+            return self.pane;
+        }
+        match self.preview_origin {
+            PreviewOrigin::Guide => Pane::Guide,
+            PreviewOrigin::Favorites => Pane::Groups,
+            PreviewOrigin::Search => Pane::Rail,
+        }
+    }
+
     /// Whether the rail and the groups column are shown.
     pub fn columns_shown(&self) -> bool {
-        matches!(self.pane, Pane::Rail | Pane::Groups)
+        matches!(self.layout_pane(), Pane::Rail | Pane::Groups)
     }
 
-    /// TV hosts may hand Up at the first guide row to their mini-player.
-    /// The row and time anchor remain intact for Down/Back and list refresh.
+    /// Up from the first guide row, Favourites or Search reaches the playing
+    /// preview without changing the underlying channel, time or list identity.
     pub fn focus_preview(&mut self, playing: bool) -> bool {
-        if playing && self.pane == Pane::Guide && self.channel == 0 {
-            self.pane = Pane::Preview;
-            self.hint = false;
-            true
-        } else {
-            false
+        if !playing {
+            return false;
         }
+        let origin = match self.pane {
+            Pane::Guide if self.channel == 0 => PreviewOrigin::Guide,
+            Pane::Groups if self.group == crate::lists::FAVORITES => PreviewOrigin::Favorites,
+            Pane::Rail if self.rail == RailItem::Search => PreviewOrigin::Search,
+            _ => return false,
+        };
+        self.preview_origin = origin;
+        self.pane = Pane::Preview;
+        self.hint = false;
+        true
     }
 
-    /// A stopped player or a layout without a preview returns focus to
-    /// the anchored guide row; the content identity/time stay unchanged.
+    /// A stopped player or unavailable preview returns to its content pane.
     pub fn retain_preview(&mut self, available: bool) {
         if self.pane == Pane::Preview && !available {
-            self.pane = Pane::Guide;
+            self.pane = self.layout_pane();
         }
+    }
+
+    fn leave_preview(&mut self, list: &dyn Schedule) -> Outcome {
+        self.retain_preview(false);
+        if self.pane == Pane::Guide && list.channel_count() == 0 {
+            self.pane = Pane::Groups;
+        }
+        Outcome::Moved
     }
 
     /// A direction on the guide screen. `list` is the list the guide shows.
@@ -194,7 +222,8 @@ impl Focus {
         self.retain_rail(cols.rail);
         self.hint = false;
         match (self.pane, m) {
-            (Pane::Preview, Move::Down | Move::Right) => {
+            (Pane::Preview, Move::Down) => self.leave_preview(list),
+            (Pane::Preview, Move::Right) => {
                 self.pane = if list.channel_count() > 0 {
                     Pane::Guide
                 } else {
@@ -276,14 +305,7 @@ impl Focus {
             return Outcome::Moved;
         }
         match self.pane {
-            Pane::Preview => {
-                self.pane = if list.channel_count() > 0 {
-                    Pane::Guide
-                } else {
-                    Pane::Groups
-                };
-                Outcome::Moved
-            }
+            Pane::Preview => self.leave_preview(list),
             Pane::Guide => {
                 if !(cols.back_to_now && self.return_to_now(list)) {
                     self.pane = Pane::Groups;

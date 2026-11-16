@@ -26,7 +26,7 @@ const ICON: f32 = 22.0;
 
 /// The rail's width now (0 while the guide has the focus).
 pub fn width(ui: Ui) -> f32 {
-    match ui.focus.with(|f| f.pane) {
+    match ui.focus.with(|f| f.layout_pane()) {
         Pane::Guide | Pane::Preview => 0.0,
         Pane::Groups => RAIL_W,
         Pane::Rail => RAIL_OPEN_W,
@@ -82,11 +82,15 @@ pub(crate) fn icon(item: RailItem) -> ImageSrc {
 }
 
 fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
-    // Its place in the rail now (Movies and Shows come and go with VOD).
+    // Its place in the rail now (discovery shelves follow imported VOD).
     let index = move || crate::lists::rail(ui).iter().position(|&i| i == item);
-    let open = move || ui.focus.with(|f| f.pane) == Pane::Rail;
-    let focused =
-        move || open() && ui.keys_shown() && index().is_some() && ui.focus.with(|f| f.rail) == item;
+    let open = move || ui.focus.with(|f| f.layout_pane()) == Pane::Rail;
+    let focused = move || {
+        open()
+            && ui.keys_shown()
+            && index().is_some()
+            && ui.focus.with(|f| f.pane == Pane::Rail && f.rail == item)
+    };
     let colour = move || {
         if !item.enabled() {
             tint(WHITE, TEXT_DISABLED_ALPHA / 2)
@@ -164,6 +168,7 @@ pub fn column(ui: Ui) -> impl IntoElement {
         )
     };
     view()
+        .test_id("navigation-rail")
         .w(move || px(width(ui)))
         .overflow_hidden()
         .py(px(8.0))

@@ -48,8 +48,8 @@ pub fn number(ui: Ui, channel: usize) -> u32 {
     ui.list.with(|l| l.number_of(channel, &*catalog))
 }
 
-/// The rail's items for the source on screen. The cross-source shelves
-/// and catalogues follow every enabled playlist.
+/// Catalogues stay visible; discovery shelves follow enabled playlists
+/// with imported movies or shows.
 pub fn rail(ui: Ui) -> Vec<RailItem> {
     rail_items(VodAvailability {
         shown: ui.has_vod.get(),
@@ -169,6 +169,7 @@ fn restored_list(
     let mut focus = Focus::at(now);
     focus.visible = kept.focus.visible;
     focus.pane = kept.focus.pane;
+    focus.preview_origin = kept.focus.preview_origin;
     focus.rail = kept.focus.rail;
     focus.group = kept.list.find(&*catalog);
     let list = Rc::new(ChannelList::build(
@@ -235,7 +236,11 @@ pub fn bind(ui: Ui) {
                 crate::ViewMode::Guide | crate::ViewMode::Fullscreen
             );
         if ui.focus.with(|f| f.pane == Pane::Preview) && !available {
-            ui.focus.update(|f| f.retain_preview(false));
+            let view = view(ui);
+            ui.focus.update(|f| {
+                f.retain_preview(false);
+                f.restore(None, &view);
+            });
         }
     });
 }
@@ -243,7 +248,10 @@ pub fn bind(ui: Ui) {
 /// A direction on the guide screen.
 pub fn navigate(ui: Ui, m: Move) {
     if m == Move::Up
-        && nsh_core::prelude::idiom() == nsh_core::platform::Idiom::Tv
+        && matches!(
+            nsh_core::prelude::idiom(),
+            nsh_core::platform::Idiom::Tv | nsh_core::platform::Idiom::Desktop
+        )
         && ui.mode.get_untracked() == crate::ViewMode::Guide
     {
         let mut moved = false;
@@ -487,6 +495,33 @@ mod identity_tests {
     }
 
     #[test]
+    fn preview_bookmarks_restore_sidebar_origin_and_channel_by_identity() {
+        for pane in [Pane::Guide, Pane::Groups, Pane::Rail] {
+            let before: Rc<dyn Schedule> = Rc::new(catalog(&[("Generated", &["a", "b"])]));
+            let mut focus = Focus::at(0);
+            focus.pane = pane;
+            focus.rail = RailItem::Search;
+            focus.group = if pane == Pane::Groups { FAVORITES } else { ALL };
+            focus.channel = usize::from(pane != Pane::Guide);
+            let list = Rc::new(ChannelList::build(focus.group, &*before, &[0, 1], &[]));
+            let key = ListView::new(before.clone(), list.clone()).channel_key(focus.channel);
+            assert!(focus.focus_preview(true));
+            let kept = keep_list(focus, list, before);
+            let after: Rc<dyn Schedule> = Rc::new(catalog(&[("Generated", &["b", "a"])]));
+            let (mut restored, list) = restored_list(kept, after.clone(), &[0, 1], &[], 60);
+            assert_eq!(restored.pane, Pane::Preview);
+            assert_eq!(restored.layout_pane(), pane);
+            assert_eq!(
+                ListView::new(after, list).channel_key(restored.channel),
+                key
+            );
+            restored.retain_preview(false);
+            assert_eq!(restored.pane, pane, "Stop after a catalogue refresh");
+            assert_eq!(restored.rail, RailItem::Search);
+        }
+    }
+
+    #[test]
     fn a_catalogue_bookmark_retains_rail_action_identity_as_vod_rows_change() {
         for item in [RailItem::Recordings, RailItem::Settings, RailItem::Movies] {
             let before: Rc<dyn Schedule> = Rc::new(catalog(&[("Generated", &["a", "b"])]));
@@ -509,12 +544,8 @@ mod identity_tests {
             assert_eq!(restored.rail, item);
             restored.retain_rail(&rail_items(VodAvailability::default()));
             assert_eq!(
-                restored.rail,
-                if item == RailItem::Movies {
-                    RailItem::Tv
-                } else {
-                    item
-                }
+                restored.rail, item,
+                "catalogues remain available without VOD"
             );
             assert_eq!(restored.pane, Pane::Rail);
             assert_eq!(
