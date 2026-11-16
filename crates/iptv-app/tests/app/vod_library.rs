@@ -1492,3 +1492,58 @@ fn exercise_admission(
         }
     );
 }
+
+#[test]
+fn movies_and_shows_stay_visible_with_an_empty_catalogue_on_desktop_and_tv() {
+    let Some(home) = isolated!() else { return };
+    let mut settings = iptv_settings::Settings::new();
+    settings
+        .set("guide.autoplay", iptv_settings::Value::Bool(false))
+        .unwrap();
+    settings
+        .set(
+            "general.resume_last_channel",
+            iptv_settings::Value::Bool(false),
+        )
+        .unwrap();
+    let mut fixture = crate::personalization::start(home, settings, true);
+    let app = &mut fixture.app;
+    let surface = player(app);
+    for idiom in [
+        nsh_core::platform::Idiom::Desktop,
+        nsh_core::platform::Idiom::Tv,
+    ] {
+        step(app.set_environment("library discovery", |env| env.idiom = idiom));
+        let (w, h) = if idiom == nsh_core::platform::Idiom::Tv {
+            (960.0, 540.0)
+        } else {
+            (1280.0, 720.0)
+        };
+        step(app.set_viewport(nsh_core::Size::new(
+            nsh_core::prelude::px(w),
+            nsh_core::prelude::px(h),
+        )));
+        for id in ["open-movies", "open-shows"] {
+            step(app.wait_for(&format!("id:{id}")));
+            step(app.press(&format!("id:{id}")));
+            step(app.wait_for("text:No titles found. Enable movie and series imports in playlist settings, then refresh your playlist."));
+            step(app.press("id:vod-screen >> label:Close"));
+            step(app.wait_for_gone("id:vod-screen", Duration::from_secs(2)));
+            assert_eq!(player(app), surface);
+        }
+        step(app.press("text:/^☰  /"));
+        step(app.press_key("left"));
+        for label in ["Movies", "Shows"] {
+            step(app.wait_for(&format!("id:navigation-rail >> label:{label}")));
+            step(app.press(&format!("id:navigation-rail >> label:{label}")));
+            step(app.wait_for("text:No titles found. Enable movie and series imports in playlist settings, then refresh your playlist."));
+            step(app.press("id:vod-screen >> label:Close"));
+            step(app.wait_for_gone("id:vod-screen", Duration::from_secs(2)));
+        }
+        assert_eq!(
+            iptv_app::player_opens(0),
+            0,
+            "discovery never tunes live video"
+        );
+    }
+}

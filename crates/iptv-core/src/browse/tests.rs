@@ -292,6 +292,11 @@ fn the_rail_skips_items_without_a_screen() {
     assert_eq!(s.focus.rail, RailItem::Search);
     assert_eq!(s.mv(Move::Down), Outcome::Moved);
     assert_eq!(s.focus.rail, RailItem::Tv);
+    for item in [RailItem::Movies, RailItem::Shows] {
+        assert_eq!(s.mv(Move::Down), Outcome::Moved);
+        assert_eq!(s.focus.rail, item, "catalogues are always reachable");
+        assert_eq!(s.ok(), Outcome::Open(item));
+    }
     assert_eq!(s.mv(Move::Down), Outcome::Moved);
     assert_eq!(
         s.focus.rail,
@@ -304,9 +309,9 @@ fn the_rail_skips_items_without_a_screen() {
     s.mv(Move::Down);
     assert_eq!(s.focus.rail, RailItem::Settings);
     assert_eq!(s.mv(Move::Down), Outcome::None, "Settings is last");
-    s.mv(Move::Up);
-    s.mv(Move::Up);
-    s.mv(Move::Up);
+    for _ in 0..5 {
+        s.mv(Move::Up);
+    }
     assert_eq!(s.focus.rail, RailItem::Tv);
     s.mv(Move::Up);
     assert_eq!(s.ok(), Outcome::Open(RailItem::Search));
@@ -330,12 +335,14 @@ fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
     };
     assert_eq!(
         rail_items(none),
-        [Search, Tv, Recordings, MyList, Playlists, Settings]
+        [
+            Search, Tv, Movies, Shows, Recordings, MyList, Playlists, Settings
+        ]
     );
     assert_eq!(
         rail_items(both),
         [
-            Search, Tv, Continue, Recent, Movies, Shows, Recordings, MyList, Playlists, Settings
+            Search, Tv, Movies, Shows, Continue, Recent, Recordings, MyList, Playlists, Settings
         ]
     );
     // A live-only playlist on screen while another enabled playlist has
@@ -346,7 +353,7 @@ fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
             any: true,
         }),
         [
-            Search, Tv, Continue, Recent, Movies, Shows, Recordings, MyList, Playlists, Settings
+            Search, Tv, Movies, Shows, Continue, Recent, Recordings, MyList, Playlists, Settings
         ]
     );
     assert!(Settings.at_bottom() && Playlists.at_bottom() && !Search.at_bottom());
@@ -364,17 +371,17 @@ fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
         back_to_now: true,
     };
     assert_eq!(
-        f.tap_rail(2, &cols, &SyntheticList),
+        f.tap_rail(4, &cols, &SyntheticList),
         Outcome::Open(Continue),
-        "Continue watching, one below TV"
+        "Continue watching remains available after the catalogues"
     );
     assert_eq!(
-        f.tap_rail(3, &cols, &SyntheticList),
+        f.tap_rail(5, &cols, &SyntheticList),
         Outcome::Open(Recent),
         "Recently added"
     );
     assert_eq!(
-        f.tap_rail(4, &cols, &SyntheticList),
+        f.tap_rail(2, &cols, &SyntheticList),
         Outcome::Open(Movies),
         "Movies"
     );
@@ -606,8 +613,6 @@ fn a_removed_shelf_focus_returns_to_tv_instead_of_another_row() {
     for (removed, available) in [
         (RailItem::Continue, VodAvailability::default()),
         (RailItem::Recent, VodAvailability::default()),
-        (RailItem::Movies, VodAvailability::default()),
-        (RailItem::Shows, VodAvailability::default()),
     ] {
         let mut screen = Screen::new();
         screen.focus.pane = Pane::Rail;
@@ -645,4 +650,104 @@ fn preview_focus_keeps_the_guide_anchor_and_returns_the_existing_player() {
     screen.focus.retain_preview(false);
     assert_eq!(screen.focus.pane, Pane::Guide);
     assert_eq!(screen.focus.channel, 0);
+}
+
+#[test]
+fn up_to_preview_restores_each_browse_origin_without_changing_content() {
+    for pane in [Pane::Guide, Pane::Groups, Pane::Rail] {
+        let mut screen = Screen::new();
+        screen.toggle_favourite(0);
+        screen.toggle_favourite(1);
+        screen.focus.pane = pane;
+        screen.focus.rail = RailItem::Search;
+        if pane == Pane::Groups {
+            screen.focus.group = FAVORITES;
+            screen.rebuild(false);
+        }
+        screen.focus.channel = usize::from(pane != Pane::Guide);
+        let key = screen.view.channel_key(screen.focus.channel);
+        let cursor = screen.focus.cursor;
+        assert!(!screen.focus.focus_preview(false), "idle player, {pane:?}");
+        assert!(screen.focus.focus_preview(true), "Up from {pane:?}");
+        assert_eq!(screen.focus.columns_shown(), pane != Pane::Guide);
+        assert!(
+            !screen.focus.focus_preview(true),
+            "repeated Up stays in preview"
+        );
+        assert_eq!(screen.mv(Move::Down), Outcome::Moved);
+        assert_eq!(screen.focus.pane, pane, "Down restores {pane:?}");
+        assert_eq!(screen.view.channel_key(screen.focus.channel), key);
+        assert_eq!(screen.focus.cursor, cursor);
+        assert!(screen.focus.focus_preview(true));
+        assert_eq!(screen.back(), Outcome::Moved);
+        assert_eq!(screen.focus.pane, pane, "Back restores {pane:?}");
+        assert!(screen.focus.focus_preview(true));
+        screen.focus.retain_preview(false);
+        assert_eq!(screen.focus.pane, pane, "Stop restores {pane:?}");
+        assert_eq!(screen.view.channel_key(screen.focus.channel), key);
+    }
+}
+
+#[test]
+fn empty_favourites_can_focus_an_existing_player_and_return_to_their_group() {
+    let mut screen = Screen::new();
+    screen.focus.pane = Pane::Groups;
+    screen.focus.group = FAVORITES;
+    screen.rebuild(false);
+    assert_eq!(screen.view.channel_count(), 0);
+    assert!(screen.focus.focus_preview(true));
+    assert_eq!(screen.mv(Move::Down), Outcome::Moved);
+    assert_eq!(screen.focus.pane, Pane::Groups);
+    assert_eq!(screen.focus.group, FAVORITES);
+    assert!(screen.focus.focus_preview(true));
+    assert_eq!(screen.mv(Move::Right), Outcome::Moved);
+    assert_eq!(
+        screen.focus.pane,
+        Pane::Groups,
+        "empty guide cannot own focus"
+    );
+}
+
+#[test]
+fn preview_entry_is_limited_to_the_top_item_of_each_column() {
+    let mut focus = Focus::at(0);
+    focus.channel = 1;
+    assert!(!focus.focus_preview(true));
+    focus.pane = Pane::Groups;
+    focus.group = ALL;
+    assert!(!focus.focus_preview(true));
+    focus.pane = Pane::Rail;
+    focus.rail = RailItem::Movies;
+    assert!(!focus.focus_preview(true));
+}
+
+#[test]
+fn an_emptied_guide_under_the_preview_returns_to_groups() {
+    for back in [false, true] {
+        let mut screen = Screen::new();
+        assert!(screen.focus.focus_preview(true));
+        screen.focus.group = FAVORITES;
+        screen.rebuild(false);
+        assert_eq!(screen.focus.pane, Pane::Preview);
+        let outcome = if back {
+            screen.back()
+        } else {
+            screen.mv(Move::Down)
+        };
+        assert_eq!(outcome, Outcome::Moved);
+        assert_eq!(screen.focus.pane, Pane::Groups);
+    }
+}
+
+#[test]
+fn preview_left_and_right_reach_their_adjacent_columns() {
+    let mut screen = Screen::new();
+    screen.focus.pane = Pane::Rail;
+    screen.focus.rail = RailItem::Search;
+    assert!(screen.focus.focus_preview(true));
+    assert_eq!(screen.mv(Move::Right), Outcome::Moved);
+    assert_eq!(screen.focus.pane, Pane::Guide);
+    assert!(screen.focus.focus_preview(true));
+    assert_eq!(screen.mv(Move::Left), Outcome::Moved);
+    assert_eq!(screen.focus.pane, Pane::Groups);
 }

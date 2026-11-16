@@ -285,13 +285,21 @@ fn guide_keys(app: &mut Headless) {
     step(app.wait_for(FIELD));
     assert!(app.screen().matches("text:☰  News").unwrap());
     close_search(app);
-    // From Search down past TV to Recordings, Playlists, then Settings:
-    // each enabled destination opens its screen.
+    // From Search down past TV, Movies and Shows stay reachable even
+    // without a VOD catalogue; Recordings, Playlists and Settings follow.
     const PLAYLISTS: &str = "text:▲▼ choose   OK actions   Back close";
     const SETTINGS: &str = "text:▲▼ page   ▶ OK its settings   Back close";
     step(app.press_key("up"));
     step(app.press_key("up"));
-    step(app.press_key("down"));
+    step(app.press_key("down")); // Live TV
+    for _ in 0..2 {
+        step(app.press_key("down"));
+        step(app.press_key("enter"));
+        step(app.wait_for("text:No titles found. Enable movie and series imports in playlist settings, then refresh your playlist."));
+        step(app.back()); // Categories to the library's navigation.
+        step(app.back()); // Return to the same rail destination.
+        gone(app, "id:vod-screen");
+    }
     step(app.press_key("down"));
     step(app.press_key("enter"));
     step(app.wait_for("id:recordings-screen"));
@@ -322,9 +330,9 @@ fn guide_keys(app: &mut Headless) {
     gone(app, SETTINGS);
     // Up to TV, OK: the groups; Up shows All channels, OK takes it (the
     // hint again, which the next key but Back dismisses).
-    step(app.press_key("up"));
-    step(app.press_key("up"));
-    step(app.press_key("up"));
+    for _ in 0..5 {
+        step(app.press_key("up"));
+    }
     step(app.press_key("enter"));
     step(app.press_key("up"));
     step(app.wait_for("text:☰  All channels"));

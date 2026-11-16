@@ -357,8 +357,19 @@ pub enum Pane {
     Rail,
     Groups,
     Guide,
-    /// The existing playing video above the first guide row.
+    /// The existing playing video above the guide and navigation columns.
     Preview,
+}
+
+/// The content beneath a focused preview, restored by Down, Back or Stop.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewOrigin {
+    /// The first row of the current guide list.
+    Guide,
+    /// The built-in Favourites group, including when it is empty.
+    Favorites,
+    /// The navigation rail's Search action.
+    Search,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -379,6 +390,8 @@ pub enum Move {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Focus {
     pub pane: Pane,
+    /// The originating content while the existing video preview owns focus.
+    pub preview_origin: PreviewOrigin,
     /// The selected entry of the groups column ([`crate::lists`]): the
     /// list the guide shows.
     pub group: usize,
@@ -422,6 +435,7 @@ impl Focus {
     pub fn at(now: i32) -> Self {
         Focus {
             pane: Pane::Guide,
+            preview_origin: PreviewOrigin::Guide,
             group: crate::lists::ALL,
             channel: 0,
             rail: crate::browse::RailItem::Tv,

@@ -36,9 +36,9 @@ fn persistent(app: &crate::Headless, lifetime: &Arc<Mutex<Lifetime>>, player: No
     );
 }
 
-#[test]
-fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
-    let Some(home) = isolated!() else { return };
+fn preview_fixture(
+    home: crate::isolated::Home,
+) -> (personalization::Fixture, Arc<Mutex<Lifetime>>) {
     let lifetime: Arc<Mutex<Lifetime>> = Arc::default();
     let observed = lifetime.clone();
     let mut settings = Settings::new();
@@ -52,7 +52,7 @@ fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
     settings
         .set("general.resume_last_channel", Value::Bool(false))
         .unwrap();
-    let mut fixture = personalization::start_with_setup(home, settings, true, move |app| {
+    let fixture = personalization::start_with_setup(home, settings, true, move |app| {
         app.observe(move |_, batch| {
             let mut recorded = observed.lock().unwrap();
             for item in &batch.items {
@@ -71,6 +71,13 @@ fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
             }
         });
     });
+    (fixture, lifetime)
+}
+
+#[test]
+fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, lifetime) = preview_fixture(home);
     let app = &mut fixture.app;
     step(app.set_environment("TV remote", |env| env.idiom = Idiom::Tv));
     step(app.set_viewport(nsh_core::Size::new(
@@ -183,4 +190,94 @@ fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
         "Menu after Stop stays in the guide"
     );
     persistent(app, &lifetime, player);
+}
+
+fn width(app: &crate::Headless, id: &str) -> f32 {
+    app.screen()
+        .layout_nodes()
+        .iter()
+        .find(|node| node.test_id.as_deref() == Some(id))
+        .unwrap_or_else(|| panic!("missing {id}"))
+        .bounds
+        .size
+        .width
+        .0
+}
+
+#[test]
+fn sidebar_up_reaches_preview_on_desktop_and_tv_without_reopening_video() {
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, lifetime) = preview_fixture(home);
+    let app = &mut fixture.app;
+    let player = app
+        .screen()
+        .layout_nodes()
+        .iter()
+        .find(|node| node.kind == ViewKind::Native)
+        .unwrap()
+        .id;
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    step(
+        app.wait_until("B plays in preview", Duration::from_secs(5), |_| {
+            iptv_app::player_has_source(0)
+        }),
+    );
+    let opens = iptv_app::player_opens(0);
+    step(app.press_key("up"));
+    for idiom in [Idiom::Desktop, Idiom::Tv] {
+        step(app.set_environment("shared preview navigation", |env| env.idiom = idiom));
+        let (w, h) = if idiom == Idiom::Tv {
+            (960.0, 540.0)
+        } else {
+            (1280.0, 720.0)
+        };
+        step(app.set_viewport(nsh_core::Size::new(
+            nsh_core::prelude::px(w),
+            nsh_core::prelude::px(h),
+        )));
+        // Guide A is focused while B keeps playing. Up must cancel A's pending autoplay.
+        step(app.press_key("up"));
+        assert!(selected(app, "guide-preview"), "first guide row, {idiom:?}");
+        step(app.run_for(Duration::from_secs(3)));
+        assert_eq!(iptv_app::player_opens(0), opens);
+        step(app.press_key("down"));
+        assert!(!selected(app, "guide-preview"));
+        step(app.press("text:/^☰  /"));
+        step(app.press("id:guide-groups >> text:Favourites"));
+        let groups_width = width(app, "guide-groups");
+        let rail_width = width(app, "navigation-rail");
+        step(app.press_key("up"));
+        assert!(selected(app, "guide-preview"), "Favourites, {idiom:?}");
+        assert_eq!(width(app, "guide-groups"), groups_width);
+        assert_eq!(width(app, "navigation-rail"), rail_width);
+        step(app.press_key("down"));
+        step(app.press_key("up"));
+        step(app.back());
+        assert!(!selected(app, "guide-preview"));
+        // Left enters Search; its expanded sidebar remains in place during preview focus.
+        step(app.press_key("left"));
+        let rail_width = width(app, "navigation-rail");
+        assert!(rail_width > 100.0, "expanded rail");
+        step(app.press_key("up"));
+        assert!(selected(app, "guide-preview"), "Search, {idiom:?}");
+        assert_eq!(width(app, "navigation-rail"), rail_width);
+        step(app.press_key("down"));
+        step(app.press_key("enter"));
+        step(app.wait_for("id:search-screen"));
+        step(app.back());
+        step(app.wait_for_gone("id:search-screen", Duration::from_secs(2)));
+        // Back from the preview also returns to Search, whose OK opens search again.
+        step(app.press_key("up"));
+        assert!(selected(app, "guide-preview"));
+        step(app.back());
+        step(app.press_key("enter"));
+        step(app.wait_for("id:search-screen"));
+        step(app.back());
+        step(app.wait_for_gone("id:search-screen", Duration::from_secs(2)));
+        assert_eq!(iptv_app::player_opens(0), opens);
+        persistent(app, &lifetime, player);
+        step(app.press_key("right"));
+        step(app.press_key("right"));
+    }
 }

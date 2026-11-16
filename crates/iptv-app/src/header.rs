@@ -295,6 +295,47 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
         )
 }
 
+fn library_shortcuts(ui: Ui) -> View {
+    let size = Scale::new();
+    view().flex_row().gap(px(8.0)).children(
+        [
+            (
+                iptv_core::browse::RailItem::Movies,
+                iptv_core::vod::Kind::Movie,
+                tr("Movies"),
+            ),
+            (
+                iptv_core::browse::RailItem::Shows,
+                iptv_core::vod::Kind::Series,
+                tr("Shows"),
+            ),
+        ]
+        .into_iter()
+        .map(move |(item, kind, label)| {
+            crate::ui_kit::button(
+                ui,
+                size,
+                label,
+                || false,
+                move || crate::vod_view::open(ui, kind),
+            )
+            .test_id(if kind == iptv_core::vod::Kind::Movie {
+                "open-movies"
+            } else {
+                "open-shows"
+            })
+            .flex_row()
+            .items_center()
+            .gap(px(8.0))
+            .child(
+                svg(crate::rail::icon(item))
+                    .size(px(22.0))
+                    .text_color(rgb(WHITE)),
+            )
+        }),
+    )
+}
+
 /// The list on screen (a tap opens the groups), Add playlist, and in
 /// development the key stats ([`debug_overlay`]).
 fn side(ui: Ui) -> impl IntoElement {
@@ -316,49 +357,7 @@ fn side(ui: Ui) -> impl IntoElement {
                     crate::lists::open_groups(ui);
                 }),
         )
-        .child(when(
-            move || ui.any_vod.get() || ui.has_vod.get(),
-            move || {
-                let size = Scale::new();
-                view().flex_row().gap(px(8.0)).children(
-                    [
-                        (
-                            iptv_core::browse::RailItem::Movies,
-                            iptv_core::vod::Kind::Movie,
-                            tr("Movies"),
-                        ),
-                        (
-                            iptv_core::browse::RailItem::Shows,
-                            iptv_core::vod::Kind::Series,
-                            tr("Shows"),
-                        ),
-                    ]
-                    .into_iter()
-                    .map(move |(item, kind, label)| {
-                        crate::ui_kit::button(
-                            ui,
-                            size,
-                            label,
-                            || false,
-                            move || crate::vod_view::open(ui, kind),
-                        )
-                        .test_id(if kind == iptv_core::vod::Kind::Movie {
-                            "open-movies"
-                        } else {
-                            "open-shows"
-                        })
-                        .flex_row()
-                        .items_center()
-                        .gap(px(8.0))
-                        .child(
-                            svg(crate::rail::icon(item))
-                                .size(px(22.0))
-                                .text_color(rgb(WHITE)),
-                        )
-                    }),
-                )
-            },
-        ))
+        .child(library_shortcuts(ui))
         .child(crate::wizard_view::add_button(ui))
         .child(view().flex_1())
         .children(debug_overlay().then(|| {
@@ -421,7 +420,7 @@ pub fn header(ui: Ui) -> impl IntoElement {
 fn corner_back_shown(ui: Ui) -> bool {
     ui.back_controls()
         && ui.mode.get() == ViewMode::Guide
-        && ui.focus.with(|f| f.pane) != Pane::Rail
+        && ui.focus.with(|f| f.layout_pane()) != Pane::Rail
 }
 
 /// A pointer or touch route to the left columns, over the preview where
@@ -429,7 +428,7 @@ fn corner_back_shown(ui: Ui) -> bool {
 /// Back and Left walk, the guide to its groups, the groups to the rail
 /// with its names (Search, Settings).
 fn corner_back(ui: Ui) -> impl IntoElement {
-    let groups = move || ui.focus.with(|f| f.pane) == Pane::Guide;
+    let groups = move || ui.focus.with(|f| f.layout_pane()) == Pane::Guide;
     view()
         .absolute()
         // The player's ‹ is 20 and 16 points in from the safe area.

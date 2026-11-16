@@ -313,10 +313,45 @@ fn tv_saved_playback_returns_through_guide_preview_without_reopening_the_player(
     step(app.press_key("enter"));
     step(app.wait_for_gone("id:play-bar-layer", Duration::from_secs(2)));
     step(app.wait_for("id:guide-preview"));
-    // Recordings was opened from the rail: enter groups, then the guide,
-    // without changing its selected group while moving towards the preview.
-    step(app.press_key("right"));
-    step(app.press_key("right"));
+    // A recording also owns the preview when no live channel is playing.
+    // Search and the empty Favourites group remain valid origins on TV/desktop.
+    for idiom in [Idiom::Desktop, Idiom::Tv] {
+        step(app.set_environment("saved preview navigation", |env| env.idiom = idiom));
+        let (w, h) = if idiom == Idiom::Tv {
+            (960.0, 540.0)
+        } else {
+            (1280.0, 720.0)
+        };
+        step(app.set_viewport(Size::new(px(w), px(h))));
+        step(app.press("text:/^☰  /"));
+        step(app.press_key("left"));
+        step(app.press_key("up"));
+        assert!(
+            app.screen()
+                .accessibility_state("id:guide-preview")
+                .unwrap()
+                .selected
+        );
+        step(app.press_key("down"));
+        step(app.press_key("enter"));
+        step(app.wait_for("id:search-screen"));
+        step(app.back());
+        step(app.wait_for_gone("id:search-screen", Duration::from_secs(2)));
+        step(app.press_key("right"));
+        step(app.press("id:guide-groups >> text:Favourites"));
+        step(app.press_key("up"));
+        assert!(
+            app.screen()
+                .accessibility_state("id:guide-preview")
+                .unwrap()
+                .selected
+        );
+        step(app.back());
+        step(app.press("id:guide-groups >> text:All channels"));
+        step(app.press_key("right"));
+        assert_eq!(iptv_app::player_opens(0), opens);
+        assert_eq!(props.lock().unwrap()["source"], source);
+    }
     step(app.press_key("up"));
     assert!(
         app.screen()
