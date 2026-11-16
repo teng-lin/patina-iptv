@@ -18,13 +18,22 @@ floor was not a current measurement. No source exclusions or assertion changes
 were used to obtain this baseline.
 
 The first recovery slice measured **13,802 / 17,305 lines (79.76%)** in the
-library-only lane. The expanded service, headless-shell and native GTK lane
+library-only lane. The expanded service, headless-shell and native GTK lane at
+`7a506cc`
 measured **16,093 / 17,476 runtime lines (92.09%)** and
 **23,168 / 25,409 application-source lines (91.18%)**. Both crates now enforce a
 90% floor. The broader application build also exposed native GTK/X11 player
 lines absent from the earlier unit-only denominator. The actual GTK/GL scenario
 and compositor failure tests raised the combined player result to
 **3,705 / 3,855 lines (96.11%)**, preserving its existing 94% floor.
+
+After integration with the shared capability model, a fresh complete Linux lane
+at `12f06a3` measured **16,124 / 17,507 runtime lines (92.10%)**,
+**23,183 / 25,461 application-source lines (91.05%)** and
+**3,706 / 3,855 player lines (96.13%)**. Every measured crate met its floor.
+The later repair-test fixture adjustment only acknowledges debounce registration
+before releasing its injected timer; it retains the ten-second watchdog and
+all domain assertions. Five fresh-process repeats passed on both Linux and macOS.
 
 The lane changes are explicit: service-only, rendered headless application and
 native GTK scenarios exercise different boundaries. These measurements include
