@@ -1147,6 +1147,7 @@ fn exercise_admission(
                 "timeline",
                 json!({"token":previous_source["token"],"seekId":0,"ms":117000,"durationMs":120000,"seekable":true}),
             ),
+            ("firstRender", json!({"token":previous_source["token"]})),
             ("position", json!({"ms":119000})),
             ("state", json!({"state":"ended"})),
             (
