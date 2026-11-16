@@ -289,12 +289,13 @@ mod tests {
             let (done, finished) = std::sync::mpsc::channel();
             let (ready, started) = std::sync::mpsc::sync_channel(0);
             let worker = std::thread::spawn(move || {
-                let deadline = std::time::Instant::now() + Duration::from_secs(5);
                 let mut commands = Vec::new();
                 ready.send(()).unwrap();
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
                 loop {
                     match listener.accept() {
                         Ok((mut stream, _)) => {
+                            stream.set_nonblocking(false).unwrap();
                             stream
                                 .set_read_timeout(Some(Duration::from_secs(1)))
                                 .unwrap();
@@ -330,8 +331,10 @@ mod tests {
             });
             // A bound socket can connect before its worker is scheduled.
             // Acknowledge startup before the request's 500 ms budget begins.
+            // Nothing before this acknowledgement blocks; a worker panic
+            // disconnects the channel. Scheduling is not a protocol deadline.
             started
-                .recv_timeout(Duration::from_secs(5))
+                .recv()
                 .expect("compositor fixture worker did not start");
             Self {
                 _directory: directory,

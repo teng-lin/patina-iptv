@@ -187,7 +187,6 @@ const CARRIED_MESSAGES: &[(&str, &str)] = &[
     ("iptv-app/src/recordings_view.rs", "j"),
     ("iptv-app/src/recordings_view.rs", "name"),
     ("iptv-app/src/recordings_view.rs", "message"),
-    ("iptv-app/src/recordings_view.rs", "EMPTY"),
     // What `tr` and `trf` hand to the core is what they were given.
     ("iptv-app/src/i18n.rs", "source"),
     // `key(…)` constants.

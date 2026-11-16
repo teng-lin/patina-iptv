@@ -21,9 +21,8 @@ use std::{
     time::Duration,
 };
 
-#[test]
-fn saved_recording_resumes_seeks_paused_and_starts_again_without_changing_surfaces() {
-    let Some(home) = isolated!() else { return };
+type Observed = Arc<Mutex<HashMap<String, Value>>>;
+fn saved_fixture(home: &crate::isolated::Home) -> (Headless, std::path::PathBuf, JobId, Observed) {
     let root = home.data_dir();
     std::fs::create_dir_all(&root).unwrap();
     let mut settings = Settings::new();
@@ -119,7 +118,14 @@ fn saved_recording_resumes_seeks_paused_and_starts_again_without_changing_surfac
     step(app.press("text:/^☰  /"));
     step(app.press("label:Recordings"));
     step(app.wait_for("id:recording-job"));
-    step(app.press("id:recording-job"));
+    (app, database, id, props)
+}
+
+#[test]
+fn saved_recording_resumes_seeks_paused_and_starts_again_without_changing_surfaces() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, database, id, props) = saved_fixture(&home);
+    step(app.long_press("id:recording-job"));
     step(app.wait_for("text:Resume recording"));
     step(app.wait_for("text:Play from beginning"));
     step(app.wait_for("text:Delete recording"));
@@ -206,7 +212,10 @@ fn saved_recording_resumes_seeks_paused_and_starts_again_without_changing_surfac
     );
     // Touch users get the same recording timeline and can seek without reopening.
     step(app.press_key("space"));
-    step(app.set_environment("a tablet", |e| e.idiom = Idiom::Pad));
+    step(app.set_environment("a tablet", |e| {
+        e.idiom = Idiom::Pad;
+        e.window = Size::new(px(1920.), px(1080.));
+    }));
     step(app.press("label:Video"));
     step(app.wait_for("id:play-bar-time-line >> text:2:00"));
     let touch_opens = iptv_app::player_opens(0);
@@ -236,4 +245,174 @@ fn saved_recording_resumes_seeks_paused_and_starts_again_without_changing_surfac
         "stale source events cannot replace the final position"
     );
     assert!(!saved.completed);
+}
+
+#[test]
+fn tv_saved_playback_returns_through_guide_preview_without_reopening_the_player() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, _, _, props) = saved_fixture(&home);
+    step(app.press("id:recording-job"));
+    step(app.wait_for_gone("id:recordings-screen", Duration::from_secs(10)));
+    let source = props.lock().unwrap()["source"].clone();
+    let opens = iptv_app::player_opens(0);
+    let player = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|n| n.kind == ViewKind::Native)
+        .unwrap()
+        .id;
+    step(app.press_key("m"));
+    step(app.wait_for("id:play-bar-layer"));
+    for _ in 0..16 {
+        if app
+            .screen()
+            .accessibility_state("id:play-bar-guide")
+            .is_ok_and(|s| s.selected)
+        {
+            break;
+        }
+        step(app.press_key("right"));
+    }
+    assert!(
+        app.screen()
+            .accessibility_state("id:play-bar-guide")
+            .unwrap()
+            .selected
+    );
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("id:play-bar-layer", Duration::from_secs(2)));
+    step(app.wait_for("id:guide-preview"));
+    // Recordings was opened from the rail: enter groups, then the guide,
+    // without changing its selected group while moving towards the preview.
+    step(app.press_key("right"));
+    step(app.press_key("right"));
+    step(app.press_key("up"));
+    assert!(
+        app.screen()
+            .accessibility_state("id:guide-preview")
+            .is_ok_and(|s| s.selected && !s.disabled)
+    );
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("id:player-banner", Duration::from_secs(2)));
+    step(app.wait_for("id:player-panels >> text:Generated saved programme"));
+    step(app.wait_for("id:player-time-line"));
+    assert_eq!(iptv_app::player_opens(0), opens);
+    assert_eq!(props.lock().unwrap()["source"], source);
+    assert!(
+        app.screen()
+            .layout_nodes()
+            .into_iter()
+            .any(|n| n.id == player && !n.hidden)
+    );
+}
+
+#[test]
+fn back_returns_to_the_library_and_delete_handles_the_playing_file_after_consent() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, database, id, props) = saved_fixture(&home);
+    step(app.set_environment("a tablet", |e| {
+        e.idiom = Idiom::Pad;
+        e.window = Size::new(px(1920.), px(1080.));
+    }));
+    step(app.press("id:recording-job"));
+    step(app.wait_for_gone("id:recordings-screen", Duration::from_secs(10)));
+    let source = props.lock().unwrap()["source"].clone();
+    let opens = iptv_app::player_opens(0);
+    let player = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|n| n.kind == ViewKind::Native)
+        .unwrap()
+        .id;
+    step(app.press("id:video"));
+    step(app.press("id:play-bar-back"));
+    step(app.wait_for("id:recordings-screen"));
+    step(app.wait_for("id:recording-return-to-player"));
+    assert_eq!(props.lock().unwrap()["source"], source);
+    step(app.press("id:recording-return-to-player"));
+    step(app.wait_for_gone("id:recordings-screen", Duration::from_secs(2)));
+    assert_eq!(iptv_app::player_opens(0), opens);
+    step(app.press("label:TV guide"));
+    step(app.wait_for("id:guide-preview"));
+    assert!(
+        !app.screen()
+            .matches("id:guide-preview >> text:Nothing playing")
+            .unwrap()
+    );
+    step(app.press("id:guide-preview"));
+    step(app.press("id:video"));
+    assert_eq!(iptv_app::player_opens(0), opens);
+    step(app.press("id:play-bar-back"));
+    step(app.wait_for("id:recordings-screen"));
+    // Deleting a different retained file never stops the current recording's playback.
+    let mut store = crate::isolated::open_database(&database).unwrap();
+    let mut other = store.recording_job(id).unwrap().unwrap().request;
+    other.title = "Generated other programme".into();
+    other.start += 200;
+    other.end += 200;
+    store
+        .schedule_recording(JobId(98), &other, 1790000000)
+        .unwrap();
+    store
+        .transition_recording(
+            JobId(98),
+            Status::Scheduled,
+            Status::Completed,
+            18800,
+            "Recording completed",
+        )
+        .unwrap();
+    std::fs::write(
+        iptv_runtime::recordings::media_directory(&home.data_dir()).join("98.ts"),
+        vec![0x47; 18800],
+    )
+    .unwrap();
+    drop(store);
+    step(app.wait_for_within(
+        "label:/^Delete recording · Generated other programme/",
+        Duration::from_secs(10),
+    ));
+    step(app.press("label:/^Delete recording · Generated other programme/"));
+    step(app.press("id:recording-delete-confirmation >> text:Delete recording"));
+    step(app.wait_for_gone(
+        "label:/^Delete recording · Generated other programme/",
+        Duration::from_secs(10),
+    ));
+    assert_eq!(props.lock().unwrap()["source"], source);
+    assert_eq!(iptv_app::player_opens(0), opens);
+    step(app.press("label:/^Delete recording · Generated saved programme/"));
+    step(app.wait_for("id:recording-delete-confirmation"));
+    step(app.press("id:recording-delete-confirmation >> text:Cancel"));
+    assert_eq!(props.lock().unwrap()["source"], source);
+    assert!(
+        crate::isolated::open_database(&database)
+            .unwrap()
+            .recording_job(id)
+            .unwrap()
+            .is_some()
+    );
+    step(app.press("label:/^Delete recording · Generated saved programme/"));
+    step(app.press("id:recording-delete-confirmation >> text:Delete recording"));
+    step(app.wait_for_within("text:/No recordings here/", Duration::from_secs(10)));
+    assert!(props.lock().unwrap()["source"].is_null());
+    assert!(
+        !iptv_runtime::recordings::media_directory(&home.data_dir())
+            .join("97.ts")
+            .exists()
+    );
+    assert!(
+        crate::isolated::open_database(&database)
+            .unwrap()
+            .recording_job(id)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        app.screen()
+            .layout_nodes()
+            .iter()
+            .any(|n| n.kind == ViewKind::Native && n.id == player)
+    );
 }

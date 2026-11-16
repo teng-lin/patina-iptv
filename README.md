@@ -251,8 +251,8 @@ desktops (MPVKit's LGPL build) and adds touch navigation of its own.
 ```sh
 tools/fetch-mpvkit.sh            # libmpv xcframeworks, checksums pinned
 cd crates/iptv-app
-nsh package . --target ios-simulator -o ../../target/ios-sim
-nsh package . --target ios -o ../../target/ios \
+nsh package . --target ios-simulator --icon icon-ios.png -o ../../target/ios-sim
+nsh package . --target ios --icon icon-ios.png -o ../../target/ios \
   --sign <signing identity SHA-1> --profile <app.mobileprovision>
 xcrun devicectl device install app --device <id> ../../target/ios/Patina.app
 ```
@@ -338,14 +338,33 @@ cancel recordings that were already authorized.
 
 ## Recordings on TV, tablet and desktop
 
-Choose **Record** or **Schedule a recording…** in a programme's menu. The
-programme details and full-screen controls also offer recording. On a TV, use
-the remote's Menu/long OK or Record key; Up/Down chooses a form row and
-Left/Right changes its value. Touch and mouse users have labelled −/+ buttons.
+Choose **Record** on the play bar to start recording the playing live channel
+immediately; the control turns red while capture is active. Press it again to
+stop recording while playback continues.
+On a TV while watching, press Menu or long-press OK to open the control strip,
+then choose **Record**.
+In the guide, long-press a current programme (right-click on desktop) to open
+its menu and choose **Record**, without starting or changing playback.
+For a future programme, right-click on desktop or long-press on touch/TV, then
+choose **Schedule recording**. It schedules that programme immediately using its
+guide times, without a form. Choose **Edit recording** in Recordings for adjustments.
+For channels without guide data, **Schedule a recording…** opens the manual editor.
+On a TV, Menu/long OK also opens the programme menu. Up/Down chooses a form row,
+Left/Right changes its value, and Select opens an exact date/time/name editor.
+Touch and mouse users tap a field to edit it. Repeat and padding are under
+**Recording options**.
 The navigation rail's **Recordings** entry manages current, scheduled and
-finished recordings. Cancel removes a schedule; Stop retains captured media;
-Delete removes media after confirmation. A dot marks recording programmes in
-the guide, and the recording indicator opens management while watching.
+finished recordings. Tap a finished recording to play or resume it. Back returns
+to Recordings while playback continues; the playing row or **Return to playback**
+returns to the player without reopening the stream. The guide's video preview
+also returns to saved playback.
+
+The row's pencil edits a schedule, its cancel control cancels it, and its stop
+control retains captured media. The trash icon on the right asks for confirmation.
+Cancelling leaves playback and the file intact. Confirming deletion automatically
+stops that file if it is playing, then deletes it; other playback is unaffected.
+Remote users can open secondary actions with Menu. A dot marks recording
+programmes in the guide.
 
 Use **Repeat** to choose once, daily, weekly or series. Daily and weekly
 schedules keep their local clock time across daylight-saving changes; series
@@ -372,8 +391,10 @@ the player uses its normal pause, rewind, fast-forward and seek bar controls.
 Interrupted jobs retain captured media and recover the remaining window when
 possible; gaps and missed windows are reported. Reminders and network recording
 destinations remain outside this feature. Provider accounts need enough
-connections for watching plus recording. **Settings → Other → Streams at once** sets a local
-ceiling (default one); known provider limits still apply. Accounts identified
+connections for watching plus recording. **Settings → Other → Streams at once**
+uses the reported provider allowance automatically, or one connection when the
+allowance is unknown. An explicit local ceiling and known provider limits still
+apply. Watching and recording currently use separate upstream connections. Accounts identified
 as the same Xtream/portal account share their budget. M3U account associations
 are unknown and are counted conservatively against other streams.
 

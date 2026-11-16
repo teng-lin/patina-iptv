@@ -423,7 +423,8 @@ impl Ui {
     /// What just started playing over full-screen video: the banner for
     /// a live channel, the card with its seek bar for a replay.
     pub fn show_playing(&self) {
-        let live = self.playback.get_untracked() == Playback::Live;
+        let live =
+            self.playback.get_untracked() == Playback::Live && !crate::on_demand::active(*self);
         self.update_panels(|p, now| {
             if live {
                 p.show_banner(now);
@@ -969,7 +970,6 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(guide_inspect_view::layer(ui))
         .child(guide_repair_view::layer(ui))
         .child(wizard_view::layer(ui))
-        .child(recordings_view::indicator(ui))
         .child(parental_view::layer(ui))
 }
 
@@ -1117,6 +1117,10 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 multiview_picker::key(ui, iptv_nav::Action::Back);
                 true
             }
+            (ViewMode::Fullscreen, _, false) if ui.player.recorded.with(Option::is_some) => {
+                recordings_view::open(ui);
+                true
+            }
             _ if ui.player_surface == 0 && desktop::fullscreen() => {
                 desktop::set_fullscreen(false);
                 true
@@ -1190,4 +1194,12 @@ pub fn store_reads() -> u64 {
     platform_data::host_handle()
         .expect("store_reads needs a started app")
         .store_reads()
+}
+
+/// Pauses queued writes; the gate acknowledges entry and releases on drop.
+#[cfg(feature = "test-support")]
+pub fn hold_writer() -> runtime::TestGate {
+    platform_data::host_handle()
+        .and_then(|owner| owner.hold_writer())
+        .expect("hold_writer needs a started app")
 }
