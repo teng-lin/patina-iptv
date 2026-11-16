@@ -979,12 +979,12 @@ fn toggle_panels(ui: Ui) {
         if multiview::dismiss(ui) {
             return;
         }
-        if play_bar::available() {
+        if play_bar::pointer_available() {
             play_bar::tapped(ui);
         }
         return;
     }
-    if play_bar::available() {
+    if play_bar::pointer_available() {
         play_bar::tapped(ui);
         return;
     }

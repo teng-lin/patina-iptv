@@ -321,6 +321,53 @@ mod tests {
     }
 
     #[test]
+    fn long_ok_opens_controls_once_even_after_the_context_changes() {
+        use crate::{Phase, PressDetector};
+        let keys = Keymap::for_profile(Profile::Remote);
+        for repeated in [false, true] {
+            let mut detector = PressDetector::new(400);
+            assert_eq!(
+                detector.feed(
+                    RemoteKey::Ok,
+                    Phase::Down,
+                    0,
+                    keys.has_long(Player, RemoteKey::Ok)
+                ),
+                None
+            );
+            let long = if repeated {
+                detector.feed(RemoteKey::Ok, Phase::Repeat, 400, true)
+            } else {
+                detector.poll(400)
+            };
+            assert_eq!(
+                long.and_then(|(key, press)| keys.resolve(Player, key, press)),
+                Some(Action::ShowControls)
+            );
+            // Opening the bar changes Player to Controls before release.
+            assert_eq!(
+                detector.feed(
+                    RemoteKey::Ok,
+                    Phase::Repeat,
+                    600,
+                    keys.has_long(Controls, RemoteKey::Ok)
+                ),
+                None
+            );
+            assert_eq!(
+                detector.feed(
+                    RemoteKey::Ok,
+                    Phase::Up,
+                    700,
+                    keys.has_long(Controls, RemoteKey::Ok)
+                ),
+                None
+            );
+            assert_eq!(detector.poll(800), None);
+        }
+    }
+
+    #[test]
     fn search_opens_from_everywhere() {
         let k = Keymap::defaults();
         for ctx in [Guide, Groups, Player, Controls, ChannelList, Menu] {

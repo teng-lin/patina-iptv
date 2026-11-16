@@ -7,6 +7,8 @@
 //! Synthetic data only: a playlist picked from a file, channel one with a
 //! day of catch-up, its guide a local XMLTV file.
 
+use nsh_core::{MountItem, ViewKind};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::headless::Headless;
@@ -57,10 +59,14 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_pauses() {
         guide_path.display()
     );
     let config = EngineConfig {
+        clock: nsh_core::time::Clock::manual(SystemTime::now()),
         viewport: Size::new(px(960.0), px(540.0)),
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     };
     let mut app = Headless::start(config).unwrap();
+    let lifetime: Arc<Mutex<Vec<MountItem>>> = Arc::default();
+    let observed = lifetime.clone();
+    app.observe(move |_, batch| observed.lock().unwrap().extend(batch.items.iter().cloned()));
     app.on_pick(move |_| {
         vec![PickedFile::new(
             "synthetic.m3u",
@@ -111,4 +117,91 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_pauses() {
     step(app.press_key("enter"));
     step(app.wait_for("text:CATCH-UP"));
     assert_eq!(app.screen().count(LINE).unwrap(), 1);
+
+    // The same bar serves seekable TV playback. OK commits before the
+    // debounce clock advances and never also pauses the player.
+    let player = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|n| n.kind == ViewKind::Native)
+        .unwrap()
+        .id;
+    step(app.press_key("m"));
+    step(app.wait_for("id:play-bar-layer"));
+    step(app.press_key("down"));
+    assert!(
+        app.screen()
+            .accessibility_state("id:play-bar-seek")
+            .unwrap()
+            .selected
+    );
+    let opens = iptv_app::player_opens(0);
+    step(app.press_key("right"));
+    step(app.wait_for("id:play-bar-time-line >> text:10:00"));
+    assert_eq!(
+        iptv_app::player_opens(0),
+        opens,
+        "selection has not committed before OK"
+    );
+    assert!(
+        !app.screen().matches(CARD).unwrap(),
+        "the old card stays hidden behind the shared bar"
+    );
+    step(app.press_key("enter"));
+    step(app.wait_until(
+        "OK commits archive seek without waiting for debounce",
+        Duration::from_secs(5),
+        |_| iptv_app::player_opens(0) > opens,
+    ));
+    assert_eq!(
+        iptv_app::player_opens(0),
+        opens + 1,
+        "one explicit archive seek"
+    );
+    assert!(
+        app.screen()
+            .accessibility_state("id:play-bar-play-pause")
+            .unwrap()
+            .selected
+    );
+    assert!(!app.screen().matches(CARD).unwrap());
+    step(app.run_for(Duration::from_secs(2)));
+    assert_eq!(
+        iptv_app::player_opens(0),
+        opens + 1,
+        "the cancelled seek timer does not reopen again"
+    );
+    let history = lifetime.lock().unwrap();
+    let components: Vec<_> = history
+        .iter()
+        .filter_map(|item| match item {
+            MountItem::Component { id, name } if name.as_ref() == "tv.player" => Some(*id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(components, [player]);
+    assert!(!history.iter().any(
+        |item| matches!(item, MountItem::Remove { id } | MountItem::Delete { id } if *id == player)
+    ));
+    assert_eq!(
+        history
+            .iter()
+            .filter(|item| matches!(item, MountItem::Insert { child, .. } if *child == player))
+            .count(),
+        1
+    );
+    let paused = history.iter().rev().find_map(|item| match item {
+        MountItem::ComponentProps { id, props } if *id == player => {
+            props.iter().find_map(|(name, value)| {
+                if name.as_ref() == "paused" {
+                    value.as_ref().and_then(serde_json::Value::as_bool)
+                } else {
+                    None
+                }
+            })
+        }
+        _ => None,
+    });
+    assert_eq!(paused, Some(false), "timeline OK never also pauses");
 }

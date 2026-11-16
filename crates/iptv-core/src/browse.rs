@@ -115,6 +115,8 @@ pub enum Outcome {
     Committed,
     /// OK on a programme: watch it.
     Watch,
+    /// Return the existing preview to full screen without tuning a channel.
+    ReturnToPlayer,
     /// OK on a rail item that opens a screen.
     Open(RailItem),
     /// Back with nothing left to close: the platform leaves the app.
@@ -124,13 +126,38 @@ pub enum Outcome {
 impl Focus {
     /// Whether the rail and the groups column are shown.
     pub fn columns_shown(&self) -> bool {
-        self.pane != Pane::Guide
+        matches!(self.pane, Pane::Rail | Pane::Groups)
+    }
+
+    /// TV hosts may hand Up at the first guide row to their mini-player.
+    /// The row and time anchor remain intact for Down/Back and list refresh.
+    pub fn focus_preview(&mut self, playing: bool) -> bool {
+        if playing && self.pane == Pane::Guide && self.channel == 0 {
+            self.pane = Pane::Preview;
+            self.hint = false;
+            true
+        } else {
+            false
+        }
     }
 
     /// A direction on the guide screen. `list` is the list the guide shows.
     pub fn navigate(&mut self, m: Move, cols: &Columns, list: &dyn Schedule) -> Outcome {
         self.hint = false;
         match (self.pane, m) {
+            (Pane::Preview, Move::Down | Move::Right) => {
+                self.pane = if list.channel_count() > 0 {
+                    Pane::Guide
+                } else {
+                    Pane::Groups
+                };
+                Outcome::Moved
+            }
+            (Pane::Preview, Move::Left) => {
+                self.pane = Pane::Groups;
+                Outcome::Moved
+            }
+            (Pane::Preview, Move::Up) => Outcome::None,
             (Pane::Guide, _) => {
                 self.apply(m, list);
                 Outcome::Moved
@@ -172,6 +199,7 @@ impl Focus {
     pub fn ok(&mut self, cols: &Columns, list: &dyn Schedule) -> Outcome {
         self.hint = false;
         match self.pane {
+            Pane::Preview => Outcome::ReturnToPlayer,
             Pane::Guide => Outcome::Watch,
             Pane::Groups if list.channel_count() == 0 => Outcome::None,
             Pane::Groups => {
@@ -198,6 +226,14 @@ impl Focus {
             return Outcome::Moved;
         }
         match self.pane {
+            Pane::Preview => {
+                self.pane = if list.channel_count() > 0 {
+                    Pane::Guide
+                } else {
+                    Pane::Groups
+                };
+                Outcome::Moved
+            }
             Pane::Guide => {
                 if !(cols.back_to_now && self.return_to_now(list)) {
                     self.pane = Pane::Groups;
