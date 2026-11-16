@@ -54,6 +54,17 @@ fn a_resumed_episode_ending_before_its_first_timeline_still_advances() {
 }
 
 #[test]
+fn old_native_events_cannot_consume_resume_while_the_next_source_is_preparing() {
+    let Some(home) = isolated!() else { return };
+    exercise_preparing(
+        home,
+        nsh_core::platform::Idiom::Pad,
+        ResumeCase::Unseekable,
+        true,
+    );
+}
+
+#[test]
 fn tablet_reaches_unfinished_titles_of_two_playlists_from_the_rail() {
     let Some(home) = isolated!() else { return };
     discover(home, nsh_core::platform::Idiom::Pad);
@@ -808,6 +819,14 @@ enum ResumeCase {
 }
 
 fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resume: ResumeCase) {
+    exercise_preparing(home, idiom, resume, false);
+}
+fn exercise_preparing(
+    home: crate::isolated::Home,
+    idiom: nsh_core::platform::Idiom,
+    resume: ResumeCase,
+    hold_preparation: bool,
+) {
     let server = Server::start(&[(
         "/player_api.php",
         r#"{
@@ -1039,6 +1058,9 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resum
         selected, 1,
         "the episode selection has one content identity"
     );
+    let held = hold_preparation.then(iptv_app::hold_source_preparation);
+    let previous_source = props.lock().unwrap()["source"].clone();
+    let previous_seek = props.lock().unwrap().get("seek").cloned();
     if idiom == nsh_core::platform::Idiom::Tv {
         for _ in 0..2 {
             step(app.press_key("right"));
@@ -1049,7 +1071,77 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resum
     } else {
         step(app.press("text:/Generated Second/"));
     }
+    if let Some(held) = &held {
+        step(app.wait_until(
+            "source preparation acknowledged",
+            Duration::from_secs(5),
+            |_| held.wait_entered(Duration::ZERO),
+        ));
+        assert_eq!(props.lock().unwrap()["source"], previous_source);
+        if app.screen().count("label:Rewind").unwrap() == 0 {
+            step(app.press("label:Video"));
+        }
+        step(app.wait_for("label:Rewind"));
+        assert!(
+            app.screen()
+                .accessibility_state("label:Rewind")
+                .unwrap()
+                .disabled,
+            "seek controls stay disabled while the selected source is unpublished"
+        );
+        for (name, data) in [
+            (
+                "timeline",
+                json!({"token":previous_source["token"],"seekId":0,"ms":117000,"durationMs":120000,"seekable":true}),
+            ),
+            ("position", json!({"ms":119000})),
+            ("state", json!({"state":"ended"})),
+            (
+                "error",
+                json!({"code":"ERROR_CODE_IO_NETWORK_CONNECTION_FAILED","http":503}),
+            ),
+        ] {
+            app.engine().control().dispatch_event(
+                surface,
+                EventKind::NativeEvent,
+                EventPayload::Native {
+                    name: name.into(),
+                    data,
+                },
+            );
+            app.settle();
+        }
+        assert_eq!(
+            props.lock().unwrap()["source"],
+            previous_source,
+            "old media events cannot publish or retry the new selection"
+        );
+        assert_eq!(
+            props.lock().unwrap().get("seek").cloned(),
+            previous_seek,
+            "old timeline cannot consume the new resume request"
+        );
+        let point = crate::isolated::open_database(&path)
+            .unwrap()
+            .vod_progress(&second_key)
+            .unwrap();
+        assert_eq!(point.position_ms, 37_000);
+        assert!(!point.completed, "old EOF cannot complete the new episode");
+        held.release();
+    }
     step(app.wait_for_gone("id:vod-screen", Duration::from_secs(5)));
+    step(app.wait_until(
+        "new episode source published",
+        Duration::from_secs(5),
+        |_| {
+            props
+                .lock()
+                .unwrap()
+                .get("source")
+                .and_then(|source| source["url"].as_str())
+                .is_some_and(|url| url.ends_with("/series/generated-user/generated-pass/102.mp4"))
+        },
+    ));
     assert_eq!(player(&app), surface);
     let opened = props.lock().unwrap()["source"].clone();
     assert!(
@@ -1059,6 +1151,34 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resum
             .ends_with("/series/generated-user/generated-pass/102.mp4")
     );
     let token = opened["token"].clone();
+    if held.is_some() {
+        app.engine().control().dispatch_event(
+            surface,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: "timeline".into(),
+                data: json!({"token":token,"seekId":0,"ms":0,"durationMs":120000,"seekable":true}),
+            },
+        );
+        app.settle();
+        let seek = props.lock().unwrap()["seek"].clone();
+        assert_eq!(seek["token"], token);
+        assert_eq!(
+            seek["ms"], 37_000,
+            "the authoritative new timeline receives the preserved resume request"
+        );
+        app.engine().control().dispatch_event(surface, EventKind::NativeEvent, EventPayload::Native { name:"timeline".into(), data:json!({"token":token,"seekId":seek["id"],"ms":37000,"durationMs":120000,"seekable":true}) });
+        app.settle();
+        step(app.wait_until(
+            "seek controls re-enable after publication",
+            Duration::from_secs(5),
+            |app| {
+                app.screen()
+                    .accessibility_state("label:Rewind")
+                    .is_ok_and(|state| !state.disabled)
+            },
+        ));
+    }
     if resume != ResumeCase::Seekable {
         assert_eq!(
             crate::isolated::open_database(&path)
@@ -1085,7 +1205,7 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resum
         );
         app.settle();
     }
-    if resume != ResumeCase::Seekable {
+    if resume != ResumeCase::Seekable && held.is_none() {
         assert!(props.lock().unwrap().get("seek").is_none_or(Value::is_null));
     }
     app.engine().control().dispatch_event(

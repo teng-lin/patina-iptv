@@ -236,6 +236,8 @@ pub(crate) struct State {
     execution: Mutex<Execution>,
     contexts: Mutex<HashMap<i64, ContextEntry>>,
     inputs_changed: tokio::sync::Notify,
+    #[cfg(feature = "test-support")]
+    source_preparation_gate: Mutex<Option<Arc<crate::testing::GateState>>>,
     preparations: Mutex<HashMap<usize, (CancelToken, Arc<tokio::sync::Mutex<()>>)>>,
     media_ops: tokio::sync::Mutex<()>,
     playback: Mutex<Option<(JobId, iptv_net::recording_file::RecordingFile)>>,

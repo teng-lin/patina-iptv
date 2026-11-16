@@ -1188,3 +1188,9 @@ pub fn hold_writer() -> runtime::TestGate {
         .and_then(|owner| owner.hold_writer())
         .expect("hold_writer needs a started app")
 }
+
+/// Hold the next source preparation for deterministic old-native-event tests.
+#[cfg(feature = "test-support")]
+pub fn hold_source_preparation() -> runtime::TestGate {
+    runtime().hold_source_preparation()
+}

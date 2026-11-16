@@ -657,3 +657,56 @@ async fn per_channel_user_agent_precedes_playlist_and_network_defaults_when_shar
     owner.release_viewing(0);
     assert!(owner.drain_services());
 }
+
+#[tokio::test]
+async fn a_new_incarnation_uses_fresh_provider_limit_after_a_stale_view_reservation() {
+    let fixture = Fixture::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let owner = owner(dir.path());
+    let request = seed(&owner, &fixture.url).await;
+    let first = open(&owner, &request).await;
+    let playback = player(&first).await;
+    let source_id = SourceId(request.source);
+    owner
+        .services()
+        .call(move |store| {
+            let mut source = store.source(source_id)?.unwrap().source;
+            if let SourceConfig::M3u(config) = &mut source.config {
+                config.location =
+                    iptv_providers::SecretUrl::new("https://example.test/generated-new.m3u");
+            }
+            store.update_source(source_id, &source)
+        })
+        .await
+        .unwrap();
+    assert!(owner.reserve_live_viewing(0, source_id, &request.channel));
+    // Model a provisional reservation made before the source-incarnation poll
+    // discarded the old provider's observed hard allowance.
+    owner.recordings.lock().viewers.get_mut(&0).unwrap().limit = 1;
+    let prepared = owner
+        .prepare_live_source(
+            0,
+            source_id,
+            request.channel.clone(),
+            source(&owner, &request).await,
+        )
+        .await
+        .unwrap();
+    assert_ne!(first.url, prepared.url);
+    owner
+        .recordings
+        .lock()
+        .provider_limits
+        .insert(source_id.0, 3);
+    refresh_accounts(&owner.services(), &owner.recordings)
+        .await
+        .unwrap();
+    assert!(
+        owner.recordings.lock().capacity(source_id.0, None),
+        "the newly registered owner must not retain the old incarnation's hard allowance"
+    );
+    assert_eq!(fixture.peak.load(Ordering::SeqCst), 1);
+    drop(playback);
+    owner.release_viewing(0);
+    assert!(owner.drain_services());
+}

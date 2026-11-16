@@ -154,3 +154,47 @@ pub fn zap_target(schedule: &dyn Schedule, channel: usize, step: isize) -> usize
 mod live_tests;
 #[cfg(test)]
 mod tests;
+
+/// Admission for callbacks from the native source actually published to a
+/// persistent player. Selecting/preparing its successor must not relabel old
+/// native progress as belonging to the new content identity.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Publication {
+    published: Option<(u64, u64)>,
+}
+impl Publication {
+    pub fn publish(&mut self, session: u64, token: u64) {
+        self.published = Some((session, token));
+    }
+    pub fn clear(&mut self) {
+        self.published = None;
+    }
+    pub fn accepts(&self, session: u64, token: Option<u64>) -> bool {
+        self.published
+            .is_some_and(|(published_session, published_token)| {
+                published_session == session && token.is_none_or(|token| token == published_token)
+            })
+    }
+}
+
+#[cfg(test)]
+mod publication_tests {
+    use super::Publication;
+    #[test]
+    fn callbacks_belong_to_published_session_and_token() {
+        let mut publication = Publication::default();
+        assert!(!publication.accepts(1, None));
+        publication.publish(1, 7);
+        assert!(publication.accepts(1, None));
+        assert!(publication.accepts(1, Some(7)));
+        assert!(!publication.accepts(2, Some(7)));
+        publication.clear();
+        assert!(
+            !publication.accepts(1, Some(7)),
+            "a same-session retry is also fenced during preparation"
+        );
+        publication.publish(1, 8);
+        assert!(!publication.accepts(1, Some(7)));
+        assert!(publication.accepts(1, Some(8)));
+    }
+}

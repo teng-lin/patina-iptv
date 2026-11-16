@@ -5,10 +5,14 @@ pub fn active(ui: Ui) -> bool {
     ui.player.recorded.with(Option::is_some) || ui.player.vod.with(Option::is_some)
 }
 pub fn seekable(ui: Ui) -> bool {
-    active(ui) && ui.player.main().timeline.with(|t| t.seekable)
+    let stream = ui.player.main();
+    let published = stream.native_published();
+    let seekable = stream.timeline.with(|timeline| timeline.seekable);
+    active(ui) && published && seekable
 }
+
 pub fn seek_to(ui: Ui, ms: u64) -> bool {
-    if !active(ui) {
+    if !active(ui) || !ui.player.main().accepts_native(None) {
         return false;
     }
     let stream = ui.player.main();
@@ -51,7 +55,7 @@ pub fn observe(
     seekable: bool,
 ) {
     let stream = ui.player.stream(surface);
-    if surface != 0 || token != stream.token.get_untracked() || !active(ui) {
+    if surface != 0 || !stream.accepts_native(Some(token)) || !active(ui) {
         return;
     }
     let mut accepted = false;
@@ -77,6 +81,9 @@ pub fn observe(
 }
 pub fn flush(ui: Ui, ended: bool) {
     let stream = ui.player.main();
+    if !stream.accepts_native(None) {
+        return;
+    }
     let ended = ended || stream.finished.get_untracked();
     if stream.resume_ms.get_untracked().is_some() {
         if !ended {

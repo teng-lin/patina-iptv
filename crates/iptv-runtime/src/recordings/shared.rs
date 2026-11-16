@@ -150,6 +150,17 @@ impl Runtime {
             state.retire_unused().await;
         });
     }
+    /// Hold the next independent-source preparation at its worker boundary.
+    #[cfg(feature = "test-support")]
+    pub fn hold_source_preparation(&self) -> crate::TestGate {
+        let gate = crate::TestGate::new();
+        *self
+            .recordings
+            .source_preparation_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(gate.0.clone());
+        gate
+    }
     /// Join superseded incoming owners before an independent native source
     /// opens, including VOD/catch-up following a shared live stream.
     pub fn retire_viewing_inputs(
@@ -159,10 +170,23 @@ impl Runtime {
         let state = self.recordings.clone();
         let gate = state.preparation_gate(surface);
         let services = self.services();
+        #[cfg(feature = "test-support")]
+        let pause = state
+            .source_preparation_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
         async move {
+            let work = services.clone();
             let _ = services
                 .spawn(async move {
                     let _gate = gate.lock().await;
+                    #[cfg(feature = "test-support")]
+                    if let Some(pause) = pause {
+                        let _ = work.spawn_blocking(move || pause.pause()).await;
+                    }
+                    #[cfg(not(feature = "test-support"))]
+                    let _ = work;
                     state.retire_unused().await;
                 })
                 .await;
@@ -323,11 +347,7 @@ impl Runtime {
                     let id = NEXT_INPUT.fetch_add(1, Ordering::Relaxed);
                     {
                         let mut data = state.lock();
-                        let mut wanted = data
-                            .viewers
-                            .get(&surface)
-                            .cloned()
-                            .ok_or_else(|| Error::unavailable("Channel unavailable"))?;
+                        let mut wanted = data.lease(source_id.0);
                         wanted.account = account(&config);
                         if !data.capacity_for(&wanted, Some(surface), None) {
                             return Err(Error::unavailable(
@@ -339,11 +359,10 @@ impl Runtime {
                         {
                             return Err(Error::unavailable("Channel unavailable"));
                         }
-                        let mut lease = data
-                            .viewers
-                            .get(&surface)
-                            .cloned()
-                            .ok_or_else(|| Error::unavailable("Channel unavailable"))?;
+                        if !data.viewers.contains_key(&surface) {
+                            return Err(Error::unavailable("Channel unavailable"));
+                        }
+                        let mut lease = data.lease(source_id.0);
                         lease.account = account(&config);
                         lease.pending = Some(id);
                         data.viewers.insert(surface, lease.clone());

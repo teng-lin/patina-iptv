@@ -53,6 +53,7 @@ pub struct Stream {
     pub source: Signal<Option<PlaySource>>,
     /// Bumped on every open, so a retry reopens even the same URL.
     pub token: Signal<u64>,
+    publication: Signal<iptv_core::playback::Publication>,
     /// The open stream is live (not catch-up): the player bridges
     /// connections the server closes.
     pub live: Signal<bool>,
@@ -84,11 +85,22 @@ pub struct Stream {
 }
 
 impl Stream {
+    pub(crate) fn native_published(self) -> bool {
+        self.publication.with(|publication| {
+            publication.accepts(self.health.with(|health| health.session()), None)
+        })
+    }
+    pub(crate) fn accepts_native(self, token: Option<u64>) -> bool {
+        self.publication.with_untracked(|publication| {
+            publication.accepts(self.health.with_untracked(|health| health.session()), token)
+        })
+    }
     fn new() -> Self {
         Stream {
             health: signal(Health::default()),
             source: signal(None),
             token: signal(0),
+            publication: signal(Default::default()),
             live: signal(true),
             reconnect: signal(false),
             key: signal(None),
@@ -347,6 +359,7 @@ fn close(ui: Ui, surface: usize) {
     crate::runtime().release_viewing(surface);
     cancel_resolve(surface);
     let stream = ui.player.stream(surface);
+    stream.publication.update(|publication| publication.clear());
     stream.health.update(Health::stop);
     stream.parked.set(None);
     stream.source.set(None);
@@ -361,6 +374,11 @@ fn close(ui: Ui, surface: usize) {
 
 /// Resolves what `surface` plays and hands the stream to its player.
 fn open(ui: Ui, surface: usize, session: u64) {
+    let stream = ui.player.stream(surface);
+    if stream.health.with_untracked(|health| health.session()) != session {
+        return;
+    }
+    stream.publication.update(|publication| publication.clear());
     if surface == 0
         && let Some((playing, _)) = ui.player.vod.get_untracked()
     {
@@ -598,6 +616,7 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
     if stream.health.with_untracked(|h| h.session()) != session {
         return; // the viewer moved on
     }
+    stream.publication.update(|publication| publication.clear());
     // Recheck timed grants after asynchronous resolution, before the decoder
     // sees a stream. The runtime already checked current durable membership.
     let owner = crate::runtime();
@@ -706,6 +725,9 @@ fn publish_source(ui: Ui, surface: usize, session: u64, source: PlaySource) {
         stream.live.set(live);
         stream.reconnect.set(reconnect);
         stream.token.update(|t| *t += 1);
+        stream
+            .publication
+            .update(|publication| publication.publish(session, stream.token.get_untracked()));
         stream.position_ms.set(0);
         stream.finished.set(false);
         stream.timeline.set(Default::default());
