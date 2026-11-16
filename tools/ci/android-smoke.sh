@@ -224,7 +224,7 @@ if [ "$is_tv" = true ]; then
   # Queue navigation before reading logcat: a loaded host can spend the
   # entire auto-hide interval polling or taking screenshots.
   keys KEYCODE_DPAD_RIGHT KEYCODE_BACK
-  expect 'iptv (long press by timer: ShowControls|key=ok .*phase=Repeat .*action=Some\(ShowControls\))' 10
+  expect 'iptv (long press by timer: ShowControls|key=ok .*phase=(Repeat|Up) .*action=Some\(ShowControls\))' 10
   expect 'key=right .*ctx=Controls .*action=Some\(MoveRight\)' 10
   expect 'key=back .*ctx=Controls' 10
   pause 0.2

@@ -321,6 +321,27 @@ mod tests {
     }
 
     #[test]
+    fn a_late_release_opens_controls_when_the_long_press_timer_has_not_run() {
+        use crate::{Phase, PressDetector};
+        let keys = Keymap::for_profile(Profile::Remote);
+        for context in [Player, Controls] {
+            let mut detector = PressDetector::new(400);
+            assert_eq!(detector.feed(RemoteKey::Ok, Phase::Down, 0, true), None);
+            // Native Android can report its repeat just before the threshold,
+            // with release queued ahead of the UI timer under rendering load.
+            assert_eq!(detector.feed(RemoteKey::Ok, Phase::Repeat, 399, true), None);
+            let released = detector.feed(RemoteKey::Ok, Phase::Up, 404, true);
+            assert_eq!(
+                released.and_then(|(key, press)| keys.resolve(context, key, press)),
+                Some(Action::ShowControls),
+                "elapsed hold duration must not fall back to short OK"
+            );
+            assert_eq!(detector.poll(500), None, "late timer cannot fire twice");
+            assert_eq!(detector.feed(RemoteKey::Ok, Phase::Up, 501, true), None);
+        }
+    }
+
+    #[test]
     fn long_ok_opens_controls_once_even_after_the_context_changes() {
         use crate::{Phase, PressDetector};
         let keys = Keymap::for_profile(Profile::Remote);
