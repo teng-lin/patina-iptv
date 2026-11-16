@@ -469,3 +469,56 @@ async fn cancelling_pending_preparation_waits_for_its_upstream_to_close() {
         .unwrap();
     server.await.unwrap();
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_transient_accept_error_backs_off_and_keeps_the_capability_serving() {
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    let listener = &listener;
+    let attempts = AtomicUsize::new(0);
+    let accept = || {
+        let first = attempts.fetch_add(1, Ordering::SeqCst) == 0;
+        async move {
+            if first {
+                Err(io::Error::other("generated transient accept failure"))
+            } else {
+                listener.accept().await
+            }
+        }
+    };
+    let shared = Arc::new(Shared {
+        buffer: Mutex::default(),
+        changed: Notify::new(),
+    });
+    let serving = serve_connections(accept, "/generated/live.ts".into(), Arc::downgrade(&shared));
+    tokio::pin!(serving);
+    for _ in 0..2 {
+        let state =
+            std::future::poll_fn(|cx| std::task::Poll::Ready(serving.as_mut().poll(cx))).await;
+        assert!(
+            state.is_pending(),
+            "an accept error must not retire the server"
+        );
+        assert_eq!(attempts.load(Ordering::SeqCst), 1, "retry must back off");
+    }
+    tokio::time::advance(Duration::from_millis(50)).await;
+    tokio::time::resume();
+    let request = async {
+        let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+        client
+            .write_all(b"HEAD /generated/live.ts HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        client.read_to_end(&mut response).await.unwrap();
+        assert!(response.starts_with(b"HTTP/1.1 200 OK\r\n"));
+    };
+    tokio::select! {
+        _ = &mut serving => panic!("the same capability must remain available"),
+        result = tokio::time::timeout(Duration::from_secs(5), request) => result.unwrap(),
+    }
+    assert!(attempts.load(Ordering::SeqCst) >= 2);
+    assert!(shared.lock().ended.is_none(), "capture remains live");
+}

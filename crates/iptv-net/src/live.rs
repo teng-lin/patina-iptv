@@ -165,22 +165,13 @@ impl LiveInput {
             let _ = closed_tx.send(true);
         });
         let server_shared = Arc::downgrade(&shared);
+        let server_cancel = lifetime.clone();
         let server = tokio::spawn(async move {
             let Ok(listener) = tokio::net::TcpListener::from_std(listener) else {
+                server_cancel.cancel();
                 return;
             };
-            let mut clients = tokio::task::JoinSet::new();
-            loop {
-                tokio::select! {
-                    Some(_) = clients.join_next(), if !clients.is_empty() => {},
-                    connection = listener.accept(), if clients.len() < CLIENTS => {
-                        let Ok((socket, _)) = connection else { break };
-                        let shared = server_shared.clone();
-                        let path = path.clone();
-                        clients.spawn(async move { let _ = serve(socket, &path, shared).await; });
-                    }
-                }
-            }
+            serve_connections(|| listener.accept(), path, server_shared).await;
         });
         let owner = Self(Arc::new(Owner {
             url,
@@ -399,6 +390,31 @@ impl LiveReader {
                 }
             }
             notified.await;
+        }
+    }
+}
+
+async fn serve_connections<F, A>(mut accept: F, path: String, shared: Weak<Shared>)
+where
+    F: FnMut() -> A,
+    A: std::future::Future<Output = io::Result<(tokio::net::TcpStream, std::net::SocketAddr)>>,
+{
+    let mut clients = tokio::task::JoinSet::new();
+    loop {
+        tokio::select! {
+            Some(_) = clients.join_next(), if !clients.is_empty() => {},
+            connection = accept(), if clients.len() < CLIENTS => {
+                match connection {
+                    Ok((socket, _)) => {
+                        let shared = shared.clone();
+                        let path = path.clone();
+                        clients.spawn(async move { let _ = serve(socket, &path, shared).await; });
+                    }
+                    // Resource pressure must not retire a still-owned capability
+                    // or its clients. Back off rather than spin on accept errors.
+                    Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
+                }
+            }
         }
     }
 }
