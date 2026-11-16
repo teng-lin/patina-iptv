@@ -114,6 +114,7 @@ class Plan(unittest.TestCase):
         sources = {
             checks.REPAIR: "crates/iptv-runtime/src/guide_repair/tests.rs",
             checks.INSPECTION: "crates/iptv-runtime/tests/it/foundation_inspection.rs",
+            checks.GTK_LIFECYCLE: "crates/iptv-app/tests/native_player.rs",
             checks.LATENCY: "crates/iptv-app/tests/app/store_latency.rs",
             checks.BUSY_READER: "crates/iptv-app/tests/app/store_latency.rs",
         }
