@@ -386,7 +386,9 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
             Action::MoveLeft => mv(Move::Left),
             Action::MoveRight => mv(Move::Right),
             Action::Select | Action::ReturnToPlayer => crate::lists::ok(ui),
-            Action::ShowMenu | Action::ShowControls if ui.playing.get().is_some() => {
+            Action::ShowMenu | Action::ShowControls
+                if ui.playing.get().is_some() || crate::on_demand::active(ui) =>
+            {
                 ui.mode.set(ViewMode::Fullscreen);
                 crate::play_bar::remote(ui);
             }
