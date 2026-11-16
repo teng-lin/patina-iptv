@@ -116,6 +116,16 @@ fn pointer_and_touch_drive_search_the_channel_list_and_multiview() {
         .set("guide.stay_on_list", Value::Bool(true))
         .unwrap();
     settings.set("guide.switch_delay", Value::ms(0)).unwrap();
+    // A fresh store assigns the first imported synthetic playlist source 1.
+    // Scope its four-stream fixture allowance so the later Xtream account
+    // retains its observed one-stream limit and warning behavior.
+    settings
+        .set_in(
+            "playlists.max_connections",
+            &iptv_settings::Target::playlist("1"),
+            Value::Int(4),
+        )
+        .unwrap();
     settings
         .set("search.show_history", Value::Bool(false))
         .unwrap();
@@ -148,6 +158,13 @@ fn pointer_and_touch_drive_search_the_channel_list_and_multiview() {
     step(app.wait_for_within("text:Playlist added", IMPORT));
     step(app.press("text:Watch"));
     step(app.wait_for_within("text:Morning Talk", IMPORT));
+    let store = crate::isolated::open_database(data.join("iptv.sqlite")).unwrap();
+    assert_eq!(
+        store.sources().unwrap()[0].id.0,
+        1,
+        "fixture allowance source"
+    );
+    drop(store);
 
     search_by_touch(&mut app, &data);
     channel_list_by_touch(&mut app);
@@ -539,6 +556,11 @@ fn multiview_by_pointer(app: &mut Headless) {
     // does not have: its message and Try again, which opens it again.
     // (Until their players report, the tiles say they are loading.)
     let loading = format!("{TILE} >> text:Loading…");
+    step(
+        app.wait_until("three synthetic tile sources are published", WAIT, |_| {
+            (0..3).all(iptv_app::player_has_source)
+        }),
+    );
     assert_eq!(app.screen().count(&loading), Ok(3));
     player_event(
         app,

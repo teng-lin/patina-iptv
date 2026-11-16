@@ -144,7 +144,6 @@ fn start_portal(home: &crate::isolated::Home) -> (Headless, Arc<(Mutex<Slow>, Co
     settings
         .set("general.resume_last_channel", Value::Bool(true))
         .unwrap();
-    std::fs::write(data.join("settings.json"), settings.to_json_string()).unwrap();
     let (url, state) = serve();
     let mut store = crate::isolated::open_database(data.join("iptv.sqlite")).unwrap();
     let source = store
@@ -174,6 +173,15 @@ fn start_portal(home: &crate::isolated::Home) -> (Headless, Arc<(Mutex<Slow>, Co
         .unwrap();
     store.set_active_source(source).unwrap();
     drop(store);
+    // The cancellation scenario holds main playback while resolving an auxiliary.
+    settings
+        .set_in(
+            "playlists.max_connections",
+            &iptv_settings::Target::playlist(source.0.to_string()),
+            Value::Int(2),
+        )
+        .unwrap();
+    std::fs::write(data.join("settings.json"), settings.to_json_string()).unwrap();
     std::fs::write(data.join(format!("last_channel-{}", source.0)), slow).unwrap();
 
     let app = Headless::start(EngineConfig {

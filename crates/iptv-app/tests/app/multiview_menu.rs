@@ -200,7 +200,19 @@ fn changing_picker_group_or_query_reveals_selection_after_touch_scrolling() {
 
 #[test]
 fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
-    let Some(_home) = isolated!() else { return };
+    let Some(home) = isolated!() else { return };
+    let root = home.data_dir();
+    std::fs::create_dir_all(&root).unwrap();
+    let mut settings = iptv_settings::Settings::new();
+    // Four generated streams are allowed for this tile-menu fixture.
+    settings
+        .set_in(
+            "playlists.max_connections",
+            &iptv_settings::Target::playlist("1"),
+            iptv_settings::Value::Int(4),
+        )
+        .unwrap();
+    std::fs::write(root.join("settings.json"), settings.to_json_string()).unwrap();
     let config = EngineConfig {
         viewport: Size::new(px(W), px(H)),
         ..EngineConfig::new(Root::of::<iptv_app::App>())
@@ -227,6 +239,13 @@ fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
     step(app.wait_for_within("text:Playlist added", IMPORT));
     step(app.press("text:Watch"));
     step(app.wait_for("text:Test Channel One"));
+    let store = crate::isolated::open_database(root.join("iptv.sqlite")).unwrap();
+    assert_eq!(
+        store.sources().unwrap()[0].id.0,
+        1,
+        "fixture allowance source"
+    );
+    drop(store);
 
     // Multiview from full-screen video (the play bar's button: the
     // harness starts as a desktop), Channel One the first tile; then a
@@ -265,6 +284,11 @@ fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
     step(gone(&mut app, picker));
     step(app.wait_for(&format!("{TILE} >> text:/Test Channel Three$/")));
     assert_eq!(tiles(&app), 2);
+    step(
+        app.wait_until("both synthetic tile sources are published", IMPORT, |_| {
+            iptv_app::player_has_source(0) && iptv_app::player_has_source(1)
+        }),
+    );
 
     // OK: the panel at the right edge, centred, with the reference's items.
     step(app.press_key("enter"));

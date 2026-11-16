@@ -152,6 +152,11 @@ fn the_last_channel_opens_once_before_the_guide() {
     let mut app = app();
     assert!(!app.shows("text:Channel 1"), "the synthetic guide showed");
     step(app.wait_for_within("text:Test Channel Two", IMPORT));
+    step(
+        app.wait_until("the last channel source is published", IMPORT, |_| {
+            iptv_app::player_has_source(0) && iptv_app::player_opens(0) > opens
+        }),
+    );
     assert_eq!(iptv_app::player_opens(0), opens + 1, "opened once");
     // The guide arrives (first screen, then the whole window) and the
     // playing channel is found in it: back to the guide shows it, with
