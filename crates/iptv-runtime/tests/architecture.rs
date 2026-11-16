@@ -92,6 +92,11 @@ const STATICS: &[(&str, &str)] = &[
     ("recordings/host.rs", "HOSTS"),
     // Synthetic callback handoff barrier used only by recording unit tests.
     ("recordings/tests.rs", "PUBLICATION_GATE"),
+    // Function-pointer host ports need process-local test observation/gates.
+    // This module is declared only under cfg(test), never in a shipped runtime.
+    ("recordings/tests.rs", "CALLS"),
+    ("recordings/tests.rs", "GATE"),
+    ("recordings/tests.rs", "REGISTRATIONS"),
 ];
 
 fn sources(directory: &Path, files: &mut Vec<PathBuf>) {

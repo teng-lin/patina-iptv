@@ -86,6 +86,100 @@ fn back_in_app(app: &mut Headless) {
 }
 
 #[test]
+fn native_pip_reports_revoke_and_restore_controls_without_reopening_playback() {
+    use nsh_core::{EventKind, EventPayload, MountItem};
+    use std::sync::{Arc, Mutex};
+
+    let Some(_home) = isolated!() else { return };
+    let native = Arc::new(Mutex::new(None));
+    let observed = native.clone();
+    let mut config = EngineConfig {
+        viewport: Size::new(px(960.0), px(540.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    };
+    config.environment.os = Os::Linux;
+    let mut app = Headless::start(config).unwrap();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::Component { id, name } = item
+                && name.as_ref() == "tv.player"
+            {
+                *observed.lock().unwrap() = Some(*id);
+            }
+        }
+    });
+    app.on_pick(|_| {
+        vec![PickedFile::new(
+            "synthetic.m3u",
+            "audio/x-mpegurl",
+            ImageData::new(PLAYLIST.as_bytes().to_vec()),
+        )]
+    });
+    step(app.wait_for("text:No playlists yet"));
+    step(app.press("text:Add playlist"));
+    step(app.press("text:Playlist file"));
+    step(app.press("text:Choose a file…"));
+    step(app.wait_for("text:synthetic.m3u"));
+    step(app.press("text:Add playlist"));
+    step(app.wait_for_within("text:Playlist added", Duration::from_secs(20)));
+    step(app.press("text:Watch"));
+    step(app.wait_for("text:Test Channel One"));
+    step(app.set_environment("TV input", |environment| environment.idiom = Idiom::Tv));
+    let app = &mut app;
+    step(app.press_key("enter"));
+    step(app.wait_for("id:player-banner"));
+    step(
+        app.wait_until("initial player source", Duration::from_secs(5), |_| {
+            iptv_app::player_opens(0) > 0 && iptv_app::player_has_source(0)
+        }),
+    );
+    step(app.press_key("m"));
+    step(app.wait_for(STRIP));
+    step(app.wait_for(PIP));
+    let node = native
+        .lock()
+        .unwrap()
+        .expect("the persistent player was observed");
+    let opens = iptv_app::player_opens(0);
+    for supported in [false, true, false, true] {
+        app.engine().control().dispatch_event(
+            node,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: "pip".into(),
+                data: serde_json::json!({"supported":supported,"tv":false,"active":false}),
+            },
+        );
+        if supported {
+            step(app.wait_for_gone(
+                "text:/Picture in picture is unavailable on this device/",
+                Duration::from_secs(3),
+            ));
+        } else {
+            step(app.wait_for("text:/Picture in picture is unavailable on this device/"));
+            step(app.press("text:/^Picture in picture/"));
+            app.settle();
+            assert!(
+                !pip_open(app),
+                "unsupported native reports revoke action admission"
+            );
+        }
+        assert_eq!(
+            iptv_app::player_opens(0),
+            opens,
+            "capability reports must not open a stream"
+        );
+    }
+    step(app.press(PIP));
+    step(app.wait_for(PLACEHOLDER));
+    assert!(
+        pip_open(app),
+        "a fresh supported report restores action admission"
+    );
+    assert_eq!(iptv_app::player_opens(0), opens);
+}
+
+#[test]
 fn picture_in_picture_opens_a_window_of_its_own_on_the_same_player() {
     let Some(_home) = isolated!() else { return };
     let mut config = EngineConfig {

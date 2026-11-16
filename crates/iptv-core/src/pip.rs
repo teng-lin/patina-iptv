@@ -47,6 +47,8 @@ pub enum Change {
 /// Picture-in-picture state, as the host reports it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Pip {
+    /// A native host has reported support (false support is distinct from no report).
+    pub reported: bool,
     /// The host can open a picture-in-picture window (Android with the
     /// system feature; never the desktop players today).
     pub supported: bool,
@@ -64,6 +66,7 @@ pub struct Pip {
 impl Pip {
     /// The host's report: `supported`, `tv`, `active`.
     pub fn report(&mut self, supported: bool, tv: bool, active: bool) -> Change {
+        self.reported = true;
         self.supported = supported;
         self.tv = tv;
         let was = std::mem::replace(&mut self.active, active);
@@ -77,7 +80,7 @@ impl Pip {
     /// Whether the control strip's button can open the window now:
     /// `playing` is a channel playing full screen.
     pub fn can_enter(&self, playing: bool) -> bool {
-        self.supported && playing && !self.active
+        crate::capabilities::pip(self, playing).available()
     }
 
     /// Asks the host to open the window; false when it cannot now.
@@ -96,7 +99,7 @@ impl Pip {
             OnLeave::Always => true,
             OnLeave::Never => false,
         };
-        self.supported && playing && wanted
+        self.reported && self.supported && playing && wanted
     }
 
     /// Whether the app's UI shows over the video: not in Android's

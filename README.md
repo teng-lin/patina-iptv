@@ -34,6 +34,8 @@ your IPTV provider gave you.
 
 The [internal runtime API contract](docs/runtime-api-v1.md) documents source-scoped
 inspection, guide repair, verification and undo for native application clients.
+The [feature availability matrix](docs/capabilities.md) explains host limits,
+player reports and background recording requirements.
 
 ### Why "Patina"
 
