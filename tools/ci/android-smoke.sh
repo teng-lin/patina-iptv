@@ -68,8 +68,16 @@ expect() {
   echo "  ok: $(applog | grep -E -m1 "$pattern" | sed 's/^.*: iptv/iptv/')"
 }
 alive() { [ -n "$($adb shell pidof $pkg | tr -d '\r')" ]; }
-# Sends remote keys (one adb call: menus that hide after a moment stay up).
-keys() { $adb shell input keyevent "$@"; }
+# Queue each short Down/Up pair without waiting for app handling between them.
+# State/log acknowledgements below still wait for the requested app behavior.
+# Deliberate long presses use adb input --longpress separately.
+keys() {
+  local key
+  for key in "$@"; do
+    [[ $key =~ ^KEYCODE_[A-Z0-9_]+$ ]] || fail "invalid smoke key: $key"
+  done
+  $adb shell "CLASSPATH=$probe app_process /system/bin ShortKeys $*"
+}
 shot() { $adb exec-out screencap -p > "$out/$1.png" || true; }
 step() { echo "== $*"; }
 
@@ -104,8 +112,10 @@ for candidate in "${ANDROID_HOME:-$HOME/Android/Sdk}"/build-tools/*/d8; do
   [ ! -x "$candidate" ] || d8=$candidate
 done
 [ -n "$d8" ] || fail "Android d8 is required for the lifecycle probe"
-javac --release 11 -d "$out/always-finish" "$(dirname "$0")/android/AlwaysFinish.java"
-"$d8" --output "$out/always-finish" "$out/always-finish/AlwaysFinish.class"
+javac --release 11 -d "$out/always-finish" \
+  "$(dirname "$0")/android/AlwaysFinish.java" "$(dirname "$0")/android/ShortKeys.java"
+"$d8" --output "$out/always-finish" \
+  "$out/always-finish/AlwaysFinish.class" "$out/always-finish/ShortKeys.class"
 probe=/data/local/tmp/patina-smoke-always-finish.dex
 set_always_finish() {
   $adb shell "CLASSPATH=$probe app_process /system/bin AlwaysFinish $1"
