@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 use common::{XT_PASSWORD, catalog, m3u_source, replace};
 use iptv_providers::model::ContentKind;
 use iptv_store_sqlite::{ChannelQuery, ChannelScope, MoveTarget, OrderScope, Store};

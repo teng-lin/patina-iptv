@@ -1,6 +1,6 @@
 //! Import-driven display reads must keep using committed data while writes wait.
 #![cfg(feature = "test-support")]
-mod support;
+use crate::support;
 
 use iptv_runtime::{Ports, Runtime};
 use std::{

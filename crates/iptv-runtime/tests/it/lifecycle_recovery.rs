@@ -1,6 +1,6 @@
 //! Acknowledged persistence work survives teardown and failed publication.
 #![cfg(feature = "test-support")]
-mod support;
+use crate::support;
 use iptv_runtime::{Ports, Runtime, commands};
 use std::{
     future::Future,

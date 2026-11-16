@@ -64,8 +64,10 @@ class Parity(unittest.TestCase):
         self.assertIn("nsh-platform-windows --lib chrome::tests -- --format=pretty", native[0])
         self.assertIn("pins.py\" check-nsh", script)
         steps = {step["name"]: step["argv"] for step in plan.plan()}
-        libraries = steps["library-tests"]
-        self.assertEqual(libraries[libraries.index("--features") + 1], "iptv-runtime/test-support")
+        tests = steps["workspace-tests"]
+        self.assertEqual(tests[tests.index("--features") + 1], plan.COVERAGE_FEATURES)
+        self.assertIn("--tests", tests)
+        self.assertIn("--doc", steps["workspace-doctests"])
         for name in ("repair-display-independence", "guide-input-budget", "busy-store-reader"):
             argv = steps[name]
             self.assertEqual(argv[argv.index("--") + 1:], ["--ignored", "--exact", "--format=pretty"])

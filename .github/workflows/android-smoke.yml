@@ -5,6 +5,7 @@ on:
       - '.github/workflows/android-smoke.yml'
       - '.github/actions/android/**'
       - '.github/actions/setup/**'
+      - '.github/actions/cargo-tool/**'
       - '.github/actions/nsh-cli/**'
       - 'hosts/android/**'
       - 'crates/**'
@@ -43,6 +44,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        with:
+          cache-key: smoke-v2-${{ hashFiles('tools/sync-host.sh', 'tools/ci/android-ndk-env.sh', '.github/actions/android/action.yml', '.github/workflows/android-smoke.yml') }}
       - uses: ./.github/actions/android
         with:
           abi: x86_64

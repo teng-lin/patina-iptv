@@ -1,7 +1,6 @@
 //! Cached single-source startup, descriptions, older pages and manual guide edits.
 #![cfg(feature = "test-support")]
-#[path = "../../iptv-store-sqlite/tests/common/mod.rs"]
-mod common;
+use crate::common;
 use iptv_epg::{ChannelKey, DAY, EpgRef, FeedId, MatchKind, ProgrammeData};
 use iptv_import::{EpgImport, EpgSourceConfig, GuideSink, ListedChannel};
 use iptv_runtime::{Ports, Runtime, RuntimeEvent, data};

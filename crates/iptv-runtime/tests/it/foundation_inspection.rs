@@ -1,8 +1,7 @@
 //! Independent application consumer: generated catalogue/guide fixtures and
 //! public runtime queries, without an NSH root, renderer or native key broker.
-#[path = "../../iptv-store-sqlite/tests/common/mod.rs"]
-mod common;
-mod support;
+use crate::common;
+use crate::support;
 
 use iptv_epg::{
     ChannelKey, EpgRef, FeedId, GuideStore, MatchKind, SourceBuilder, StoreOptions, XmltvChannel,

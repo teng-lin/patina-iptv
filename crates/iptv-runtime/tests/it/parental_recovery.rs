@@ -1,7 +1,6 @@
 //! Recovery rotates one-way credentials and revokes content grants across owners.
-#[path = "../../iptv-store-sqlite/tests/common/mod.rs"]
-mod common;
-mod support;
+use crate::common;
+use crate::support;
 use iptv_core::parental::{Pin, Target};
 use iptv_runtime::{Ports, Runtime, parental::Error};
 use iptv_settings::Value;

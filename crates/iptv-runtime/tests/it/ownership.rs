@@ -1,7 +1,7 @@
 //! Public runtime API exercised without a UI or platform credential broker.
 //! Every owner is reached through the handle the caller holds: there is no
 //! ambient owner for a second runtime to replace.
-mod support;
+use crate::support;
 
 use iptv_runtime::{Ports, Runtime, RuntimeEvent, commands};
 use std::{

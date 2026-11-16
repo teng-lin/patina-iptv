@@ -1,5 +1,5 @@
 //! Foreground return cannot cancel a saved alarm while native recovery is blocked.
-mod support;
+use crate::support;
 
 use iptv_core::recording::{JobId, Request, WakeCapability};
 use iptv_providers::{

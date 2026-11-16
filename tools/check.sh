@@ -28,6 +28,7 @@ python3 tools/ci/test-package-lock.py
 python3 tools/ci/test-ios-entitlements.py
 python3 tools/ci/test-unpack-signing-input.py
 python3 tools/ci/test-nsh-tool-key.py
+python3 tools/ci/test-ci-cache.py
 python3 tools/ci/test-pins.py
 python3 tools/ci/test-android-changes.py
 python3 tools/ci/test-adb-timeout.py

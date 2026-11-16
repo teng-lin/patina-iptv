@@ -2,8 +2,8 @@
 //! Rust allocations; SQLite's own heap is reported separately).
 //!
 //! ```sh
-//! cargo test --release -p iptv-store-sqlite --test epg_memory -- --nocapture
-//! cargo test --release -p iptv-store-sqlite --test epg_memory -- --ignored --nocapture
+//! cargo test --release -p iptv-store-sqlite --test memory epg_memory:: -- --nocapture
+//! cargo test --release -p iptv-store-sqlite --test memory epg_memory:: -- --ignored --nocapture
 //! ```
 //!
 //! The first runs the 1000-channel guide (~83 programmes per channel, as
@@ -11,12 +11,11 @@
 //! writes it); the second the script's default (5000 channels, 9 days,
 //! 1.2M programmes).
 
-mod epg_synth;
-mod staged;
+use crate::epg_synth;
+use crate::staged;
 
-use std::alloc::{GlobalAlloc, Layout, System};
+use crate::allocations::thread::{LIVE, PEAK};
 use std::cell::Cell;
-
 use std::time::Instant;
 
 use epg_synth::{NOW, Shape};
@@ -25,49 +24,6 @@ use iptv_guide::{EpgSchedule, GuideChannel};
 use iptv_import::EpgSourceConfig;
 use iptv_providers::SecretUrl;
 use iptv_store_sqlite::{EpgFeedMeta, EpgWindow, Store};
-
-thread_local! {
-    static LIVE: Cell<isize> = const { Cell::new(0) };
-    static PEAK: Cell<isize> = const { Cell::new(0) };
-}
-
-fn add(n: isize) {
-    // `try_with`: allocations during thread teardown are not counted.
-    let _ = LIVE.try_with(|l| {
-        let v = l.get() + n;
-        l.set(v);
-        let _ = PEAK.try_with(|p| p.set(p.get().max(v)));
-    });
-}
-
-struct Counting;
-
-// SAFETY: every allocation operation delegates unchanged to System.
-unsafe impl GlobalAlloc for Counting {
-    unsafe fn alloc(&self, l: Layout) -> *mut u8 {
-        add(l.size() as isize);
-        // SAFETY: the caller supplies the allocator pointer/layout contract; System receives them unchanged.
-        unsafe { System.alloc(l) }
-    }
-    unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
-        add(l.size() as isize);
-        // SAFETY: the caller supplies the allocator pointer/layout contract; System receives them unchanged.
-        unsafe { System.alloc_zeroed(l) }
-    }
-    unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
-        add(-(l.size() as isize));
-        // SAFETY: the caller supplies the allocator pointer/layout contract; System receives them unchanged.
-        unsafe { System.dealloc(p, l) }
-    }
-    unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
-        add(new as isize - l.size() as isize);
-        // SAFETY: the caller supplies the allocator pointer/layout contract; System receives them unchanged.
-        unsafe { System.realloc(p, l, new) }
-    }
-}
-
-#[global_allocator]
-static ALLOC: Counting = Counting;
 
 /// Live and peak bytes allocated by `f` on this thread, and its result.
 fn measure<T>(f: impl FnOnce() -> T) -> (T, usize, usize) {
@@ -212,32 +168,36 @@ fn stored_load(shape: Shape) -> (Report, Report) {
 
 #[test]
 fn thousand_channel_guide() {
-    let r = in_memory_import(Shape::THOUSAND);
-    assert!(r.programmes > 80_000, "{}", r.programmes);
-    assert!(r.peak >= r.live);
-    let (window, all) = stored_load(Shape::THOUSAND);
-    assert_eq!(all.programmes, r.programmes);
-    // Budgets (measured: ~2-3 MiB live): the stored guide without
-    // descriptions stays far below the in-memory import.
-    assert!(window.live < 5 << 20, "{}", window.live);
-    assert!(all.live < r.live / 2, "{} vs {}", all.live, r.live);
-    // Settled rows go straight into their slots: reading back holds no
-    // raw copy of the guide on the way (it used to peak ~2.5x).
-    for w in [&window, &all] {
-        assert!(
-            w.peak < w.live + w.live / 4 + (64 << 10),
-            "{} vs {}",
-            w.peak,
-            w.live
-        );
-    }
+    crate::isolated("epg_memory::thousand_channel_guide", || {
+        let r = in_memory_import(Shape::THOUSAND);
+        assert!(r.programmes > 80_000, "{}", r.programmes);
+        assert!(r.peak >= r.live);
+        let (window, all) = stored_load(Shape::THOUSAND);
+        assert_eq!(all.programmes, r.programmes);
+        // Budgets (measured: ~2-3 MiB live): the stored guide without
+        // descriptions stays far below the in-memory import.
+        assert!(window.live < 5 << 20, "{}", window.live);
+        assert!(all.live < r.live / 2, "{} vs {}", all.live, r.live);
+        // Settled rows go straight into their slots: reading back holds no
+        // raw copy of the guide on the way (it used to peak ~2.5x).
+        for w in [&window, &all] {
+            assert!(
+                w.peak < w.live + w.live / 4 + (64 << 10),
+                "{} vs {}",
+                w.peak,
+                w.live
+            );
+        }
+    });
 }
 
 #[test]
 #[ignore = "large: run with --release --ignored"]
 fn default_fixture_guide() {
-    let r = in_memory_import(Shape::DEFAULT_FIXTURE);
-    assert!(r.programmes > 1_000_000, "{}", r.programmes);
-    let (window, _) = stored_load(Shape::DEFAULT_FIXTURE);
-    assert!(window.live < 40 << 20, "{}", window.live);
+    crate::isolated("epg_memory::default_fixture_guide", || {
+        let r = in_memory_import(Shape::DEFAULT_FIXTURE);
+        assert!(r.programmes > 1_000_000, "{}", r.programmes);
+        let (window, _) = stored_load(Shape::DEFAULT_FIXTURE);
+        assert!(window.live < 40 << 20, "{}", window.live);
+    });
 }

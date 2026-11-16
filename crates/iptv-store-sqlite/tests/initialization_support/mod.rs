@@ -4,24 +4,31 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub fn child(test: &str, marker: &str) -> Output {
+pub fn child(test: &str, marker: &str, timeout: Duration) -> Output {
     let mut child = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", test, "--nocapture"])
+        .args(["--exact", test, "--include-ignored", "--nocapture"])
         .env(marker, "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + timeout;
     loop {
         if child.try_wait().unwrap().is_some() {
-            return child.wait_with_output().unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains("running 1 test"),
+                "child selector {test:?} must execute exactly one test:\n{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return output;
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
             panic!(
-                "native initialization child timed out and was reaped:\n{}\n{}",
+                "test child {test:?} timed out and was reaped:\n{}\n{}",
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );

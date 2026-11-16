@@ -1,7 +1,6 @@
 //! Synthetic direct-ID access, source fences and durable watch progress.
-#[path = "../../iptv-store-sqlite/tests/common/mod.rs"]
-mod common;
-mod support;
+use crate::common;
+use crate::support;
 use iptv_core::{
     parental::{Pin, Target},
     vod::{Key, Kind, Progress, Query},

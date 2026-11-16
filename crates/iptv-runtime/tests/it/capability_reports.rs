@@ -1,5 +1,5 @@
 //! Inspection is I/O-free; a loaded native host refreshes permission without reopening credentials.
-mod support;
+use crate::support;
 
 use iptv_core::recording::WakeCapability;
 use iptv_runtime::{Ports, Runtime, model::DatabaseKey};

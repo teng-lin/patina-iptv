@@ -174,6 +174,7 @@ mod tests {
                 let output = initialization_support::child(
                     "inspection_stage::tests::probe_stage_initialization_precedes_its_first_encrypted_connection",
                     CHILD,
+                    std::time::Duration::from_secs(20),
                 );
                 assert!(
                     output.status.success(),

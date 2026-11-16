@@ -1,6 +1,5 @@
 //! Cached aggregate browsing retains source identity through policy and deletion.
-#[path = "../../iptv-store-sqlite/tests/common/mod.rs"]
-mod common;
+use crate::common;
 
 use iptv_library::SourcePolicy;
 use iptv_runtime::{Ports, Runtime, RuntimeEvent, data};

@@ -4,56 +4,19 @@
 //! guide eight times longer. The programmes go to the stage in batches of
 //! bounded size; only the channel lists stay in memory.
 //!
-//! One test in this binary: the counters are process-wide.
+//! Each case runs in a fresh process: the counters are process-wide.
 
-mod common;
-mod stream_support;
+use crate::common;
+use crate::stream_support;
 
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicIsize, Ordering};
+use crate::allocations::{LIVE, PEAK};
+use std::sync::atomic::Ordering;
 
 use iptv_epg::{FeedId, Overrides, StoreOptions};
 use iptv_import::{CancelToken, EpgSourceConfig, NoProgress, import_epg};
 use iptv_providers::SecretUrl;
 use iptv_store_sqlite::{EpgFeedMeta, EpgStage, Store};
 use stream_support::{Feeds, GenShape, Serve, block_on};
-
-static LIVE: AtomicIsize = AtomicIsize::new(0);
-static PEAK: AtomicIsize = AtomicIsize::new(0);
-
-fn add(n: isize) {
-    let v = LIVE.fetch_add(n, Ordering::Relaxed) + n;
-    PEAK.fetch_max(v, Ordering::Relaxed);
-}
-
-struct Counting;
-
-// SAFETY: every allocation operation delegates unchanged to System.
-unsafe impl GlobalAlloc for Counting {
-    unsafe fn alloc(&self, l: Layout) -> *mut u8 {
-        add(l.size() as isize);
-        // SAFETY: the caller supplies the allocator pointer/layout contract; System receives them unchanged.
-        unsafe { System.alloc(l) }
-    }
-    unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
-        add(l.size() as isize);
-        // SAFETY: the caller supplies the allocator pointer/layout contract; System receives them unchanged.
-        unsafe { System.alloc_zeroed(l) }
-    }
-    unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
-        add(-(l.size() as isize));
-        // SAFETY: the caller supplies the allocator pointer/layout contract; System receives them unchanged.
-        unsafe { System.dealloc(p, l) }
-    }
-    unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
-        add(new as isize - l.size() as isize);
-        // SAFETY: the caller supplies the allocator pointer/layout contract; System receives them unchanged.
-        unsafe { System.realloc(p, l, new) }
-    }
-}
-
-#[global_allocator]
-static ALLOC: Counting = Counting;
 
 const NOW: i64 = 1_800_000_000;
 const CHANNELS: usize = 500;
@@ -110,30 +73,35 @@ fn import(days: i64) -> (usize, usize, usize, u64) {
 
 #[test]
 fn import_memory_does_not_grow_with_the_guide() {
-    let mib = |b: usize| b as f64 / f64::from(1 << 20);
-    let (short_heap, short_staging, short_sqlite, short_n) = import(1);
-    let (long_heap, long_staging, long_sqlite, long_n) = import(8);
-    eprintln!(
-        "{short_n} programmes: heap {:.1} MiB, SQLite {:.1} MiB staging, {:.1} MiB in all; \
+    crate::isolated(
+        "epg_stream_memory::import_memory_does_not_grow_with_the_guide",
+        || {
+            let mib = |b: usize| b as f64 / f64::from(1 << 20);
+            let (short_heap, short_staging, short_sqlite, short_n) = import(1);
+            let (long_heap, long_staging, long_sqlite, long_n) = import(8);
+            eprintln!(
+                "{short_n} programmes: heap {:.1} MiB, SQLite {:.1} MiB staging, {:.1} MiB in all; \
          {long_n} programmes: heap {:.1} MiB, SQLite {:.1} MiB staging, {:.1} MiB in all",
-        mib(short_heap),
-        mib(short_staging),
-        mib(short_sqlite),
-        mib(long_heap),
-        mib(long_staging),
-        mib(long_sqlite)
+                mib(short_heap),
+                mib(short_staging),
+                mib(short_sqlite),
+                mib(long_heap),
+                mib(long_staging),
+                mib(long_sqlite)
+            );
+            assert_eq!(long_n, 8 * short_n);
+            assert_eq!(short_n, CHANNELS as u64 * 24);
+            // Batches, parser buffers and the channel lists: a few MiB at most,
+            // whatever the guide's length.
+            assert!(long_heap < 12 << 20, "{long_heap}");
+            assert!(
+                long_heap < short_heap + (1 << 20),
+                "{short_heap} -> {long_heap}"
+            );
+            // Page caches bound SQLite: 4 MiB for the stage while downloading,
+            // 32 MiB for the store while copying.
+            assert!(long_staging < 8 << 20, "{long_staging}");
+            assert!(long_sqlite < 48 << 20, "{long_sqlite}");
+        },
     );
-    assert_eq!(long_n, 8 * short_n);
-    assert_eq!(short_n, CHANNELS as u64 * 24);
-    // Batches, parser buffers and the channel lists: a few MiB at most,
-    // whatever the guide's length.
-    assert!(long_heap < 12 << 20, "{long_heap}");
-    assert!(
-        long_heap < short_heap + (1 << 20),
-        "{short_heap} -> {long_heap}"
-    );
-    // Page caches bound SQLite: 4 MiB for the stage while downloading,
-    // 32 MiB for the store while copying.
-    assert!(long_staging < 8 << 20, "{long_staging}");
-    assert!(long_sqlite < 48 << 20, "{long_sqlite}");
 }

@@ -286,10 +286,10 @@ scheduling consumes foreground notifications and emits refresh requests;
 it does not wake a sleeping device. Platform handles, caches and UI gesture
 flags remain in the shell, with an explicit list in
 `iptv-app/tests/app/architecture.rs`. The boundary is a set of exact lists
-that only change on purpose: `iptv-runtime/tests/architecture.rs` lists the
+that only change on purpose: `iptv-runtime/tests/it/architecture.rs` lists the
 crates the runtime may name, the runtime modules that may name the store
 adapter, and its few process-lifetime statics (no thread-local);
-`iptv-runtime/tests/shell_boundary.rs` lists what the shell may name from the
+`iptv-runtime/tests/it/shell_boundary.rs` lists what the shell may name from the
 runtime, and keeps store types and the store dependency out of the shell.
 
 The runtime has no ambient owner. Every operation is given the `Runtime` it

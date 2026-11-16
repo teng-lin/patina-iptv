@@ -16,7 +16,8 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - name: 100k channels and 100k VOD, bounded allocations and elapsed time
-        run: cargo test --locked -p iptv-store-sqlite --test catalog_stream_memory -- --nocapture
+        run: |
+          cargo test --locked -p iptv-store-sqlite --test memory catalog_stream_memory:: -- --nocapture
   fuzz:
     # Five minutes for every fuzz target. The corpus each run grows is cached
     # per target and restored by the next run and by pull request passes;

@@ -1,45 +1,8 @@
 //! Whole import + private SQLite stage + publish allocation regression.
 //! Generated transport chunks never retain the full input JSON document.
-mod common;
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicIsize, Ordering};
-
-static LIVE: AtomicIsize = AtomicIsize::new(0);
-static PEAK: AtomicIsize = AtomicIsize::new(0);
-
-fn add(n: isize) {
-    let v = LIVE.fetch_add(n, Ordering::Relaxed) + n;
-    PEAK.fetch_max(v, Ordering::Relaxed);
-}
-
-struct Counting;
-
-// SAFETY: every allocation operation delegates unchanged to System.
-unsafe impl GlobalAlloc for Counting {
-    unsafe fn alloc(&self, l: Layout) -> *mut u8 {
-        add(l.size() as isize);
-        // SAFETY: the caller supplies the allocator pointer/layout contract; System receives them unchanged.
-        unsafe { System.alloc(l) }
-    }
-    unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
-        add(l.size() as isize);
-        // SAFETY: the caller supplies the allocator pointer/layout contract; System receives them unchanged.
-        unsafe { System.alloc_zeroed(l) }
-    }
-    unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
-        add(-(l.size() as isize));
-        // SAFETY: the caller supplies the allocator pointer/layout contract; System receives them unchanged.
-        unsafe { System.dealloc(p, l) }
-    }
-    unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
-        add(new as isize - l.size() as isize);
-        // SAFETY: the caller supplies the allocator pointer/layout contract; System receives them unchanged.
-        unsafe { System.realloc(p, l, new) }
-    }
-}
-
-#[global_allocator]
-static ALLOC: Counting = Counting;
+use crate::allocations::{LIVE, PEAK};
+use crate::common;
+use std::sync::atomic::Ordering;
 
 use iptv_import::{
     BodyStream, CancelToken, Fetch, FetchError, ImportOptions, NoProgress, StreamingResponse,
@@ -186,10 +149,15 @@ fn run(n: usize) -> (usize, usize) {
 }
 #[test]
 fn hundred_thousand_channels_and_vod_stay_bounded() {
-    let (small, _) = run(100);
-    let (large, _) = run(100_000);
-    assert!(
-        large < small + (2 << 20),
-        "heap grew with catalog: {small} -> {large}"
+    crate::isolated(
+        "catalog_stream_memory::hundred_thousand_channels_and_vod_stay_bounded",
+        || {
+            let (small, _) = run(100);
+            let (large, _) = run(100_000);
+            assert!(
+                large < small + (2 << 20),
+                "heap grew with catalog: {small} -> {large}"
+            );
+        },
     );
 }
