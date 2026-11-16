@@ -271,4 +271,275 @@ mod tests {
         worker.join().unwrap();
         assert!(cache.lock().unwrap().as_ref().unwrap().is_empty());
     }
+
+    /// A local compositor protocol fixture: inspect actual bytes on UnixStream,
+    /// including unexpected mutations after a cached placement.
+    struct IpcMock {
+        _directory: tempfile::TempDir,
+        path: PathBuf,
+        done: std::sync::mpsc::Sender<()>,
+        worker: std::thread::JoinHandle<Vec<String>>,
+    }
+    impl IpcMock {
+        fn new(replies: Vec<(&'static str, Vec<u8>)>) -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("compositor.sock");
+            let listener = UnixListener::bind(&path).unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let (done, finished) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                let mut commands = Vec::new();
+                loop {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            stream
+                                .set_read_timeout(Some(Duration::from_secs(1)))
+                                .unwrap();
+                            let mut bytes = [0; 8192];
+                            let count = stream.read(&mut bytes).unwrap();
+                            let command = String::from_utf8(bytes[..count].to_vec()).unwrap();
+                            let (prefix, reply) =
+                                replies.get(commands.len()).unwrap_or_else(|| {
+                                    panic!("unexpected compositor command: {command}")
+                                });
+                            assert!(
+                                command.starts_with(prefix),
+                                "{command} must start with {prefix}"
+                            );
+                            commands.push(command);
+                            stream.write_all(reply).unwrap();
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            if finished.try_recv().is_ok() {
+                                break;
+                            }
+                            assert!(
+                                std::time::Instant::now() < deadline,
+                                "fixture was never finished"
+                            );
+                            std::thread::sleep(Duration::from_millis(2));
+                        }
+                        Err(error) => panic!("compositor fixture: {error}"),
+                    }
+                }
+                assert_eq!(commands.len(), replies.len(), "missing compositor request");
+                commands
+            });
+            Self {
+                _directory: directory,
+                path,
+                done,
+                worker,
+            }
+        }
+        fn finish(self) -> Vec<String> {
+            self.done.send(()).unwrap();
+            self.worker.join().unwrap()
+        }
+    }
+
+    fn client(address: &str) -> Value {
+        json!({"address":address, "pid":std::process::id(),
+            "title":iptv_core::pip_window::TITLE, "floating":true,
+            "monitor":1, "size":[600,338]})
+    }
+    fn monitors() -> Vec<u8> {
+        serde_json::to_vec(&json!([{"id":1,"x":0,"y":0,"width":1920,
+            "height":1080,"scale":1,"reserved":[0,0,0,0]}]))
+        .unwrap()
+    }
+    fn snapshot(clients: Value) -> Vec<(&'static str, Vec<u8>)> {
+        vec![
+            ("j/clients", serde_json::to_vec(&clients).unwrap()),
+            ("j/monitors", monitors()),
+        ]
+    }
+
+    #[test]
+    fn placement_targets_only_own_valid_new_windows_and_respects_existing_slots() {
+        let mut foreign = client("0x30");
+        foreign["pid"] = json!(u64::from(std::process::id()) + 1);
+        let mut another_title = client("0x31");
+        another_title["title"] = json!("Synthetic other window");
+        let mut tiled = client("0x32");
+        tiled["floating"] = json!(false);
+        let mut missing_address = client("0x33");
+        missing_address.as_object_mut().unwrap().remove("address");
+        let mut missing_monitor = client("0x34");
+        missing_monitor["monitor"] = json!(99);
+        let mut zero_size = client("0x35");
+        zero_size["size"] = json!([0, 338]);
+        let clients = json!([
+            client("0x1"),
+            client("0x2"),
+            foreign,
+            another_title,
+            tiled,
+            client("0x2;dispatch"),
+            client("not-an-address"),
+            missing_address,
+            missing_monitor,
+            zero_size
+        ]);
+        let cache = Mutex::new(Some(HashMap::from([
+            ("0x1".into(), 2),
+            ("0xdead".into(), 1),
+        ])));
+        let mut replies = snapshot(clients.clone());
+        replies.extend([
+            ("dispatch resizewindowpixel exact ", b"ok".to_vec()),
+            ("dispatch movewindowpixel exact ", b"ok\n".to_vec()),
+        ]);
+        let server = IpcMock::new(replies);
+        arrange_at(&server.path, &cache);
+        let commands = server.finish();
+        assert!(
+            commands[2..]
+                .iter()
+                .all(|command| command.ends_with(",address:0x2"))
+        );
+        assert_eq!(
+            *cache.lock().unwrap(),
+            Some(HashMap::from([("0x1".into(), 2), ("0x2".into(), 0)]))
+        );
+        // A later snapshot must not move either an existing or newly cached PiP.
+        let server = IpcMock::new(snapshot(clients));
+        arrange_at(&server.path, &cache);
+        assert_eq!(server.finish(), ["j/clients", "j/monitors"]);
+    }
+
+    #[test]
+    fn legacy_failures_try_modern_dispatch_and_cache_only_acknowledged_placements() {
+        for resize_ok in [false, true] {
+            for modern_ok in [false, true] {
+                let cache = Mutex::new(None);
+                let mut replies = snapshot(json!([client("0xab")]));
+                replies.push((
+                    "dispatch resizewindowpixel exact ",
+                    if resize_ok {
+                        b"ok".to_vec()
+                    } else {
+                        b"unknown dispatcher".to_vec()
+                    },
+                ));
+                if resize_ok {
+                    replies.push((
+                        "dispatch movewindowpixel exact ",
+                        b"unknown dispatcher".to_vec(),
+                    ));
+                }
+                replies.push((
+                    "eval hl.dispatch(hl.dsp.window.resize(",
+                    if modern_ok {
+                        b"ok".to_vec()
+                    } else {
+                        b"rejected".to_vec()
+                    },
+                ));
+                let server = IpcMock::new(replies);
+                arrange_at(&server.path, &cache);
+                let commands = server.finish();
+                let modern = commands.last().unwrap();
+                assert_eq!(modern.matches("window=\"address:0xab\"").count(), 2);
+                assert!(modern.contains("hl.dsp.window.move("));
+                assert_eq!(
+                    cache.lock().unwrap().as_ref().unwrap().contains_key("0xab"),
+                    modern_ok
+                );
+                if !modern_ok {
+                    // A rejected mutation must be retried, not marked as positioned.
+                    let mut replies = snapshot(json!([client("0xab")]));
+                    replies.extend([
+                        ("dispatch resizewindowpixel exact ", b"ok".to_vec()),
+                        ("dispatch movewindowpixel exact ", b"ok".to_vec()),
+                    ]);
+                    let retry = IpcMock::new(replies);
+                    arrange_at(&retry.path, &cache);
+                    retry.finish();
+                    assert_eq!(
+                        cache.lock().unwrap().as_ref().unwrap().get("0xab"),
+                        Some(&0)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_snapshots_or_unreachable_socket_preserve_previous_placements() {
+        let original = Some(HashMap::from([("0x1".into(), 3)]));
+        for replies in [
+            vec![("j/clients", b"not json".to_vec())],
+            vec![("j/clients", vec![0xff])],
+            vec![
+                ("j/clients", b"[]".to_vec()),
+                ("j/monitors", b"not json".to_vec()),
+            ],
+            vec![("j/clients", b"{}".to_vec()), ("j/monitors", monitors())],
+        ] {
+            let cache = Mutex::new(original.clone());
+            let server = IpcMock::new(replies);
+            arrange_at(&server.path, &cache);
+            server.finish();
+            assert_eq!(*cache.lock().unwrap(), original);
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let cache = Mutex::new(original.clone());
+        arrange_at(&directory.path().join("missing.sock"), &cache);
+        assert_eq!(*cache.lock().unwrap(), original);
+    }
+
+    #[test]
+    fn missing_monitors_and_invalid_dimensions_never_dispatch_mutations() {
+        for monitor_reply in [b"{}".to_vec(), b"[]".to_vec(), monitors()] {
+            let mut invalid = client("0x2");
+            invalid["size"] = json!([600, 0]);
+            let mut no_monitor = client("0x3");
+            no_monitor["monitor"] = json!(99);
+            let server = IpcMock::new(vec![
+                (
+                    "j/clients",
+                    serde_json::to_vec(&json!([client("0x1"), invalid, no_monitor])).unwrap(),
+                ),
+                ("j/monitors", monitor_reply),
+            ]);
+            let cache = Mutex::new(Some(HashMap::from([("0x1".into(), 1)])));
+            arrange_at(&server.path, &cache);
+            assert_eq!(server.finish(), ["j/clients", "j/monitors"]);
+            assert_eq!(
+                *cache.lock().unwrap(),
+                Some(HashMap::from([("0x1".into(), 1)]))
+            );
+        }
+        for size in [
+            (0.0, 1.0),
+            (-1.0, 1.0),
+            (1.0, 0.0),
+            (f32::NAN, 1.0),
+            (1.0, f32::INFINITY),
+        ] {
+            assert!(fit_window((0.0, 0.0, 600.0, 450.0), size).is_none());
+        }
+        assert_eq!(work_area(&json!({"scale":0})), (0.0, 0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn an_unresponsive_compositor_is_bounded_and_the_next_request_can_recover() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("slow.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        let worker = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut command = [0; 9];
+            stream.read_exact(&mut command).unwrap();
+            assert_eq!(&command, b"j/clients");
+            std::thread::sleep(Duration::from_millis(650));
+        });
+        assert!(request(&path, "j/clients").is_none());
+        worker.join().unwrap();
+        let server = IpcMock::new(vec![("j/clients", b"[]".to_vec())]);
+        assert_eq!(request(&server.path, "j/clients"), Some("[]".into()));
+        server.finish();
+    }
 }
