@@ -466,9 +466,11 @@ async fn show_part(
     }
     let built = started.elapsed();
     let mut schedule = match playback {
-        Streams::New(context, allowed) => {
+        Streams::New(context, allowed, authority) => {
             owner.emit(crate::RuntimeEvent::AccountStreams(allowed));
-            schedule.with_playback(context)
+            schedule
+                .with_playback(context)
+                .with_source_authority(Some(authority))
         }
         Streams::Current => {
             let current = owner.schedule();
@@ -476,7 +478,13 @@ async fn show_part(
                 .as_any()
                 .and_then(|s| s.downcast_ref::<EpgSchedule>())
                 .and_then(EpgSchedule::shared_playback);
-            schedule.with_shared_playback(shared)
+            let authority = current
+                .as_any()
+                .and_then(|s| s.downcast_ref::<EpgSchedule>())
+                .and_then(EpgSchedule::source_authority);
+            schedule
+                .with_shared_playback(shared)
+                .with_source_authority(authority)
         }
     };
     if let Some(lookup) = stored::description_lookup(owner, source) {

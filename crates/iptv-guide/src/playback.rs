@@ -20,7 +20,7 @@ use iptv_providers::m3u::{
     CatchupRequest, DEFAULT_CATCHUP_WINDOW_DAYS, build_catchup_url, expand_live_url,
 };
 use iptv_providers::model::{
-    CatchUpKind, Channel, M3uSourceConfig, StreamLocator, XtreamCredentials,
+    CatchUpKind, Channel, M3uSourceConfig, SourceConfig, StreamLocator, XtreamCredentials,
 };
 use iptv_providers::stalker::{StalkerSession, static_playback_url};
 use iptv_providers::xtream::{
@@ -32,6 +32,66 @@ use iptv_providers::xtream::{
 #[derive(Clone, Debug)]
 pub struct PlaybackContext {
     inner: Inner,
+}
+
+/// Immutable source snapshot that produced a cached playback context. It is
+/// deliberately not serializable; diagnostics never expose its credentials.
+#[derive(Clone, PartialEq, Eq)]
+pub struct SourceAuthority {
+    source: i64,
+    incarnation: String,
+    config: SourceConfig,
+}
+impl std::fmt::Debug for SourceAuthority {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SourceAuthority")
+            .field("source", &self.source)
+            .finish_non_exhaustive()
+    }
+}
+impl SourceAuthority {
+    pub fn new(source: i64, incarnation: String, config: SourceConfig) -> Self {
+        Self {
+            source,
+            incarnation,
+            config,
+        }
+    }
+    pub fn resolve(&self, channel: &Channel) -> ResolutionAuthority {
+        ResolutionAuthority {
+            source: std::sync::Arc::new(self.clone()),
+            channel: channel.clone(),
+        }
+    }
+}
+
+/// Original source and channel used by one resolver, retained across provider
+/// I/O and transport retirement. It cannot be rebound to a newer catalogue.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ResolutionAuthority {
+    source: std::sync::Arc<SourceAuthority>,
+    channel: Channel,
+}
+impl std::fmt::Debug for ResolutionAuthority {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolutionAuthority")
+            .field("source", &self.source)
+            .finish_non_exhaustive()
+    }
+}
+impl ResolutionAuthority {
+    pub fn source(&self) -> i64 {
+        self.source.source
+    }
+    pub fn incarnation(&self) -> &str {
+        &self.source.incarnation
+    }
+    pub fn config(&self) -> &SourceConfig {
+        &self.source.config
+    }
+    pub fn channel(&self) -> &Channel {
+        &self.channel
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -127,13 +127,39 @@ async fn source(owner: &Runtime, request: &Request) -> PlaySource {
     };
     source
 }
+// Test callers resolve from this real store snapshot, like an imported context.
+impl Runtime {
+    fn prepare_current_live_source(
+        &self,
+        surface: usize,
+        id: SourceId,
+        key: String,
+        source: PlaySource,
+    ) -> impl std::future::Future<Output = Result<PlaySource, crate::Error>> + use<> {
+        let member = ContentId::from_stored(key.clone());
+        let services = self.services();
+        // Resolve fixture metadata on a worker before constructing the owned
+        // preparation future; Runtime itself intentionally cannot cross threads.
+        let authority = std::thread::spawn(move || {
+            services.blocking(move |store| {
+                let stored = store.source(id)?.unwrap();
+                let channel = store.channel(id, &member)?.unwrap().channel;
+                Ok(crate::playback::source_authority(&stored).resolve(&channel))
+            })
+        })
+        .join()
+        .unwrap()
+        .unwrap();
+        self.prepare_live_source(surface, id, key, source, authority)
+    }
+}
 async fn open(owner: &Runtime, request: &Request) -> PlaySource {
     refresh_accounts(&owner.services(), &owner.recordings)
         .await
         .unwrap();
     assert!(owner.reserve_live_viewing(0, SourceId(request.source), &request.channel));
     owner
-        .prepare_live_source(
+        .prepare_current_live_source(
             0,
             SourceId(request.source),
             request.channel.clone(),
@@ -288,7 +314,7 @@ async fn immediate_replacement_joins_the_previous_incoming_before_opening() {
     replacement.set_header("X-Generated-Auth", "generated-new-context");
     assert!(owner.reserve_live_viewing(0, SourceId(request.source), &request.channel));
     let second = owner
-        .prepare_live_source(0, SourceId(request.source), request.channel, replacement)
+        .prepare_current_live_source(0, SourceId(request.source), request.channel, replacement)
         .await
         .unwrap();
     assert_ne!(first.url, second.url);
@@ -319,7 +345,7 @@ async fn changed_auth_context_cannot_spend_a_shared_capture_discount() {
     assert!(owner.reserve_live_viewing(0, SourceId(request.source), &request.channel));
     assert!(
         owner
-            .prepare_live_source(0, SourceId(request.source), request.channel, changed)
+            .prepare_current_live_source(0, SourceId(request.source), request.channel, changed)
             .await
             .is_err()
     );
@@ -393,7 +419,7 @@ async fn pending_account_owner_stays_budgeted_when_its_surface_switches_accounts
         .await
         .unwrap();
     assert!(owner.reserve_live_viewing(0, SourceId(old.source), &old.channel));
-    let pending = tokio::spawn(owner.prepare_live_source(
+    let pending = tokio::spawn(owner.prepare_current_live_source(
         0,
         SourceId(old.source),
         old.channel.clone(),
@@ -401,14 +427,14 @@ async fn pending_account_owner_stays_budgeted_when_its_surface_switches_accounts
     ));
     wait(|| a.requests.load(Ordering::SeqCst) == 1).await;
     assert!(owner.reserve_live_viewing(0, SourceId(other.source), &other.channel));
-    let switched = tokio::spawn(owner.prepare_live_source(
+    let switched = tokio::spawn(owner.prepare_current_live_source(
         0,
         SourceId(other.source),
         other.channel.clone(),
         source(&owner, &other).await,
     ));
     assert!(owner.reserve_live_viewing(1, SourceId(sibling.source), &sibling.channel));
-    let returning = tokio::spawn(owner.prepare_live_source(
+    let returning = tokio::spawn(owner.prepare_current_live_source(
         1,
         SourceId(sibling.source),
         sibling.channel.clone(),
@@ -601,7 +627,7 @@ async fn actual_app_source_without_a_user_agent_shares_with_recording_defaults()
     let original = PlaySource::new(&fixture.url);
     assert!(original.header("User-Agent").is_none());
     let local = owner
-        .prepare_live_source(
+        .prepare_current_live_source(
             0,
             SourceId(request.source),
             request.channel.clone(),
@@ -694,7 +720,7 @@ async fn a_new_incarnation_uses_fresh_provider_limit_after_a_stale_view_reservat
     // discarded the old provider's observed hard allowance.
     owner.recordings.lock().viewers.get_mut(&0).unwrap().limit = 1;
     let prepared = owner
-        .prepare_live_source(
+        .prepare_current_live_source(
             0,
             source_id,
             request.channel.clone(),
@@ -738,6 +764,7 @@ async fn owned_native_fallback_and_on_demand_retire_before_next_live_probe() {
                     0,
                     Some((SourceId(request.source), context.into())),
                     source(&owner, &request).await,
+                    None,
                 )
                 .await
                 .unwrap()
@@ -780,7 +807,7 @@ async fn rejected_live_and_independent_zaps_preserve_current_pending_preparation
         .unwrap();
     let id = record_now(&owner, recording.clone()).await;
     assert!(owner.reserve_live_viewing(0, SourceId(viewing.source), &viewing.channel));
-    let prepared = tokio::spawn(owner.prepare_live_source(
+    let prepared = tokio::spawn(owner.prepare_current_live_source(
         0,
         SourceId(viewing.source),
         viewing.channel.clone(),
@@ -821,7 +848,7 @@ async fn live_preparation_revalidates_enabled_membership_and_channel_authority_a
             .await
             .unwrap();
         assert!(owner.reserve_live_viewing(0, source_id, &request.channel));
-        let preparation = tokio::spawn(owner.prepare_live_source(
+        let preparation = tokio::spawn(owner.prepare_current_live_source(
             0,
             source_id,
             request.channel.clone(),
@@ -922,7 +949,7 @@ async fn rejected_reused_viewer_releases_only_its_own_capture_input_reference() 
         .unwrap();
     assert!(
         owner
-            .prepare_live_source(1, source_id, request.channel, resolved)
+            .prepare_current_live_source(1, source_id, request.channel, resolved)
             .await
             .is_err()
     );
@@ -1074,5 +1101,211 @@ async fn recording_link_resolution_revalidates_member_authority_before_shared_at
         );
         server.await.unwrap();
         assert!(owner.drain_services());
+    }
+}
+
+#[tokio::test]
+async fn viewing_searches_past_an_owner_with_different_resolved_headers() {
+    matching_owner_at_capacity(false).await;
+}
+
+#[tokio::test]
+async fn capture_reselects_the_matching_owner_after_resolution_at_capacity() {
+    matching_owner_at_capacity(true).await;
+}
+
+async fn matching_owner_at_capacity(capture: bool) {
+    let fixture = Fixture::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut settings = iptv_settings::Settings::new();
+    settings
+        .set_in(
+            "playlists.max_connections",
+            &iptv_settings::Target::playlist("1"),
+            iptv_settings::Value::Int(2),
+        )
+        .unwrap();
+    std::fs::write(dir.path().join("settings.json"), settings.to_json_string()).unwrap();
+    let owner = owner(dir.path());
+    crate::settings::load(&owner);
+    let request = seed(&owner, &fixture.url).await;
+    refresh_accounts(&owner.services(), &owner.recordings)
+        .await
+        .unwrap();
+    let mut sockets = Vec::new();
+    for surface in 0..2 {
+        let mut stream = source(&owner, &request).await;
+        stream.set_header("X-Generated-Auth", &format!("generated-{surface}"));
+        assert!(owner.reserve_live_viewing(surface, SourceId(request.source), &request.channel));
+        let local = owner
+            .prepare_current_live_source(
+                surface,
+                SourceId(request.source),
+                request.channel.clone(),
+                stream,
+            )
+            .await
+            .unwrap();
+        sockets.push(player(&local).await);
+    }
+    // Hash iteration order is irrelevant: choose the other actual ready owner
+    // after observing which owner the provisional identity-only search picks.
+    let wanted = {
+        let data = owner.recordings.lock();
+        let first = data.shared_for(request.source, &request.channel).unwrap();
+        data.viewers
+            .values()
+            .filter_map(|lease| lease.input.as_ref())
+            .find(|incoming| incoming.id != first.id)
+            .unwrap()
+            .clone()
+    };
+    if capture {
+        let id = SourceId(request.source);
+        let key = ContentId::from_stored(request.channel.clone());
+        let headers = wanted.source.headers.clone();
+        owner
+            .services()
+            .call(move |store| {
+                let mut channel = store.channel(id, &key)?.unwrap().channel;
+                if let iptv_providers::model::StreamLocator::Url {
+                    headers: current, ..
+                } = &mut channel.stream
+                {
+                    *current = headers;
+                } else {
+                    panic!("generated URL channel");
+                }
+                store.replace_catalog(id, &[], &[channel], &[], &[])
+            })
+            .await
+            .unwrap();
+        let job = record_now(&owner, request.clone()).await;
+        assert_eq!(
+            owner.recordings.lock().active[&job]
+                .0
+                .input
+                .as_ref()
+                .unwrap()
+                .id,
+            wanted.id
+        );
+        owner.stop_recording(job).await.unwrap();
+        until(&owner, job, |job| !job.status.active()).await;
+    } else {
+        assert!(owner.reserve_live_viewing(2, SourceId(request.source), &request.channel));
+        let local = owner
+            .prepare_current_live_source(
+                2,
+                SourceId(request.source),
+                request.channel.clone(),
+                wanted.source.clone(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(local.url, wanted.input.shared().unwrap().url());
+        owner.release_viewing(2);
+    }
+    assert_eq!(fixture.requests.load(Ordering::SeqCst), 2);
+    assert_eq!(fixture.peak.load(Ordering::SeqCst), 2);
+    drop(sockets);
+    owner.release_viewing(0);
+    owner.release_viewing(1);
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn resolved_authority_cannot_be_rebound_to_an_edited_account_or_channel() {
+    for timing in ["queued", "before-entry"] {
+        for mutation in ["account", "channel-headers"] {
+            let fixture = Fixture::start().await;
+            let dir = tempfile::tempdir().unwrap();
+            let owner = owner(dir.path());
+            let request = seed(&owner, &fixture.url).await;
+            xtream_account(&owner, &request, &fixture, "generated-account-a").await;
+            refresh_accounts(&owner.services(), &owner.recordings)
+                .await
+                .unwrap();
+            let id = SourceId(request.source);
+            let member = ContentId::from_stored(request.channel.clone());
+            let expected_member = member.clone();
+            let authority = owner
+                .services()
+                .read(move |store| {
+                    let stored = store.source(id)?.unwrap();
+                    let row = store.channel(id, &member)?.unwrap();
+                    Ok(crate::playback::source_authority(&stored).resolve(&row.channel))
+                })
+                .await
+                .unwrap();
+            let stream = source(&owner, &request).await;
+            assert!(owner.reserve_live_viewing(0, id, &request.channel));
+            let gate = {
+                let mut slots = owner.recordings.preparations.lock().unwrap();
+                slots
+                    .entry(0)
+                    .or_insert_with(|| (CancelToken::new(), Arc::default()))
+                    .1
+                    .clone()
+            };
+            let held = gate.lock().await;
+            let prepare = || {
+                owner.prepare_live_source(
+                    0,
+                    id,
+                    request.channel.clone(),
+                    stream.clone(),
+                    authority.clone(),
+                )
+            };
+            let queued = (timing == "queued").then(|| tokio::spawn(prepare()));
+            if mutation == "account" {
+                xtream_account(&owner, &request, &fixture, "generated-account-b").await;
+            } else {
+                owner
+                    .services()
+                    .call(move |store| {
+                        let mut channel = store.channel(id, &expected_member)?.unwrap().channel;
+                        if let iptv_providers::model::StreamLocator::Url { headers, .. } =
+                            &mut channel.stream
+                        {
+                            headers
+                                .push(("X-Generated-Auth".into(), "generated-new-channel".into()));
+                        }
+                        store.replace_catalog(id, &[], &[channel], &[], &[])
+                    })
+                    .await
+                    .unwrap();
+            }
+            let previous_incarnation = authority.incarnation().to_owned();
+            let current_incarnation = owner
+                .services()
+                .read(move |store| store.source_incarnation(id))
+                .await
+                .unwrap();
+            assert_eq!(
+                current_incarnation != previous_incarnation,
+                mutation == "account"
+            );
+            // Even an updated account cache cannot relabel the caller's older
+            // credentials/channel snapshot while it waits at this surface.
+            refresh_accounts(&owner.services(), &owner.recordings)
+                .await
+                .unwrap();
+            let prepared = queued.unwrap_or_else(|| tokio::spawn(prepare()));
+            drop(held);
+            assert!(prepared.await.unwrap().is_err(), "{timing}/{mutation}");
+            assert_eq!(fixture.requests.load(Ordering::SeqCst), 0);
+            assert!(owner.recordings.lock().inputs.is_empty());
+            owner.release_viewing(0);
+            // A fresh resolution using the new, supported public store state
+            // remains usable; rejection does not poison the numeric source ID.
+            let current = open(&owner, &request).await;
+            let socket = player(&current).await;
+            assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
+            drop(socket);
+            owner.release_viewing(0);
+            assert!(owner.drain_services());
+        }
     }
 }

@@ -107,6 +107,8 @@ pub struct EpgSchedule {
     /// Shared with the next schedule of the same source (a refreshed guide),
     /// so a Stalker session renewed by one is the other's too.
     playback: Option<std::rc::Rc<playback::PlaybackContext>>,
+    /// Same stored/import snapshot as this catalogue, even without a session.
+    source_authority: Option<std::sync::Arc<playback::SourceAuthority>>,
 }
 
 /// Each channel's group slot (its first group's position in `groups`;
@@ -187,6 +189,7 @@ impl EpgSchedule {
             held: None,
             held_keys: None,
             playback: None,
+            source_authority: None,
         }
     }
 
@@ -405,6 +408,28 @@ impl EpgSchedule {
     /// The context, to share with a schedule that replaces this one.
     pub fn shared_playback(&self) -> Option<std::rc::Rc<playback::PlaybackContext>> {
         self.playback.clone()
+    }
+
+    /// Keep the source origin independent of optional account/session metadata.
+    pub fn with_source_authority(
+        mut self,
+        authority: Option<std::sync::Arc<playback::SourceAuthority>>,
+    ) -> Self {
+        self.source_authority = authority;
+        self
+    }
+
+    pub fn source_authority(&self) -> Option<std::sync::Arc<playback::SourceAuthority>> {
+        self.source_authority.clone()
+    }
+
+    /// Bind the original channel before asynchronous stream resolution.
+    pub fn resolution_authority(&self, channel: usize) -> Option<playback::ResolutionAuthority> {
+        Some(
+            self.source_authority
+                .as_ref()?
+                .resolve(self.source_channel(channel)?),
+        )
     }
 
     /// The imported channel behind a guide row.

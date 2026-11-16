@@ -1363,18 +1363,36 @@ async fn record(
                 #[cfg(debug_assertions)]
                 allow_private_fixture: net.allow_private_fixture,
             };
-            let input = state
-                .lock()
-                .active
-                .get(&job.id)
-                .and_then(|(lease, _)| lease.input.clone());
-            let shared = input.filter(|incoming| {
-                incoming.source == source
-                    && incoming.identity == resolved.identity
-                    && incoming.config == resolved.config
-                    && incoming.policy == policy
-                    && incoming.input.shared().is_some()
-            });
+            let shared = {
+                let mut data = state.lock();
+                let matching = data
+                    .shared_resolved(&resolved.identity, &resolved.config, &source, &policy)
+                    .or_else(|| {
+                        // Preserve partial/failure if the retained shared owner
+                        // ended and no live owner can replace it; playback keeps
+                        // its normal retry slot.
+                        data.active
+                            .get(&job.id)
+                            .and_then(|(lease, _)| lease.input.clone())
+                            .filter(|incoming| {
+                                incoming.identity == resolved.identity
+                                    && incoming.config == resolved.config
+                                    && incoming.source == source
+                                    && incoming.policy == policy
+                                    && incoming.input.shared().is_some()
+                                    && !incoming.input.is_running()
+                            })
+                    });
+                // Reservation may have retained a different authentication or
+                // trust context before resolution. Search every eligible owner
+                // before asking for another provider connection.
+                if let Some(incoming) = &matching
+                    && let Some((lease, _)) = data.active.get_mut(&job.id)
+                {
+                    lease.input = Some(incoming.clone());
+                }
+                matching
+            };
             let outcome = if let Some(incoming) = shared {
                 if !incoming.input.is_running() {
                     return Err(iptv_net::recording::Failure::Network.message());

@@ -35,8 +35,13 @@ Portable `iptv-core::live` values define source incarnation/channel identity and
 count unique incoming connection IDs. Runtime admission additionally checks the
 source configuration, final resolved URL and headers, and complete transport
 trust policy. Numeric source IDs, matching channel text, or matching addresses
-alone grant no sharing authority. Durable source scope is checked after
-asynchronous resolution and before attachment. Viewing and capture use the same
+alone grant no sharing authority. Imported schedules retain an opaque,
+nonserializable source incarnation/configuration snapshot. Resolution binds the
+original channel before portal I/O. Preparation compares that origin after the
+surface gate and again before publication; edits reject stale results instead
+of rebinding credentials or account budgets. Selection searches all ready
+owners using the complete resolved URL, headers and trust policy.
+Viewing and capture use the same
 local-offset clock helper. Naturally rotating live URL templates, refreshed
 links, changed authentication/format context or changed trust policy may no
 longer match an existing input; those cases require the permitted independent

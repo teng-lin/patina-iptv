@@ -668,6 +668,7 @@ mod source_tests {
                     &snapshot,
                 )?;
                 imports::save(&worker, &job, &catalog(), &[], stage(&worker), &publication)
+                    .map(|(id, counts, guides, _)| (id, counts, guides))
             })
             .await
             .unwrap()

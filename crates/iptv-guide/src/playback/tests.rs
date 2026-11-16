@@ -417,3 +417,25 @@ fn the_schedule_resolves_by_guide_row_and_finds_channels_by_key() {
         Resolution::Unavailable(Unavailable::NoChannel)
     ));
 }
+
+#[test]
+fn resolution_authority_diagnostics_never_include_stream_or_credential_details() {
+    let channel = parse_m3u("#EXTM3U\n#EXTINF:-1,Generated secret channel\nhttps://example.test/generated-private-stream|X-Generated-Auth=generated-channel-secret\n")
+        .channels.items.remove(0);
+    let authority = super::SourceAuthority::new(
+        81,
+        "generated-incarnation".into(),
+        iptv_providers::model::SourceConfig::Xtream(creds(Some("GeneratedPrivateAgent/81"))),
+    )
+    .resolve(&channel);
+    let debug = format!("{authority:?}");
+    for secret in [
+        "generated-private-stream",
+        "generated-channel-secret",
+        "s3cret",
+        "GeneratedPrivateAgent",
+        "generated-incarnation",
+    ] {
+        assert!(!debug.contains(secret));
+    }
+}

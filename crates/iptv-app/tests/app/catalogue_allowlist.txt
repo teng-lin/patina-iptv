@@ -10,6 +10,9 @@
 [untranslated]
 
 [not-shown]
+# Opaque authority type names in redacted Rust diagnostics, never rendered.
+iptv-guide/src/playback.rs	ResolutionAuthority
+iptv-guide/src/playback.rs	SourceAuthority
 # Explicit synthetic profile injection diagnostics, absent from production builds.
 iptv-app/src/platform_data.rs	test storage was already installed or resolved
 iptv-app/src/platform_data.rs	test storage directory must be absolute

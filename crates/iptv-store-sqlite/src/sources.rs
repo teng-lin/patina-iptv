@@ -288,35 +288,40 @@ impl Store {
 
     /// One source with its secrets.
     pub fn source(&self, id: SourceId) -> Result<Option<StoredSource>> {
-        let row = self
-            .conn
-            .query_row(
-                "SELECT kind, name, config, position, created_at, updated_at FROM sources WHERE id = ?1",
-                [id.0],
-                |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, String>(2)?,
-                        r.get::<_, i64>(3)?,
-                        r.get::<_, i64>(4)?,
-                        r.get::<_, i64>(5)?,
-                    ))
-                },
-            )
-            .optional()?;
-        let Some((kind, name, config, position, created_at, updated_at)) = row else {
+        // One statement binds public metadata, incarnation and credentials to
+        // the same SQLite snapshot, including during concurrent source edits.
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT s.kind, s.name, s.config, s.position, s.created_at, s.updated_at,
+                    r.incarnation, c.name, c.value
+             FROM sources s JOIN guide_revisions r ON r.source_id = s.id
+             LEFT JOIN source_credentials c ON c.source_id = s.id WHERE s.id = ?1",
+        )?;
+        let mut rows = stmt.query([id.0])?;
+        let Some(row) = rows.next()? else {
             return Ok(None);
         };
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT name, value FROM source_credentials WHERE source_id = ?1")?;
-        let secrets = stmt
-            .query_map([id.0], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<rusqlite::Result<HashMap<String, String>>>()?;
+        let (kind, name, config, position, created_at, updated_at, incarnation) = (
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, i64>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, String>(6)?,
+        );
+        let mut secrets = HashMap::new();
+        if let Some(name) = row.get::<_, Option<String>>(7)? {
+            secrets.insert(name, row.get::<_, String>(8)?);
+        }
+        while let Some(row) = rows.next()? {
+            if let Some(name) = row.get::<_, Option<String>>(7)? {
+                secrets.insert(name, row.get::<_, String>(8)?);
+            }
+        }
         let config: Value = serde_json::from_str(&config)?;
         Ok(Some(StoredSource {
             id,
+            incarnation,
             source: Source {
                 name,
                 config: join(source_kind_from(&kind)?, &config, secrets)?,

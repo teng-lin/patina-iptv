@@ -150,6 +150,28 @@ impl Data {
             .is_some_and(|registered| !registered.closing)
     }
     pub(super) fn shared_for(&self, source: i64, channel: &str) -> Option<Arc<Incoming>> {
+        self.shared_matching(source, channel, |_| true)
+    }
+    pub(super) fn shared_resolved(
+        &self,
+        identity: &Identity,
+        config: &SourceConfig,
+        source: &PlaySource,
+        policy: &PlaybackPolicy,
+    ) -> Option<Arc<Incoming>> {
+        self.shared_matching(identity.source, &identity.channel, |incoming| {
+            incoming.identity == *identity
+                && incoming.config == *config
+                && incoming.source == *source
+                && incoming.policy == *policy
+        })
+    }
+    fn shared_matching(
+        &self,
+        source: i64,
+        channel: &str,
+        matches: impl Fn(&Incoming) -> bool,
+    ) -> Option<Arc<Incoming>> {
         let (incarnation, config) = self.scopes.get(&source)?;
         self.viewers
             .values()
@@ -165,6 +187,7 @@ impl Data {
                     && incoming.input.shared().is_some()
                     && incoming.input.is_ready()
                     && incoming.input.is_running()
+                    && matches(incoming)
             })
             .cloned()
     }
@@ -339,8 +362,9 @@ impl Runtime {
         source: SourceId,
         channel: String,
         stream: PlaySource,
+        authority: iptv_guide::playback::ResolutionAuthority,
     ) -> impl std::future::Future<Output = Result<PlaySource, Error>> + use<> {
-        self.prepare_provider_source(surface, source, channel, stream, true)
+        self.prepare_provider_source(surface, source, channel, stream, true, Some(authority))
     }
     /// Own HTTP VOD/catch-up/native-fallback transport without selecting HLS
     /// variants or reading ahead. Local recordings have no provider reservation.
@@ -349,10 +373,11 @@ impl Runtime {
         surface: usize,
         provider: Option<(SourceId, String)>,
         source: PlaySource,
+        authority: Option<iptv_guide::playback::ResolutionAuthority>,
     ) -> impl std::future::Future<Output = Result<PlaySource, Error>> + use<> {
         let retired = self.retire_viewing_inputs(surface);
         let prepared = provider.map(|(provider, key)| {
-            self.prepare_provider_source(surface, provider, key, source.clone(), false)
+            self.prepare_provider_source(surface, provider, key, source.clone(), false, authority)
         });
         async move {
             retired.await;
@@ -372,6 +397,7 @@ impl Runtime {
         channel: String,
         mut source: PlaySource,
         share: bool,
+        expected: Option<iptv_guide::playback::ResolutionAuthority>,
     ) -> impl std::future::Future<Output = Result<PlaySource, Error>> + use<> {
         let disabled = self.recordings_detached.get()
             || self.shutdown_requested.get()
@@ -431,7 +457,7 @@ impl Runtime {
                                     "Channel unavailable",
                                 )));
                             }
-                            let authority = if share {
+                            let authority = if share || expected.is_some() {
                                 let stored = store.channel(source_id, &member)?.ok_or(
                                     iptv_store_sqlite::StoreError::Unavailable(key(
                                         "Channel unavailable",
@@ -441,12 +467,23 @@ impl Runtime {
                             } else {
                                 None
                             };
-                            let config = store
+                            let stored = store
                                 .source(source_id)?
-                                .ok_or(iptv_store_sqlite::StoreError::SourceNotFound(source_id))?
-                                .source
-                                .config;
-                            Ok((store.source_incarnation(source_id)?, config, authority))
+                                .ok_or(iptv_store_sqlite::StoreError::SourceNotFound(source_id))?;
+                            if expected.as_ref().is_some_and(|expected| {
+                                expected.source() != source_id.0
+                                    || expected.channel().id != member
+                                    || expected.incarnation() != stored.incarnation
+                                    || expected.config() != &stored.source.config
+                                    || authority
+                                        .as_ref()
+                                        .is_none_or(|(channel, _)| channel != expected.channel())
+                            }) {
+                                return Err(iptv_store_sqlite::StoreError::Unavailable(key(
+                                    "Channel unavailable",
+                                )));
+                            }
+                            Ok((stored.incarnation, stored.source.config, authority))
                         })
                         .await?;
                     let identity = Identity {
@@ -489,14 +526,8 @@ impl Runtime {
                     let existing = {
                         let data = state.lock();
                         share
-                            .then(|| data.shared_for(source_id.0, &identity.channel))
+                            .then(|| data.shared_resolved(&identity, &config, &source, &policy))
                             .flatten()
-                            .filter(|incoming| {
-                                incoming.identity == identity
-                                    && incoming.config == config
-                                    && incoming.source == source
-                                    && incoming.policy == policy
-                            })
                     };
                     let mut created = None;
                     let incoming = if let Some(existing) = existing {

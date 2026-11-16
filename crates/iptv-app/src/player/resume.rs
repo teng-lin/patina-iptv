@@ -26,6 +26,7 @@ pub struct Early {
     pub key: String,
     pub source_id: i64,
     pub source: PlaySource,
+    pub authority: iptv_guide::playback::ResolutionAuthority,
 }
 
 /// Startup, with the store open: starts `stored`'s last channel full
@@ -79,12 +80,14 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     main.health.update(|h| session = h.start(true, now));
     ui.player.resume.set(false);
     ui.playback.set(Playback::Live);
+    let authority = crate::runtime::playback::source_authority(stored).resolve(&row.channel);
     ui.player.early.set(Some(Early {
+        authority: authority.clone(),
         source_id: stored.id.0,
         key,
         source: source.clone(),
     }));
-    super::load(ui, 0, session, source);
+    super::load_authorized(ui, 0, session, source, Some(authority));
     ui.mode.set(ViewMode::Fullscreen);
     true
 }

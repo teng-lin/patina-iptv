@@ -1,4 +1,15 @@
 //! Playback metadata and per-source resume persistence.
+/// Attach the exact stored source snapshot without another store job.
+pub fn source_authority(
+    stored: &iptv_library::StoredSource,
+) -> iptv_guide::playback::SourceAuthority {
+    iptv_guide::playback::SourceAuthority::new(
+        stored.id.0,
+        stored.incarnation.clone(),
+        stored.source.config.clone(),
+    )
+}
+
 use iptv_guide::playback::PlaybackContext;
 use iptv_import::SourceMeta;
 use iptv_library::SourceId;

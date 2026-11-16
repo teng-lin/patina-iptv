@@ -515,7 +515,7 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
                     return;
                 }
                 if owner.reserve_live_viewing(0, source, &early.key) {
-                    load(ui, 0, session, early.source);
+                    load_authorized(ui, 0, session, early.source, Some(early.authority));
                 } else {
                     fail(
                         ui,
@@ -600,9 +600,12 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
             clock(at),
         ),
     };
+    let authority = resolution_authority(&*schedule, channel);
     match resolution {
-        Resolution::Play(source) => load(ui, surface, session, source),
-        Resolution::StalkerLink(link) => resolve_link(ui, surface, session, link, schedule.clone()),
+        Resolution::Play(source) => load_authorized(ui, surface, session, source, authority),
+        Resolution::StalkerLink(link) => {
+            resolve_link(ui, surface, session, link, schedule.clone(), authority)
+        }
         Resolution::Unavailable(why) => {
             let detail = match why {
                 Unavailable::NoChannel => key("no channel").to_owned(),
@@ -643,7 +646,28 @@ fn source_allowed(ui: Ui, surface: usize) -> bool {
     }
 }
 
-fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
+fn resolution_authority(
+    schedule: &dyn Schedule,
+    channel: usize,
+) -> Option<iptv_guide::playback::ResolutionAuthority> {
+    let (schedule, channel) = iptv_guide::combined::epg_channel(schedule, channel)?;
+    schedule.resolution_authority(channel)
+}
+
+fn load(ui: Ui, surface: usize, session: u64, source: PlaySource) {
+    let authority = target(ui, surface)
+        .and_then(|(channel, _)| resolution_authority(&*crate::schedule(), channel))
+        .or_else(|| resume::source(ui).map(|early| early.authority));
+    load_authorized(ui, surface, session, source, authority);
+}
+
+fn load_authorized(
+    ui: Ui,
+    surface: usize,
+    session: u64,
+    mut source: PlaySource,
+    authority: Option<iptv_guide::playback::ResolutionAuthority>,
+) {
     let stream = ui.player.stream(surface);
     if stream.health.with_untracked(|h| h.session()) != session {
         return; // the viewer moved on
@@ -679,7 +703,17 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
         None
     };
     if let Some((source_id, channel)) = identity.clone().filter(|_| may_probe) {
-        let prepared = owner.prepare_live_source(surface, source_id, channel, source);
+        let Some(authority) = authority else {
+            fail(
+                ui,
+                surface,
+                session,
+                ErrorKind::Unavailable,
+                crate::i18n::tr("Channel unavailable").into(),
+            );
+            return;
+        };
+        let prepared = owner.prepare_live_source(surface, source_id, channel, source, authority);
         crate::data::spawn_in_app(async move {
             match prepared.await {
                 Ok(source) => publish_source(ui, surface, session, source),
@@ -706,7 +740,7 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
             }
         });
     } else {
-        let authority = if surface == 0
+        let vod_authority = if surface == 0
             && let Some((playing, _)) = ui.player.vod.get_untracked()
         {
             match owner.vod_publication_authority(&playing) {
@@ -735,7 +769,7 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
                 None
             }
         });
-        let prepared = owner.prepare_independent_source(surface, provider, source);
+        let prepared = owner.prepare_independent_source(surface, provider, source, authority);
         crate::data::spawn_in_app(async move {
             let source = match prepared.await {
                 Ok(source) => source,
@@ -746,7 +780,7 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
                     return;
                 }
             };
-            if let Some(authority) = authority
+            if let Some(authority) = vod_authority
                 && !authority.await
             {
                 if stream.health.with_untracked(|health| health.session()) == session {
@@ -824,6 +858,7 @@ fn resolve_link(
     session: u64,
     link: Box<StalkerLink>,
     schedule: Rc<dyn Schedule>,
+    authority: Option<iptv_guide::playback::ResolutionAuthority>,
 ) {
     let context = target(ui, surface)
         .and_then(|(channel, _)| iptv_guide::combined::epg_channel(&*schedule, channel))
@@ -866,11 +901,12 @@ fn resolve_link(
                 ctx.update_stalker_session(portal.clone());
             }
             match result {
-                Ok(url) => load(
+                Ok(url) => load_authorized(
                     ui,
                     surface,
                     session,
                     StalkerLink::source(&portal, url, &channel_headers),
+                    authority,
                 ),
                 Err(kind) => fail(ui, surface, session, ErrorKind::from_resolve(&kind), kind),
             }

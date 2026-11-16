@@ -8,6 +8,8 @@ use iptv_providers::{GroupId, model::Source};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredSource {
     pub id: SourceId,
+    /// Durable identity changes whenever connection details change.
+    pub incarnation: String,
     pub source: Source,
     /// Order in the source list (insertion order).
     pub position: i64,
