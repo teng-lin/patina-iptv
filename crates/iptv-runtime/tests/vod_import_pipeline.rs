@@ -502,8 +502,17 @@ async fn hidden_playlist_mutations_update_shelves_without_republishing_the_guide
                 )
                 .await;
             provider.assert_requests(false);
+            // Adding a second enabled playlist automatically joins both. Wait
+            // for that real transition, then explicitly choose the live-only
+            // playlist before observing hidden-source-only mutations.
+            host.discovery_after(previous, true).await;
+            data::set_policy(&host.owner, shown, enabled).await.unwrap();
+            let previous = host.publications.get();
+            data::library::switch_to(&host.owner, shown);
             host.availability_after(previous, false, true).await;
             assert_ne!(hidden, shown);
+            assert!(!data::combined::active(&host.owner));
+            assert_eq!(host.owner.shown_source(), Some(shown));
             assert_eq!(host.has_vod.get(), Some(false));
             assert_eq!(host.any_vod.get(), Some(true));
             let catalogue = host.owner.schedule();

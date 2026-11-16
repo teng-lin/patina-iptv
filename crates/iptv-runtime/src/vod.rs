@@ -552,19 +552,21 @@ url,
         let progress = self
             .services()
             .read(move |s| {
-                let valid = s
-                    .source_incarnation(SourceId(lookup.source))
-                    .is_ok_and(|v| v == incarnation)
-                    && s.vod_card(parent.as_ref().unwrap_or(&lookup))?.is_some()
-                    && s.source_policy(SourceId(lookup.source))?.enabled
-                    && s.source(SourceId(lookup.source))?
-                        .is_some_and(|s| s.source.config == expected);
-                if !valid {
-                    return Err(iptv_store_sqlite::StoreError::Unavailable(
-                        "Playlist changed",
-                    ));
-                }
-                s.vod_progress(&lookup)
+                s.vod_read_snapshot(|s| {
+                    let valid = s
+                        .source_incarnation(SourceId(lookup.source))
+                        .is_ok_and(|v| v == incarnation)
+                        && s.vod_card(parent.as_ref().unwrap_or(&lookup))?.is_some()
+                        && s.source_policy(SourceId(lookup.source))?.enabled
+                        && s.source(SourceId(lookup.source))?
+                            .is_some_and(|s| s.source.config == expected);
+                    if !valid {
+                        return Err(iptv_store_sqlite::StoreError::Unavailable(
+                            "Playlist changed",
+                        ));
+                    }
+                    s.vod_progress(&lookup)
+                })
             })
             .await?;
         if key.kind == Kind::Episode {

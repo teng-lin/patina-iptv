@@ -603,15 +603,21 @@ impl Screen {
             .is_some_and(|d| d.item.key.kind == Kind::Movie)
         {
             out.extend([Control::Play, Control::Restart, Control::Block]);
-        } else if self.details.is_some() {
+        } else if let Some(details) = &self.details {
             out.extend([
                 Control::Play,
                 Control::Restart,
                 Control::Seasons,
                 Control::Episodes,
-                Control::Next,
-                Control::Block,
             ]);
+            if self
+                .episode
+                .as_ref()
+                .is_some_and(|key| details.next_episode(key).is_some())
+            {
+                out.push(Control::Next);
+            }
+            out.push(Control::Block);
         } else if self.is_shelf() {
             out.push(Control::Catalogue);
         } else {
@@ -997,6 +1003,30 @@ mod tests {
         assert!(again != before && s.error.is_none() && s.retry.is_none());
         s.show_details(series_details(2));
         assert_eq!(s.control, Control::Play);
+    }
+    #[test]
+    fn the_last_episode_skips_the_unmounted_next_action() {
+        let mut screen = Screen::default();
+        screen.begin_shelf(Shelf::ContinueWatching);
+        let details = series_details(2);
+        screen.show_details(details.clone());
+        screen.episode = Some(details.episodes[1].key.clone());
+        screen.control = Control::Episodes;
+        screen.move_control(1);
+        assert_eq!(
+            screen.control,
+            Control::Block,
+            "Right must reach a visible action, not the absent Next button"
+        );
+        screen.move_control(-1);
+        assert_eq!(screen.control, Control::Episodes);
+        screen.episode = Some(details.episodes[0].key.clone());
+        screen.move_control(1);
+        assert_eq!(
+            screen.control,
+            Control::Next,
+            "Next remains reachable when usable"
+        );
     }
     #[test]
     fn load_more_advances_after_a_refresh_repeats_a_whole_page() {
