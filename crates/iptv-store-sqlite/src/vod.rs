@@ -47,7 +47,8 @@ l.content_id=w.last_episode_id"
 /// next episode and stopping at once keeps it listed, while a series only
 /// glanced at stays out. Its own `completed` (the whole series) always
 /// wins: older episode records cannot bring a completed series back. The
-/// episode lookup is bounded by the episodes watched, not the catalogue.
+/// episode lookup uses the covering source/parent index, so each series
+/// checks its own watched episodes rather than every series' history.
 macro_rules! unfinished {
     ($p:literal, $min:literal) => {
         concat!(
@@ -1733,6 +1734,97 @@ mod tests {
             budget.load(Ordering::Relaxed) <= 40,
             "Continue watching scanned the catalogue"
         );
+    }
+    #[test]
+    fn continuing_series_check_only_their_own_episode_history() {
+        use rusqlite::StatementStatus;
+
+        let mut previous_work = None;
+        for per_source in [100, 1000] {
+            let (mut store, sources) = large_library(per_source);
+            for source in sources {
+                for i in 0..per_source {
+                    let parent = format!("generated-series-{i:06}");
+                    // The parent follows a just-started next episode. Its own
+                    // position cannot qualify it: EXISTS must find the earlier
+                    // completed episode, even for parents late in key order.
+                    for (episode, progress) in [
+                        (1, Progress::observed(120_000, Some(120_000), true)),
+                        (2, Progress::observed(1000, Some(120_000), false)),
+                    ] {
+                        store
+                            .save_vod_progress(
+                                &key(source, Kind::Episode, &format!("{parent}:{episode}")),
+                                Some(&parent),
+                                progress,
+                            )
+                            .unwrap();
+                    }
+                }
+            }
+            store
+                .conn
+                .execute("UPDATE vod_progress SET updated_at=1800000000", [])
+                .unwrap();
+            let target = format!("generated-series-{:06}", per_source - 1);
+            for lines in [
+                plan(&store, CONTINUE_WATCHING_SQL, params![41, 0, 5000]),
+                plan(
+                    &store,
+                    CONTINUE_WATCHING_RANK_SQL,
+                    params![5000, sources[1].0, "series", target],
+                ),
+            ] {
+                let episodes: Vec<_> = lines
+                    .iter()
+                    .filter(|line| line.starts_with("SEARCH e "))
+                    .collect();
+                assert!(!episodes.is_empty(), "{lines:#?}");
+                assert!(
+                    episodes.iter().all(|line| {
+                        line.contains("COVERING INDEX vod_progress_by_parent")
+                            && line.contains("source_id=? AND parent_id=?")
+                    }),
+                    "each correlated episode lookup uses source and parent: {lines:#?}"
+                );
+            }
+            let mut page = store.conn.prepare(CONTINUE_WATCHING_SQL).unwrap();
+            let cards: Vec<String> = page
+                .query_map(params![41, 0, 5000], |row| row.get(1))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            assert_eq!(cards.len(), 41);
+            assert_eq!(cards[0], "generated-series-000000");
+            let page_work = page.get_status(StatementStatus::VmStep);
+            let mut rank = store.conn.prepare(CONTINUE_WATCHING_RANK_SQL).unwrap();
+            assert_eq!(
+                rank.query_row(params![5000, sources[1].0, "series", target], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+                (per_source * 2 - 1) as i64,
+                "every generated series remains eligible through its earlier episode"
+            );
+            let rank_work = rank.get_status(StatementStatus::VmStep);
+            let work = [page_work, rank_work];
+            println!("{per_source} parents/source: page/rank VM steps {work:?}");
+            for measured in work {
+                assert!(
+                    measured < (per_source * 2 * 400 + 10_000) as i32,
+                    "episode history exceeded the linear work budget: {work:?}"
+                );
+            }
+            if let Some(previous) = previous_work {
+                for (measured, smaller) in work.into_iter().zip(previous) {
+                    assert!(
+                        measured < smaller * 14 + 10_000,
+                        "ten times the history must not perform quadratic work: {work:?}"
+                    );
+                }
+            }
+            previous_work = Some(work);
+        }
     }
     /// Evidence for review, not a gate: plans and page/rank latency of both
     /// shelves over a large generated library (200,000 titles across two
