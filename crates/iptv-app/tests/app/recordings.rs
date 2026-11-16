@@ -371,6 +371,32 @@ fn long_press_on_a_future_programme_schedules_without_a_form() {
     future_programme(home, Idiom::Pad);
 }
 
+#[test]
+fn long_press_on_a_current_programme_offers_record_without_starting_playback() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, _, _, _) = fixture(&home, Idiom::Pad, "https://example.test/generated.ts", true);
+    step(app.wait_for("text:Generated live programme"));
+    let opens = iptv_app::player_opens(0);
+    step(app.long_press("role:cell[Generated live programme]"));
+    step(app.wait_for("id:menu-panel >> text:/^Generated live programme ·/"));
+    step(app.wait_for("id:menu-panel >> label:Record"));
+    assert!(
+        !app.screen()
+            .accessibility_state("id:menu-panel >> label:Record")
+            .unwrap()
+            .disabled
+    );
+    assert!(
+        !app.screen()
+            .matches("id:menu-panel >> text:Schedule recording")
+            .unwrap()
+    );
+    assert_eq!(iptv_app::player_opens(0), opens);
+    assert!(!app.screen().matches("id:recordings-screen").unwrap());
+    step(app.back());
+    step(app.wait_for_gone("id:menu-panel >> label:Record", Duration::from_secs(2)));
+}
+
 fn local_capture() -> (String, std::thread::JoinHandle<()>) {
     use std::io::{Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

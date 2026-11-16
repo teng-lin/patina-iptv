@@ -302,6 +302,8 @@ immediately; the control turns red while capture is active. Press it again to
 stop recording while playback continues.
 On a TV while watching, press Menu or long-press OK to open the control strip,
 then choose **Record**.
+In the guide, long-press a current programme (right-click on desktop) to open
+its menu and choose **Record**, without starting or changing playback.
 For a future programme, right-click on desktop or long-press on touch/TV, then
 choose **Schedule recording**. It schedules that programme immediately using its
 guide times, without a form. Choose **Edit recording** in Recordings for adjustments.
