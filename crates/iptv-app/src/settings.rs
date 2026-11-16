@@ -158,21 +158,21 @@ pub fn font_factor() -> f32 {
 /// time matters only where keys report their release (Android), and
 /// picture in picture on leaving only on Android.
 pub fn offer(key: &str) -> Offer {
-    if key == "recordings.quit_host" && !crate::desktop::DESKTOP {
+    if key == "recordings.quit_host" && !crate::capabilities::HOST.startup_registration() {
         return Offer::Hidden;
     }
-    if key == "recordings.alarm_access" && !cfg!(target_os = "android") {
+    if key == "recordings.alarm_access" && !crate::capabilities::HOST.alarm_permission() {
         return Offer::Hidden;
     }
     if matches!(
         key,
         "recordings.enable_startup" | "recordings.disable_startup"
-    ) && !crate::desktop::DESKTOP
+    ) && !crate::capabilities::HOST.startup_registration()
     {
         return Offer::Hidden;
     }
     // Leaving the app into a picture-in-picture window: Android only.
-    let android = cfg!(target_os = "android");
+    let android = crate::capabilities::HOST.automatic_pip();
     if matches!(key, "general.backup" | "general.restore") && cfg!(target_os = "ios") {
         return Offer::NotYet;
     }

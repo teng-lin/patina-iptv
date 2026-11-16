@@ -53,7 +53,7 @@ pub type State = Multiview<usize>;
 
 /// Streams this device decodes at once (setting-ready): cheap TV boxes
 /// manage two, desktops four.
-pub const DECODERS: usize = if cfg!(target_os = "android") { 2 } else { 4 };
+pub const DECODERS: usize = crate::capabilities::HOST.decoder_slots();
 
 /// Space around each tile, px (twice this between two).
 const GAP: f32 = 3.0;
@@ -157,13 +157,8 @@ pub fn surface_rect(ui: Ui, surface: usize) -> Option<(f32, f32, f32, f32)> {
 /// becomes the first tile (live), and adding the next one starts at once.
 /// On a detour it goes back to the grid.
 pub fn open(ui: Ui) {
-    if ui.player_surface != 0 {
-        return;
-    }
-    if ui
-        .player_windows
-        .with_untracked(|w| !w.sessions().is_empty())
-    {
+    if let Some(reason) = untracked(|| crate::capabilities::multiview(ui)).reason() {
+        crate::settings_view::notify(crate::capabilities::reason(reason));
         return;
     }
     if untracked(|| detour(ui)) {

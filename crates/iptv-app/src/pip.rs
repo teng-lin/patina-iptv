@@ -110,6 +110,12 @@ pub fn enter(ui: Ui) {
     let mut asked = false;
     ui.pip.update(|p| asked = p.request(playing));
     if !asked {
+        if let Some(reason) = ui
+            .pip
+            .with_untracked(|p| iptv_core::capabilities::pip(p, playing).reason())
+        {
+            crate::settings_view::notify(crate::capabilities::reason(reason));
+        }
         return;
     }
     log::info!("iptv pip: asked to enter");

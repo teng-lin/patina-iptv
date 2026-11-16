@@ -73,9 +73,19 @@ pub fn start(ui: Ui) {
     // a zap or a settings change made just before must already be on disk.
     // Usually nothing is queued and this returns at once. The Android host
     // also waits for them in `onStop` (`TvActivity.flushPendingWrites`).
-    effect(|| {
+    let was_background = std::cell::Cell::new(false);
+    effect(move || {
         let background = lifecycle() == nsh_core::platform::Lifecycle::Background;
         crate::runtime().set_foreground(!background);
+        if was_background.replace(background) && !background {
+            // Returning from host permission settings needs a fresh OS acknowledgement.
+            let owner = crate::runtime();
+            spawn_in_app(async move {
+                if owner.refresh_recording_wake().await.is_err() {
+                    log::warn!("iptv recording: wake report unavailable after resume");
+                }
+            });
+        }
         if background && !crate::runtime().flush_files(Duration::from_secs(2)) {
             log::warn!("iptv persistence: queued file writes did not finish in the background");
         }

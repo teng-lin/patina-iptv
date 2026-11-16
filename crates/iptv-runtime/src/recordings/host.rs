@@ -122,6 +122,8 @@ impl State {
             let mut data = self.lock();
             data.stopped = false;
             data.ready = false;
+            // A new native run must acknowledge its own OS registration.
+            data.wake_reported = false;
         }
         let state = self.clone();
         services.clone().spawn(async move {

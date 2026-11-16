@@ -80,6 +80,7 @@ struct Data {
     active: HashMap<JobId, (Lease, CancelToken)>,
     jobs: Vec<Job>,
     wake_capability: iptv_core::recording::WakeCapability,
+    wake_reported: bool,
     intent_revision: u64,
     recurring: bool,
     ready: bool,
@@ -190,6 +191,7 @@ impl State {
         let mut data = self.lock();
         if data.intent_revision == revision {
             data.wake_capability = capability;
+            data.wake_reported = true;
         }
         true
     }
@@ -465,10 +467,27 @@ impl Runtime {
         }
         Ok(())
     }
+    /// Current OS registration, not a promise about content or provider capacity.
+    pub fn recording_capabilities(&self) -> iptv_core::capabilities::Recording {
+        let services = self.services();
+        let background = services.ports().background_recordings;
+        let data = self.recordings.lock();
+        iptv_core::capabilities::Recording {
+            background,
+            wake: (services.is_current() && data.wake_reported && !data.stopped)
+                .then_some(data.wake_capability),
+        }
+    }
     pub fn recording_wake_notice(&self) -> Option<&'static str> {
         let data = self.recordings.lock();
-        (data.recurring || data.jobs.iter().any(|job| job.status.active()))
-            .then(|| data.wake_capability.notice())
+        let active = data.recurring || data.jobs.iter().any(|job| job.status.active());
+        drop(data);
+        active
+            .then(|| {
+                self.recording_capabilities()
+                    .wake
+                    .and_then(|wake| wake.notice())
+            })
             .flatten()
     }
     pub async fn refresh_recording_wake(&self) -> Result<(), Error> {
