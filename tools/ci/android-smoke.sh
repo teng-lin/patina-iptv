@@ -32,7 +32,26 @@ serial=${1:-${ANDROID_SERIAL:-}}
 apk=${2:-}
 port=${IPTV_SMOKE_PORT:-8089}
 out=${IPTV_SMOKE_OUT:-target/android-smoke}
-adb="adb${serial:+ -s $serial}"
+adb_guard=$(cd "$(dirname "$0")" && pwd)/android/adb.py
+phase="device boot"
+# Preserve timeout diagnostics even when an expected adb error is suppressed.
+exec 3>&2
+adb() {
+  local limit=15
+  case "$1" in
+    install|push|wait-for-device) limit=120 ;;
+    reboot) limit=30 ;;
+    shell) [ "${2:-} ${3:-}" != "am start" ] || limit=60 ;;
+  esac
+  case "$phase" in "failure diagnostics"|cleanup) limit=5 ;; esac
+  if [ -n "$serial" ]; then
+    python3 "$adb_guard" --timeout "$limit" --phase "$phase" --category "$1" \
+      --diagnostic-fd 3 -- adb -s "$serial" "$@"
+  else
+    python3 "$adb_guard" --timeout "$limit" --phase "$phase" --category "$1" \
+      --diagnostic-fd 3 -- adb "$@"
+  fi
+}
 pkg=com.hantekllc.iptvrs
 act=$pkg/.host.TvActivity
 mkdir -p "$out"
@@ -40,8 +59,9 @@ rm -f "$out"/*.png "$out"/*.log
 
 pause() { sleep "$1"; }
 fail() {
+  phase="failure diagnostics"
   echo "FAIL: $*" >&2
-  $adb exec-out screencap -p > "$out/failure.png" 2>/dev/null || true
+  adb exec-out screencap -p > "$out/failure.png" 2>/dev/null || true
   mark || true
   echo "last app log lines:" >&2
   tail -20 "$out/app.log" >&2 || true
@@ -50,12 +70,12 @@ fail() {
 # Pipes into grep read to the end (no -q): with pipefail, grep quitting at
 # the first match can fail the producer, which would read as no match.
 # The app's log since the last mark (`nsh` tag: the Rust app and the host).
-applog() { $adb logcat -d -s nsh:I | tr -d '\r'; }
+applog() { adb logcat -d -s nsh:I | tr -d '\r'; }
 # Keeps the logs so far ($out) and starts afresh.
 mark() {
   applog >> "$out/app.log"
-  $adb logcat -d -b crash >> "$out/crash.log"
-  $adb logcat -b main -b system -b crash -c
+  adb logcat -d -b crash >> "$out/crash.log"
+  adb logcat -b main -b system -b crash -c
 }
 # Waits up to $2 s for a line of the app's log since the last mark matching $1.
 expect() {
@@ -67,7 +87,7 @@ expect() {
   done
   echo "  ok: $(applog | grep -E -m1 "$pattern" | sed 's/^.*: iptv/iptv/')"
 }
-alive() { [ -n "$($adb shell pidof $pkg | tr -d '\r')" ]; }
+alive() { [ -n "$(adb shell pidof $pkg | tr -d '\r')" ]; }
 # Queue each short Down/Up pair without waiting for app handling between them.
 # State/log acknowledgements below still wait for the requested app behavior.
 # Deliberate long presses use adb input --longpress separately.
@@ -76,26 +96,26 @@ keys() {
   for key in "$@"; do
     [[ $key =~ ^KEYCODE_[A-Z0-9_]+$ ]] || fail "invalid smoke key: $key"
   done
-  $adb shell "CLASSPATH=$probe app_process /system/bin ShortKeys $*"
+  adb shell "CLASSPATH=$probe app_process /system/bin ShortKeys $*"
 }
-shot() { $adb exec-out screencap -p > "$out/$1.png" || true; }
-step() { echo "== $*"; }
+shot() { adb exec-out screencap -p > "$out/$1.png" || true; }
+step() { phase=$*; echo "== $*"; }
 
 [ "$(curl -sf --max-time 10 "http://127.0.0.1:$port/iptv/playlist.m3u" | head -c 7)" = "#EXTM3U" ] ||
   fail "no synthetic playlist at http://127.0.0.1:$port/iptv/playlist.m3u (see the usage)"
 wait_for_boot() {
   for _ in $(seq 1 60); do
-    [ "$($adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && return 0
+    [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && return 0
     pause 2
   done
   return 1
 }
 
-$adb wait-for-device
+adb wait-for-device
 if ! wait_for_boot; then
   echo "Emulator failed to finish boot; rebooting and retrying once..." >&2
-  $adb reboot || true
-  $adb wait-for-device
+  adb reboot || true
+  adb wait-for-device
   wait_for_boot || fail "emulator failed to complete boot after retry"
 fi
 # A freshly booted emulator image keeps optimizing and starting its own apps
@@ -118,22 +138,22 @@ javac --release 11 -d "$out/always-finish" \
   "$out/always-finish/AlwaysFinish.class" "$out/always-finish/ShortKeys.class"
 probe=/data/local/tmp/patina-smoke-always-finish.dex
 set_always_finish() {
-  $adb shell "CLASSPATH=$probe app_process /system/bin AlwaysFinish $1"
+  adb shell "CLASSPATH=$probe app_process /system/bin AlwaysFinish $1"
 }
 
 step "install and first start"
 if [ -n "$apk" ]; then
-  $adb uninstall $pkg >/dev/null 2>&1 || true
-  $adb install -r "$apk" >/dev/null
+  adb uninstall $pkg >/dev/null 2>&1 || true
+  adb install -r "$apk" >/dev/null
 else
-  $adb shell pm clear $pkg >/dev/null
+  adb shell pm clear $pkg >/dev/null
 fi
 # This fixture imports exactly one generated playlist into a fresh profile.
 # Its two-player journey needs an explicit allowance for that first source;
 # leave the product's conservative default and every other source unchanged.
-$adb shell "run-as $pkg test ! -e files/iptv.sqlite" || fail "expected a fresh synthetic profile"
-$adb shell "run-as $pkg mkdir -p files"
-$adb shell "run-as $pkg sh -c 'cat > files/settings.json'" <<'SMOKE_SETTINGS'
+adb shell "run-as $pkg test ! -e files/iptv.sqlite" || fail "expected a fresh synthetic profile"
+adb shell "run-as $pkg mkdir -p files"
+adb shell "run-as $pkg sh -c 'cat > files/settings.json'" <<'SMOKE_SETTINGS'
 {
   "format": "iptv-rs.settings", "version": 2,
   "global": {}, "groups": {},
@@ -143,49 +163,50 @@ SMOKE_SETTINGS
 # Restore only the device settings this smoke changes, including failure paths.
 restore_setting() {
   if [ "$3" = null ] || [ -z "$3" ]; then
-    $adb shell settings delete "$1" "$2" >/dev/null
+    adb shell settings delete "$1" "$2" >/dev/null
   else
-    $adb shell settings put "$1" "$2" "$3" >/dev/null
+    adb shell settings put "$1" "$2" "$3" >/dev/null
   fi
 }
-saved_finish=$($adb shell settings get global always_finish_activities | tr -d '\r')
-saved_font=$($adb shell settings get system font_scale | tr -d '\r')
-saved_immersive=$($adb shell settings get secure immersive_mode_confirmations | tr -d '\r')
-saved_pip=$($adb shell appops get "$pkg" PICTURE_IN_PICTURE | sed -n 's/.*PICTURE_IN_PICTURE: \([^; ]*\).*/\1/p' | tr -d '\r')
+saved_finish=$(adb shell settings get global always_finish_activities | tr -d '\r')
+saved_font=$(adb shell settings get system font_scale | tr -d '\r')
+saved_immersive=$(adb shell settings get secure immersive_mode_confirmations | tr -d '\r')
+saved_pip=$(adb shell appops get "$pkg" PICTURE_IN_PICTURE | sed -n 's/.*PICTURE_IN_PICTURE: \([^; ]*\).*/\1/p' | tr -d '\r')
 saved_pip=${saved_pip:-default}
 cleanup() {
   local status=$?
   trap - EXIT
+  phase=cleanup
   set +e
   if [ "$saved_finish" = 1 ]; then set_always_finish true; else set_always_finish false; fi
   restore_setting global always_finish_activities "$saved_finish"
-  $adb shell rm -f "$probe" >/dev/null
+  adb shell rm -f "$probe" >/dev/null
   restore_setting system font_scale "$saved_font"
   restore_setting secure immersive_mode_confirmations "$saved_immersive"
-  $adb shell appops set "$pkg" PICTURE_IN_PICTURE "$saved_pip" >/dev/null
+  adb shell appops set "$pkg" PICTURE_IN_PICTURE "$saved_pip" >/dev/null
   exit "$status"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-$adb push "$out/always-finish/classes.dex" "$probe" >/dev/null
+adb push "$out/always-finish/classes.dex" "$probe" >/dev/null
 # Ensure background/resume runs with ordinary activity lifetime first.
 set_always_finish false
 # No first-use hint over the immersive app, no picture in picture: Home
 # must stop the activity (picture in picture only pauses it).
-$adb shell settings put secure immersive_mode_confirmations confirmed
-$adb shell appops set $pkg PICTURE_IN_PICTURE ignore
-$adb shell input keyevent KEYCODE_WAKEUP
-$adb shell wm dismiss-keyguard >/dev/null 2>&1 || true
-$adb shell am force-stop $pkg
-$adb logcat -b main -b system -b crash -c
-$adb shell am start -W -n $act >/dev/null
+adb shell settings put secure immersive_mode_confirmations confirmed
+adb shell appops set $pkg PICTURE_IN_PICTURE ignore
+adb shell input keyevent KEYCODE_WAKEUP
+adb shell wm dismiss-keyguard >/dev/null 2>&1 || true
+adb shell am force-stop $pkg
+adb logcat -b main -b system -b crash -c
+adb shell am start -W -n $act >/dev/null
 expect 'iptv startup: fonts registered' 60
 # The last start-up step: until then a slow emulator may drop keys.
 expect 'iptv pip: supported' 60
 # pm returns a nonzero status for a valid false result. Validate its output
 # so tablets proceed while an adb/query failure still fails the smoke.
-is_tv=$($adb shell pm has-feature android.software.leanback | tr -d '\r' || true)
+is_tv=$(adb shell pm has-feature android.software.leanback | tr -d '\r' || true)
 case "$is_tv" in
   true|false) ;;
   *) fail "could not determine the Android TV feature" ;;
@@ -229,7 +250,7 @@ expect 'iptv player 0 state: ready' 60
 # Confirm the actual first-import identity before spending its fixture allowance.
 resume_file=
 for _ in $(seq 1 60); do
-  resume_file=$($adb shell "run-as $pkg ls files" | tr -d '\r' | sed -n '/^last_channel-[0-9][0-9]*$/p' || true)
+  resume_file=$(adb shell "run-as $pkg ls files" | tr -d '\r' | sed -n '/^last_channel-[0-9][0-9]*$/p' || true)
   [[ "$resume_file" =~ ^last_channel-[0-9]+$ ]] && break
   pause 0.5
 done
@@ -248,7 +269,7 @@ if [ "$is_tv" = true ]; then
   step "shared TV controls and long OK release"
   mark
   # Keep deliberate long presses real; keys() supplies only bounded short pairs.
-  $adb shell input keyevent --longpress KEYCODE_DPAD_CENTER
+  adb shell input keyevent --longpress KEYCODE_DPAD_CENTER
   # Queue navigation before reading logcat: a loaded host can spend the
   # entire auto-hide interval polling or taking screenshots.
   keys KEYCODE_DPAD_RIGHT KEYCODE_BACK
@@ -292,16 +313,16 @@ step "background and resume"
 mark
 keys KEYCODE_HOME
 for _ in $(seq 1 20); do
-  $adb shell dumpsys activity -p $pkg activities | grep 'state=STOPPED' >/dev/null && break
+  adb shell dumpsys activity -p $pkg activities | grep 'state=STOPPED' >/dev/null && break
   pause 0.5
 done
-$adb shell dumpsys activity -p $pkg activities | grep 'state=STOPPED' >/dev/null ||
+adb shell dumpsys activity -p $pkg activities | grep 'state=STOPPED' >/dev/null ||
   fail "the activity did not stop in the background"
 echo "  ok: activity stopped"
 pause 3
 alive || fail "the app died in the background"
 mark
-$adb shell am start -W -n $act >/dev/null
+adb shell am start -W -n $act >/dev/null
 expect 'iptv player 0 state: ready' 60
 expect 'iptv player 1 state: ready' 60
 shot 07-resumed
@@ -326,7 +347,7 @@ shot 08-guide
 # The fixture starts from a clean installation and contains one playlist.
 # Its resume file stores content identity, not a list index. Keep identities
 # out of logs even though this script uses only generated input.
-resume_identity() { $adb exec-out run-as "$pkg" cat "files/$resume_file" 2>/dev/null | tr -d '\r\n'; }
+resume_identity() { adb exec-out run-as "$pkg" cat "files/$resume_file" 2>/dev/null | tr -d '\r\n'; }
 assert_resume() {
   local expected=$1 label=$2 actual
   actual=$(resume_identity) || fail "$label: cannot read persisted resume identity"
@@ -336,7 +357,7 @@ assert_resume() {
 }
 wait_stopped() {
   for _ in $(seq 1 40); do
-    $adb shell dumpsys activity -p "$pkg" activities | grep -E 'state=STOPPED|mAppStopped=true' >/dev/null && return 0
+    adb shell dumpsys activity -p "$pkg" activities | grep -E 'state=STOPPED|mAppStopped=true' >/dev/null && return 0
     pause 0.5
   done
   fail "activity did not stop and flush its queued writes"
@@ -344,7 +365,7 @@ wait_stopped() {
 wait_destroyed() {
   local activities
   for _ in $(seq 1 60); do
-    activities=$($adb shell dumpsys activity -p "$pkg" activities) ||
+    activities=$(adb shell dumpsys activity -p "$pkg" activities) ||
       fail "cannot inspect activity destruction"
     if ! printf '%s\n' "$activities" | grep -E "ActivityRecord.*${pkg//./\\.}" >/dev/null ||
       printf '%s\n' "$activities" | grep -E 'state=DESTROYED' >/dev/null; then
@@ -355,7 +376,7 @@ wait_destroyed() {
   fail "activity was not destroyed with don't-keep-activities enabled"
 }
 reopen_and_expect_resume() {
-  $adb shell am start -W -n "$act" >/dev/null
+  adb shell am start -W -n "$act" >/dev/null
   expect 'iptv startup: activity created' 60
   expect 'iptv pip: supported' 60
   expect 'iptv player: resuming the last channel' 60
@@ -414,7 +435,7 @@ fi
 keys KEYCODE_HOME
 wait_stopped
 assert_resume "$changed_identity" "background flush"
-$adb shell am force-stop "$pkg"
+adb shell am force-stop "$pkg"
 ! alive || fail "app failed to stop on kill"
 mark
 reopen_and_expect_resume
@@ -422,17 +443,17 @@ assert_resume "$changed_identity" "process restart"
 shot 10-reopened
 
 step "recreate the activity"
-orig_pid=$($adb shell pidof "$pkg" | tr -d '\r')
+orig_pid=$(adb shell pidof "$pkg" | tr -d '\r')
 [ -n "$orig_pid" ] || fail "app is not running before activity recreation"
 # fontScale/orientation are handled by configChanges and do not recreate this
 # Activity. Don't-keep-activities destroys it on background, retaining its process.
 set_always_finish true
 keys KEYCODE_HOME
 wait_destroyed
-[ "$orig_pid" = "$($adb shell pidof "$pkg" | tr -d '\r')" ] || fail "process died before recreation"
+[ "$orig_pid" = "$(adb shell pidof "$pkg" | tr -d '\r')" ] || fail "process died before recreation"
 mark
 reopen_and_expect_resume
-[ "$orig_pid" = "$($adb shell pidof "$pkg" | tr -d '\r')" ] || fail "recreation replaced the process"
+[ "$orig_pid" = "$(adb shell pidof "$pkg" | tr -d '\r')" ] || fail "recreation replaced the process"
 assert_resume "$changed_identity" "activity recreation"
 # Keep ordinary lifecycle for the final recovery case; the trap restores the original.
 set_always_finish false
@@ -442,17 +463,17 @@ step "interrupt then recover a restore"
 keys KEYCODE_HOME
 wait_stopped
 assert_resume "$changed_identity" "before interrupted restore"
-$adb shell am force-stop "$pkg"
+adb shell am force-stop "$pkg"
 ! alive || fail "app failed to stop before staged restore"
 # A crash after moving current storage aside, before the new tree is
 # installed: activation must recover the previous tree, even if Android has
 # recreated the empty files directory. Compare content identity, not file size.
-$adb shell "run-as $pkg mv files files.restore-previous"
-$adb shell "run-as $pkg mkdir files"
+adb shell "run-as $pkg mv files files.restore-previous"
+adb shell "run-as $pkg mkdir files"
 mark
 reopen_and_expect_resume
 assert_resume "$changed_identity" "interrupted restore recovery"
-$adb shell "run-as $pkg test ! -d files.restore-previous" || fail "restore-previous was not cleaned up"
+adb shell "run-as $pkg test ! -d files.restore-previous" || fail "restore-previous was not cleaned up"
 shot 12-recovered
 
 step "checks"
