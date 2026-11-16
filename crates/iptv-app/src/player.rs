@@ -658,7 +658,7 @@ fn fail_capacity(ui: Ui, surface: usize, session: u64, error: &crate::runtime::E
         surface,
         session,
         ErrorKind::Http(429),
-        crate::i18n::tr(reason).into(),
+        crate::i18n::tr("No provider connection available; check Streams at once").into(),
     );
     true
 }
