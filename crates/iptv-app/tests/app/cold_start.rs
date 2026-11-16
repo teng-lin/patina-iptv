@@ -217,9 +217,12 @@ fn cold_start(home: crate::isolated::Home, hold_preparation: bool) {
     }
     let preparation = hold_preparation.then(|| PREPARATION.lock().unwrap().take().unwrap());
     if let Some(preparation) = &preparation {
-        step(app.wait_until("early preparation entered", IMPORT, |_| {
-            preparation.wait_entered(Duration::ZERO)
-        }));
+        step(crate::isolated::wait_outside(
+            &mut app,
+            "early preparation entered",
+            IMPORT,
+            || preparation.wait_entered(Duration::ZERO),
+        ));
         // Programme cells only arrive with the catalogue/guide, so this passes
         // the actual adoption boundary while the first request is still held.
         step(app.wait_for_within("text:Now Show", IMPORT));

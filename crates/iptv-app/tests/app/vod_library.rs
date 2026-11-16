@@ -1146,10 +1146,11 @@ fn exercise_admission(
         step(app.press("text:/Generated Second/"));
     }
     if let Some(held) = &held {
-        step(app.wait_until(
+        step(crate::isolated::wait_outside(
+            &mut app,
             "source preparation acknowledged",
             Duration::from_secs(5),
-            |_| held.wait_entered(Duration::ZERO),
+            || held.wait_entered(Duration::ZERO),
         ));
         assert_eq!(props.lock().unwrap()["source"], previous_source);
         if app.screen().count("label:Rewind").unwrap() == 0 {
