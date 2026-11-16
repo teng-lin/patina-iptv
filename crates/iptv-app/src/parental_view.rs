@@ -196,6 +196,14 @@ pub fn manage(ui: Ui) {
     });
 }
 fn manage_pick(ui: Ui, index: usize) {
+    if ui.parental.with_untracked(|o| {
+        o.as_ref()
+            .and_then(|o| o.blocks.as_ref())
+            .is_some_and(|blocks| index == blocks.len() + 1)
+    }) {
+        close(ui);
+        return;
+    }
     let target = ui
         .parental
         .with_untracked(|o| o.as_ref()?.blocks.as_ref()?.get(index).cloned());
@@ -269,6 +277,10 @@ pub fn key(ui: Ui, action: Action) {
     }
 }
 pub fn remote(ui: Ui, key: RemoteKey) {
+    ui.input.set(crate::Input::Keys);
+    if busy(ui) && key != RemoteKey::Back {
+        return;
+    }
     if ui
         .parental
         .with_untracked(|o| o.as_ref().is_some_and(|o| o.blocks.is_some()))
@@ -298,7 +310,10 @@ pub fn remote(ui: Ui, key: RemoteKey) {
         RemoteKey::Left => self::key(ui, Action::MoveLeft),
         RemoteKey::Right => self::key(ui, Action::MoveRight),
         RemoteKey::Ok => {
-            if phase(ui).is_some_and(|p| matches!(p, Phase::Recovery | Phase::RecoveryNotice))
+            if cancel_focused(ui) {
+                close(ui);
+            } else if phase(ui)
+                .is_some_and(|p| matches!(p, Phase::Recovery | Phase::RecoveryNotice))
                 || crate::settings::choice(iptv_settings::keys::EnumKey("parental.pin_input"))
                     == "number_keys"
             {
@@ -317,7 +332,14 @@ pub fn remote(ui: Ui, key: RemoteKey) {
 fn move_focus(ui: Ui, step: isize) {
     ui.parental.update(|o| {
         if let Some(o) = o {
-            let count = o.blocks.as_ref().map_or(15, |b| b.len() + 1);
+            let count = o.blocks.as_ref().map_or_else(
+                || match o.dialog.phase {
+                    Phase::Recovery => 3,
+                    Phase::RecoveryNotice => 2,
+                    _ => 14,
+                },
+                |b| b.len() + 2,
+            );
             o.dialog.move_focus(step, count);
         }
     });
@@ -442,6 +464,21 @@ fn focused(ui: Ui, index: usize) -> bool {
     ui.parental
         .with(|o| o.as_ref().is_some_and(|o| o.dialog.focus == index))
 }
+fn cancel_focused(ui: Ui) -> bool {
+    ui.parental.with(|o| {
+        o.as_ref().is_some_and(|o| {
+            let cancel = o.blocks.as_ref().map_or_else(
+                || match o.dialog.phase {
+                    Phase::Recovery => 2,
+                    Phase::RecoveryNotice => 1,
+                    _ => 13,
+                },
+                |b| b.len() + 1,
+            );
+            o.dialog.focus == cancel
+        })
+    })
+}
 fn managing(ui: Ui) -> bool {
     ui.parental
         .with(|o| o.as_ref().is_some_and(|o| o.blocks.is_some()))
@@ -483,7 +520,11 @@ fn manager(ui: Ui, size: Scale) -> View {
         .h(move || size.px(count().clamp(1, 6) as f32 * 52.0)),
     )
 }
-fn keypad(ui: Ui, size: Scale) -> View {
+fn busy(ui: Ui) -> bool {
+    ui.parental
+        .with(|o| o.as_ref().is_some_and(|o| o.dialog.busy))
+}
+fn keypad(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
     let mut keypad = view().gap(px(6.0)).child(ui_kit::title(size, move || {
         ui.parental.with(|o| {
             o.as_ref()
@@ -508,20 +549,29 @@ fn keypad(ui: Ui, size: Scale) -> View {
                     move || focused(ui, index),
                     move || activate(ui, index),
                 )
+                .disabled(move || busy(ui))
                 .flex_1(),
             );
         }
-        keypad = keypad.child(cells);
+        keypad = keypad.child(scrolling.control(cells, move || {
+            (row * 3..row * 3 + 3).any(|index| focused(ui, index))
+        }));
     }
-    keypad.child(ui_kit::button(
-        ui,
-        size,
-        crate::i18n::tr("Forgot PIN?"),
-        move || focused(ui, 12),
-        move || activate(ui, 12),
-    ))
+    keypad.child(
+        scrolling.control(
+            ui_kit::button(
+                ui,
+                size,
+                crate::i18n::tr("Forgot PIN?"),
+                move || focused(ui, 12),
+                move || activate(ui, 12),
+            )
+            .disabled(move || busy(ui)),
+            move || focused(ui, 12),
+        ),
+    )
 }
-fn credentials(ui: Ui, size: Scale) -> View {
+fn credentials(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
     use crate::i18n::tr;
     view().gap(px(8.0))
         .child(ui_kit::body(size,move||ui.parental.with(|o|o.as_ref()
@@ -532,21 +582,24 @@ fn credentials(ui: Ui, size: Scale) -> View {
                 .child(ui_kit::body(size,tr("Keep this recovery code private. A new code replaces the previous code.")))
                 .child(ui_kit::body(size,move||ui.parental.with(|o|o.as_ref()
                     .map_or(String::new(),|o|o.dialog.recovery.to_string()))))
-                .child(ui_kit::button(ui,size,tr("I saved the code"),||true,move||finish(ui)))
+                .child(ui_kit::button(ui,size,tr("I saved the code"),move||focused(ui,0),move||finish(ui)))
         }))
         .child(when(move||phase(ui)==Some(Phase::Recovery),move||{
             view().gap(px(8.0)).child(ui_kit::field(size,input())
                 .test_id("parental-recovery-input").masked(true).max_length(32)
+                .label(move || tr("Recovery code").to_owned())
+                .disabled(move || busy(ui))
                 .auto_correct(false).auto_capitalize(AutoCapitalize::None)
                 .placeholder(tr("Recovery code"))
                 .on_change(move|text:&str|ui.parental.update(|o|{
                     if let Some(o)=o {o.dialog.recovery.clear();
                         o.dialog.recovery.push_str(&text.to_ascii_lowercase());}
                 })).on_submit(move|_:&str|submit(ui)))
-                .child(ui_kit::button(ui,size,tr("Continue"),||true,move||submit(ui)))
+                .child(scrolling.control(ui_kit::button(ui,size,tr("Continue"),move||focused(ui,1),move||submit(ui))
+                    .disabled(move||busy(ui)),move||focused(ui,1)))
         }))
         .child(when(move||phase(ui).is_some_and(|p|
-            !matches!(p,Phase::Recovery|Phase::RecoveryNotice)),move||keypad(ui,size)))
+            !matches!(p,Phase::Recovery|Phase::RecoveryNotice)),move||keypad(ui,size,scrolling)))
 }
 pub fn layer(ui: Ui) -> View {
     let size = Scale::new();
@@ -569,8 +622,22 @@ pub fn layer(ui: Ui) -> View {
         .child(when(
             move || is_open(ui),
             move || {
+                let scrolling = ui_kit::FocusScroll::new();
+                effect(move || {
+                    phase(ui);
+                    scrolling.reset();
+                });
                 view()
+                    .test_id("parental-card")
                     .w(move || size.px(440.0))
+                    .max_w(percentage(0.95))
+                    .max_h(percentage(0.95))
+                    .h(move || {
+                        px((window().height.0 * 0.95).min(
+                            size.of(540.0)
+                                * (crate::settings::font_factor() * font_scale()).max(1.0),
+                        ))
+                    })
                     .p(move || size.px(16.0))
                     .gap(px(8.0))
                     .rounded(px(crate::theme::RADIUS_LARGE))
@@ -580,14 +647,27 @@ pub fn layer(ui: Ui) -> View {
                         crate::i18n::tr(&title).to_owned()
                     }))
                     .child(when(move || managing(ui), move || manager(ui, size)))
-                    .child(when(move || !managing(ui), move || credentials(ui, size)))
-                    .child(ui_kit::button(
-                        ui,
-                        size,
-                        crate::i18n::tr("Cancel"),
-                        move || focused(ui, 13),
-                        move || close(ui),
+                    .child(when(
+                        move || !managing(ui),
+                        move || {
+                            scrolling
+                                .view()
+                                .test_id("parental-scroll")
+                                .flex_1()
+                                .child(credentials(ui, size, scrolling))
+                        },
                     ))
+                    .child(
+                        ui_kit::button(
+                            ui,
+                            size,
+                            crate::i18n::tr("Cancel"),
+                            move || cancel_focused(ui),
+                            move || close(ui),
+                        )
+                        .test_id("parental-cancel")
+                        .flex_shrink_0(),
+                    )
             },
         ))
 }

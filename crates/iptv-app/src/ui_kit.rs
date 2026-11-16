@@ -172,8 +172,12 @@ fn pill(
     text: impl Fn() -> Rgba + 'static,
     on_press: impl Fn() + 'static,
 ) -> View {
+    let label = label.into_reactive();
+    let spoken = label.clone();
     view()
         .role(AccessibilityRole::Button)
+        .accessible(true)
+        .label(move || spoken.get().to_string())
         .min_h(move || px(size.whole(TOUCH)))
         .px(move || size.px(20.0))
         .items_center()
@@ -186,10 +190,75 @@ fn pill(
         })
         .child(
             styled(size, label, BUTTON)
-                .number_of_lines(1)
                 .font_weight(MEDIUM)
                 .text_color(text),
         )
+}
+
+/// A form's scroll container. Logical D-pad focus must reveal its actual
+/// measured control too; fixed row estimates fail with enlarged/wrapped text.
+#[derive(Clone, Copy)]
+pub(crate) struct FocusScroll {
+    handle: ElementRef,
+    offset: Signal<f32>,
+}
+
+impl FocusScroll {
+    pub(crate) fn new() -> Self {
+        Self {
+            handle: element_ref(),
+            offset: signal(0.0),
+        }
+    }
+
+    pub(crate) fn view(self) -> Scroll {
+        scroll()
+            .element_ref(&self.handle)
+            .on_scroll(move |e: &ScrollEvent| {
+                self.offset.set(e.offset.y.0);
+            })
+    }
+
+    pub(crate) fn reset(self) {
+        self.offset.set(0.0);
+        self.handle.scroll_to_offset(px(0.0), false);
+    }
+
+    pub(crate) fn control(self, view: View, focused: impl Fn() -> bool + Copy + 'static) -> View {
+        let control = element_ref();
+        effect(move || {
+            if focused() {
+                self.reveal(control, focused);
+            }
+        });
+        view.element_ref(&control)
+            .on_layout(move |_: &Bounds<Points>| {
+                if focused() {
+                    self.reveal(control, focused);
+                }
+            })
+    }
+
+    fn reveal(self, control: ElementRef, focused: impl Fn() -> bool + 'static) {
+        drop(spawn(async move {
+            let Some(viewport) = self.handle.measure().await else {
+                return;
+            };
+            let Some(item) = control.measure().await else {
+                return;
+            };
+            if !focused() {
+                return;
+            }
+            let top = item.page.y.0 - viewport.page.y.0;
+            let bottom = top + item.frame.size.height.0 - viewport.frame.size.height.0;
+            let delta = if top < 0.0 { top } else { bottom.max(0.0) };
+            if delta.abs() > 0.5 {
+                self.handle
+                    .scroll_to_offset(px((self.offset.get_untracked() + delta).max(0.0)), false);
+            }
+        }));
+    }
 }
 
 /// A tab or chip (search's Channels and Programmes): the selected one in
@@ -202,9 +271,13 @@ pub fn tab(
     focused: impl Fn() -> bool + Copy + 'static,
     on_press: impl Fn() + 'static,
 ) -> View {
+    let label = label.into_reactive();
+    let spoken = label.clone();
     let pill = move || focused() && ui.keys_shown();
     view()
         .role(AccessibilityRole::Tab)
+        .accessible(true)
+        .label(move || spoken.get().to_string())
         .accessibility_state(move || AccessibilityState {
             selected: selected(),
             ..Default::default()
@@ -252,9 +325,13 @@ pub fn action(
     color: u32,
     on_press: impl Fn() + 'static,
 ) -> View {
+    let label = label.into_reactive();
+    let spoken = label.clone();
     let mark = move || Mark::of(focused() && ui.keys_shown(), false);
     list_rows::row(size, ROW, mark)
         .role(AccessibilityRole::Button)
+        .accessible(true)
+        .label(move || spoken.get().to_string())
         .on_press(move || {
             ui.touched();
             on_press();

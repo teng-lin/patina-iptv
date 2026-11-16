@@ -312,7 +312,9 @@ fn mark(ui: Ui, target: Target) -> Mark {
 }
 
 fn card(ui: Ui, size: Scale) -> View {
-    ui_kit::card(ui, size, CARD_W).gap(move || size.px(10.0))
+    ui_kit::card(ui, size, CARD_W)
+        .max_h(percentage(0.95))
+        .gap(move || size.px(10.0))
 }
 
 /// Remote hints, shown only while keys drive the UI.
@@ -341,7 +343,7 @@ fn hint_or_back(ui: Ui, size: Scale, keys: &'static str) -> impl IntoElement {
 }
 
 /// A focusable button for `target`; a tap sends `Tap(target)`.
-fn button(ui: Ui, size: Scale, label: &'static str, target: Target) -> impl IntoElement {
+fn button(ui: Ui, size: Scale, label: &'static str, target: Target) -> View {
     ui_kit::button(
         ui,
         size,
@@ -370,18 +372,25 @@ fn empty(ui: Ui) -> impl IntoElement {
 
 fn choose_type(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
+    let scrolling = ui_kit::FocusScroll::new();
     let row = move |kind: PlaylistKind| {
         let target = Target::Kind(kind);
         let mark = move || mark(ui, target);
-        list_rows::row(size, ROW_TWO, mark)
-            .role(AccessibilityRole::Button)
-            .on_press(move || {
-                ui.touched();
-                send(ui, WizardEvent::Tap(target));
-            })
-            .child(
-                ui_kit::label(size, move || words::kind_title(kind))
-                    .text_color(move || mark().text()),
+        scrolling
+            .control(
+                list_rows::row(size, ROW_TWO, mark)
+                    .role(AccessibilityRole::Button)
+                    .accessible(true)
+                    .label(move || words::kind_title(kind).to_owned())
+                    .on_press(move || {
+                        ui.touched();
+                        send(ui, WizardEvent::Tap(target));
+                    })
+                    .child(
+                        ui_kit::label(size, move || words::kind_title(kind))
+                            .text_color(move || mark().text()),
+                    ),
+                move || focused(ui, target),
             )
             .child(
                 ui_kit::detail(size, move || words::kind_detail(kind))
@@ -389,10 +398,20 @@ fn choose_type(ui: Ui) -> impl IntoElement {
             )
     };
     card(ui, size)
+        .h(move || {
+            px((window().height.0 * 0.95)
+                .min(size.of(500.0) * (crate::settings::font_factor() * font_scale()).max(1.0)))
+        })
         .child(ui_kit::title(size, move || {
             tr("What did your provider give you?")
         }))
-        .children(PlaylistKind::ALL.map(row))
+        .child(
+            scrolling
+                .view()
+                .test_id("wizard-types-scroll")
+                .flex_1()
+                .child(view().children(PlaylistKind::ALL.map(row))),
+        )
         .child(hint_or_back(ui, size, "▲▼ choose   OK next   Back back"))
 }
 
@@ -405,7 +424,7 @@ fn shown_value(field: Field, value: &str) -> String {
     }
 }
 
-fn field_row(ui: Ui, size: Scale, field: Field) -> impl IntoElement {
+fn field_row(ui: Ui, size: Scale, field: Field) -> View {
     let target = Target::Field(field);
     let value = move || read(ui, |w| w.value(field).to_owned()).unwrap_or_default();
     let error = move || read(ui, |w| w.error(field)).flatten();
@@ -420,7 +439,21 @@ fn field_row(ui: Ui, size: Scale, field: Field) -> impl IntoElement {
         )
     });
     list_rows::row(size, ROW, mark)
+        .test_id(match field {
+            Field::EpgUrl => "wizard-field-EpgUrl",
+            _ => "wizard-field",
+        })
         .role(AccessibilityRole::Button)
+        .accessible(true)
+        .label(move || {
+            let label = words::label(field);
+            let content = shown_value(field, &value());
+            if content.is_empty() {
+                label.to_owned()
+            } else {
+                format!("{label} · {content}")
+            }
+        })
         .flex_row()
         .items_center()
         .justify_start()
@@ -473,8 +506,13 @@ fn form(ui: Ui, kind: PlaylistKind) -> impl IntoElement {
         .flatten()
     };
     let size = Scale::new();
+    let scrolling = ui_kit::FocusScroll::new();
     card(ui, size)
         .test_id("wizard-form")
+        .h(move || {
+            px((window().height.0 * 0.95)
+                .min(size.of(500.0) * (crate::settings::font_factor() * font_scale()).max(1.0)))
+        })
         .accessibility_elements_hidden(move || entry::is_editing(ui))
         .gap(move || size.px(4.0))
         .child(ui_kit::title(size, move || words::kind_title(kind)))
@@ -483,7 +521,18 @@ fn form(ui: Ui, kind: PlaylistKind) -> impl IntoElement {
                 .text_color(rgb(ERROR))
                 .h(move || size.px(if banner().is_some() { 22.0 } else { 0.0 })),
         )
-        .children(kind.fields().iter().map(|f| field_row(ui, size, *f)))
+        .child(
+            scrolling
+                .view()
+                .test_id("wizard-fields-scroll")
+                .flex_1()
+                .child(view().children(kind.fields().iter().map(move |f| {
+                    let field = *f;
+                    scrolling.control(field_row(ui, size, field), move || {
+                        focused(ui, Target::Field(field))
+                    })
+                }))),
+        )
         .child(when(
             move || {
                 read(ui, |w| {
@@ -507,7 +556,7 @@ fn form(ui: Ui, kind: PlaylistKind) -> impl IntoElement {
                 )
             },
         ))
-        .child(button(ui, size, "Add playlist", Target::Submit))
+        .child(button(ui, size, "Add playlist", Target::Submit).test_id("wizard-submit"))
         .child(hint_or_back(
             ui,
             size,

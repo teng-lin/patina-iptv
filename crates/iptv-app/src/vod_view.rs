@@ -598,6 +598,10 @@ fn card_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
         },
     )
     .test_id("vod-title")
+    .accessibility_state(move || AccessibilityState {
+        selected: card().is_some_and(|c| ui.vod.with(|s| s.focused.as_ref() == Some(&c.key))),
+        ..Default::default()
+    })
 }
 fn catalogue(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = element_ref();
@@ -690,6 +694,10 @@ fn episode_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
         },
     )
     .test_id("vod-episode")
+    .accessibility_state(move || AccessibilityState {
+        selected: ep().is_some_and(|e| ui.vod.with(|s| s.episode.as_ref() == Some(&e.key))),
+        ..Default::default()
+    })
 }
 fn episodes(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = element_ref();

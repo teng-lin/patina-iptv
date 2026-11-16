@@ -72,9 +72,37 @@ fn setup_block_remote_unlock_change_and_recovery() {
             .any(|target| target.source == source.0)
     );
     drop(store);
+    // The manager has a footer after its content and Lock now. Saturating
+    // Down must reach that actual Cancel control, rather than an invisible
+    // keypad index or the destructive Lock now action.
+    personalization::menu(&mut app, "Manage blocked channels…");
+    wait(&mut app, "Blocked content");
+    for _ in 0..5 {
+        step(app.press_key("down"));
+    }
+    assert_eq!(
+        app.screen()
+            .span_style("id:parental-cancel >> text:Cancel")
+            .unwrap()
+            .color,
+        nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff)
+    );
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("text:Blocked content", Duration::from_secs(3)));
+    assert!(
+        !crate::isolated::open_database(&path)
+            .unwrap()
+            .parental_blocks()
+            .unwrap()
+            .is_empty()
+    );
     // A manager selection completes one authorized operation without asking
     // for the same administrative PIN again after closing the manager.
     personalization::menu(&mut app, "Manage blocked channels…");
+    // Cancel deliberately retired the previous administrative grant.
+    wait(&mut app, "Enter parental PIN");
+    digits(&mut app, "2468");
+    continue_entry(&mut app);
     wait(&mut app, "Blocked content");
     let unblock = app
         .screen()

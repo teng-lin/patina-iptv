@@ -23,6 +23,8 @@ is below 1.0, a minor release may change behaviour.
 - Disposing the final UI owner drains its native store connections and accepted
   small-file writes, including during unwinding, to avoid racing SQLCipher's
   process-exit cleanup.
+- Keep enlarged PIN dialogs and recording actions reachable, show D-pad focus
+  after touch entry, and announce on-demand selection and recovery fields.
 
 ## [0.1.3] - 2026-11-15
 

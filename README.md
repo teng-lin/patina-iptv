@@ -401,6 +401,8 @@ addresses).
 
 [docs/contributing.md](docs/contributing.md) maps changes to subsystem owners,
 contracts and validation commands.
+[Accessibility journeys](docs/accessibility.md) documents semantic/layout checks and
+repeatable platform screen-reader validation.
 [docs/architecture.md](docs/architecture.md) explains the crate layering, the
 sans-IO ports, the state and video-layer rules, the import pipeline and the
 NSH boundary. [CONTRIBUTING.md](CONTRIBUTING.md) covers setup, checks and

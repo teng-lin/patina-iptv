@@ -397,6 +397,7 @@ impl Dialog {
         self.old = None;
         self.new = None;
         self.phase = Phase::Recovery;
+        self.focus = 0;
         self.message.clear();
     }
     pub fn fail(&mut self, message: String) {
@@ -434,6 +435,7 @@ impl Dialog {
                 return Submission::None;
             }
             self.phase = Phase::New;
+            self.focus = 0;
             self.input.clear();
             return Submission::None;
         }
@@ -516,10 +518,14 @@ mod dialog_tests {
     #[test]
     fn recovery_never_disables_protection_without_replacing_pin() {
         let mut d = Dialog::new(Phase::Unlock);
+        d.focus = 12;
         d.recover();
+        assert_eq!(d.focus, 0, "recovery starts at its own first control");
+        d.focus = 1;
         d.recovery.push_str("0123456789abcdef0123456789abcdef");
         assert!(matches!(d.submit(), Submission::None));
         assert_eq!(d.phase, Phase::New);
+        assert_eq!(d.focus, 0, "new PIN starts at its own first control");
         enter(&mut d, "2468");
         d.submit();
         enter(&mut d, "2468");
