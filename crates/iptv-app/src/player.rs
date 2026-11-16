@@ -686,7 +686,12 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
                     session,
                     ErrorKind::Unavailable,
                     match error.unavailable_reason() {
-                        Some("No provider connection available; check Streams at once") => {
+                        Some(reason)
+                            if reason
+                                == crate::i18n::key(
+                                    "No provider connection available; check Streams at once",
+                                ) =>
+                        {
                             crate::i18n::tr(
                                 "No provider connection available; check Streams at once",
                             )
