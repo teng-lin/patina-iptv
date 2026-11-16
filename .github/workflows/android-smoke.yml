@@ -15,6 +15,7 @@ on:
       - 'tools/sync-host.sh'
       - 'tools/ci/android-smoke.sh'
       - 'tools/ci/android/**'
+      - 'tools/ci/*-hls-fixtures.py'
       - 'tools/ci/android-ndk-env.sh'
       - 'tools/make-hls-fixtures.sh'
       - 'tools/make-iptv-fixtures.py'
@@ -96,6 +97,10 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Serve the fixtures
         run: |
+          python3 -I tools/ci/test-repeat-hls-fixtures.py
+          # Each encoded channel is 30s. Reuse its segments for an hour so
+          # natural fixture EOF cannot overlap the no-reopen refresh check.
+          python3 -I tools/ci/repeat-hls-fixtures.py fixtures/hls --cycles 120
           mkdir -p target
           nohup python3 tools/mock-server.py 8089 fixtures/hls > target/mock-server.log 2>&1 &
           for _ in $(seq 1 20); do

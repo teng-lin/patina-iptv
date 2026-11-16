@@ -894,7 +894,14 @@ fn schedule_panel(ui: Ui, size: Scale) -> View {
                 .pb_safe_area()
                 .bg(rgb(style::PANEL))
                 .child(style::header(ui, size, tr("Schedule a recording…")))
-                .child(scroll().flex_1().child(draft_view(ui, size)))
+                .child({
+                    let scrolling = ui_kit::FocusScroll::new();
+                    scrolling
+                        .view()
+                        .test_id("recording-draft-scroll")
+                        .flex_1()
+                        .child(draft_view(ui, size, scrolling))
+                })
                 .child(
                     ui_kit::body(size, move || message(ui))
                         .text_color(rgb(ui_kit::ERROR))

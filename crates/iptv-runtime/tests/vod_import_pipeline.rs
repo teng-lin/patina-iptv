@@ -159,6 +159,7 @@ struct Host {
     directory: tempfile::TempDir,
     publications: Rc<Cell<u64>>,
     has_vod: Rc<Cell<Option<bool>>>,
+    any_vod: Rc<Cell<Option<bool>>>,
 }
 impl Host {
     fn new() -> Self {
@@ -176,6 +177,8 @@ impl Host {
         let presented = publications.clone();
         let has_vod = Rc::new(Cell::new(None));
         let discovery = has_vod.clone();
+        let any_vod = Rc::new(Cell::new(None));
+        let shelves = any_vod.clone();
         let weak = Rc::downgrade(&owner);
         owner.bind(move |event| match event {
             RuntimeEvent::ScheduleReady(schedule) => {
@@ -186,7 +189,12 @@ impl Host {
                 owner.favorites_catalog_changed(schedule.as_ref());
                 presented.set(presented.get() + 1);
             }
-            RuntimeEvent::FavoritesChanged { has_vod, .. } => discovery.set(Some(has_vod)),
+            RuntimeEvent::FavoritesChanged {
+                has_vod, any_vod, ..
+            } => {
+                discovery.set(Some(has_vod));
+                shelves.set(Some(any_vod));
+            }
             _ => {}
         });
         let mut settings = Settings::new();
@@ -208,7 +216,23 @@ impl Host {
             directory,
             publications,
             has_vod,
+            any_vod,
         }
+    }
+    /// Waits for a publication after `previous` reporting `shown` (the
+    /// playlist on screen has movies or shows) and `any` (some enabled
+    /// playlist has).
+    async fn availability_after(&self, previous: u64, shown: bool, any: bool) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while self.publications.get() <= previous
+                || self.has_vod.get() != Some(shown)
+                || self.any_vod.get() != Some(any)
+            {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .expect("the shown playlist did not publish its on-demand availability");
     }
     async fn discovery_after(&self, previous: u64, expected: bool) {
         tokio::time::timeout(Duration::from_secs(10), async {
@@ -386,6 +410,187 @@ async fn normal_xtream_import_discovers_vod_and_respects_global_and_playlist_pre
             data::delete(&host.owner, id).await.unwrap();
             host.discovery_after(previous, false).await;
             assert!(host.owner.playlists().unwrap().is_empty());
+        })
+        .await;
+}
+
+/// The rail's cross-source shelves follow every enabled playlist: a
+/// live-only playlist on screen still reaches another playlist's films,
+/// while its own Movies and Shows entries stay hidden.
+#[tokio::test(flavor = "current_thread")]
+async fn a_live_only_playlist_on_screen_still_offers_the_cross_source_shelves() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let provider = Provider::new();
+            let host = Host::new();
+            let films = provider.source();
+            let previous = host.publications.get();
+            let with_films = host.import(&films, None, true).await;
+            provider.assert_requests(true);
+            host.availability_after(previous, true, true).await;
+            // A second playlist imports live channels only and is shown alone.
+            let mut settings = (*host.owner.settings()).clone();
+            settings.set(INCLUDE, Value::Bool(false)).unwrap();
+            host.settings(&settings);
+            let live_only = Source {
+                name: "Generated live only".into(),
+                ..provider.source()
+            };
+            let previous = host.publications.get();
+            let shown = host.import(&live_only, None, false).await;
+            provider.assert_requests(false);
+            // Add joins both enabled playlists. Let that finish before choosing
+            // the live-only playlist explicitly, without refreshing its data.
+            host.discovery_after(previous, true).await;
+            data::set_policy(
+                &host.owner,
+                shown,
+                iptv_library::SourcePolicy {
+                    refresh_on_start: false,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+            let previous = host.publications.get();
+            data::library::switch_to(&host.owner, shown);
+            host.availability_after(previous, false, true).await;
+            assert_ne!(shown, with_films);
+            assert!(!data::combined::active(&host.owner));
+            assert_eq!(host.owner.shown_source(), Some(shown));
+            // The films' playlist itself still lists all four entries (shown
+            // from storage: no refresh with the now global live-only
+            // preference).
+            data::set_policy(
+                &host.owner,
+                with_films,
+                iptv_library::SourcePolicy {
+                    refresh_on_start: false,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+            let previous = host.publications.get();
+            data::library::switch_to(&host.owner, with_films);
+            host.availability_after(previous, true, true).await;
+            if let Some(finished) = host.owner.pending_import_completion(with_films) {
+                tokio::time::timeout(Duration::from_secs(20), finished)
+                    .await
+                    .unwrap();
+            }
+        })
+        .await;
+}
+
+/// Hidden-source policy and background imports update only the shelves: the
+/// live-only guide on screen retains its source, catalogue and channel identity.
+#[tokio::test(flavor = "current_thread")]
+async fn hidden_playlist_mutations_update_shelves_without_republishing_the_guide() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let provider = Provider::new();
+            let host = Host::new();
+            let previous = host.publications.get();
+            let hidden = host.import(&provider.source(), None, true).await;
+            provider.assert_requests(true);
+            host.availability_after(previous, true, true).await;
+            let enabled = iptv_library::SourcePolicy {
+                refresh_on_start: false,
+                ..Default::default()
+            };
+            data::set_policy(&host.owner, hidden, enabled)
+                .await
+                .unwrap();
+            let mut settings = (*host.owner.settings()).clone();
+            settings.set(INCLUDE, Value::Bool(false)).unwrap();
+            host.settings(&settings);
+            let previous = host.publications.get();
+            let shown = host
+                .import(
+                    &Source {
+                        name: "Generated live-only anchor".into(),
+                        ..provider.source()
+                    },
+                    None,
+                    false,
+                )
+                .await;
+            provider.assert_requests(false);
+            // Adding a second enabled playlist automatically joins both. Wait
+            // for that real transition, then explicitly choose the live-only
+            // playlist before observing hidden-source-only mutations.
+            host.discovery_after(previous, true).await;
+            data::set_policy(&host.owner, shown, enabled).await.unwrap();
+            let previous = host.publications.get();
+            data::library::switch_to(&host.owner, shown);
+            host.availability_after(previous, false, true).await;
+            assert_ne!(hidden, shown);
+            assert!(!data::combined::active(&host.owner));
+            assert_eq!(host.owner.shown_source(), Some(shown));
+            assert_eq!(host.has_vod.get(), Some(false));
+            assert_eq!(host.any_vod.get(), Some(true));
+            let catalogue = host.owner.schedule();
+            let channel = catalogue.channel_key(0);
+            let publications = host.publications.get();
+            let unchanged = || {
+                assert_eq!(host.owner.shown_source(), Some(shown));
+                assert!(!data::combined::active(&host.owner));
+                assert!(Rc::ptr_eq(&catalogue, &host.owner.schedule()));
+                assert_eq!(host.owner.schedule().channel_key(0), channel);
+                assert_eq!(host.publications.get(), publications);
+                assert_eq!(host.has_vod.get(), Some(false));
+            };
+            data::set_policy(
+                &host.owner,
+                hidden,
+                iptv_library::SourcePolicy {
+                    enabled: false,
+                    ..enabled
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(host.any_vod.get(), Some(false), "disable is awaited");
+            unchanged();
+            data::set_policy(&host.owner, hidden, enabled)
+                .await
+                .unwrap();
+            assert_eq!(host.any_vod.get(), Some(true), "enable is awaited");
+            unchanged();
+            // A normal hidden-source import removes its old on-demand catalogue.
+            data::library::refresh(&host.owner, hidden);
+            tokio::time::timeout(Duration::from_secs(20), async {
+                while host.any_vod.get() != Some(false) {
+                    tokio::time::sleep(Duration::from_millis(2)).await;
+                }
+            })
+            .await
+            .expect("completed background import did not remove shelves");
+            provider.assert_requests(false);
+            unchanged();
+            // A later background import adds films without switching the guide.
+            settings
+                .set_in(
+                    INCLUDE,
+                    &Target::playlist(hidden.0.to_string()),
+                    Value::Bool(true),
+                )
+                .unwrap();
+            host.settings(&settings);
+            data::library::refresh(&host.owner, hidden);
+            tokio::time::timeout(Duration::from_secs(20), async {
+                while host.any_vod.get() != Some(true) {
+                    tokio::time::sleep(Duration::from_millis(2)).await;
+                }
+            })
+            .await
+            .expect("completed background import did not add shelves");
+            provider.assert_requests(true);
+            unchanged();
+            data::delete(&host.owner, hidden).await.unwrap();
+            assert_eq!(host.any_vod.get(), Some(false), "delete is awaited");
+            unchanged();
         })
         .await;
 }

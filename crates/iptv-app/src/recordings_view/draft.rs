@@ -251,7 +251,7 @@ fn row(ui: Ui, size: Scale, row: usize) -> View {
         )
 }
 
-pub(super) fn draft_view(ui: Ui, size: Scale) -> View {
+pub(super) fn draft_view(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
     view()
         .child(
             ui_kit::heading(size, move || {
@@ -265,38 +265,66 @@ pub(super) fn draft_view(ui: Ui, size: Scale) -> View {
             .px(move || size.px(24.0))
             .pb(move || size.px(16.0)),
         )
-        .children((0..4).map(move |at| row(ui, size, at)))
+        .children((0..4).map(move |at| {
+            scrolling.control(row(ui, size, at), move || {
+                ui.recordings
+                    .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == at))
+            })
+        }))
         .child(
-            super::style::action(
-                ui,
-                size,
-                tr("Recording options"),
+            scrolling.control(
+                super::style::action(
+                    ui,
+                    size,
+                    tr("Recording options"),
+                    move || {
+                        ui.recordings
+                            .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == Draft::OPTIONS))
+                    },
+                    move || begin(ui, Draft::OPTIONS),
+                )
+                .label(tr("Recording options"))
+                .test_id("recording-options"),
                 move || {
                     ui.recordings
                         .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == Draft::OPTIONS))
                 },
-                move || begin(ui, Draft::OPTIONS),
-            )
-            .label(tr("Recording options"))
-            .test_id("recording-options"),
+            ),
         )
         .child(when(
             move || {
                 ui.recordings
                     .with(|s| s.draft.as_ref().is_some_and(|d| d.options_open))
             },
-            move || view().children((4..7).map(move |at| row(ui, size, at))),
-        ))
-        .child(super::style::action(
-            ui,
-            size,
-            tr("Save recording"),
             move || {
-                ui.recordings
-                    .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == Draft::SAVE))
+                view().children((4..7).map(move |at| {
+                    scrolling.control(row(ui, size, at), move || {
+                        ui.recordings
+                            .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == at))
+                    })
+                }))
             },
-            move || super::save(ui),
         ))
+        .child(
+            scrolling.control(
+                super::style::action(
+                    ui,
+                    size,
+                    tr("Save recording"),
+                    move || {
+                        ui.recordings
+                            .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == Draft::SAVE))
+                    },
+                    move || super::save(ui),
+                )
+                .disabled(move || ui.recordings.with(|s| s.busy))
+                .test_id("recording-save"),
+                move || {
+                    ui.recordings
+                        .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == Draft::SAVE))
+                },
+            ),
+        )
 }
 
 pub(super) fn entry_layer(ui: Ui) -> impl IntoElement {

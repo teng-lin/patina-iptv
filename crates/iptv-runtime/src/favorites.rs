@@ -11,6 +11,7 @@
 //! them in memory only.
 
 use std::collections::{BTreeSet, VecDeque};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
@@ -30,6 +31,90 @@ pub(crate) struct State {
     index: KeyIndex,
     /// The source has movies or shows.
     has_vod: bool,
+    /// Some enabled source has movies or shows (the cross-source shelves).
+    any_vod: bool,
+    /// Reset identity and request order. Only a successful application advances
+    /// authority: a newer failed read must not suppress an older valid result.
+    vod_epoch: Rc<()>,
+    vod_requested: u64,
+    vod_applied: u64,
+}
+
+/// Whether `source` has movies or shows by its last import's counts.
+fn source_has_vod(store: &Store, source: SourceId) -> Result<bool, StoreError> {
+    let counts = store.import_status(source)?.counts;
+    Ok(counts.vod > 0 || counts.series > 0)
+}
+
+/// Whether any enabled source has movies or shows: one status read per
+/// configured playlist, never a catalogue scan.
+fn any_enabled_vod(store: &Store) -> Result<bool, StoreError> {
+    for source in store.sources()? {
+        if store.source_policy(source.id)?.enabled && source_has_vod(store, source.id)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+struct VodRequest {
+    epoch: Rc<()>,
+    revision: u64,
+}
+
+/// Reserve before queuing work, independently from the newest applied result.
+fn begin_vod_request(owner: &super::Runtime) -> VodRequest {
+    owner.favorites.with(|state| {
+        let mut state = state.borrow_mut();
+        state.vod_requested = match state.vod_requested.checked_add(1) {
+            Some(next) => next,
+            None => {
+                state.vod_epoch = Rc::new(());
+                state.vod_applied = 0;
+                1
+            }
+        };
+        VodRequest {
+            epoch: state.vod_epoch.clone(),
+            revision: state.vod_requested,
+        }
+    })
+}
+
+/// Even an unchanged successful result fences older reads. An error/unknown
+/// result never reaches here and cannot discard valid work still in flight.
+fn apply_vod_availability(state: &mut State, request: &VodRequest, any_vod: bool) -> bool {
+    if !Rc::ptr_eq(&state.vod_epoch, &request.epoch) || request.revision <= state.vod_applied {
+        return false;
+    }
+    state.vod_applied = request.revision;
+    let changed = state.any_vod != any_vod;
+    state.any_vod = any_vod;
+    changed
+}
+
+/// Refresh just the cross-source availability, leaving the guide and its
+/// favourites intact. Policy/deletion callers await this nonblocking read;
+/// completed background imports schedule it. Errors retain the last good value.
+pub(crate) fn refresh_vod_availability(
+    owner: &Rc<super::Runtime>,
+) -> impl std::future::Future<Output = ()> + use<> {
+    let request = begin_vod_request(owner);
+    let services = owner.services();
+    let read = services.read(any_enabled_vod);
+    let owner = owner.clone();
+    async move {
+        let Ok(any_vod) = read.await else { return };
+        if !services.is_current() {
+            return;
+        }
+        let changed = owner
+            .favorites
+            .with(|state| apply_vod_availability(&mut state.borrow_mut(), &request, any_vod));
+        if changed {
+            publish(&owner);
+        }
+    }
 }
 
 /// A store write, in the order made.
@@ -117,10 +202,19 @@ pub async fn prepare_source(
 ) -> Option<impl FnOnce()> {
     let generation = owner.generation.get();
     let id = source?;
+    let services = owner.services();
+    let request = begin_vod_request(owner);
     let loaded = load(owner, move |store| {
-        let has_vod = store
-            .import_status(id)
-            .is_ok_and(|s| s.counts.vod + s.counts.series > 0);
+        let has_vod = source_has_vod(store, id).unwrap_or(false);
+        // Another enabled playlist's films keep the cross-source shelves
+        // reachable while a live-only playlist is on screen.
+        // An unrelated playlist's metadata error must not block this guide.
+        // None preserves the last known cross-source availability.
+        let any_vod = if has_vod {
+            Some(true)
+        } else {
+            any_enabled_vod(store).ok()
+        };
         let rows = store.load_channels(
             id,
             &ChannelQuery {
@@ -131,13 +225,13 @@ pub async fn prepare_source(
             },
         )?;
         let recent = store.recent(Some(id), Some(ContentKind::Live), RECENT_LIMIT as u32)?;
-        Ok((has_vod, rows, recent))
+        Ok(((has_vod, any_vod), rows, recent))
     })
     .await;
-    if owner.generation.get() != generation {
+    if !services.is_current() || owner.generation.get() != generation {
         return None;
     }
-    let (has_vod, rows, recent) = match loaded {
+    let ((has_vod, any_vod), rows, recent) = match loaded {
         Ok(loaded) => loaded,
         Err(error) => {
             log::warn!("iptv favourites: store unavailable ({error})");
@@ -149,6 +243,11 @@ pub async fn prepare_source(
         owner.favorites.with(|state| {
             let mut state = state.borrow_mut();
             state.has_vod = has_vod;
+            if services.is_current()
+                && let Some(any_vod) = any_vod
+            {
+                apply_vod_availability(&mut state, &request, any_vod);
+            }
             if state.source == source {
                 return;
             }
@@ -170,17 +269,21 @@ pub async fn prepare_source(
 /// Load enabled-source favourites while preserving edits already held in memory.
 pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<impl FnOnce()> {
     let generation = owner.generation.get();
+    let services = owner.services();
+    let request = begin_vod_request(owner);
     use iptv_guide::combined::{qualified_key, split_key};
     let loaded = load(owner, |store| {
         let mut ids = Vec::new();
         let mut favorites = Vec::new();
         let mut has_vod = false;
+        let mut availability_known = true;
         for source in store.sources()? {
             if store.source_policy(source.id)?.enabled {
                 ids.push(source.id);
-                has_vod |= store
-                    .import_status(source.id)
-                    .is_ok_and(|status| status.counts.vod + status.counts.series > 0);
+                match source_has_vod(store, source.id) {
+                    Ok(available) => has_vod |= available,
+                    Err(_) => availability_known = false,
+                }
                 let rows = store.load_channels(
                     source.id,
                     &ChannelQuery {
@@ -199,11 +302,11 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
             ids,
             favorites,
             store.recent(None, Some(ContentKind::Live), RECENT_LIMIT as u32)?,
-            has_vod,
+            (has_vod || availability_known).then_some(has_vod),
         ))
     })
     .await;
-    if owner.generation.get() != generation {
+    if !services.is_current() || owner.generation.get() != generation {
         return None;
     }
     let Ok((ids, favorites, recent, has_vod)) = loaded else {
@@ -242,7 +345,13 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
                         .map(|row| qualified_key(row.source_id.0, row.item_id.as_str())),
                 );
             }
-            state.has_vod = has_vod;
+            // Every enabled playlist is on screen.
+            if let Some(has_vod) = has_vod {
+                state.has_vod = has_vod;
+                if services.is_current() {
+                    apply_vod_availability(&mut state, &request, has_vod);
+                }
+            }
         })
     })
 }
@@ -268,13 +377,14 @@ pub fn catalog_changed(owner: &super::Runtime, catalog: &dyn Schedule) {
 }
 
 pub fn publish(owner: &super::Runtime) {
-    let (set, has_vod) = owner.favorites.with(|s| {
+    let (set, has_vod, any_vod) = owner.favorites.with(|s| {
         let s = s.borrow();
-        (s.favorites.set_of(&s.index), s.has_vod)
+        (s.favorites.set_of(&s.index), s.has_vod, s.any_vod)
     });
     owner.emit(super::RuntimeEvent::FavoritesChanged {
         channels: set,
         has_vod,
+        any_vod,
     });
 }
 
@@ -782,5 +892,195 @@ mod writer_tests {
         for mut result in answers {
             assert_eq!(result.try_recv().unwrap(), Some(false));
         }
+    }
+}
+
+#[cfg(test)]
+mod vod_availability_tests {
+    use super::*;
+    use crate::{Ports, Runtime};
+    use std::cell::Cell;
+
+    #[test]
+    fn reordered_availability_reads_and_old_service_epochs_cannot_publish() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = Rc::new(Runtime::new(Ports::new(directory.path().into(), |_| {
+            Ok(crate::model::DatabaseKey::from_bytes([0x72; 32]))
+        })));
+        owner.start_services();
+        owner
+            .favorites
+            .with(|state| state.borrow_mut().any_vod = true);
+        let events = Rc::new(Cell::new(0));
+        let reported = events.clone();
+        owner.bind(move |event| {
+            if matches!(event, super::super::RuntimeEvent::FavoritesChanged { .. }) {
+                reported.set(reported.get() + 1);
+            }
+        });
+        // Poll the newer success first; the older reply cannot replace it.
+        let earlier = refresh_vod_availability(&owner);
+        let newer = refresh_vod_availability(&owner);
+        owner.services().block_on(newer);
+        assert!(!owner.favorites.with(|s| s.borrow().any_vod));
+        assert_eq!(events.get(), 1);
+        owner.services().block_on(earlier);
+        assert!(!owner.favorites.with(|s| s.borrow().any_vod));
+        assert_eq!(events.get(), 1);
+        owner
+            .favorites
+            .with(|state| state.borrow_mut().any_vod = true);
+        let retired = refresh_vod_availability(&owner);
+        assert!(owner.drain_services());
+        owner.start_services();
+        owner.services().block_on(retired);
+        assert!(owner.favorites.with(|s| s.borrow().any_vod));
+        assert_eq!(events.get(), 1);
+        let reset_request = refresh_vod_availability(&owner);
+        reset(&owner);
+        owner
+            .favorites
+            .with(|state| state.borrow_mut().any_vod = true);
+        owner.services().block_on(reset_request);
+        assert!(owner.favorites.with(|s| s.borrow().any_vod));
+        assert_eq!(events.get(), 1);
+        assert!(owner.drain_services());
+    }
+
+    #[test]
+    fn a_failed_newer_guide_read_does_not_discard_a_valid_availability_reply() {
+        use std::{
+            future::Future,
+            task::{Context, Waker},
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let owner = Rc::new(Runtime::new(Ports::new(directory.path().into(), |_| {
+            Ok(crate::model::DatabaseKey::from_bytes([0x74; 32]))
+        })));
+        owner.start_services();
+        owner.favorites.with(|s| s.borrow_mut().any_vod = true);
+        let valid = refresh_vod_availability(&owner); // reads the empty library
+        let (writer, inbox) = mpsc::channel();
+        *owner.favorite_writer.borrow_mut() = Some(writer);
+        owner.favorite_unsaved.store(1, Ordering::Release);
+        // A newer guide preparation reserves, but a failed persistence barrier
+        // prevents its read/install. Its reservation carries no new authority.
+        let mut failed = std::pin::pin!(prepare_source(&owner, Some(SourceId(74))));
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(failed.as_mut().poll(&mut context).is_pending());
+        let Write::Barrier(reply) = inbox
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap()
+        else {
+            panic!("guide preparation must await its favorite-write barrier")
+        };
+        reply.send(false).unwrap();
+        assert!(owner.services().block_on(failed).is_none());
+        owner.services().block_on(valid);
+        assert!(!owner.favorites.with(|s| s.borrow().any_vod));
+        owner.favorite_writer.borrow_mut().take();
+        owner.favorite_unsaved.store(0, Ordering::Release);
+        assert!(owner.drain_services());
+    }
+
+    #[test]
+    fn a_newer_unchanged_success_still_rejects_an_older_different_value() {
+        let owner = Runtime::default();
+        let older = begin_vod_request(&owner);
+        let newer = begin_vod_request(&owner);
+        owner.favorites.with(|s| {
+            let mut state = s.borrow_mut();
+            assert!(!apply_vod_availability(&mut state, &newer, false));
+            assert!(!apply_vod_availability(&mut state, &older, true));
+            assert!(!state.any_vod);
+        });
+    }
+
+    /// A newer shelf read can finish while an already-read guide waits to
+    /// install. It reports the still-mounted guide's index and does not cancel
+    /// that preparation; only its older global availability value is fenced.
+    #[test]
+    fn dynamic_availability_keeps_the_mounted_index_and_allows_pending_guide_install() {
+        use iptv_providers::{
+            SecretUrl,
+            model::{M3uSourceConfig, Source, SourceConfig},
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let key = crate::model::DatabaseKey::from_bytes([0x73; 32]);
+        let mut store = Store::open_encrypted(directory.path().join("iptv.sqlite"), &key).unwrap();
+        let source = |name: &str| Source {
+            name: name.into(),
+            config: SourceConfig::M3u(M3uSourceConfig {
+                location: SecretUrl::new("https://example.test/generated-guide.m3u"),
+                user_agent: None,
+                referrer: None,
+            }),
+        };
+        let old = store
+            .add_source(&source("Generated mounted source"))
+            .unwrap();
+        let next = store.add_source(&source("Generated next source")).unwrap();
+        drop(store);
+        let owner = Rc::new(Runtime::new(Ports::new(
+            directory.path().into(),
+            move |_| Ok(key.clone()),
+        )));
+        owner.start_services();
+        let mounted = owner.schedule();
+        let channel = mounted.channel_key(0).unwrap();
+        owner.favorites.with(|state| {
+            let mut state = state.borrow_mut();
+            state.source = Some(old);
+            state.index = KeyIndex::build(mounted.as_ref());
+            state.favorites = Favorites::from_keys([channel]);
+            state.has_vod = true;
+            state.any_vod = true;
+        });
+        let events = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let reported = events.clone();
+        owner.bind(move |event| {
+            if let super::super::RuntimeEvent::FavoritesChanged {
+                channels,
+                has_vod,
+                any_vod,
+            } = event
+            {
+                reported.borrow_mut().push((channels, has_vod, any_vod));
+            }
+        });
+        // The next guide's data has loaded, but its actual installation is held.
+        let install = owner
+            .services()
+            .block_on(prepare_source(&owner, Some(next)))
+            .unwrap();
+        owner.services().block_on(refresh_vod_availability(&owner));
+        assert!(Rc::ptr_eq(&mounted, &owner.schedule()));
+        assert_eq!(owner.favorites.with(|s| s.borrow().source), Some(old));
+        assert_eq!(*events.borrow(), vec![(BTreeSet::from([0]), true, false)]);
+        // A superseded availability ticket must not discard the prepared guide.
+        install();
+        owner.favorites.with(|state| {
+            let state = state.borrow();
+            assert_eq!(state.source, Some(next));
+            assert!(state.favorites.keys().is_empty());
+            assert!(!state.has_vod);
+            assert!(!state.any_vod);
+        });
+        assert!(owner.drain_services());
+    }
+
+    #[test]
+    fn an_unavailable_read_keeps_the_last_good_shelf_availability() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = Rc::new(Runtime::new(Ports::new(directory.path().into(), |_| {
+            Err(StoreError::Unavailable("generated availability read failure").into())
+        })));
+        owner.start_services();
+        owner
+            .favorites
+            .with(|state| state.borrow_mut().any_vod = true);
+        owner.services().block_on(refresh_vod_availability(&owner));
+        assert!(owner.favorites.with(|s| s.borrow().any_vod));
+        assert!(owner.drain_services());
     }
 }

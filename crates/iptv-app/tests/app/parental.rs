@@ -51,7 +51,20 @@ fn setup_block_remote_unlock_change_and_recovery() {
     digits(&mut app, "2468");
     continue_entry(&mut app);
     digits(&mut app, "2468");
+    // Delay the credential commit so Back/Cancel races are deterministic.
+    let writer = crate::store_latency::hold_writer(&fixture.home);
     continue_entry(&mut app);
+    wait(&mut app, "Checking…");
+    assert!(
+        app.screen()
+            .accessibility_state("id:parental-cancel")
+            .unwrap()
+            .disabled
+    );
+    step(app.back());
+    assert!(app.shows("Checking…"));
+    assert!(app.press("id:parental-cancel").is_err());
+    writer.execute_batch("ROLLBACK").unwrap();
     wait(&mut app, "Save your recovery code");
     let code = app
         .screen()
@@ -72,9 +85,37 @@ fn setup_block_remote_unlock_change_and_recovery() {
             .any(|target| target.source == source.0)
     );
     drop(store);
+    // The manager has a footer after its content and Lock now. Saturating
+    // Down must reach that actual Cancel control, rather than an invisible
+    // keypad index or the destructive Lock now action.
+    personalization::menu(&mut app, "Manage blocked channels…");
+    wait(&mut app, "Blocked content");
+    for _ in 0..5 {
+        step(app.press_key("down"));
+    }
+    assert_eq!(
+        app.screen()
+            .span_style("id:parental-cancel >> text:Cancel")
+            .unwrap()
+            .color,
+        nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff)
+    );
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("text:Blocked content", Duration::from_secs(3)));
+    assert!(
+        !crate::isolated::open_database(&path)
+            .unwrap()
+            .parental_blocks()
+            .unwrap()
+            .is_empty()
+    );
     // A manager selection completes one authorized operation without asking
     // for the same administrative PIN again after closing the manager.
     personalization::menu(&mut app, "Manage blocked channels…");
+    // Cancel deliberately retired the previous administrative grant.
+    wait(&mut app, "Enter parental PIN");
+    digits(&mut app, "2468");
+    continue_entry(&mut app);
     wait(&mut app, "Blocked content");
     let unblock = app
         .screen()
@@ -213,4 +254,210 @@ fn number_key_entry_protects_settings_and_changes_an_existing_pin() {
     digits(&mut app, "1357");
     step(app.press_key("enter"));
     step(app.wait_for_gone("text:Enter parental PIN", Duration::from_secs(20)));
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+mod hidden_window {
+    use super::*;
+    use nsh_core::element::Root;
+    use nsh_core::prelude::*;
+    use nsh_engine::EngineConfig;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static REOPEN: AtomicBool = AtomicBool::new(false);
+
+    #[component]
+    fn WindowHarness() -> impl IntoElement {
+        let window = nsh_core::element::desktop::main_window();
+        let _timer = set_interval(Duration::from_millis(10), move || {
+            if REOPEN.swap(false, Ordering::SeqCst) {
+                window.focus();
+            }
+        });
+        <iptv_app::App as nsh_core::element::Component>::element(())
+    }
+    fn reopen(app: &mut Headless) {
+        REOPEN.store(true, Ordering::SeqCst);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            app.settle();
+            if app
+                .window_state("main")
+                .unwrap()
+                .is_some_and(|window| window.visible)
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the recording window did not acknowledge reopening"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(!REOPEN.load(Ordering::SeqCst));
+    }
+    fn code(app: &Headless) -> Option<String> {
+        app.screen()
+            .texts()
+            .into_iter()
+            .find(|text| text.len() == 32 && text.bytes().all(|b| b.is_ascii_hexdigit()))
+            .map(str::to_owned)
+    }
+
+    #[test]
+    fn hiding_a_window_during_pin_commit_gates_the_notice_and_stops_video() {
+        use iptv_core::recording::{JobId, Request};
+        use iptv_providers::{
+            SecretUrl,
+            model::{M3uSourceConfig, Source, SourceConfig},
+        };
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let Some(home) = isolated!() else { return };
+        let root = home.data_dir();
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("iptv.sqlite");
+        let mut store = crate::isolated::open_database(&path).unwrap();
+        let source = store
+            .add_source(&Source {
+                name: "Generated recording owner".into(),
+                config: SourceConfig::M3u(M3uSourceConfig {
+                    location: SecretUrl::new("https://example.test/generated.m3u"),
+                    user_agent: None,
+                    referrer: None,
+                }),
+            })
+            .unwrap();
+        let catalog = iptv_providers::m3u::parse_m3u(personalization::M3U);
+        store
+            .replace_catalog(source, &catalog.groups, &catalog.channels.items, &[], &[])
+            .unwrap();
+        store
+            .set_source_policy(
+                source,
+                iptv_store_sqlite::SourcePolicy {
+                    refresh_on_start: false,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        store.set_active_source(source).unwrap();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        store
+            .schedule_recording(
+                JobId(681),
+                &Request {
+                    source: source.0,
+                    channel: catalog.channels.items[0].id.as_str().into(),
+                    channel_name: "Generated recording channel".into(),
+                    title: "Generated future programme".into(),
+                    start: now + 3600,
+                    end: now + 7200,
+                },
+                now,
+            )
+            .unwrap();
+        drop(store);
+        let mut settings = Settings::new();
+        settings
+            .set("guide.stay_on_guide", Value::Bool(true))
+            .unwrap();
+        settings.set("guide.autoplay", Value::Bool(false)).unwrap();
+        settings
+            .set("general.resume_last_channel", Value::Bool(false))
+            .unwrap();
+        std::fs::write(root.join("settings.json"), settings.to_json_string()).unwrap();
+        let mut config = EngineConfig {
+            viewport: nsh_core::Size::new(px(1920.0), px(1080.0)),
+            ..EngineConfig::new(Root::of::<WindowHarness>())
+        };
+        config.environment.os = if cfg!(target_os = "macos") {
+            nsh_core::platform::Os::MacOs
+        } else if cfg!(windows) {
+            nsh_core::platform::Os::Windows
+        } else {
+            nsh_core::platform::Os::Linux
+        };
+        config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+        let mut app = Headless::start(config).unwrap();
+        step(app.wait_for("text:Local A"));
+        step(app.press_key("home"));
+        step(app.press_key("enter"));
+        step(
+            app.wait_until("generated preview plays", Duration::from_secs(5), |_| {
+                iptv_app::player_has_source(0)
+            }),
+        );
+        personalization::menu(&mut app, "Block channel");
+        wait(&mut app, "Choose a new PIN");
+        digits(&mut app, "2468");
+        continue_entry(&mut app);
+        digits(&mut app, "2468");
+        let writer = crate::store_latency::hold_writer(&home);
+        continue_entry(&mut app);
+        wait(&mut app, "Checking…");
+        step(app.press_window_close("main"));
+        assert!(!app.window_state("main").unwrap().unwrap().visible);
+        assert!(!iptv_app::player_has_source(0));
+        writer.execute_batch("ROLLBACK").unwrap();
+        wait(&mut app, "Enter parental PIN");
+        assert!(
+            code(&app).is_none(),
+            "hidden credential results never render their code before fresh verification"
+        );
+        assert!(!app.window_state("main").unwrap().unwrap().visible);
+        assert!(
+            !iptv_app::player_has_source(0),
+            "the completed write never resumes hidden playback"
+        );
+
+        // Closing during an in-flight verification invalidates its grant.
+        reopen(&mut app);
+        let writer = crate::store_latency::hold_writer(&home);
+        digits(&mut app, "2468");
+        continue_entry(&mut app);
+        wait(&mut app, "Checking…");
+        step(app.press_window_close("main"));
+        writer.execute_batch("ROLLBACK").unwrap();
+        step(app.wait_for_gone("text:Checking…", Duration::from_secs(20)));
+        assert!(
+            code(&app).is_none(),
+            "a stale verify cannot redisplay the held credential"
+        );
+        assert!(!iptv_app::player_has_source(0));
+
+        reopen(&mut app);
+        digits(&mut app, "2468");
+        continue_entry(&mut app);
+        wait(&mut app, "Save your recovery code");
+        let saved = code(&app).expect("fresh PIN verification reveals the committed result");
+        step(app.press_window_close("main"));
+        assert!(
+            code(&app).is_none(),
+            "hiding an already visible notice gates it again"
+        );
+        reopen(&mut app);
+        digits(&mut app, "2468");
+        continue_entry(&mut app);
+        wait(&mut app, "Save your recovery code");
+        assert_eq!(
+            code(&app).as_deref(),
+            Some(saved.as_str()),
+            "re-authentication preserves, rather than rotates or loses, the code"
+        );
+
+        step(app.press_window_close("main"));
+        reopen(&mut app);
+        step(app.back());
+        assert!(code(&app).is_none());
+        personalization::menu(&mut app, "Block channel");
+        wait(&mut app, "Enter parental PIN");
+        assert!(
+            !iptv_app::player_has_source(0),
+            "Cancel drops the held result and leaves access locked"
+        );
+        let store = crate::isolated::open_database(&path).unwrap();
+        assert!(store.parental_credential().unwrap().is_some());
+    }
 }

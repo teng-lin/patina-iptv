@@ -48,6 +48,8 @@ pub struct BrowserState {
     pub focused_key: Option<String>,
     pub playing: bool,
     pub has_vod: bool,
+    /// Some enabled playlist has movies or shows.
+    pub any_vod: bool,
 }
 
 mod guide_checks;
@@ -294,6 +296,9 @@ impl Runtime {
             self.recordings.detach_ui();
         }
         self.cancel_guide_checks();
+        // A Recently added sort still running must not hold the analysis
+        // lane's teardown barrier.
+        self.vod.cancel_discovery();
         self.shutdown_requested.set(true);
         let drained = self
             .store
@@ -367,6 +372,9 @@ impl Runtime {
 
 impl Drop for Runtime {
     fn drop(&mut self) {
+        // An abandoned reply can leave its discovery query on the analysis lane.
+        // Cancel it before fallback draining waits for that lane's barrier.
+        self.vod.cancel_discovery();
         if !self.recordings_detached.replace(true) {
             self.recordings.detach_ui();
         }

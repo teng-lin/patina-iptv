@@ -1,0 +1,1 @@
+-- Index-only migration: the generated watch progress from v14/v17 is unchanged.

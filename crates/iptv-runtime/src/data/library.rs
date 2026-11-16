@@ -68,6 +68,7 @@ pub async fn set_policy(
         }
     })
     .await;
+    crate::favorites::refresh_vod_availability(owner).await;
     if super::combined::active(owner) {
         if !policy.enabled {
             cancel_running(owner, id);
@@ -180,6 +181,9 @@ pub(super) fn run(owner: &Rc<crate::Runtime>, stored: StoredSource, purpose: Pur
     let reporting = owner.clone();
     start_import_with(owner, job, token, move |update| {
         let owner = &reporting;
+        if matches!(update, Update::Done(_)) {
+            owner.spawn(crate::favorites::refresh_vod_availability(owner));
+        }
         if !current() {
             // Cancelled or replaced by a newer import of it, which reports.
             if matches!(update, Update::Done(_)) {
@@ -366,6 +370,7 @@ pub async fn delete(owner: &Rc<crate::Runtime>, id: SourceId) -> Result<(), Stor
         }
     })
     .await;
+    crate::favorites::refresh_vod_availability(owner).await;
     log::info!("iptv data: deleted source {}", id.0);
     owner.emit(crate::RuntimeEvent::ForgetSource(id));
     crate::library::set_activity(owner, id, None);

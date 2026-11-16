@@ -246,8 +246,23 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
             }),
         },
     );
-    app.settle();
-    step(app.press("label:Subtitles and tracks"));
+    step(app.wait_until(
+        "auxiliary track choices are acknowledged",
+        Duration::from_secs(5),
+        |screen| {
+            screen
+                .accessibility_state("id:auxiliary-player-1 >> label:Subtitles and tracks")
+                .is_ok_and(|state| !state.disabled)
+        },
+    ));
+    step(app.press("id:auxiliary-player-1 >> label:Subtitles and tracks"));
+    let chooser = app.screen().layout_nodes().into_iter().find(|node| {
+        node.test_id.as_deref() == Some("chooser-items") && node.bounds.size.height.0 > 0.0
+    });
+    assert!(
+        chooser.is_some(),
+        "the auxiliary chooser keeps a non-zero viewport"
+    );
     step(app.wait_for("text:/Second synthetic audio/"));
     step(app.press_key("escape"));
     assert!(app.window_state("player-window-1").unwrap().is_some());
@@ -256,7 +271,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
             .matches("text:/Second synthetic audio/")
             .unwrap()
     );
-    step(app.press("label:Subtitles and tracks"));
+    step(app.press("id:auxiliary-player-1 >> label:Subtitles and tracks"));
     step(app.wait_for("text:/Second synthetic audio/"));
     step(app.press("text:/Second synthetic audio/"));
     app.settle();
