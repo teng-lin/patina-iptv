@@ -794,12 +794,14 @@ fn account_streams(home: &crate::isolated::Home, scenario: AccountScenario) {
     };
     step(app.wait_for_within(first, IMPORT));
     step(app.press(first));
-    step(app.wait_until("primary account stream", IMPORT, |_| {
-        iptv_app::player_has_source(0)
-    }));
-    if native_primary {
-        assert!(native_published.load(std::sync::atomic::Ordering::SeqCst));
-    }
+    step(
+        app.wait_until("primary account stream and native delivery", IMPORT, |_| {
+            // Source calculation precedes delivery of the mount batch to the test
+            // observer. Both acknowledgements must arrive before checking ownership.
+            iptv_app::player_has_source(0)
+                && (!native_primary || native_published.load(std::sync::atomic::Ordering::SeqCst))
+        }),
+    );
     step(app.press(first));
     step(app.wait_for("label:Video"));
     step(app.press("label:Video"));
