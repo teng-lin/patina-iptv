@@ -177,6 +177,16 @@ impl Data {
     }
 }
 impl State {
+    #[cfg(feature = "test-support")]
+    pub(super) fn original_player_source(&self, url: &str) -> Option<PlaySource> {
+        self.lock()
+            .inputs
+            .values()
+            .filter_map(|registered| registered.lease.input.as_ref())
+            .find(|incoming| incoming.input.url() == url)
+            .map(|incoming| incoming.source.clone())
+    }
+
     fn preparation_gate(&self, surface: usize) -> Arc<tokio::sync::Mutex<()>> {
         self.preparations
             .lock()
@@ -402,217 +412,256 @@ impl Runtime {
             let stopping = cancel.clone();
             let task = services.spawn(async move {
                 let _gate = gate.lock().await;
-                state.retire_unused().await;
-                if stopping.is_cancelled() || revision.is_none() {
-                    return Err(Error::unavailable(key("Channel unavailable")));
-                }
-                let (incarnation, config) = work
-                    .read(move |store| {
-                        let config = store
-                            .source(source_id)?
-                            .ok_or(iptv_store_sqlite::StoreError::SourceNotFound(source_id))?
-                            .source
-                            .config;
-                        Ok((store.source_incarnation(source_id)?, config))
-                    })
-                    .await?;
-                let identity = Identity {
-                    source: source_id.0,
-                    incarnation: incarnation.clone(),
-                    channel,
-                };
-                let net = crate::settings::net_config(&work.settings());
-                source.default_header("User-Agent", &net.user_agent);
-                let policy = PlaybackPolicy {
-                    public_only: source.public_only,
-                    extra_roots_der: net.extra_roots_der,
-                    #[cfg(debug_assertions)]
-                    allow_private_fixture: net.allow_private_fixture,
-                };
-                {
-                    let mut data = state.lock();
-                    if data
-                        .source_incarnations
-                        .get(&source_id.0)
-                        .is_some_and(|old| old != &incarnation)
-                        || data
-                            .scopes
-                            .get(&source_id.0)
-                            .is_some_and(|scope| scope != &(incarnation.clone(), config.clone()))
-                    {
-                        data.provider_limits.remove(&source_id.0);
+                let result = async {
+                    state.retire_unused().await;
+                    if stopping.is_cancelled() || revision.is_none() {
+                        return Err(Error::unavailable(key("Channel unavailable")));
                     }
-                    data.source_incarnations
-                        .insert(source_id.0, incarnation.clone());
-                    let limit = connection_limit(
-                        &work.settings(),
-                        source_id.0,
-                        data.provider_limits.get(&source_id.0).copied(),
-                    );
-                    data.limits.insert(source_id.0, limit);
-                    data.accounts.insert(source_id.0, account(&config));
-                    data.scopes
-                        .insert(source_id.0, (incarnation.clone(), config.clone()));
-                }
-                let existing = {
-                    let data = state.lock();
-                    share
-                        .then(|| data.shared_for(source_id.0, &identity.channel))
-                        .flatten()
-                        .filter(|incoming| {
-                            incoming.identity == identity
-                                && incoming.config == config
-                                && incoming.source == source
-                                && incoming.policy == policy
+                    let member = ContentId::from_stored(channel.clone());
+                    let expected_member = member.clone();
+                    let (incarnation, config, authority) = work
+                        .read(move |store| {
+                            if !store.source_policy(source_id)?.enabled {
+                                return Err(iptv_store_sqlite::StoreError::Unavailable(key(
+                                    "Channel unavailable",
+                                )));
+                            }
+                            let authority = if share {
+                                let stored = store.channel(source_id, &member)?.ok_or(
+                                    iptv_store_sqlite::StoreError::Unavailable(key(
+                                        "Channel unavailable",
+                                    )),
+                                )?;
+                                Some((stored.channel, stored.blocked))
+                            } else {
+                                None
+                            };
+                            let config = store
+                                .source(source_id)?
+                                .ok_or(iptv_store_sqlite::StoreError::SourceNotFound(source_id))?
+                                .source
+                                .config;
+                            Ok((store.source_incarnation(source_id)?, config, authority))
                         })
-                };
-                let mut created = None;
-                let incoming = if let Some(existing) = existing {
-                    Some(existing)
-                } else {
+                        .await?;
+                    let identity = Identity {
+                        source: source_id.0,
+                        incarnation: incarnation.clone(),
+                        channel,
+                    };
+                    let net = crate::settings::net_config(&work.settings());
+                    source.default_header("User-Agent", &net.user_agent);
+                    let policy = PlaybackPolicy {
+                        public_only: source.public_only,
+                        extra_roots_der: net.extra_roots_der,
+                        #[cfg(debug_assertions)]
+                        allow_private_fixture: net.allow_private_fixture,
+                    };
                     {
                         let mut data = state.lock();
-                        if data.viewer_revision.get(&surface).copied() != revision
-                            || stopping.is_cancelled()
+                        if data
+                            .source_incarnations
+                            .get(&source_id.0)
+                            .is_some_and(|old| old != &incarnation)
+                            || data.scopes.get(&source_id.0).is_some_and(|scope| {
+                                scope != &(incarnation.clone(), config.clone())
+                            })
                         {
-                            return Err(Error::unavailable(key("Channel unavailable")));
+                            data.provider_limits.remove(&source_id.0);
                         }
-                        if let Some(lease) = data.viewers.get_mut(&surface) {
+                        data.source_incarnations
+                            .insert(source_id.0, incarnation.clone());
+                        let limit = connection_limit(
+                            &work.settings(),
+                            source_id.0,
+                            data.provider_limits.get(&source_id.0).copied(),
+                        );
+                        data.limits.insert(source_id.0, limit);
+                        data.accounts.insert(source_id.0, account(&config));
+                        data.scopes
+                            .insert(source_id.0, (incarnation.clone(), config.clone()));
+                    }
+                    let existing = {
+                        let data = state.lock();
+                        share
+                            .then(|| data.shared_for(source_id.0, &identity.channel))
+                            .flatten()
+                            .filter(|incoming| {
+                                incoming.identity == identity
+                                    && incoming.config == config
+                                    && incoming.source == source
+                                    && incoming.policy == policy
+                            })
+                    };
+                    let mut created = None;
+                    let incoming = if let Some(existing) = existing {
+                        Some(existing)
+                    } else {
+                        {
+                            let mut data = state.lock();
+                            if data.viewer_revision.get(&surface).copied() != revision
+                                || stopping.is_cancelled()
+                            {
+                                return Err(Error::unavailable(key("Channel unavailable")));
+                            }
+                            if let Some(lease) = data.viewers.get_mut(&surface) {
+                                lease.input = None;
+                                lease.pending = None;
+                            }
+                        }
+                        state.retire_unused().await;
+                        let id = NEXT_INPUT.fetch_add(1, Ordering::Relaxed);
+                        {
+                            let mut data = state.lock();
+                            let mut wanted = data.lease(source_id.0);
+                            wanted.account = account(&config);
+                            if !data.capacity_for(&wanted, Some(surface), None) {
+                                return Err(Error::unavailable(key(
+                                    "No provider connection available; check Streams at once",
+                                )));
+                            }
+                            if data.viewer_revision.get(&surface).copied() != revision
+                                || stopping.is_cancelled()
+                            {
+                                return Err(Error::unavailable(key("Channel unavailable")));
+                            }
+                            if !data.viewers.contains_key(&surface) {
+                                return Err(Error::unavailable(key("Channel unavailable")));
+                            }
+                            let mut lease = data.lease(source_id.0);
+                            lease.account = account(&config);
+                            lease.pending = Some(id);
+                            data.viewers.insert(surface, lease.clone());
+                            data.inputs.insert(
+                                id,
+                                Registered {
+                                    lease,
+                                    closing: false,
+                                },
+                            );
+                        }
+                        created = Some(id);
+                        let mut incoming = None;
+                        if share
+                            && let Ok(input) = LiveInput::begin_with_cancel(
+                                &source.url,
+                                &source.headers,
+                                policy.clone(),
+                                stopping.clone(),
+                            )
+                        {
+                            let shared = register_transport(
+                                &state,
+                                id,
+                                &identity,
+                                &config,
+                                &source,
+                                &policy,
+                                Transport::Shared(input),
+                            );
+                            if shared
+                                .input
+                                .shared()
+                                .expect("shared probe")
+                                .ready()
+                                .await
+                                .is_ok()
+                            {
+                                incoming = Some(shared);
+                            } else {
+                                shared.input.clone().shutdown().await;
+                            }
+                        }
+                        if incoming.is_none()
+                            && !stopping.is_cancelled()
+                            && let Ok(input) = Transport::passthrough(&source, policy.clone())
+                        {
+                            incoming = Some(register_transport(
+                                &state, id, &identity, &config, &source, &policy, input,
+                            ));
+                        }
+                        if incoming.is_none() {
+                            // A failed/cancelled actual owner stays registered until
+                            // retire_unused joins it; a protocol with no owner can
+                            // release its provisional reservation immediately.
+                            let empty = state
+                                .lock()
+                                .inputs
+                                .get(&id)
+                                .is_some_and(|registered| registered.lease.input.is_none());
+                            if empty {
+                                state.lock().inputs.remove(&id);
+                                state.inputs_changed.notify_waiters();
+                            }
+                        }
+                        incoming
+                    };
+                    let valid = work
+                        .read(move |store| {
+                            Ok(store.source_policy(source_id)?.enabled
+                                && store.source_incarnation(source_id)? == incarnation
+                                && store
+                                    .source(source_id)?
+                                    .is_some_and(|stored| stored.source.config == config)
+                                && authority.is_none_or(|expected| {
+                                    store
+                                        .channel(source_id, &expected_member)
+                                        .ok()
+                                        .flatten()
+                                        .is_some_and(|stored| {
+                                            (stored.channel, stored.blocked) == expected
+                                        })
+                                }))
+                        })
+                        .await
+                        .unwrap_or(false);
+                    let installed = {
+                        let mut data = state.lock();
+                        let available = incoming
+                            .as_ref()
+                            .is_none_or(|input| data.available(input.id));
+                        let current = valid
+                            && available
+                            && !stopping.is_cancelled()
+                            && data.viewer_revision.get(&surface).copied() == revision;
+                        match data.viewers.get_mut(&surface).filter(|lease| {
+                            lease.source == source_id.0
+                                && (created.is_none() || lease.pending == created)
+                        }) {
+                            Some(lease) if current => {
+                                lease.input = incoming.clone();
+                                lease.pending = None;
+                                true
+                            }
+                            _ => false,
+                        }
+                    };
+                    // Unsuccessful/stale preparations remain in the registry until
+                    // this join, even when another surface now uses the old account.
+                    if !installed || incoming.is_none() {
+                        state.retire_unused().await;
+                    }
+                    if !installed {
+                        return Err(Error::unavailable(key("Channel unavailable")));
+                    }
+                    Ok(incoming.map_or(source, |incoming| incoming.local_source()))
+                }
+                .await;
+                if result.is_err() {
+                    {
+                        let mut data = state.lock();
+                        // A failed preparation relinquishes only its own lease.
+                        // A newer reservation and any capture retain ownership.
+                        if data.viewer_revision.get(&surface).copied() == revision
+                            && let Some(lease) = data.viewers.get_mut(&surface)
+                        {
                             lease.input = None;
                             lease.pending = None;
                         }
                     }
                     state.retire_unused().await;
-                    let id = NEXT_INPUT.fetch_add(1, Ordering::Relaxed);
-                    {
-                        let mut data = state.lock();
-                        let mut wanted = data.lease(source_id.0);
-                        wanted.account = account(&config);
-                        if !data.capacity_for(&wanted, Some(surface), None) {
-                            return Err(Error::unavailable(key(
-                                "No provider connection available; check Streams at once",
-                            )));
-                        }
-                        if data.viewer_revision.get(&surface).copied() != revision
-                            || stopping.is_cancelled()
-                        {
-                            return Err(Error::unavailable(key("Channel unavailable")));
-                        }
-                        if !data.viewers.contains_key(&surface) {
-                            return Err(Error::unavailable(key("Channel unavailable")));
-                        }
-                        let mut lease = data.lease(source_id.0);
-                        lease.account = account(&config);
-                        lease.pending = Some(id);
-                        data.viewers.insert(surface, lease.clone());
-                        data.inputs.insert(
-                            id,
-                            Registered {
-                                lease,
-                                closing: false,
-                            },
-                        );
-                    }
-                    created = Some(id);
-                    let mut incoming = None;
-                    if share
-                        && let Ok(input) = LiveInput::begin_with_cancel(
-                            &source.url,
-                            &source.headers,
-                            policy.clone(),
-                            stopping.clone(),
-                        )
-                    {
-                        let shared = register_transport(
-                            &state,
-                            id,
-                            &identity,
-                            &config,
-                            &source,
-                            &policy,
-                            Transport::Shared(input),
-                        );
-                        if shared
-                            .input
-                            .shared()
-                            .expect("shared probe")
-                            .ready()
-                            .await
-                            .is_ok()
-                        {
-                            incoming = Some(shared);
-                        } else {
-                            shared.input.clone().shutdown().await;
-                        }
-                    }
-                    if incoming.is_none() && !stopping.is_cancelled() {
-                        if let Ok(input) = Transport::passthrough(&source, policy.clone()) {
-                            incoming = Some(register_transport(
-                                &state, id, &identity, &config, &source, &policy, input,
-                            ));
-                        }
-                    }
-                    if incoming.is_none() {
-                        // A failed/cancelled actual owner stays registered until
-                        // retire_unused joins it; a protocol with no owner can
-                        // release its provisional reservation immediately.
-                        let empty = state
-                            .lock()
-                            .inputs
-                            .get(&id)
-                            .is_some_and(|registered| registered.lease.input.is_none());
-                        if empty {
-                            state.lock().inputs.remove(&id);
-                            state.inputs_changed.notify_waiters();
-                        }
-                    }
-                    incoming
-                };
-                let valid = work
-                    .read(move |store| {
-                        Ok(store.source_incarnation(source_id)? == incarnation
-                            && store
-                                .source(source_id)?
-                                .is_some_and(|stored| stored.source.config == config))
-                    })
-                    .await
-                    .unwrap_or(false);
-                let installed = {
-                    let mut data = state.lock();
-                    let available = incoming
-                        .as_ref()
-                        .is_none_or(|input| data.available(input.id));
-                    let current = valid
-                        && available
-                        && !stopping.is_cancelled()
-                        && data.viewer_revision.get(&surface).copied() == revision;
-                    match data.viewers.get_mut(&surface).filter(|lease| {
-                        lease.source == source_id.0
-                            && (created.is_none() || lease.pending == created)
-                    }) {
-                        Some(lease) if current => {
-                            lease.input = incoming.clone();
-                            lease.pending = None;
-                            true
-                        }
-                        Some(lease) => {
-                            if created.is_some() {
-                                lease.pending = None;
-                            }
-                            false
-                        }
-                        None => false,
-                    }
-                };
-                // Unsuccessful/stale preparations remain in the registry until
-                // this join, even when another surface now uses the old account.
-                if !installed || incoming.is_none() {
-                    state.retire_unused().await;
                 }
-                if !installed {
-                    return Err(Error::unavailable(key("Channel unavailable")));
-                }
-                Ok(incoming.map_or(source, |incoming| incoming.local_source()))
+                result
             });
             struct Cancel(CancelToken);
             impl Drop for Cancel {

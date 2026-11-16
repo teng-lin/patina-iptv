@@ -271,7 +271,8 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
             if let MountItem::ComponentProps { props, .. } = item {
                 for (key, value) in props {
                     if key.as_ref() == "source"
-                        && let Some(url) = value.as_ref().and_then(|v| v["url"].as_str())
+                        && let Some(source) = value.as_ref().map(crate::support::upstream_source)
+                        && let Some(url) = source["url"].as_str()
                     {
                         observed.lock().unwrap().push(url.into());
                     }
@@ -473,7 +474,8 @@ fn leaving_combined_mode_cancels_a_missing_startup_channel_before_manual_return(
             if let MountItem::ComponentProps { props, .. } = item {
                 for (key, value) in props {
                     if key.as_ref() == "source"
-                        && let Some(url) = value.as_ref().and_then(|v| v["url"].as_str())
+                        && let Some(source) = value.as_ref().map(crate::support::upstream_source)
+                        && let Some(url) = source["url"].as_str()
                     {
                         observed.lock().unwrap().push(url.into());
                     }
@@ -953,7 +955,8 @@ fn automatic_join_keeps_account_format_limit_and_the_original_guide_job_and_time
             if let MountItem::ComponentProps { props, .. } = item {
                 for (key, value) in props {
                     if key.as_ref() == "source"
-                        && let Some(url) = value.as_ref().and_then(|v| v["url"].as_str())
+                        && let Some(source) = value.as_ref().map(crate::support::upstream_source)
+                        && let Some(url) = source["url"].as_str()
                     {
                         observed.lock().unwrap().push(url.into());
                     }

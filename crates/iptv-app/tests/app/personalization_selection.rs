@@ -30,7 +30,8 @@ fn default_explicit_choices_debounce_close_the_guide_and_list_and_cancel_on_back
             if let MountItem::ComponentProps { props, .. } = item {
                 for (k, v) in props {
                     if k.as_ref() == "source"
-                        && let Some(url) = v.as_ref().and_then(|v| v["url"].as_str())
+                        && let Some(source) = v.as_ref().map(crate::support::upstream_source)
+                        && let Some(url) = source["url"].as_str()
                     {
                         seen.lock().unwrap().push(url.into());
                     }

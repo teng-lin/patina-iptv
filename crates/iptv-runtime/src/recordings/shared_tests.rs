@@ -802,3 +802,277 @@ async fn rejected_live_and_independent_zaps_preserve_current_pending_preparation
     owner.release_viewing(0);
     assert!(owner.drain_services());
 }
+
+#[tokio::test]
+async fn live_preparation_revalidates_enabled_membership_and_channel_authority_after_media_wait() {
+    for mutation in ["disabled", "removed", "blocked", "stream"] {
+        let fixture = Fixture::starting(true).await;
+        let dir = tempfile::tempdir().unwrap();
+        let owner = owner(dir.path());
+        let request = seed(&owner, &fixture.url).await;
+        refresh_accounts(&owner.services(), &owner.recordings)
+            .await
+            .unwrap();
+        let source_id = SourceId(request.source);
+        let channel_id = ContentId::from_stored(request.channel.clone());
+        let original_incarnation = owner
+            .services()
+            .read(move |store| store.source_incarnation(source_id))
+            .await
+            .unwrap();
+        assert!(owner.reserve_live_viewing(0, source_id, &request.channel));
+        let preparation = tokio::spawn(owner.prepare_live_source(
+            0,
+            source_id,
+            request.channel.clone(),
+            source(&owner, &request).await,
+        ));
+        wait(|| fixture.requests.load(Ordering::SeqCst) == 1).await;
+        owner
+            .services()
+            .call(move |store| {
+                match mutation {
+                    "disabled" => {
+                        let mut policy = store.source_policy(source_id)?;
+                        policy.enabled = false;
+                        store.set_source_policy(source_id, policy)?;
+                    }
+                    "removed" => {
+                        store.replace_catalog(source_id, &[], &[], &[], &[])?;
+                    }
+                    "blocked" => store.set_blocked(source_id, &channel_id, true)?,
+                    "stream" => {
+                        let mut channel = store.channel(source_id, &channel_id)?.unwrap().channel;
+                        if let iptv_providers::model::StreamLocator::Url { headers, .. } =
+                            &mut channel.stream
+                        {
+                            headers.push((
+                                "Authorization".into(),
+                                "Generated changed identity".into(),
+                            ));
+                        }
+                        store.replace_catalog(source_id, &[], &[channel], &[], &[])?;
+                    }
+                    _ => unreachable!(),
+                }
+                assert_eq!(store.source_incarnation(source_id)?, original_incarnation);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        fixture.held.store(false, Ordering::SeqCst);
+        assert!(
+            preparation.await.unwrap().is_err(),
+            "late {mutation} invalidates the original preparation"
+        );
+        assert!(owner.recordings.lock().inputs.is_empty());
+        wait(|| fixture.active.load(Ordering::SeqCst) == 0).await;
+        assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.peak.load(Ordering::SeqCst), 1);
+        owner.release_viewing(0);
+        assert!(owner.drain_services());
+    }
+}
+
+#[tokio::test]
+async fn unchanged_protected_live_member_reaches_the_app_grant_boundary() {
+    let fixture = Fixture::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let owner = owner(dir.path());
+    let request = seed(&owner, &fixture.url).await;
+    let source_id = SourceId(request.source);
+    let channel = ContentId::from_stored(request.channel.clone());
+    owner
+        .services()
+        .call(move |store| store.set_blocked(source_id, &channel, true))
+        .await
+        .unwrap();
+    // The runtime preserves authority; the app's final synchronous parental
+    // grant check decides whether the native source may be published.
+    let local = open(&owner, &request).await;
+    let playback = player(&local).await;
+    assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
+    drop(playback);
+    owner.release_viewing(0);
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn rejected_reused_viewer_releases_only_its_own_capture_input_reference() {
+    let fixture = Fixture::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let owner = owner(dir.path());
+    let request = seed(&owner, &fixture.url).await;
+    let local = open(&owner, &request).await;
+    let playback = player(&local).await;
+    let id = record_now(&owner, request.clone()).await;
+    drop(playback);
+    owner.release_viewing(0);
+    let source_id = SourceId(request.source);
+    assert!(owner.reserve_live_viewing(1, source_id, &request.channel));
+    let resolved = source(&owner, &request).await;
+    owner
+        .services()
+        .call(move |store| {
+            let mut policy = store.source_policy(source_id)?;
+            policy.enabled = false;
+            store.set_source_policy(source_id, policy)
+        })
+        .await
+        .unwrap();
+    assert!(
+        owner
+            .prepare_live_source(1, source_id, request.channel, resolved)
+            .await
+            .is_err()
+    );
+    assert!(owner.recordings.lock().viewers[&1].input.is_none());
+    assert_eq!(
+        fixture.active.load(Ordering::SeqCst),
+        1,
+        "capture retains its own owner"
+    );
+    owner.stop_recording(id).await.unwrap();
+    until(&owner, id, |job| !job.status.active()).await;
+    wait(|| fixture.active.load(Ordering::SeqCst) == 0).await;
+    assert!(owner.recordings.lock().inputs.is_empty());
+    assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.peak.load(Ordering::SeqCst), 1);
+    owner.release_viewing(1);
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn recording_link_resolution_revalidates_member_authority_before_shared_attachment() {
+    use iptv_providers::{
+        Secret,
+        model::{MacAddress, StalkerCredentials, StreamLocator},
+        stalker::{PortalMode, StalkerPortal, StalkerSession},
+    };
+    for mutation in ["disabled", "removed", "blocked", "stream"] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let portal_url = format!("http://{}/c/", listener.local_addr().unwrap());
+        let (entered, seen) = tokio::sync::oneshot::channel();
+        let (release, resumed) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                request.push(socket.read_u8().await.unwrap());
+            }
+            assert!(
+                String::from_utf8(request)
+                    .unwrap()
+                    .contains("action=create_link")
+            );
+            entered.send(()).unwrap();
+            resumed.await.unwrap();
+            let body = r#"{"js":{"cmd":"ffmpeg http://127.0.0.1:9/generated.ts"}}"#;
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let owner = owner(dir.path());
+        let request = seed(&owner, "http://127.0.0.1:9/generated.ts").await;
+        let source_id = SourceId(request.source);
+        let channel_id = ContentId::from_stored(request.channel.clone());
+        let expected_member = channel_id.clone();
+        let credentials = StalkerCredentials {
+            portal_url,
+            mac: MacAddress::parse("00:1A:79:00:00:81").unwrap(),
+            serial: None,
+            device_id: None,
+            device_id2: None,
+            signature: None,
+            signature2: None,
+            login: None,
+            password: None,
+        };
+        let config = SourceConfig::Stalker(credentials.clone());
+        let stored_config = config.clone();
+        let job = owner
+            .services()
+            .call(move |store| {
+                let mut source = store.source(source_id)?.unwrap().source;
+                source.config = stored_config;
+                store.update_source(source_id, &source)?;
+                let mut channel = store.channel(source_id, &channel_id)?.unwrap().channel;
+                channel.stream = StreamLocator::Stalker {
+                    cmd: "ffmpeg /generated-live".into(),
+                    link: Default::default(),
+                };
+                store.replace_catalog(source_id, &[], &[channel], &[], &[])?;
+                store.schedule_recording(JobId(81), &request, now())?;
+                Ok(store.recording_job(JobId(81))?.unwrap())
+            })
+            .await
+            .unwrap();
+        let portal = StalkerPortal::from_credentials(
+            &credentials,
+            &iptv_providers::stalker::endpoint_candidates(&credentials.portal_url).unwrap()[0],
+            PortalMode::Simple,
+        )
+        .unwrap();
+        let session = StalkerSession::resume(portal, Secret::new("generated-session-token"), None);
+        owner.recordings.contexts.lock().unwrap().insert(
+            source_id.0,
+            ContextEntry {
+                pointer: 0,
+                config,
+                value: iptv_guide::playback::PlaybackContext::stalker(session),
+            },
+        );
+        let services = owner.services();
+        let work = services.clone();
+        let state = owner.recordings.clone();
+        let resolving =
+            services.spawn(async move { resolve(&work, &state, &job, &CancelToken::new()).await });
+        tokio::time::timeout(Duration::from_secs(5), seen)
+            .await
+            .unwrap()
+            .unwrap();
+        owner
+            .services()
+            .call(move |store| {
+                match mutation {
+                    "disabled" => {
+                        let mut policy = store.source_policy(source_id)?;
+                        policy.enabled = false;
+                        store.set_source_policy(source_id, policy)?;
+                    }
+                    "removed" => {
+                        store.replace_catalog(source_id, &[], &[], &[], &[])?;
+                    }
+                    "blocked" => store.set_blocked(source_id, &expected_member, true)?,
+                    "stream" => {
+                        let mut channel =
+                            store.channel(source_id, &expected_member)?.unwrap().channel;
+                        channel.stream = StreamLocator::Stalker {
+                            cmd: "ffmpeg /changed-live".into(),
+                            link: Default::default(),
+                        };
+                        store.replace_catalog(source_id, &[], &[channel], &[], &[])?;
+                    }
+                    _ => unreachable!(),
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        release.send(()).unwrap();
+        assert!(
+            resolving.await.unwrap().is_err(),
+            "late {mutation} must reject the prior recording link"
+        );
+        server.await.unwrap();
+        assert!(owner.drain_services());
+    }
+}

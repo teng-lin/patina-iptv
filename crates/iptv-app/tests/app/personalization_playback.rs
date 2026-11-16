@@ -39,7 +39,8 @@ fn rapid_navigation_cancels_tuning_menus_cancel_preview_and_input_extends_fullsc
             if let MountItem::ComponentProps { props, .. } = item {
                 for (key, value) in props {
                     if key.as_ref() == "source"
-                        && let Some(url) = value.as_ref().and_then(|v| v["url"].as_str())
+                        && let Some(source) = value.as_ref().map(crate::support::upstream_source)
+                        && let Some(url) = source["url"].as_str()
                     {
                         observed.lock().unwrap().push(url.into());
                     }

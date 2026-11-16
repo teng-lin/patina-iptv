@@ -1212,3 +1212,9 @@ pub fn hold_source_preparation() -> runtime::TestGate {
         .and_then(|owner| owner.hold_source_preparation())
         .expect("source preparation gate needs a started app")
 }
+
+/// Read-only synthetic-source observation keyed by the actually published URL.
+#[cfg(feature = "test-support")]
+pub fn original_player_source(url: &str) -> Option<iptv_core::playback::PlaySource> {
+    platform_data::host_handle().and_then(|owner| owner.original_player_source(url))
+}

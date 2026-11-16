@@ -416,6 +416,14 @@ impl Drop for Runtime {
 #[derive(Clone)]
 pub struct HostHandle(std::sync::Weak<store_service::Service>);
 impl HostHandle {
+    /// Observe the original synthetic source behind an actual native capability.
+    #[cfg(feature = "test-support")]
+    pub fn original_player_source(&self, url: &str) -> Option<iptv_core::playback::PlaySource> {
+        self.0
+            .upgrade()
+            .and_then(|service| recordings::host::original_player_source(service.directory(), url))
+    }
+
     #[cfg(feature = "test-support")]
     pub fn hold_source_preparation(&self) -> Option<TestGate> {
         self.0

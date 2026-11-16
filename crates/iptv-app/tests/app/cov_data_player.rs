@@ -324,7 +324,13 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
                 if let MountItem::ComponentProps { id, props: changed } = item {
                     let entry = props.entry(*id).or_default();
                     for (name, value) in changed {
-                        entry.insert(name.to_string(), value.clone().unwrap_or(Value::Null));
+                        let value = value.clone().unwrap_or(Value::Null);
+                        let value = if name.as_ref() == "source" {
+                            crate::support::upstream_source(&value)
+                        } else {
+                            value
+                        };
+                        entry.insert(name.to_string(), value);
                     }
                 }
             }

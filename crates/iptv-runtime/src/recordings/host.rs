@@ -26,6 +26,16 @@ static HOSTS: OnceLock<Mutex<HashMap<PathBuf, Arc<State>>>> = OnceLock::new();
 fn hosts() -> &'static Mutex<HashMap<PathBuf, Arc<State>>> {
     HOSTS.get_or_init(Mutex::default)
 }
+#[cfg(feature = "test-support")]
+pub(crate) fn original_player_source(directory: &Path, url: &str) -> Option<PlaySource> {
+    let state = hosts()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(directory)
+        .cloned()?;
+    state.original_player_source(url)
+}
+
 pub(crate) fn acquire(ports: &crate::Ports) -> Arc<State> {
     if !ports.background_recordings {
         return Arc::default();

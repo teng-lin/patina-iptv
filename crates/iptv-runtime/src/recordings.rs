@@ -1275,14 +1275,19 @@ async fn resolve(
     let config = source.source.config;
     let expected_config = config.clone();
     let expected_incarnation = incarnation.clone();
+    let expected_channel = channel.clone();
     let source_id = SourceId(job.request.source);
     let current = services
         .read(move |store| {
             Ok(store.recording_source_is_current(id)?
+                && store.source_policy(source_id)?.enabled
                 && store.source_incarnation(source_id)? == expected_incarnation
                 && store
                     .source(source_id)?
-                    .is_some_and(|source| source.source.config == expected_config))
+                    .is_some_and(|source| source.source.config == expected_config)
+                && store
+                    .channel(source_id, &expected_channel.id)?
+                    .is_some_and(|current| !current.blocked && current.channel == expected_channel))
         })
         .await
         .map_err(|_| "Playlist unavailable")?;

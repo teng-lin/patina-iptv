@@ -157,6 +157,8 @@ fn answer(mut stream: TcpStream, gates: Arc<(Mutex<Gates>, Condvar)>, links: Arc
         match action {
             "get_profile" => r#"{"js":{"status":0,"watchdog_timeout":60}}"#.to_owned(),
             "get_genres" => GENRES.to_owned(),
+            // Optional movie/series discovery has no generated titles here.
+            "get_categories" => r#"{"js":[]}"#.to_owned(),
             "get_ordered_list" if gates.0.lock().unwrap().fresh_catalog => {
                 CHANNELS.replace("Saved portal channel", "Authenticated portal channel")
             }
@@ -261,7 +263,8 @@ fn exercise(data: &Path, combined_key: bool) {
             if let MountItem::ComponentProps { props, .. } = item {
                 for (key, value) in props {
                     if key.as_ref() == "source"
-                        && let Some(url) = value.as_ref().and_then(|value| value["url"].as_str())
+                        && let Some(source) = value.as_ref().map(crate::support::upstream_source)
+                        && let Some(url) = source["url"].as_str()
                     {
                         observed.lock().unwrap().push(url.into());
                     }
