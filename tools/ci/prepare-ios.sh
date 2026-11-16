@@ -11,7 +11,7 @@ rustup target add aarch64-apple-ios
 bash tools/fetch-mpvkit.sh
 root=$PWD
 source "$root/tools/ci/locked-build-env.sh"
-(cd crates/iptv-app && "$NSH" package . --target ios -o "$root/target/ios")
+(cd crates/iptv-app && "$NSH" package . --target ios --icon icon-ios.png -o "$root/target/ios")
 bash tools/ci/notices.sh
 python3 tools/ci/mpvkit-notices.py
 cp -R target/notices target/ios/Patina.app/notices

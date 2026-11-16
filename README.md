@@ -249,8 +249,8 @@ desktops (MPVKit's LGPL build) and adds touch navigation of its own.
 ```sh
 tools/fetch-mpvkit.sh            # libmpv xcframeworks, checksums pinned
 cd crates/iptv-app
-nsh package . --target ios-simulator -o ../../target/ios-sim
-nsh package . --target ios -o ../../target/ios \
+nsh package . --target ios-simulator --icon icon-ios.png -o ../../target/ios-sim
+nsh package . --target ios --icon icon-ios.png -o ../../target/ios \
   --sign <signing identity SHA-1> --profile <app.mobileprovision>
 xcrun devicectl device install app --device <id> ../../target/ios/Patina.app
 ```
