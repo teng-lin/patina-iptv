@@ -379,6 +379,10 @@ impl Runtime {
         if !disabled {
             self.start_recordings();
         }
+        #[cfg(feature = "test-support")]
+        let pause = share
+            .then(|| self.services().take_source_preparation())
+            .flatten();
         let state = self.recordings.clone();
         let services = state
             .host
@@ -409,6 +413,10 @@ impl Runtime {
             let stopping = cancel.clone();
             let task = services.spawn(async move {
                 let _gate = gate.lock().await;
+                #[cfg(feature = "test-support")]
+                if let Some(pause) = pause {
+                    let _ = work.spawn_blocking(move || pause.pause()).await;
+                }
                 let result = async {
                     state.retire_unused().await;
                     if stopping.is_cancelled() || revision.is_none() {

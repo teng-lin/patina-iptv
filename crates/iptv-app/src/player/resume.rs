@@ -114,7 +114,13 @@ pub fn adopt(ui: Ui) -> bool {
         ui.mode.set(crate::settings::browse_mode());
         return true;
     };
-    let open = main.source.with_untracked(Option::is_some);
+    // Preparing the early stream already owns this request, even before a
+    // native source is published. Adopting its catalogue identity keeps that
+    // health session and its in-flight preparation.
+    let requested = main.source.with_untracked(Option::is_some)
+        || main.health.with_untracked(|health| {
+            matches!(health.phase(), iptv_core::playback::Phase::Resolving)
+        });
     nsh_core::prelude::batch(|| {
         main.key.set(Some(early.key.clone()));
         ui.player.history.update(|h| h.played(&early.key));
@@ -123,7 +129,7 @@ pub fn adopt(ui: Ui) -> bool {
     });
     crate::favorites::played(&early.key);
     super::show_channel(ui, channel);
-    if !open {
+    if !requested {
         // It closed meanwhile (stopped, or failed for good): start it as
         // the guide has it.
         ui.play(channel, Playback::Live);
