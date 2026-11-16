@@ -536,8 +536,7 @@ iptv-runtime/src/credential_store.rs	pending restore cannot be read
 iptv-runtime/src/favorites.rs	recent favourite edits are not saved
 iptv-runtime/src/imports.rs	cannot create document identity
 iptv-runtime/src/imports.rs	cannot create private document directory
-iptv-runtime/src/imports.rs	import source changed
-iptv-runtime/src/imports.rs	import was cancelled
+iptv-runtime/src/imports.rs	import superseded
 iptv-runtime/src/imports.rs	private document cannot be saved
 # Probe errors become typed inspection failures before reaching the UI.
 iptv-runtime/src/inspection/probe.rs	probe identity unavailable

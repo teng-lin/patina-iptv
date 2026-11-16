@@ -116,9 +116,28 @@ pub(crate) struct Hooks {
     released: Condvar,
     publication: Mutex<Option<Arc<crate::testing::GateState>>>,
     drained: Mutex<Option<Arc<crate::testing::GateState>>>,
+    admission_closed: Mutex<Option<Arc<crate::testing::GateState>>>,
+    drain_limit: Mutex<Option<std::time::Duration>>,
 }
 #[cfg(feature = "test-support")]
 impl Hooks {
+    pub(crate) fn observe_admission_close(&self) -> crate::TestGate {
+        let gate = crate::TestGate::new();
+        *self.admission_closed.lock().unwrap() = Some(gate.0.clone());
+        gate
+    }
+    pub(crate) fn admission_closed(&self) {
+        if let Some(gate) = self.admission_closed.lock().unwrap().take() {
+            gate.acknowledge();
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn set_drain_limit(&self, limit: Option<std::time::Duration>) {
+        *self.drain_limit.lock().unwrap() = limit;
+    }
+    pub(crate) fn drain_limit(&self) -> Option<std::time::Duration> {
+        *self.drain_limit.lock().unwrap()
+    }
     pub(crate) fn observe_drain(&self) -> crate::TestGate {
         let gate = crate::TestGate::new();
         *self.drained.lock().unwrap() = Some(gate.0.clone());

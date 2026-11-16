@@ -648,11 +648,14 @@ mod source_tests {
         services: &crate::store_service::Services,
         job: &Job,
         snapshot: &Snapshot,
-    ) -> iptv_store_sqlite::Result<(
-        iptv_store_sqlite::SourceId,
-        iptv_store_sqlite::CatalogCounts,
-        Vec<iptv_store_sqlite::GuideSource>,
-    )> {
+    ) -> Result<
+        (
+            iptv_store_sqlite::SourceId,
+            iptv_store_sqlite::CatalogCounts,
+            Vec<iptv_store_sqlite::GuideSource>,
+        ),
+        imports::PublicationError,
+    > {
         let worker = services.clone();
         let job = job.clone();
         let snapshot = snapshot.clone();

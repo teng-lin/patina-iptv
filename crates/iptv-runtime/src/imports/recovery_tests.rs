@@ -257,7 +257,7 @@ async fn an_old_staged_completion_cannot_replace_a_recreated_source_with_the_sam
         .unwrap();
     gate.release();
     tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
-    assert_eq!(failure(&mut rx), FailureKind::Storage);
+    assert_eq!(failure(&mut rx), FailureKind::Cancelled);
     assert_retained(&owner, id, "Generated successor source").await;
     assert_clean_stage(directory.path());
     server.join().unwrap();
@@ -339,7 +339,7 @@ async fn a_queued_refresh_cannot_adopt_configuration_changed_before_it_started()
         .unwrap();
     let (task, mut rx) = start(&owner, job, &CancelToken::new());
     tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
-    assert_eq!(failure(&mut rx), FailureKind::Auth);
+    assert_eq!(failure(&mut rx), FailureKind::Cancelled);
     assert_eq!(
         listener.accept().unwrap_err().kind(),
         std::io::ErrorKind::WouldBlock
@@ -378,7 +378,7 @@ async fn a_configuration_edit_fences_an_old_stage_without_reusing_the_source_id(
         .unwrap();
     gate.release();
     tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
-    assert_eq!(failure(&mut rx), FailureKind::Storage);
+    assert_eq!(failure(&mut rx), FailureKind::Cancelled);
     owner
         .services()
         .read(move |store| {
@@ -415,7 +415,7 @@ async fn a_retired_owners_staged_import_cannot_mutate_a_restarted_owners_store()
     assert_retained(&newer, id, "Generated retained source").await;
     gate.release();
     tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
-    assert_eq!(failure(&mut rx), FailureKind::Storage);
+    assert_eq!(failure(&mut rx), FailureKind::Cancelled);
     assert_retained(&newer, id, "Generated retained source").await;
     assert_clean_stage(directory.path());
     server.join().unwrap();

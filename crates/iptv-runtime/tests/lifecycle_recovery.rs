@@ -39,7 +39,11 @@ fn dropping_the_last_ui_owner_acknowledges_closed_lanes_and_keeps_accepted_write
     );
     drop(accepted);
     runtime.save_last_channel(None, "generated-drop-file");
-    let release = std::thread::spawn(move || gate.release());
+    let closed = runtime.host_handle().observe_admission_close().unwrap();
+    let release = std::thread::spawn(move || {
+        assert!(closed.wait_entered(LIMIT));
+        gate.release();
+    });
     drop(runtime);
     release.join().unwrap();
     assert!(
@@ -137,7 +141,11 @@ fn shutdown_drains_accepted_database_work_even_when_its_reply_is_dropped() {
         Poll::Pending
     ));
     drop(accepted);
-    let release = std::thread::spawn(move || gate.release());
+    let closed = runtime.host_handle().observe_admission_close().unwrap();
+    let release = std::thread::spawn(move || {
+        assert!(closed.wait_entered(LIMIT));
+        gate.release();
+    });
     assert!(runtime.drain_services());
     release.join().unwrap();
     assert!(

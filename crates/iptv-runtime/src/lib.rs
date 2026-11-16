@@ -101,6 +101,7 @@ pub struct Runtime {
     parental: RefCell<parental::State>,
     recordings: std::sync::Arc<recordings::State>,
     recordings_detached: Cell<bool>,
+    shutdown_requested: Cell<bool>,
     vod: std::sync::Arc<vod::State>,
     repairs: RefCell<guide_repair::State>,
     account_streams: Slot<Cell<Option<u32>>>,
@@ -171,6 +172,7 @@ impl Runtime {
             parental: RefCell::default(),
             recordings,
             recordings_detached: Cell::new(false),
+            shutdown_requested: Cell::new(false),
             vod: Default::default(),
             repairs: RefCell::default(),
             account_streams: Slot::default(),
@@ -282,6 +284,7 @@ impl Runtime {
     /// The calling thread becomes this owner's application thread: store
     /// requests are accepted from now until [`Runtime::drain_services`].
     pub fn start_services(&self) {
+        self.shutdown_requested.set(false);
         self.store.begin();
         self.inspection.renew();
     }
@@ -291,6 +294,7 @@ impl Runtime {
             self.recordings.detach_ui();
         }
         self.cancel_guide_checks();
+        self.shutdown_requested.set(true);
         let drained = self
             .store
             .drain_on_shutdown_with(|| self.inspection.cancel_requests());
@@ -382,9 +386,12 @@ impl Drop for Runtime {
         // also attempt to close its cipher connections before process-level
         // SQLCipher cleanup can free their private heap. These are this UI owner's lanes;
         // the independent native recording host retains its own services.
-        if !self
-            .store
-            .drain_on_shutdown_with(|| self.inspection.cancel_requests())
+        // An explicit attempt already spent its bounded shutdown budget, even
+        // if a noncooperative lane did not close. Do not spend it again in Drop.
+        if !self.shutdown_requested.replace(true)
+            && !self
+                .store
+                .drain_on_shutdown_with(|| self.inspection.cancel_requests())
         {
             log::error!("iptv persistence: fallback store drain did not finish at disposal");
         }
@@ -469,6 +476,14 @@ impl HostHandle {
             .map(|service| service.hooks.observe_drain())
     }
 
+    /// Acknowledges that shutdown closed admission, before its FIFO barriers.
+    #[cfg(feature = "test-support")]
+    pub fn observe_admission_close(&self) -> Option<TestGate> {
+        self.0
+            .upgrade()
+            .map(|service| service.hooks.observe_admission_close())
+    }
+
     /// Occupies this owner's store writer for `duration` after the work
     /// queued before it (the headless tests of what must not wait for it
     /// drive the app from another thread).
@@ -483,6 +498,31 @@ impl HostHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[cfg(feature = "test-support")]
+    async fn a_failed_explicit_drain_does_not_spend_its_budget_again_in_drop() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = Runtime::new(Ports::new(directory.path().into(), |_| {
+            Ok(crate::model::DatabaseKey::from_bytes([0x69; 32]))
+        }));
+        owner.start_services();
+        owner.services().call(|_| Ok(())).await.unwrap();
+        let store = owner.store.clone();
+        let held = owner.host_handle().hold_writer().unwrap();
+        assert!(held.wait_entered(std::time::Duration::from_secs(5)));
+        store.hooks.set_drain_limit(Some(std::time::Duration::ZERO));
+        assert!(!owner.drain_services());
+        let repeated = store.hooks.observe_admission_close();
+        drop(owner);
+        let retried = repeated.wait_entered(std::time::Duration::ZERO);
+        // Always release and close the actual held connection before checking
+        // the regression, including when the fallback has been mutated.
+        held.release();
+        store.hooks.set_drain_limit(None);
+        assert!(store.drain_on_shutdown_with(|| {}));
+        assert!(!retried, "Drop repeated an explicit shutdown attempt");
+    }
 
     #[test]
     fn independent_runtimes_can_apply_events_during_delivery() {

@@ -198,7 +198,10 @@ impl Service {
     }
 
     pub(crate) fn drain_on_shutdown_with(self: &Arc<Self>, after_writer: impl FnOnce()) -> bool {
-        self.drain_on_shutdown_with_limit(std::time::Duration::from_secs(10), after_writer)
+        let limit = std::time::Duration::from_secs(10);
+        #[cfg(feature = "test-support")]
+        let limit = self.hooks.drain_limit().unwrap_or(limit);
+        self.drain_on_shutdown_with_limit(limit, after_writer)
     }
 
     fn drain_on_shutdown_with_limit(
@@ -210,6 +213,8 @@ impl Service {
         // No new work may enter now. Queries observe owner closure immediately,
         // while queued writer jobs retain their epoch until the FIFO barrier.
         self.epochs.close_admission(epoch);
+        #[cfg(feature = "test-support")]
+        self.hooks.admission_closed();
         if self.writer.jobs.get().is_none() {
             self.epochs.close(epoch);
             after_writer();
