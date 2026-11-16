@@ -178,6 +178,8 @@ cleanup() {
   trap - EXIT
   phase=cleanup
   set +e
+  # Release the fixture app's decoders before the emulator action tears down.
+  adb shell am force-stop "$pkg" >/dev/null
   if [ "$saved_finish" = 1 ]; then set_always_finish true; else set_always_finish false; fi
   restore_setting global always_finish_activities "$saved_finish"
   adb shell rm -f "$probe" >/dev/null

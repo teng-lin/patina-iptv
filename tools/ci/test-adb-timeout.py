@@ -162,6 +162,9 @@ class Integration(unittest.TestCase):
         self.assertIn('phase="failure diagnostics"', script)
         self.assertIn("phase=cleanup", script)
         self.assertIn('step() { phase=$*;', script)
+        cleanup = script.split("cleanup() {", 1)[1].split("trap cleanup EXIT", 1)[0]
+        self.assertLess(cleanup.index('adb shell am force-stop "$pkg"'),
+                        cleanup.index('restore_setting global'))
 
     def test_action_has_its_own_limit_and_recovery_commands_are_guarded(self):
         workflow = (ROOT / ".github/workflows/android-smoke.yml").read_text()
