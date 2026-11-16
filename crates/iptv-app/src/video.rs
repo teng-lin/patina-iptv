@@ -272,7 +272,7 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
 /// An event the contract does not have, from surface `surface`'s player. It
 /// does what it did before the events were typed: a state without one of
 /// the four names shows on the status line and changes nothing else, a
-/// `size` without its two numbers still counts as the first frame (the
+/// `size` without its two numbers still marks reported size (the
 /// stream's size stays), and the rest sets nothing.
 fn on_unread(ui: Ui, surface: usize, error: PlayerEventError) {
     if !ui.player.stream(surface).accepts_native(None) {
@@ -281,7 +281,9 @@ fn on_unread(ui: Ui, surface: usize, error: PlayerEventError) {
     let (kind, status) = match error {
         // Another component's event or a later host's, and a `position`
         // without its `ms`: not logged.
-        PlayerEventError::UnknownName | PlayerEventError::NoPosition => return,
+        PlayerEventError::UnknownName
+        | PlayerEventError::NoPosition
+        | PlayerEventError::NoRenderToken => return,
         // The window has no such button: logged as every action is.
         PlayerEventError::UnknownAction(action) => {
             log::info!("iptv pip: {action}");
@@ -290,7 +292,7 @@ fn on_unread(ui: Ui, surface: usize, error: PlayerEventError) {
         PlayerEventError::UnknownState(name) => (PlayerEventKind::State, name),
         PlayerEventError::NoSize { width, height } => {
             if surface == 0 {
-                crate::startup::mark("video frame");
+                crate::startup::mark("video size");
             }
             (PlayerEventKind::Size, format!("{width}×{height}"))
         }
@@ -346,6 +348,14 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
             active,
         } => return crate::pip::on_state(ui, supported, tv, active),
         PlayerEvent::PipAction(action) => return crate::pip::on_action(ui, action),
+        PlayerEvent::FirstRender { token } => {
+            #[cfg(feature = "test-support")]
+            crate::performance_probe::rendered(ui, surface, token);
+            if token == stream.token.get_untracked() && surface == 0 {
+                crate::startup::mark("video rendered");
+            }
+            return;
+        }
         PlayerEvent::State(state) => {
             crate::player::on_state(ui, surface, state);
             state.name().to_owned()
@@ -353,7 +363,7 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
         PlayerEvent::Size { width, height } => {
             stream.size.set(Some((width as u32, height as u32)));
             if surface == 0 {
-                crate::startup::mark("video frame");
+                crate::startup::mark("video size");
             }
             format!("{width}×{height}")
         }

@@ -84,6 +84,12 @@ fn reload(ui: Ui) {
 }
 pub fn bind(ui: Ui) {
     crate::runtime().start_recordings();
+    // This one-second UI reload is unrelated to a guide/player action. Keep
+    // the real native recorder running in explicitly opted-in work-counter runs.
+    #[cfg(feature = "test-support")]
+    if crate::performance_probe::enabled() {
+        return;
+    }
     crate::data::spawn_in_app(async move {
         loop {
             timer(Duration::from_secs(1)).await;

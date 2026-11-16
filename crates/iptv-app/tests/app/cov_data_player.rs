@@ -394,11 +394,11 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     send(&mut app, "state", json!({}));
     assert!(logged("iptv player 0 state: warming-up"));
     assert!(logged("iptv player 0 state: ?"));
-    // A `size` without its two numbers is no size, yet it is the first
-    // frame's mark as it always was, and is logged as it came.
-    assert!(!iptv_app::startup::marked("video frame"));
+    // A malformed size retains its reported-size proxy mark and raw log,
+    // while neither malformed nor valid dimensions establish rendered evidence.
+    assert!(!iptv_app::startup::marked("video size"));
     send(&mut app, "size", json!({ "width": 1280 }));
-    assert!(iptv_app::startup::marked("video frame"));
+    assert!(iptv_app::startup::marked("video size"));
     assert!(logged("iptv player 0 size: 1280×null"));
     send(
         &mut app,
@@ -406,6 +406,15 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
         json!({ "width": (1_u64 << 32) + 1280, "height": 720 }),
     );
     assert!(logged("iptv player 0 size: 4294968576×720"));
+    assert!(!iptv_app::startup::marked("video rendered"));
+    let token = source["token"].as_u64().unwrap();
+    send(&mut app, "firstRender", json!({"token": token + 1}));
+    assert!(
+        !iptv_app::startup::marked("video rendered"),
+        "stale renderer token"
+    );
+    send(&mut app, "firstRender", json!({"token": token}));
+    assert!(iptv_app::startup::marked("video rendered"));
     // A position without its time does nothing.
     send(&mut app, "position", json!({}));
     assert!(!seen(&app, "text:/…$/"), "still no pill");

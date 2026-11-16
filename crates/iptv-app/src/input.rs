@@ -463,3 +463,14 @@ fn page(ui: Ui, dir: isize) {
         f.channel = to as usize;
     });
 }
+
+/// Synthetic native journey: the same Enter dispatch as the registered key handler.
+#[cfg(feature = "test-support")]
+pub(crate) fn synthetic_enter(ui: Ui) {
+    let nav = Rc::new(RefCell::new(Nav {
+        keymap: crate::remote_editor::keymap(),
+        detector: PressDetector::default(),
+        start: Instant::now(),
+    }));
+    key_event(ui, &nav, RemoteKey::Ok, Phase::Down);
+}

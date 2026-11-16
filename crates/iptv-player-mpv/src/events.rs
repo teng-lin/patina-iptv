@@ -15,6 +15,7 @@ wire_enum! {
     pub enum PlayerEventKind {
         State = "state",
         Size = "size",
+        FirstRender = "firstRender",
         Error = "error",
         Position = "position",
         Timeline = "timeline",
@@ -42,6 +43,10 @@ pub enum PlayerEvent {
     State(PlayerState),
     /// `size` {width, height}: the video's, in pixels.
     Size { width: u64, height: u64 },
+    /// Current-source frame submitted to a native renderer, once per source identity/token.
+    /// This is not a display presentation/scanout timestamp. Unsupported hosts
+    /// omit it; ready/size events must never stand in for this evidence.
+    FirstRender { token: u64 },
     /// `error` {code, http?}: Media3's code name (`?` when the host gave
     /// none) and the HTTP status behind it.
     Error { code: String, http: Option<u16> },
@@ -87,6 +92,8 @@ pub enum PlayerEventError {
     NoSize { width: String, height: String },
     /// A `position` without its `ms`.
     NoPosition,
+    /// Renderer evidence without a positive originating source token.
+    NoRenderToken,
     /// A `pipAction` that names none of the window's buttons: the name it
     /// gave (`?` when it gave none).
     UnknownAction(String),
@@ -101,6 +108,7 @@ impl fmt::Display for PlayerEventError {
                 write!(f, "`size` is not two whole numbers: {width}×{height}")
             }
             Self::NoPosition => f.write_str("`position` has no `ms`"),
+            Self::NoRenderToken => f.write_str("`firstRender` has no positive source token"),
             Self::UnknownAction(name) => write!(f, "`pipAction` names no button: {name}"),
         }
     }
@@ -113,6 +121,7 @@ impl PlayerEvent {
         match self {
             Self::State(_) => PlayerEventKind::State,
             Self::Size { .. } => PlayerEventKind::Size,
+            Self::FirstRender { .. } => PlayerEventKind::FirstRender,
             Self::Error { .. } => PlayerEventKind::Error,
             Self::Position { .. } => PlayerEventKind::Position,
             Self::Timeline { .. } => PlayerEventKind::Timeline,
@@ -128,6 +137,7 @@ impl PlayerEvent {
         match self {
             Self::State(state) => json!({ "state": state.name() }),
             Self::Size { width, height } => json!({ "width": width, "height": height }),
+            Self::FirstRender { token } => json!({ "token": token }),
             Self::Error { code, http } => {
                 let mut data = json!({ "code": code });
                 if let Some(status) = http {
@@ -199,6 +209,12 @@ impl PlayerEvent {
                     }
                 }
             }
+            PlayerEventKind::FirstRender => Self::FirstRender {
+                token: data["token"]
+                    .as_u64()
+                    .filter(|token| *token > 0)
+                    .ok_or(PlayerEventError::NoRenderToken)?,
+            },
             PlayerEventKind::Error => Self::Error {
                 code: data["code"].as_str().unwrap_or("?").to_owned(),
                 http: data["http"].as_u64().and_then(|h| u16::try_from(h).ok()),
@@ -329,7 +345,8 @@ mod tests {
     }
 
     /// Each fixture event reads as its typed value and is written back as
-    /// the same JSON; the fixture leaves no kind of event out.
+    /// the same JSON; the fixture leaves no shared Android event out.
+    /// FirstRender is optional native-renderer evidence, tested separately.
     #[test]
     fn shared_android_fixture_is_the_exact_rust_event_format() {
         let fixture = fixture();
@@ -347,6 +364,9 @@ mod tests {
             assert_eq!(want.wire(), (name, entry["data"].clone()), "{entry}");
         }
         for kind in PlayerEventKind::ALL {
+            if *kind == PlayerEventKind::FirstRender {
+                continue;
+            }
             assert!(
                 expected.iter().any(|e| e.kind() == *kind),
                 "no `{}` event in the fixture",
@@ -480,5 +500,26 @@ mod tests {
         assert_eq!(decode(0, 0), size(0, 0));
         assert_eq!(decode(u64::from(u32::MAX), 1), size(u64::from(u32::MAX), 1));
         assert_eq!(decode((1 << 32) + 1280, 720), size((1 << 32) + 1280, 720));
+    }
+}
+
+#[cfg(test)]
+mod render_evidence_tests {
+    use super::*;
+    #[test]
+    fn render_evidence_requires_a_positive_source_token() {
+        let event = PlayerEvent::FirstRender { token: 9 };
+        assert_eq!(
+            PlayerEvent::decode(event.wire().0, &event.data()),
+            Ok(event)
+        );
+        for data in [
+            json!({}),
+            json!({"token": 0}),
+            json!({"token": -1}),
+            json!({"token": "9"}),
+        ] {
+            assert!(PlayerEvent::decode("firstRender", &data).is_err());
+        }
     }
 }

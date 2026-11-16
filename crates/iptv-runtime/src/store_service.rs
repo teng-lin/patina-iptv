@@ -110,6 +110,8 @@ pub(crate) struct Service {
     pub(crate) guide_checks: super::guide_checks::Mirror,
     #[cfg(feature = "test-support")]
     pub(crate) hooks: super::workers::Hooks,
+    #[cfg(feature = "test-support")]
+    pub(crate) reads: AtomicU64,
 }
 impl Service {
     pub(crate) fn new(ports: crate::Ports) -> Self {
@@ -137,6 +139,8 @@ impl Service {
             guide_checks: Default::default(),
             #[cfg(feature = "test-support")]
             hooks: Default::default(),
+            #[cfg(feature = "test-support")]
+            reads: AtomicU64::new(0),
         }
     }
 
@@ -421,7 +425,10 @@ impl Services {
             let owner = self.service.clone();
             self.service.reader.queue(Box::new(move |connection| {
                 let _ = sender.send(owner.read(epoch, connection, operation));
-            }))
+            }))?;
+            #[cfg(feature = "test-support")]
+            self.service.reads.fetch_add(1, Ordering::Relaxed);
+            Ok(())
         });
         async move {
             queued?;
@@ -492,6 +499,8 @@ impl Services {
         self.service.reader.queue(Box::new(move |connection| {
             let _ = sender.send(owner.read(epoch, connection, operation));
         }))?;
+        #[cfg(feature = "test-support")]
+        self.service.reads.fetch_add(1, Ordering::Relaxed);
         receiver
             .recv()
             .map_err(|_| StoreError::Unavailable("store reply lost"))?
