@@ -47,7 +47,7 @@ use nsh_core::prelude::*;
 use crate::{Ui, ViewMode};
 
 /// A channel plays full screen: what the window would show.
-fn playing(ui: Ui) -> bool {
+pub(crate) fn playing(ui: Ui) -> bool {
     ui.mode.get() == ViewMode::Fullscreen && ui.playing.get().is_some()
 }
 
@@ -84,6 +84,13 @@ pub fn can_enter(ui: Ui) -> bool {
 /// closes when nothing plays any more or multiview opens.
 pub fn bind(ui: Ui) {
     if !crate::desktop::DESKTOP {
+        // Android reports through its persistent player. Other hosts have no
+        // native PiP implementation to acknowledge availability later.
+        if !cfg!(target_os = "android") {
+            ui.pip.update(|p| {
+                p.report(false, false, false);
+            });
+        }
         return;
     }
     ui.pip.update(|p| {

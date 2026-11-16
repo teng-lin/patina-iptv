@@ -124,6 +124,8 @@ impl State {
             data.ready = false;
             // A new native run must acknowledge its own OS registration.
             data.wake_reported = false;
+            data.published_schedule = None;
+            data.guide_check_at = 0;
         }
         let state = self.clone();
         services.clone().spawn(async move {

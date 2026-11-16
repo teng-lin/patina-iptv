@@ -58,7 +58,7 @@ fn label(ui: Ui, control: Control) -> String {
         PictureInPicture => with(
             tr("Picture in picture"),
             ui.pip
-                .with(|pip| iptv_core::capabilities::pip(pip, ui.playing.get().is_some()).reason())
+                .with(|pip| iptv_core::capabilities::pip(pip, crate::pip::playing(ui)).reason())
                 .map(|reason| crate::capabilities::reason(reason).to_owned()),
         ),
         VideoTracks => {

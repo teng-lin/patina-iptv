@@ -140,6 +140,10 @@ pub fn new_group(app: &mut Headless, name: &str) {
     step(app.press("text:New group"));
     step(app.type_text("text:Enter text", name));
     step(app.submit(&format!("text:{name}")));
+    // Submission queues a store write. A following press must wait for its
+    // acknowledgement instead of hitting the still-open modal editor.
+    step(app.wait_for_gone("text:Group name", Duration::from_secs(5)));
+    step(app.wait_for(&format!("text:{name} · 0 channels")));
 }
 
 /// Debounce uses the manual UI clock; authorization completes on native workers.

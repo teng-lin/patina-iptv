@@ -5,6 +5,85 @@ use iptv_providers::{
 };
 use std::io::{Read, Write};
 
+#[tokio::test]
+async fn foreground_refresh_preserves_the_native_series_deadline_and_newer_intents() {
+    static REGISTRATIONS: std::sync::Mutex<Vec<(i64, bool)>> = std::sync::Mutex::new(Vec::new());
+    fn register(next: i64, active: bool) -> iptv_core::recording::WakeCapability {
+        REGISTRATIONS.lock().unwrap().push((next, active));
+        iptv_core::recording::WakeCapability::Exact
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let mut ports = crate::Ports::new(directory.path().to_owned(), |_| {
+        panic!("wake refresh must not open the catalogue")
+    });
+    ports.recording_schedule = register;
+    let owner = Runtime::new(ports);
+    owner.start_services();
+    let at = now();
+    let guide_deadline = at + 25 * 60;
+    let mut job = Job {
+        id: JobId(1),
+        source_current: true,
+        request: Request {
+            source: 1,
+            channel: "generated".into(),
+            channel_name: "Generated channel".into(),
+            title: "Generated programme".into(),
+            start: at + 86400,
+            end: at + 86460,
+        },
+        status: Status::Scheduled,
+        bytes: 0,
+        message: String::new(),
+    };
+    {
+        let mut data = owner.recordings.lock();
+        data.recurring = true;
+        data.guide_check_at = guide_deadline;
+        data.jobs = vec![job.clone()];
+    }
+    assert!(
+        owner
+            .recordings
+            .publish_schedule(&owner.services(), 0, false)
+    );
+    owner.refresh_recording_wake().await.unwrap();
+    assert_eq!(
+        *REGISTRATIONS.lock().unwrap(),
+        vec![(guide_deadline, false); 2],
+        "foreground permission refresh must retain the native series wake"
+    );
+    owner.recordings.lock().jobs.clear();
+    owner.refresh_recording_wake().await.unwrap();
+    assert_eq!(
+        REGISTRATIONS.lock().unwrap().last(),
+        Some(&(guide_deadline, false))
+    );
+    job.request.start = at + 60;
+    job.request.end = at + 120;
+    {
+        let mut data = owner.recordings.lock();
+        data.intent_revision += 1;
+        data.jobs = vec![job];
+    }
+    owner.refresh_recording_wake().await.unwrap();
+    assert_eq!(
+        REGISTRATIONS.lock().unwrap().last(),
+        Some(&(at + 60, false))
+    );
+    assert!(
+        !owner
+            .recordings
+            .publish_schedule(&owner.services(), 0, false)
+    );
+    assert_eq!(
+        REGISTRATIONS.lock().unwrap().len(),
+        4,
+        "a late native poll cannot replace the edit"
+    );
+    assert!(owner.drain_services());
+}
+
 #[test]
 fn media_finalization_moves_once_and_never_replaces_an_existing_recording() {
     let directory = tempfile::tempdir().unwrap();

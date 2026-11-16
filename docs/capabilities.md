@@ -19,7 +19,8 @@ decoder performance. The profile tests exercise each row without needing that
 OS. Android TV and tablet share the same surface budget; the native PiP report
 also distinguishes a TV for the existing automatic-entry preference.
 
-PiP starts unknown until the player reports support. Its button and action
+PiP starts unknown until the player reports support; hosts without a native
+implementation acknowledge it as unavailable during setup. Its button and action
 handler use the same current decision. A denied or changed report takes effect
 without restarting the application. Desktop PiP presents the original player;
 it never reserves another provider stream.
@@ -38,6 +39,8 @@ status command uses the current report. The recording screen refreshes its
 notice through its existing reload loop.
 Returning to the foreground requests a fresh acknowledgement, including after
 leaving Android's alarm-permission settings. That refresh does not open a stream.
+It uses the recorder's current schedule, including the earlier recurring guide
+check deadline, so refreshing permission cannot postpone discovery of episodes.
 
 Awake-only desktop capture can outlive the window while the host process and
 computer remain running. iPad capture requires the app to remain open. Android
