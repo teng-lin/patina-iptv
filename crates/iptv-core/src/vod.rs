@@ -699,14 +699,23 @@ impl Screen {
         let at = controls
             .iter()
             .position(|c| *c == self.control)
-            .unwrap_or_else(|| {
+            .or_else(|| {
                 // A control that is gone (Retry after a success) restarts
                 // from the content, not from a hidden control.
                 controls
                     .iter()
                     .position(|c| matches!(c, Control::Catalogue | Control::Play))
-                    .unwrap_or(0)
             });
+        let Some(at) = at else {
+            // An empty catalogue has no content anchor. Enter its visible
+            // toolbar at the edge, without stepping past its first action.
+            self.control = if delta < 0 {
+                controls[controls.len() - 1]
+            } else {
+                controls[0]
+            };
+            return;
+        };
         self.control =
             controls[(at as isize + delta).clamp(0, controls.len() as isize - 1) as usize];
     }
@@ -1396,6 +1405,25 @@ mod tests {
             resume_episode: None,
         });
         assert!(s.resumes());
+    }
+    #[test]
+    fn an_empty_catalogue_enters_the_visible_toolbar_without_skipping_controls() {
+        for kind in [Kind::Movie, Kind::Series] {
+            let mut screen = Screen::default();
+            let generation = screen.begin(kind);
+            screen.publish(generation, Vec::new(), false, false);
+            for (delta, expected) in [(-1, Control::Continue), (1, Control::Search)] {
+                screen.control = Control::Catalogue;
+                screen.move_control(delta);
+                assert_eq!(screen.control, expected, "{kind:?}, direction {delta}");
+            }
+            screen.move_control(1);
+            assert_eq!(
+                screen.control,
+                Control::Source,
+                "the next step advances normally"
+            );
+        }
     }
     #[test]
     fn the_catalogue_keeps_its_toolbar() {
