@@ -65,6 +65,17 @@ fn old_native_events_cannot_consume_resume_while_the_next_source_is_preparing() 
 }
 
 #[test]
+fn prior_eof_play_pause_during_preparation_preserves_the_next_titles_resume() {
+    let Some(home) = isolated!() else { return };
+    exercise_preparing(
+        home,
+        nsh_core::platform::Idiom::Pad,
+        ResumeCase::PriorEndedDuringPreparation,
+        true,
+    );
+}
+
+#[test]
 fn disabling_a_vod_source_during_preparation_rejects_its_resolved_url() {
     let Some(home) = isolated!() else { return };
     exercise_admission(
@@ -857,6 +868,7 @@ enum ResumeCase {
     Seekable,
     Unseekable,
     EndedBeforeTimeline,
+    PriorEndedDuringPreparation,
 }
 
 fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resume: ResumeCase) {
@@ -1108,6 +1120,17 @@ fn exercise_admission(
         selected, 1,
         "the episode selection has one content identity"
     );
+    if resume == ResumeCase::PriorEndedDuringPreparation {
+        app.engine().control().dispatch_event(
+            surface,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: "state".into(),
+                data: json!({"state":"ended"}),
+            },
+        );
+        app.settle();
+    }
     let held = hold_preparation.then(iptv_app::hold_source_preparation);
     let previous_source = props.lock().unwrap()["source"].clone();
     let previous_opens = iptv_app::player_opens(0);
@@ -1164,6 +1187,14 @@ fn exercise_admission(
                 },
             );
             app.settle();
+        }
+        if resume == ResumeCase::PriorEndedDuringPreparation {
+            step(app.press("id:play-bar-play-pause"));
+            assert_eq!(
+                iptv_app::player_opens(0),
+                previous_opens,
+                "PlayPause during preparation cannot replay prior EOF or replace this preparation"
+            );
         }
         assert_eq!(
             props.lock().unwrap()["source"],
@@ -1248,6 +1279,13 @@ fn exercise_admission(
             .unwrap()
             .ends_with("/series/generated-user/generated-pass/102.mp4")
     );
+    if held.is_some() {
+        assert_eq!(
+            iptv_app::player_opens(0),
+            previous_opens + 1,
+            "the prepared title publishes exactly one new native source"
+        );
+    }
     let token = opened["token"].clone();
     if held.is_some() {
         app.engine().control().dispatch_event(
@@ -1417,6 +1455,10 @@ fn exercise_admission(
             })
             .unwrap()
             .resume_ms(),
-        37_000
+        if resume == ResumeCase::PriorEndedDuringPreparation {
+            0
+        } else {
+            37_000
+        }
     );
 }

@@ -229,7 +229,10 @@ pub fn start(ui: &Ui, channel: usize) {
 }
 
 pub fn toggle_pause(ui: Ui) {
-    if crate::on_demand::active(ui) && ui.player.main().finished.get_untracked() {
+    if crate::on_demand::active(ui)
+        && ui.player.main().finished.get_untracked()
+        && ui.player.main().accepts_native(None)
+    {
         ui.paused.set(false);
         retry_surface(ui, 0);
     } else {
