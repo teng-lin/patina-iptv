@@ -20,6 +20,7 @@ PORTABLE = (
     "iptv-guide", "iptv-import", "iptv-search", "iptv-library",
 )
 REPAIR = "guide_repair::tests::repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive"
+INSPECTION = "foundation_inspection::a_hundred_thousand_channel_analysis_keeps_display_reads_responsive"
 LATENCY = "store_latency::guide_input_stays_under_budget_while_the_database_writer_is_locked"
 BUSY_READER = "store_latency::a_store_read_does_not_wait_for_a_busy_writer"
 COVERAGE_FEATURES = "iptv-runtime/test-support,iptv-app/test-support"
@@ -58,6 +59,8 @@ def plan(root=ROOT, release=False):
         step("workspace-tests", "cargo", "test", *test_args, "--tests", "--timings", "--", "--format=pretty"),
         step("repair-display-independence", "cargo", "test", *test_args,
              "--lib", REPAIR, "--", "--ignored", "--exact", "--format=pretty"),
+        step("inspection-display-budget", "cargo", "test", *test_args,
+             "--test", "it", INSPECTION, "--", "--ignored", "--exact", "--format=pretty"),
     ]
     steps.extend(
         step(f"wasm-{crate}", "cargo", "build", "--locked", "-p", crate, "--target", "wasm32-unknown-unknown")

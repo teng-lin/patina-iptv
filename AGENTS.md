@@ -23,8 +23,9 @@
   display isolation requires it. Use child processes of the same executable for
   fresh process state. Keep private unit tests in their owning crate and disable
   empty binary test harnesses. CI checks examples with Clippy's `--all-targets`,
-  runs ordinary tests with `--tests`, and runs doctests separately. The target
-  budget is enforced by `tools/ci/test-check-plan.py`.
+  runs ordinary tests with `--tests`, and runs doctests separately. Run strict
+  timing gates alone through the shared CI plan, reusing the same harness. The
+  target budget is enforced by `tools/ci/test-check-plan.py`.
 - **Video layer.** One persistent player surface under the UI; modes change
   layout only. Never hide, detach or re-parent the player view: on Android
   hiding or detaching it destroys its video surface.

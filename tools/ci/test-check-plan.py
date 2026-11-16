@@ -86,7 +86,7 @@ class Plan(unittest.TestCase):
                 if argv[1] == "test":
                     self.assertIn("--format=pretty", argv[argv.index("--") + 1:])
         for name in ["workspace-tests", "workspace-doctests", "repair-display-independence",
-                     "guide-input-budget", "busy-store-reader"]:
+                     "inspection-display-budget", "guide-input-budget", "busy-store-reader"]:
             argv = self.by_name[name]
             self.assertEqual(argv[argv.index("--features") + 1], checks.COVERAGE_FEATURES)
             self.assertEqual(packages(argv), list(checks.workspace_crates()))
@@ -94,6 +94,7 @@ class Plan(unittest.TestCase):
     def test_isolated_scenarios_have_exact_targets_and_are_not_in_parallel_suite(self):
         expected = {
             "repair-display-independence": (["--lib"], checks.REPAIR),
+            "inspection-display-budget": (["--test", "it"], checks.INSPECTION),
             "guide-input-budget": (["--test", "app"], checks.LATENCY),
             "busy-store-reader": (["--test", "app"], checks.BUSY_READER),
         }
@@ -112,6 +113,7 @@ class Plan(unittest.TestCase):
     def test_exact_filters_name_existing_ignored_tests(self):
         sources = {
             checks.REPAIR: "crates/iptv-runtime/src/guide_repair/tests.rs",
+            checks.INSPECTION: "crates/iptv-runtime/tests/it/foundation_inspection.rs",
             checks.LATENCY: "crates/iptv-app/tests/app/store_latency.rs",
             checks.BUSY_READER: "crates/iptv-app/tests/app/store_latency.rs",
         }

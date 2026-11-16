@@ -29,6 +29,11 @@ else
   cargo llvm-cov --locked --no-report "${checks[@]}"
 fi
 if [ "$#" -eq 0 ]; then
+  # Keep the strict display budget covered without parallel harness contention.
+  # Reuse the ordinary run's package/feature graph and compiled test binaries.
+  cargo llvm-cov test --locked --no-report "${checks[@]}" \
+    foundation_inspection::a_hundred_thousand_channel_analysis_keeps_display_reads_responsive \
+    -- --ignored --exact --format=pretty
   if [ "$(uname -s)" = Linux ]; then
     python3 tools/ci/run-xvfb.py cargo llvm-cov test --locked --no-report \
       -p iptv-app --features test-support --test native_player -- \

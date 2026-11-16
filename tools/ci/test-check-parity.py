@@ -68,7 +68,8 @@ class Parity(unittest.TestCase):
         self.assertEqual(tests[tests.index("--features") + 1], plan.COVERAGE_FEATURES)
         self.assertIn("--tests", tests)
         self.assertIn("--doc", steps["workspace-doctests"])
-        for name in ("repair-display-independence", "guide-input-budget", "busy-store-reader"):
+        for name in ("repair-display-independence", "inspection-display-budget",
+                     "guide-input-budget", "busy-store-reader"):
             argv = steps[name]
             self.assertEqual(argv[argv.index("--") + 1:], ["--ignored", "--exact", "--format=pretty"])
 
@@ -79,6 +80,7 @@ class Parity(unittest.TestCase):
         self.assertIn("arguments=$(python3 tools/ci/check-plan.py coverage-args)", script)
         self.assertIn('read -r -a checks <<< "$arguments"', script)
         self.assertIn('"${checks[@]}" -- --format=pretty', script)
+        self.assertIn(plan.INSPECTION + " \\\n    -- --ignored --exact --format=pretty", script)
 
     def test_coverage_enables_native_runtime_and_headless_application_scenarios(self):
         args = plan.coverage_args()

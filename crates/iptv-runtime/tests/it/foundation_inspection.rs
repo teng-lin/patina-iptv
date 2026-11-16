@@ -717,6 +717,7 @@ fn audit_cursor_cannot_mix_different_guide_snapshots() {
 
 #[test]
 #[cfg(feature = "test-support")]
+#[ignore = "50 ms display budget runs alone through tools/ci/check-plan.py"]
 fn a_hundred_thousand_channel_analysis_keeps_display_reads_responsive() {
     let mut f = Fixture::new();
     let source = f.sources[0];

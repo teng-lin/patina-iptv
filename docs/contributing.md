@@ -100,7 +100,8 @@ full lint, library/app test, dependency, tooling and portable-build suite.
 [Windows validation](../tools/build-windows.ps1) uses the same
 [Rust command plan](../tools/ci/check-plan.py). Both select the same library
 and app test-support features, ordinary app targets, exact isolated repair,
-guide-latency and busy-reader scenarios, portable wasm builds and normal app build.
+inspection-display, guide-latency and busy-reader scenarios, portable wasm builds
+and normal app build.
 Ordinary tests share one Cargo invocation and feature graph. Examples are checked
 by Clippy's `--all-targets` pass, without linking them in the test or coverage pass;
 doctests run explicitly in the host checks.
