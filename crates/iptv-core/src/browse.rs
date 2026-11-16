@@ -73,7 +73,7 @@ impl RailItem {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct VodAvailability {
     /// The playlist (or combined playlists) on screen has movies or shows:
-    /// the per-playlist Movies and Shows entries.
+    /// catalogue entries stay available while any enabled source has VOD.
     pub shown: bool,
     /// Any enabled playlist has movies or shows: the cross-source Continue
     /// watching and Recently added shelves, whichever playlist is on screen.
@@ -82,15 +82,13 @@ pub struct VodAvailability {
 
 /// The rail's items, top to bottom: the cross-source on-demand shelves
 /// (Continue watching and Recently added) when any enabled playlist has
-/// video on demand, then Movies and Shows for the playlist on screen. TV
+/// video on demand, then Movies and Shows across enabled playlists. TV
 /// stays the rail's home and the screen the app starts on.
 pub fn rail_items(vod: VodAvailability) -> Vec<RailItem> {
     let mut items = vec![RailItem::Search, RailItem::Tv];
     // The shown playlist is one of the enabled ones.
     if vod.any || vod.shown {
         items.extend([RailItem::Continue, RailItem::Recent]);
-    }
-    if vod.shown {
         items.extend([RailItem::Movies, RailItem::Shows]);
     }
     items.extend([

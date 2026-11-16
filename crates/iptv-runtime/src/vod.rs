@@ -237,15 +237,40 @@ impl Runtime {
         Ok(())
     }
     pub async fn vod_details(&self, key: Key) -> Result<Details, Error> {
-        self.vod_details_for(key, None).await
+        self.vod_details_for(key, None, true, iptv_import::CancelToken::new())
+            .await
+    }
+    /// Focused-poster metadata uses the same parental/source checks, without
+    /// registering playback locators or displacing an active title's cache.
+    pub async fn vod_preview(
+        &self,
+        key: Key,
+        cancel: iptv_import::CancelToken,
+    ) -> Result<Details, Error> {
+        self.vod_details_for(key, None, false, cancel).await
     }
     /// Retry remains bound to the playlist whose original details failed.
     /// Check its incarnation in the same snapshot that captures credentials,
     /// before any provider request; a replacement cannot inherit this action.
     pub async fn vod_retry_details(&self, key: Key, incarnation: String) -> Result<Details, Error> {
-        self.vod_details_for(key, Some(incarnation)).await
+        self.vod_details_for(
+            key,
+            Some(incarnation),
+            true,
+            iptv_import::CancelToken::new(),
+        )
+        .await
     }
-    async fn vod_details_for(&self, key: Key, expected: Option<String>) -> Result<Details, Error> {
+    async fn vod_details_for(
+        &self,
+        key: Key,
+        expected: Option<String>,
+        retain_playback: bool,
+        cancel: iptv_import::CancelToken,
+    ) -> Result<Details, Error> {
+        if cancel.is_cancelled() {
+            return Err(unavailable());
+        }
         self.parental_check(&target(&key))
             .await
             .map_err(|_| unavailable())?;
@@ -287,7 +312,9 @@ impl Runtime {
                 let client =
                     iptv_net::NetClient::new(crate::settings::net_config(&work.settings()))
                         .map_err(|_| unavailable())?;
-                let cancel = iptv_import::CancelToken::new();
+                if cancel.is_cancelled() {
+                    return Err(unavailable());
+                }
                 let mut episodes = Vec::new();
                 let mut entries = Vec::new();
                 let mut movie_locator = locator.map(|(_, l)| l);
@@ -311,6 +338,8 @@ impl Runtime {
                                 .map_err(|_| unavailable())?;
                             item.plot = details.series.plot.or(item.plot);
                             item.poster = details.series.poster.or(item.poster);
+                            item.year = details.series.year.or(item.year);
+                            item.rating_x10 = details.series.rating_x10.or(item.rating_x10);
                             for e in details.episodes.items.into_iter().take(20_000) {
                                 let key = Key {
                                     source: key2.source,
@@ -351,6 +380,8 @@ impl Runtime {
                             {
                                 item.plot = details.item.plot.or(item.plot);
                                 item.poster = details.item.poster.or(item.poster);
+                                item.year = details.item.year.or(item.year);
+                                item.rating_x10 = details.item.rating_x10.or(item.rating_x10);
                                 item.duration_secs =
                                     details.item.duration_secs.or(item.duration_secs);
                                 if matches!(&details.item.stream,
@@ -471,28 +502,36 @@ url,
                         },
                     ));
                 }
+                if cancel.is_cancelled() {
+                    return Err(unavailable());
+                }
                 let keys: Vec<_> = episodes.iter().map(|e| e.key.clone()).collect();
                 let resume_key = key2.clone();
-                let (progress, resume_episode) = work
-                    .read(move |s| {
+                let (progress, resume_episode) = if retain_playback {
+                    work.read(move |s| {
                         let progress = keys
                             .iter()
                             .map(|k| s.vod_progress(k))
                             .collect::<iptv_store_sqlite::Result<Vec<_>>>()?;
                         Ok((progress, s.vod_resume_episode(&resume_key)?))
                     })
-                    .await?;
+                    .await?
+                } else {
+                    (Vec::new(), None)
+                };
                 for (e, p) in episodes.iter_mut().zip(progress) {
                     e.progress = p;
                 }
-                let mut cache = state
-                    .entries
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                if cache.len() + entries.len() > 30_000 {
-                    cache.clear();
+                if retain_playback {
+                    let mut cache = state
+                        .entries
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if cache.len() + entries.len() > 30_000 {
+                        cache.clear();
+                    }
+                    cache.extend(entries);
                 }
-                cache.extend(entries);
                 Ok::<_, Error>(Details {
                     item,
                     episodes,
@@ -516,7 +555,9 @@ url,
                     && s.source_policy(SourceId(lookup.source))?.enabled)
             })
             .await?;
-        if !current {
+        // Keep the source read last, then check access without yielding:
+        // an expired or revoked grant cannot survive that final store await.
+        if !current || !self.parental_allowed(&target(&key)) {
             return Err(unavailable());
         }
         Ok(result)

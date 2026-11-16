@@ -3,7 +3,7 @@
 use crate::i18n::trf;
 use crate::{Ui, i18n::tr, scale::Scale, ui_kit};
 use iptv_core::menu::Origin;
-use iptv_core::recording::{Draft, Filter, Job, JobId, Request, Status};
+use iptv_core::recording::{Draft, Job, JobId, Request, Status};
 use iptv_nav::Action;
 use nsh_core::prelude::*;
 use std::time::Duration;
@@ -466,7 +466,6 @@ fn save_allowed(ui: Ui, draft: Draft) {
                     // row, editor or confirmation the viewer opened meanwhile.
                     if !draft.immediate {
                         s.draft = None;
-                        s.filter = Filter::All;
                         s.focus = Some(id);
                         s.actions = false;
                     }
@@ -776,8 +775,6 @@ pub fn key(ui: Ui, action: Action) {
         match action {
             Action::MoveUp => ui.recordings.update(|s| s.move_focus(-1)),
             Action::MoveDown => ui.recordings.update(|s| s.move_focus(1)),
-            Action::MoveLeft => ui.recordings.update(|s| s.set_filter(Filter::Active)),
-            Action::MoveRight => ui.recordings.update(|s| s.set_filter(Filter::Finished)),
             Action::ShowMenu => {
                 if let Some(id) = ui.recordings.with_untracked(|s| s.focus) {
                     select_job(ui, id);
@@ -945,30 +942,6 @@ fn library_content(ui: Ui, size: Scale) -> View {
             .child(view().flex_1())
             .child(ui_kit::title(size, tr("Recordings"))))
         .child(rows::now_playing(ui, size))
-        .child(view().flex_row().items_start().px(move || size.px(24.0)).min_h(move || size.px(128.0))
-            .child(view().flex_row().children(
-                [(Filter::All, "All"), (Filter::Active, "Active"), (Filter::Finished, "Finished")]
-                    .into_iter().map(move |(filter, name)| {
-                        style::action(ui, size, tr(name), move || ui.recordings.with(|s| s.filter == filter),
-                            move || ui.recordings.update(|s| {
-                                s.set_filter(filter); s.actions = false; s.confirm_delete = false;
-                            }))
-                    })))
-            .child(view().flex_1())
-            .child(when(move || ui.recordings.with(|s| s.focused().is_some()), move || {
-                view().w(percentage(0.45)).gap(move || size.px(8.0))
-                    .child(ui_kit::title(size, move || ui.recordings.with(|s| {
-                        s.focused().map(|j| j.request.title.clone()).unwrap_or_default()
-                    })))
-                    .child(ui_kit::caption(size, move || ui.recordings.with(|s| {
-                        s.focused().map(|j| format!("{} · {} – {}", crate::time::date_only(j.request.start),
-                            crate::time::time_only(j.request.start), crate::time::time_only(j.request.end)))
-                            .unwrap_or_default()
-                    })))
-                    .child(ui_kit::body(size, move || ui.recordings.with(|s| {
-                        s.focused().map(|j| format!("{} · {}", j.request.channel_name, status(j))).unwrap_or_default()
-                    })))
-            })))
         .child(ui_kit::body(size, move || message(ui)).text_color(rgb(ui_kit::ERROR))
             .px(move || size.px(24.0)))
         .child(when(move || ui.recordings.with(|s| s.visible().next().is_none()), move || {

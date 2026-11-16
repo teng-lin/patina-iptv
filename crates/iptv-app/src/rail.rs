@@ -39,8 +39,8 @@ fn label(item: RailItem) -> &'static str {
         RailItem::Tv => tr("Live TV"),
         RailItem::Continue => tr("Continue watching"),
         RailItem::Recent => tr("Recently added"),
-        RailItem::Movies => tr("Films"),
-        RailItem::Shows => tr("Series"),
+        RailItem::Movies => tr("Movies"),
+        RailItem::Shows => tr("Shows"),
         RailItem::Recordings => tr("Recordings"),
         RailItem::MyList => tr("Watchlist"),
         RailItem::Playlists => tr("Playlists"),
@@ -49,7 +49,7 @@ fn label(item: RailItem) -> &'static str {
 }
 
 /// A 24-unit line drawing in the text colour.
-fn icon(item: RailItem) -> ImageSrc {
+pub(crate) fn icon(item: RailItem) -> ImageSrc {
     let body = match item {
         RailItem::Search => "<circle cx='10.5' cy='10.5' r='6'/><path d='M15 15l5.5 5.5'/>",
         RailItem::Tv => "<rect x='3' y='5' width='18' height='12' rx='2'/><path d='M8 21h8'/>",

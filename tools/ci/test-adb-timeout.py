@@ -229,5 +229,79 @@ with open("adb-calls.jsonl", "a") as stream: stream.write(json.dumps(sys.argv[1:
                     self.assertFalse((root / "adb-calls.jsonl").exists())
 
 
+@unittest.skipUnless(shutil.which("javac") and shutil.which("java"), "requires a JDK")
+class KeyInjection(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.directory = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.directory.name)
+        sources = {
+            "android/view/InputEvent.java": "package android.view; public class InputEvent {}",
+            "android/view/KeyEvent.java": '''package android.view;
+public class KeyEvent extends InputEvent {
+    public final long time; public final int action;
+    public KeyEvent(long down, long time, int action, int code, int repeat) {
+        this.time = time; this.action = action;
+    }
+    public static int keyCodeFromString(String name) { return name.equals("KEYCODE_DPAD_CENTER") ? 23 : 0; }
+    public void setSource(int source) {}
+}''',
+            "android/os/SystemClock.java": '''package android.os;
+public class SystemClock {
+    public static long uptimeMillis() { return System.nanoTime() / 1000000; }
+}''',
+            "android/hardware/input/InputManagerGlobal.java": '''package android.hardware.input;
+import android.view.InputEvent; import android.view.KeyEvent;
+public class InputManagerGlobal {
+    public static InputManagerGlobal getInstance() { return new InputManagerGlobal(); }
+    public boolean injectInputEvent(InputEvent input, int mode) throws Exception {
+        KeyEvent key = (KeyEvent) input;
+        // Model delayed Down acknowledgement; a hold must begin after this.
+        if (key.action == 0 && mode == 2) Thread.sleep(80);
+        System.out.printf("%d %d %d %d%n", key.action, key.time, mode, System.nanoTime());
+        return true;
+    }
+}''',
+        }
+        paths = []
+        for relative, source in sources.items():
+            path = cls.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(source)
+            paths.append(str(path))
+        subprocess.run(["javac", "--release", "11", "-d", str(cls.root), *paths,
+                        str(ROOT / "tools/ci/android/ShortKeys.java")], check=True, timeout=30)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.directory.cleanup()
+
+    def invoke(self, *arguments):
+        return subprocess.run(["java", "-cp", str(self.root), "ShortKeys", *arguments],
+                              capture_output=True, text=True, timeout=5, check=False)
+
+    def test_short_pairs_queue_up_without_waiting_on_down(self):
+        result = self.invoke("KEYCODE_DPAD_CENTER", "KEYCODE_DPAD_CENTER")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        events = [list(map(int, line.split())) for line in result.stdout.splitlines()]
+        self.assertEqual([(e[0], e[2]) for e in events], [(0, 0), (1, 2)] * 2)
+        for down, up in zip(events[::2], events[1::2]):
+            self.assertEqual(up[1], down[1] + 1)
+
+    def test_deliberate_hold_waits_after_down_delivery_and_then_releases(self):
+        result = self.invoke("--hold-ms", "100", "KEYCODE_DPAD_CENTER")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        down, up = [list(map(int, line.split())) for line in result.stdout.splitlines()]
+        self.assertEqual((down[0], down[2], up[0], up[2]), (0, 2, 1, 2))
+        self.assertGreaterEqual(up[3] - down[3], 100_000_000)
+        self.assertGreaterEqual(up[1] - down[1], 180)
+
+    def test_invalid_holds_do_not_inject_events(self):
+        for duration in ["0", "-1", "5001", "invalid"]:
+            result = self.invoke("--hold-ms", duration, "KEYCODE_DPAD_CENTER")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, "")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -90,7 +90,7 @@ expect() {
 alive() { [ -n "$(adb shell pidof $pkg | tr -d '\r')" ]; }
 # Queue each short Down/Up pair without waiting for app handling between them.
 # State/log acknowledgements below still wait for the requested app behavior.
-# Deliberate long presses use adb input --longpress separately.
+# Deliberate long presses use the same helper with an explicit hold below.
 keys() {
   local key
   for key in "$@"; do
@@ -270,8 +270,9 @@ shot 05-fullscreen
 if [ "$is_tv" = true ]; then
   step "shared TV controls and long OK release"
   mark
-  # Keep deliberate long presses real; keys() supplies only bounded short pairs.
-  adb shell input keyevent --longpress KEYCODE_DPAD_CENTER
+  # One second is deliberately above the 400 ms product default. Android's
+  # input --longpress sits on that boundary and dispatch jitter can shorten it.
+  adb shell "CLASSPATH=$probe app_process /system/bin ShortKeys --hold-ms 1000 KEYCODE_DPAD_CENTER"
   # Queue navigation before reading logcat: a loaded host can spend the
   # entire auto-hide interval polling or taking screenshots.
   keys KEYCODE_DPAD_RIGHT KEYCODE_BACK

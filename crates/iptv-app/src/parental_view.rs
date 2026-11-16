@@ -285,6 +285,19 @@ fn manage_pick(ui: Ui, index: usize) {
     }
 }
 pub fn enforce(ui: Ui) {
+    let denied = ui.vod.with_untracked(|s| {
+        s.cards
+            .iter()
+            .filter(|c| c.plot.is_some() || c.poster.is_some())
+            .map(|c| &c.key)
+            .chain(s.preview.iter().map(|d| &d.item.key))
+            .filter(|key| !crate::runtime().parental_allowed(&iptv_runtime::vod::target(key)))
+            .cloned()
+            .collect::<Vec<_>>()
+    });
+    if !denied.is_empty() {
+        ui.vod.update(|s| s.redact_metadata(&denied));
+    }
     let details_allowed = ui.vod.with_untracked(|s| {
         s.details.as_ref().is_none_or(|d| {
             crate::runtime().parental_allowed(&iptv_runtime::vod::target(&d.item.key))
