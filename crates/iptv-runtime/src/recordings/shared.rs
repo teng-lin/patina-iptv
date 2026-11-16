@@ -4,9 +4,6 @@
 use super::*;
 use iptv_core::{i18n::key, live::Identity};
 use iptv_net::live::LiveInput;
-use std::sync::atomic::AtomicU64;
-
-static NEXT_INPUT: AtomicU64 = AtomicU64::new(1);
 pub(super) struct Incoming {
     pub id: u64,
     pub identity: Identity,
@@ -510,7 +507,7 @@ impl Runtime {
                             }
                         }
                         state.retire_unused().await;
-                        let id = NEXT_INPUT.fetch_add(1, Ordering::Relaxed);
+                        let id = state.next_input.fetch_add(1, Ordering::Relaxed) + 1;
                         {
                             let mut data = state.lock();
                             let mut wanted = data.lease(source_id.0);

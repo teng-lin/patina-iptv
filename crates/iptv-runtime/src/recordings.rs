@@ -23,7 +23,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Condvar, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -237,6 +237,8 @@ pub(crate) struct State {
     execution: Mutex<Execution>,
     contexts: Mutex<HashMap<i64, ContextEntry>>,
     inputs_changed: tokio::sync::Notify,
+    // Connection IDs belong to this directory-owned registry, including retries.
+    next_input: AtomicU64,
     preparations: Mutex<HashMap<usize, SurfacePreparation>>,
     media_ops: tokio::sync::Mutex<()>,
     playback: Mutex<Option<(JobId, iptv_net::recording_file::RecordingFile)>>,
