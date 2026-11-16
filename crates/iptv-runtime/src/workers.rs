@@ -115,9 +115,20 @@ pub(crate) struct Hooks {
     reports: Mutex<(bool, usize)>,
     released: Condvar,
     publication: Mutex<Option<Arc<crate::testing::GateState>>>,
+    drained: Mutex<Option<Arc<crate::testing::GateState>>>,
 }
 #[cfg(feature = "test-support")]
 impl Hooks {
+    pub(crate) fn observe_drain(&self) -> crate::TestGate {
+        let gate = crate::TestGate::new();
+        *self.drained.lock().unwrap() = Some(gate.0.clone());
+        gate
+    }
+    pub(crate) fn drained(&self) {
+        if let Some(gate) = self.drained.lock().unwrap().take() {
+            gate.acknowledge();
+        }
+    }
     pub(crate) fn hold_publication(&self) -> crate::TestGate {
         let gate = crate::TestGate::new();
         *self.publication.lock().unwrap() = Some(gate.0.clone());

@@ -15,6 +15,10 @@ pub(crate) struct GateState {
 }
 
 impl GateState {
+    pub(crate) fn acknowledge(&self) {
+        self.progress.lock().unwrap().entered = true;
+        self.changed.notify_all();
+    }
     /// Called only after a worker has reached the boundary being exercised.
     pub(crate) fn pause(&self) {
         let mut progress = self.progress.lock().unwrap();

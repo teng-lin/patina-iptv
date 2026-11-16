@@ -20,6 +20,47 @@ fn owner(path: &Path) -> Rc<Runtime> {
 }
 
 #[test]
+fn dropping_the_last_ui_owner_acknowledges_closed_lanes_and_keeps_accepted_writes() {
+    let directory = tempfile::tempdir().unwrap();
+    let runtime = owner(directory.path());
+    support::block_on(commands::combined_resume_key(&runtime)).unwrap();
+    let gate = runtime.host_handle().hold_writer().unwrap();
+    assert!(gate.wait_entered(LIMIT));
+    let observed = runtime.host_handle().observe_drain().unwrap();
+    let mut accepted = Box::pin(commands::remember_combined_channel(
+        &runtime,
+        "generated-drop-commit".into(),
+    ));
+    assert!(
+        accepted
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    drop(accepted);
+    runtime.save_last_channel(None, "generated-drop-file");
+    let release = std::thread::spawn(move || gate.release());
+    drop(runtime);
+    release.join().unwrap();
+    assert!(
+        observed.wait_entered(Duration::ZERO),
+        "Drop returned before its native connections were drained"
+    );
+    let restarted = owner(directory.path());
+    assert_eq!(
+        support::block_on(commands::combined_resume_key(&restarted))
+            .unwrap()
+            .as_deref(),
+        Some("generated-drop-commit")
+    );
+    assert_eq!(
+        restarted.load_last_channel(None).as_deref(),
+        Some("generated-drop-file")
+    );
+    assert!(restarted.drain_services());
+}
+
+#[test]
 fn host_flush_acknowledges_the_actual_file_worker_and_dropped_reply() {
     let directory = tempfile::tempdir().unwrap();
     let runtime = owner(directory.path());

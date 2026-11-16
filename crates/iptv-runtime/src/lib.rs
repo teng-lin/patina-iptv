@@ -366,7 +366,6 @@ impl Drop for Runtime {
         if !self.recordings_detached.replace(true) {
             self.recordings.detach_ui();
         }
-        self.store.retire();
         if let Some((_, cancel)) = self.wizard_import.borrow().as_ref() {
             cancel.cancel();
         }
@@ -379,6 +378,20 @@ impl Drop for Runtime {
         for completion in self.completions.borrow().values().filter_map(Weak::upgrade) {
             completion.cancel.cancel();
         }
+        // Hosts normally drain explicitly. Unwinding or an abandoned owner must
+        // also attempt to close its cipher connections before process-level
+        // SQLCipher cleanup can free their private heap. These are this UI owner's lanes;
+        // the independent native recording host retains its own services.
+        if !self
+            .store
+            .drain_on_shutdown_with(|| self.inspection.cancel_requests())
+        {
+            log::error!("iptv persistence: fallback store drain did not finish at disposal");
+        }
+        if !self.store.files().flush(std::time::Duration::from_secs(2)) {
+            log::error!("iptv persistence: fallback file flush did not finish at disposal");
+        }
+        self.store.retire();
     }
 }
 
@@ -446,6 +459,14 @@ impl HostHandle {
         self.0
             .upgrade()
             .map(|service| service.hooks.hold_publication())
+    }
+
+    /// Acknowledges that this owner's actual store lanes have closed.
+    #[cfg(feature = "test-support")]
+    pub fn observe_drain(&self) -> Option<TestGate> {
+        self.0
+            .upgrade()
+            .map(|service| service.hooks.observe_drain())
     }
 
     /// Occupies this owner's store writer for `duration` after the work

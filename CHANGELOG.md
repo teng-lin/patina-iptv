@@ -17,6 +17,9 @@ is below 1.0, a minor release may change behaviour.
 - Cancelled imports and stale work from a replaced source cannot publish a
   staged catalogue over committed data. Refused private backup storage is
   removed immediately without changing an existing archive.
+- Disposing the final UI owner drains its native store connections and accepted
+  small-file writes, including during unwinding, to avoid racing SQLCipher's
+  process-exit cleanup.
 
 ## [0.1.3] - 2026-11-15
 

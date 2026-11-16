@@ -46,7 +46,11 @@ pub(crate) async fn guarded<T>(
     }
     let mut work = pin!(future);
     let mut stop = pin!(control.cancel.cancelled());
+    let mut closed = pin!(services.closed());
     let race = poll_fn(|cx| {
+        if closed.as_mut().poll(cx).is_ready() {
+            return Poll::Ready(Err(InspectionError::OwnerClosed));
+        }
         if stop.as_mut().poll(cx).is_ready() {
             return Poll::Ready(Err(InspectionError::Cancelled));
         }
@@ -57,7 +61,7 @@ pub(crate) async fn guarded<T>(
     });
     let result = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), race)
         .await
-        .map_err(|_| InspectionError::Deadline)?;
+        .unwrap_or(Err(InspectionError::Deadline));
     if !services.is_current() {
         return Err(InspectionError::OwnerClosed);
     }

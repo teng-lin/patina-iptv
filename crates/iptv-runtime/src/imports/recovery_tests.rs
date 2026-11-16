@@ -24,6 +24,18 @@ fn server(
     mpsc::Sender<()>,
     std::thread::JoinHandle<()>,
 ) {
+    response_server(PLAYLIST, block_body)
+}
+
+fn response_server(
+    body: &'static str,
+    block_body: bool,
+) -> (
+    String,
+    mpsc::Receiver<()>,
+    mpsc::Sender<()>,
+    std::thread::JoinHandle<()>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/generated.m3u", listener.local_addr().unwrap());
     let (entered, observed) = mpsc::channel();
@@ -42,14 +54,14 @@ fn server(
         write!(
             stream,
             "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            PLAYLIST.len()
+            body.len()
         )
         .unwrap();
         let _ = entered.send(());
         if block_body {
             let _ = resume.recv_timeout(LIMIT);
         }
-        let _ = stream.write_all(PLAYLIST.as_bytes());
+        let _ = stream.write_all(body.as_bytes());
     });
     (url, observed, release, task)
 }
@@ -305,4 +317,136 @@ async fn a_failed_catalogue_transaction_preserves_source_details_and_survives_re
         store.load_channels(id, &Default::default()).unwrap()[0].name,
         "Generated retained"
     );
+}
+
+#[tokio::test]
+async fn a_queued_refresh_cannot_adopt_configuration_changed_before_it_started() {
+    let directory = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let url = format!("http://{}/generated.m3u", listener.local_addr().unwrap());
+    let (owner, job) = fixture(directory.path(), &url).await;
+    let id = job.stored.unwrap();
+    let mut changed = job.source.clone();
+    let SourceConfig::M3u(config) = &mut changed.config else {
+        unreachable!()
+    };
+    config.user_agent = Some("GeneratedUpdated/1".into());
+    owner
+        .services()
+        .call(move |store| store.update_source(id, &changed))
+        .await
+        .unwrap();
+    let (task, mut rx) = start(&owner, job, &CancelToken::new());
+    tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
+    assert_eq!(failure(&mut rx), FailureKind::Auth);
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert_retained(&owner, id, "Generated retained source").await;
+    assert_clean_stage(directory.path());
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn a_configuration_edit_fences_an_old_stage_without_reusing_the_source_id() {
+    let directory = tempfile::tempdir().unwrap();
+    let (url, _, _, server) = server(false);
+    let (owner, job) = fixture(directory.path(), &url).await;
+    let id = job.stored.unwrap();
+    let mut changed = job.source.clone();
+    let SourceConfig::M3u(config) = &mut changed.config else {
+        unreachable!()
+    };
+    config.user_agent = Some("GeneratedChanged/1".into());
+    let gate = owner.host_handle().hold_import_publication().unwrap();
+    let (task, mut rx) = start(&owner, job, &CancelToken::new());
+    assert!(gate.wait_entered(LIMIT));
+    let expected = changed.clone();
+    owner
+        .services()
+        .call(move |store| {
+            let incarnation = store.source_incarnation(id)?;
+            store.update_source(id, &changed)?;
+            // A public configuration edit changes the source incarnation even
+            // though the stable source id remains the same.
+            assert_ne!(store.source_incarnation(id)?, incarnation);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    gate.release();
+    tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
+    assert_eq!(failure(&mut rx), FailureKind::Storage);
+    owner
+        .services()
+        .read(move |store| {
+            assert!(store.source(id)?.unwrap().source.config == expected.config);
+            assert_eq!(
+                store.load_channels(id, &Default::default())?[0].name,
+                "Generated retained"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_clean_stage(directory.path());
+    server.join().unwrap();
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn a_retired_owners_staged_import_cannot_mutate_a_restarted_owners_store() {
+    let directory = tempfile::tempdir().unwrap();
+    let (url, _, _, server) = server(false);
+    let (owner, job) = fixture(directory.path(), &url).await;
+    let id = job.stored.unwrap();
+    let gate = owner.host_handle().hold_import_publication().unwrap();
+    let (task, mut rx) = start(&owner, job, &CancelToken::new());
+    assert!(gate.wait_entered(LIMIT));
+    assert!(owner.drain_services());
+    drop(owner);
+    let newer = Runtime::new(crate::Ports::new(directory.path().into(), |_| {
+        Ok(crate::model::DatabaseKey::from_bytes(KEY))
+    }));
+    newer.start_services();
+    newer.bind(|_| panic!("old import delivered an event to the replacement owner"));
+    assert_retained(&newer, id, "Generated retained source").await;
+    gate.release();
+    tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
+    assert_eq!(failure(&mut rx), FailureKind::Storage);
+    assert_retained(&newer, id, "Generated retained source").await;
+    assert_clean_stage(directory.path());
+    server.join().unwrap();
+    assert!(newer.drain_services());
+}
+
+#[tokio::test]
+async fn an_empty_refresh_records_a_failure_but_an_empty_edit_preserves_committed_status() {
+    for edit in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let (url, _, _, server) = response_server("#EXTM3U\n", false);
+        let (owner, mut job) = fixture(directory.path(), &url).await;
+        let id = job.stored.unwrap();
+        job.edit = edit;
+        let (task, mut rx) = start(&owner, job, &CancelToken::new());
+        tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
+        assert_eq!(failure(&mut rx), FailureKind::EmptyPlaylist);
+        owner
+            .services()
+            .read(move |store| {
+                assert_eq!(
+                    store.load_channels(id, &Default::default())?[0].name,
+                    "Generated retained"
+                );
+                assert_eq!(store.import_status(id)?.last_error.is_some(), !edit);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_clean_stage(directory.path());
+        server.join().unwrap();
+        assert!(owner.drain_services());
+    }
 }

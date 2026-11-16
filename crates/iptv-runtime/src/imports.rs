@@ -47,6 +47,12 @@ impl Publication {
             job.stored
                 .map(|id| {
                     let stored = store.source(id)?.ok_or(StoreError::SourceNotFound(id))?;
+                    // A refresh can wait in the bounded pool while source details
+                    // change. It must not adopt the newer incarnation and then
+                    // fetch using the older job's connection configuration.
+                    if !job.edit && stored.source.config != job.source.config {
+                        return Err(StoreError::Unavailable("import source changed"));
+                    }
                     Ok((id, store.source_incarnation(id)?, stored.source.config))
                 })
                 .transpose()
