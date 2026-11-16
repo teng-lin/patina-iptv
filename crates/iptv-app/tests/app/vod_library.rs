@@ -65,6 +65,40 @@ fn old_native_events_cannot_consume_resume_while_the_next_source_is_preparing() 
 }
 
 #[test]
+fn disabling_a_vod_source_during_preparation_rejects_its_resolved_url() {
+    let Some(home) = isolated!() else { return };
+    exercise_admission(
+        home,
+        nsh_core::platform::Idiom::Pad,
+        ResumeCase::Unseekable,
+        true,
+        Some(SourceMutation::Disable),
+    );
+}
+#[test]
+fn editing_vod_credentials_during_preparation_does_not_rebind_the_old_url() {
+    let Some(home) = isolated!() else { return };
+    exercise_admission(
+        home,
+        nsh_core::platform::Idiom::Pad,
+        ResumeCase::Unseekable,
+        true,
+        Some(SourceMutation::Edit),
+    );
+}
+#[test]
+fn deleting_a_vod_source_during_preparation_rejects_its_resolved_url() {
+    let Some(home) = isolated!() else { return };
+    exercise_admission(
+        home,
+        nsh_core::platform::Idiom::Pad,
+        ResumeCase::Unseekable,
+        true,
+        Some(SourceMutation::Delete),
+    );
+}
+
+#[test]
 fn tablet_reaches_unfinished_titles_of_two_playlists_from_the_rail() {
     let Some(home) = isolated!() else { return };
     discover(home, nsh_core::platform::Idiom::Pad);
@@ -811,6 +845,13 @@ fn discover(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     assert_eq!(player(&app), surface);
 }
 
+#[derive(Clone, Copy)]
+enum SourceMutation {
+    Disable,
+    Edit,
+    Delete,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ResumeCase {
     Seekable,
@@ -826,6 +867,15 @@ fn exercise_preparing(
     idiom: nsh_core::platform::Idiom,
     resume: ResumeCase,
     hold_preparation: bool,
+) {
+    exercise_admission(home, idiom, resume, hold_preparation, None)
+}
+fn exercise_admission(
+    home: crate::isolated::Home,
+    idiom: nsh_core::platform::Idiom,
+    resume: ResumeCase,
+    hold_preparation: bool,
+    mutation: Option<SourceMutation>,
 ) {
     let server = Server::start(&[(
         "/player_api.php",
@@ -1060,6 +1110,7 @@ fn exercise_preparing(
     );
     let held = hold_preparation.then(iptv_app::hold_source_preparation);
     let previous_source = props.lock().unwrap()["source"].clone();
+    let previous_opens = iptv_app::player_opens(0);
     let previous_seek = props.lock().unwrap().get("seek").cloned();
     if idiom == nsh_core::platform::Idiom::Tv {
         for _ in 0..2 {
@@ -1127,6 +1178,50 @@ fn exercise_preparing(
             .unwrap();
         assert_eq!(point.position_ms, 37_000);
         assert!(!point.completed, "old EOF cannot complete the new episode");
+        if let Some(mutation) = mutation {
+            let mut store = crate::isolated::open_database(&path).unwrap();
+            match mutation {
+                SourceMutation::Disable => {
+                    let mut policy = store.source_policy(source).unwrap();
+                    policy.enabled = false;
+                    store.set_source_policy(source, policy).unwrap();
+                }
+                SourceMutation::Edit => {
+                    let mut edited = store.source(source).unwrap().unwrap().source;
+                    if let SourceConfig::Xtream(credentials) = &mut edited.config {
+                        credentials.password = Secret::new("generated-replacement-password");
+                    }
+                    store.update_source(source, &edited).unwrap();
+                }
+                SourceMutation::Delete => {
+                    assert!(store.delete_source(source).unwrap());
+                }
+            }
+            drop(store);
+            held.release();
+            step(app.wait_until(
+                "stale VOD authority rejected",
+                Duration::from_secs(5),
+                |_| {
+                    props
+                        .lock()
+                        .unwrap()
+                        .get("source")
+                        .is_none_or(Value::is_null)
+                },
+            ));
+            assert_eq!(
+                iptv_app::player_opens(0),
+                previous_opens,
+                "a stale resolved source must never reach the decoder"
+            );
+            assert_eq!(
+                player(&app),
+                surface,
+                "rejection retains the persistent native surface"
+            );
+            return;
+        }
         held.release();
     }
     step(app.wait_for_gone("id:vod-screen", Duration::from_secs(5)));

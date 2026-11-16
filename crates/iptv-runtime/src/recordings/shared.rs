@@ -150,17 +150,6 @@ impl Runtime {
             state.retire_unused().await;
         });
     }
-    /// Hold the next independent-source preparation at its worker boundary.
-    #[cfg(feature = "test-support")]
-    pub fn hold_source_preparation(&self) -> crate::TestGate {
-        let gate = crate::TestGate::new();
-        *self
-            .recordings
-            .source_preparation_gate
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(gate.0.clone());
-        gate
-    }
     /// Join superseded incoming owners before an independent native source
     /// opens, including VOD/catch-up following a shared live stream.
     pub fn retire_viewing_inputs(
@@ -171,11 +160,7 @@ impl Runtime {
         let gate = state.preparation_gate(surface);
         let services = self.services();
         #[cfg(feature = "test-support")]
-        let pause = state
-            .source_preparation_gate
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
+        let pause = services.take_source_preparation();
         async move {
             let work = services.clone();
             let _ = services

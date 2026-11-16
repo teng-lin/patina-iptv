@@ -913,6 +913,67 @@ pub fn target(key: &Key) -> iptv_core::parental::Target {
     }
 }
 
+/// Opaque authority captured for one already-resolved on-demand selection.
+/// It retains the original credentials/incarnation rather than rebinding an
+/// edited source while a native handoff is pending.
+#[derive(Clone)]
+pub struct PublicationAuthority {
+    key: Key,
+    parent: Option<Key>,
+    incarnation: String,
+    config: SourceConfig,
+}
+impl Runtime {
+    pub fn vod_publication_authority(
+        &self,
+        playing: &Playing,
+    ) -> Result<PublicationAuthority, Error> {
+        let entries = self
+            .vod
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = entries
+            .get(&playing.key)
+            .filter(|entry| {
+                entry.incarnation == playing.details.incarnation && entry.parent == playing.parent
+            })
+            .ok_or_else(unavailable)?;
+        Ok(PublicationAuthority {
+            key: playing.key.clone(),
+            parent: entry.parent.clone(),
+            incarnation: entry.incarnation.clone(),
+            config: entry.config.clone(),
+        })
+    }
+    pub fn validate_vod_publication(
+        &self,
+        authority: PublicationAuthority,
+    ) -> impl std::future::Future<Output = bool> + Send + use<> {
+        let services = self.services();
+        async move {
+            services
+                .read(move |store| {
+                    store.vod_read_snapshot(|store| {
+                        let source = SourceId(authority.key.source);
+                        Ok(store
+                            .source_incarnation(source)
+                            .is_ok_and(|incarnation| incarnation == authority.incarnation)
+                            && store.source_policy(source)?.enabled
+                            && store
+                                .source(source)?
+                                .is_some_and(|source| source.source.config == authority.config)
+                            && store
+                                .vod_card(authority.parent.as_ref().unwrap_or(&authority.key))?
+                                .is_some())
+                    })
+                })
+                .await
+                .unwrap_or(false)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

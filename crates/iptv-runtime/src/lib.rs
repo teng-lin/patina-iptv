@@ -416,6 +416,12 @@ impl Drop for Runtime {
 #[derive(Clone)]
 pub struct HostHandle(std::sync::Weak<store_service::Service>);
 impl HostHandle {
+    #[cfg(feature = "test-support")]
+    pub fn hold_source_preparation(&self) -> Option<TestGate> {
+        self.0
+            .upgrade()
+            .map(|service| service.accept().hold_source_preparation())
+    }
     /// Waits, at most `limit`, until every write queued so far is on disk.
     pub fn flush_files(&self, limit: std::time::Duration) -> bool {
         // A host can stop before the application root has accepted any work,

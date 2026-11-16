@@ -687,9 +687,30 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
             }
         });
     } else {
+        let authority = if surface == 0
+            && let Some((playing, _)) = ui.player.vod.get_untracked()
+        {
+            match owner.vod_publication_authority(&playing) {
+                Ok(authority) => Some(owner.validate_vod_publication(authority)),
+                Err(_) => {
+                    stop_surface(ui, surface);
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         let retired = owner.retire_viewing_inputs(surface);
         crate::data::spawn_in_app(async move {
             retired.await;
+            if let Some(authority) = authority
+                && !authority.await
+            {
+                if stream.health.with_untracked(|health| health.session()) == session {
+                    stop_surface(ui, surface);
+                }
+                return;
+            }
             publish_source(ui, surface, session, source);
         });
     }

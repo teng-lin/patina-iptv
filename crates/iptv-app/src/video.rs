@@ -256,12 +256,17 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
     for (prop, value) in props.into_wire() {
         player = player.prop(prop.wire(), value);
     }
-    player.on_native_event(
-        move |e: &NativeEvent| match PlayerEvent::decode(&e.name, &e.data) {
+    player.on_native_event(move |e: &NativeEvent| {
+        #[cfg(feature = "test-support")]
+        if e.name.as_ref() == "test.parental.lock" {
+            crate::runtime().parental_lock();
+            return;
+        }
+        match PlayerEvent::decode(&e.name, &e.data) {
             Ok(event) => on_event(ui, surface, event),
             Err(error) => on_unread(ui, surface, error),
-        },
-    )
+        }
+    })
 }
 
 /// An event the contract does not have, from surface `surface`'s player. It

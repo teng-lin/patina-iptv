@@ -1192,11 +1192,7 @@ pub fn hold_writer() -> runtime::TestGate {
 /// Hold the next source preparation for deterministic old-native-event tests.
 #[cfg(feature = "test-support")]
 pub fn hold_source_preparation() -> runtime::TestGate {
-    runtime().hold_source_preparation()
-}
-
-/// Exercise revocation between preparation and native publication.
-#[cfg(feature = "test-support")]
-pub fn lock_parental_content() {
-    runtime().parental_lock();
+    platform_data::host_handle()
+        .and_then(|owner| owner.hold_source_preparation())
+        .expect("source preparation gate needs a started app")
 }

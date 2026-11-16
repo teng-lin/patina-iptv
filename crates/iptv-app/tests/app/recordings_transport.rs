@@ -466,7 +466,22 @@ fn a_saved_recording_grant_revoked_during_preparation_never_reaches_the_native_p
     ));
     step(app.back());
     step(app.wait_for("id:recording-return-to-player"));
-    iptv_app::lock_parental_content();
+    let surface = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.kind == ViewKind::Native)
+        .unwrap()
+        .id;
+    app.engine().control().dispatch_event(
+        surface,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "test.parental.lock".into(),
+            data: Value::Null,
+        },
+    );
+    app.settle();
     preparation.release();
     // The selected playback is cleared by final admission. This follows the
     // actual unlock dialog, so the test revokes a real verified content grant.
