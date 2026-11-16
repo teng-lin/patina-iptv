@@ -15,14 +15,25 @@ pub struct Open {
     dialog: Dialog,
     target: Target,
     done: AfterUnlock,
+    request: Rc<()>,
+    retired_verify: Option<Rc<()>>,
     blocks: Option<Vec<Target>>,
+    recovery_input: ElementRef,
+    locked_on_hide: bool,
 }
 impl PartialEq for Open {
     fn eq(&self, other: &Self) -> bool {
         self.dialog == other.dialog
             && self.target == other.target
             && self.blocks == other.blocks
+            && self.locked_on_hide == other.locked_on_hide
             && Rc::ptr_eq(&self.done, &other.done)
+            && Rc::ptr_eq(&self.request, &other.request)
+            && match (&self.retired_verify, &other.retired_verify) {
+                (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
     }
 }
 pub fn is_open(ui: Ui) -> bool {
@@ -31,7 +42,7 @@ pub fn is_open(ui: Ui) -> bool {
 pub fn close(ui: Ui) {
     // Credential changes can commit before their recovery notice returns.
     // Keep the modal until that result is shown instead of discarding it.
-    if busy(ui) {
+    if committing(ui) {
         return;
     }
     abort(ui);
@@ -42,6 +53,44 @@ pub fn abort(ui: Ui) {
     ui.parental.set(None);
     crate::runtime().parental_lock();
     dismiss_keyboard();
+}
+/// Hiding for background recordings retires verification immediately. A
+/// credential write/notice keeps only its result dialog until the window returns.
+pub fn hidden(ui: Ui) {
+    let keep = committing(ui)
+        || phase(ui) == Some(Phase::RecoveryNotice)
+        || ui
+            .parental
+            .with_untracked(|o| o.as_ref().is_some_and(|o| o.dialog.has_held_notice()));
+    if keep {
+        ui.parental.update(|open| {
+            if let Some(open) = open {
+                open.locked_on_hide = true;
+                // An in-flight verify may not have reached its runtime epoch
+                // check yet. Retire its UI request but keep the private result;
+                // its completion unlocks no UI and acknowledges when retry is safe.
+                if open.dialog.busy
+                    && open.dialog.phase == Phase::Unlock
+                    && open.dialog.has_held_notice()
+                    && open.retired_verify.is_none()
+                {
+                    open.retired_verify = Some(std::mem::replace(&mut open.request, Rc::new(())));
+                }
+                open.dialog.suspend_notice();
+            }
+        });
+        crate::runtime().parental_lock();
+        dismiss_keyboard();
+    } else {
+        abort(ui);
+    }
+}
+fn committing(ui: Ui) -> bool {
+    busy(ui) && phase(ui) == Some(Phase::Confirm)
+}
+fn recovery_input(ui: Ui) -> Option<ElementRef> {
+    ui.parental
+        .with_untracked(|open| open.as_ref().map(|open| open.recovery_input))
 }
 fn finish(ui: Ui) {
     let mut done = None;
@@ -58,7 +107,11 @@ fn show(ui: Ui, target: Target, phase: Phase, done: impl FnOnce() + 'static) {
         dialog: Dialog::new(phase),
         target,
         done: Rc::new(RefCell::new(Some(Box::new(done)))),
+        request: Rc::new(()),
+        retired_verify: None,
         blocks: None,
+        recovery_input: element_ref(),
+        locked_on_hide: false,
     }));
 }
 /// Always re-resolve durable ancestry before executing a content action.
@@ -201,7 +254,11 @@ pub fn manage(ui: Ui) {
             dialog: Dialog::new(Phase::Unlock),
             target: Target::settings(),
             done: Rc::new(RefCell::new(None)),
+            request: Rc::new(()),
+            retired_verify: None,
             blocks: Some(blocks),
+            recovery_input: element_ref(),
+            locked_on_hide: false,
         }));
     });
 }
@@ -288,7 +345,7 @@ pub fn key(ui: Ui, action: Action) {
 }
 pub fn remote(ui: Ui, key: RemoteKey) {
     ui.input.set(crate::Input::Keys);
-    if busy(ui) && key != RemoteKey::Back {
+    if committing(ui) && key != RemoteKey::Back {
         return;
     }
     if ui
@@ -324,8 +381,13 @@ pub fn remote(ui: Ui, key: RemoteKey) {
                 close(ui);
             } else if phase(ui)
                 .is_some_and(|p| matches!(p, Phase::Recovery | Phase::RecoveryNotice))
-                || crate::settings::choice(iptv_settings::keys::EnumKey("parental.pin_input"))
-                    == "number_keys"
+            {
+                let at = ui
+                    .parental
+                    .with_untracked(|o| o.as_ref().map_or(0, |o| o.dialog.focus));
+                activate(ui, at);
+            } else if crate::settings::choice(iptv_settings::keys::EnumKey("parental.pin_input"))
+                == "number_keys"
             {
                 submit(ui);
             } else {
@@ -362,9 +424,18 @@ fn move_focus(ui: Ui, step: isize) {
             o.dialog.move_focus(step, count);
         }
     });
+    if phase(ui) == Some(Phase::Recovery) && !focused(ui, 0) {
+        if let Some(input) = recovery_input(ui) {
+            input.blur();
+        }
+        dismiss_keyboard();
+    }
 }
 fn activate(ui: Ui, index: usize) {
     if busy(ui) {
+        if cancel_focused(ui) {
+            close(ui);
+        }
         return;
     }
     if ui
@@ -375,7 +446,11 @@ fn activate(ui: Ui, index: usize) {
         return;
     }
     if phase(ui).is_some_and(|phase| matches!(phase, Phase::Recovery | Phase::RecoveryNotice)) {
-        if cancel_focused(ui) {
+        if phase(ui) == Some(Phase::Recovery) && index == 0 {
+            if let Some(input) = recovery_input(ui) {
+                input.focus();
+            }
+        } else if cancel_focused(ui) {
             close(ui);
         } else {
             submit(ui);
@@ -412,7 +487,7 @@ fn submit(ui: Ui) {
     let mut target = Target::settings();
     let token = ui
         .parental
-        .with_untracked(|o| o.as_ref().map(|o| o.done.clone()));
+        .with_untracked(|o| o.as_ref().map(|o| o.request.clone()));
     ui.parental.update(|o| {
         if let Some(o) = o {
             target = o.target.clone();
@@ -439,18 +514,56 @@ fn submit(ui: Ui) {
             if !ui.parental.with_untracked(|o| {
                 o.as_ref()
                     .zip(token.as_ref())
-                    .is_some_and(|(o, token)| Rc::ptr_eq(&o.done, token))
+                    .is_some_and(|(o, token)| Rc::ptr_eq(&o.request, token))
             }) {
                 owner.parental_lock();
+                ui.parental.update(|o| {
+                    if let Some(o) = o
+                        && o.retired_verify
+                            .as_ref()
+                            .zip(token.as_ref())
+                            .is_some_and(|(retired, token)| Rc::ptr_eq(retired, token))
+                    {
+                        o.retired_verify = None;
+                        o.dialog.fail(String::new());
+                    }
+                });
                 return;
             }
+            let locked = ui
+                .parental
+                .with_untracked(|o| o.as_ref().is_some_and(|o| o.locked_on_hide));
             match result {
-                Ok(None) => finish(ui),
-                Ok(Some(code)) => ui.parental.update(|o| {
-                    if let Some(o) = o {
-                        o.dialog.notice(code);
+                Ok(None) => {
+                    let mut resumed = false;
+                    ui.parental.update(|o| {
+                        if let Some(o) = o {
+                            resumed = o.dialog.resume_notice();
+                            if resumed {
+                                o.locked_on_hide = false;
+                            }
+                        }
+                    });
+                    if !resumed {
+                        finish(ui);
                     }
-                }),
+                }
+                Ok(Some(code)) => {
+                    // Change/recovery temporarily grants administration in the
+                    // runtime; revoke it in this same poll before UI publication.
+                    if locked {
+                        owner.parental_lock();
+                    }
+                    ui.parental.update(|o| {
+                        if let Some(o) = o {
+                            if locked {
+                                o.dialog.hold_notice(code);
+                            } else {
+                                o.dialog.notice(code);
+                            }
+                        }
+                    });
+                }
                 Err(error) => ui.parental.update(|o| {
                     if let Some(o) = o {
                         o.dialog.fail(error.to_string());
@@ -608,6 +721,7 @@ fn keypad(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
 }
 fn credentials(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
     use crate::i18n::tr;
+    let recovery = recovery_input(ui).unwrap_or_else(element_ref);
     view().gap(px(8.0))
         .child(ui_kit::body(size,move||ui.parental.with(|o|o.as_ref()
             .map_or(String::new(),|o|if o.dialog.busy {tr("Checking…").into()}
@@ -621,7 +735,8 @@ fn credentials(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
         }))
         .child(when(move||phase(ui)==Some(Phase::Recovery),move||{
             view().gap(px(8.0)).child(scrolling.control(view().child(ui_kit::field(size,input())
-                .test_id("parental-recovery-input").masked(true).max_length(32)
+                .test_id("parental-recovery-input").element_ref(&recovery).masked(true).max_length(32)
+                .on_focus(move||ui.parental.update(|o|{if let Some(o)=o{o.dialog.focus=0;}}))
                 .label(move || tr("Recovery code").to_owned())
                 .border(px(1.0)).border_color(move||ui_kit::field_border(ui,focused(ui,0)))
                 .disabled(move || busy(ui))
@@ -630,7 +745,7 @@ fn credentials(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
                 .on_change(move|text:&str|ui.parental.update(|o|{
                     if let Some(o)=o {o.dialog.recovery.clear();
                         o.dialog.recovery.push_str(&text.to_ascii_lowercase());}
-                })).on_submit(move|_:&str|submit(ui))),move||focused(ui,0)))
+                })).on_submit(move|_:&str|{submit(ui);dismiss_keyboard();})),move||focused(ui,0)))
                 .child(scrolling.control(ui_kit::button(ui,size,tr("Continue"),move||focused(ui,1),move||submit(ui))
                     .disabled(move||busy(ui)),move||focused(ui,1)))
         }))
@@ -703,7 +818,7 @@ pub fn layer(ui: Ui) -> View {
                             move || close(ui),
                         )
                         .test_id("parental-cancel")
-                        .disabled(move || busy(ui))
+                        .disabled(move || committing(ui))
                         .flex_shrink_0(),
                     )
             },

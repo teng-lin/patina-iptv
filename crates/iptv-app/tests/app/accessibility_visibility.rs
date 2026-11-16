@@ -329,6 +329,16 @@ fn modal_back_restores_channel_identity_after_reordering_and_recovery_can_cancel
     step(app.wait_for("text:Choose a new PIN"));
     step(app.press("text:Forgot PIN?"));
     assert!(app.screen().matches("label:Recovery code").unwrap());
+    step(app.press_key("enter"));
+    step(app.press_key("1"));
+    step(app.press_key("2"));
+    assert_eq!(
+        app.screen()
+            .input_text("id:parental-recovery-input")
+            .unwrap(),
+        Some("12"),
+        "D-pad OK focuses the native input and keyboard digits edit recovery text"
+    );
     // Each vertical arrow visits the next stacked control, including Continue.
     step(app.press_key("down"));
     step(app.press_key("enter"));
