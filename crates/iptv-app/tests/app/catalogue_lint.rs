@@ -121,7 +121,6 @@ const TRANSLATING_HELPERS: &[(&str, &str, usize)] = &[
     // `.label(move || tr(name))`, and the tile buttons' `tr(what)`.
     ("iptv-app/src/multiview_view/chrome.rs", "pill", 0),
     ("iptv-app/src/multiview_view/chrome.rs", "label", 0),
-    ("iptv-app/src/play_bar.rs", "button", 1),
     ("iptv-app/src/search_view/view.rs", "button", 2),
     ("iptv-app/src/settings_view/editors.rs", "button", 2),
     ("iptv-app/src/settings_view/words.rs", "with_unit", 0),
@@ -209,7 +208,8 @@ const CARRIED_MESSAGES: &[(&str, &str)] = &[
     ("iptv-app/src/fav_editor.rs", "label"),
     ("iptv-app/src/multiview_view/chrome.rs", "name"),
     ("iptv-app/src/multiview_view/chrome.rs", "what"),
-    ("iptv-app/src/play_bar.rs", "name"),
+    // Each typed control label arm is a checked key(…) message.
+    ("iptv-app/src/play_bar.rs", "control_label"),
     ("iptv-app/src/search_view/view.rs", "label"),
     ("iptv-app/src/settings_view/editors.rs", "label"),
     ("iptv-app/src/settings_view/words.rs", "message"),

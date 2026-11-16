@@ -448,6 +448,26 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for("text:The stream stopped sending video."));
     step(app.wait_for("text:/· still trying$/"));
     step(app.wait_for("text:OK  Try again"));
+    step(app.press_key("m"));
+    step(app.wait_for("id:play-bar-layer"));
+    assert!(
+        !app.screen()
+            .accessibility_state("id:player-retry")
+            .unwrap()
+            .selected
+    );
+    assert!(
+        app.screen()
+            .accessibility_state("id:play-bar-play-pause")
+            .unwrap()
+            .selected
+    );
+    assert!(
+        !seen(&app, "text:OK  Try again"),
+        "retry does not claim OK while the bar owns remote focus"
+    );
+    step(app.back());
+    step(app.wait_for("text:OK  Try again"));
     assert!(opens() >= before + 6, "{} retries", opens() - before);
     // Behind the card retries go on (every 30 s, each stalling in 15).
     let behind = opens();
@@ -559,8 +579,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     send(&mut app, "tracks", tracks());
     send(&mut app, "position", json!({ "ms": 4000 }));
     assert_eq!(prop(&app, &props, "videoTrack"), json!("auto"));
-    step(app.press_key("m"));
-    step(app.wait_for(STRIP));
+    strip(&mut app);
     for _ in 0..5 {
         step(app.press_key("right"));
     }
@@ -572,10 +591,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     let video = prop(&app, &props, "videoTrack");
     assert!(video == json!("v1") || video == json!("v2"), "{video}");
     // Subtitles by a tap on the strip: on.
-    if !seen(&app, STRIP) {
-        step(app.press_key("m"));
-        step(app.wait_for(STRIP));
-    }
+    strip(&mut app);
     step(app.press("text:Subtitles · Off"));
     step(app.press_key("down"));
     step(app.press_key("enter"));
@@ -616,10 +632,11 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for_gone("id:recordings-screen", Duration::from_secs(1)));
     // Another stream forgets the tracks and the choices.
     // (`M` toggles the strip, which may be up without its hint.)
-    step(app.press_key("m"));
-    if seen(&app, STRIP) {
+    if !seen(&app, "id:play-bar-layer") {
         step(app.press_key("m"));
+        step(app.wait_for("id:play-bar-layer"));
     }
+    step(app.back());
     step(app.wait_for_gone(STRIP, Duration::from_secs(1)));
     step(app.press_key("up"));
     step(app.wait_for("id:player-banner >> text:/Test Channel One$/"));
@@ -842,7 +859,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.back());
     card_action(&mut app, 6);
     step(app.wait_for(STRIP));
-    step(app.press_key("m"));
+    step(app.back());
     step(app.wait_for_gone(STRIP, Duration::from_secs(1)));
     // Left: the channel list over the video; Shift + Left beside it.
     step(app.press_key("left"));
@@ -991,15 +1008,27 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
 
 const STRIP: &str = "text:/M or Esc hide/";
 
-/// The control strip over full-screen video (Menu, `M`, when it is not up).
+/// Advanced controls remain available through the live info card. Menu and
+/// long OK now open the shared bar, so exercise the actual More-controls route.
 fn strip(app: &mut Headless) {
     if !seen(app, STRIP) {
-        step(app.press_key("m"));
-        // Under touch the strip may be up without its keys' hint: then
-        // `M` just closed it.
-        if !seen(app, STRIP) {
+        for _ in 0..2 {
             step(app.press_key("m"));
+            if seen(app, STRIP) {
+                return;
+            } // Desktop retains its Menu strip.
+            if seen(app, "id:play-bar-layer") {
+                break;
+            }
         }
+        step(app.wait_for("id:play-bar-layer"));
+        step(app.back());
+        step(app.press_key("enter"));
+        step(app.wait_for("id:player-actions"));
+        for _ in 0..6 {
+            step(app.press_key("right"));
+        }
+        step(app.press_key("enter"));
         step(app.wait_for(STRIP));
     }
 }

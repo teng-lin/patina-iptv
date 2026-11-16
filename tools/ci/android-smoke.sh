@@ -171,6 +171,13 @@ $adb shell am start -W -n $act >/dev/null
 expect 'iptv startup: fonts registered' 60
 # The last start-up step: until then a slow emulator may drop keys.
 expect 'iptv pip: supported' 60
+# pm returns a nonzero status for a valid false result. Validate its output
+# so tablets proceed while an adb/query failure still fails the smoke.
+is_tv=$($adb shell pm has-feature android.software.leanback | tr -d '\r' || true)
+case "$is_tv" in
+  true|false) ;;
+  *) fail "could not determine the Android TV feature" ;;
+esac
 pause 3
 shot 01-first-run
 
@@ -215,12 +222,41 @@ keys KEYCODE_DPAD_CENTER
 pause 3
 shot 05-fullscreen
 
+if [ "$is_tv" = true ]; then
+  step "shared TV controls and long OK release"
+  mark
+  # Keep deliberate long presses real; keys() supplies only bounded short pairs.
+  $adb shell input keyevent --longpress KEYCODE_DPAD_CENTER
+  # Queue navigation before reading logcat: a loaded host can spend the
+  # entire auto-hide interval polling or taking screenshots.
+  keys KEYCODE_DPAD_RIGHT KEYCODE_BACK
+  expect 'iptv (long press by timer: ShowControls|key=ok .*phase=(Repeat|Up) .*action=Some\(ShowControls\))' 10
+  expect 'key=right .*ctx=Controls .*action=Some\(MoveRight\)' 10
+  expect 'key=back .*ctx=Controls' 10
+  pause 0.2
+  if applog | grep -E 'key=ok .*phase=Up .*action=Some\((Select|ShowPanels)\)' >/dev/null; then
+    fail "long OK also performed a short OK action on release"
+  fi
+  mark
+fi
+
 step "multiview with a second player"
-# The control strip: Search, Channels, Recordings, Multiview. Complete the
-# selection in one adb call: a screenshot on a loaded emulator can take
-# longer than the strip's auto-hide timer.
-keys KEYCODE_MENU KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_CENTER
-expect 'key=menu .*mode=Fullscreen' 10
+if [ "$is_tv" = true ]; then
+  # The live info card begins before the quick-action row. Six Rights reach
+  # More controls (sixth action), including
+  # sleep/audio-delay settings. Its advanced strip has Multiview fourth.
+  # This route is stable even when stream track availability changes the
+  # shared bar's enabled buttons; its bar navigation is checked above and
+  # by the native/headless TV journeys.
+  keys KEYCODE_DPAD_CENTER \
+    KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT \
+    KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_CENTER \
+    KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_CENTER
+else
+  # Tablet remote/keyboard Menu retains the existing advanced strip.
+  keys KEYCODE_MENU KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_CENTER
+  expect 'key=menu .*mode=Fullscreen' 10
+fi
 
 expect 'iptv multiview: open' 10
 pause 2

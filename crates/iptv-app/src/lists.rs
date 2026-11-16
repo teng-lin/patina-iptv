@@ -214,8 +214,33 @@ fn step(ui: Ui, f: impl FnOnce(&mut Focus, &Columns, &ListView) -> Outcome) -> O
     outcome
 }
 
+/// Keep preview focus on a visible, playing surface across stop/layout changes.
+pub fn bind(ui: Ui) {
+    effect(move || {
+        let available = ui.playing.get().is_some()
+            && matches!(
+                ui.mode.get(),
+                crate::ViewMode::Guide | crate::ViewMode::Fullscreen
+            );
+        if ui.focus.with(|f| f.pane == Pane::Preview) && !available {
+            ui.focus.update(|f| f.retain_preview(false));
+        }
+    });
+}
+
 /// A direction on the guide screen.
 pub fn navigate(ui: Ui, m: Move) {
+    if m == Move::Up
+        && nsh_core::prelude::idiom() == nsh_core::platform::Idiom::Tv
+        && ui.mode.get_untracked() == crate::ViewMode::Guide
+    {
+        let mut moved = false;
+        ui.focus
+            .update(|f| moved = f.focus_preview(ui.playing.get_untracked().is_some()));
+        if moved {
+            return;
+        }
+    }
     let o = step(ui, |f, cols, view| f.navigate(m, cols, view));
     follow(ui, o);
 }
@@ -286,6 +311,10 @@ fn follow(ui: Ui, outcome: Outcome) {
         Outcome::Preview => rebuild(ui, false),
         Outcome::Committed if ui.focus.with_untracked(|f| f.hint) => arm_hint(ui),
         Outcome::Watch => ui.watch(),
+        Outcome::ReturnToPlayer if ui.playing.get_untracked().is_some() => {
+            ui.mode.set(crate::ViewMode::Fullscreen);
+            ui.show_playing();
+        }
         Outcome::Open(item) => open(ui, item),
         _ => {}
     }
@@ -318,7 +347,7 @@ fn arm_hint(ui: Ui) {
 
 /// Whether the rail and groups show beside the guide.
 pub fn columns_shown(ui: Ui) -> bool {
-    ui.focus.with(|f| f.pane) != Pane::Guide
+    ui.focus.with(|f| f.columns_shown())
 }
 
 fn toggle_playlist(entry: usize) -> bool {

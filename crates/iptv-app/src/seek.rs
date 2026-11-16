@@ -193,7 +193,7 @@ fn commit_later(ui: Ui, wait: Duration) {
 /// The info card shows where a remote's seek goes; a pointer's shows on
 /// the play bar.
 fn show_info(ui: Ui) {
-    if ui.keys_shown() {
+    if ui.keys_shown() && !crate::play_bar::captures(ui) {
         ui.update_panels(|p, now| p.show_info(now));
     }
 }

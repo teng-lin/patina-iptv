@@ -7,6 +7,12 @@ is below 1.0, a minor release may change behaviour.
 
 ## [Unreleased]
 
+### Added
+
+- Open the shared playback bar on Android TV with long OK or Menu and navigate
+  its enabled controls with the D-pad. Up from the guide's first channel focuses
+  the mini-player; OK returns the current stream to full screen.
+
 ### Changed
 
 - Explain unavailable PiP/multiview actions and use current player and recording

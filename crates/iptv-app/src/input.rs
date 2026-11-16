@@ -47,7 +47,11 @@ pub fn context(ui: &Ui) -> Context {
         return Context::Multiview; // Up/Down/Left/Right, OK, Long OK, Menu
     }
     match (ui.mode.get(), ui.focus.with(|f| f.pane)) {
-        (ViewMode::Fullscreen, _) if ui.panels.with(|p| p.captures_input()) => Context::Controls,
+        (ViewMode::Fullscreen, _)
+            if crate::play_bar::captures(*ui) || ui.panels.with(|p| p.captures_input()) =>
+        {
+            Context::Controls
+        }
         (ViewMode::Fullscreen, _) => Context::Player,
         (_, Pane::Groups | Pane::Rail) => Context::Groups,
         _ => Context::Guide,
@@ -373,9 +377,35 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         crate::multiview::key(ui, action);
         return;
     }
+    // The preview owns focus, not the guide row left underneath it. Keep
+    // programme/list commands from acting on a different channel.
+    if ui.mode.get() == ViewMode::Guide && ui.focus.with(|f| f.pane == Pane::Preview) {
+        match action {
+            Action::MoveUp => mv(Move::Up),
+            Action::MoveDown => mv(Move::Down),
+            Action::MoveLeft => mv(Move::Left),
+            Action::MoveRight => mv(Move::Right),
+            Action::Select | Action::ReturnToPlayer => crate::lists::ok(ui),
+            Action::ShowMenu | Action::ShowControls if ui.playing.get().is_some() => {
+                ui.mode.set(ViewMode::Fullscreen);
+                crate::play_bar::remote(ui);
+            }
+            Action::Back => {
+                crate::go_back(ui);
+            }
+            Action::PlayPause | Action::Stop => {
+                crate::player_keys::apply(ui, key, action, repeat);
+            }
+            _ => {}
+        }
+        return;
+    }
     // Any key but Back dismisses the hint card (Back does, as its own step).
     if action != Action::Back && ui.focus.with(|f| f.hint) {
         ui.focus.update(|f| f.hint = false);
+    }
+    if crate::play_bar::key(ui, key, action, repeat) {
+        return;
     }
     // Full screen and its panels: `player_keys.rs`.
     if crate::player_keys::apply(ui, key, action, repeat) {
