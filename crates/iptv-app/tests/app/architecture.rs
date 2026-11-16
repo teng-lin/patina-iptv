@@ -24,6 +24,8 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("header.rs", "ON"),                // Debug overlay environment flag cache.
     ("i18n.rs", "SYSTEM"),              // System locale cache.
     ("i18n.rs", "WORDING_SETTINGS"),    // cfg(test)-only scoped wording preferences.
+    ("i18n/pseudo.rs", "ENABLED"),      // test-support-only pseudolocale environment flag.
+    ("i18n/pseudo.rs", "FIXED"),        // test-support-only immutable expanded catalogue.
     ("lib.rs", "RUNTIME"),              // The shell's single application handle.
     ("lib.rs", "ROOT_STARTED"), // Guard: the handle is asked for on the application thread only.
     ("lists.rs", "HINT_SHOWN"), // Visible navigation hint revision.
