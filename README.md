@@ -296,7 +296,8 @@ cancel recordings that were already authorized.
 ## Recordings on TV, tablet and desktop
 
 Choose **Record** on the play bar to start recording the playing live channel
-immediately; playback continues. Repeated presses do not create duplicate jobs.
+immediately; the control turns red while capture is active. Press it again to
+stop recording while playback continues.
 On a TV while watching, press Menu or long-press OK to open the control strip,
 then choose **Record**.
 For a future programme, right-click on desktop or long-press on touch/TV, then
@@ -308,9 +309,17 @@ Left/Right changes its value, and Select opens an exact date/time/name editor.
 Touch and mouse users tap a field to edit it. Repeat and padding are under
 **Recording options**.
 The navigation rail's **Recordings** entry manages current, scheduled and
-finished recordings. Cancel removes a schedule; Stop retains captured media;
-Delete removes media after confirmation. A dot marks recording programmes in
-the guide, and the recording indicator opens management while watching.
+finished recordings. Tap a finished recording to play or resume it. Back returns
+to Recordings while playback continues; the playing row or **Return to playback**
+returns to the player without reopening the stream. The guide's video preview
+also returns to saved playback.
+
+The row's pencil edits a schedule, its cancel control cancels it, and its stop
+control retains captured media. The trash icon on the right asks for confirmation.
+Cancelling leaves playback and the file intact. Confirming deletion automatically
+stops that file if it is playing, then deletes it; other playback is unaffected.
+Remote users can open secondary actions with Menu. A dot marks recording
+programmes in the guide.
 
 Use **Repeat** to choose once, daily, weekly or series. Daily and weekly
 schedules keep their local clock time across daylight-saving changes; series

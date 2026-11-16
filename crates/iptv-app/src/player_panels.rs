@@ -52,7 +52,12 @@ fn label(ui: Ui, control: Control) -> String {
         Search => tr("Search").to_owned(),
         ChannelList => tr("Channels").to_owned(),
         Recordings => tr("Recordings").to_owned(),
-        Record => tr("Record").to_owned(),
+        Record => if crate::recordings_view::recording_active(ui) {
+            tr("Stop recording")
+        } else {
+            tr("Record")
+        }
+        .to_owned(),
         Multiview if crate::multiview::detour(ui) => tr("Back to multiview").to_owned(),
         Multiview => tr("Multiview").to_owned(),
         PictureInPicture => tr("Picture in picture").to_owned(),
@@ -124,6 +129,8 @@ pub fn enabled(ui: Ui, control: Control) -> bool {
         }
         Control::Record => {
             ui.player_surface == 0
+                && ui.playback.get() == crate::Playback::Live
+                && !ui.recordings.with(|s| s.busy || s.starting.is_some())
                 && ui
                     .playing
                     .get()

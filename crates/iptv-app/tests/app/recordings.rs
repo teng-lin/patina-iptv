@@ -220,46 +220,24 @@ fn exercise(home: crate::isolated::Home, idiom: Idiom) {
     }
     drop(store);
     if idiom == Idiom::Tv {
-        step(app.press_key("enter"));
-    } else {
-        step(app.press("id:recording-job"));
-    }
-    step(app.wait_for("text:Cancel recording"));
-    if idiom == Idiom::Tv {
-        // Remote: second action cancels the schedule, then Back returns to the guide.
+        step(app.press_key("m"));
+        step(app.wait_for("text:Cancel recording"));
         step(app.press_key("down"));
         step(app.press_key("enter"));
     } else {
-        step(app.press("text:Cancel recording"));
+        step(app.press("label:/^Cancel recording ·/"));
     }
     step(app.wait_for_within("text:/Cancelled ·/", Duration::from_secs(10)));
     if idiom == Idiom::Tv {
+        step(app.press_key("m"));
         step(app.press_key("enter"));
     } else {
-        step(app.press("id:recording-job"));
+        step(app.press("label:/^Delete recording ·/"));
     }
-    if idiom == Idiom::Tv {
-        step(app.press_key("enter"));
-    } else {
-        step(app.press("text:Delete recording"));
-    }
-    step(app.wait_for("text:/Delete this recording file permanently/"));
-    // Closing the whole screen also cancels the pending confirmation. Reopening
-    // and choosing Delete must ask again instead of reusing the previous consent.
-    if idiom != Idiom::Tv {
-        step(app.press("text:Close"));
-        step(app.press("text:/^☰  /"));
-        step(app.press("label:Recordings"));
-        step(app.press("id:recording-job"));
-        step(app.press("text:Delete recording"));
-        step(app.wait_for("text:/Delete this recording file permanently/"));
-    }
-    // Cancelling a delete never loses the job.
+    step(app.wait_for("id:recording-delete-confirmation"));
+    // Back cancels and a later attempt needs its own confirmation.
     step(app.back());
-    step(app.wait_for_gone(
-        "text:/Delete this recording file permanently/",
-        Duration::from_secs(2),
-    ));
+    step(app.wait_for_gone("id:recording-delete-confirmation", Duration::from_secs(2)));
     assert_eq!(
         crate::isolated::open_database(&path)
             .unwrap()
@@ -269,14 +247,14 @@ fn exercise(home: crate::isolated::Home, idiom: Idiom) {
         1
     );
     if idiom == Idiom::Tv {
+        step(app.press_key("m"));
+        step(app.press_key("enter"));
+        // Destructive confirmation defaults to Cancel for remote users.
+        step(app.press_key("right"));
         step(app.press_key("enter"));
     } else {
-        step(app.press("text:Delete recording"));
-    }
-    if idiom == Idiom::Tv {
-        step(app.press_key("enter"));
-    } else {
-        step(app.press("text:Delete recording"));
+        step(app.press("label:/^Delete recording ·/"));
+        step(app.press("id:recording-delete-confirmation >> text:Delete recording"));
     }
     step(app.wait_for_within("text:/No recordings here/", Duration::from_secs(10)));
     step(app.back());
@@ -361,7 +339,6 @@ fn future_programme(home: crate::isolated::Home, idiom: Idiom) {
         expected.unwrap()
     );
     step(app.press("id:recording-job"));
-    step(app.press("text:Edit recording"));
     step(app.wait_for("text:Save recording"));
     step(app.press("text:Close"));
     // Repeating the same guide action opens the existing job, never a duplicate.
@@ -463,18 +440,14 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
     let opens = iptv_app::player_opens(0);
     step(app.press("label:Record"));
     assert!(!app.screen().matches("id:recordings-screen").unwrap());
-    if let Err(error) = app.wait_for_within("id:recording-indicator", Duration::from_secs(15)) {
-        let jobs = crate::isolated::open_database(&path)
-            .unwrap()
-            .recording_jobs()
-            .unwrap();
-        eprintln!(
-            "GENERATED_RECORD_JOBS {:?}; server_finished={}",
-            jobs,
-            server.is_finished()
-        );
-        panic!("{error}");
-    }
+    step(
+        app.wait_until("active record toggle", Duration::from_secs(15), |screen| {
+            screen
+                .accessibility_state("id:record-toggle")
+                .is_ok_and(|s| s.pressed == Some(nsh_core::Checked::True) && !s.disabled)
+        }),
+    );
+    assert!(!app.screen().matches("id:recording-indicator").unwrap());
     assert_eq!(iptv_app::player_opens(0), opens);
     assert!(
         app.screen()
@@ -482,23 +455,24 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
             .iter()
             .any(|n| n.id == surface && n.kind == nsh_core::ViewKind::Native)
     );
-    // Repeated Record is idempotent rather than starting another capture.
-    if !app.screen().matches("label:Record").unwrap() {
-        step(app.press("label:Video"));
-    }
-    step(app.press("label:Record"));
-    assert_eq!(
-        crate::isolated::open_database(&path)
-            .unwrap()
-            .recording_jobs()
-            .unwrap()
-            .len(),
-        1
+    step(app.press("id:record-toggle"));
+    step(
+        app.wait_until("idle record toggle", Duration::from_secs(15), |screen| {
+            screen
+                .accessibility_state("id:record-toggle")
+                .is_ok_and(|s| s.pressed == Some(nsh_core::Checked::False) && !s.disabled)
+        }),
     );
-    step(app.press("id:recording-indicator"));
-    step(app.press("id:recording-job"));
-    step(app.press("text:Stop recording"));
-    step(app.wait_for_within("text:/Completed ·/", Duration::from_secs(10)));
+    let jobs = crate::isolated::open_database(&path)
+        .unwrap()
+        .recording_jobs()
+        .unwrap();
+    assert_eq!(jobs.len(), 1);
+    assert!(matches!(
+        jobs[0].status,
+        iptv_core::recording::Status::Completed | iptv_core::recording::Status::Cancelled
+    ));
+    assert!(!app.screen().matches("id:recordings-screen").unwrap());
     assert_eq!(iptv_app::player_opens(0), opens);
     server.join().unwrap();
 }
@@ -524,9 +498,8 @@ fn a_recordings_screen_opened_during_record_now_stays_open_after_save() {
     drop(pending);
     step(app.wait_for_within("id:recording-job", Duration::from_secs(15)));
     assert!(app.screen().matches("id:recordings-screen").unwrap());
-    step(app.press("id:recording-job"));
-    step(app.wait_for_within("text:Stop recording", Duration::from_secs(10)));
-    step(app.press("text:Stop recording"));
+    step(app.wait_for_within("label:/^Recording ·/", Duration::from_secs(15)));
+    step(app.press("label:/^Stop recording ·/"));
     step(app.wait_for_within("text:/Completed ·/", Duration::from_secs(10)));
     server.join().unwrap();
 }

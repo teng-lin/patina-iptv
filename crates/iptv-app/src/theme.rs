@@ -86,6 +86,8 @@ pub const RADIUS_LARGE: f32 = 16.0;
 /// Base text size (sp) and list padding (dp).
 pub const TEXT_SIZE: f32 = 14.0;
 pub const LIST_PADDING: f32 = 16.0;
+/// Active recording control, distinct from the neutral idle icon.
+pub const RECORDING: u32 = 0xF34B4B;
 
 /// The theme in use: one accent and one background bundle.
 #[derive(Clone, Copy, Debug, PartialEq)]

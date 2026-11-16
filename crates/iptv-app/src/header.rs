@@ -61,9 +61,11 @@ fn left(now: i32, p: Program) -> String {
 fn preview(ui: Ui, size: Scale) -> impl IntoElement {
     // Transparent while something plays: the video layer sits under this
     // rectangle in guide mode. A tap opens full screen.
-    let idle = move || ui.playing.get().is_none();
+    let idle = move || ui.playing.get().is_none() && !crate::on_demand::active(ui);
     view()
         .role(AccessibilityRole::Button)
+        .label(crate::i18n::tr("Return to playback"))
+        .test_id("guide-video-preview")
         .w(move || px(header_now().1))
         .h(move || px(header_now().2))
         .rounded(px(PREVIEW_RADIUS))
@@ -79,7 +81,7 @@ fn preview(ui: Ui, size: Scale) -> impl IntoElement {
         .justify_center()
         .on_press(move || {
             ui.touched();
-            if ui.playing.get().is_some() {
+            if !idle() {
                 ui.mode.set(crate::ViewMode::Fullscreen);
             }
         })
@@ -104,7 +106,8 @@ fn preview_ring(ui: Ui) -> impl IntoElement {
         .rounded(px(PREVIEW_RADIUS + RING))
         .border_color(move || rgb(ui.theme.with(|t| t.background.window)))
         .opacity(move || {
-            let shown = ui.mode.get() == ViewMode::Guide && ui.playing.get().is_some();
+            let shown = ui.mode.get() == ViewMode::Guide
+                && (ui.playing.get().is_some() || crate::on_demand::active(ui));
             if shown { 1.0_f32 } else { 0.0 }
         })
         .pointer_events(PointerEvents::None)

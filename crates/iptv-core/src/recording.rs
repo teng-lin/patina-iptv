@@ -198,6 +198,9 @@ pub struct Screen {
     pub actions: bool,
     pub action: usize,
     pub confirm_delete: bool,
+    pub delete_selected: bool,
+    /// Immediate capture being admitted; separate from library presentation.
+    pub starting: Option<Request>,
     pub error: Option<String>,
     pub background_notice: Option<String>,
     pub draft: Option<Draft>,
@@ -431,6 +434,16 @@ impl Draft {
     }
 }
 impl Screen {
+    pub fn active_on(&self, source: i64, channel: &str, now: i64) -> Option<&Job> {
+        self.jobs.iter().find(|j| {
+            j.source_current
+                && j.status.active()
+                && j.request.source == source
+                && j.request.channel == channel
+                && j.request.start <= now
+                && (j.status == Status::Recording || j.request.end > now)
+        })
+    }
     pub fn visible(&self) -> impl Iterator<Item = &Job> {
         self.jobs.iter().filter(|j| self.filter.includes(j))
     }
@@ -654,6 +667,25 @@ mod tests {
         r.end = i64::MAX;
         assert!(r.validate(0).is_err());
     }
+    #[test]
+    fn record_toggle_only_matches_the_current_channel_and_incarnation() {
+        let mut s = Screen {
+            jobs: vec![job(1)],
+            ..Default::default()
+        };
+        assert!(s.active_on(1, "synthetic", 99).is_none());
+        assert_eq!(s.active_on(1, "synthetic", 150).unwrap().id, JobId(1));
+        assert!(s.active_on(2, "synthetic", 150).is_none());
+        assert!(s.active_on(1, "other", 150).is_none());
+        s.jobs[0].source_current = false;
+        assert!(s.active_on(1, "synthetic", 150).is_none());
+        s.jobs[0].source_current = true;
+        s.jobs[0].status = Status::Recording;
+        assert!(s.active_on(1, "synthetic", 201).is_some());
+        s.jobs[0].status = Status::Completed;
+        assert!(s.active_on(1, "synthetic", 150).is_none());
+    }
+
     #[test]
     fn refresh_and_filters_restore_focus_by_job_identity() {
         let mut s = Screen::default();

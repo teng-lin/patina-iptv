@@ -30,9 +30,9 @@ use iptv_core::menu::Origin;
 use iptv_core::panels::QuickAction;
 use iptv_core::play_bar::PlayBar;
 use iptv_core::tracks::{Kind as Track, fps_label, resolution_class};
-use nsh_core::TouchEvent;
 use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
+use nsh_core::{Checked, TouchEvent};
 
 use crate::theme::{RADIUS_LARGE, RESTING_ALPHA, TEXT_DISABLED_ALPHA};
 use crate::theme::{TEXT_SECONDARY_ALPHA, TEXT_SIZE};
@@ -198,29 +198,34 @@ fn back(ui: Ui) -> impl IntoElement {
         .pt_safe_area_plus(px(16.0))
         // Only the button takes presses: around it they reach the video.
         .pointer_events(PointerEvents::BoxNone)
-        .child(crate::ui_kit::round_back(
-            side,
-            0.0,
-            back_bg(ui),
-            move || {
-                if crate::multiview::detour(ui) {
-                    tr("Multiview")
-                } else {
-                    tr("Guide")
-                }
-            },
-            move || {
-                if !window.is_main() {
-                    window.close();
-                    return;
-                }
-                ui.touched();
-                log::info!("iptv play bar: back");
-                ui.panels.update(|p| p.hide());
-                ui.play_bar.update(PlayBar::hide);
-                crate::go_back(ui);
-            },
-        ))
+        .child(
+            crate::ui_kit::round_back(
+                side,
+                0.0,
+                back_bg(ui),
+                move || {
+                    if crate::multiview::detour(ui) {
+                        tr("Multiview")
+                    } else if ui.player.recorded.with(Option::is_some) {
+                        tr("Recordings")
+                    } else {
+                        tr("Guide")
+                    }
+                },
+                move || {
+                    if !window.is_main() {
+                        window.close();
+                        return;
+                    }
+                    ui.touched();
+                    log::info!("iptv play bar: back");
+                    ui.panels.update(|p| p.hide());
+                    ui.play_bar.update(PlayBar::hide);
+                    crate::go_back(ui);
+                },
+            )
+            .test_id("play-bar-back"),
+        )
 }
 
 /// The round ‹'s colour over video (the player's, the guide's over its
@@ -272,6 +277,26 @@ fn button(
     size: f32,
     act: impl Fn() + 'static,
 ) -> View {
+    icon_button(
+        ui,
+        move || tr(name),
+        icon,
+        enabled,
+        size,
+        move || tint(WHITE, if enabled() { 0xFF } else { TEXT_DISABLED_ALPHA }),
+        act,
+    )
+}
+
+fn icon_button(
+    ui: Ui,
+    name: impl Fn() -> &'static str + 'static,
+    icon: impl Fn() -> Icon + 'static,
+    enabled: impl Fn() -> bool + Copy + 'static,
+    size: f32,
+    color: impl Fn() -> Rgba + 'static,
+    act: impl Fn() + 'static,
+) -> View {
     view()
         .role(AccessibilityRole::Button)
         .accessibility_state(move || AccessibilityState {
@@ -284,11 +309,11 @@ fn button(
         .rounded(px(size / 2.0))
         .items_center()
         .justify_center()
-        .label(move || tr(name))
+        .label(name)
         .hover(|s| s.bg(tint(WHITE, RESTING_ALPHA * 2)))
         .on_press(move || {
             ui.touched();
-            log::info!("iptv play bar: {name}");
+
             if enabled() {
                 act();
             }
@@ -297,9 +322,7 @@ fn button(
         .child(
             svg(move || icons::src(icon()))
                 .size(px(size * 0.55))
-                .text_color(move || {
-                    tint(WHITE, if enabled() { 0xFF } else { TEXT_DISABLED_ALPHA })
-                }),
+                .text_color(color),
         )
 }
 
@@ -491,6 +514,12 @@ fn right(ui: Ui) -> impl IntoElement {
             .find(|k| ui.player.main().tracks.with(|t| t.has_choice(*k)))
     };
     let playing = move || ui.playing.get().is_some();
+    let recordable = move || {
+        ui.player_surface == 0
+            && playing()
+            && ui.playback.get() == crate::Playback::Live
+            && !ui.recordings.with(|s| s.busy || s.starting.is_some())
+    };
     // Reserve space for every control, including recording and optional
     // native window controls, so none overlap the transport hit targets.
     let buttons = move || {
@@ -503,16 +532,46 @@ fn right(ui: Ui) -> impl IntoElement {
         .items_center()
         .justify_end()
         .gap(px(2.0))
-        .child(button(
-            ui,
-            "Record",
-            || Icon::Record,
-            move || {
-                ui.player_surface == 0 && playing() && ui.playback.get() == crate::Playback::Live
-            },
-            size,
-            move || crate::recordings_view::record_now(ui),
-        ))
+        .child(
+            icon_button(
+                ui,
+                move || {
+                    if crate::recordings_view::recording_active(ui) {
+                        tr("Stop recording")
+                    } else {
+                        tr("Record")
+                    }
+                },
+                || Icon::Record,
+                recordable,
+                size,
+                move || {
+                    if crate::recordings_view::recording_active(ui) {
+                        rgb(crate::theme::RECORDING)
+                    } else {
+                        tint(
+                            WHITE,
+                            if recordable() {
+                                0xFF
+                            } else {
+                                TEXT_DISABLED_ALPHA
+                            },
+                        )
+                    }
+                },
+                move || crate::recordings_view::toggle_current(ui),
+            )
+            .test_id("record-toggle")
+            .accessibility_state(move || AccessibilityState {
+                pressed: Some(if crate::recordings_view::recording_active(ui) {
+                    Checked::True
+                } else {
+                    Checked::False
+                }),
+                disabled: !recordable(),
+                ..Default::default()
+            }),
+        )
         .child(button(
             ui,
             "Favourite",

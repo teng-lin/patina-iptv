@@ -958,7 +958,6 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(guide_inspect_view::layer(ui))
         .child(guide_repair_view::layer(ui))
         .child(wizard_view::layer(ui))
-        .child(recordings_view::indicator(ui))
         .child(parental_view::layer(ui))
 }
 
@@ -1104,6 +1103,10 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             }
             _ if top == Some(Overlay::ChannelPicker) => {
                 multiview_picker::key(ui, iptv_nav::Action::Back);
+                true
+            }
+            (ViewMode::Fullscreen, _, false) if ui.player.recorded.with(Option::is_some) => {
+                recordings_view::open(ui);
                 true
             }
             _ if ui.player_surface == 0 && desktop::fullscreen() => {
