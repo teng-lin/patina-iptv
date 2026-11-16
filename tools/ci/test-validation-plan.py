@@ -107,6 +107,12 @@ class Selection(unittest.TestCase):
             self.assertTrue(v.select([path])["packages"], path)
         self.assertTrue(v.select(["tools/package-windows.ps1"])["windows-package"])
         self.assertTrue(v.select(["hosts/android/app/build.gradle.kts"])["android_package"])
+
+    def test_version_stamping_changes_exercise_all_package_consumers(self):
+        plan = v.select(["tools/ci/version.py"])
+        self.assertTrue(plan["windows-package"])
+        self.assertTrue(plan["packages"])
+        self.assertEqual([entry["platform"] for entry in plan["package_matrix"]["include"]], ["linux", "macos"])
     def test_platform_specific_package_changes_do_not_build_the_other_installer(self):
         for path, platform in (("tools/ci/package-linux.sh", "linux"), ("tools/package-macos.sh", "macos")):
             matrix = v.select([path])["package_matrix"]

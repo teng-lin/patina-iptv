@@ -34,10 +34,10 @@ PACKAGES = (*NOTICES, *LINUX_PACKAGE, *MACOS_PACKAGE, *BUILD, "about.toml", "LIC
             "tools/bundle-macos.py", "tools/ci/package-*.sh", "tools/ci/*packages.sh",
             "tools/ci/native-sources.py", "tools/ci/smoke-desktop.py", "tools/ci/nsh-tool-key.py",
             "tools/ci/native_candidates.py", "tools/ci/setup-linux-packaging.sh", "tools/ci/enable-deb-src.sh",
-            "tools/ci/unpack-signing-input.py", "tools/mpv-runtime/**", "tools/mpv-runtime-unix/**")
+            "tools/ci/unpack-signing-input.py", "tools/ci/version.py", "tools/mpv-runtime/**", "tools/mpv-runtime-unix/**")
 WINDOWS_PACKAGE = (*NOTICES, *BUILD, "crates/iptv-app/build.rs", "hosts/windows/**", "tools/package-windows.ps1", "tools/build-windows.ps1",
                     "tools/fetch-mpv-windows.ps1", "tools/ci/*windows*.ps1", "tools/ci/*windows*.py",
-                    "tools/ci/windows-notices.py", "tools/mpv-runtime/**",
+                    "tools/ci/windows-notices.py", "tools/ci/version.py", "tools/mpv-runtime/**",
                     "about.toml", "LICENSE", "crates/iptv-app/icon.png", "crates/iptv-app/fonts/**")
 SMOKE = (*BUILD, "hosts/android/**", "crates/iptv-app/**", "crates/iptv-runtime/**",
          "crates/iptv-player-mpv/**", "crates/iptv-net/**", "crates/iptv-nav/**", "tools/sync-host.sh",
