@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # macOS strips DYLD_* when starting a protected shell. Restore the selected
-# runtime inside this shell before Cargo launches the real player tests.
+# runtime inside this shell; the Python planner also restores it for Cargo.
 if [ "$(uname -s)" = Darwin ] && [ -n "${IPTV_RS_MPV_LIB_DIR:-}" ]; then
   export DYLD_LIBRARY_PATH="$IPTV_RS_MPV_LIB_DIR"
 fi

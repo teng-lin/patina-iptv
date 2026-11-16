@@ -7,11 +7,12 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 SPEC = importlib.util.spec_from_file_location("check_plan", Path(__file__).with_name("check-plan.py"))
 checks = importlib.util.module_from_spec(SPEC)
@@ -136,7 +137,7 @@ class Plan(unittest.TestCase):
                  checks.step("failed", "generated-tool", "second"),
                  checks.step("never", "generated-tool", "third")]
         output, errors = io.StringIO(), io.StringIO()
-        with redirect_stdout(output), redirect_stderr(errors):
+        with patch.dict(os.environ, {}, clear=True), redirect_stdout(output), redirect_stderr(errors):
             self.assertEqual(checks.run(steps, root=Path("/generated/root"), runner=runner), 7)
         self.assertEqual(runner.call_count, 2)
         for call in runner.call_args_list:
@@ -146,9 +147,32 @@ class Plan(unittest.TestCase):
         self.assertNotIn("==> never", output.getvalue())
         self.assertIn("failed (exit 7)", errors.getvalue())
 
+    def test_mac_child_restores_selected_runtime_without_mutating_parent_environment(self):
+        environment = {"IPTV_RS_MPV_LIB_DIR": "/generated/runtime", "PATH": "/generated/bin"}
+        for inherited in (None, "/generated/other-runtime"):
+            original = dict(environment)
+            if inherited is not None:
+                original["DYLD_LIBRARY_PATH"] = inherited
+            runner = Mock(return_value=subprocess.CompletedProcess([], 0))
+            with patch.dict(os.environ, original, clear=True), patch.object(sys, "platform", "darwin"):
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(checks.run([checks.step("synthetic", "generated-tool")], runner=runner), 0)
+                self.assertEqual(dict(os.environ), original)
+            self.assertEqual(runner.call_args.kwargs["env"],
+                             dict(original, DYLD_LIBRARY_PATH="/generated/runtime"))
+
+    def test_other_hosts_keep_the_inherited_environment(self):
+        original = {"IPTV_RS_MPV_LIB_DIR": "/generated/runtime", "DYLD_LIBRARY_PATH": "/generated/other"}
+        runner = Mock(return_value=subprocess.CompletedProcess([], 0))
+        with patch.dict(os.environ, original, clear=True), patch.object(sys, "platform", "linux"):
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(checks.run([checks.step("synthetic", "generated-tool")], runner=runner), 0)
+            self.assertEqual(dict(os.environ), original)
+        self.assertNotIn("env", runner.call_args.kwargs)
+
     def test_missing_tool_fails_without_starting_following_checks(self):
         runner = Mock(side_effect=FileNotFoundError("generated executable is absent"))
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+        with patch.dict(os.environ, {}, clear=True), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             self.assertEqual(checks.run(self.steps, runner=runner), 127)
         self.assertEqual(runner.call_count, 1)
 
@@ -160,6 +184,44 @@ class Plan(unittest.TestCase):
             )
         self.assertEqual(json.loads(result.stdout), self.steps)
         self.assertEqual(result.stderr, "")
+
+
+@unittest.skipUnless(os.name != "nt" and shutil.which("bash"), "coverage.sh is a Unix wrapper")
+class CustomCoverage(unittest.TestCase):
+    def test_custom_arguments_reach_fake_cargo_without_extra_test_filters_or_features(self):
+        cases = [
+            ["-p", "generated-crate"],
+            ["-p", "generated-crate", "--", "--nocapture"],
+            ["-p", "generated-crate", "--", "--test-threads=1", "--format=terse"],
+        ]
+        for arguments in cases:
+            with self.subTest(arguments=arguments), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                script = root / "tools/ci/coverage.sh"
+                script.parent.mkdir(parents=True)
+                shutil.copyfile(checks.ROOT / "tools/ci/coverage.sh", script)
+                binary = root / "bin"
+                binary.mkdir()
+                cargo = binary / "cargo"
+                cargo.write_text(f"#!{sys.executable}\n" + '''import json, os, sys
+args = sys.argv[1:]
+with open(os.environ["COVERAGE_ARGV_LOG"], "a") as stream:
+    stream.write(json.dumps(args) + "\\n")
+if "--" in args and "--" in args[args.index("--") + 1:]:
+    raise SystemExit("extra separator would turn output options into a zero-match test filter")
+print("synthetic coverage output")
+''', encoding="utf-8")
+                cargo.chmod(0o755)
+                log = root / "argv.jsonl"
+                result = subprocess.run(
+                    [shutil.which("bash"), str(script), *arguments], capture_output=True, text=True,
+                    env={"PATH": str(binary) + os.pathsep + os.defpath, "COVERAGE_ARGV_LOG": str(log)},
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                calls = [json.loads(line) for line in log.read_text().splitlines()]
+                measured = [argv for argv in calls if "--no-report" in argv]
+                self.assertEqual(measured, [["llvm-cov", "--locked", "--no-report", *arguments]])
 
 
 if __name__ == "__main__":

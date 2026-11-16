@@ -21,7 +21,13 @@ out=target/coverage
 rm -rf "$out"
 mkdir -p "$out"
 cargo llvm-cov clean --workspace
-cargo llvm-cov --locked --no-report "${checks[@]}" -- --format=pretty
+if [ "$#" -eq 0 ]; then
+  cargo llvm-cov --locked --no-report "${checks[@]}" -- --format=pretty
+else
+  # Preserve custom Cargo/libtest arguments, including their existing separator
+  # and output format. Libtest's default already prints each test name.
+  cargo llvm-cov --locked --no-report "${checks[@]}"
+fi
 if [ "$#" -eq 0 ]; then
   if [ "$(uname -s)" = Linux ]; then
     python3 tools/ci/run-xvfb.py cargo llvm-cov test --locked --no-report \
