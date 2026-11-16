@@ -1217,10 +1217,7 @@ async fn resolve(
         context.as_ref(),
         &channel,
         None,
-        iptv_guide::playback::Clock {
-            now: now(),
-            local_offset_secs: 0,
-        },
+        crate::playback::clock(now(), None),
     );
     let mut stream = match resolution {
         iptv_guide::playback::Resolution::Play(source) => source,

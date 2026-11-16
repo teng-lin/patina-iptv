@@ -28,7 +28,11 @@ count unique incoming connection IDs. Runtime admission additionally checks the
 source configuration, final resolved URL and headers, and complete transport
 trust policy. Numeric source IDs, matching channel text, or matching addresses
 alone grant no sharing authority. Durable source scope is checked after
-asynchronous resolution and before attachment.
+asynchronous resolution and before attachment. Viewing and capture use the same
+local-offset clock helper. Naturally rotating live URL templates, refreshed
+links, changed authentication/format context or changed trust policy may no
+longer match an existing input; those cases require the permitted independent
+fallback rather than weakening URL/header equality.
 
 The runtime registers an incoming ID with its original account lease before
 starting provider I/O. Pending preparation, playback and capture references use

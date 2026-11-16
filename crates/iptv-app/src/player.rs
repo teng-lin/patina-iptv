@@ -174,10 +174,7 @@ fn later(ui: Ui, delay: Duration, f: impl FnOnce() + 'static) {
 /// start for catch-up: date placeholders describe that instant).
 fn clock(at: Option<i64>) -> Clock {
     let now = crate::time::wall_unix();
-    Clock {
-        now,
-        local_offset_secs: crate::time::offset_minutes(at.unwrap_or(now)) * 60,
-    }
+    crate::runtime::playback::clock(now, at)
 }
 
 fn real_schedule(s: &Rc<dyn Schedule>) -> Option<&EpgSchedule> {
