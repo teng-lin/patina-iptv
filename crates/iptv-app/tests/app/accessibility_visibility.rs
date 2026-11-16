@@ -212,11 +212,11 @@ fn largest_text_pin_keeps_cancel_visible_and_dpad_has_no_invisible_stop() {
         step(app.set_environment("input mode", move |env| env.idiom = idiom));
         step(app.set_viewport(Size::new(px(width), px(height))));
         assert!(
-            inside(&app.screen(), "parental-card", "parental-layer"),
+            inside(app.screen(), "parental-card", "parental-layer"),
             "dialog stays in {width}x{height}"
         );
         assert!(
-            inside(&app.screen(), "parental-cancel", "parental-card"),
+            inside(app.screen(), "parental-cancel", "parental-card"),
             "Cancel remains visible"
         );
         assert!(app.screen().matches("role:button[/Cancel/]").unwrap());
@@ -405,7 +405,7 @@ fn first_run_large_text_exposes_source_choices_and_scrolls_focused_fields() {
         |screen| inside(screen, "wizard-field-EpgUrl", "wizard-fields-scroll"),
     ));
     step(app.press_key("down"));
-    assert!(inside(&app.screen(), "wizard-submit", "wizard-form"));
+    assert!(inside(app.screen(), "wizard-submit", "wizard-form"));
     assert!(app.screen().matches("role:button[/Add playlist/]").unwrap());
     step(app.press("id:wizard-submit"));
     assert!(
