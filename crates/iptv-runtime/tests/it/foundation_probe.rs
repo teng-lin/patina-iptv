@@ -342,6 +342,48 @@ fn cancellation_ends_an_acknowledged_request_and_removes_its_partial_stage() {
     assert_probe_cache_empty(directory.path());
 }
 
+#[cfg(feature = "test-support")]
+#[test]
+fn shutdown_waits_for_a_cancelled_probe_worker_to_release_its_partial_stage() {
+    let server = Mock::new(XML.as_bytes().to_vec(), false);
+    let directory = tempfile::tempdir().unwrap();
+    let source = seed(directory.path(), server.url(), 0);
+    let runtime = owner(directory.path());
+    let held = runtime.hold_probe_stage();
+    let draining = runtime.observe_probe_drain();
+    let options = control();
+    let cancel = options.cancel.clone();
+    let request = runtime.probe_feed(
+        ProbeRequest {
+            source,
+            target: ProbeTarget::Configured(FeedId(1)),
+        },
+        options,
+    );
+    assert!(held.wait_entered(Duration::from_secs(30)));
+    cancel.cancel();
+    assert_eq!(support::block_on(request), Err(InspectionError::Cancelled));
+    let path = directory.path().to_owned();
+    let release = thread::spawn(move || {
+        assert!(draining.wait_entered(Duration::from_secs(30)));
+        assert!(
+            std::fs::read_dir(path.join("guide-probes"))
+                .unwrap()
+                .flat_map(|entry| std::fs::read_dir(entry.unwrap().path()).unwrap())
+                .any(|entry| entry
+                    .unwrap()
+                    .path()
+                    .extension()
+                    .is_some_and(|e| e == "sqlite")),
+            "teardown must still be waiting while the partial stage is held"
+        );
+        held.release();
+    });
+    assert!(runtime.drain_services());
+    release.join().unwrap();
+    assert_probe_cache_empty(directory.path());
+}
+
 #[test]
 fn malformed_html_entities_and_truncated_xml_never_become_probe_evidence() {
     for body in [

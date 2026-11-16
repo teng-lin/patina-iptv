@@ -13,7 +13,7 @@ use std::{
     future::Future,
     path::PathBuf,
     sync::{
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
         atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
@@ -73,6 +73,9 @@ pub(crate) struct Vault {
     queries: Arc<AtomicUsize>,
     calls: Arc<Mutex<BTreeMap<u64, CancelToken>>>,
     next_call: AtomicU64,
+    workers: Arc<Workers>,
+    #[cfg(feature = "test-support")]
+    stage_hook: Arc<Mutex<Option<Arc<crate::testing::GateState>>>>,
 }
 impl Vault {
     pub(crate) fn new() -> Self {
@@ -86,6 +89,9 @@ impl Vault {
             queries: Arc::new(AtomicUsize::new(0)),
             calls: Arc::new(Mutex::new(BTreeMap::new())),
             next_call: AtomicU64::new(0),
+            workers: Arc::default(),
+            #[cfg(feature = "test-support")]
+            stage_hook: Arc::default(),
         }
     }
     pub(crate) fn context(&self, epoch: u64) -> String {
@@ -135,8 +141,24 @@ impl Vault {
             random::<16>().map(|b| hex(&b)).unwrap_or_default();
         *self.key.lock().unwrap_or_else(|e| e.into_inner()) =
             random().ok().map(DatabaseKey::from_bytes);
+        self.workers
+            .state
+            .lock()
+            .expect("probe worker state poisoned")
+            .accepting = true;
+    }
+    pub(crate) fn close_workers(&self) {
+        self.workers
+            .state
+            .lock()
+            .expect("probe worker state poisoned")
+            .accepting = false;
+    }
+    pub(crate) fn drain_workers(&self, limit: Duration) -> bool {
+        self.workers.drain(limit)
     }
     pub(crate) fn clear(&self) {
+        self.close_workers();
         self.cancel_requests();
         self.stages
             .lock()
@@ -149,6 +171,70 @@ impl Vault {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take();
+    }
+}
+
+#[derive(Default)]
+struct WorkerState {
+    accepting: bool,
+    active: usize,
+}
+
+#[derive(Default)]
+struct Workers {
+    state: Mutex<WorkerState>,
+    finished: Condvar,
+    #[cfg(feature = "test-support")]
+    draining: Mutex<Option<Arc<crate::testing::GateState>>>,
+}
+impl Workers {
+    fn enter(self: &Arc<Self>) -> Option<Completion> {
+        let mut state = self.state.lock().expect("probe worker state poisoned");
+        if !state.accepting {
+            return None;
+        }
+        state.active += 1;
+        Some(Completion(self.clone()))
+    }
+
+    fn drain(&self, limit: Duration) -> bool {
+        let state = self.state.lock().expect("probe worker state poisoned");
+        #[cfg(feature = "test-support")]
+        if state.active != 0
+            && let Some(gate) = self.draining.lock().unwrap().take()
+        {
+            gate.acknowledge();
+        }
+        let (state, _) = self
+            .finished
+            .wait_timeout_while(state, limit, |state| state.active != 0)
+            .expect("probe worker state poisoned");
+        state.active == 0
+    }
+}
+
+struct Completion(Arc<Workers>);
+impl Drop for Completion {
+    fn drop(&mut self) {
+        let mut state = self.0.state.lock().expect("probe worker state poisoned");
+        state.active -= 1;
+        self.0.finished.notify_all();
+    }
+}
+
+// Fields drop in declaration order, including if a queued task never starts.
+// Completion must follow the operation's captured snapshots and capacity permit.
+struct WorkerOperation<F, Permit> {
+    operation: F,
+    _permit: Permit,
+    _completion: Completion,
+}
+impl<F, Permit> WorkerOperation<F, Permit> {
+    fn run<T>(self) -> T
+    where
+        F: FnOnce() -> T,
+    {
+        (self.operation)()
     }
 }
 
@@ -627,19 +713,49 @@ fn await_worker<T: Send + 'static>(
 /// on the async executor and never enter its blocking queue.
 fn admitted_worker<T: Send + 'static, Permit: Send + 'static>(
     services: &Services,
+    workers: &Arc<Workers>,
     admission: Option<Permit>,
     operation: impl FnOnce() -> InspectionResult<T> + Send + 'static,
 ) -> tokio::task::JoinHandle<InspectionResult<T>> {
-    match admission {
-        Some(permit) => services.spawn_blocking(move || {
-            let _permit = permit;
-            operation()
-        }),
-        None => services.spawn(async { Err(InspectionError::Busy) }),
+    match workers.enter() {
+        Some(completion) => {
+            let work = WorkerOperation {
+                operation,
+                _permit: admission,
+                _completion: completion,
+            };
+            if work._permit.is_some() {
+                services.spawn_blocking(move || work.run())
+            } else {
+                drop(work);
+                services.spawn(async { Err(InspectionError::Busy) })
+            }
+        }
+        None => {
+            drop(operation);
+            drop(admission);
+            services.spawn(async { Err(InspectionError::OwnerClosed) })
+        }
     }
 }
 
 impl Runtime {
+    /// Hold a probe after its encrypted partial stage has been created.
+    #[cfg(feature = "test-support")]
+    pub fn hold_probe_stage(&self) -> crate::TestGate {
+        let gate = crate::TestGate::new();
+        *self.inspection.stage_hook.lock().unwrap() = Some(gate.0.clone());
+        gate
+    }
+
+    /// Observe teardown waiting for actual blocking probe workers to finish.
+    #[cfg(feature = "test-support")]
+    pub fn observe_probe_drain(&self) -> crate::TestGate {
+        let gate = crate::TestGate::new();
+        *self.inspection.workers.draining.lock().unwrap() = Some(gate.0.clone());
+        gate
+    }
+
     pub fn probe_feed(
         &self,
         request: ProbeRequest,
@@ -671,7 +787,9 @@ impl Runtime {
         let operation_cancel = worker_control.cancel.clone();
         let guard = self.inspection.register(operation_cancel.clone());
         let cancel = operation_cancel.clone();
-        let task = admitted_worker(&services, admission, move || {
+        #[cfg(feature = "test-support")]
+        let stage_hook = self.inspection.stage_hook.clone();
+        let task = admitted_worker(&services, &self.inspection.workers, admission, move || {
             let config = config.ok_or(InspectionError::Busy)?;
             let key = key.ok_or(InspectionError::Storage)?;
             let reservation = Reservation::acquire(stages.clone())?;
@@ -684,6 +802,9 @@ impl Runtime {
             let id = ProbeId(hex(&random::<16>()?));
             let directory = {
                 let mut directory = directory.lock().unwrap_or_else(|e| e.into_inner());
+                // A timed-out worker may resume after shutdown or a restart.
+                // Fence initialization under the same lock clear() uses.
+                check(&accepted, &cancel, deadline)?;
                 if directory.is_none() {
                     *directory = Some(Directory::create(&accepted, &nonce)?);
                 }
@@ -710,6 +831,13 @@ impl Runtime {
                 _directory: directory,
             };
             let mut stage = storage(InspectionStage::create(&snapshot.path, &snapshot.key))?;
+            #[cfg(feature = "test-support")]
+            {
+                let hook = stage_hook.lock().unwrap().take();
+                if let Some(hook) = hook {
+                    hook.pause();
+                }
+            }
             let mut net = configuration.net;
             net.max_redirects = 3;
             net.request_timeout = PROBE_DEADLINE;
@@ -874,7 +1002,9 @@ impl Runtime {
         worker_control.cancel = CancelToken::new();
         let operation_cancel = worker_control.cancel.clone();
         let guard = self.inspection.register(operation_cancel.clone());
-        let task = admitted_worker(&services, self.inspection.admit(), move || {
+        let workers = &self.inspection.workers;
+        let admission = self.inspection.admit();
+        let task = admitted_worker(&services, workers, admission, move || {
             let lease = lease?;
             lease.current_configuration()?;
             check(&lease.0.services, &worker_control.cancel, deadline)?;
@@ -950,7 +1080,9 @@ impl Runtime {
         worker_control.cancel = CancelToken::new();
         let operation_cancel = worker_control.cancel.clone();
         let guard = self.inspection.register(operation_cancel.clone());
-        let task = admitted_worker(&services, self.inspection.admit(), move || {
+        let workers = &self.inspection.workers;
+        let admission = self.inspection.admit();
+        let task = admitted_worker(&services, workers, admission, move || {
             if !window.valid() {
                 return Err(InspectionError::InvalidRequest);
             }
@@ -1085,5 +1217,97 @@ impl Runtime {
             Ok(programmes)
         });
         await_worker(services, control, deadline, task, operation_cancel, guard)
+    }
+}
+
+#[cfg(all(test, feature = "test-support"))]
+mod worker_tests {
+    use super::*;
+
+    struct Cleanup(crate::TestGate);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            self.0.0.pause();
+        }
+    }
+
+    #[test]
+    fn completion_follows_capture_cleanup_for_run_panic_and_queued_drop() {
+        for mode in 0..3 {
+            let vault = Vault::new();
+            vault.renew();
+            let gate = crate::TestGate::new();
+            let cleanup = Cleanup(crate::TestGate(gate.0.clone()));
+            let work = WorkerOperation {
+                operation: move || {
+                    let _cleanup = cleanup;
+                    assert_ne!(mode, 1, "synthetic worker panic");
+                },
+                _permit: Running::acquire(vault.running.clone()).unwrap(),
+                _completion: vault.workers.enter().unwrap(),
+            };
+            let worker = std::thread::spawn(move || {
+                if mode == 2 {
+                    drop(work);
+                } else {
+                    work.run();
+                }
+            });
+            assert!(gate.wait_entered(Duration::from_secs(5)));
+            vault.close_workers();
+            assert!(vault.workers.enter().is_none());
+            assert!(!vault.drain_workers(Duration::ZERO));
+            assert_eq!(vault.running.load(Ordering::SeqCst), 1);
+            gate.release();
+            assert_eq!(worker.join().is_err(), mode == 1);
+            assert!(vault.drain_workers(Duration::ZERO));
+            assert_eq!(vault.running.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[test]
+    fn timed_out_shutdown_keeps_old_workers_tracked_across_restart() {
+        let owner = Runtime::default();
+        owner.start_services();
+        let old = owner.services();
+        let gate = crate::TestGate::new();
+        let worker_gate = gate.0.clone();
+        let accepted = old.clone();
+        let task = admitted_worker(
+            &old,
+            &owner.inspection.workers,
+            Running::acquire(owner.inspection.running.clone()),
+            move || {
+                worker_gate.pause();
+                check(
+                    &accepted,
+                    &CancelToken::new(),
+                    Instant::now() + PROBE_DEADLINE,
+                )
+            },
+        );
+        assert!(gate.wait_entered(Duration::from_secs(5)));
+        owner.store.hooks.set_drain_limit(Some(Duration::ZERO));
+        assert!(!owner.drain_services());
+        let refused = admitted_worker(
+            &old,
+            &owner.inspection.workers,
+            Running::acquire(owner.inspection.running.clone()),
+            || -> InspectionResult<()> { panic!("closed workers must refuse late work") },
+        );
+        assert_eq!(
+            old.block_on(refused).unwrap(),
+            Err(InspectionError::OwnerClosed)
+        );
+        assert_eq!(owner.inspection.running.load(Ordering::SeqCst), 1);
+        owner.start_services();
+        assert!(!owner.inspection.drain_workers(Duration::ZERO));
+        gate.release();
+        assert_eq!(
+            old.block_on(task).unwrap(),
+            Err(InspectionError::OwnerClosed)
+        );
+        owner.store.hooks.set_drain_limit(None);
+        assert!(owner.drain_services());
     }
 }

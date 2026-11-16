@@ -291,6 +291,8 @@ impl Runtime {
         self.inspection.renew();
     }
     pub fn drain_services(&self) -> bool {
+        let deadline = std::time::Instant::now() + self.store.drain_limit();
+        self.inspection.close_workers();
         self.parental_lock();
         if !self.recordings_detached.replace(true) {
             self.recordings.detach_ui();
@@ -303,12 +305,15 @@ impl Runtime {
         let drained = self
             .store
             .drain_on_shutdown_with(|| self.inspection.cancel_requests());
+        let probes_drained = self
+            .inspection
+            .drain_workers(deadline.saturating_duration_since(std::time::Instant::now()));
         // Detached local tasks can retain this Runtime after the root closes.
         // Retire services now, rather than waiting for its last Rc to drop.
         self.store.retire();
         self.inspection.clear();
         self.repairs.borrow_mut().clear();
-        drained
+        drained && probes_drained
     }
 
     pub fn bind_browser(&self, observe: impl Fn() -> BrowserState + 'static) {
