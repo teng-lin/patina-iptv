@@ -42,6 +42,7 @@ mod cross_origin;
 mod error;
 mod file;
 pub mod playback;
+pub mod live;
 pub mod recording;
 pub mod recording_file;
 mod redirect;

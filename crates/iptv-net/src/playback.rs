@@ -48,7 +48,7 @@ const REQUEST_HEAD: Duration = Duration::from_secs(15);
 
 /// Provenance of the original playable URL. A trusted URL authorizes only its
 /// exact origin; derived or redirected resources still require public hosts.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PlaybackPolicy {
     pub public_only: bool,
     /// DER certificates trusted in addition to the Mozilla roots: the
@@ -79,6 +79,7 @@ pub struct PlaybackRelay {
     url_auth: Option<HeaderValue>,
     cookies: Arc<OriginCookies>,
     stop: Option<oneshot::Sender<()>>,
+    closed: Option<oneshot::Receiver<()>>,
     headers: Arc<Mutex<HeaderMap>>,
     error: Arc<Mutex<Option<FetchErrorKind>>>,
 }
@@ -284,9 +285,19 @@ impl PlaybackRelay {
         });
         let prefix = session.prefix.clone();
         let (stop, mut stopped) = oneshot::channel();
+        let (closed_tx, closed) = oneshot::channel();
         std::thread::Builder::new()
             .name("iptv-playback-http".into())
             .spawn(move || {
+                struct Closed(Option<oneshot::Sender<()>>);
+                impl Drop for Closed {
+                    fn drop(&mut self) {
+                        if let Some(done) = self.0.take() {
+                            let _ = done.send(());
+                        }
+                    }
+                }
+                let _closed = Closed(Some(closed_tx));
                 let Ok(rt) = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -324,9 +335,22 @@ impl PlaybackRelay {
             url_auth,
             cookies,
             stop: Some(stop),
+            closed: Some(closed),
             headers: fields,
             error,
         })
+    }
+
+    /// Join transport retirement before a caller opens a fallback connection.
+    /// Ordinary player drops remain nonblocking; unsupported shared-input probes
+    /// use this acknowledgement so they cannot transiently exceed a limit.
+    pub async fn shutdown(mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(closed) = self.closed.take() {
+            let _ = closed.await;
+        }
     }
 
     pub fn url(&self) -> &str {

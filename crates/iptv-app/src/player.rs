@@ -240,7 +240,7 @@ pub fn start_surface(ui: Ui, surface: usize, channel: usize) -> bool {
         ui.play(channel, Playback::Live);
         return ui.playing.get_untracked() == Some(channel);
     }
-    if !crate::recordings_view::reserve_viewing(ui, surface, channel) {
+    if !crate::recordings_view::reserve_viewing(ui, surface, channel, true) {
         let previous = ui.player.stream(surface).channel.get_untracked();
         ui.multiview.update(|m| {
             if let Some(m) = m {
@@ -485,7 +485,7 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
             Some(early) => crate::data::spawn_in_app(async move {
                 let owner = crate::runtime();
                 let source = iptv_library::SourceId(early.source_id);
-                let channel = iptv_providers::ContentId::from_stored(early.key);
+                let channel = iptv_providers::ContentId::from_stored(early.key.clone());
                 let allowed = crate::runtime::commands::channel(&owner, source, channel)
                     .await
                     .is_ok_and(|row| row.is_some_and(|r| !r.blocked));
@@ -496,7 +496,7 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
                     stop(ui);
                     return;
                 }
-                if owner.reserve_viewing(0, source) {
+                if owner.reserve_live_viewing(0, source, &early.key) {
                     load(ui, 0, session, early.source);
                 } else {
                     fail(
@@ -512,7 +512,11 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
         }
         return;
     };
-    if !crate::recordings_view::try_reserve_viewing(surface, channel) {
+    if !crate::recordings_view::try_reserve_viewing(
+        surface,
+        channel,
+        matches!(playback, Playback::Live),
+    ) {
         fail(
             ui,
             surface,
@@ -631,6 +635,59 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
     }
 
     crate::settings::add_user_agent(&mut source.headers, crate::settings::user_agent());
+    let identity = if stream.health.with_untracked(|h| h.live()) {
+        target(ui, surface)
+            .and_then(|(channel, _)| {
+                crate::schedule()
+                    .channel_key(channel)
+                    .and_then(|key| crate::data::combined::owner(&owner, &key))
+            })
+            .or_else(|| {
+                resume::source(ui).map(|early| (iptv_library::SourceId(early.source_id), early.key))
+            })
+    } else {
+        None
+    };
+    if let Some((source_id, channel)) = identity {
+        let prepared = owner.prepare_live_source(surface, source_id, channel, source);
+        crate::data::spawn_in_app(async move {
+            match prepared.await {
+                Ok(source) => publish_source(ui, surface, session, source),
+                Err(error) => fail(
+                    ui,
+                    surface,
+                    session,
+                    ErrorKind::Unavailable,
+                    error.to_string(),
+                ),
+            }
+        });
+    } else {
+        let retired = owner.retire_viewing_inputs(surface);
+        crate::data::spawn_in_app(async move {
+            retired.await;
+            publish_source(ui, surface, session, source);
+        });
+    }
+}
+
+fn publish_source(ui: Ui, surface: usize, session: u64, source: PlaySource) {
+    let stream = ui.player.stream(surface);
+    if stream.health.with_untracked(|h| h.session()) != session {
+        return;
+    }
+    if stream.health.with_untracked(|health| health.live()) {
+        let target = target(ui, surface)
+            .and_then(|(channel, _)| crate::parental_view::live_target(ui, channel))
+            .or_else(|| {
+                resume::source(ui)
+                    .map(|early| iptv_core::parental::Target::live(early.source_id, early.key))
+            });
+        if target.is_some_and(|target| !crate::runtime().parental_allowed(&target)) {
+            stop_surface(ui, surface);
+            return;
+        }
+    }
     let (live, reconnect) = stream
         .health
         .with_untracked(|h| (h.live(), h.reconnecting()));

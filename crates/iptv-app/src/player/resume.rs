@@ -68,7 +68,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
         Resolution::Play(source) => source,
         Resolution::StalkerLink(_) | Resolution::Unavailable(_) => return false,
     };
-    if !crate::runtime().reserve_viewing(0, stored.id) {
+    if !crate::runtime().reserve_live_viewing(0, stored.id, &key) {
         return false;
     }
     log::info!("iptv player: resuming the last channel before the guide");

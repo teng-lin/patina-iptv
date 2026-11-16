@@ -98,14 +98,29 @@ async fn capture_inner(
 ) -> Result<(), Failure> {
     let relay =
         PlaybackRelay::start_with_policy(url, headers, policy).map_err(|_| Failure::Network)?;
-    let client = reqwest::Client::builder()
-        .tls_backend_preconfigured(crate::tls::client_config(&[]).map_err(|_| Failure::Network)?)
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(Duration::from_secs(15))
-        .read_timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|_| Failure::Network)?;
+    let client = client()?;
+    let mut writer = writer(path, max_bytes, resume)?;
+    let result = receive(&client, &relay, &mut writer, state).await;
+    writer.file.sync_all().map_err(|_| Failure::Storage)?;
+    result
+}
+
+/// Capture shares the incoming owner; no request, header update or provider
+/// connection is created when attaching or detaching this consumer.
+pub async fn capture_shared(
+    input: &crate::live::LiveInput,
+    path: &Path,
+    max_bytes: u64,
+) -> Result<(), Failure> {
+    let mut writer = writer(path, max_bytes, true)?;
+    let mut reader = input.subscribe();
+    loop {
+        let bytes = reader.next().await?;
+        writer.write(&bytes).await?;
+    }
+}
+
+fn writer(path: &Path, max_bytes: u64, resume: bool) -> Result<Writer, Failure> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true);
     let existing = if resume {
@@ -136,12 +151,29 @@ async fn capture_inner(
     // Windows append-only handles cannot truncate torn packets. One claimed
     // capture owns this spool, so a writable handle plus seek is portable.
     file.seek(SeekFrom::End(0)).map_err(|_| Failure::Storage)?;
-    let mut writer = Writer {
+    Ok(Writer {
         file,
         bytes,
         max_bytes,
-    };
-    let mut response = get(&client, &relay, relay.url()).await?;
+    })
+}
+
+/// A synchronous, bounded sink: cancellation cannot leave a queued write racing
+/// recording finalization. Live fanout uses the same parser and validation.
+pub(crate) trait Sink {
+    fn accepts_master_playlist(&self) -> bool {
+        true
+    }
+    fn write(&mut self, bytes: &[u8]) -> impl Future<Output = Result<(), Failure>> + Send;
+}
+
+pub(crate) async fn receive(
+    client: &reqwest::Client,
+    relay: &PlaybackRelay,
+    writer: &mut impl Sink,
+    state: &mut CaptureState,
+) -> Result<(), Failure> {
+    let mut response = get(client, relay, relay.url()).await?;
     let mut head = Vec::new();
     while head.len() < 188 {
         let Some(chunk) = response.chunk().await.map_err(|_| Failure::Network)? else {
@@ -159,20 +191,30 @@ async fn capture_inner(
             }
             head.extend_from_slice(&chunk);
         }
-        hls(&client, &relay, head, &mut writer, state).await?;
+        hls(client, relay, head, writer, state).await?;
     } else {
         *state = CaptureState::default();
         if head.first() != Some(&0x47) || head.len() < 188 {
             return Err(Failure::Unsupported);
         }
-        writer.write(&head)?;
+        writer.write(&head).await?;
         while let Some(chunk) = response.chunk().await.map_err(|_| Failure::Network)? {
-            writer.write(&chunk)?;
+            writer.write(&chunk).await?;
         }
     }
-    writer.file.sync_all().map_err(|_| Failure::Storage)?;
     // Live input EOF before the requested deadline is never a successful full recording.
     Err(Failure::Network)
+}
+
+pub(crate) fn client() -> Result<reqwest::Client, Failure> {
+    reqwest::Client::builder()
+        .tls_backend_preconfigured(crate::tls::client_config(&[]).map_err(|_| Failure::Network)?)
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(15))
+        .read_timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|_| Failure::Network)
 }
 
 async fn get(
@@ -196,8 +238,8 @@ struct Writer {
     bytes: u64,
     max_bytes: u64,
 }
-impl Writer {
-    fn write(&mut self, bytes: &[u8]) -> Result<(), Failure> {
+impl Sink for Writer {
+    async fn write(&mut self, bytes: &[u8]) -> Result<(), Failure> {
         if self.bytes.saturating_add(bytes.len() as u64) > self.max_bytes {
             return Err(Failure::Limit);
         }
@@ -310,7 +352,7 @@ async fn hls(
     client: &reqwest::Client,
     relay: &PlaybackRelay,
     mut bytes: Vec<u8>,
-    writer: &mut Writer,
+    writer: &mut impl Sink,
     state: &mut CaptureState,
 ) -> Result<(), Failure> {
     let mut url = relay.url().to_owned();
@@ -318,6 +360,9 @@ async fn hls(
     for _ in 0..4 {
         let p = playlist(&bytes)?;
         let Some(variant) = p.variant else { break };
+        if !writer.accepts_master_playlist() {
+            return Err(Failure::Unsupported);
+        }
         url = variant;
         bytes = manifest(client, relay, &url).await?;
     }
@@ -370,7 +415,7 @@ async fn hls(
             {
                 return Err(Failure::Unsupported);
             }
-            writer.write(&data)?;
+            writer.write(&data).await?;
             last_progress = tokio::time::Instant::now();
             state.next_hls_sequence = sequence.checked_add(1);
             if state.next_hls_sequence.is_none() {

@@ -1,0 +1,582 @@
+use super::{
+    tests::{owner, seed, until},
+    *,
+};
+use std::sync::atomic::AtomicUsize;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+const MASTER: &[u8] = b"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1200000\nlow.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2400000\nhigh.m3u8\n";
+
+struct Fixture {
+    url: String,
+    requests: Arc<AtomicUsize>,
+    active: Arc<AtomicUsize>,
+    peak: Arc<AtomicUsize>,
+    generation: Arc<AtomicUsize>,
+    held: Arc<AtomicBool>,
+    task: tokio::task::JoinHandle<()>,
+}
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+impl Fixture {
+    async fn start() -> Self {
+        Self::starting(false).await
+    }
+    async fn starting(hold: bool) -> Self {
+        Self::serving(hold, false).await
+    }
+    async fn master() -> Self {
+        Self::serving(false, true).await
+    }
+    async fn serving(hold: bool, master: bool) -> Self {
+        let held = Arc::new(AtomicBool::new(hold));
+        let paused = held.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/generated.ts", listener.local_addr().unwrap());
+        let requests = Arc::new(AtomicUsize::new(0));
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let generation = Arc::new(AtomicUsize::new(0));
+        let seen = requests.clone();
+        let count = active.clone();
+        let high = peak.clone();
+        let current = generation.clone();
+        let task = tokio::spawn(async move {
+            let mut tasks = tokio::task::JoinSet::new();
+            loop {
+                tokio::select! {
+                    Some(_) = tasks.join_next(), if !tasks.is_empty() => {},
+                    connection = listener.accept() => {
+                        let (mut socket, _) = connection.unwrap();
+                        let seen = seen.clone(); let count = count.clone(); let high = high.clone(); let current = current.clone(); let paused = paused.clone();
+                        tasks.spawn(async move {
+                            let mut request = Vec::new();
+                            while !request.ends_with(b"\r\n\r\n") { request.push(socket.read_u8().await?); }
+                            seen.fetch_add(1, Ordering::SeqCst);
+                            high.fetch_max(count.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+                            struct Active(Arc<AtomicUsize>);
+                            impl Drop for Active { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::SeqCst); } }
+                            let _active = Active(count);
+                            let incarnation = current.load(Ordering::SeqCst);
+                            if master {
+                                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl\r\nContent-Length: {}\r\n\r\n", MASTER.len()).as_bytes()).await?;
+                                socket.write_all(MASTER).await?;
+                                let _ = socket.read_u8().await;
+                                return Ok::<(), std::io::Error>(());
+                            }
+                            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nConnection: close\r\n\r\n").await?;
+                            let (mut reader, mut writer) = socket.into_split();
+                            let mut packet = [0u8; 188 * 8];
+                            for part in packet.as_chunks_mut::<188>().0 { part[..4].copy_from_slice(&[0x47, 0x1f, 0xff, 0x10]); }
+                            let mut interval = tokio::time::interval(Duration::from_millis(10));
+                            loop {
+                                tokio::select! {
+                                    byte = reader.read_u8() => { let _ = byte; break; },
+                                    _ = interval.tick() => {
+                                        if current.load(Ordering::SeqCst) != incarnation { break; }
+                                        if !paused.load(Ordering::SeqCst) { writer.write_all(&packet).await?; }
+                                    }
+                                }
+                            }
+                            Ok::<(), std::io::Error>(())
+                        });
+                    }
+                }
+            }
+        });
+        Self {
+            url,
+            requests,
+            active,
+            peak,
+            generation,
+            held,
+            task,
+        }
+    }
+}
+async fn source(owner: &Runtime, request: &Request) -> PlaySource {
+    let id = SourceId(request.source);
+    let channel = ContentId::from_stored(request.channel.clone());
+    let (config, channel) = owner
+        .services()
+        .read(move |store| {
+            Ok((
+                store.source(id)?.unwrap().source.config,
+                store.channel(id, &channel)?.unwrap().channel,
+            ))
+        })
+        .await
+        .unwrap();
+    let context = crate::playback::stored_context(&config).unwrap();
+    let iptv_guide::playback::Resolution::Play(mut source) = iptv_guide::playback::resolve(
+        Some(&context),
+        &channel,
+        None,
+        iptv_guide::playback::Clock {
+            now: now(),
+            local_offset_secs: 0,
+        },
+    ) else {
+        panic!("generated direct source")
+    };
+    source.default_header(
+        "User-Agent",
+        &crate::settings::net_config(&owner.services().settings()).user_agent,
+    );
+    source
+}
+async fn open(owner: &Runtime, request: &Request) -> PlaySource {
+    refresh_accounts(&owner.services(), &owner.recordings)
+        .await
+        .unwrap();
+    assert!(owner.reserve_live_viewing(0, SourceId(request.source), &request.channel));
+    owner
+        .prepare_live_source(
+            0,
+            SourceId(request.source),
+            request.channel.clone(),
+            source(owner, request).await,
+        )
+        .await
+        .unwrap()
+}
+async fn player(source: &PlaySource) -> tokio::net::TcpStream {
+    let (address, path) = source
+        .url
+        .strip_prefix("http://")
+        .unwrap()
+        .split_once('/')
+        .unwrap();
+    let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
+    socket
+        .write_all(format!("GET /{path} HTTP/1.1\r\nHost: {address}\r\n\r\n").as_bytes())
+        .await
+        .unwrap();
+    let mut header = Vec::new();
+    while !header.ends_with(b"\r\n\r\n") {
+        header.push(socket.read_u8().await.unwrap());
+    }
+    assert!(header.starts_with(b"HTTP/1.1 200"));
+    let mut packet = [0; 188];
+    socket.read_exact(&mut packet).await.unwrap();
+    assert_eq!(packet[0], 0x47);
+    socket
+}
+async fn wait(mut ready: impl FnMut() -> bool) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !ready() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+async fn record_now(owner: &Runtime, mut request: Request) -> JobId {
+    request.start = now();
+    request.end = request.start + 30;
+    let id = owner.schedule_recording(request).await.unwrap();
+    until(owner, id, |job| {
+        job.status == Status::Recording && job.bytes >= 188
+    })
+    .await;
+    id
+}
+
+#[tokio::test]
+async fn live_capture_uses_one_incoming_and_keeps_it_after_playback_stops() {
+    let fixture = Fixture::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let owner = owner(dir.path());
+    let request = seed(&owner, &fixture.url).await;
+    let local = open(&owner, &request).await;
+    assert_ne!(local.url, fixture.url);
+    assert!(local.headers.is_empty());
+    let playback = player(&local).await;
+    let id = record_now(&owner, request).await;
+    assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.active.load(Ordering::SeqCst), 1);
+    drop(playback);
+    owner.release_viewing(0);
+    let before = owner
+        .recording_jobs()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|job| job.id == id)
+        .unwrap()
+        .bytes;
+    until(&owner, id, |job| job.bytes > before).await;
+    assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
+    owner.stop_recording(id).await.unwrap();
+    assert_eq!(
+        until(&owner, id, |job| !job.status.active()).await.status,
+        Status::Completed
+    );
+    owner.recordings.retire_unused().await;
+    assert_eq!(fixture.peak.load(Ordering::SeqCst), 1);
+    assert!(owner.recordings.lock().inputs.is_empty());
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn stopping_capture_preserves_local_playback_source_and_input() {
+    let fixture = Fixture::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let owner = owner(dir.path());
+    let request = seed(&owner, &fixture.url).await;
+    let local = open(&owner, &request).await;
+    let mut playback = player(&local).await;
+    let incoming = owner.recordings.lock().viewers[&0]
+        .input
+        .as_ref()
+        .unwrap()
+        .id;
+    let id = record_now(&owner, request).await;
+    owner.stop_recording(id).await.unwrap();
+    until(&owner, id, |job| !job.status.active()).await;
+    owner.recordings.retire_unused().await;
+    assert_eq!(
+        owner.recordings.lock().viewers[&0]
+            .input
+            .as_ref()
+            .unwrap()
+            .id,
+        incoming
+    );
+    let mut packet = [0; 188];
+    playback.read_exact(&mut packet).await.unwrap();
+    assert_eq!(packet[0], 0x47);
+    assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.peak.load(Ordering::SeqCst), 1);
+    drop(playback);
+    owner.release_viewing(0);
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn immediate_replacement_joins_the_previous_incoming_before_opening() {
+    let fixture = Fixture::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let owner = owner(dir.path());
+    let request = seed(&owner, &fixture.url).await;
+    let first = open(&owner, &request).await;
+    let playback = player(&first).await;
+    // Change only the resolved authentication context, as a portal token refresh
+    // can do. The old owner is solely viewing, so it must retire first.
+    let mut replacement = source(&owner, &request).await;
+    replacement.set_header("X-Generated-Auth", "generated-new-context");
+    assert!(owner.reserve_live_viewing(0, SourceId(request.source), &request.channel));
+    let second = owner
+        .prepare_live_source(0, SourceId(request.source), request.channel, replacement)
+        .await
+        .unwrap();
+    assert_ne!(first.url, second.url);
+    let next = player(&second).await;
+    assert_eq!(fixture.requests.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        fixture.peak.load(Ordering::SeqCst),
+        1,
+        "replacement cannot overlap its retiring provider owner"
+    );
+    drop(playback);
+    drop(next);
+    owner.release_viewing(0);
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn changed_auth_context_cannot_spend_a_shared_capture_discount() {
+    let fixture = Fixture::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let owner = owner(dir.path());
+    let request = seed(&owner, &fixture.url).await;
+    let local = open(&owner, &request).await;
+    let playback = player(&local).await;
+    let id = record_now(&owner, request.clone()).await;
+    let mut changed = source(&owner, &request).await;
+    changed.set_header("X-Generated-Auth", "generated-changed");
+    assert!(owner.reserve_live_viewing(0, SourceId(request.source), &request.channel));
+    assert!(
+        owner
+            .prepare_live_source(0, SourceId(request.source), request.channel, changed)
+            .await
+            .is_err()
+    );
+    assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.peak.load(Ordering::SeqCst), 1);
+    owner.stop_recording(id).await.unwrap();
+    until(&owner, id, |job| !job.status.active()).await;
+    drop(playback);
+    owner.release_viewing(0);
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn shared_transport_failure_retains_partial_media_and_frees_playback_retry() {
+    let fixture = Fixture::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let owner = owner(dir.path());
+    let request = seed(&owner, &fixture.url).await;
+    let first = open(&owner, &request).await;
+    let playback = player(&first).await;
+    let id = record_now(&owner, request.clone()).await;
+    fixture.generation.fetch_add(1, Ordering::SeqCst);
+    let job = until(&owner, id, |job| !job.status.active()).await;
+    assert_eq!(job.status, Status::Partial);
+    assert!(job.bytes >= 188);
+    assert_eq!(job.bytes % 188, 0);
+    let second = open(&owner, &request).await;
+    assert_ne!(first.url, second.url);
+    let next = player(&second).await;
+    assert_eq!(fixture.requests.load(Ordering::SeqCst), 2);
+    assert_eq!(fixture.peak.load(Ordering::SeqCst), 1);
+    drop(playback);
+    drop(next);
+    owner.release_viewing(0);
+    assert!(owner.drain_services());
+}
+
+async fn xtream_account(owner: &Runtime, request: &Request, fixture: &Fixture, username: &str) {
+    let source = SourceId(request.source);
+    let base = fixture.url.trim_end_matches("/generated.ts").to_owned();
+    let username = username.to_owned();
+    owner
+        .services()
+        .call(move |store| {
+            let mut stored = store.source(source)?.unwrap().source;
+            stored.config = SourceConfig::Xtream(iptv_providers::model::XtreamCredentials {
+                server_url: base,
+                username: iptv_providers::Secret::new(username),
+                password: iptv_providers::Secret::new("generated-secret"),
+                user_agent: None,
+            });
+            store.update_source(source, &stored)
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn pending_account_owner_stays_budgeted_when_its_surface_switches_accounts() {
+    let a = Fixture::starting(true).await;
+    let b = Fixture::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let owner = owner(dir.path());
+    let old = seed(&owner, &a.url).await;
+    xtream_account(&owner, &old, &a, "generated-a").await;
+    let sibling = seed(&owner, &a.url).await;
+    xtream_account(&owner, &sibling, &a, "generated-a").await;
+    let other = seed(&owner, &b.url).await;
+    xtream_account(&owner, &other, &b, "generated-b").await;
+    refresh_accounts(&owner.services(), &owner.recordings)
+        .await
+        .unwrap();
+    assert!(owner.reserve_live_viewing(0, SourceId(old.source), &old.channel));
+    let pending = tokio::spawn(owner.prepare_live_source(
+        0,
+        SourceId(old.source),
+        old.channel.clone(),
+        source(&owner, &old).await,
+    ));
+    wait(|| a.requests.load(Ordering::SeqCst) == 1).await;
+    assert!(owner.reserve_live_viewing(0, SourceId(other.source), &other.channel));
+    let switched = tokio::spawn(owner.prepare_live_source(
+        0,
+        SourceId(other.source),
+        other.channel.clone(),
+        source(&owner, &other).await,
+    ));
+    assert!(owner.reserve_live_viewing(1, SourceId(sibling.source), &sibling.channel));
+    let returning = tokio::spawn(owner.prepare_live_source(
+        1,
+        SourceId(sibling.source),
+        sibling.channel.clone(),
+        source(&owner, &sibling).await,
+    ));
+    wait(|| a.requests.load(Ordering::SeqCst) == 2).await;
+    a.held.store(false, Ordering::SeqCst);
+    assert!(pending.await.unwrap().is_err());
+    assert!(switched.await.unwrap().is_ok());
+    assert!(returning.await.unwrap().is_ok());
+    assert_eq!(
+        a.peak.load(Ordering::SeqCst),
+        1,
+        "the original account's pending request must retire before another surface opens it"
+    );
+    assert_eq!(b.peak.load(Ordering::SeqCst), 1);
+    owner.release_viewing(0);
+    owner.release_viewing(1);
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn reused_incarnation_cannot_attach_the_old_incoming_at_the_same_url() {
+    let fixture = Fixture::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let owner = owner(dir.path());
+    let request = seed(&owner, &fixture.url).await;
+    let local = open(&owner, &request).await;
+    let playback = player(&local).await;
+    let id = record_now(&owner, request.clone()).await;
+    let source_id = SourceId(request.source);
+    owner
+        .services()
+        .call(move |store| {
+            let mut source = store.source(source_id)?.unwrap().source;
+            source.config = SourceConfig::M3u(iptv_providers::model::M3uSourceConfig {
+                location: iptv_providers::SecretUrl::new(
+                    "https://example.test/generated-replacement.m3u",
+                ),
+                user_agent: None,
+                referrer: None,
+            });
+            store.update_source(source_id, &source)
+        })
+        .await
+        .unwrap();
+    refresh_accounts(&owner.services(), &owner.recordings)
+        .await
+        .unwrap();
+    assert!(!owner.reserve_live_viewing(1, source_id, &request.channel));
+    assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
+    owner.stop_recording(id).await.unwrap();
+    until(&owner, id, |job| !job.status.active()).await;
+    drop(playback);
+    owner.release_viewing(0);
+    assert!(owner.drain_services());
+}
+
+fn background_owner(directory: &Path) -> Runtime {
+    let mut ports = crate::Ports::new(directory.to_owned(), |_| {
+        Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
+    });
+    ports.background_recordings = true;
+    let runtime = Runtime::new(ports);
+    runtime.start_services();
+    runtime
+}
+
+#[tokio::test]
+async fn suspended_shared_viewer_retains_capture_budget_and_resumes_the_same_input() {
+    let fixture = Fixture::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let owner = background_owner(dir.path());
+    let request = seed(&owner, &fixture.url).await;
+    let local = open(&owner, &request).await;
+    let playback = player(&local).await;
+    let id = record_now(&owner, request.clone()).await;
+    drop(playback);
+    host::suspend_viewing(dir.path());
+    assert!(owner.recordings.lock().viewers.is_empty());
+    assert!(!owner.recordings.lock().capacity(request.source, None));
+    assert!(host::resume_viewing(dir.path()));
+    assert!(owner.recordings.lock().viewers[&0].input.is_some());
+    let resumed = player(&local).await;
+    assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
+    owner.stop_recording(id).await.unwrap();
+    until(&owner, id, |job| !job.status.active()).await;
+    drop(resumed);
+    owner.release_viewing(0);
+    assert!(owner.shutdown_recording_host());
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn background_shared_input_outlives_the_ui_executor_and_finishes_once() {
+    let fixture = Fixture::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_owned();
+    let owner = background_owner(&root);
+    let mut request = seed(&owner, &fixture.url).await;
+    let local = open(&owner, &request).await;
+    let playback = player(&local).await;
+    request.start = now();
+    request.end = request.start + 4;
+    let id = owner.schedule_recording(request).await.unwrap();
+    until(&owner, id, |job| {
+        job.status == Status::Recording && job.bytes >= 188
+    })
+    .await;
+    let state = owner.recordings.clone();
+    drop(playback);
+    assert!(owner.drain_services());
+    drop(owner);
+    let services = state.host.lock().unwrap().as_ref().unwrap().accept();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+    let job = loop {
+        let job = services
+            .read(move |store| store.recording_job(id))
+            .await
+            .unwrap()
+            .unwrap();
+        if !job.status.active() {
+            break job;
+        }
+        assert!(tokio::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(job.status, Status::Completed);
+    assert!(job.bytes >= 188);
+    assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
+    assert!(state.stop());
+    assert!(state.lock().inputs.is_empty());
+}
+
+#[tokio::test]
+async fn adaptive_master_retires_probe_then_preserves_native_handoff_and_capture_budget() {
+    let fixture = Fixture::master().await;
+    let dir = tempfile::tempdir().unwrap();
+    let owner = owner(dir.path());
+    let mut request = seed(&owner, &fixture.url).await;
+    let original = source(&owner, &request).await;
+    let fallback = open(&owner, &request).await;
+    assert_eq!(
+        fallback, original,
+        "native adaptive choice must retain the original manifest/source"
+    );
+    assert!(owner.recordings.lock().inputs.is_empty());
+    // Immediately open the native path, without a grace period for probe
+    // cleanup. The server keeps each root connection until client EOF.
+    let (address, path) = fallback
+        .url
+        .strip_prefix("http://")
+        .unwrap()
+        .split_once('/')
+        .unwrap();
+    let mut native = tokio::net::TcpStream::connect(address).await.unwrap();
+    native
+        .write_all(format!("GET /{path} HTTP/1.1\r\nHost: {address}\r\n\r\n").as_bytes())
+        .await
+        .unwrap();
+    let mut head = Vec::new();
+    while !head.ends_with(b"\r\n\r\n") {
+        head.push(native.read_u8().await.unwrap());
+    }
+    let mut manifest = vec![0; MASTER.len()];
+    native.read_exact(&mut manifest).await.unwrap();
+    assert_eq!(manifest, MASTER);
+    assert_eq!(
+        fixture.requests.load(Ordering::SeqCst),
+        2,
+        "the probe must not select or fetch a variant"
+    );
+    assert_eq!(
+        fixture.peak.load(Ordering::SeqCst),
+        1,
+        "native handoff must not overlap its unsupported probe"
+    );
+    request.start = now();
+    request.end = request.start + 30;
+    assert!(
+        owner.schedule_recording(request).await.is_err(),
+        "independent capture still needs a spare permitted connection"
+    );
+    assert_eq!(fixture.requests.load(Ordering::SeqCst), 2);
+    drop(native);
+    owner.release_viewing(0);
+    assert!(owner.drain_services());
+}

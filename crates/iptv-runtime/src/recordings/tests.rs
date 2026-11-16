@@ -161,14 +161,14 @@ fn media_finalization_moves_once_and_never_replaces_an_existing_recording() {
     assert_eq!(std::fs::read(&to).unwrap(), b"generated new media");
 }
 
-fn owner(directory: &Path) -> Runtime {
+pub(super) fn owner(directory: &Path) -> Runtime {
     let owner = Runtime::new(crate::Ports::new(directory.to_owned(), |_| {
         Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
     }));
     owner.start_services();
     owner
 }
-async fn seed(owner: &Runtime, url: &str) -> Request {
+pub(super) async fn seed(owner: &Runtime, url: &str) -> Request {
     let url = url.to_owned();
     owner
         .services()
@@ -580,7 +580,7 @@ async fn a_reused_playlist_id_is_rejected_before_resolving_recording_media() {
         replacement
     );
 }
-async fn until(owner: &Runtime, id: JobId, accept: impl Fn(&Job) -> bool) -> Job {
+pub(super) async fn until(owner: &Runtime, id: JobId, accept: impl Fn(&Job) -> bool) -> Job {
     for _ in 0..1000 {
         if let Some(job) = owner
             .recording_jobs()

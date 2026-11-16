@@ -360,7 +360,8 @@ impl Ui {
             }
             return;
         }
-        if !recordings_view::reserve_viewing(*self, 0, channel) {
+        if !recordings_view::reserve_viewing(*self, 0, channel, matches!(playback, Playback::Live))
+        {
             return;
         }
         crate::on_demand::flush(*self, false);

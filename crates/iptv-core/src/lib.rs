@@ -30,6 +30,7 @@ pub mod playback;
 pub mod playback_windows;
 pub mod player_info;
 pub mod player_options;
+pub mod live;
 pub mod recording;
 pub mod reorder;
 pub mod seek_hold;
