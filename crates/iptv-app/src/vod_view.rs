@@ -563,6 +563,7 @@ pub fn key(ui: Ui, action: Action) {
                 return;
             }
             ui.vod.update(|s| match control {
+                Control::Catalogue if s.cards.is_empty() => s.move_control(-1),
                 Control::Catalogue if at_top => s.move_control(-1),
                 Control::Catalogue => s.move_focus(-1),
                 Control::Episodes => s.move_episode(-1),
@@ -571,6 +572,7 @@ pub fn key(ui: Ui, action: Action) {
         }
         Action::MoveDown => {
             ui.vod.update(|s| match control {
+                Control::Catalogue if s.cards.is_empty() => s.move_control(1),
                 Control::Catalogue => s.move_focus(1),
                 Control::Episodes => s.move_episode(1),
                 _ => s.move_control(1),

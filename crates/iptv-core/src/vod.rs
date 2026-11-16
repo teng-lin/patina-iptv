@@ -619,7 +619,9 @@ impl Screen {
             }
             out.push(Control::Block);
         } else if self.is_shelf() {
-            out.push(Control::Catalogue);
+            if !self.cards.is_empty() {
+                out.push(Control::Catalogue);
+            }
         } else {
             out.extend([
                 Control::Search,
@@ -627,8 +629,10 @@ impl Screen {
                 Control::Category,
                 Control::Sort,
                 Control::Continue,
-                Control::Catalogue,
             ]);
+            if !self.cards.is_empty() {
+                out.push(Control::Catalogue);
+            }
         }
         out
     }
@@ -686,6 +690,12 @@ impl Screen {
     }
     pub fn move_control(&mut self, delta: isize) {
         let controls = self.controls();
+        if controls.is_empty() {
+            // An empty successful shelf has no arrow-focus target. Keep its
+            // neutral content anchor; Back remains available in the shell.
+            self.control = Control::Catalogue;
+            return;
+        }
         let at = controls
             .iter()
             .position(|c| *c == self.control)
@@ -872,18 +882,19 @@ mod tests {
     fn a_shelf_offers_only_its_titles_until_an_error_offers_retry() {
         let mut s = Screen::default();
         let g = s.begin_shelf(Shelf::RecentlyAdded);
-        assert_eq!(s.controls(), vec![Control::Catalogue]);
+        assert!(s.controls().is_empty());
         s.move_control(-1);
         assert_eq!(s.control, Control::Catalogue, "no hidden toolbar to reach");
         s.fail("On-demand library could not be loaded", Operation::List);
         assert!(!s.busy);
         assert_eq!(s.control, Control::Retry, "OK repeats the failed load");
-        assert_eq!(s.controls(), vec![Control::Retry, Control::Catalogue]);
+        assert_eq!(s.controls(), vec![Control::Retry]);
         assert_eq!(s.retry_operation(), Some(Operation::List));
         let g2 = s.reload();
         assert!(g2 != g && s.error.is_none() && s.retry.is_none());
         assert_eq!(s.control, Control::Catalogue);
         s.publish(g2, vec![keyed(1, Kind::Movie, "a")], false, false);
+        assert_eq!(s.controls(), vec![Control::Catalogue]);
         // An error over a list keeps the focus on the titles.
         s.fail(
             "Details unavailable; refresh the playlist and try again",
@@ -892,10 +903,47 @@ mod tests {
         assert_eq!(s.control, Control::Catalogue);
         s.move_control(-1);
         assert_eq!(s.control, Control::Retry);
+        s.move_control(1);
+        assert_eq!(
+            s.control,
+            Control::Catalogue,
+            "populated cards remain reachable"
+        );
+        s.move_control(-1);
         s.back();
         assert_eq!(s.control, Control::Catalogue);
         assert!(!s.open, "Back from the list closes the shelf");
     }
+    #[test]
+    fn empty_shelf_navigation_stays_on_retry_and_empty_success_has_no_targets() {
+        for shelf in [Shelf::ContinueWatching, Shelf::RecentlyAdded] {
+            let mut screen = Screen::default();
+            let generation = screen.begin_shelf(shelf);
+            assert!(screen.publish(generation, Vec::new(), false, false));
+            assert!(screen.controls().is_empty());
+            for delta in [-1, 1] {
+                screen.move_control(delta);
+                assert_eq!(screen.control, Control::Catalogue);
+                assert!(screen.focused.is_none());
+            }
+            screen.fail("On-demand library could not be loaded", Operation::List);
+            assert_eq!(screen.controls(), [Control::Retry]);
+            for stale in [Control::Retry, Control::Catalogue] {
+                for delta in [-1, 1] {
+                    screen.control = stale;
+                    screen.move_control(delta);
+                    assert_eq!(
+                        screen.control,
+                        Control::Retry,
+                        "empty errors offer only visible Retry"
+                    );
+                }
+            }
+            screen.back();
+            assert!(!screen.open, "empty shelves still dismiss with Back");
+        }
+    }
+
     #[test]
     fn reopening_a_shelf_returns_to_its_title_by_identity() {
         let mut s = Screen::default();
@@ -1352,7 +1400,7 @@ mod tests {
     #[test]
     fn the_catalogue_keeps_its_toolbar() {
         let mut s = Screen::default();
-        s.begin(Kind::Series);
+        let generation = s.begin(Kind::Series);
         assert!(!s.is_shelf());
         assert_eq!(
             s.controls(),
@@ -1362,9 +1410,15 @@ mod tests {
                 Control::Category,
                 Control::Sort,
                 Control::Continue,
-                Control::Catalogue,
             ]
         );
+        s.publish(
+            generation,
+            vec![keyed(1, Kind::Series, "generated")],
+            false,
+            false,
+        );
+        assert!(s.controls().contains(&Control::Catalogue));
     }
     #[test]
     fn series_resume_keeps_the_last_watched_episode_and_advances_after_completion() {
