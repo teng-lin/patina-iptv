@@ -2,7 +2,7 @@
 # Builds the Rust crate's Android libnsh.so with nsh and copies it, plus the
 # app's NSH assets, into the Gradle host (hosts/android/app/build/nsh).
 # Usage: tools/sync-host.sh [--release] [--no-build]
-# --release: arm64-v8a only (ABIS=... to choose), smallest library.
+# --release: arm64-v8a and armeabi-v7a (ABIS=... to choose), smallest libraries.
 # ABIS also limits development builds (default x86_64,arm64-v8a).
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -18,7 +18,7 @@ source "$root/tools/ci/android-ndk-env.sh"
 abis=${ABIS:-x86_64,arm64-v8a}
 if [ "${1:-}" = "--release" ]; then
   shift
-  abis=${ABIS:-arm64-v8a}
+  abis=${ABIS:-arm64-v8a,armeabi-v7a}
   export CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
   export CARGO_PROFILE_RELEASE_OPT_LEVEL=s
 fi
@@ -26,7 +26,7 @@ export CARGO_PROFILE_RELEASE_LTO=${CARGO_PROFILE_RELEASE_LTO:-thin}
 export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-16}
 
 if [ "${1:-}" != "--no-build" ]; then
-  # x86_64 for emulators, arm64-v8a for real TV boxes and tablets.
+  # x86_64 for emulators; ARM64 and ARMv7 for TV boxes and tablets.
   (cd "$app" && "$nsh" package --target android --abi "$abis")
 fi
 

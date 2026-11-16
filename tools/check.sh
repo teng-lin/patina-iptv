@@ -50,6 +50,7 @@ python3 tools/ci/test-unpack-signing-input.py
 python3 tools/ci/test-nsh-tool-key.py
 python3 tools/ci/test-pins.py
 python3 tools/ci/test-android-changes.py
+python3 tools/ci/test-android-artifacts.py
 python3 tools/ci/test-publish-release.py
 python3 tools/ci/test-rehearsal.py
 python3 tools/ci/test-release-workflow.py

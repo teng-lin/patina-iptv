@@ -28,7 +28,7 @@ def check(artifact, abis):
 
 
 if __name__ == "__main__":
-    abis = os.environ.get("ABIS", "arm64-v8a").replace(",", " ").split()
+    abis = os.environ.get("ABIS", "arm64-v8a,armeabi-v7a").replace(",", " ").split()
     if not abis or not set(abis) <= {"arm64-v8a", "armeabi-v7a", "x86_64", "x86"}:
         raise SystemExit("ABIS must list supported Android architectures")
     if len(sys.argv) < 2:

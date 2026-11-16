@@ -50,15 +50,17 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
-      - name: Install the NDK and the Android Rust target
+      - name: Install the NDK and the Android Rust targets
         run: |
           # Runner images preset ANDROID_NDK_HOME to their own default NDK.
           source tools/ci/android-ndk-env.sh
           sdkmanager "ndk;$IPTV_ANDROID_NDK"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$IPTV_ANDROID_NDK" >> "$GITHUB_ENV"
-          rustup target add aarch64-linux-android
+          rustup target add aarch64-linux-android armv7-linux-androideabi
       - name: Compile the app library for Android
-        run: bash tools/ci/check-android.sh
+        run: |
+          bash tools/ci/check-android.sh aarch64-linux-android
+          bash tools/ci/check-android.sh armv7-linux-androideabi
   android:
     needs: changes
     # Keep the required android check present even when packaging is skipped.
@@ -79,7 +81,7 @@ jobs:
       - name: Build Android native library
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target
-        run: ABIS=arm64-v8a bash tools/sync-host.sh
+        run: ABIS=arm64-v8a,armeabi-v7a bash tools/sync-host.sh
       - name: Generate and stage Android notices
         run: |
           cargo install cargo-about --version 0.9.3 --features cli --locked
@@ -94,6 +96,11 @@ jobs:
       - name: Verify APK signature
         run: |
           "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify hosts/android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Verify ARM64 and ARMv7 native libraries and notices
+        run: |
+          python3 tools/ci/check-android-artifacts.py \
+            hosts/android/app/build/outputs/apk/debug/app-debug.apk \
+            hosts/android/app/build/outputs/bundle/debug/app-debug.aab
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: android-debug
