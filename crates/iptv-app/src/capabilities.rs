@@ -1,7 +1,6 @@
 //! One host projection for feature controls and action admission.
 use crate::Ui;
 use iptv_core::capabilities::{Availability, Host, Platform, Reason};
-use nsh_core::prelude::*;
 
 pub const HOST: Host = Host {
     platform: if cfg!(target_os = "android") {
