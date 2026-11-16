@@ -175,7 +175,8 @@ mod tests {
                     "inspection_stage::tests::probe_stage_initialization_precedes_its_first_encrypted_connection",
                     CHILD,
                     std::time::Duration::from_secs(20),
-                );
+                )
+                .expect("probe initialization child could not complete");
                 assert!(
                     output.status.success(),
                     "fresh probe opener failed:\n{}\n{}",

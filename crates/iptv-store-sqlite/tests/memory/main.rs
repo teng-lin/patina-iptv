@@ -28,10 +28,13 @@ fn isolated(test: &str, measure: impl FnOnce()) {
         measure();
         return;
     }
-    let _measurement = MEASUREMENT
-        .lock()
-        .expect("memory measurement lock poisoned");
-    let output = initialization_support::child(test, CHILD, std::time::Duration::from_secs(600));
+    let output = {
+        let _measurement = MEASUREMENT
+            .lock()
+            .expect("memory measurement lock poisoned");
+        initialization_support::child(test, CHILD, std::time::Duration::from_secs(600))
+    }
+    .expect("memory child could not complete");
     assert!(
         output.status.success(),
         "memory case {test} failed:\n{}\n{}",

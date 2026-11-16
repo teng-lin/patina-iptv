@@ -17,7 +17,8 @@ fn native_initialization_finishes_before_concurrent_key_attachment() {
                 "cipher_initialization::native_initialization_finishes_before_concurrent_key_attachment",
                 CHILD,
                 std::time::Duration::from_secs(20),
-            );
+            )
+            .expect("native initialization child could not complete");
             assert!(
                 output.status.success(),
                 "native concurrent initialization failed:\n{}\n{}",

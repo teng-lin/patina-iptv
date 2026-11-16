@@ -284,7 +284,8 @@ mod tests {
                     "encryption::tests::concurrent_first_connections_wait_for_cipher_initialization",
                     CHILD,
                     std::time::Duration::from_secs(20),
-                );
+                )
+                .expect("cold cipher initialization child could not complete");
                 assert!(
                     output.status.success(),
                     "cold concurrent cipher initialization failed:\n{}\n{}",
