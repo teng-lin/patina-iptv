@@ -216,9 +216,6 @@ pub fn press_quick(ui: Ui, action: QuickAction) {
         QuickAction::Channels => crate::channels_view::open(ui, ListMode::Overlay),
         QuickAction::Favorite => press_control(ui, Control::Favorite),
         QuickAction::Multiview => press_control(ui, Control::Multiview),
-        QuickAction::Controls if nsh_core::prelude::idiom() == nsh_core::platform::Idiom::Tv => {
-            crate::play_bar::remote(ui)
-        }
         QuickAction::Controls => ui.update_panels(|p, now| p.show_controls(now)),
     }
 }

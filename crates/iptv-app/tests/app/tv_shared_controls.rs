@@ -161,4 +161,26 @@ fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
     assert!(!selected(app, "guide-preview"));
     assert_eq!(iptv_app::player_opens(0), opens);
     persistent(app, &lifetime, player);
+    step(app.press_key("up"));
+    step(app.press_key("enter"));
+    step(app.press_key("g"));
+    assert!(
+        !selected(app, "guide-preview"),
+        "Overlay returns focus to a visible guide row"
+    );
+    step(app.press_key("f"));
+    step(app.press_key("stop"));
+    step(app.wait_until(
+        "stop clears preview playback",
+        Duration::from_secs(3),
+        |_| !iptv_app::player_has_source(0),
+    ));
+    assert!(!selected(app, "guide-preview"));
+    step(app.press_key("m"));
+    step(app.wait_for("id:menu-panel"));
+    assert!(
+        !app.screen().matches("id:play-bar-layer").unwrap(),
+        "Menu after Stop stays in the guide"
+    );
+    persistent(app, &lifetime, player);
 }

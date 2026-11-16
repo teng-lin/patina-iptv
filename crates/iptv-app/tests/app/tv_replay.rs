@@ -148,12 +148,18 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_pauses() {
         !app.screen().matches(CARD).unwrap(),
         "the old card stays hidden behind the shared bar"
     );
+    let clock_before_ok = app.clock().now();
     step(app.press_key("enter"));
-    step(app.wait_until(
-        "OK commits archive seek without waiting for debounce",
-        Duration::from_secs(5),
-        |_| iptv_app::player_opens(0) > opens,
-    ));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while iptv_app::player_opens(0) == opens && std::time::Instant::now() < deadline {
+        app.settle(); // flush native workers without advancing the manual clock
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        app.clock().now(),
+        clock_before_ok,
+        "OK committed with the debounce clock frozen"
+    );
     assert_eq!(
         iptv_app::player_opens(0),
         opens + 1,

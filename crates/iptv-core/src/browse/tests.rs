@@ -555,4 +555,8 @@ fn preview_focus_keeps_the_guide_anchor_and_returns_the_existing_player() {
     assert!(screen.focus.focus_preview(true));
     assert_eq!(screen.back(), Outcome::Moved);
     assert_eq!(screen.focus.pane, Pane::Guide);
+    assert!(screen.focus.focus_preview(true));
+    screen.focus.retain_preview(false);
+    assert_eq!(screen.focus.pane, Pane::Guide);
+    assert_eq!(screen.focus.channel, 0);
 }

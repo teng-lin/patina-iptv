@@ -141,6 +141,14 @@ impl Focus {
         }
     }
 
+    /// A stopped player or a layout without a preview returns focus to
+    /// the anchored guide row; the content identity/time stay unchanged.
+    pub fn retain_preview(&mut self, available: bool) {
+        if self.pane == Pane::Preview && !available {
+            self.pane = Pane::Guide;
+        }
+    }
+
     /// A direction on the guide screen. `list` is the list the guide shows.
     pub fn navigate(&mut self, m: Move, cols: &Columns, list: &dyn Schedule) -> Outcome {
         self.hint = false;

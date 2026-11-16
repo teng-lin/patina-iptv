@@ -214,6 +214,20 @@ fn step(ui: Ui, f: impl FnOnce(&mut Focus, &Columns, &ListView) -> Outcome) -> O
     outcome
 }
 
+/// Keep preview focus on a visible, playing surface across stop/layout changes.
+pub fn bind(ui: Ui) {
+    effect(move || {
+        let available = ui.playing.get().is_some()
+            && matches!(
+                ui.mode.get(),
+                crate::ViewMode::Guide | crate::ViewMode::Fullscreen
+            );
+        if ui.focus.with(|f| f.pane == Pane::Preview) && !available {
+            ui.focus.update(|f| f.retain_preview(false));
+        }
+    });
+}
+
 /// A direction on the guide screen.
 pub fn navigate(ui: Ui, m: Move) {
     if m == Move::Up

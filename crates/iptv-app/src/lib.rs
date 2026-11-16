@@ -788,6 +788,7 @@ fn ready_app() -> impl IntoElement {
     player::bind(ui);
     data::pages::bind(ui);
     play_bar::bind(ui);
+    lists::bind(ui);
     multiview::bind(ui);
     pip::bind(ui);
     desktop::player_windows::bind(ui);
