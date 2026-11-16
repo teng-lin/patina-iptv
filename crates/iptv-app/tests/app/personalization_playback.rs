@@ -133,12 +133,23 @@ fn cold_start_resumes_the_stored_channel_with_an_auto_hiding_banner() {
 
     // One cached playlist with refresh disabled takes the early-resume path.
     // Keep the isolated home alive while a new app reads its saved channel.
+    let before = iptv_app::player_opens(0);
     let mut app = crate::cov_data::start();
     step(app.wait_for_within(
         "id:player-banner >> text:/Local A$/",
         Duration::from_secs(20),
     ));
+    step(app.wait_until(
+        "the resumed native source is published",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0) && iptv_app::player_opens(0) > before,
+    ));
     assert!(iptv_app::player_has_source(0));
+    assert_eq!(
+        iptv_app::player_opens(0),
+        before + 1,
+        "one resumed native source"
+    );
     step(app.run_for(Duration::from_secs(10)));
     assert!(!app.screen().matches("id:player-banner").unwrap());
     // OK can still open the full information card after the banner expires.
