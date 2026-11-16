@@ -41,8 +41,8 @@ Returning to the foreground requests a fresh acknowledgement, including after
 leaving Android's alarm-permission settings. That refresh does not open a stream.
 It uses the recorder's current schedule, including the earlier recurring guide
 check deadline, so refreshing permission cannot postpone discovery of episodes.
-During native startup it waits for the first durable job/rule snapshot instead
-of replacing a saved alarm with an empty schedule. Foreground checks update the
+During native startup a refresh returns without replacing the saved alarm;
+the first loaded job/rule snapshot supplies the new schedule. Foreground checks update the
 persistent recording notice without repeating its warning toast on every return.
 
 Awake-only desktop capture can outlive the window while the host process and

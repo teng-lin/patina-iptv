@@ -90,12 +90,20 @@ fn early_foreground_return_keeps_saved_wake_until_durable_jobs_are_loaded() {
     owner.start_services();
     owner.start_recordings();
     seen.recv_timeout(Duration::from_secs(10)).unwrap();
-    let refreshed = block_on(owner.resume_recording_wake());
+    let driver = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    let refreshed = driver.block_on(async {
+        tokio::time::timeout(Duration::from_secs(5), owner.resume_recording_wake()).await
+    });
     let during_startup = ALARM.load(Ordering::SeqCst);
     let pending = owner.recording_capabilities();
     // Release the actual native store worker before assertions, also on regressions.
     release.send(()).unwrap();
-    refreshed.unwrap();
+    refreshed
+        .expect("foreground return must not wait for the blocked store")
+        .unwrap();
     assert_eq!(
         during_startup, next,
         "an unloaded snapshot must not clear the saved alarm"
