@@ -162,17 +162,19 @@ impl Runtime {
     /// through [`Runtime::vod_details`] and [`Runtime::vod_play`], which
     /// check the parental lock, the source's current incarnation and policy,
     /// and resolve a fresh provider link. No playback URL is part of a card.
-    pub async fn vod_discovery(
+    pub fn vod_discovery(
         &self,
         query: iptv_core::vod::DiscoveryQuery,
-    ) -> Result<iptv_core::vod::DiscoveryPage, Error> {
+    ) -> impl std::future::Future<Output = Result<iptv_core::vod::DiscoveryPage, Error>> + '_ {
         let token = self.vod.begin_discovery();
         let services = self.services();
-        let mut page = services
-            .analyze(move |s| s.vod_discovery_cancellable(query, &token))
-            .await?;
-        self.vod_redact_protected(&mut page.cards).await?;
-        Ok(page)
+        async move {
+            let mut page = services
+                .analyze(move |s| s.vod_discovery_cancellable(query, &token))
+                .await?;
+            self.vod_redact_protected(&mut page.cards).await?;
+            Ok(page)
+        }
     }
     /// The bounded page of `shelf` holding `key` at its current place, or
     /// the first page when the shelf no longer lists it
@@ -181,18 +183,20 @@ impl Runtime {
     /// The place and the page come from one read transaction on the
     /// analysis lane, cancelled like the shelf's other pages; a failure is
     /// reported, never mistaken for a title that has gone.
-    pub async fn vod_discovery_around(
+    pub fn vod_discovery_around(
         &self,
         shelf: iptv_core::vod::Shelf,
         key: Key,
-    ) -> Result<iptv_core::vod::DiscoveryPage, Error> {
+    ) -> impl std::future::Future<Output = Result<iptv_core::vod::DiscoveryPage, Error>> + '_ {
         let token = self.vod.begin_discovery();
         let services = self.services();
-        let mut page = services
-            .analyze(move |s| s.vod_discovery_around_cancellable(shelf, &key, &token))
-            .await?;
-        self.vod_redact_protected(&mut page.cards).await?;
-        Ok(page)
+        async move {
+            let mut page = services
+                .analyze(move |s| s.vod_discovery_around_cancellable(shelf, &key, &token))
+                .await?;
+            self.vod_redact_protected(&mut page.cards).await?;
+            Ok(page)
+        }
     }
     /// Whether playlist `source` is still the incarnation `incarnation` (an
     /// opaque value from [`Details::incarnation`]): false once it was
@@ -1091,6 +1095,14 @@ mod tests {
             assert_eq!(names(page), expected, "{shelf:?}");
             waits_off_the_guide_reader(&owner, owner.vod_discovery(first));
             waits_off_the_guide_reader(&owner, owner.vod_discovery_around(shelf, older.clone()));
+            // Closing before a host polls the future must not start a new,
+            // uncancelled query when the queued task eventually runs.
+            let pending = owner.vod_discovery(first);
+            owner.vod_discovery_cancel();
+            assert!(owner.services().block_on(pending).is_err(), "{shelf:?}");
+            let pending = owner.vod_discovery_around(shelf, older.clone());
+            owner.vod_discovery_cancel();
+            assert!(owner.services().block_on(pending).is_err(), "{shelf:?}");
             // A later shelf reads normally, its window around the title too.
             let window = owner
                 .services()

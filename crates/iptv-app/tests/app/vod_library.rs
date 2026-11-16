@@ -535,12 +535,12 @@ fn recover(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     let surface = player(&app);
     step(app.press("text:/^☰  /"));
     step(app.press("label:Continue watching"));
-    step(app.wait_for("text:/^Generated Voyage · Series · Generated retry playlist/"));
+    step(app.wait_for("text:/^Generated Voyage · TV series · Generated retry playlist/"));
     let tv = idiom == nsh_core::platform::Idiom::Tv;
     if tv {
         step(app.press_key("enter"));
     } else {
-        step(app.press("text:/^Generated Voyage · Series/"));
+        step(app.press("text:/^Generated Voyage · TV series/"));
     }
     step(app.wait_for("text:Details unavailable; refresh the playlist and try again"));
     assert_eq!(app.screen().count("id:vod-retry").unwrap(), 1);
@@ -793,7 +793,7 @@ fn discover(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     step(app.back());
     step(app.press("text:/^☰  /"));
     step(app.press("label:Recently added"));
-    step(app.wait_for("text:/^Generated Voyage · Series · Generated alpha/"));
+    step(app.wait_for("text:/^Generated Voyage · TV series · Generated alpha/"));
     assert_eq!(app.screen().count("id:vod-title").unwrap(), 6);
     step(app.back());
     step(app.wait_for_gone("id:vod-screen", Duration::from_secs(5)));

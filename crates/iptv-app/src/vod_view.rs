@@ -98,6 +98,14 @@ fn reload(ui: Ui, append: bool) {
     });
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
+        // A queued host task may first run after Back or another shelf.
+        // Do not start work (or supersede the newer read's token) then.
+        if !ui
+            .vod
+            .with_untracked(|s| s.open && s.generation == generation)
+        {
+            return;
+        }
         // A shelf reads one bounded page across every playlist; a
         // catalogue also refreshes its filter choices.
         let result = match (shelf, anchor) {
@@ -163,6 +171,12 @@ fn load_previous(ui: Ui, step_up: bool) {
     };
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
+        if !ui
+            .vod
+            .with_untracked(|s| s.open && s.generation == generation && s.start == start)
+        {
+            return;
+        }
         let result = owner.vod_discovery(query).await;
         ui.vod.update(|s| {
             if s.generation != generation || !s.open {
@@ -807,7 +821,7 @@ fn toolbar(ui: Ui, size: Scale) -> impl IntoElement {
 fn kind_name(kind: Kind) -> &'static str {
     match kind {
         Kind::Movie => tr("Film"),
-        Kind::Series | Kind::Episode => tr("Series"),
+        Kind::Series | Kind::Episode => tr("TV series"),
     }
 }
 

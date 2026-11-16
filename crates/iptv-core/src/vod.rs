@@ -363,6 +363,9 @@ pub struct Screen {
     /// A shelf's position of `cards[0]` in its order: titles before it can
     /// be loaded with Load previous. Always 0 for a catalogue.
     pub start: u32,
+    /// Next store position after the pages consumed. Refreshes can repeat
+    /// titles in a later page, so this must not use deduplicated card count.
+    pub end: u32,
     pub focused: Option<Key>,
     pub details: Option<Details>,
     pub season: Option<u32>,
@@ -420,13 +423,12 @@ impl Screen {
         self.generation
     }
     /// Starts reading the page after the titles shown: they and the focus
-    /// stay. Returns where that page starts: the window's start plus the
-    /// titles shown.
+    /// stay. Returns the next store position actually consumed, including
+    /// repeated titles removed from a page after a library refresh.
     pub fn begin_more(&mut self) -> u32 {
         self.busy = true;
         self.clear_failure();
-        self.start
-            .saturating_add(u32::try_from(self.cards.len()).unwrap_or(u32::MAX))
+        self.end
     }
     /// Whether a shelf window starts below its top, so Load previous (or Up
     /// on its first title) has titles to read.
@@ -477,10 +479,12 @@ impl Screen {
     /// when the shelf no longer lists it.
     pub fn publish_window(&mut self, generation: u64, page: DiscoveryPage) -> bool {
         let start = page.start;
+        let end = start.saturating_add(u32::try_from(page.cards.len()).unwrap_or(u32::MAX));
         if !self.publish(generation, page.cards, page.more, false) {
             return false;
         }
         self.start = start;
+        self.end = end;
         true
     }
     /// Starts opening details or playing: a newer generation, so an older
@@ -626,15 +630,18 @@ impl Screen {
         if generation != self.generation || !self.open {
             return false;
         }
+        let consumed = u32::try_from(cards.len()).unwrap_or(u32::MAX);
         if !append {
             self.cards = cards;
             self.start = 0;
+            self.end = consumed;
         } else {
             for card in cards {
                 if !self.cards.iter().any(|c| c.key == card.key) {
                     self.cards.push(card);
                 }
             }
+            self.end = self.end.saturating_add(consumed);
         }
         if !self
             .focused
@@ -990,6 +997,35 @@ mod tests {
         assert!(again != before && s.error.is_none() && s.retry.is_none());
         s.show_details(series_details(2));
         assert_eq!(s.control, Control::Play);
+    }
+    #[test]
+    fn load_more_advances_after_a_refresh_repeats_a_whole_page() {
+        let shelf = Shelf::RecentlyAdded;
+        let original = numbered(120);
+        let mut screen = Screen::default();
+        let generation = screen.begin_shelf(shelf);
+        screen.publish_window(generation, read(&original, DiscoveryQuery::first(shelf)));
+        screen.move_focus(39);
+        let focused = screen.focused.clone();
+        // Forty new additions move the already shown titles onto the next
+        // page. Deduplication must not make Load more request it forever.
+        let mut refreshed: Vec<_> = (0..40)
+            .map(|n| card(&format!("generated-new-{n:03}")))
+            .collect();
+        refreshed.extend(original.clone());
+        for expected_offset in [40, 80, 120] {
+            let offset = screen.begin_more();
+            assert_eq!(offset, expected_offset);
+            let page = read(&refreshed, DiscoveryQuery::after(shelf, offset as usize));
+            assert!(screen.publish(generation, page.cards, page.more, true));
+            assert_eq!(screen.focused, focused);
+            if offset == 40 {
+                assert_eq!(screen.cards.len(), 40, "the repeated page is deduplicated");
+                assert!(screen.has_more);
+            }
+        }
+        assert_eq!(screen.cards, original);
+        assert!(!screen.has_more, "all remaining titles were reached");
     }
     #[test]
     fn retry_after_a_later_page_fails_keeps_the_pages_and_focus() {
