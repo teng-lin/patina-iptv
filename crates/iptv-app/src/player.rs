@@ -717,26 +717,33 @@ fn load_authorized(
         crate::data::spawn_in_app(async move {
             match prepared.await {
                 Ok(source) => publish_source(ui, surface, session, source),
-                Err(error) => fail(
-                    ui,
-                    surface,
-                    session,
-                    ErrorKind::Unavailable,
-                    match error.unavailable_reason() {
-                        Some(reason)
-                            if reason
-                                == crate::i18n::key(
-                                    "No provider connection available; check Streams at once",
-                                ) =>
-                        {
+                Err(error) => {
+                    let capacity = error.unavailable_reason()
+                        == Some(crate::i18n::key(
+                            "No provider connection available; check Streams at once",
+                        ));
+                    fail(
+                        ui,
+                        surface,
+                        session,
+                        // Local admission uses the same retryable refusal as a
+                        // connection held by recording in open_allowed(). The
+                        // channel resolved; its address is not missing.
+                        if capacity {
+                            ErrorKind::Http(429)
+                        } else {
+                            ErrorKind::Unavailable
+                        },
+                        if capacity {
                             crate::i18n::tr(
                                 "No provider connection available; check Streams at once",
                             )
+                        } else {
+                            crate::i18n::tr("Channel unavailable")
                         }
-                        _ => crate::i18n::tr("Channel unavailable"),
-                    }
-                    .into(),
-                ),
+                        .into(),
+                    );
+                }
             }
         });
     } else {

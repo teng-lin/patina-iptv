@@ -59,8 +59,9 @@ cancel or revise an already admitted preparation.
 A recording retains its own reader and incoming lease. Stopping playback or
 zapping releases only viewing ownership. Returning to a still-recorded channel
 can reuse that incoming owner. Other channels and unsupported transports require
-their own permitted connections. Unknown account association keeps the existing
-conservative budget behavior.
+their own permitted connections. Streams with unknown account association
+conservatively share a budget while they own a connection. An idle M3U playlist
+does not lower a known account's allowance merely by being stored in the library.
 
 Android/background-capable hosts run preparation and ingestion on the recording
 host executor. UI-engine teardown cannot destroy that executor or its capture.

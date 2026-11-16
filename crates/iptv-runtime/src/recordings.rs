@@ -200,12 +200,21 @@ impl Data {
         let mut limit = wanted
             .limit
             .min(self.limits.get(&source).copied().unwrap_or(1));
+        let mut occupied = std::collections::HashSet::new();
         for lease in leases {
+            occupied.insert(lease.source);
             inputs.push(lease.connection());
             limit = limit.min(lease.limit);
         }
         for (id, account) in &self.accounts {
-            if same_account(account, &wanted.account) {
+            // Unknown M3U association matters while it owns a connection. An
+            // idle playlist cannot establish an alias or lower another account's
+            // allowance just by being present in the library.
+            let known =
+                !matches!(account, Account::Unknown) && !matches!(wanted.account, Account::Unknown);
+            if same_account(account, &wanted.account)
+                && (*id == source || occupied.contains(id) || known)
+            {
                 limit = limit
                     .min(self.lease(*id).limit)
                     .min(self.limits.get(id).copied().unwrap_or(1));

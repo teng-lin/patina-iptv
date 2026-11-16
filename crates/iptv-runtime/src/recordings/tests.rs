@@ -6,6 +6,35 @@ use iptv_providers::{
 use std::io::{Read, Write};
 
 #[test]
+fn an_idle_unknown_playlist_does_not_lower_a_known_accounts_allowance() {
+    let mut data = Data::default();
+    data.accounts.insert(
+        1,
+        Account::Xtream("https://example.test".into(), "generated".into()),
+    );
+    data.provider_limits.insert(1, 2);
+    data.limits.insert(1, 2);
+    data.accounts.insert(2, Account::Unknown);
+    data.limits.insert(2, 1);
+    data.viewers.insert(0, data.lease(1));
+    assert!(
+        data.capacity(1, None),
+        "an idle M3U playlist is not a one-stream cap on Xtream"
+    );
+    data.viewers.insert(1, data.lease(1));
+    assert!(
+        !data.capacity(1, None),
+        "the known two-stream allowance still applies"
+    );
+    data.viewers.remove(&1);
+    data.viewers.insert(1, data.lease(2));
+    assert!(
+        !data.capacity(1, Some(0)),
+        "an active unknown-account stream still shares the conservative budget"
+    );
+}
+
+#[test]
 fn a_reported_connection_allowance_is_not_masked_by_the_default() {
     let mut settings = iptv_settings::Settings::new();
     assert_eq!(connection_limit(&settings, 1, Some(3)), 3);
