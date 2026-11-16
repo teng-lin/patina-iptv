@@ -84,6 +84,30 @@ pub(super) fn job_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
                 .items_center()
                 .role(AccessibilityRole::Row)
                 .child(
+                    svg(move || {
+                        icons::src(match job().map(|j| j.status) {
+                            Some(Status::Recording) => Icon::Record,
+                            Some(Status::Scheduled) => Icon::Clock,
+                            Some(Status::Completed) => Icon::Check,
+                            Some(Status::Cancelled) => Icon::Close,
+                            _ => Icon::Warning,
+                        })
+                    })
+                    .test_id("recording-status")
+                    .size(move || size.px(24.0))
+                    .mr(move || size.px(16.0))
+                    .accessibility_elements_hidden(true)
+                    .text_color(move || {
+                        rgb(match job().map(|j| j.status) {
+                            Some(Status::Recording) => crate::theme::RECORDING,
+                            Some(Status::Partial | Status::Failed | Status::Missed) => {
+                                ui_kit::ERROR
+                            }
+                            _ => crate::theme::LIST_TEXT,
+                        })
+                    }),
+                )
+                .child(
                     view()
                         .flex_1()
                         .min_h(move || size.px(ui_kit::ROW_THREE))

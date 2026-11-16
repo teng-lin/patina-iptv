@@ -615,3 +615,66 @@ fn a_recordings_screen_opened_during_record_now_stays_open_after_save() {
     step(app.wait_for_within("text:/Completed ·/", Duration::from_secs(10)));
     server.join().unwrap();
 }
+
+#[test]
+fn one_recording_list_keeps_scheduled_and_finished_jobs_visible() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, path, source, _) =
+        fixture(&home, Idiom::Tv, "https://example.test/generated.ts", false);
+    use iptv_core::recording::{JobId, Request, Status};
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    let channel = store.load_channels(source, &Default::default()).unwrap()[0]
+        .channel
+        .id
+        .as_str()
+        .to_owned();
+    for (n, status) in [Status::Scheduled, Status::Completed, Status::Failed]
+        .into_iter()
+        .enumerate()
+    {
+        let request = Request {
+            source: source.0,
+            channel: channel.clone(),
+            channel_name: "Generated channel".into(),
+            title: format!("Generated library job {}", n + 1),
+            start: now + 3600 * (n as i64 + 1),
+            end: now + 3600 * (n as i64 + 2),
+        };
+        let id = store
+            .schedule_recording(JobId(n as i64 + 1), &request, now)
+            .unwrap();
+        if status != Status::Scheduled {
+            assert!(
+                store
+                    .transition_recording(id, Status::Scheduled, status, 0, "")
+                    .unwrap()
+            );
+        }
+    }
+    drop(store);
+    step(app.press("text:/^☰  /"));
+    step(app.press("label:Recordings"));
+    step(app.wait_for("id:recording-job >> nth=2"));
+    assert_eq!(app.screen().count("id:recording-status").unwrap(), 3);
+    for label in ["Scheduled", "Completed", "Failed"] {
+        assert!(
+            app.screen()
+                .matches(&format!("id:recording-job >> label:/^{label} ·/"))
+                .unwrap_or(false)
+                || app
+                    .screen()
+                    .matches(&format!("label:/^{label} · Generated library job/"))
+                    .unwrap()
+        );
+    }
+    for label in ["All", "Active", "Finished"] {
+        assert_eq!(app.screen().count(&format!("text:{label}")).unwrap(), 0);
+    }
+    step(app.press_key("right"));
+    step(app.press_key("left"));
+    assert_eq!(app.screen().count("id:recording-job").unwrap(), 3);
+}

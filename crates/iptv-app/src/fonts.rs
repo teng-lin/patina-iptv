@@ -42,6 +42,8 @@ pub const SECTION: f32 = HEADER_TIMES;
 pub const CAPTION: f32 = 15.0;
 /// A screen's title (Search, the favourites editor): the header's title.
 pub const TITLE: f32 = HEADER_TITLE;
+/// The focused on-demand title, above the poster grid.
+pub const LIBRARY_TITLE: f32 = 34.0;
 
 /// Over full-screen video (the player's panels and its status card), not
 /// scaled with the window: read from across the room. The programme's

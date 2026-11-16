@@ -49,7 +49,7 @@ pub fn number(ui: Ui, channel: usize) -> u32 {
 }
 
 /// The rail's items for the source on screen. The cross-source shelves
-/// follow every enabled playlist, Movies and Shows the one on screen.
+/// and catalogues follow every enabled playlist.
 pub fn rail(ui: Ui) -> Vec<RailItem> {
     rail_items(VodAvailability {
         shown: ui.has_vod.get(),

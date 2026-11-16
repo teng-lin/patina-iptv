@@ -90,6 +90,14 @@ pub fn title(size: Scale, content: impl IntoReactive<SharedString>) -> Text {
         .text_color(rgb(LIST_TEXT))
 }
 
+/// The focused title in Movies and Shows.
+pub fn library_title(size: Scale, content: impl IntoReactive<SharedString>) -> Text {
+    styled(size, content, crate::fonts::LIBRARY_TITLE)
+        .font_weight(MEDIUM)
+        .number_of_lines(1)
+        .text_color(rgb(LIST_TEXT))
+}
+
 /// A section's heading ("Recent searches", a settings section): the
 /// lists' heading size, in the secondary colour.
 pub fn heading(size: Scale, content: impl IntoReactive<SharedString>) -> Text {

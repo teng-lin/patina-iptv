@@ -1465,3 +1465,10 @@ Work around stutter and freezes seen with some Amlogic decoders.	Evitar los tiro
 Write resolution as pixel dimensions rather than a quality tag.	Mostrar la resolución en píxeles en lugar de una etiqueta de calidad.	Afficher la résolution en pixels plutôt qu'avec une étiquette de qualité.	Auflösung als Pixelmaße statt als Qualitätskennzeichnung anzeigen.	Mostra la risoluzione in pixel invece che con un'etichetta di qualità.	Mostrar a resolução em píxeis em vez de uma etiqueta de qualidade.	Указывать разрешение в пикселях, а не меткой качества.	以像素尺寸而非画质标签显示分辨率。	以像素尺寸而非畫質標籤顯示解析度。	解像度を画質ラベルではなくピクセル数で表示します。	해상도를 화질 표시 대신 픽셀 크기로 표시합니다.
 TV series	Serie de televisión	Série télévisée	Fernsehserie	Serie TV	Série de televisão	Сериал	电视剧	影集	テレビシリーズ	TV 시리즈
 Playback position	Posición de reproducción	Position de lecture	Wiedergabeposition	Posizione di riproduzione	Posição de reprodução	Позиция воспроизведения	播放位置	播放位置	再生位置	재생 위치
+Movies	Películas	Films	Filme	Film	Filmes	Фильмы	电影	電影	映画	영화
+Shows	Series	Séries	Serien	Serie	Séries	Сериалы	剧集	影集	シリーズ	시리즈
+All movies	Todas las películas	Tous les films	Alle Filme	Tutti i film	Todos os filmes	Все фильмы	所有电影	所有電影	すべての映画	모든 영화
+All shows	Todas las series	Toutes les séries	Alle Serien	Tutte le serie	Todas as séries	Все сериалы	所有剧集	所有影集	すべてのシリーズ	모든 시리즈
+1 season	1 temporada	1 saison	1 Staffel	1 stagione	1 temporada	1 сезон	1 季	1 季	1 シーズン	시즌 1개
+{count} seasons	{count} temporadas	{count} saisons	{count} Staffeln	{count} stagioni	{count} temporadas	{count} сезонов	{count} 季	{count} 季	{count} シーズン	시즌 {count}개
+Sort	Ordenar	Trier	Sortieren	Ordina	Ordenar	Сортировка	排序	排序	並べ替え	정렬

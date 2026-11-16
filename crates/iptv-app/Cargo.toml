@@ -88,3 +88,8 @@ embed-resource = "3.0"
 name = "guide_window_preview"
 path = "examples/guide_window_preview.rs"
 required-features = ["test-support"]
+
+[[example]]
+name = "library_preview"
+path = "examples/library_preview.rs"
+required-features = ["test-support"]

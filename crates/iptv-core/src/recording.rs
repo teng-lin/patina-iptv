@@ -170,23 +170,6 @@ pub struct Job {
     pub message: String,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Filter {
-    #[default]
-    All,
-    Active,
-    Finished,
-}
-impl Filter {
-    pub fn includes(self, job: &Job) -> bool {
-        match self {
-            Self::All => true,
-            Self::Active => job.status.active(),
-            Self::Finished => !job.status.active(),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Screen {
     pub open: bool,
@@ -194,7 +177,6 @@ pub struct Screen {
     pub progress: Vec<(JobId, crate::on_demand::Progress)>,
     pub repeating: Vec<JobId>,
     pub focus: Option<JobId>,
-    pub filter: Filter,
     pub actions: bool,
     pub action: usize,
     pub confirm_delete: bool,
@@ -445,7 +427,7 @@ impl Screen {
         })
     }
     pub fn visible(&self) -> impl Iterator<Item = &Job> {
-        self.jobs.iter().filter(|j| self.filter.includes(j))
+        self.jobs.iter()
     }
     pub fn focused(&self) -> Option<&Job> {
         self.visible().find(|j| Some(j.id) == self.focus)
@@ -471,11 +453,6 @@ impl Screen {
                     .min(ids.len().saturating_sub(1)),
             )
             .copied();
-    }
-    pub fn set_filter(&mut self, filter: Filter) {
-        self.filter = filter;
-        let jobs = std::mem::take(&mut self.jobs);
-        self.reload(jobs);
     }
 }
 
@@ -687,7 +664,7 @@ mod tests {
     }
 
     #[test]
-    fn refresh_and_filters_restore_focus_by_job_identity() {
+    fn refresh_restores_focus_by_job_identity_across_status_changes() {
         let mut s = Screen::default();
         s.reload(vec![job(1), job(2)]);
         s.move_focus(1);
@@ -697,7 +674,10 @@ mod tests {
         s.reload(vec![job(1)]);
         assert_eq!(s.focus, Some(JobId(1)));
         assert!(!s.actions);
-        s.set_filter(Filter::Finished);
-        assert_eq!(s.focus, None);
+        let mut completed = job(1);
+        completed.status = Status::Completed;
+        s.reload(vec![completed, job(3)]);
+        assert_eq!(s.focus, Some(JobId(1)));
+        assert_eq!(s.visible().count(), 2);
     }
 }

@@ -321,7 +321,7 @@ fn the_rail_skips_items_without_a_screen() {
 }
 
 #[test]
-fn rail_items_follow_the_playlist() {
+fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
     use RailItem::*;
     let none = VodAvailability::default();
     let both = VodAvailability {
@@ -339,15 +339,14 @@ fn rail_items_follow_the_playlist() {
         ]
     );
     // A live-only playlist on screen while another enabled playlist has
-    // films: the cross-source shelves stay reachable, the per-playlist
-    // Movies and Shows do not.
+    // films: both the discovery shelves and catalogues stay reachable.
     assert_eq!(
         rail_items(VodAvailability {
             shown: false,
             any: true,
         }),
         [
-            Search, Tv, Continue, Recent, Recordings, MyList, Playlists, Settings
+            Search, Tv, Continue, Recent, Movies, Shows, Recordings, MyList, Playlists, Settings
         ]
     );
     assert!(Settings.at_bottom() && Playlists.at_bottom() && !Search.at_bottom());
@@ -607,20 +606,8 @@ fn a_removed_shelf_focus_returns_to_tv_instead_of_another_row() {
     for (removed, available) in [
         (RailItem::Continue, VodAvailability::default()),
         (RailItem::Recent, VodAvailability::default()),
-        (
-            RailItem::Movies,
-            VodAvailability {
-                shown: false,
-                any: true,
-            },
-        ),
-        (
-            RailItem::Shows,
-            VodAvailability {
-                shown: false,
-                any: true,
-            },
-        ),
+        (RailItem::Movies, VodAvailability::default()),
+        (RailItem::Shows, VodAvailability::default()),
     ] {
         let mut screen = Screen::new();
         screen.focus.pane = Pane::Rail;

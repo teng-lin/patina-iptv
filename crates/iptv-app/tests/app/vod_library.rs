@@ -258,7 +258,7 @@ fn deep_focus(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
         // OK opens the focused title: still Aurora, found by identity.
         step(app.press_key("enter"));
         step(app.wait_for("text:Play from beginning"));
-        step(app.wait_for("text:/^Generated Aurora · Film/"));
+        step(app.wait_for("id:vod-focused-metadata >> text:Generated Aurora"));
         step(app.back());
         step(app.wait_for("id:vod-previous"));
         // Up walks to the window's first title (the newer 19, 2,081st);
@@ -269,7 +269,7 @@ fn deep_focus(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
         step(app.wait_for("text:/^Generated newer 0020 · Film/"));
         step(app.press_key("enter"));
         step(app.wait_for("text:Play from beginning"));
-        step(app.wait_for("text:/^Generated newer 0020 · Film · Generated beta/"));
+        step(app.wait_for("id:vod-focused-metadata >> text:Generated newer 0020"));
         step(app.back());
     } else {
         // The titles above load on demand, a bounded page at a time; the
@@ -1047,7 +1047,7 @@ fn exercise_admission(
     step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
     let surface = player(&app);
     step(app.press("text:/^☰  /"));
-    step(app.press("label:Films"));
+    step(app.press("id:open-movies"));
     step(app.wait_for("id:vod-screen"));
     step(app.wait_for("id:vod-title >> nth=1"));
     assert!(
@@ -1062,7 +1062,22 @@ fn exercise_admission(
             .unwrap()
             .selected
     );
-    step(app.press("text:/^Generated Aurora/"));
+    if idiom == nsh_core::platform::Idiom::Tv {
+        // Right enters the grid; the next Right changes the title, not a filter.
+        step(app.press_key("right"));
+        step(app.press_key("right"));
+        assert!(
+            app.screen()
+                .accessibility_state("id:vod-title >> nth=1")
+                .unwrap()
+                .selected
+        );
+        step(app.wait_for("id:vod-focused-metadata >> text:Generated Brook"));
+        step(app.press_key("left"));
+        step(app.press_key("left"));
+        step(app.wait_for("id:vod-continue"));
+    }
+    step(app.press("label:/^Generated Aurora ·/"));
     step(app.wait_for("text:Play from beginning"));
     if idiom == nsh_core::platform::Idiom::Tv {
         step(app.press_key("enter"));
@@ -1097,16 +1112,16 @@ fn exercise_admission(
     app.settle();
     step(app.back());
     step(app.press("text:/^☰  /"));
-    step(app.press("label:Films"));
+    step(app.press("id:open-movies"));
     step(app.wait_for("id:vod-screen"));
     step(app.press("id:vod-continue"));
     step(app.wait_for("text:/^Generated Aurora/"));
     assert_eq!(app.screen().count("id:vod-title").unwrap(), 1);
-    step(app.back());
+    step(app.press("id:vod-screen >> label:Close"));
     step(app.press("text:/^☰  /"));
-    step(app.press("label:Series"));
+    step(app.press("id:open-shows"));
     step(app.wait_for("id:vod-screen"));
-    step(app.press("text:/^Generated Voyage/"));
+    step(app.press("label:/^Generated Voyage ·/"));
     step(app.wait_for("text:/Generated First/"));
     let selected = (0..app.screen().count("id:vod-episode").unwrap())
         .filter(|at| {
@@ -1140,6 +1155,10 @@ fn exercise_admission(
             step(app.press_key("right"));
         }
         step(app.press_key("down"));
+        step(app.press_key("right"));
+        // Up escapes the horizontal episodes to Seasons, then Down returns
+        // to the same selected episode by identity.
+        step(app.press_key("up"));
         step(app.press_key("down"));
         step(app.press_key("enter"));
     } else {

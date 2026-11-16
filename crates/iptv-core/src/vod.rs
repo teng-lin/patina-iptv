@@ -291,6 +291,7 @@ pub struct Playing {
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Control {
+    Navigation,
     Search,
     Source,
     Category,
@@ -349,9 +350,22 @@ pub enum Retried {
     /// added again, or edited): nothing is shown or played from it.
     PlaylistChanged,
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Destination {
+    Live,
+    #[default]
+    Movies,
+    Shows,
+    Recordings,
+}
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Screen {
+    pub destination: Destination,
     pub control: Control,
+    /// Measured poster columns; selection itself always uses a content key.
+    pub columns: usize,
+    pub categories_open: bool,
+    pub search_open: bool,
     pub open: bool,
     /// A cross-source shelf instead of the `query.kind` catalogue: the
     /// query's kind, filters and sort do not apply to it.
@@ -367,7 +381,11 @@ pub struct Screen {
     /// titles in a later page, so this must not use deduplicated card count.
     pub end: u32,
     pub focused: Option<Key>,
+    /// A Down press waiting for the next poster row to arrive.
+    pending_down: Option<Key>,
     pub details: Option<Details>,
+    /// Metadata for the focused poster; independent of the opened details page.
+    pub preview: Option<Details>,
     pub season: Option<u32>,
     pub episode: Option<Key>,
     pub busy: bool,
@@ -382,6 +400,13 @@ impl Screen {
     pub fn begin(&mut self, kind: Kind) -> u64 {
         *self = Self {
             open: true,
+            destination: if kind == Kind::Series {
+                Destination::Shows
+            } else {
+                Destination::Movies
+            },
+            categories_open: true,
+            control: Control::Category,
             query: Query {
                 kind,
                 ..Default::default()
@@ -415,6 +440,8 @@ impl Screen {
         self.shelf.is_some()
     }
     pub fn reload(&mut self) -> u64 {
+        self.pending_down = None;
+        self.preview = None;
         self.generation = self.generation.wrapping_add(1);
         self.busy = true;
         self.details = None;
@@ -660,6 +687,16 @@ impl Screen {
         {
             self.focused = self.cards.first().map(|c| c.key.clone());
         }
+        if append
+            && let Some(key) = self.pending_down.take()
+            && self.focused.as_ref() == Some(&key)
+            && let Some(at) = self.cards.iter().position(|c| c.key == key)
+        {
+            self.focused = self
+                .cards
+                .get((at + self.columns.max(1)).min(self.cards.len().saturating_sub(1)))
+                .map(|c| c.key.clone());
+        }
         self.busy = false;
         self.has_more = more;
         true
@@ -673,6 +710,143 @@ impl Screen {
         let at =
             (at as isize + delta).clamp(0, self.cards.len().saturating_sub(1) as isize) as usize;
         self.focused = self.cards.get(at).map(|c| c.key.clone());
+    }
+    /// A poster grid's horizontal movement never wraps into another row.
+    /// Left at its edge reveals categories; Right enters the posters.
+    pub fn browse_horizontal(&mut self, step: isize) {
+        if self.control == Control::Navigation {
+            if step > 0 {
+                self.control = Control::Category;
+            }
+            return;
+        }
+        if matches!(
+            self.control,
+            Control::Category | Control::Continue | Control::Source
+        ) {
+            if step > 0 {
+                self.categories_open = false;
+                self.control = Control::Catalogue;
+            } else {
+                self.control = Control::Navigation;
+            }
+            return;
+        }
+        if self.control != Control::Catalogue {
+            let mut controls = vec![Control::Search, Control::Sort];
+            if self.retry.is_some() {
+                controls.insert(0, Control::Retry);
+            }
+            let at = controls
+                .iter()
+                .position(|c| *c == self.control)
+                .unwrap_or(0);
+            self.control = controls[at.saturating_add_signed(step).min(controls.len() - 1)];
+            return;
+        }
+        let at = self.focused_index().unwrap_or(0);
+        let columns = self.columns.max(1);
+        if step < 0 && at.is_multiple_of(columns) {
+            self.categories_open = true;
+            self.control = Control::Category;
+        } else if step < 0 || at % columns + 1 < columns {
+            self.move_focus(step);
+        }
+    }
+    pub fn focused_index(&self) -> Option<usize> {
+        self.focused
+            .as_ref()
+            .and_then(|key| self.cards.iter().position(|c| &c.key == key))
+    }
+    /// Up/Down on categories previews that category. Returns whether the
+    /// shell should fetch the changed query. The category key is source-qualified.
+    pub fn browse_vertical(&mut self, step: isize) -> bool {
+        match self.control {
+            Control::Navigation => {
+                let destinations = [
+                    Destination::Live,
+                    Destination::Movies,
+                    Destination::Shows,
+                    Destination::Recordings,
+                ];
+                let at = destinations
+                    .iter()
+                    .position(|d| *d == self.destination)
+                    .unwrap_or(1);
+                self.destination =
+                    destinations[at.saturating_add_signed(step).min(destinations.len() - 1)];
+            }
+            Control::Source => self.control = Control::Category,
+            Control::Category | Control::Continue => {
+                let mut groups = vec![(true, None), (false, None)];
+                groups.extend(
+                    self.categories
+                        .iter()
+                        .map(|c| (false, Some((c.source, c.id.clone())))),
+                );
+                let at = groups
+                    .iter()
+                    .position(|g| *g == (self.query.continue_watching, self.query.category.clone()))
+                    .unwrap_or(1);
+                if at == 0 && step < 0 {
+                    self.control = Control::Source;
+                    return false;
+                }
+                let next = at.saturating_add_signed(step).min(groups.len() - 1);
+                if next == at {
+                    return false;
+                }
+                self.query.continue_watching = groups[next].0;
+                self.query.category = groups[next].1.clone();
+                self.control = Control::Category;
+                return true;
+            }
+            Control::Catalogue => {
+                let at = self.focused_index().unwrap_or(0);
+                let columns = self.columns.max(1);
+                if step < 0 && at < columns {
+                    self.control = if self.retry.is_some() {
+                        Control::Retry
+                    } else {
+                        Control::Search
+                    };
+                } else if step > 0 && at + columns >= self.cards.len() && self.has_more {
+                    self.pending_down = self.focused.clone();
+                } else {
+                    self.move_focus(step * columns as isize);
+                }
+            }
+            _ if step > 0 => self.control = Control::Catalogue,
+            _ => {}
+        }
+        false
+    }
+    /// Remove protected artwork/synopses when a runtime grant expires.
+    pub fn redact_metadata(&mut self, denied: &[Key]) {
+        if self
+            .preview
+            .as_ref()
+            .is_some_and(|d| denied.contains(&d.item.key))
+        {
+            self.preview = None;
+        }
+        for card in &mut self.cards {
+            if denied.contains(&card.key) {
+                card.poster = None;
+                card.plot = None;
+            }
+        }
+    }
+    pub fn publish_preview(&mut self, generation: u64, details: Details) -> bool {
+        if !self.open
+            || self.generation != generation
+            || self.details.is_some()
+            || self.focused.as_ref() != Some(&details.item.key)
+        {
+            return false;
+        }
+        self.preview = Some(details);
+        true
     }
     pub fn show_details(&mut self, details: Details) {
         self.season = details.seasons().first().copied();
@@ -755,12 +929,30 @@ impl Screen {
         }
     }
     pub fn back(&mut self) {
+        self.preview = None;
+        self.pending_down = None;
         self.generation = self.generation.wrapping_add(1);
         self.busy = false;
         self.error = None;
         self.retry = None;
         if self.control == Control::Retry {
             self.control = Control::Catalogue;
+        }
+        if !self.is_shelf() && self.details.is_none() {
+            if self.search_open {
+                self.search_open = false;
+                self.control = Control::Catalogue;
+                return;
+            }
+            if !self.categories_open {
+                self.categories_open = true;
+                self.control = Control::Category;
+                return;
+            }
+            if self.control != Control::Navigation {
+                self.control = Control::Navigation;
+                return;
+            }
         }
         if self.details.take().is_none() {
             self.open = false;
@@ -799,6 +991,160 @@ mod tests {
         assert!(!s.publish(g - 1, vec![], false, false));
         s.publish(g, vec![card("b"), card("a")], false, false);
         assert_eq!(s.focused, Some(card("b").key));
+    }
+    #[test]
+    fn poster_grid_moves_in_rows_then_reveals_categories() {
+        let mut s = Screen::default();
+        let g = s.begin(Kind::Movie);
+        s.publish(
+            g,
+            (0..10).map(|n| card(&n.to_string())).collect(),
+            false,
+            false,
+        );
+        s.columns = 4;
+        s.browse_horizontal(1);
+        assert!(!s.categories_open);
+        s.browse_horizontal(1);
+        assert_eq!(s.focused_index(), Some(1));
+        s.browse_vertical(1);
+        assert_eq!(s.focused_index(), Some(5));
+        s.browse_vertical(1);
+        assert_eq!(s.focused_index(), Some(9));
+        s.browse_horizontal(-1);
+        s.browse_horizontal(-1);
+        assert!(s.categories_open);
+        assert_eq!(s.focused_index(), Some(8));
+        assert_eq!(s.control, Control::Category);
+    }
+    #[test]
+    fn revoked_metadata_is_removed_from_the_preview_and_catalogue() {
+        let mut s = Screen::default();
+        let g = s.begin(Kind::Movie);
+        let mut item = card("a");
+        item.plot = Some("Generated protected plot".into());
+        item.poster = Some("https://example.test/poster.png".into());
+        s.publish(g, vec![item.clone()], false, false);
+        s.publish_preview(
+            g,
+            Details {
+                incarnation: "generated".into(),
+                item: item.clone(),
+                episodes: vec![],
+                resume_episode: None,
+            },
+        );
+        s.redact_metadata(&[item.key]);
+        assert!(s.preview.is_none());
+        assert!(s.cards[0].plot.is_none());
+        assert!(s.cards[0].poster.is_none());
+    }
+    #[test]
+    fn preview_metadata_cannot_replace_another_title_or_a_newer_query() {
+        let mut s = Screen::default();
+        let g = s.begin(Kind::Movie);
+        s.publish(g, vec![card("a"), card("b")], false, false);
+        let details = |id| Details {
+            incarnation: "generated".into(),
+            item: card(id),
+            episodes: vec![],
+            resume_episode: None,
+        };
+        assert!(s.publish_preview(g, details("a")));
+        s.move_focus(1);
+        assert!(!s.publish_preview(g, details("a")));
+        let next = s.reload();
+        assert!(s.preview.is_none());
+        assert!(!s.publish_preview(g, details("b")));
+        s.publish(next, vec![card("b")], false, false);
+        assert!(s.publish_preview(next, details("b")));
+    }
+    #[test]
+    fn down_at_a_page_boundary_waits_for_the_same_column_in_the_next_row() {
+        let mut s = Screen::default();
+        let g = s.begin(Kind::Movie);
+        s.publish(
+            g,
+            (0..20).map(|n| card(&n.to_string())).collect(),
+            true,
+            false,
+        );
+        s.columns = 5;
+        s.focused = Some(card("15").key);
+        s.control = Control::Catalogue;
+        s.browse_vertical(1);
+        assert_eq!(s.focused, Some(card("15").key));
+        s.begin_more();
+        s.publish(
+            g,
+            (20..25).map(|n| card(&n.to_string())).collect(),
+            false,
+            true,
+        );
+        assert_eq!(s.focused, Some(card("20").key));
+    }
+    #[test]
+    fn backing_away_from_a_pending_title_invalidates_its_reply() {
+        let mut s = Screen::default();
+        let g = s.begin(Kind::Movie);
+        s.publish(g, vec![card("a")], false, false);
+        s.browse_horizontal(1);
+        let pending = s.begin_operation();
+        s.back();
+        assert!(s.open && s.categories_open);
+        assert!(!s.busy);
+        assert_ne!(s.generation, pending);
+        assert!(!s.publish(pending, vec![card("old")], false, false));
+        assert_eq!(s.focused, Some(card("a").key));
+    }
+    #[test]
+    fn a_remote_can_return_to_retry_after_a_failed_title() {
+        let mut s = Screen::default();
+        let g = s.begin(Kind::Movie);
+        s.publish(g, vec![card("a")], false, false);
+        s.browse_horizontal(1);
+        s.fail("Generated failure", Operation::Details(card("a").key));
+        s.browse_vertical(-1);
+        assert_eq!(s.control, Control::Retry);
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Search);
+        s.browse_horizontal(-1);
+        assert_eq!(s.control, Control::Retry);
+    }
+    #[test]
+    fn category_previews_keep_source_qualified_identity() {
+        let mut s = Screen::default();
+        s.begin(Kind::Series);
+        s.categories = [1, 2]
+            .into_iter()
+            .map(|source| Category {
+                source,
+                id: "same".into(),
+                name: "Generated".into(),
+                adult: false,
+            })
+            .collect();
+        assert!(s.browse_vertical(1));
+        assert_eq!(s.query.category, Some((1, "same".into())));
+        assert!(s.browse_vertical(1));
+        assert_eq!(s.query.category, Some((2, "same".into())));
+        assert!(!s.browse_vertical(1));
+        assert!(s.browse_vertical(-1));
+        assert_eq!(s.query.category, Some((1, "same".into())));
+    }
+    #[test]
+    fn back_walks_from_posters_to_categories_to_navigation_before_leaving() {
+        let mut s = Screen::default();
+        s.begin(Kind::Movie);
+        s.browse_horizontal(1);
+        s.back();
+        assert!(s.open && s.categories_open);
+        assert_eq!(s.control, Control::Category);
+        s.back();
+        assert!(s.open);
+        assert_eq!(s.control, Control::Navigation);
+        s.back();
+        assert!(!s.open);
     }
     #[test]
     fn completed_media_does_not_resume_near_its_ending() {

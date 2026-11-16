@@ -213,3 +213,9 @@ iptv-app/src/recordings_view/rows.rs	Stop recording
 iptv-app/src/play_bar/icons.rs	<path d='M4 20l1-5L16 4l4 4L9 19zM13 7l4 4'/>
 iptv-app/src/play_bar/icons.rs	<path d='M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7'/>
 iptv-app/src/play_bar/icons.rs	<rect x='5' y='5' width='14' height='14' rx='1' fill='currentColor' stroke='none'/>
+
+# Original recording status drawings, not text.
+iptv-app/src/play_bar/icons.rs	<circle cx='12' cy='12' r='9'/><path d='M12 6v6l4 2'/>
+iptv-app/src/play_bar/icons.rs	<path d='M12 3L2 21h20zM12 9v5'/><circle cx='12' cy='17.5' r='1' fill='currentColor'/>
+iptv-app/src/play_bar/icons.rs	<path d='M4 12l5 5L20 6'/>
+iptv-app/src/play_bar/icons.rs	<path d='M4 6h16M4 12h11M4 18h6'/>

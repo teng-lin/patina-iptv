@@ -310,3 +310,106 @@ fn repeated_native_pages_stop_when_no_new_episode_identity_was_discovered() {
     );
     assert!(owner.drain_services());
 }
+
+#[test]
+fn cancelling_a_focused_preview_closes_its_pending_provider_request() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let cancel = iptv_import::CancelToken::new();
+    let interrupt = cancel.clone();
+    let (closed, observed) = std::sync::mpsc::channel();
+    let task = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut header = Vec::new();
+        while !header.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            stream.read_exact(&mut byte).unwrap();
+            header.push(byte[0]);
+            assert!(header.len() < 16_384);
+        }
+        interrupt.cancel();
+        let mut byte = [0];
+        let ended = match stream.read(&mut byte) {
+            Ok(0) => true,
+            Err(e) => matches!(
+                e.kind(),
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
+            ),
+            _ => false,
+        };
+        closed.send(ended).unwrap();
+    });
+    let (_directory, owner, key) = fixture(&url, vec![]);
+    assert!(
+        owner
+            .services()
+            .block_on(owner.vod_preview(key, cancel))
+            .is_err()
+    );
+    assert!(
+        observed.recv_timeout(Duration::from_secs(6)).unwrap(),
+        "cancelled preview retained its provider connection"
+    );
+    task.join().unwrap();
+    assert!(owner.vod.entries.lock().unwrap().is_empty());
+}
+
+#[test]
+fn focused_movie_preview_enriches_missing_metadata_without_registering_playback() {
+    let mut provider = Provider::new(vec![
+        r#"{"info":{"plot":"Generated detailed plot","releasedate":"2024-02-01","rating":"8.2","duration_secs":5400},"movie_data":{"stream_id":1,"name":"Generated movie","container_extension":"mp4"}}"#,
+    ]);
+    let directory = tempfile::tempdir().unwrap();
+    let database_key = crate::model::DatabaseKey::from_bytes([0x79; 32]);
+    let mut store = iptv_store_sqlite::Store::open_encrypted(
+        directory.path().join("iptv.sqlite"),
+        &database_key,
+    )
+    .unwrap();
+    let source = store
+        .add_source(&Source {
+            name: "Generated preview source".into(),
+            config: SourceConfig::Xtream(iptv_providers::model::XtreamCredentials {
+                server_url: provider.url.clone(),
+                username: iptv_providers::Secret::new("generated"),
+                password: iptv_providers::Secret::new("generated"),
+                user_agent: None,
+            }),
+        })
+        .unwrap();
+    let movies = iptv_providers::xtream::parse_vod_streams(&iptv_providers::HttpResponse::ok(
+        r#"[{"stream_id":1,"name":"Generated movie","container_extension":"mp4"}]"#,
+    ))
+    .unwrap();
+    let key = Key {
+        source: source.0,
+        kind: Kind::Movie,
+        id: movies.items[0].id.as_str().into(),
+    };
+    store
+        .replace_catalog(source, &[], &[], &movies.items, &[])
+        .unwrap();
+    drop(store);
+    let owner = Rc::new(Runtime::new(crate::Ports::new(
+        directory.path().into(),
+        move |_| Ok(database_key.clone()),
+    )));
+    owner.start_services();
+    owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+    let details = owner
+        .services()
+        .block_on(owner.vod_preview(key, iptv_import::CancelToken::new()))
+        .unwrap();
+    assert_eq!(details.item.year, Some(2024));
+    assert_eq!(details.item.rating_x10, Some(82));
+    assert_eq!(details.item.duration_secs, Some(5400));
+    assert_eq!(
+        details.item.plot.as_deref(),
+        Some("Generated detailed plot")
+    );
+    assert!(owner.vod.entries.lock().unwrap().is_empty());
+    assert_eq!(provider.finish().len(), 1);
+}

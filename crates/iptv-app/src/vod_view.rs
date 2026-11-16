@@ -14,6 +14,7 @@ use iptv_core::vod::{
 use iptv_nav::Action;
 use nsh_base::input;
 use nsh_core::prelude::*;
+mod browser;
 fn edit<R>(ui: Ui, f: impl FnOnce(&mut iptv_core::vod::Screen) -> R) -> R {
     let mut result = None;
     ui.vod.update(|s| result = Some(f(s)));
@@ -65,13 +66,20 @@ pub fn back(ui: Ui) -> bool {
     if ui.player.vod.with_untracked(Option::is_none) {
         crate::runtime().parental_content_closed();
     }
-    let closed = edit(ui, |s| {
+    let (closed, refresh) = edit(ui, |s| {
+        let pending = s.busy;
+        let had_details = s.details.is_some();
         s.back();
-        s.control = Control::Catalogue;
-        !s.open
+        if had_details {
+            s.control = Control::Catalogue;
+        }
+        (!s.open, pending && !had_details && s.open && !s.is_shelf())
     });
+    crate::parental_view::enforce(ui);
     if closed {
         crate::runtime().vod_discovery_cancel();
+    } else if refresh {
+        reload(ui, false);
     }
     true
 }
@@ -499,12 +507,23 @@ fn cycle_category(ui: Ui) {
 fn activate(ui: Ui) {
     let control = ui.vod.with_untracked(|s| s.control);
     match control {
+        Control::Navigation => browser::activate_navigation(ui),
         Control::Catalogue => {
             if let Some(key) = ui.vod.with_untracked(|s| s.focused.clone()) {
                 select(ui, key);
             }
         }
         Control::Source => cycle_source(ui),
+        Control::Category
+            if ui
+                .vod
+                .with_untracked(|s| !s.is_shelf() && s.details.is_none()) =>
+        {
+            ui.vod.update(|s| {
+                s.categories_open = false;
+                s.control = Control::Catalogue;
+            });
+        }
         Control::Category => cycle_category(ui),
         Control::Sort => {
             ui.vod.update(|s| s.query.sort = s.query.sort.next());
@@ -521,7 +540,7 @@ fn activate(ui: Ui) {
         Control::Next => next(ui),
         Control::Block => toggle_block(ui),
         Control::Retry => retry(ui),
-        Control::Search => {}
+        Control::Search => ui.vod.update(|s| s.search_open = true),
     }
 }
 
@@ -534,10 +553,40 @@ pub fn key(ui: Ui, action: Action) {
         return;
     }
     let control = ui.vod.with_untracked(|s| s.control);
+    if ui
+        .vod
+        .with_untracked(|s| !s.is_shelf() && s.details.is_none())
+    {
+        match action {
+            Action::MoveLeft | Action::MoveRight => ui
+                .vod
+                .update(|s| s.browse_horizontal(if action == Action::MoveLeft { -1 } else { 1 })),
+            Action::MoveUp | Action::MoveDown => {
+                let changed = edit(ui, |s| {
+                    s.browse_vertical(if action == Action::MoveUp { -1 } else { 1 })
+                });
+                if changed {
+                    reload(ui, false);
+                } else if ui.vod.with_untracked(|s| {
+                    s.control == Control::Catalogue
+                        && s.has_more
+                        && s.focused_index()
+                            .is_some_and(|at| at + s.columns.max(1) >= s.cards.len())
+                }) {
+                    reload(ui, true);
+                }
+            }
+            Action::Select => activate(ui),
+            _ => {}
+        }
+        return;
+    }
     match action {
         Action::MoveLeft => ui.vod.update(|s| {
             if control == Control::Seasons {
                 s.cycle_season(-1)
+            } else if control == Control::Episodes {
+                s.move_episode(-1)
             } else {
                 s.move_control(-1)
             }
@@ -545,6 +594,8 @@ pub fn key(ui: Ui, action: Action) {
         Action::MoveRight => ui.vod.update(|s| {
             if control == Control::Seasons {
                 s.cycle_season(1)
+            } else if control == Control::Episodes {
+                s.move_episode(1)
             } else {
                 s.move_control(1)
             }
@@ -566,7 +617,7 @@ pub fn key(ui: Ui, action: Action) {
                 Control::Catalogue if s.cards.is_empty() => s.move_control(-1),
                 Control::Catalogue if at_top => s.move_control(-1),
                 Control::Catalogue => s.move_focus(-1),
-                Control::Episodes => s.move_episode(-1),
+                Control::Episodes => s.control = Control::Seasons,
                 _ => s.move_control(-1),
             })
         }
@@ -574,7 +625,7 @@ pub fn key(ui: Ui, action: Action) {
             ui.vod.update(|s| match control {
                 Control::Catalogue if s.cards.is_empty() => s.move_control(1),
                 Control::Catalogue => s.move_focus(1),
-                Control::Episodes => s.move_episode(1),
+                Control::Episodes => s.move_control(1),
                 _ => s.move_control(1),
             });
             let more = ui.vod.with_untracked(|s| {
@@ -710,113 +761,10 @@ fn button(
             callback();
         },
     )
-}
-
-fn toolbar(ui: Ui, size: Scale) -> impl IntoElement {
-    let field = element_ref();
-    effect(move || {
-        if ui.vod.with(|s| s.control == Control::Search) {
-            field.focus();
-        } else {
-            field.blur();
-        }
-    });
-    view()
-        .gap(move || size.px(8.0))
-        .child(
-            ui_kit::field(size, input())
-                .element_ref(&field)
-                .value(move || ui.vod.with(|s| s.query.text.clone()))
-                .placeholder(tr("Search movies and series"))
-                .auto_correct(false)
-                .auto_capitalize(AutoCapitalize::None)
-                .return_key_type(ReturnKeyType::Search)
-                .on_change(move |text: &str| {
-                    ui.vod.update(|s| s.query.text = text.into());
-                    reload(ui, false);
-                })
-                .on_submit(move |_: &str| ui.vod.update(|s| s.control = Control::Catalogue))
-                .on_focus(move || ui.vod.update(|s| s.control = Control::Search))
-                .test_id("vod-search"),
-        )
-        .child(
-            view()
-                .flex_row()
-                .gap(move || size.px(8.0))
-                .child(button(
-                    ui,
-                    size,
-                    Control::Source,
-                    move || {
-                        ui.vod.with(|s| {
-                            s.query
-                                .source
-                                .and_then(|id| s.sources.iter().find(|v| v.id == id))
-                                .map(|v| v.name.clone())
-                                .unwrap_or_else(|| tr("All playlists").into())
-                        })
-                    },
-                    move || cycle_source(ui),
-                ))
-                .child(button(
-                    ui,
-                    size,
-                    Control::Category,
-                    move || {
-                        ui.vod.with(|s| {
-                            s.query
-                                .category
-                                .as_ref()
-                                .and_then(|(source, id)| {
-                                    s.categories
-                                        .iter()
-                                        .find(|v| v.source == *source && v.id == *id)
-                                })
-                                .map(|v| v.name.clone())
-                                .unwrap_or_else(|| tr("All categories").into())
-                        })
-                    },
-                    move || cycle_category(ui),
-                ))
-                .child(button(
-                    ui,
-                    size,
-                    Control::Sort,
-                    move || {
-                        ui.vod.with(|s| match s.query.sort {
-                            Sort::Name => tr("Name"),
-                            Sort::Newest => tr("Recently added"),
-                            Sort::Year => tr("Year"),
-                            Sort::Rating => tr("Rating"),
-                        })
-                    },
-                    move || {
-                        ui.vod.update(|s| s.query.sort = s.query.sort.next());
-                        reload(ui, false);
-                    },
-                ))
-                .child(
-                    button(
-                        ui,
-                        size,
-                        Control::Continue,
-                        move || {
-                            if ui.vod.with(|s| s.query.continue_watching) {
-                                format!("✓ {}", tr("Continue watching"))
-                            } else {
-                                tr("Continue watching").into()
-                            }
-                        },
-                        move || {
-                            ui.vod
-                                .update(|s| s.query.continue_watching = !s.query.continue_watching);
-                            reload(ui, false);
-                        },
-                    )
-                    // The rail's Continue watching entry shares the words.
-                    .test_id("vod-continue"),
-                ),
-        )
+    .accessibility_state(move || AccessibilityState {
+        selected: ui.vod.with(|s| s.control == control),
+        ..Default::default()
+    })
 }
 
 /// What a card is, for a shelf that mixes movies and series.
@@ -884,7 +832,7 @@ fn card_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
         ..Default::default()
     })
 }
-fn catalogue(ui: Ui, size: Scale) -> impl IntoElement {
+fn shelf_catalogue(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = element_ref();
     effect(move || {
         let at = ui.vod.with(|s| {
@@ -912,12 +860,6 @@ fn catalogue(ui: Ui, size: Scale) -> impl IntoElement {
                 }
             })
         },
-    );
-    // A shelf has no search, filter or sort: its titles come from every
-    // playlist in a fixed order, so the toolbar would only add stops.
-    let filters = when(
-        move || !ui.vod.with(|s| s.is_shelf()),
-        move || toolbar(ui, size),
     );
     let titles = virtual_list(
         move || ui.vod.with(|s| s.cards.len()),
@@ -964,7 +906,6 @@ fn catalogue(ui: Ui, size: Scale) -> impl IntoElement {
     view()
         .flex_1()
         .gap(move || size.px(8.0))
-        .child(filters)
         .child(empty)
         .child(previous)
         .child(titles)
@@ -1007,6 +948,10 @@ fn episode_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
             }
         },
     )
+    .w(move || size.px(300.0))
+    .min_h(move || size.px(180.0))
+    .mr(move || size.px(12.0))
+    .justify_end()
     .test_id("vod-episode")
     .accessibility_state(move || AccessibilityState {
         selected: ep().is_some_and(|e| ui.vod.with(|s| s.episode.as_ref() == Some(&e.key))),
@@ -1070,6 +1015,8 @@ fn episodes(ui: Ui, size: Scale) -> impl IntoElement {
         move |at| episode_row(ui, size, at),
     )
     .element_ref(&rows)
+    .horizontal()
+    .estimated_item_size(move || size.px(312.0))
     .flex_1();
     view()
         .flex_1()
@@ -1077,55 +1024,6 @@ fn episodes(ui: Ui, size: Scale) -> impl IntoElement {
         .child(season)
         .child(empty)
         .child(list)
-}
-fn metadata(ui: Ui, size: Scale) -> impl IntoElement {
-    let poster = when(
-        move || {
-            ui.vod.with(|s| {
-                s.details
-                    .as_ref()
-                    .is_some_and(|d| d.item.poster.as_ref().is_some_and(|p| !p.is_empty()))
-            })
-        },
-        move || {
-            let source = crate::content_image::source(move || {
-                ui.vod
-                    .with(|s| s.details.as_ref().and_then(|d| d.item.poster.clone()))
-                    .unwrap_or_default()
-            });
-            image(source)
-                .w(move || size.px(100.0))
-                .h(move || size.px(150.0))
-                .object_fit(ResizeMode::Contain)
-        },
-    );
-    let name = ui_kit::heading(size, move || {
-        ui.vod.with(|s| {
-            s.details
-                .as_ref()
-                .map(|d| card_label(&d.item, s.is_shelf()))
-                .unwrap_or_default()
-        })
-    });
-    let plot = ui_kit::body(size, move || {
-        ui.vod.with(|s| {
-            s.details
-                .as_ref()
-                .and_then(|d| d.item.plot.clone())
-                .unwrap_or_default()
-        })
-    })
-    .number_of_lines(4);
-    let words = view()
-        .flex_1()
-        .gap(move || size.px(8.0))
-        .child(name)
-        .child(plot);
-    view()
-        .flex_row()
-        .gap(move || size.px(20.0))
-        .child(poster)
-        .child(words)
 }
 fn play_label(ui: Ui) -> &'static str {
     // A series resumes only its chosen episode: after a finished episode the
@@ -1182,6 +1080,7 @@ fn details(ui: Ui, size: Scale) -> impl IntoElement {
     );
     let actions = view()
         .flex_row()
+        .flex_wrap()
         .gap(move || size.px(12.0))
         .child(play_button)
         .child(restart)
@@ -1206,31 +1105,79 @@ fn details(ui: Ui, size: Scale) -> impl IntoElement {
     view()
         .flex_1()
         .gap(move || size.px(12.0))
-        .child(metadata(ui, size))
+        .child(browser::hero(ui, size).h(percentage(0.55)))
         .child(actions)
         .child(block)
         .child(seasons)
 }
-pub fn layer(ui: Ui) -> impl IntoElement {
-    let size = Scale::new();
-    when(
-        move || is_open(ui),
+fn status_message(ui: Ui) -> String {
+    ui.vod.with(|s| {
+        if let Some(e) = &s.error {
+            tr(e).to_owned()
+        } else if s.busy {
+            tr("Loading…").to_owned()
+        } else {
+            s.notice
+                .as_ref()
+                .map(|e| tr(e).to_owned())
+                .unwrap_or_default()
+        }
+    })
+}
+fn detail_screen(ui: Ui, size: Scale) -> View {
+    view()
+        .absolute()
+        .inset_0()
+        .pt_safe_area()
+        .pb_safe_area()
+        .px(move || size.px(30.0))
+        .pb(move || size.px(24.0))
+        .bg(move || rgb(ui.theme.with(|t| t.background.window)))
+        .test_id("vod-screen")
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::Vod.accessibility_covered(ui)
+        })
+        .child(details(ui, size))
+        .child(
+            view()
+                .absolute()
+                .top(move || size.px(24.0))
+                .right(move || size.px(30.0))
+                .child(ui_kit::button(
+                    ui,
+                    size,
+                    tr("Close"),
+                    || false,
+                    move || {
+                        back(ui);
+                    },
+                )),
+        )
+        .child(ui_kit::body(size, move || status_message(ui)))
+        .child(when(
+            move || ui.vod.with(|s| s.retry.is_some() && !s.busy),
+            move || {
+                button(ui, size, Control::Retry, tr("Retry"), move || retry(ui))
+                    .test_id("vod-retry")
+            },
+        ))
+}
+fn library_screen(ui: Ui, size: Scale) -> View {
+    let header = ui_kit::header(
+        ui,
+        size,
         move || {
-            let header = ui_kit::header(
-                ui,
-                size,
-                move || {
-                    ui.vod.with(|s| match s.shelf {
-                        Some(Shelf::ContinueWatching) => tr("Continue watching"),
-                        Some(Shelf::RecentlyAdded) => tr("Recently added"),
-                        None if s.query.kind == Kind::Series => tr("Series"),
-                        None => tr("Films"),
-                    })
-                },
-                close,
-            );
-            let hint = ui_kit::caption(size, move || {
-                ui.vod.with(|s| match s.shelf {
+            ui.vod.with(|s| match s.shelf {
+                Some(Shelf::ContinueWatching) => tr("Continue watching"),
+                Some(Shelf::RecentlyAdded) => tr("Recently added"),
+                None if s.query.kind == Kind::Series => tr("Shows"),
+                None => tr("Movies"),
+            })
+        },
+        close,
+    );
+    let hint = ui_kit::caption(size, move || {
+        ui.vod.with(|s| match s.shelf {
                     Some(_) if s.details.is_some() => tr(
                         "Choose a title, then play or resume. Left/Right changes controls; Up/Down browses titles and episodes.",
                     ),
@@ -1244,56 +1191,72 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         "Choose a title, then play or resume. Left/Right changes controls; Up/Down browses titles and episodes.",
                     ),
                 })
-            });
-            // Shown with a failed operation: OK, a tap or a click runs that
-            // same operation again (see `retry`).
-            let retry_button = when(
-                move || ui.vod.with(|s| s.retry.is_some() && !s.busy),
-                move || {
-                    button(ui, size, Control::Retry, tr("Retry"), move || retry(ui))
-                        .test_id("vod-retry")
-                },
-            );
-            let error = ui_kit::body(size, move || {
-                ui.vod.with(|s| {
-                    s.error
-                        .as_ref()
-                        .map(|e| tr(e).to_owned())
-                        .unwrap_or_default()
-                })
-            });
-            let notice = ui_kit::caption(size, move || {
-                ui.vod.with(|s| {
-                    s.notice
-                        .as_ref()
-                        .map(|e| tr(e).to_owned())
-                        .unwrap_or_default()
-                })
-            });
-            let busy = ui_kit::caption(size, move || {
-                if ui.vod.with(|s| s.busy) {
-                    tr("Loading…")
-                } else {
-                    ""
-                }
-            });
-            let content = when(
-                move || ui.vod.with(|s| s.details.is_some()),
-                move || details(ui, size),
+    });
+    // Shown with a failed operation: OK, a tap or a click runs that
+    // same operation again (see `retry`).
+    let retry_button = when(
+        move || ui.vod.with(|s| s.retry.is_some() && !s.busy),
+        move || {
+            button(ui, size, Control::Retry, tr("Retry"), move || retry(ui)).test_id("vod-retry")
+        },
+    );
+    let error = ui_kit::body(size, move || {
+        ui.vod.with(|s| {
+            s.error
+                .as_ref()
+                .map(|e| tr(e).to_owned())
+                .unwrap_or_default()
+        })
+    });
+    let notice = ui_kit::caption(size, move || {
+        ui.vod.with(|s| {
+            s.notice
+                .as_ref()
+                .map(|e| tr(e).to_owned())
+                .unwrap_or_default()
+        })
+    });
+    let busy = ui_kit::caption(size, move || {
+        if ui.vod.with(|s| s.busy) {
+            tr("Loading…")
+        } else {
+            ""
+        }
+    });
+    let content = when(
+        move || ui.vod.with(|s| s.details.is_some()),
+        move || details(ui, size),
+    )
+    .otherwise(move || shelf_catalogue(ui, size));
+    ui_kit::screen(ui, size)
+        .test_id("vod-screen")
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::Vod.accessibility_covered(ui)
+        })
+        .child(header)
+        .child(hint)
+        .child(error)
+        .child(retry_button)
+        .child(notice)
+        .child(busy)
+        .child(content)
+}
+pub fn layer(ui: Ui) -> impl IntoElement {
+    let size = Scale::new();
+    when(
+        move || is_open(ui),
+        move || {
+            when(
+                move || ui.vod.with(|s| !s.is_shelf() && s.details.is_none()),
+                move || browser::screen(ui, size),
             )
-            .otherwise(move || catalogue(ui, size));
-            ui_kit::screen(ui, size)
-                .test_id("vod-screen")
-                .accessibility_elements_hidden(move || {
-                    crate::overlays::Overlay::Vod.accessibility_covered(ui)
-                })
-                .child(header)
-                .child(hint)
-                .child(error)
-                .child(retry_button)
-                .child(notice)
-                .child(busy)
-                .child(content)
+            .otherwise(move || {
+                when(
+                    move || ui.vod.with(|s| s.details.is_some()),
+                    move || detail_screen(ui, size),
+                )
+                .otherwise(move || library_screen(ui, size))
+            })
         },
     )
 }
