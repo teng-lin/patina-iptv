@@ -202,8 +202,8 @@ async fn bounded_lag_is_explicit_and_does_not_block_other_readers() {
         buffer: Mutex::default(),
         changed: Notify::new(),
     });
-    let mut governor = LiveReader::new(shared.clone(), false);
-    let mut lagged = LiveReader::new(shared.clone(), false);
+    let mut governor = LiveReader::new(shared.clone());
+    let mut lagged = LiveReader::new(shared.clone());
     let mut sink = Fanout {
         shared: shared.clone(),
         ready: None,
@@ -215,10 +215,72 @@ async fn bounded_lag_is_explicit_and_does_not_block_other_readers() {
         governor.next().await.unwrap();
     }
     assert_eq!(lagged.next().await, Err(Failure::Gap));
-    let mut recent = LiveReader::new(shared.clone(), true);
+    let mut recent = LiveReader::new(shared.clone());
     recent.cursor = shared.lock().chunks.front().unwrap().0;
     assert_eq!(recent.next().await.unwrap().len(), CHUNK);
     assert!(shared.lock().bytes <= BUFFER);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stalled_first_capture_does_not_block_playback_and_reports_a_gap() {
+    let shared = Arc::new(Shared {
+        buffer: Mutex::default(),
+        changed: Notify::new(),
+    });
+    let mut stalled_capture = LiveReader::new(shared.clone());
+    let mut playback = LiveReader::new(shared.clone());
+    let mut sink = Fanout {
+        shared: shared.clone(),
+        ready: None,
+        pending: vec![],
+        first: Arc::new(AtomicBool::new(false)),
+    };
+    for sequence in 0..(BUFFER / CHUNK + 2) {
+        let chunk = packet(sequence as u8).repeat(CHUNK / 188);
+        tokio::time::timeout(Duration::from_secs(1), sink.write(&chunk))
+            .await
+            .expect("advancing playback must keep ingestion moving")
+            .unwrap();
+        assert_eq!(playback.next().await.unwrap().as_ref(), chunk.as_slice());
+        assert!(shared.lock().bytes <= BUFFER);
+    }
+    assert_eq!(stalled_capture.next().await, Err(Failure::Gap));
+}
+
+#[tokio::test]
+async fn all_stalled_consumers_bound_read_ahead_until_one_advances() {
+    let shared = Arc::new(Shared {
+        buffer: Mutex::default(),
+        changed: Notify::new(),
+    });
+    let _stalled_capture = LiveReader::new(shared.clone());
+    let mut playback = LiveReader::new(shared.clone());
+    let mut sink = Fanout {
+        shared: shared.clone(),
+        ready: None,
+        pending: vec![],
+        first: Arc::new(AtomicBool::new(false)),
+    };
+    let chunk = packet(1).repeat(CHUNK / 188);
+    for _ in 0..(BUFFER / 2).div_ceil(CHUNK) {
+        sink.write(&chunk).await.unwrap();
+    }
+    let boundary = shared.lock().next;
+    let mut next = Box::pin(sink.write(&chunk));
+    for _ in 0..2 {
+        let state = std::future::poll_fn(|cx| std::task::Poll::Ready(next.as_mut().poll(cx))).await;
+        assert!(
+            state.is_pending(),
+            "all stalled readers must bound ingestion"
+        );
+        let buffer = shared.lock();
+        assert_eq!(buffer.next, boundary);
+        assert!(buffer.bytes <= BUFFER / 2 + CHUNK);
+    }
+    assert_eq!(playback.next().await.unwrap().as_ref(), chunk.as_slice());
+    let state = std::future::poll_fn(|cx| std::task::Poll::Ready(next.as_mut().poll(cx))).await;
+    assert!(matches!(state, std::task::Poll::Ready(Ok(()))));
+    assert_eq!(shared.lock().next, boundary + 1);
 }
 
 #[tokio::test]
@@ -242,10 +304,10 @@ async fn producer_waits_for_a_consumer_and_capture_continues_while_playback_is_p
         1,
         "preparation only retains the first chunk before a consumer arrives"
     );
-    let playback = LiveReader::new(shared.clone(), true);
-    let mut capture = LiveReader::new(shared.clone(), false);
-    // Once capture is attached, it controls progress. A paused decoder may
-    // exceed the bounded rewind window, but cannot stop the recording.
+    let playback = LiveReader::new(shared.clone());
+    let mut capture = LiveReader::new(shared.clone());
+    // An advancing capture controls progress while the decoder is paused.
+    // Playback can exceed the rewind window without stopping the recording.
     while !producer.is_finished() {
         let _ = tokio::time::timeout(Duration::from_millis(40), capture.next()).await;
     }
@@ -277,7 +339,7 @@ async fn late_capture_gets_the_bounded_current_pat_interval_in_order() {
         buffer.chunks.push_back((0, Arc::from(media.clone())));
         buffer.next = 1;
     }
-    let mut capture = LiveReader::new(shared.clone(), false);
+    let mut capture = LiveReader::new(shared.clone());
     assert_eq!(&*capture.next().await.unwrap(), [pat, pmt, media].concat());
     assert_eq!(capture.cursor, 1);
     assert!(
@@ -347,7 +409,7 @@ async fn natural_preroll_replaces_old_pat_versions_and_preserves_continuations()
     };
     shared.buffer.get_mut().unwrap().pre_roll_at =
         Some(tokio::time::Instant::now() - Duration::from_secs(3));
-    let reader = LiveReader::new(Arc::new(shared), false);
+    let reader = LiveReader::new(Arc::new(shared));
     assert!(
         reader.prelude.is_none(),
         "a stale PAT interval is never prepended to a late recording"

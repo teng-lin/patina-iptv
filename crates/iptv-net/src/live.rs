@@ -36,7 +36,7 @@ struct Buffer {
     next: u64,
     bytes: usize,
     ended: Option<Failure>,
-    readers: BTreeMap<u64, (bool, u64)>,
+    readers: BTreeMap<u64, u64>,
     reader_id: u64,
     pre_roll: Vec<u8>,
     pre_roll_valid: bool,
@@ -213,7 +213,7 @@ impl LiveInput {
     /// Capture starts at the live edge with a bounded current PAT interval and retains
     /// the incoming owner itself. Slow readers report an explicit gap.
     pub fn subscribe(&self) -> LiveReader {
-        let mut reader = LiveReader::new(self.0.shared.clone(), false);
+        let mut reader = LiveReader::new(self.0.shared.clone());
         reader.owner = Some(self.0.clone());
         reader
     }
@@ -257,22 +257,17 @@ impl Sink for Fanout {
             return Ok(());
         }
         for chunk in self.pending[..whole].chunks(CHUNK) {
-            // Capture governs while attached so paused playback cannot stop a
-            // recording. Otherwise the primary playback consumer bounds read-
-            // ahead. Upstream live pacing is preserved; lag is explicit.
+            // Any advancing consumer keeps ingestion moving. Bound read-ahead
+            // by the furthest cursor, so a stalled reader cannot stop healthy
+            // playback or capture; laggards fall behind the retained window.
             loop {
                 let notified = self.shared.changed.notified();
                 tokio::pin!(notified);
                 notified.as_mut().enable();
                 let wait = {
                     let buffer = self.shared.lock();
-                    let governor = buffer
-                        .readers
-                        .values()
-                        .find(|(playback, _)| !*playback)
-                        .or_else(|| buffer.readers.values().next());
-                    match governor {
-                        Some((_, cursor)) => {
+                    match buffer.readers.values().max() {
+                        Some(cursor) => {
                             buffer
                                 .chunks
                                 .iter()
@@ -350,13 +345,13 @@ impl Drop for LiveReader {
     }
 }
 impl LiveReader {
-    fn new(shared: Arc<Shared>, playback: bool) -> Self {
+    fn new(shared: Arc<Shared>) -> Self {
         let (cursor, id, prelude) = {
             let mut b = shared.lock();
             let cursor = b.next;
             b.reader_id += 1;
             let id = b.reader_id;
-            b.readers.insert(id, (playback, cursor));
+            b.readers.insert(id, cursor);
             let prelude = (!b.pre_roll.is_empty()
                 && b.pre_roll_at
                     .is_some_and(|at| at.elapsed() <= Duration::from_secs(2)))
@@ -392,7 +387,7 @@ impl LiveReader {
                 if let Some((_, bytes)) = buffer.chunks.get((self.cursor - first) as usize) {
                     let bytes = bytes.clone();
                     self.cursor += 1;
-                    if let Some((_, cursor)) = buffer.readers.get_mut(&self.id) {
+                    if let Some(cursor) = buffer.readers.get_mut(&self.id) {
                         *cursor = self.cursor;
                     }
                     drop(buffer);
@@ -445,7 +440,7 @@ async fn serve(
     let shared = shared
         .upgrade()
         .ok_or_else(|| io::Error::other("Input closed"))?;
-    let mut reader = LiveReader::new(shared, true);
+    let mut reader = LiveReader::new(shared);
     socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n").await?;
     if method == "HEAD" {
         return Ok(());

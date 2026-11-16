@@ -67,10 +67,11 @@ capability retired uses the normal playback retry path.
 
 The ingestor aligns output to complete 188-byte TS packets. Its shared rewind
 buffer is bounded to 4 MiB; one HLS segment uses the existing recorder's 32 MiB
-validation limit. Capture governs ingestion while attached, so paused playback
-cannot stop a recording. Without capture, primary playback limits read-ahead.
-A consumer that falls behind the retained window receives an explicit gap;
-bytes are never silently skipped. Live provider pacing is preserved. Synthetic
+validation limit. The most advanced consumer governs read-ahead: ingestion pauses
+once its unread window reaches 2 MiB. Advancing capture continues while playback
+is paused, and advancing playback continues when a capture stalls. If every
+consumer stalls, ingestion pauses. A consumer behind the retained window receives
+an explicit gap; bytes are never silently skipped. Live provider pacing is preserved. Synthetic
 finite inputs used for native validation are throttled at their upstream server.
 
 A late capture starts at the current cursor, with at most 512 KiB of exact TS
