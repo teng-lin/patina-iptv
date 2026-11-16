@@ -350,14 +350,15 @@ fn native_selection_reaches_a_correlated_render_submission() {
     let sample = std::env::var_os("IPTV_PERF_SAMPLE")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| home.path().join("selection.json"));
-    // This exact native test runs in a fresh process; configure it before GTK,
-    // the real application, or its workers can read the environment.
+    // SAFETY: this exact native test runs in a fresh process; configure it before
+    // GTK, the real application, or its workers can read the environment.
     unsafe {
         std::env::set_var("HOME", home.path());
         std::env::set_var("IPTV_PERF_NATIVE_SAMPLE", &sample);
         std::env::set_var("IPTV_RS_TEST_LOCALE", "en-US");
     }
     let ready = home.path().join("native-ready");
+    // SAFETY: GTK and application workers have not started in this isolated child.
     unsafe {
         std::env::set_var("IPTV_PERF_NATIVE_READY", &ready);
     }

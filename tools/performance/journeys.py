@@ -229,7 +229,9 @@ def run(args):
                 case = spec[journey]["scenario"]
                 for repetition in range(args.repetitions):
                     destination = Path(temporary) / f"{journey}-{repetition}.json"
-                    env = {**os.environ, "IPTV_PERF_SAMPLE": str(destination), "IPTV_RS_TEST_JOBS": "1"}
+                    scratch = Path(temporary) / f"scratch-{journey}-{repetition}"
+                    scratch.mkdir()
+                    env = {**os.environ, "IPTV_PERF_SAMPLE": str(destination), "IPTV_RS_TEST_JOBS": "1", "TMPDIR": str(scratch)}
                     try:
                         if journey == "selection":
                             if native is None:
