@@ -53,8 +53,7 @@ pub fn bind(ui: Ui) {
             crate::player::stop(ui);
             close_window.hide();
         } else {
-            crate::runtime().shutdown_recording_host();
-            close_window.close();
+            quit();
         }
     });
     if recorder_only_startup() {

@@ -1,4 +1,6 @@
 //! On-demand catalogue and playback. Credentials and ephemeral provider links stay here.
+#[cfg(test)]
+mod recovery_tests;
 use crate::{Error, Runtime};
 use iptv_core::{
     playback::PlaySource,

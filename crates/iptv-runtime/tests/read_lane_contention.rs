@@ -20,7 +20,8 @@ fn display_snapshot_and_catalogue_do_not_queue_behind_a_busy_writer() {
     // Open the reader before holding the writer: opening a reader itself
     // requires the writer to provide its already-validated database key.
     block_on(owner.read_library_metadata()).unwrap();
-    owner.occupy_writer(Duration::from_secs(3));
+    let gate = owner.host_handle().hold_writer().unwrap();
+    assert!(gate.wait_entered(Duration::from_secs(5)));
     let started = Instant::now();
     block_on(owner.read_library_metadata()).unwrap();
     let worker = owner.worker_catalog_size(iptv_runtime::model::SourceId(1));
@@ -31,5 +32,6 @@ fn display_snapshot_and_catalogue_do_not_queue_behind_a_busy_writer() {
         elapsed < Duration::from_secs(2),
         "display reads waited for writer: {elapsed:?}"
     );
+    gate.release();
     assert!(owner.drain_services());
 }

@@ -37,6 +37,10 @@ pub mod parental;
 pub mod recordings;
 pub mod vod;
 pub use error::Error;
+#[cfg(feature = "test-support")]
+mod testing;
+#[cfg(feature = "test-support")]
+pub use testing::TestGate;
 
 /// Shell observations needed to prioritize reads and avoid replacing active playback.
 #[derive(Default)]
@@ -99,6 +103,7 @@ pub struct Runtime {
     parental: RefCell<parental::State>,
     recordings: std::sync::Arc<recordings::State>,
     recordings_detached: Cell<bool>,
+    shutdown_requested: Cell<bool>,
     vod: std::sync::Arc<vod::State>,
     repairs: RefCell<guide_repair::State>,
     account_streams: Slot<Cell<Option<u32>>>,
@@ -169,6 +174,7 @@ impl Runtime {
             parental: RefCell::default(),
             recordings,
             recordings_detached: Cell::new(false),
+            shutdown_requested: Cell::new(false),
             vod: Default::default(),
             repairs: RefCell::default(),
             account_streams: Slot::default(),
@@ -280,6 +286,7 @@ impl Runtime {
     /// The calling thread becomes this owner's application thread: store
     /// requests are accepted from now until [`Runtime::drain_services`].
     pub fn start_services(&self) {
+        self.shutdown_requested.set(false);
         self.store.begin();
         self.inspection.renew();
     }
@@ -292,6 +299,7 @@ impl Runtime {
         // A Recently added sort still running must not hold the analysis
         // lane's teardown barrier.
         self.vod.cancel_discovery();
+        self.shutdown_requested.set(true);
         let drained = self
             .store
             .drain_on_shutdown_with(|| self.inspection.cancel_requests());
@@ -367,7 +375,6 @@ impl Drop for Runtime {
         if !self.recordings_detached.replace(true) {
             self.recordings.detach_ui();
         }
-        self.store.retire();
         if let Some((_, cancel)) = self.wizard_import.borrow().as_ref() {
             cancel.cancel();
         }
@@ -380,6 +387,23 @@ impl Drop for Runtime {
         for completion in self.completions.borrow().values().filter_map(Weak::upgrade) {
             completion.cancel.cancel();
         }
+        // Hosts normally drain explicitly. Unwinding or an abandoned owner must
+        // also attempt to close its cipher connections before process-level
+        // SQLCipher cleanup can free their private heap. These are this UI owner's lanes;
+        // the independent native recording host retains its own services.
+        // An explicit attempt already spent its bounded shutdown budget, even
+        // if a noncooperative lane did not close. Do not spend it again in Drop.
+        if !self.shutdown_requested.replace(true)
+            && !self
+                .store
+                .drain_on_shutdown_with(|| self.inspection.cancel_requests())
+        {
+            log::error!("iptv persistence: fallback store drain did not finish at disposal");
+        }
+        if !self.store.files().flush(std::time::Duration::from_secs(2)) {
+            log::error!("iptv persistence: fallback file flush did not finish at disposal");
+        }
+        self.store.retire();
     }
 }
 
@@ -427,6 +451,44 @@ impl HostHandle {
             .map_or(0, |service| service.hooks.reports_waiting())
     }
 
+    /// Pause a FIFO writer job; the returned gate acknowledges actual entry.
+    #[cfg(feature = "test-support")]
+    pub fn hold_writer(&self) -> Option<TestGate> {
+        self.0
+            .upgrade()
+            .map(|service| service.accept().hold_writer())
+    }
+
+    /// Pause the next file write immediately before filesystem publication.
+    #[cfg(feature = "test-support")]
+    pub fn hold_file_write(&self) -> Option<TestGate> {
+        self.0.upgrade().map(|service| service.files().hold_write())
+    }
+
+    /// Pause an import after staging and before its writer request is accepted.
+    #[cfg(feature = "test-support")]
+    pub fn hold_import_publication(&self) -> Option<TestGate> {
+        self.0
+            .upgrade()
+            .map(|service| service.hooks.hold_publication())
+    }
+
+    /// Acknowledges that this owner's actual store lanes have closed.
+    #[cfg(feature = "test-support")]
+    pub fn observe_drain(&self) -> Option<TestGate> {
+        self.0
+            .upgrade()
+            .map(|service| service.hooks.observe_drain())
+    }
+
+    /// Acknowledges that shutdown closed admission, before its FIFO barriers.
+    #[cfg(feature = "test-support")]
+    pub fn observe_admission_close(&self) -> Option<TestGate> {
+        self.0
+            .upgrade()
+            .map(|service| service.hooks.observe_admission_close())
+    }
+
     /// Occupies this owner's store writer for `duration` after the work
     /// queued before it (the headless tests of what must not wait for it
     /// drive the app from another thread).
@@ -441,6 +503,31 @@ impl HostHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[cfg(feature = "test-support")]
+    async fn a_failed_explicit_drain_does_not_spend_its_budget_again_in_drop() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = Runtime::new(Ports::new(directory.path().into(), |_| {
+            Ok(crate::model::DatabaseKey::from_bytes([0x69; 32]))
+        }));
+        owner.start_services();
+        owner.services().call(|_| Ok(())).await.unwrap();
+        let store = owner.store.clone();
+        let held = owner.host_handle().hold_writer().unwrap();
+        assert!(held.wait_entered(std::time::Duration::from_secs(5)));
+        store.hooks.set_drain_limit(Some(std::time::Duration::ZERO));
+        assert!(!owner.drain_services());
+        let repeated = store.hooks.observe_admission_close();
+        drop(owner);
+        let retried = repeated.wait_entered(std::time::Duration::ZERO);
+        // Always release and close the actual held connection before checking
+        // the regression, including when the fallback has been mutated.
+        held.release();
+        store.hooks.set_drain_limit(None);
+        assert!(store.drain_on_shutdown_with(|| {}));
+        assert!(!retried, "Drop repeated an explicit shutdown attempt");
+    }
 
     #[test]
     fn independent_runtimes_can_apply_events_during_delivery() {

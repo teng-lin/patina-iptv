@@ -114,9 +114,51 @@ pub(crate) struct Hooks {
     refusals: std::sync::atomic::AtomicUsize,
     reports: Mutex<(bool, usize)>,
     released: Condvar,
+    publication: Mutex<Option<Arc<crate::testing::GateState>>>,
+    drained: Mutex<Option<Arc<crate::testing::GateState>>>,
+    admission_closed: Mutex<Option<Arc<crate::testing::GateState>>>,
+    drain_limit: Mutex<Option<std::time::Duration>>,
 }
 #[cfg(feature = "test-support")]
 impl Hooks {
+    pub(crate) fn observe_admission_close(&self) -> crate::TestGate {
+        let gate = crate::TestGate::new();
+        *self.admission_closed.lock().unwrap() = Some(gate.0.clone());
+        gate
+    }
+    pub(crate) fn admission_closed(&self) {
+        if let Some(gate) = self.admission_closed.lock().unwrap().take() {
+            gate.acknowledge();
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn set_drain_limit(&self, limit: Option<std::time::Duration>) {
+        *self.drain_limit.lock().unwrap() = limit;
+    }
+    pub(crate) fn drain_limit(&self) -> Option<std::time::Duration> {
+        *self.drain_limit.lock().unwrap()
+    }
+    pub(crate) fn observe_drain(&self) -> crate::TestGate {
+        let gate = crate::TestGate::new();
+        *self.drained.lock().unwrap() = Some(gate.0.clone());
+        gate
+    }
+    pub(crate) fn drained(&self) {
+        if let Some(gate) = self.drained.lock().unwrap().take() {
+            gate.acknowledge();
+        }
+    }
+    pub(crate) fn hold_publication(&self) -> crate::TestGate {
+        let gate = crate::TestGate::new();
+        *self.publication.lock().unwrap() = Some(gate.0.clone());
+        gate
+    }
+    pub(crate) fn before_publication(&self) {
+        let pause = self.publication.lock().unwrap().take();
+        if let Some(pause) = pause {
+            pause.pause();
+        }
+    }
     pub(crate) fn refuse(&self) -> bool {
         use std::sync::atomic::Ordering::SeqCst;
         self.refusals

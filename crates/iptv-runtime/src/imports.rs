@@ -21,6 +21,96 @@ use iptv_store_sqlite::{
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::UnboundedSender as Sender;
+#[cfg(all(test, feature = "test-support"))]
+mod recovery_tests;
+
+/// Authority captured before I/O, checked again on the writer before mutation.
+/// A reused numeric source ID or an edit cannot inherit an old import's result.
+#[derive(Clone)]
+pub(crate) struct Publication {
+    cancel: CancelToken,
+    source: Option<(SourceId, String, iptv_providers::model::SourceConfig)>,
+    authorization: crate::parental::Snapshot,
+}
+
+#[derive(Debug)]
+pub(crate) enum PublicationError {
+    Superseded,
+    Store(StoreError),
+}
+impl From<StoreError> for PublicationError {
+    fn from(error: StoreError) -> Self {
+        Self::Store(error)
+    }
+}
+impl std::fmt::Display for PublicationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Superseded => f.write_str("import superseded"),
+            Self::Store(error) => error.fmt(f),
+        }
+    }
+}
+impl PublicationError {
+    fn failure(&self, fallback: FailureKind) -> ImportFailure {
+        ImportFailure::new(match self {
+            Self::Superseded | Self::Store(StoreError::SourceNotFound(_)) => FailureKind::Cancelled,
+            Self::Store(_) => fallback,
+        })
+    }
+}
+
+impl Publication {
+    pub(crate) fn capture(
+        services: &Services,
+        job: &Job,
+        cancel: &CancelToken,
+        authorization: &crate::parental::Snapshot,
+    ) -> Result<Self, PublicationError> {
+        if cancel.is_cancelled() {
+            return Err(PublicationError::Superseded);
+        }
+        let job = job.clone();
+        let auth = authorization.clone();
+        let source = services.blocking(move |store| {
+            crate::parental::require_import(store, &job, &auth)?;
+            let source = match job.stored {
+                Some(id) => {
+                    let stored = store.source(id)?.ok_or(StoreError::SourceNotFound(id))?;
+                    // A refresh can wait in the bounded pool while source details
+                    // change. It must not adopt the newer incarnation and then
+                    // fetch using the older job's connection configuration.
+                    if !job.edit && stored.source.config != job.source.config {
+                        return Ok(Err(PublicationError::Superseded));
+                    }
+                    Some((id, store.source_incarnation(id)?, stored.source.config))
+                }
+                None => None,
+            };
+            Ok(Ok(source))
+        })??;
+        Ok(Self {
+            cancel: cancel.clone(),
+            source,
+            authorization: authorization.clone(),
+        })
+    }
+
+    fn current(&self, store: &Store) -> Result<bool, StoreError> {
+        if self.cancel.is_cancelled() {
+            return Ok(false);
+        }
+        if let Some((id, incarnation, config)) = &self.source {
+            let Some(current) = store.source(*id)? else {
+                return Ok(false);
+            };
+            if store.source_incarnation(*id)? != *incarnation || current.source.config != *config {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+}
 /// An import to run.
 #[derive(Clone)]
 pub struct Job {
@@ -318,14 +408,16 @@ pub(crate) async fn pipeline(
     let fail = |failure: ImportFailure| {
         let _ = tx.send(Msg::Playlist(Err(failure)));
     };
-    let auth = authorization.clone();
-    let admission = job.clone();
-    if services
-        .blocking(move |store| crate::parental::require_import(store, &admission, &auth))
-        .is_err()
-    {
-        return fail(ImportFailure::new(FailureKind::Auth));
-    }
+    let publication = match Publication::capture(services, &job, cancel, authorization) {
+        Ok(publication) => publication,
+        Err(error) => {
+            return fail(error.failure(if services.is_current() {
+                FailureKind::Auth
+            } else {
+                FailureKind::Cancelled
+            }));
+        }
+    };
     let now = now_unix();
     if let Some(id) = job
         .stored
@@ -485,7 +577,7 @@ pub(crate) async fn pipeline(
             log::warn!("iptv data: {:?} import failed: {e}", job.source.kind());
             // New details that failed say nothing about the stored ones.
             if !matches!(e, ImportError::Cancelled) && !job.edit {
-                record_failure(services, job.stored, stored::error_kind(&e));
+                record_failure(services, job.stored, stored::error_kind(&e), &publication);
             }
             // The stored guide stays on screen: keep it current.
             if let Some(id) = job.stored.filter(|_| stored_guide.is_some()) {
@@ -501,7 +593,7 @@ pub(crate) async fn pipeline(
     };
     if catalog.is_empty() {
         if !job.edit {
-            record_failure(services, job.stored, ImportErrorKind::Other);
+            record_failure(services, job.stored, ImportErrorKind::Other, &publication);
         }
         return fail(ImportFailure::new(FailureKind::EmptyPlaylist));
     }
@@ -575,12 +667,17 @@ pub(crate) async fn pipeline(
         done: 0,
         total: None,
     }));
-    let (id, counts, sources) = match save(services, &job, &catalog, &planned, stage, authorization)
+    #[cfg(feature = "test-support")]
+    services.before_publication();
+    let (id, counts, sources) = match save(services, &job, &catalog, &planned, stage, &publication)
     {
         Ok(saved) => saved,
         Err(e) => {
             log::warn!("iptv data: store: {e}");
-            return fail(ImportFailure::new(FailureKind::Storage));
+            if cancel.is_cancelled() || !services.is_current() {
+                return fail(ImportFailure::new(FailureKind::Cancelled));
+            }
+            return fail(e.failure(FailureKind::Storage));
         }
     };
     let matching = stored::Matching {
@@ -753,16 +850,20 @@ pub(crate) fn save(
     catalog: &Catalog,
     planned: &[GuideSource],
     stage: CatalogStage,
-    authorization: &crate::parental::Snapshot,
-) -> Result<(SourceId, CatalogCounts, Vec<GuideSource>), StoreError> {
+    publication: &Publication,
+) -> Result<(SourceId, CatalogCounts, Vec<GuideSource>), PublicationError> {
     let job = job.clone();
     let guide_urls = catalog.guide_urls();
     let planned = planned.to_vec();
-    let authorization = authorization.clone();
-    services.blocking(move |store| {
-        crate::parental::require_import(store, &job, &authorization)?;
-        save_in(store, &job, guide_urls, planned, stage)
-    })
+    let publication = publication.clone();
+    let saved = services.blocking(move |store| {
+        if !publication.current(store)? {
+            return Ok(Err(PublicationError::Superseded));
+        }
+        crate::parental::require_import(store, &job, &publication.authorization)?;
+        Ok(Ok(save_in(store, &job, guide_urls, planned, stage)?))
+    })??;
+    Ok(saved)
 }
 
 pub(crate) fn save_in(
@@ -796,11 +897,22 @@ pub(crate) fn save_in(
 }
 
 /// Notes a failed refresh on the stored source (kind only).
-pub(crate) fn record_failure(services: &Services, stored: Option<SourceId>, kind: ImportErrorKind) {
+pub(crate) fn record_failure(
+    services: &Services,
+    stored: Option<SourceId>,
+    kind: ImportErrorKind,
+    publication: &Publication,
+) {
     let Some(id) = stored else {
         return;
     };
-    if let Err(e) = services.blocking(move |store| store.record_import_failure(id, kind)) {
+    let publication = publication.clone();
+    if let Err(e) = services.blocking(move |store| {
+        if !publication.current(store)? {
+            return Ok(());
+        }
+        store.record_import_failure(id, kind)
+    }) {
         log::warn!("iptv data: could not record the failure: {e}");
     }
 }
