@@ -69,6 +69,23 @@ impl Home {
     }
 }
 
+// A UI may be recreated while the native recorder keeps its own store service.
+// The final scenario lifetime must stop that host before libtest returns and
+// native library cleanup begins; dropping Headless drains only the UI service.
+impl Drop for Home {
+    fn drop(&mut self) {
+        let stopped = iptv_runtime::recordings::host::stop_background_host(&self.data_dir());
+        if !stopped && std::thread::panicking() {
+            eprintln!("native recording host did not stop while the scenario was unwinding");
+            return;
+        }
+        assert!(
+            stopped,
+            "native recording host did not stop before isolated scenario exit"
+        );
+    }
+}
+
 /// Parses a wait scale factor from an environment variable value or raw string.
 /// Returns 1 for missing, empty, invalid, non-positive, or overflow values.
 pub fn parse_wait_scale(raw: Option<&str>) -> u32 {

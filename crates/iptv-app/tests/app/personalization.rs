@@ -21,10 +21,12 @@ pub const M3U: &str = "#EXTM3U\n\
                        #EXTINF:-1 group-title=\"Sport\",Local C\n\
                        http://example.test/c\n";
 pub struct Fixture {
-    pub home: Home,
+    // Fields drop in declaration order: finish the engine before Home stops
+    // the retained native recorder and removes the scenario's storage.
+    pub app: Headless,
     pub path: PathBuf,
     pub source: SourceId,
-    pub app: Headless,
+    pub home: Home,
 }
 #[track_caller]
 pub fn step(r: Result<(), String>) {
