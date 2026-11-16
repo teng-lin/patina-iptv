@@ -294,7 +294,9 @@ fn tv_saved_playback_returns_through_guide_preview_without_reopening_the_player(
             .is_ok_and(|s| s.selected && !s.disabled)
     );
     step(app.press_key("enter"));
-    step(app.wait_for("id:player-banner"));
+    step(app.wait_for_gone("id:player-banner", Duration::from_secs(2)));
+    step(app.wait_for("id:player-panels >> text:Generated saved programme"));
+    step(app.wait_for("id:player-time-line"));
     assert_eq!(iptv_app::player_opens(0), opens);
     assert_eq!(props.lock().unwrap()["source"], source);
     assert!(
