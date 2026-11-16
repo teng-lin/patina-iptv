@@ -448,6 +448,26 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for("text:The stream stopped sending video."));
     step(app.wait_for("text:/· still trying$/"));
     step(app.wait_for("text:OK  Try again"));
+    step(app.press_key("m"));
+    step(app.wait_for("id:play-bar-layer"));
+    assert!(
+        !app.screen()
+            .accessibility_state("id:player-retry")
+            .unwrap()
+            .selected
+    );
+    assert!(
+        app.screen()
+            .accessibility_state("id:play-bar-play-pause")
+            .unwrap()
+            .selected
+    );
+    assert!(
+        !seen(&app, "text:OK  Try again"),
+        "retry does not claim OK while the bar owns remote focus"
+    );
+    step(app.back());
+    step(app.wait_for("text:OK  Try again"));
     assert!(opens() >= before + 6, "{} retries", opens() - before);
     // Behind the card retries go on (every 30 s, each stalling in 15).
     let behind = opens();

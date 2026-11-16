@@ -98,6 +98,12 @@ pub fn status(ui: Ui) -> impl IntoElement {
     let waiting = move || matches!(status.get(), Status::Waiting(_));
     let card = move || matches!(status.get(), Status::Failed { .. } | Status::Over);
     let secondary = move || tint(WHITE, TEXT_SECONDARY_ALPHA);
+    let retry_active = move || {
+        !ui.any_overlay_open()
+            && !crate::play_bar::captures(ui)
+            && !ui.panels.with(|p| p.captures_input())
+    };
+    let retry_keys = move || ui.keys_shown() && retry_active();
     view()
         .accessibility_elements_hidden(move || ui.any_overlay_open())
         .absolute()
@@ -164,11 +170,17 @@ pub fn status(ui: Ui) -> impl IntoElement {
                     text(move || {
                         if crate::on_demand::active(ui) && !failed() {
                             tr("Play again").to_owned()
-                        } else if ui.keys_shown() {
+                        } else if retry_keys() {
                             tr("OK  Try again").to_owned()
                         } else {
                             tr("Try again").to_owned()
                         }
+                    })
+                    .test_id("player-retry")
+                    .role(AccessibilityRole::Button)
+                    .accessibility_state(move || AccessibilityState {
+                        selected: retry_keys(),
+                        ..Default::default()
                     })
                     .mt(px(6.0))
                     .px(px(20.0))
@@ -176,9 +188,23 @@ pub fn status(ui: Ui) -> impl IntoElement {
                     .rounded(px(RADIUS))
                     .text_size(px(OSD_TEXT))
                     .text_color(rgb(WHITE))
-                    .bg(move || tint(ui.theme.with(|t| t.accent.main), FOCUS_ALPHA))
+                    .bg(move || {
+                        tint(
+                            ui.theme.with(|t| t.accent.main),
+                            if retry_active() {
+                                FOCUS_ALPHA
+                            } else {
+                                crate::theme::RESTING_ALPHA
+                            },
+                        )
+                    })
                     .border(px(2.0))
-                    .border_color(move || rgb(ui.theme.with(|t| t.accent.light)))
+                    .border_color(move || {
+                        tint(
+                            ui.theme.with(|t| t.accent.light),
+                            if retry_active() { 255 } else { 0 },
+                        )
+                    })
                     .on_press(move || {
                         ui.touched();
                         if crate::on_demand::active(ui) && !failed() {
