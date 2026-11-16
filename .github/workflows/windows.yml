@@ -27,6 +27,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-windows
+        with:
+          cache-on-failure: 'true'
       - name: Verify dependency packaging helpers
         shell: pwsh
         run: |

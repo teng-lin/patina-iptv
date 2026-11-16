@@ -103,6 +103,16 @@ class ToolCache(unittest.TestCase):
         for path in ("Cargo.lock", "nsh.rev", ".github/actions/setup/action.yml"):
             self.assertTrue(validation.select([path])["packages"], path)
 
+    def test_validation_retains_successful_dependency_work_after_test_failure_only_on_master(self):
+        for action in ("setup", "setup-windows"):
+            text = (ROOT / f".github/actions/{action}/action.yml").read_text()
+            self.assertIn("cache-on-failure: ${{ inputs.cache-on-failure }}", text)
+            self.assertIn("save-if: ${{ github.ref == 'refs/heads/master' }}", text)
+            self.assertIn("if: inputs.cache == 'true'", text)
+        for workflow in ("ci", "windows", "coverage", "import-stress"):
+            text = (ROOT / f".github/workflows/{workflow}.yml").read_text()
+            self.assertIn("cache-on-failure: 'true'", text)
+
     @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "composite installation uses Bash")
     def test_tool_install_uses_its_own_root_and_fixed_bootstrap_profile(self):
         install = re.search(r"(?ms)^      run: \|\n(        args=\(\).*?)(?=^    #)", RECIPE)

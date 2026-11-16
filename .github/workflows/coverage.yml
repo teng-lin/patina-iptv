@@ -21,6 +21,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
         with:
+          cache-on-failure: 'true'
           cache-key: coverage-v2-${{ hashFiles('tools/ci/coverage.sh', '.github/workflows/coverage.yml') }}
       - name: Prepare the isolated native player display
         run: sudo apt-get install -y xvfb libgl1-mesa-dri

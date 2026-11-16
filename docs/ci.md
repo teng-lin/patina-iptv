@@ -39,7 +39,10 @@ split does not weaken that policy or existing strict display latency budgets.
 
 Fuzz targets run in one job, sharing the pinned tool, sanitizer dependencies
 and full corpus cache. New/shared parser inputs select all targets; unknown
-fuzz target names fail before execution. Only master refreshes reusable caches.
+fuzz target names fail before execution. Only master refreshes reusable caches. Host, coverage and stress lanes retain
+compiled dependencies even when a later assertion or coverage floor fails. PRs
+restore those caches without writing them, and clean release packaging keeps
+its cache opt-out.
 
 ## Required checks and migration
 
