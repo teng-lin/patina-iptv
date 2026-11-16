@@ -313,7 +313,7 @@ fn report(ui: Ui, surface: usize, kind: PlayerEventKind, status: String) {
 fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
     let stream = ui.player.stream(surface);
     let token = match &event {
-        PlayerEvent::Timeline { token, .. } => Some(*token),
+        PlayerEvent::Timeline { token, .. } | PlayerEvent::FirstRender { token } => Some(*token),
         _ => None,
     };
     if !matches!(&event, PlayerEvent::Pip { .. } | PlayerEvent::PipAction(_))
