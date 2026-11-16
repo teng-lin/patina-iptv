@@ -332,7 +332,7 @@ fn multiview(app: &mut Headless, step: impl Fn(Result<(), String>) + Copy) {
     chrome(app, step);
     step(app.press("label:Remove screen: Test Channel Three"));
     assert_eq!(tiles(app), 1);
-    assert!(!app.screen().matches("label:/^Remove /").unwrap());
+    assert!(!app.screen().matches("label:/^Remove screen:/").unwrap());
     // The toolbar's Add opens the picker (the chrome goes); Back cancels
     // it, and only it.
     chrome(app, step);

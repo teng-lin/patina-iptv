@@ -968,6 +968,18 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resum
     step(app.press("text:/^☰  /"));
     step(app.press("label:Films"));
     step(app.wait_for("id:vod-screen"));
+    assert!(
+        app.screen()
+            .accessibility_state("id:vod-title >> nth=0")
+            .unwrap()
+            .selected
+    );
+    assert!(
+        !app.screen()
+            .accessibility_state("id:vod-title >> nth=1")
+            .unwrap()
+            .selected
+    );
     step(app.press("text:/^Generated Aurora/"));
     step(app.wait_for("text:Play from beginning"));
     if idiom == nsh_core::platform::Idiom::Tv {
@@ -1014,6 +1026,18 @@ fn exercise(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom, resum
     step(app.wait_for("id:vod-screen"));
     step(app.press("text:/^Generated Voyage/"));
     step(app.wait_for("text:/Generated First/"));
+    let selected = (0..app.screen().count("id:vod-episode").unwrap())
+        .filter(|at| {
+            app.screen()
+                .accessibility_state(&format!("id:vod-episode >> nth={at}"))
+                .unwrap()
+                .selected
+        })
+        .count();
+    assert_eq!(
+        selected, 1,
+        "the episode selection has one content identity"
+    );
     if idiom == nsh_core::platform::Idiom::Tv {
         for _ in 0..2 {
             step(app.press_key("right"));

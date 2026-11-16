@@ -522,7 +522,7 @@ pub fn key(ui: Ui, action: Action) {
 fn date(unix: i64) -> String {
     crate::time::label(unix, crate::time::wall_unix())
 }
-fn draft_row(ui: Ui, size: Scale, row: usize) -> impl IntoElement {
+fn draft_row(ui: Ui, size: Scale, row: usize) -> View {
     let value = move || {
         ui.recordings.with(|s| {
             s.draft
@@ -605,7 +605,7 @@ fn draft_row(ui: Ui, size: Scale, row: usize) -> impl IntoElement {
             })
         }))
 }
-fn draft_view(ui: Ui, size: Scale) -> impl IntoElement {
+fn draft_view(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> impl IntoElement {
     view()
         .gap(move || size.px(12.0))
         .child(ui_kit::heading(size, move || {
@@ -616,17 +616,32 @@ fn draft_view(ui: Ui, size: Scale) -> impl IntoElement {
                     .unwrap_or_default()
             })
         }))
-        .children((0..6).map(move |row| draft_row(ui, size, row)))
-        .child(ui_kit::button(
-            ui,
-            size,
-            tr("Save recording"),
-            move || {
+        .children((0..6).map(move |row| {
+            scrolling.control(draft_row(ui, size, row), move || {
                 ui.recordings
-                    .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == 6))
-            },
-            move || save(ui),
-        ))
+                    .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == row))
+            })
+        }))
+        .child(
+            scrolling.control(
+                ui_kit::button(
+                    ui,
+                    size,
+                    tr("Save recording"),
+                    move || {
+                        ui.recordings
+                            .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == 6))
+                    },
+                    move || save(ui),
+                )
+                .disabled(move || ui.recordings.with(|s| s.busy))
+                .test_id("recording-save"),
+                move || {
+                    ui.recordings
+                        .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == 6))
+                },
+            ),
+        )
 }
 fn job_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
     let job = move || ui.recordings.with(|s| s.visible().nth(at.index()).cloned());
@@ -697,7 +712,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             .child(ui_kit::caption(size, tr("Up/Down selects · Left/Right changes a value or filters the list · Menu shows all recordings · Back returns")))
             .child(ui_kit::body(size, move || ui.recordings.with(|s| s.error.as_ref().map(|message| tr(message).to_owned()).unwrap_or_default())))
             .child(ui_kit::caption(size, move || if ui.recordings.with(|s| s.busy) { tr("Saving…") } else { "" }))
-            .child(when(move || ui.recordings.with(|s| s.draft.is_some()), move || scroll().flex_1().child(draft_view(ui, size))))
+            .child(when(move || ui.recordings.with(|s| s.draft.is_some()), move || {
+                let scrolling = ui_kit::FocusScroll::new();
+                scrolling.view().test_id("recording-draft-scroll").flex_1().child(draft_view(ui, size, scrolling))
+            }))
             .child(when(move || ui.recordings.with(|s| s.draft.is_none() && s.actions), move || action_view(ui, size)))
             .child(when(move || ui.recordings.with(|s| s.draft.is_none() && !s.actions), move || {
                 let filters = view().flex_row().gap(move || size.px(12.0))
