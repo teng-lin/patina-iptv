@@ -12,14 +12,15 @@ in [CONTRIBUTING.md](../CONTRIBUTING.md).
 | Change | State/policy and orchestration | Adapter or host | Closest validation |
 | --- | --- | --- | --- |
 | Provider parsing/import | [providers](../crates/iptv-providers/src/lib.rs), [import](../crates/iptv-import/src/lib.rs), [runtime imports](../crates/iptv-runtime/src/imports.rs) | [network](../crates/iptv-net/src/lib.rs) | `cargo test -p iptv-providers -p iptv-import -p iptv-net`; synthetic mock import and cancellation scenarios |
-| Guide and focus | [core](../crates/iptv-core/src/lib.rs), [guide](../crates/iptv-guide/src/lib.rs), [navigation](../crates/iptv-nav/src/lib.rs) | [app input](../crates/iptv-app/src/input.rs) | `cargo test -p iptv-core -p iptv-guide -p iptv-nav`; app guide navigation/refresh scenarios |
+| Guide and focus | [core](../crates/iptv-core/src/lib.rs), [guide](../crates/iptv-guide/src/lib.rs), [navigation](../crates/iptv-nav/src/lib.rs), [runtime guides](../crates/iptv-runtime/src/guides.rs) | [app input](../crates/iptv-app/src/input.rs) | `cargo test -p iptv-core -p iptv-guide -p iptv-nav`; app guide navigation/refresh scenarios |
+| XMLTV and guide repair | [EPG parser](../crates/iptv-epg/src/lib.rs), [runtime checks](../crates/iptv-runtime/src/guide_checks.rs), [repair](../crates/iptv-runtime/src/guide_repair.rs) | [network](../crates/iptv-net/src/lib.rs), [store](../crates/iptv-store-sqlite/src/lib.rs) | `cargo test -p iptv-epg`; runtime guide-check/repair scenarios and the selected parser fuzz workflow |
 | Library and search | [library](../crates/iptv-library/src/lib.rs), [search](../crates/iptv-search/src/lib.rs), [runtime search](../crates/iptv-runtime/src/search.rs), [VOD](../crates/iptv-runtime/src/vod.rs) | [store](../crates/iptv-store-sqlite/src/lib.rs) | `cargo test -p iptv-library -p iptv-search`; runtime VOD/source-identity tests |
 | Settings | [schema](../crates/iptv-settings/src/lib.rs), [runtime](../crates/iptv-runtime/src/settings.rs) | [settings view](../crates/iptv-app/src/settings_view.rs) | `cargo test -p iptv-settings`; app settings, persistence and backup/restore scenarios |
 | Persistence and migrations | [service ownership](../crates/iptv-runtime/src/store_service.rs) | [SQLite](../crates/iptv-store-sqlite/src/lib.rs), [SQLCipher initialization](../crates/iptv-sqlcipher-init/src/lib.rs) | `cargo test -p iptv-store-sqlite -p iptv-sqlcipher-init`; [historical migration fixtures](../crates/iptv-store-sqlite/tests/it/migrations.rs) |
 | Parental policy | [portable policy](../crates/iptv-core/src/parental.rs), [runtime admission](../crates/iptv-runtime/src/parental.rs) | [PIN UI](../crates/iptv-app/src/parental_view.rs) | `cargo test -p iptv-core parental`; [runtime parental-access scenarios](../crates/iptv-runtime/tests/parental_access.rs) and app parental scenarios; revocation during queued work |
 | Recording lifecycle | [portable model](../crates/iptv-core/src/recording.rs), [runtime](../crates/iptv-runtime/src/recordings.rs), [native ownership](../crates/iptv-runtime/src/recordings/host.rs) | [recording host adapter](../crates/iptv-app/src/recording_host.rs), [Android host](../hosts/android) | [runtime recording recovery](../crates/iptv-runtime/src/recordings/recovery_tests.rs) and app recorder-startup/transport scenarios; device background/resume checks |
-| Playback and native controls | [core playback](../crates/iptv-core/src/playback.rs), [runtime opening](../crates/iptv-runtime/src/opening.rs) | [player adapter](../crates/iptv-player-mpv/src/lib.rs), [persistent surface](../crates/iptv-app/src/video.rs), [Android host](../hosts/android) | player and app playback/PiP/multiview scenarios; native playback on each changed host |
-| Localization/accessibility | [portable messages](../crates/iptv-core/src/i18n.rs), [theme](../crates/iptv-app/src/theme.rs) | [app scenarios](../crates/iptv-app/tests/app/main.rs) | core catalogue tests, app catalogue/interface-language/accessibility scenarios; actual assistive-technology checks for host changes |
+| Playback and native controls | [core playback](../crates/iptv-core/src/playback.rs), [runtime playback](../crates/iptv-runtime/src/playback.rs), [opening](../crates/iptv-runtime/src/opening.rs) | [player adapter](../crates/iptv-player-mpv/src/lib.rs), [persistent surface](../crates/iptv-app/src/video.rs), [Android host](../hosts/android) | `cargo test -p iptv-player-mpv`; app playback/PiP/multiview scenarios; native playback on each changed host |
+| Localization/accessibility | [portable messages](../crates/iptv-core/src/i18n.rs), [contrast policy](../crates/iptv-app/src/theme.rs) | [message adapter](../crates/iptv-app/src/i18n.rs), [assistive-technology checklist](../CONTRIBUTING.md#screen-readers-and-large-text) | core catalogue tests, app catalogue/interface-language/accessibility scenarios; actual assistive-technology checks for host changes |
 | Release and packaging | [release contract](release.md), [workflow](../.github/workflows/release.yml) | [CI tools](../tools/ci), [Android hosts](../hosts/android) | affected Python/shell/host tests, package smoke and workflow gates from the release contract |
 
 Runtime services have [a declared compatibility boundary](runtime-api-v1.md).
@@ -35,6 +36,29 @@ Run targeted checks while iterating. For app scenarios, use
 `cargo test -p iptv-app --features test-support --test app -- --list`.
 Runtime test-support scenarios use
 `cargo test -p iptv-runtime --features test-support`.
+Useful exact commands for the map's domains include:
+
+```sh
+cargo test -p iptv-runtime --test persistence_safety
+cargo test -p iptv-runtime --test data_startup
+cargo test -p iptv-runtime --test parental_access
+cargo test -p iptv-app --features test-support --test app vod_library
+cargo test -p iptv-app --features test-support --test app library_management
+cargo test -p iptv-app --features test-support --test app cov_settings_screen
+cargo test -p iptv-app --features test-support --test app backup_restore
+cargo test -p iptv-app --features test-support --test app recorder_startup
+cargo test -p iptv-app --features test-support --test app recordings_transport
+cargo test -p iptv-app --features test-support --test app tv_player
+cargo test -p iptv-app --features test-support --test app pip_control
+cargo test -p iptv-app --features test-support --test app multiview_menu
+cargo test -p iptv-app --features test-support --test app catalogue_lint
+cargo test -p iptv-app --features test-support --test app interface_languages
+cargo test -p iptv-app --features test-support --test app accessibility_visibility
+python3 tools/ci/test-release-workflow.py
+python3 tools/ci/test-publish-release.py
+python3 tools/ci/test-rehearsal.py
+```
+
 Headless scenarios prove model, layout and native-prop behavior, not actual
 decoding or screen-reader usability.
 
@@ -53,16 +77,29 @@ Examples of impact assessment:
   `tab36` and/or `tv36`. Exercise the changed lifecycle/input path and identify
   emulator evidence separately from physical hardware evidence. Use the
   [Android smoke workflow](../.github/workflows/android-smoke.yml) as a starting
-  point, not proof that every new behavior was exercised.
+  point, not proof that every new behavior was exercised. These profiles do not
+  replace the [physical-device requirement](../CONTRIBUTING.md#when-a-device-run-is-needed).
+  With the documented SDK/NDK prerequisites, the Android workflow's local checks are:
 
-Before finishing, the required minimum is `cargo test -p iptv-core`,
-`cargo build -p iptv-core --target wasm32-unknown-unknown`, and
-`cargo build -p iptv-app`, plus the affected checks and Android run above.
+  ```sh
+  bash tools/ci/check-android.sh aarch64-linux-android
+  bash tools/ci/check-android.sh armv7-linux-androideabi
+  ABIS=arm64-v8a,armeabi-v7a bash tools/sync-host.sh
+  (cd hosts/android && ./gradlew testDebugUnitTest lintDebug assembleDebug)
+  ```
+
+Before finishing, run the required minimum from [AGENTS.md](../AGENTS.md),
+plus the affected checks and Android run above.
 For host-side merge validation, [tools/check.sh](../tools/check.sh) runs the
 full lint, library/app test, dependency, tooling and portable-build suite.
 [Windows validation](../tools/build-windows.ps1) is kept in parity with it.
 Packaging/release changes additionally follow the release contract; targeted
 commands do not replace those gates.
+Additional workflows validate Android builds, Windows, coverage, parser fuzzing,
+device smoke and packages when selected. See [coverage and fuzzing](release.md#coverage-and-fuzzing)
+and [Android smoke](release.md#android-smoke-test); passing the host script alone
+does not prove those workflows passed. Provider/parser changes need their
+selected fuzz lane as well as ordinary tests.
 
 The portable crates built by the full check are:
 

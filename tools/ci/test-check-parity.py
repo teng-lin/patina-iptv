@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Every platform's check script covers every workspace crate.
+"""Every platform's checks and the contributor map agree on workspace ownership.
 
 tools/check.sh (Linux and macOS) is the reference. The Windows check and the
 coverage job each repeat its crate lists, so a crate added to the workspace
@@ -73,6 +73,14 @@ class Parity(unittest.TestCase):
         for target in sorted(targets):
             with self.subTest(target=target):
                 self.assertTrue((page.parent / target).exists(), f"broken map link: {target}")
+
+    def test_documented_packages_and_scenario_modules_exist(self):
+        text = (ROOT / "docs/contributing.md").read_text(encoding="utf-8")
+        self.assertLessEqual(set(PACKAGE.findall(text)), self.members)
+        modules = re.findall(r"--test app ([a-z_]+)", text)
+        self.assertTrue(modules)
+        for module in modules:
+            self.assertTrue((ROOT / f"crates/iptv-app/tests/app/{module}.rs").is_file())
 
     def test_local_target_parser_ignores_external_links_and_sections(self):
         self.assertEqual(
