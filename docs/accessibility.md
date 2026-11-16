@@ -132,3 +132,22 @@ Candidate evidence for issue #68 (2026-11-16 UTC):
   and desktop platform screen readers remain unverified in this run. The
   repeatable matrix above identifies their follow-up checks. No general
   screen-reader or hardware certification is claimed.
+
+Follow-up native checks of production commit `75588b4` used `tab36` at system
+font scale 1.0 with APK SHA-256
+`07c8e2de7fcfc25027425a67fed61daad680351229ecb6cf1ce7852b44bc9155`:
+
+- With TalkBack enabled and bound, native focus/click actions activated setup
+  choices, credential fields, Done and the qualified Paste button. Compressed
+  trees showed separate `Paste · Username` / `Paste · Password` actions, masked
+  credential values in field names, and `Server · Fill this in` after validation.
+- With TalkBack disabled for direct native keyboard input, D-pad OK focused the
+  recovery field. Enter after 32 synthetic characters advanced to a new, empty
+  PIN rather than also entering a keypad digit. Back returned to the originating
+  generated channel. This checks event routing, without validating the synthetic
+  recovery credential or claiming a successful credential reset.
+- Some repeated shell-probe processes reported a UiAutomation teardown failure
+  after an action; these failed process exits were retained separately from
+  successful action acknowledgements and resulting native trees. They were not
+  counted as clean helper runs or application crashes. Speech, touch exploration,
+  physical hardware and desktop AT limits above still apply.

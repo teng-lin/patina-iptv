@@ -15,7 +15,13 @@ public class AccessibilityActionProbe {
     private static AccessibilityNodeInfo find(AccessibilityNodeInfo node, String text) {
         if (node == null || !node.isVisibleToUser()) return null;
         if (text.contentEquals(String.valueOf(node.getContentDescription()))
-                || text.contentEquals(String.valueOf(node.getText()))) return node;
+                || text.contentEquals(String.valueOf(node.getText()))) {
+            // A page title can share its name with an actionable field.
+            // Keep searching when the match has no clickable ancestor.
+            AccessibilityNodeInfo target = node;
+            while (!target.isClickable() && target.getParent() != null) target = target.getParent();
+            if (target.isClickable()) return target;
+        }
         for (int index = 0; index < node.getChildCount(); index++) {
             AccessibilityNodeInfo result = find(node.getChild(index), text);
             if (result != null) return result;
