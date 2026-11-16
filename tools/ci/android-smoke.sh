@@ -221,10 +221,11 @@ if [ "$is_tv" = true ]; then
   mark
   # Keep deliberate long presses real; keys() supplies only bounded short pairs.
   $adb shell input keyevent --longpress KEYCODE_DPAD_CENTER
+  # Queue navigation before reading logcat: a loaded host can spend the
+  # entire auto-hide interval polling or taking screenshots.
+  keys KEYCODE_DPAD_RIGHT KEYCODE_BACK
   expect 'iptv (long press by timer: ShowControls|key=ok .*phase=Repeat .*action=Some\(ShowControls\))' 10
-  keys KEYCODE_DPAD_RIGHT
   expect 'key=right .*ctx=Controls .*action=Some\(MoveRight\)' 10
-  keys KEYCODE_BACK
   expect 'key=back .*ctx=Controls' 10
   pause 0.2
   if applog | grep -E 'key=ok .*phase=Up .*action=Some\((Select|ShowPanels)\)' >/dev/null; then
@@ -235,7 +236,8 @@ fi
 
 step "multiview with a second player"
 if [ "$is_tv" = true ]; then
-  # The live info card retains More controls (sixth action), including
+  # The live info card begins before the quick-action row. Six Rights reach
+  # More controls (sixth action), including
   # sleep/audio-delay settings. Its advanced strip has Multiview fourth.
   # This route is stable even when stream track availability changes the
   # shared bar's enabled buttons; its bar navigation is checked above and
