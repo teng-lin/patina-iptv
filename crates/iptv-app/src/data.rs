@@ -81,7 +81,7 @@ pub fn start(ui: Ui) {
             // Returning from host permission settings needs a fresh OS acknowledgement.
             let owner = crate::runtime();
             spawn_in_app(async move {
-                if owner.refresh_recording_wake().await.is_err() {
+                if owner.resume_recording_wake().await.is_err() {
                     log::warn!("iptv recording: wake report unavailable after resume");
                 }
             });

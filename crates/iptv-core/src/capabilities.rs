@@ -88,9 +88,12 @@ impl Recording {
     pub fn notice(self) -> Option<&'static str> {
         match self.wake {
             Some(wake @ (WakeCapability::Inexact | WakeCapability::Denied)) => wake.notice(),
-            Some(WakeCapability::AwakeOnly) if self.background => Some(key(
-                "Closing the window keeps accepted recordings running. Enable start at login to recover after restart. Linux and macOS cannot wake a sleeping or powered-off computer; leave it awake. Quit stops the recorder.",
-            )),
+            Some(WakeCapability::AwakeOnly) if self.background => Some(key(concat!(
+                "Closing the window keeps accepted recordings running. ",
+                "Enable start at login to recover after restart. ",
+                "Linux and macOS cannot wake a sleeping or powered-off computer; leave it awake. ",
+                "Quit stops the recorder.",
+            ))),
             Some(WakeCapability::AwakeOnly) => Some(key(
                 "Keep Patina open and this device awake for recordings. Recordings use local app storage and are excluded from backups.",
             )),

@@ -38,7 +38,12 @@ fn restart_waits_for_its_new_registration_before_exposing_exact_wake() {
     ports.recording_schedule = register;
     let owner = Runtime::new(ports);
     owner.start_services();
+    let (entered, seen) = sync_channel(1);
+    let (release, parked) = sync_channel(1);
+    *GATE.lock().unwrap() = Some((entered, parked));
     owner.start_recordings();
+    seen.recv_timeout(Duration::from_secs(10)).unwrap();
+    release.send(()).unwrap();
     block_on(owner.refresh_recording_wake()).unwrap();
     assert!(owner.recording_capabilities().exact_start());
     assert!(owner.shutdown_recording_host());

@@ -5,6 +5,66 @@ use iptv_providers::{
 };
 use std::io::{Read, Write};
 
+#[test]
+fn a_queued_registration_cannot_outlive_its_application_owner() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    let directory = tempfile::tempdir().unwrap();
+    let mut ports = crate::Ports::new(directory.path().to_owned(), |_| {
+        panic!("a wake report must not open the catalogue")
+    });
+    ports.recording_schedule = |_, _| {
+        CALLS.fetch_add(1, Ordering::SeqCst);
+        iptv_core::recording::WakeCapability::Exact
+    };
+    let owner = Runtime::new(ports);
+    owner.start_services();
+    owner.recordings.lock().ready = true;
+    let state = owner.recordings.clone();
+    let publication = state.publication.lock().unwrap();
+    let queued = state.clone();
+    let services = owner.services();
+    let worker = std::thread::spawn(move || queued.publish_schedule(&services, 0, true));
+    assert!(owner.drain_services());
+    drop(publication);
+    assert!(!worker.join().unwrap());
+    assert_eq!(CALLS.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn a_registration_spanning_native_restart_cannot_publish_the_old_report() {
+    use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
+    type Gate = (SyncSender<()>, Receiver<()>);
+    static GATE: std::sync::Mutex<Option<Gate>> = std::sync::Mutex::new(None);
+    fn register(_: i64, _: bool) -> iptv_core::recording::WakeCapability {
+        let (entered, release) = GATE.lock().unwrap().take().unwrap();
+        entered.send(()).unwrap();
+        release.recv_timeout(Duration::from_secs(10)).unwrap();
+        iptv_core::recording::WakeCapability::Exact
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let mut ports = crate::Ports::new(directory.path().to_owned(), |_| {
+        panic!("a wake report must not open the catalogue")
+    });
+    ports.recording_schedule = register;
+    let owner = Runtime::new(ports);
+    owner.start_services();
+    owner.recordings.lock().ready = true;
+    let (entered, seen) = sync_channel(1);
+    let (release, parked) = sync_channel(1);
+    *GATE.lock().unwrap() = Some((entered, parked));
+    let state = owner.recordings.clone();
+    let services = owner.services();
+    let worker = std::thread::spawn(move || state.publish_schedule(&services, 0, true));
+    seen.recv_timeout(Duration::from_secs(10)).unwrap();
+    // The execution gate changes this identity before a successor can load.
+    owner.recordings.execution().generation += 1;
+    release.send(()).unwrap();
+    assert!(!worker.join().unwrap());
+    assert_eq!(owner.recording_capabilities().wake, None);
+    assert!(owner.drain_services());
+}
+
 #[tokio::test]
 async fn foreground_refresh_preserves_the_native_series_deadline_and_newer_intents() {
     static REGISTRATIONS: std::sync::Mutex<Vec<(i64, bool)>> = std::sync::Mutex::new(Vec::new());
@@ -38,6 +98,7 @@ async fn foreground_refresh_preserves_the_native_series_deadline_and_newer_inten
     };
     {
         let mut data = owner.recordings.lock();
+        data.ready = true;
         data.recurring = true;
         data.guide_check_at = guide_deadline;
         data.jobs = vec![job.clone()];

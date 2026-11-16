@@ -41,6 +41,9 @@ Returning to the foreground requests a fresh acknowledgement, including after
 leaving Android's alarm-permission settings. That refresh does not open a stream.
 It uses the recorder's current schedule, including the earlier recurring guide
 check deadline, so refreshing permission cannot postpone discovery of episodes.
+During native startup it waits for the first durable job/rule snapshot instead
+of replacing a saved alarm with an empty schedule. Foreground checks update the
+persistent recording notice without repeating its warning toast on every return.
 
 Awake-only desktop capture can outlive the window while the host process and
 computer remain running. iPad capture requires the app to remain open. Android
@@ -50,7 +53,7 @@ physical-machine wake validation. An unknown report does not promise an
 unattended start. See [architecture](architecture.md) and
 [platform installation details](../README.md) for the supported distributions.
 
-Validation combines portable profile/decision tests, a real runtime test of
-permission denial/grant/revocation without opening the catalogue, headless
-control scenarios and native host smoke checks. Real-device and emulator
-evidence must remain distinguishable.
+Validation combines portable profile/decision tests, I/O-free initial capability
+inspection, native startup/restart tests and permission changes without reopening
+credentials, headless control scenarios and native host smoke checks. Real-device
+and emulator evidence must remain distinguishable.

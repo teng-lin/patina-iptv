@@ -204,16 +204,45 @@ impl State {
         execution.started && execution.shutdown.is_cancelled() && !self.lock().stopped
     }
     fn publish_schedule(&self, services: &Services, revision: u64, force: bool) -> bool {
+        // The common poll must not wait for an unchanged, slow OS permission
+        // refresh before it can start due captures.
+        if !force {
+            let data = self.lock();
+            if data.intent_revision == revision
+                && data.published_schedule == Some(data.schedule(now()))
+            {
+                return true;
+            }
+        }
         // UI acknowledgements and native polls publish in order. A late poll
         // cannot replace the alarm belonging to a newly accepted edit.
         let _publication = self
             .publication
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !services.is_current() {
+            return false;
+        }
+        let (generation, stopping) = {
+            let execution = self.execution();
+            (
+                execution.generation,
+                execution.started && execution.shutdown.is_cancelled(),
+            )
+        };
         let (next, active) = {
             let data = self.lock();
             if data.intent_revision != revision {
                 return false;
+            }
+            // A cold/restarted host first reconciles durable jobs and rules.
+            // An early foreground callback must leave its saved alarm intact.
+            // Its first successful poll will publish after loading the snapshot.
+            if !data.ready || stopping {
+                return true;
+            }
+            if data.recurring && data.guide_check_at <= now() {
+                return true;
             }
             let schedule = data.schedule(now());
             if !force && data.published_schedule == Some(schedule) {
@@ -222,6 +251,10 @@ impl State {
             schedule
         };
         let capability = (services.ports().recording_schedule)(next, active);
+        let execution = self.execution();
+        if !services.is_current() || execution.generation != generation {
+            return false;
+        }
         let mut data = self.lock();
         if data.intent_revision == revision {
             data.wake_capability = capability;
@@ -526,20 +559,31 @@ impl Runtime {
             .flatten()
     }
     pub async fn refresh_recording_wake(&self) -> Result<(), Error> {
+        self.refresh_recording_wake_with_notice(true).await
+    }
+    /// Recheck permission on foreground return; the recording screen keeps the
+    /// current explanation visible without repeating a toast on every return.
+    pub async fn resume_recording_wake(&self) -> Result<(), Error> {
+        self.refresh_recording_wake_with_notice(false).await
+    }
+    async fn refresh_recording_wake_with_notice(&self, notify: bool) -> Result<(), Error> {
+        let services = self.services();
         loop {
+            if !services.is_current() {
+                return Err(Error::unavailable("Recording service unavailable"));
+            }
             let revision = self.recordings.lock().intent_revision;
             let state = self.recordings.clone();
-            let services = self.services();
-            let published = self
-                .services()
-                .spawn_blocking(move || state.publish_schedule(&services, revision, true))
+            let work = services.clone();
+            let published = services
+                .spawn_blocking(move || state.publish_schedule(&work, revision, true))
                 .await
                 .map_err(|_| Error::unavailable("Recording service unavailable"))?;
             if published && self.recordings.lock().intent_revision == revision {
                 break;
             }
         }
-        if let Some(notice) = self.recording_wake_notice() {
+        if notify && let Some(notice) = self.recording_wake_notice() {
             self.emit(crate::RuntimeEvent::Notify(notice));
         }
         Ok(())
@@ -891,7 +935,6 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
         }
         retry = (retry * 2).min(Duration::from_secs(5));
     }
-    state.lock().ready = true;
     let mut tasks = tokio::task::JoinSet::new();
     let mut rules_at = 0;
     loop {
@@ -937,7 +980,11 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
             state.lock().guide_check_at = now().saturating_add(30 * 60);
         }
         if now() >= rules_at {
-            if let Ok(rules) = services.read(|store| store.recording_rules()).await {
+            let Ok(rules) = services.read(|store| store.recording_rules()).await else {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            };
+            {
                 let mut data = state.lock();
                 if data.intent_revision == revision {
                     data.recurring = rules.iter().any(|rule| rule.enabled);
@@ -952,6 +999,7 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
                 continue;
             }
             data.jobs = jobs.clone();
+            data.ready = true;
         }
         if !state.publish_schedule(&services, revision, false) {
             continue;
