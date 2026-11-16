@@ -439,10 +439,25 @@ async fn a_live_only_playlist_on_screen_still_offers_the_cross_source_shelves() 
             let previous = host.publications.get();
             let shown = host.import(&live_only, None, false).await;
             provider.assert_requests(false);
+            // Add joins both enabled playlists. Let that finish before choosing
+            // the live-only playlist explicitly, without refreshing its data.
+            host.discovery_after(previous, true).await;
+            data::set_policy(
+                &host.owner,
+                shown,
+                iptv_library::SourcePolicy {
+                    refresh_on_start: false,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+            let previous = host.publications.get();
+            data::library::switch_to(&host.owner, shown);
+            host.availability_after(previous, false, true).await;
             assert_ne!(shown, with_films);
             assert!(!data::combined::active(&host.owner));
             assert_eq!(host.owner.shown_source(), Some(shown));
-            host.availability_after(previous, false, true).await;
             // The films' playlist itself still lists all four entries (shown
             // from storage: no refresh with the now global live-only
             // preference).
