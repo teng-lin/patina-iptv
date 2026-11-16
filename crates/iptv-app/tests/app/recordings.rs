@@ -397,52 +397,137 @@ fn long_press_on_a_current_programme_offers_record_without_starting_playback() {
     step(app.wait_for_gone("id:menu-panel >> label:Record", Duration::from_secs(2)));
 }
 
-fn local_capture() -> (String, std::thread::JoinHandle<()>) {
-    use std::io::{Read, Write};
+struct CaptureServer {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+impl CaptureServer {
+    fn close(&mut self) -> std::thread::Result<()> {
+        self.stop.store(true, std::sync::atomic::Ordering::Release);
+        self.thread.take().map_or(Ok(()), |thread| thread.join())
+    }
+    fn join(mut self) -> std::thread::Result<()> {
+        self.close()
+    }
+}
+impl Drop for CaptureServer {
+    fn drop(&mut self) {
+        let _ = self.close();
+    }
+}
+
+fn local_capture() -> (String, CaptureServer) {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let url = format!("http://{}/generated.ts", listener.local_addr().unwrap());
-    let server = std::thread::spawn(move || {
-        let until = std::time::Instant::now() + Duration::from_secs(15);
-        while std::time::Instant::now() < until {
-            let Ok((mut stream, _)) = listener.accept() else {
-                std::thread::sleep(Duration::from_millis(10));
-                continue;
-            };
-            stream.set_nonblocking(false).unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(2)))
-                .unwrap();
-            stream
-                .set_write_timeout(Some(Duration::from_secs(2)))
-                .unwrap();
-            let mut head = [0; 4096];
-            if stream.read(&mut head).is_err() {
-                return;
-            }
-            if stream
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nConnection: close\r\n\r\n",
-                )
-                .is_err()
-            {
-                return;
-            }
-            let mut packets = [0u8; 18800];
-            for packet in packets.as_chunks_mut::<188>().0 {
-                packet[0] = 0x47;
-                packet[3] = 0x10;
-            }
-            while std::time::Instant::now() < until {
-                if stream.write_all(&packets).is_err() {
-                    return;
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopping = stop.clone();
+    let thread = std::thread::spawn(move || {
+        let mut handlers = Vec::new();
+        while !stopping.load(Ordering::Acquire) {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    let stop = stopping.clone();
+                    handlers.push(std::thread::spawn(move || serve_capture(stream, stop)));
                 }
-                std::thread::sleep(Duration::from_millis(10));
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("synthetic capture listener failed: {error}"),
             }
-            return;
+        }
+        for handler in handlers {
+            handler.join().unwrap();
         }
     });
-    (url, server)
+    (
+        url,
+        CaptureServer {
+            stop,
+            thread: Some(thread),
+        },
+    )
+}
+
+fn serve_capture(
+    mut stream: std::net::TcpStream,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    use std::io::{Read, Write};
+    stream.set_nonblocking(false).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let mut head = [0; 4096];
+    if !matches!(stream.read(&mut head), Ok(n) if n > 0) {
+        return;
+    }
+    if stream
+        .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return;
+    }
+    let mut packets = [0u8; 18800];
+    for packet in packets.as_chunks_mut::<188>().0 {
+        packet[0] = 0x47;
+        packet[3] = 0x10;
+    }
+    while !stop.load(std::sync::atomic::Ordering::Acquire) {
+        if stream.write_all(&packets).is_err() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn local_capture_serves_two_streams_without_waiting_for_either_to_close() {
+    use std::io::{BufRead, Read, Write};
+    let (url, server) = local_capture();
+    let address = url
+        .strip_prefix("http://")
+        .unwrap()
+        .split('/')
+        .next()
+        .unwrap();
+    let mut clients = Vec::new();
+    for _ in 0..2 {
+        let mut stream = std::net::TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        stream
+            .write_all(b"GET /generated.ts HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .unwrap();
+        let mut reader = std::io::BufReader::new(stream);
+        loop {
+            let mut line = String::new();
+            assert!(reader.read_line(&mut line).unwrap() > 0);
+            if line == "\r\n" {
+                break;
+            }
+        }
+        let mut packet = [0u8; 188];
+        reader.read_exact(&mut packet).unwrap();
+        assert_eq!((packet[0], packet[3]), (0x47, 0x10));
+        clients.push(reader);
+    }
+    let mut packet = [0u8; 188];
+    clients[0].read_exact(&mut packet).unwrap();
+    assert_eq!(packet[0], 0x47, "the first stream is still live");
+    drop(clients);
+    server.join().unwrap();
 }
 
 #[test]
