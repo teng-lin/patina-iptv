@@ -6,6 +6,30 @@ use iptv_providers::{
 use std::io::{Read, Write};
 
 #[test]
+fn a_reported_connection_allowance_is_not_masked_by_the_default() {
+    let mut settings = iptv_settings::Settings::new();
+    assert_eq!(connection_limit(&settings, 1, Some(3)), 3);
+    assert_eq!(connection_limit(&settings, 1, None), 1);
+    assert_eq!(connection_limit(&settings, 1, Some(0)), 1);
+    settings
+        .set_in(
+            "playlists.max_connections",
+            &iptv_settings::Target::playlist("1"),
+            iptv_settings::Value::Int(1),
+        )
+        .unwrap();
+    assert_eq!(connection_limit(&settings, 1, Some(3)), 1);
+    assert_eq!(connection_limit(&settings, 2, Some(3)), 3);
+    // A manual value cannot override the provider's lower hard limit.
+    let mut data = Data::default();
+    data.accounts.insert(1, Account::Unknown);
+    data.provider_limits.insert(1, 1);
+    data.limits.insert(1, 3);
+    data.viewers.insert(0, data.lease(1));
+    assert!(!data.capacity(1, None));
+}
+
+#[test]
 fn a_queued_registration_cannot_outlive_its_application_owner() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static CALLS: AtomicUsize = AtomicUsize::new(0);
@@ -197,6 +221,64 @@ pub(super) async fn seed(owner: &Runtime, url: &str) -> Request {
         })
         .await
         .unwrap()
+}
+
+#[tokio::test]
+async fn record_now_uses_the_reported_spare_connection_and_preserves_viewing() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(&directory.path().join("generated-app"));
+    let mut request = seed(&owner, &server()).await;
+    owner
+        .recordings
+        .lock()
+        .provider_limits
+        .insert(request.source, 3);
+    refresh_accounts(&owner.services(), &owner.recordings)
+        .await
+        .unwrap();
+    assert!(owner.reserve_viewing(0, SourceId(request.source)));
+    request.start = now();
+    request.end = request.start + 20;
+    let id = owner.schedule_recording(request).await.unwrap();
+    until(&owner, id, |job| {
+        job.status == Status::Recording && job.bytes > 0
+    })
+    .await;
+    assert_eq!(owner.recordings.lock().viewers.len(), 1);
+    owner.stop_recording(id).await.unwrap();
+    let job = until(&owner, id, |job| job.status == Status::Completed).await;
+    assert!(job.bytes >= 188);
+    assert_eq!(owner.recordings.lock().viewers.len(), 1);
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn a_reused_playlist_id_does_not_inherit_an_old_connection_allowance() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(&directory.path().join("generated-app"));
+    let request = seed(&owner, "https://example.test/generated.ts").await;
+    owner
+        .recordings
+        .lock()
+        .provider_limits
+        .insert(request.source, 3);
+    refresh_accounts(&owner.services(), &owner.recordings)
+        .await
+        .unwrap();
+    assert_eq!(owner.recordings.lock().limits[&request.source], 3);
+    let source = SourceId(request.source);
+    owner
+        .services()
+        .call(move |store| store.delete_source(source))
+        .await
+        .unwrap();
+    let replacement = seed(&owner, "https://example.test/generated.ts").await;
+    assert_eq!(replacement.source, request.source);
+    refresh_accounts(&owner.services(), &owner.recordings)
+        .await
+        .unwrap();
+    assert_eq!(owner.recordings.lock().limits[&replacement.source], 1);
+    assert!(owner.drain_services());
 }
 
 fn seed_series_guide(owner: &Runtime, request: &Request, start: i64, end: i64) {

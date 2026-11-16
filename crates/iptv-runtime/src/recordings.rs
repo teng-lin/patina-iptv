@@ -85,6 +85,7 @@ struct Data {
     accounts: HashMap<i64, Account>,
     scopes: HashMap<i64, (String, SourceConfig)>,
     viewer_revision: HashMap<usize, u64>,
+    source_incarnations: HashMap<i64, String>,
     limits: HashMap<i64, u32>,
     provider_limits: HashMap<i64, u32>,
     viewers: HashMap<usize, Lease>,
@@ -884,35 +885,66 @@ async fn refresh_accounts(
                 .sources()?
                 .into_iter()
                 .map(|source| {
-                    Ok((
-                        store.source(source.id)?,
-                        store.source_incarnation(source.id)?,
-                    ))
+                    let Some(stored) = store.source(source.id)? else {
+                        return Ok(None);
+                    };
+                    let incarnation = store.source_incarnation(source.id)?;
+                    Ok(Some((stored, incarnation)))
                 })
                 .collect::<iptv_store_sqlite::Result<Vec<_>>>()
         })
         .await?;
     let settings = services.settings();
     let mut data = state.lock();
-    data.accounts.clear();
-    data.scopes.clear();
+    let previous_accounts = std::mem::take(&mut data.accounts);
+    let previous_incarnations = std::mem::take(&mut data.source_incarnations);
     data.limits.clear();
-    for (source, incarnation) in sources {
-        let Some(source) = source else { continue };
-        data.scopes
-            .insert(source.id.0, (incarnation, source.source.config.clone()));
-        let limit = match settings.get_in(
-            "playlists.max_connections",
-            &iptv_settings::Target::playlist(source.id.0.to_string()),
-        ) {
-            Ok(iptv_settings::Value::Int(n)) => n.clamp(1, 20) as u32,
-            _ => 1,
-        };
-        data.accounts
-            .insert(source.id.0, account(&source.source.config));
+    data.scopes.clear();
+    for (source, incarnation) in sources.into_iter().flatten() {
+        let account = account(&source.source.config);
+        if previous_incarnations
+            .get(&source.id.0)
+            .is_some_and(|old| old != &incarnation)
+            || previous_accounts
+                .get(&source.id.0)
+                .is_some_and(|old| old != &account)
+        {
+            data.provider_limits.remove(&source.id.0);
+        }
+        let limit = connection_limit(
+            &settings,
+            source.id.0,
+            data.provider_limits.get(&source.id.0).copied(),
+        );
+        data.scopes.insert(
+            source.id.0,
+            (incarnation.clone(), source.source.config.clone()),
+        );
+        data.accounts.insert(source.id.0, account);
+        data.source_incarnations.insert(source.id.0, incarnation);
         data.limits.insert(source.id.0, limit);
     }
+    let current = data
+        .accounts
+        .keys()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+    data.provider_limits
+        .retain(|source, _| current.contains(source));
     Ok(())
+}
+
+fn connection_limit(settings: &iptv_settings::Settings, source: i64, observed: Option<u32>) -> u32 {
+    const KEY: &str = "playlists.max_connections";
+    let target = iptv_settings::Target::playlist(source.to_string());
+    if settings.source(KEY, &target).ok().flatten().is_some()
+        && let Ok(iptv_settings::Value::Int(limit)) = settings.get_in(KEY, &target)
+    {
+        return limit.clamp(1, 20) as u32;
+    }
+    // The conservative schema default is for unknown providers. It must not
+    // override an allowance actually reported by an authenticated provider.
+    observed.filter(|limit| *limit > 0).unwrap_or(1)
 }
 async fn transition(services: &Services, job: &Job, to: Status, bytes: u64, message: &'static str) {
     let (id, from) = (job.id, job.status);

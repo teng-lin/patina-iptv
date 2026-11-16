@@ -271,12 +271,24 @@ impl Runtime {
                 {
                     let mut data = state.lock();
                     if data
-                        .scopes
+                        .source_incarnations
                         .get(&source_id.0)
-                        .is_some_and(|scope| scope != &(incarnation.clone(), config.clone()))
+                        .is_some_and(|old| old != &incarnation)
+                        || data
+                            .scopes
+                            .get(&source_id.0)
+                            .is_some_and(|scope| scope != &(incarnation.clone(), config.clone()))
                     {
                         data.provider_limits.remove(&source_id.0);
                     }
+                    data.source_incarnations
+                        .insert(source_id.0, incarnation.clone());
+                    let limit = connection_limit(
+                        &work.settings(),
+                        source_id.0,
+                        data.provider_limits.get(&source_id.0).copied(),
+                    );
+                    data.limits.insert(source_id.0, limit);
                     data.accounts.insert(source_id.0, account(&config));
                     data.scopes
                         .insert(source_id.0, (incarnation.clone(), config.clone()));

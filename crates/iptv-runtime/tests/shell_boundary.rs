@@ -15,6 +15,8 @@ const SHELL_MAY_NAME: &[&str] = &[
     "Ports",
     "Runtime",
     "RuntimeEvent",
+    // Acknowledged worker gate, only named by synthetic test-support helpers.
+    "TestGate",
     // Backup progress, errors and the operation in progress.
     "backup",
     // Named library operations, each given the owner.
