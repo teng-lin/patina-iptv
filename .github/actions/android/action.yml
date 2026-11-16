@@ -45,18 +45,21 @@ runs:
       id: identity
       if: inputs.cache != ''
       shell: bash
+      env:
+        ABI: ${{ inputs.abi }}
       run: |
         key=$(python3 tools/ci/nsh-tool-key.py android)
         [[ "$key" =~ ^[0-9a-f]{64}$ ]] || exit 1
         root=$(cd ../nsh && pwd)
         echo "key=$key" >> "$GITHUB_OUTPUT"
+        echo "abis=${ABI//,/-}" >> "$GITHUB_OUTPUT"
         echo "path=$root/target/android/release" >> "$GITHUB_OUTPUT"
     - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       if: inputs.cache != ''
       id: runtime
       with:
         path: ${{ steps.identity.outputs.path }}
-        key: nsh-android-${{ runner.os }}-${{ runner.arch }}-${{ inputs.abi }}-${{ steps.identity.outputs.key }}
+        key: nsh-android-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.abis }}-${{ steps.identity.outputs.key }}
     - name: Build pinned Android runtime
       if: steps.runtime.outputs.cache-hit != 'true'
       shell: bash
@@ -74,4 +77,4 @@ runs:
       if: inputs.cache != '' && steps.runtime.outputs.cache-hit != 'true'
       with:
         path: ${{ steps.identity.outputs.path }}
-        key: nsh-android-${{ runner.os }}-${{ runner.arch }}-${{ inputs.abi }}-${{ steps.identity.outputs.key }}
+        key: nsh-android-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.abis }}-${{ steps.identity.outputs.key }}
