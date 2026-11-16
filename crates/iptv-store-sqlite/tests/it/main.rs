@@ -18,6 +18,7 @@ mod stream_support;
 
 mod backup;
 mod catalog;
+mod child_output;
 mod cipher_initialization;
 mod concurrency;
 mod custom_group_reset_scale;

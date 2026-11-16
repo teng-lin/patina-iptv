@@ -52,6 +52,11 @@ class ToolCache(unittest.TestCase):
         self.assertEqual(self.identity(), before)
         self.assertEqual(Path(before["path"]), Path(before["root"]) / "bin/cargo-about")
 
+    def test_explicit_cargo_home_never_requires_a_system_home_directory(self):
+        with patch.object(Path, "home", side_effect=RuntimeError("no system home")):
+            self.assertEqual(Path(self.identity()["root"]),
+                             Path(self.environment["RUNNER_TEMP"]) / "patina-cargo-tools/cargo-about")
+
     def test_tool_version_features_and_compiler_flags_are_distinct(self):
         before = self.identity()["key"]
         self.assertNotEqual(before, self.identity(compiler="different generated compiler")["key"])

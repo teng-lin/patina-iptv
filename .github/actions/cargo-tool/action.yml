@@ -31,7 +31,7 @@ runs:
         if not re.fullmatch(r'[a-z][a-z0-9-]*', name):
             raise SystemExit('invalid Cargo tool name')
         root = Path(os.environ['RUNNER_TEMP']) / 'patina-cargo-tools' / name
-        cargo_home = Path(os.environ.get('CARGO_HOME', Path.home() / '.cargo'))
+        cargo_home = Path(os.environ.get('CARGO_HOME') or Path.home() / '.cargo')
         inputs = {
             'name': name,
             'version': os.environ['TOOL_VERSION'],

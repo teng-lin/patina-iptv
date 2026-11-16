@@ -91,12 +91,12 @@ Target the relevant runtime scenarios during development:
 cargo test -p iptv-runtime --features test-support --lib imports::recovery_tests
 cargo test -p iptv-runtime --features test-support --lib vod::recovery_tests
 cargo test -p iptv-runtime --features test-support --lib recordings::tests
-cargo test -p iptv-runtime --features test-support --test lifecycle_recovery
-cargo test -p iptv-runtime --features test-support --test native_backup
-cargo test -p iptv-runtime --features test-support --test command_journeys
-cargo test -p iptv-runtime --features test-support --test library_journeys
-cargo test -p iptv-runtime --features test-support --test guide_journeys
-cargo test -p iptv-runtime --features test-support --test parental_recovery
+cargo test -p iptv-runtime --features test-support --test it lifecycle_recovery::
+cargo test -p iptv-runtime --features test-support --test it native_backup::
+cargo test -p iptv-runtime --features test-support --test it command_journeys::
+cargo test -p iptv-runtime --features test-support --test it library_journeys::
+cargo test -p iptv-runtime --features test-support --test it guide_journeys::
+cargo test -p iptv-runtime --features test-support --test it parental_recovery::
 python3 tools/ci/run-xvfb.py cargo test -p iptv-app --features test-support --test native_player -- --ignored
 ```
 
