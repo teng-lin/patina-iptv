@@ -4,6 +4,8 @@ Start with [AGENTS.md](../AGENTS.md) for repository-wide rules and
 [architecture](architecture.md) for dependency direction. This map locates
 the owner and the closest validation for a change; it does not replace the
 full checks before finishing or the release gates.
+Setup, contribution policy and physical-device validation requirements remain
+in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Find the owner
 
@@ -14,8 +16,8 @@ full checks before finishing or the release gates.
 | Library and search | [library](../crates/iptv-library/src/lib.rs), [search](../crates/iptv-search/src/lib.rs), [runtime search](../crates/iptv-runtime/src/search.rs), [VOD](../crates/iptv-runtime/src/vod.rs) | [store](../crates/iptv-store-sqlite/src/lib.rs) | `cargo test -p iptv-library -p iptv-search`; runtime VOD/source-identity tests |
 | Settings | [schema](../crates/iptv-settings/src/lib.rs), [runtime](../crates/iptv-runtime/src/settings.rs) | [settings view](../crates/iptv-app/src/settings_view.rs) | `cargo test -p iptv-settings`; app settings, persistence and backup/restore scenarios |
 | Persistence and migrations | [service ownership](../crates/iptv-runtime/src/store_service.rs) | [SQLite](../crates/iptv-store-sqlite/src/lib.rs), [SQLCipher initialization](../crates/iptv-sqlcipher-init/src/lib.rs) | `cargo test -p iptv-store-sqlite -p iptv-sqlcipher-init`; [historical migration fixtures](../crates/iptv-store-sqlite/tests/it/migrations.rs) |
-| Parental policy | [runtime admission](../crates/iptv-runtime/src/parental.rs) | [PIN UI](../crates/iptv-app/src/parental_view.rs) | runtime parental-access and app parental scenarios; revocation during queued work |
-| Recording lifecycle | [portable model](../crates/iptv-core/src/recording.rs), [runtime](../crates/iptv-runtime/src/recordings.rs) | [recording host](../crates/iptv-app/src/recording_host.rs), [Android host](../hosts/android) | runtime recording recovery and app recorder-startup/transport scenarios; device background/resume checks |
+| Parental policy | [portable policy](../crates/iptv-core/src/parental.rs), [runtime admission](../crates/iptv-runtime/src/parental.rs) | [PIN UI](../crates/iptv-app/src/parental_view.rs) | `cargo test -p iptv-core parental`; [runtime parental-access scenarios](../crates/iptv-runtime/tests/parental_access.rs) and app parental scenarios; revocation during queued work |
+| Recording lifecycle | [portable model](../crates/iptv-core/src/recording.rs), [runtime](../crates/iptv-runtime/src/recordings.rs), [native ownership](../crates/iptv-runtime/src/recordings/host.rs) | [recording host adapter](../crates/iptv-app/src/recording_host.rs), [Android host](../hosts/android) | [runtime recording recovery](../crates/iptv-runtime/src/recordings/recovery_tests.rs) and app recorder-startup/transport scenarios; device background/resume checks |
 | Playback and native controls | [core playback](../crates/iptv-core/src/playback.rs), [runtime opening](../crates/iptv-runtime/src/opening.rs) | [player adapter](../crates/iptv-player-mpv/src/lib.rs), [persistent surface](../crates/iptv-app/src/video.rs), [Android host](../hosts/android) | player and app playback/PiP/multiview scenarios; native playback on each changed host |
 | Localization/accessibility | [portable messages](../crates/iptv-core/src/i18n.rs), [theme](../crates/iptv-app/src/theme.rs) | [app scenarios](../crates/iptv-app/tests/app/main.rs) | core catalogue tests, app catalogue/interface-language/accessibility scenarios; actual assistive-technology checks for host changes |
 | Release and packaging | [release contract](release.md), [workflow](../.github/workflows/release.yml) | [CI tools](../tools/ci), [Android hosts](../hosts/android) | affected Python/shell/host tests, package smoke and workflow gates from the release contract |
