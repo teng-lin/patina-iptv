@@ -646,6 +646,23 @@ fn source_allowed(ui: Ui, surface: usize) -> bool {
     }
 }
 
+/// Local admission uses the same retryable refusal as a connection held by
+/// recording in open_allowed(). The channel resolved; its address is present.
+fn fail_capacity(ui: Ui, surface: usize, session: u64, error: &crate::runtime::Error) -> bool {
+    let reason = crate::i18n::key("No provider connection available; check Streams at once");
+    if error.unavailable_reason() != Some(reason) {
+        return false;
+    }
+    fail(
+        ui,
+        surface,
+        session,
+        ErrorKind::Http(429),
+        crate::i18n::tr("No provider connection available; check Streams at once").into(),
+    );
+    true
+}
+
 fn resolution_authority(
     schedule: &dyn Schedule,
     channel: usize,
@@ -717,26 +734,17 @@ fn load_authorized(
         crate::data::spawn_in_app(async move {
             match prepared.await {
                 Ok(source) => publish_source(ui, surface, session, source),
-                Err(error) => fail(
-                    ui,
-                    surface,
-                    session,
-                    ErrorKind::Unavailable,
-                    match error.unavailable_reason() {
-                        Some(reason)
-                            if reason
-                                == crate::i18n::key(
-                                    "No provider connection available; check Streams at once",
-                                ) =>
-                        {
-                            crate::i18n::tr(
-                                "No provider connection available; check Streams at once",
-                            )
-                        }
-                        _ => crate::i18n::tr("Channel unavailable"),
+                Err(error) => {
+                    if !fail_capacity(ui, surface, session, &error) {
+                        fail(
+                            ui,
+                            surface,
+                            session,
+                            ErrorKind::Unavailable,
+                            crate::i18n::tr("Channel unavailable").into(),
+                        );
                     }
-                    .into(),
-                ),
+                }
             }
         });
     } else {
@@ -773,8 +781,10 @@ fn load_authorized(
         crate::data::spawn_in_app(async move {
             let source = match prepared.await {
                 Ok(source) => source,
-                Err(_) => {
-                    if stream.health.with_untracked(|health| health.session()) == session {
+                Err(error) => {
+                    if !fail_capacity(ui, surface, session, &error)
+                        && stream.health.with_untracked(|health| health.session()) == session
+                    {
                         stop_surface(ui, surface);
                     }
                     return;
