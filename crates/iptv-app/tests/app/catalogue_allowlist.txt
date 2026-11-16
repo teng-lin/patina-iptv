@@ -10,6 +10,10 @@
 [untranslated]
 
 [not-shown]
+# Explicit synthetic profile injection diagnostics, absent from production builds.
+iptv-app/src/platform_data.rs	test storage was already installed or resolved
+iptv-app/src/platform_data.rs	test storage directory must be absolute
+iptv-app/src/platform_data.rs	synthetic database key was not installed
 # Persisted locale token; shown by the picker as the translated System language label.
 iptv-settings/src/catalogue/general.rs	system
 # CLDR territory codes used to choose the automatic clock.

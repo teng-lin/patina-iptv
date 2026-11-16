@@ -1155,6 +1155,9 @@ pub(crate) fn go_back(ui: Ui) -> bool {
 /// Explicit synthetic-key injection for the headless test binary only.
 #[cfg(feature = "test-support")]
 pub use credential_key::install_test_key;
+/// Use a fresh explicit synthetic profile without changing the process home.
+#[cfg(feature = "test-support")]
+pub use platform_data::install_test_data_dir;
 /// Whether a stored source has a guide timer or an in-flight guide read,
 /// for the headless tests of what keeps its periodic checks alive.
 #[cfg(feature = "test-support")]

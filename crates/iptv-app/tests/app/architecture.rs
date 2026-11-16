@@ -31,6 +31,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("lists.rs", "HINT_SHOWN"), // Visible navigation hint revision.
     ("organization_view.rs", "OPEN_GENERATION"), // Discard stale dialog replies.
     ("platform_data.rs", "ANDROID_FILES"), // Android files directory handle.
+    ("platform_data.rs", "TEST_DIRECTORY"), // Test-only explicit isolated storage handle.
     ("platform_data.rs", "HOST_STOP"), // The root owner's weak handle for off-thread host callbacks.
     ("recording_host/android.rs", "HOST"), // JNI VM/class handle for OS wake publication.
     ("recording_host/windows.rs", "TASKS"), // Serialize OS task registration and removal.

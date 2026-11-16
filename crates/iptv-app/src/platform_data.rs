@@ -9,7 +9,60 @@ use std::path::{Path, PathBuf};
 #[cfg(target_os = "android")]
 static ANDROID_FILES: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
+/// Explicit process-local storage handle used only by native synthetic tests.
+#[cfg(feature = "test-support")]
+struct TestDirectory {
+    path: Option<PathBuf>,
+    resolved: bool,
+}
+#[cfg(feature = "test-support")]
+static TEST_DIRECTORY: std::sync::Mutex<TestDirectory> = std::sync::Mutex::new(TestDirectory {
+    path: None,
+    resolved: false,
+});
+
+/// Install a fresh isolated profile before any app storage/runtime is resolved.
+/// Requires an explicit synthetic key; existing directories are never accepted.
+#[cfg(feature = "test-support")]
+pub fn install_test_data_dir(directory: PathBuf) -> io::Result<()> {
+    let mut state = TEST_DIRECTORY
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if state.resolved || state.path.is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "test storage was already installed or resolved",
+        ));
+    }
+    if !directory.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "test storage directory must be absolute",
+        ));
+    }
+    crate::credential_key::database_key(&directory).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "synthetic database key was not installed",
+        )
+    })?;
+    std::fs::create_dir(&directory)?;
+    protect_directory(&directory)?;
+    state.path = Some(directory);
+    Ok(())
+}
+
 pub(crate) fn resolve_data_dir() -> io::Result<PathBuf> {
+    #[cfg(feature = "test-support")]
+    {
+        let mut state = TEST_DIRECTORY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.resolved = true;
+        if let Some(directory) = &state.path {
+            return Ok(directory.clone());
+        }
+    }
     #[cfg(target_os = "android")]
     {
         ANDROID_FILES.get().cloned().ok_or_else(|| {
@@ -179,6 +232,56 @@ pub(crate) fn exclude_from_backup(path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(feature = "test-support")]
+    fn explicit_test_profile_requires_a_key_and_precedes_all_app_storage() {
+        const CHILD: &str = "IPTV_SYNTHETIC_PROFILE_CHILD";
+        if let Some(parent) = std::env::var_os(CHILD) {
+            let parent = PathBuf::from(parent);
+            let directory = parent.join("fresh-profile");
+            assert!(!crate::has_runtime());
+            assert!(install_test_data_dir(directory.clone()).is_err());
+            assert!(
+                !directory.exists(),
+                "missing synthetic key must not create storage"
+            );
+            crate::install_test_key([0x81; 32]);
+            assert!(install_test_data_dir(PathBuf::from("relative-profile")).is_err());
+            assert!(
+                install_test_data_dir(parent.clone()).is_err(),
+                "existing profiles are refused"
+            );
+            install_test_data_dir(directory.clone()).unwrap();
+            assert_eq!(resolve_data_dir().unwrap(), directory);
+            assert!(
+                !crate::has_runtime(),
+                "installation does not construct an owner"
+            );
+            assert!(install_test_data_dir(parent.join("late-profile")).is_err());
+            assert!(!parent.join("late-profile").exists());
+            assert_eq!(initialize().unwrap(), directory);
+            std::fs::write(
+                directory.join("generated-marker"),
+                b"synthetic isolated profile",
+            )
+            .unwrap();
+            return;
+        }
+        let parent = tempfile::tempdir().unwrap();
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "platform_data::tests::explicit_test_profile_requires_a_key_and_precedes_all_app_storage", "--nocapture"])
+            .env(CHILD, parent.path()).output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(
+            std::fs::read(parent.path().join("fresh-profile/generated-marker")).unwrap(),
+            b"synthetic isolated profile"
+        );
+    }
 
     #[test]
     fn a_host_stop_waits_for_the_registered_owner_and_never_for_a_later_runtime() {
