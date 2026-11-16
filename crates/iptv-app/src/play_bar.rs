@@ -30,9 +30,9 @@ use iptv_core::panels::QuickAction;
 use iptv_core::play_bar::{Control, PlayBar};
 use iptv_core::tracks::{Kind as Track, fps_label, resolution_class};
 use iptv_nav::{Action, RemoteKey};
-use nsh_core::TouchEvent;
 use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
+use nsh_core::{Checked, TouchEvent};
 
 use crate::theme::{RADIUS_LARGE, RESTING_ALPHA, TEXT_DISABLED_ALPHA};
 use crate::theme::{TEXT_SECONDARY_ALPHA, TEXT_SIZE};
@@ -203,29 +203,34 @@ fn back(ui: Ui) -> impl IntoElement {
         .pt_safe_area_plus(px(16.0))
         // Only the button takes presses: around it they reach the video.
         .pointer_events(PointerEvents::BoxNone)
-        .child(crate::ui_kit::round_back(
-            side,
-            0.0,
-            back_bg(ui),
-            move || {
-                if crate::multiview::detour(ui) {
-                    tr("Multiview")
-                } else {
-                    tr("Guide")
-                }
-            },
-            move || {
-                if !window.is_main() {
-                    window.close();
-                    return;
-                }
-                ui.touched();
-                log::info!("iptv play bar: back");
-                ui.panels.update(|p| p.hide());
-                ui.play_bar.update(PlayBar::hide);
-                crate::go_back(ui);
-            },
-        ))
+        .child(
+            crate::ui_kit::round_back(
+                side,
+                0.0,
+                back_bg(ui),
+                move || {
+                    if crate::multiview::detour(ui) {
+                        tr("Multiview")
+                    } else if ui.player.recorded.with(Option::is_some) {
+                        tr("Recordings")
+                    } else {
+                        tr("Guide")
+                    }
+                },
+                move || {
+                    if !window.is_main() {
+                        window.close();
+                        return;
+                    }
+                    ui.touched();
+                    log::info!("iptv play bar: back");
+                    ui.panels.update(|p| p.hide());
+                    ui.play_bar.update(PlayBar::hide);
+                    crate::go_back(ui);
+                },
+            )
+            .test_id("play-bar-back"),
+        )
 }
 
 /// The round ‹'s colour over video (the player's, the guide's over its
@@ -280,6 +285,13 @@ fn button(ui: Ui, control: Control, icon: impl Fn() -> Icon + 'static, size: f32
         .accessibility_state(move || AccessibilityState {
             disabled: !enabled(ui, control),
             selected: focused(ui, control),
+            pressed: (control == Control::Record).then(|| {
+                if crate::recordings_view::recording_active(ui) {
+                    Checked::True
+                } else {
+                    Checked::False
+                }
+            }),
             ..Default::default()
         })
         .flex_shrink_0()
@@ -295,7 +307,13 @@ fn button(ui: Ui, control: Control, icon: impl Fn() -> Icon + 'static, size: f32
         })
         .items_center()
         .justify_center()
-        .label(move || tr(control_label(control)))
+        .label(move || {
+            if control == Control::Record && crate::recordings_view::recording_active(ui) {
+                tr("Stop recording")
+            } else {
+                tr(control_label(control))
+            }
+        })
         .hover(|s| s.bg(tint(WHITE, RESTING_ALPHA * 2)))
         .on_press(move || {
             ui.touched();
@@ -306,7 +324,13 @@ fn button(ui: Ui, control: Control, icon: impl Fn() -> Icon + 'static, size: f32
                 .size(px(size * 0.55))
                 .text_color(move || {
                     tint(
-                        WHITE,
+                        if control == Control::Record
+                            && crate::recordings_view::recording_active(ui)
+                        {
+                            crate::theme::RECORDING
+                        } else {
+                            WHITE
+                        },
                         if enabled(ui, control) {
                             0xFF
                         } else {
@@ -366,7 +390,7 @@ fn enabled(ui: Ui, control: Control) -> bool {
         Control::Rewind | Control::Forward | Control::Timeline => {
             matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::seekable(ui)
         }
-        Control::Record => ui.player_surface == 0 && ui.playing.get().is_some(),
+        Control::Record => crate::player_panels::enabled(ui, iptv_core::panels::Control::Record),
         Control::Favourite | Control::Details => ui.playing.get().is_some(),
         Control::Tracks => tracks(ui).is_some(),
         Control::Multiview => crate::capabilities::multiview(ui).available(),
@@ -400,7 +424,7 @@ fn activate(
             );
         }
         Control::PlayPause => crate::player::toggle_pause(ui),
-        Control::Record => crate::recordings_view::current(ui),
+        Control::Record => crate::recordings_view::toggle_current(ui),
         Control::Favourite => {
             if let Some(ch) = ui.playing.get_untracked() {
                 crate::favorites::toggle(ui, ch);

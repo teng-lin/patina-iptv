@@ -25,6 +25,7 @@ fn implemented(item: MenuItem, surface: usize) -> bool {
         item,
         MenuItem::Search
             | MenuItem::Record
+            | MenuItem::ScheduleRecording
             | MenuItem::CustomRecording
             | MenuItem::Settings
             | MenuItem::Description
@@ -55,6 +56,7 @@ fn label(item: MenuItem, favorite: bool) -> &'static str {
         WatchInNewWindow => tr("Watch in new window"),
         Reminder => tr("Remind me"),
         Record => tr("Record"),
+        ScheduleRecording => tr("Schedule recording"),
         CustomRecording => tr("Schedule a recording…"),
         SaveToList => tr("Save to my list"),
         Description => tr("Details"),
@@ -101,7 +103,10 @@ pub fn open(ui: Ui) {
             if item == MenuItem::BlockGroup && crate::parental_view::group_target(ui).is_none() {
                 return false;
             }
-            if matches!(item, MenuItem::Record | MenuItem::CustomRecording) {
+            if matches!(
+                item,
+                MenuItem::Record | MenuItem::ScheduleRecording | MenuItem::CustomRecording
+            ) {
                 return ui.player_surface == 0 && crate::recordings_view::available(channel);
             }
             implemented(item, ui.player_surface)
@@ -165,9 +170,9 @@ pub fn perform(ui: Ui, item: MenuItem) {
         MenuItem::BlockChannel => crate::parental_view::block_channel(ui, origin.channel),
         MenuItem::BlockGroup => crate::parental_view::block_group(ui),
         MenuItem::ManageBlocked => crate::parental_view::manage(ui),
-        MenuItem::Record | MenuItem::CustomRecording => {
-            crate::recordings_view::programme(ui, origin, item == MenuItem::CustomRecording);
-        }
+        MenuItem::Record => crate::recordings_view::record_origin(ui, origin),
+        MenuItem::CustomRecording => crate::recordings_view::programme(ui, origin, true),
+        MenuItem::ScheduleRecording => crate::recordings_view::schedule_programme(ui, origin),
         // Details replaces the menu; Back from it returns to the guide.
         MenuItem::Description => ui.description.set(Some(origin)),
         MenuItem::WatchInNewWindow => {
@@ -323,18 +328,19 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         let focused = move || ui.keys_shown() && focus.get() == Some(at.index());
         let mark = move || Mark::of(focused(), false);
         let heading = move || matches!(row(), Some(Row::Heading(_)));
-        let name = list_rows::name(size, move || match row() {
+        let title = move || match row() {
             Some(Row::Heading(h)) => heading_text(ui, h),
             Some(Row::Action { item, .. }) => label(item, favorite()).to_owned(),
             None => String::new(),
-        })
-        // Headings in the lists' heading size.
-        .text_size(move || size.text_px(if heading() { SECTION } else { LIST_ITEM }))
-        .text_color(move || match row() {
-            Some(Row::Action { enabled: true, .. }) => mark().text(),
-            Some(Row::Heading(_)) => mark().secondary(),
-            _ => mark().disabled(),
-        });
+        };
+        let name = list_rows::name(size, title)
+            // Headings in the lists' heading size.
+            .text_size(move || size.text_px(if heading() { SECTION } else { LIST_ITEM }))
+            .text_color(move || match row() {
+                Some(Row::Action { enabled: true, .. }) => mark().text(),
+                Some(Row::Heading(_)) => mark().secondary(),
+                _ => mark().disabled(),
+            });
         list_rows::row(size, ROW, mark)
             .role(move || {
                 if heading() {
@@ -343,7 +349,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     AccessibilityRole::Menuitem
                 }
             })
+            .label(title)
             .accessibility_state(move || AccessibilityState {
+                selected: focused(),
                 disabled: matches!(row(), Some(Row::Action { enabled: false, .. })),
                 ..Default::default()
             })

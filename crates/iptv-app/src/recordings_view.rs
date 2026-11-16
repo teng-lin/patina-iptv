@@ -8,6 +8,11 @@ use iptv_nav::Action;
 use nsh_core::prelude::*;
 use std::time::Duration;
 
+mod draft;
+mod rows;
+mod style;
+use draft::draft_view;
+
 pub fn is_open(ui: Ui) -> bool {
     ui.recordings_open.get()
 }
@@ -30,6 +35,9 @@ pub fn close(ui: Ui) {
     });
 }
 pub fn back(ui: Ui) -> bool {
+    if draft::cancel_entry(ui) {
+        return true;
+    }
     ui.recordings.update(|s| {
         if s.busy {
             return;
@@ -142,26 +150,134 @@ pub fn badge(ui: Ui, channel: usize, programme: crate::guide::Program) -> &'stat
     })
 }
 pub fn current(ui: Ui) {
-    let fullscreen = ui.mode.get_untracked() == crate::ViewMode::Fullscreen;
-    let channel = if fullscreen {
-        ui.playing.get_untracked()
-    } else {
-        crate::lists::focused_channel(ui)
-    };
-    let Some(channel) = channel else {
+    if ui.mode.get_untracked() == crate::ViewMode::Fullscreen {
+        toggle_current(ui);
+        return;
+    }
+    let Some(channel) = crate::lists::focused_channel(ui) else {
         open(ui);
         return;
     };
     let origin = Origin {
         channel,
-        program_start: if fullscreen {
-            crate::time::now_minute()
-        } else {
-            ui.focus.with_untracked(|f| f.cursor)
-        },
+        program_start: ui.focus.with_untracked(|f| f.cursor),
     };
     remember(ui, origin);
-    programme(ui, origin, false);
+    let selected = crate::schedule().program_at(channel, origin.program_start);
+    match selected.airing(crate::time::now_minute()) {
+        crate::guide::Airing::Live => record_origin(ui, origin),
+        crate::guide::Airing::Upcoming => schedule_programme(ui, origin),
+        crate::guide::Airing::Ended => programme(ui, origin, false),
+    }
+}
+
+fn playing_channel(ui: Ui) -> Option<(i64, String)> {
+    if ui.player_surface != 0 || ui.playback.get() != crate::Playback::Live {
+        return None;
+    }
+    let channel = ui.playing.get()?;
+    crate::schedule()
+        .channel_key(channel)
+        .and_then(|key| crate::data::combined::owner(&crate::runtime(), &key))
+        .map(|(source, channel)| (source.0, channel))
+}
+
+pub fn recording_active(ui: Ui) -> bool {
+    let Some((source, channel)) = playing_channel(ui) else {
+        return false;
+    };
+    ui.recordings.with(|s| {
+        s.starting
+            .as_ref()
+            .is_some_and(|r| r.source == source && r.channel == channel)
+            || s.active_on(source, &channel, crate::time::wall_unix())
+                .is_some()
+    })
+}
+
+pub fn toggle_current(ui: Ui) {
+    if ui
+        .recordings
+        .with_untracked(|s| s.busy || s.starting.is_some())
+    {
+        return;
+    }
+    let Some((source, channel)) = playing_channel(ui) else {
+        return;
+    };
+    let job = ui.recordings.with_untracked(|s| {
+        s.active_on(source, &channel, crate::time::wall_unix())
+            .cloned()
+    });
+    if let Some(job) = job {
+        execute(ui, job, false, "Stop recording");
+    } else {
+        record_now(ui);
+    }
+}
+
+/// The play bar records its playing channel, independently of guide focus.
+/// It never opens the custom schedule form or replaces the player surface.
+pub fn record_now(ui: Ui) {
+    if ui.player_surface != 0 || ui.playback.get_untracked() != crate::Playback::Live {
+        return;
+    }
+    let Some(channel) = ui.playing.get_untracked() else {
+        return;
+    };
+    start_origin(
+        ui,
+        Origin {
+            channel,
+            program_start: crate::time::now_minute(),
+        },
+        false,
+    );
+}
+
+pub fn record_origin(ui: Ui, origin: Origin) {
+    start_origin(ui, origin, true);
+}
+fn start_origin(ui: Ui, origin: Origin, remembered: bool) {
+    if ui.recordings.with_untracked(|s| s.busy) {
+        return;
+    }
+    let context = remembered
+        .then(|| {
+            ui.recordings.with_untracked(|s| {
+                s.context
+                    .as_ref()
+                    .filter(|(saved, _)| *saved == origin)
+                    .map(|(_, request)| request.clone())
+            })
+        })
+        .flatten();
+    let Some(mut request) = context.or_else(|| request(origin)) else {
+        crate::settings_view::notify(tr("Choose an available channel"));
+        return;
+    };
+    let now = crate::time::wall_unix();
+    // Repeated taps are idempotent, including before the next UI status poll.
+    if crate::runtime().recording_snapshot().iter().any(|job| {
+        job.source_current
+            && job.status.active()
+            && job.request.source == request.source
+            && job.request.channel == request.channel
+            && job.request.start <= now
+            && job.request.end > now
+    }) {
+        crate::settings_view::notify(tr("Recording started"));
+        return;
+    }
+    request.start = now;
+    if request.end <= now {
+        request.end = now + 3600;
+    }
+    let mut draft = Draft::new(request);
+    draft.immediate = true;
+    let target =
+        iptv_core::parental::Target::live(draft.request.source, draft.request.channel.clone());
+    crate::parental_view::request(ui, target, move || save_allowed(ui, draft));
 }
 fn request(origin: Origin) -> Option<Request> {
     let schedule = crate::schedule();
@@ -182,7 +298,27 @@ pub fn remember(ui: Ui, origin: Origin) {
     let context = request(origin).map(|request| (origin, request));
     ui.recordings.update(|s| s.context = context);
 }
+/// EPG scheduling needs no manual date/time form: retain the selected occurrence.
+pub fn schedule_programme(ui: Ui, origin: Origin) {
+    if ui.recordings.with_untracked(|s| s.busy) {
+        return;
+    }
+    if !prepare_programme(ui, origin, false) {
+        return;
+    }
+    let draft = ui.recordings.with_untracked(|s| s.draft.clone());
+    if draft.is_some() {
+        save(ui);
+        ui.recordings.update(|s| s.draft = None);
+    }
+}
 pub fn programme(ui: Ui, origin: Origin, custom: bool) {
+    prepare_programme(ui, origin, custom);
+}
+fn prepare_programme(ui: Ui, origin: Origin, custom: bool) -> bool {
+    if ui.recordings.with_untracked(|s| s.busy) {
+        return false;
+    }
     let request = ui
         .recordings
         .with_untracked(|s| {
@@ -193,8 +329,10 @@ pub fn programme(ui: Ui, origin: Origin, custom: bool) {
         })
         .or_else(|| request(origin));
     let Some(mut request) = request else {
-        return;
+        return false;
     };
+    // A future programme keeps its actual window when opened from its context menu.
+    let custom = custom && request.start <= crate::time::wall_unix();
     if custom {
         request.start = crate::time::wall_unix();
         request.end = request.start + 3600;
@@ -236,7 +374,9 @@ pub fn programme(ui: Ui, origin: Origin, custom: bool) {
             s.draft = Some(draft);
         }
     });
+    true
 }
+
 fn save(ui: Ui) {
     let draft = ui
         .recordings
@@ -251,12 +391,18 @@ fn save(ui: Ui) {
 fn save_allowed(ui: Ui, draft: Draft) {
     let request = draft.padded(crate::time::wall_unix());
     if let Err(message) = request.validate(crate::time::wall_unix()) {
+        if draft.immediate {
+            crate::settings_view::notify(tr(message));
+        }
         ui.recordings.update(|s| s.error = Some(message.into()));
         return;
     }
     ui.recordings.update(|s| {
         s.busy = true;
         s.error = None;
+        if draft.immediate {
+            s.starting = Some(draft.request.clone());
+        }
     });
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
@@ -281,14 +427,37 @@ fn save_allowed(ui: Ui, draft: Draft) {
                     .await
             }
         };
+        if draft.immediate {
+            match &result {
+                Ok(_) => crate::settings_view::notify(tr("Starting recording")),
+                Err(error) => crate::settings_view::notify(translated_reason(
+                    error
+                        .unavailable_reason()
+                        .unwrap_or("Recording action failed"),
+                )),
+            }
+        }
+        let jobs = if result.is_ok() {
+            owner.recording_jobs().await.ok()
+        } else {
+            None
+        };
         ui.recordings.update(|s| {
             s.busy = false;
+            s.starting = None;
+            if let Some(jobs) = jobs {
+                s.reload(jobs);
+            }
             match result {
                 Ok(id) => {
-                    s.draft = None;
-                    s.filter = Filter::All;
-                    s.focus = Some(id);
-                    s.actions = false;
+                    // A play-bar action owns no library presentation. Keep a
+                    // row, editor or confirmation the viewer opened meanwhile.
+                    if !draft.immediate {
+                        s.draft = None;
+                        s.filter = Filter::All;
+                        s.focus = Some(id);
+                        s.actions = false;
+                    }
                 }
                 Err(error) => {
                     s.error = Some(
@@ -305,6 +474,9 @@ fn save_allowed(ui: Ui, draft: Draft) {
     });
 }
 fn select_job(ui: Ui, id: JobId) {
+    if ui.recordings.with_untracked(|s| s.busy) {
+        return;
+    }
     ui.recordings.update(|s| {
         s.focus = Some(id);
         s.actions = true;
@@ -312,6 +484,83 @@ fn select_job(ui: Ui, id: JobId) {
         s.action = 0;
         s.error = None;
     });
+}
+pub(super) fn return_to_player(ui: Ui) {
+    if ui.recordings.with_untracked(|s| s.busy) {
+        return;
+    }
+    close(ui);
+    ui.mode.set(crate::ViewMode::Fullscreen);
+    crate::play_bar::tapped(ui);
+}
+
+fn activate_job(ui: Ui, id: JobId) {
+    if ui.recordings.with_untracked(|s| s.busy) {
+        return;
+    }
+    let job = ui
+        .recordings
+        .with_untracked(|s| s.jobs.iter().find(|j| j.id == id).cloned());
+    let Some(job) = job else { return };
+    if ui
+        .player
+        .recorded
+        .with_untracked(|r| r.as_ref().is_some_and(|(playing, _)| playing.id == id))
+    {
+        return_to_player(ui);
+    } else if job.status == Status::Scheduled {
+        execute(ui, job, false, "Edit recording");
+    } else if matches!(job.status, Status::Completed | Status::Partial) && job.bytes > 0 {
+        ui.recordings.update(|s| {
+            s.focus = Some(id);
+            s.confirm_delete = false;
+        });
+        perform(ui, 0);
+    } else {
+        select_job(ui, id);
+    }
+}
+
+fn row_action(ui: Ui, id: JobId, action: &'static str) {
+    if ui.recordings.with_untracked(|s| s.busy) {
+        return;
+    }
+    let job = ui
+        .recordings
+        .with_untracked(|s| s.jobs.iter().find(|j| j.id == id).cloned());
+    if let Some(job) = job {
+        ui.recordings.update(|s| {
+            s.focus = Some(id);
+            s.confirm_delete = false;
+        });
+        execute(ui, job, false, action);
+    }
+}
+
+fn request_delete(ui: Ui, id: JobId) {
+    if ui.recordings.with_untracked(|s| s.busy) {
+        return;
+    }
+    ui.recordings.update(|s| {
+        s.focus = Some(id);
+        s.actions = false;
+        s.confirm_delete = true;
+        s.delete_selected = false;
+        s.error = None;
+    });
+}
+
+fn confirm_delete(ui: Ui) {
+    let job = ui.recordings.with_untracked(|s| {
+        if s.busy || !s.confirm_delete {
+            None
+        } else {
+            s.focused().cloned()
+        }
+    });
+    if let Some(job) = job {
+        execute(ui, job, true, "Delete recording");
+    }
 }
 fn actions(ui: Ui, job: &Job) -> Vec<&'static str> {
     let mut actions = match job.status {
@@ -363,18 +612,20 @@ fn perform(ui: Ui, index: usize) {
     ) {
         let target =
             iptv_core::parental::Target::live(job.request.source, job.request.channel.clone());
-        crate::parental_view::request(ui, target, move || execute(ui, job, confirm, action, index));
+        crate::parental_view::request(ui, target, move || execute(ui, job, confirm, action));
     } else {
-        execute(ui, job, confirm, action, index);
+        execute(ui, job, confirm, action);
     }
 }
-fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str, index: usize) {
+fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str) {
     if action == "Stop playback" {
         crate::player_keys::stop_playback(ui);
         return;
     }
     if action == "Edit recording" {
         ui.recordings.update(|s| {
+            s.focus = Some(job.id);
+            s.confirm_delete = false;
             let mut d = Draft::new(job.request);
             d.editing = Some(job.id);
             s.draft = Some(d);
@@ -383,10 +634,7 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str, index: usize) 
         return;
     }
     if action == "Delete recording" && !confirm {
-        ui.recordings.update(|s| {
-            s.confirm_delete = true;
-            s.action = index;
-        });
+        request_delete(ui, job.id);
         return;
     }
     if ui.recordings.with_untracked(|s| s.busy) {
@@ -422,12 +670,28 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str, index: usize) 
         } else if action == "Cancel repeating schedule" {
             owner.stop_repeating_recording(job.id).await
         } else if action == "Delete recording" {
+            // Consent precedes stopping; deleting another file leaves playback alone.
+            if ui
+                .player
+                .recorded
+                .with_untracked(|r| r.as_ref().is_some_and(|(playing, _)| playing.id == job.id))
+            {
+                crate::player_keys::stop_playback(ui);
+            }
             owner.delete_recording(job.id).await
         } else {
             owner.stop_recording(job.id).await
         };
+        let jobs = if result.is_ok() {
+            owner.recording_jobs().await.ok()
+        } else {
+            None
+        };
         ui.recordings.update(|s| {
             s.busy = false;
+            if let Some(jobs) = jobs {
+                s.reload(jobs);
+            }
             s.confirm_delete = false;
             match result {
                 Ok(()) => {
@@ -442,7 +706,7 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str, index: usize) 
                 Err(_) => {
                     s.error = Some(
                         if action == "Delete recording" {
-                            "Recording could not be deleted; stop playback first"
+                            "Recording could not be deleted"
                         } else {
                             "Recording action failed; check whether its file is available"
                         }
@@ -462,34 +726,27 @@ pub fn key(ui: Ui, action: Action) {
     if ui.recordings.with_untracked(|s| s.busy) {
         return;
     }
-    if ui.recordings.with_untracked(|s| s.draft.is_some()) {
-        if action == Action::Select {
-            let row = ui
-                .recordings
-                .with_untracked(|s| s.draft.as_ref().map_or(6, |d| d.focus));
-            if row == 6 {
-                save(ui);
-            } else {
-                ui.recordings.update(|s| {
-                    if let Some(d) = &mut s.draft {
-                        d.adjust(row, 1, crate::time::wall_unix());
-                    }
-                });
+    if ui.recordings.with_untracked(|s| s.confirm_delete) {
+        match action {
+            Action::MoveLeft | Action::MoveRight | Action::MoveUp | Action::MoveDown => {
+                ui.recordings
+                    .update(|s| s.delete_selected = !s.delete_selected);
             }
-            return;
-        }
-        ui.recordings.update(|s| {
-            if let Some(d) = &mut s.draft {
-                match action {
-                    Action::MoveUp => d.focus = d.focus.saturating_sub(1),
-                    Action::MoveDown => d.focus = (d.focus + 1).min(6),
-                    Action::MoveLeft => d.adjust(d.focus, -1, crate::time::wall_unix()),
-                    Action::MoveRight => d.adjust(d.focus, 1, crate::time::wall_unix()),
-                    _ => {}
+            Action::Select => {
+                if ui.recordings.with_untracked(|s| s.delete_selected) {
+                    confirm_delete(ui);
+                } else {
+                    back(ui);
                 }
             }
-        });
-    } else if ui.recordings.with_untracked(|s| s.actions) {
+            _ => {}
+        }
+        return;
+    }
+    if draft::key(ui, action) {
+        return;
+    }
+    if ui.recordings.with_untracked(|s| s.actions) {
         let length = ui
             .recordings
             .with_untracked(|s| s.focused().map(|j| actions(ui, j)).map_or(0, |a| a.len()));
@@ -509,10 +766,14 @@ pub fn key(ui: Ui, action: Action) {
             Action::MoveDown => ui.recordings.update(|s| s.move_focus(1)),
             Action::MoveLeft => ui.recordings.update(|s| s.set_filter(Filter::Active)),
             Action::MoveRight => ui.recordings.update(|s| s.set_filter(Filter::Finished)),
-            Action::ShowMenu => ui.recordings.update(|s| s.set_filter(Filter::All)),
-            Action::Select => {
+            Action::ShowMenu => {
                 if let Some(id) = ui.recordings.with_untracked(|s| s.focus) {
                     select_job(ui, id);
+                }
+            }
+            Action::Select => {
+                if let Some(id) = ui.recordings.with_untracked(|s| s.focus) {
+                    activate_job(ui, id);
                 }
             }
             _ => {}
@@ -522,154 +783,7 @@ pub fn key(ui: Ui, action: Action) {
 fn date(unix: i64) -> String {
     crate::time::label(unix, crate::time::wall_unix())
 }
-fn draft_row(ui: Ui, size: Scale, row: usize) -> View {
-    let value = move || {
-        ui.recordings.with(|s| {
-            s.draft
-                .as_ref()
-                .map(|d| match row {
-                    0 => trf(
-                        "Start day · {time}",
-                        &[("time", (&date(d.request.start)).into())],
-                    ),
-                    1 => trf(
-                        "Start time · {time}",
-                        &[("time", (&date(d.request.start)).into())],
-                    ),
-                    2 => trf(
-                        "Duration · {minutes} min",
-                        &[(
-                            "minutes",
-                            (((d.request.end - d.request.start) / 60) as u64).into(),
-                        )],
-                    ),
-                    3 => trf(
-                        "Start early · {minutes} min",
-                        &[("minutes", (d.lead_minutes as u64).into())],
-                    ),
-                    4 => trf(
-                        "Finish late · {minutes} min",
-                        &[("minutes", (d.trail_minutes as u64).into())],
-                    ),
-                    _ => trf(
-                        "Repeat · {frequency}",
-                        &[(
-                            "frequency",
-                            match d.repeat {
-                                iptv_core::recording::Repeat::Once => tr("Once"),
-                                iptv_core::recording::Repeat::Daily => tr("Every day"),
-                                iptv_core::recording::Repeat::Weekly => tr("Every week"),
-                                iptv_core::recording::Repeat::Series => {
-                                    tr("Every matching programme")
-                                }
-                            }
-                            .into(),
-                        )],
-                    ),
-                })
-                .unwrap_or_default()
-        })
-    };
-    view()
-        .flex_row()
-        .items_center()
-        .gap(move || size.px(12.0))
-        .child(ui_kit::label(size, value).flex_1())
-        .children([-1, 1].into_iter().map(move |step| {
-            ui_kit::button(
-                ui,
-                size,
-                if step < 0 { "−" } else { "+" },
-                move || {
-                    ui.recordings
-                        .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == row))
-                },
-                move || {
-                    ui.touched();
-                    ui.recordings.update(|s| {
-                        if !s.busy
-                            && let Some(d) = &mut s.draft
-                        {
-                            d.focus = row;
-                            d.adjust(row, step, crate::time::wall_unix());
-                        }
-                    });
-                },
-            )
-            .label(move || {
-                if step < 0 {
-                    trf("Decrease {field}", &[("field", (&value()).into())])
-                } else {
-                    trf("Increase {field}", &[("field", (&value()).into())])
-                }
-            })
-        }))
-}
-fn draft_view(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> impl IntoElement {
-    view()
-        .gap(move || size.px(12.0))
-        .child(ui_kit::heading(size, move || {
-            ui.recordings.with(|s| {
-                s.draft
-                    .as_ref()
-                    .map(|d| d.request.title.clone())
-                    .unwrap_or_default()
-            })
-        }))
-        .children((0..6).map(move |row| {
-            scrolling.control(draft_row(ui, size, row), move || {
-                ui.recordings
-                    .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == row))
-            })
-        }))
-        .child(
-            scrolling.control(
-                ui_kit::button(
-                    ui,
-                    size,
-                    tr("Save recording"),
-                    move || {
-                        ui.recordings
-                            .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == 6))
-                    },
-                    move || save(ui),
-                )
-                .disabled(move || ui.recordings.with(|s| s.busy))
-                .test_id("recording-save"),
-                move || {
-                    ui.recordings
-                        .with(|s| s.draft.as_ref().is_some_and(|d| d.focus == 6))
-                },
-            ),
-        )
-}
-fn job_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
-    let job = move || ui.recordings.with(|s| s.visible().nth(at.index()).cloned());
-    ui_kit::button(
-        ui,
-        size,
-        move || {
-            job()
-                .map(|j| {
-                    format!(
-                        "{} · {} · {} · {}",
-                        status(&j),
-                        j.request.title,
-                        j.request.channel_name,
-                        date(j.request.start)
-                    )
-                })
-                .unwrap_or_default()
-        },
-        move || job().is_some_and(|j| ui.recordings.with(|s| s.focus == Some(j.id))),
-        move || {
-            if let Some(j) = job() {
-                select_job(ui, j.id);
-            }
-        },
-    )
-    .test_id("recording-job")
-}
+
 fn status(job: &Job) -> &'static str {
     if job.status == Status::Recording && job.bytes == 0 {
         tr("Starting recording")
@@ -679,56 +793,233 @@ fn status(job: &Job) -> &'static str {
 }
 
 fn action_view(ui: Ui, size: Scale) -> impl IntoElement {
-    view().gap(move || size.px(12.0))
-        .child(ui_kit::heading(size, move || ui.recordings.with(|s| s.focused().map(|j| j.request.title.clone()).unwrap_or_default())))
-        .child(ui_kit::body(size, move || ui.recordings.with(|s| s.focused().map(|j| format!("{} · {}–{} · {} {}\n{}",
-            tr(j.status.label()), date(j.request.start), date(j.request.end), j.bytes / (1024 * 1024), "MiB", translated_reason(&j.message))).unwrap_or_default())))
-        .child(when(move || ui.recordings.with(|s| s.confirm_delete), move ||
-            ui_kit::body(size, tr("Delete this recording file permanently? Select Delete recording again to confirm. Back cancels."))))
-        .children((0..4).map(move |index| when(move || ui.recordings.with(|s| s.focused().is_some_and(|j| index < actions(ui, j).len())), move || {
-            ui_kit::button(ui, size, move || ui.recordings.with(|s| s.focused().and_then(|j| actions(ui, j).get(index).copied()).map(|name| tr(name).to_owned()).unwrap_or_default()),
-                move || ui.recordings.with(|s| s.action == index), move || perform(ui, index))
-        })))
+    view()
+        .child(
+            ui_kit::title(size, move || {
+                ui.recordings.with(|s| {
+                    s.focused()
+                        .map(|j| j.request.title.clone())
+                        .unwrap_or_default()
+                })
+            })
+            .px(move || size.px(24.0))
+            .py(move || size.px(16.0)),
+        )
+        .child(
+            ui_kit::body(size, move || {
+                ui.recordings.with(|s| {
+                    s.focused()
+                        .map(|j| {
+                            let media =
+                                format!("{:.2} {}", j.bytes as f64 / (1024.0 * 1024.0), tr("MiB"));
+                            format!(
+                                "{} · {}\n{}–{} · {}\n{}",
+                                tr(j.status.label()),
+                                j.request.channel_name,
+                                date(j.request.start),
+                                crate::time::time_only(j.request.end),
+                                media,
+                                translated_reason(&j.message)
+                            )
+                        })
+                        .unwrap_or_default()
+                })
+            })
+            .px(move || size.px(24.0))
+            .pb(move || size.px(16.0)),
+        )
+        .children((0..4).map(move |index| {
+            when(
+                move || {
+                    ui.recordings
+                        .with(|s| s.focused().is_some_and(|j| index < actions(ui, j).len()))
+                },
+                move || {
+                    style::action(
+                        ui,
+                        size,
+                        move || {
+                            ui.recordings.with(|s| {
+                                s.focused()
+                                    .and_then(|j| actions(ui, j).get(index).copied())
+                                    .map(|name| tr(name).to_owned())
+                                    .unwrap_or_default()
+                            })
+                        },
+                        move || ui.recordings.with(|s| s.action == index),
+                        move || perform(ui, index),
+                    )
+                },
+            )
+        }))
 }
+
+fn requirements() -> &'static str {
+    if cfg!(target_os = "ios") {
+        tr("Keep Patina open and this device awake for recordings. \
+             Recordings use local app storage and are excluded from backups.")
+    } else {
+        tr(
+            "Recordings continue when you close the player. Check Recordings settings for startup and device wake requirements. \
+             Recordings use local storage and are excluded from backups.",
+        )
+    }
+}
+
+fn message(ui: Ui) -> String {
+    ui.recordings.with(|s| {
+        s.error
+            .as_ref()
+            .map(|message| tr(message).to_owned())
+            .unwrap_or_default()
+    })
+}
+
+fn schedule_panel(ui: Ui, size: Scale) -> View {
+    view()
+        .absolute()
+        .inset_0()
+        .items_end()
+        .bg(crate::tint(0, 0x55))
+        .child(
+            view()
+                .h_full()
+                .w(move || size.px(400.0))
+                .max_w(percentage(0.9))
+                .accessibility_elements_hidden(move || {
+                    ui.recordings
+                        .with(|s| s.draft.as_ref().is_some_and(|d| d.entry.is_some()))
+                })
+                .pt_safe_area()
+                .pb_safe_area()
+                .bg(rgb(style::PANEL))
+                .child(style::header(ui, size, tr("Schedule a recording…")))
+                .child({
+                    let scrolling = ui_kit::FocusScroll::new();
+                    scrolling
+                        .view()
+                        .test_id("recording-draft-scroll")
+                        .flex_1()
+                        .child(draft_view(ui, size, scrolling))
+                })
+                .child(
+                    ui_kit::body(size, move || message(ui))
+                        .text_color(rgb(ui_kit::ERROR))
+                        .px(move || size.px(24.0)),
+                )
+                .child(
+                    ui_kit::caption(size, move || {
+                        if ui.recordings.with(|s| s.busy) {
+                            tr("Saving…")
+                        } else {
+                            ""
+                        }
+                    })
+                    .px(move || size.px(24.0)),
+                )
+                .child(
+                    ui_kit::caption(size, requirements())
+                        .px(move || size.px(24.0))
+                        .py(move || size.px(16.0)),
+                ),
+        )
+}
+
+fn library_content(ui: Ui, size: Scale) -> View {
+    view().absolute().inset_0().pt_safe_area().pb_safe_area().bg(rgb(style::WINDOW))
+        .child(view().flex_row().items_center().px(move || size.px(24.0))
+            .min_h(move || size.px(72.0))
+            .child(when(move || ui.recordings.with(|s| !s.actions), move || style::action(ui, size, tr("Close"), || false, move || close(ui))))
+            .child(view().flex_1())
+            .child(ui_kit::title(size, tr("Recordings"))))
+        .child(rows::now_playing(ui, size))
+        .child(view().flex_row().items_start().px(move || size.px(24.0)).min_h(move || size.px(128.0))
+            .child(view().flex_row().children(
+                [(Filter::All, "All"), (Filter::Active, "Active"), (Filter::Finished, "Finished")]
+                    .into_iter().map(move |(filter, name)| {
+                        style::action(ui, size, tr(name), move || ui.recordings.with(|s| s.filter == filter),
+                            move || ui.recordings.update(|s| {
+                                s.set_filter(filter); s.actions = false; s.confirm_delete = false;
+                            }))
+                    })))
+            .child(view().flex_1())
+            .child(when(move || ui.recordings.with(|s| s.focused().is_some()), move || {
+                view().w(percentage(0.45)).gap(move || size.px(8.0))
+                    .child(ui_kit::title(size, move || ui.recordings.with(|s| {
+                        s.focused().map(|j| j.request.title.clone()).unwrap_or_default()
+                    })))
+                    .child(ui_kit::caption(size, move || ui.recordings.with(|s| {
+                        s.focused().map(|j| format!("{} · {} – {}", crate::time::date_only(j.request.start),
+                            crate::time::time_only(j.request.start), crate::time::time_only(j.request.end)))
+                            .unwrap_or_default()
+                    })))
+                    .child(ui_kit::body(size, move || ui.recordings.with(|s| {
+                        s.focused().map(|j| format!("{} · {}", j.request.channel_name, status(j))).unwrap_or_default()
+                    })))
+            })))
+        .child(ui_kit::body(size, move || message(ui)).text_color(rgb(ui_kit::ERROR))
+            .px(move || size.px(24.0)))
+        .child(when(move || ui.recordings.with(|s| s.visible().next().is_none()), move || {
+            ui_kit::body(size, tr(
+                "No recordings here. Choose a programme in the guide, then Record or Schedule a recording."
+            )).px(move || size.px(24.0)).py(move || size.px(24.0))
+        }))
+        .child(recording_list(ui, size))
+        .child(ui_kit::caption(size, move || ui.recordings.with(|s| {
+            s.background_notice.as_ref().map(|message| tr(message).to_owned()).unwrap_or_default()
+        })).px(move || size.px(24.0)))
+        .child(ui_kit::caption(size, requirements()).px(move || size.px(24.0)).py(move || size.px(16.0)))
+}
+
+fn library(ui: Ui, size: Scale) -> View {
+    view()
+        .absolute()
+        .inset_0()
+        .child(
+            library_content(ui, size).accessibility_elements_hidden(move || {
+                ui.recordings.with(|s| s.actions || s.confirm_delete)
+            }),
+        )
+        .child(when(
+            move || ui.recordings.with(|s| s.actions),
+            move || {
+                view()
+                    .absolute()
+                    .inset_0()
+                    .items_end()
+                    .bg(crate::tint(0, 0x55))
+                    .child(
+                        view()
+                            .w(move || size.px(400.0))
+                            .max_w(percentage(0.9))
+                            .h_full()
+                            .pt_safe_area()
+                            .pb_safe_area()
+                            .bg(rgb(style::PANEL))
+                            .child(style::header(ui, size, tr("Recordings")))
+                            .child(scroll().flex_1().child(action_view(ui, size))),
+                    )
+            },
+        ))
+}
+
 pub fn layer(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
-    let requirements = if cfg!(target_os = "ios") {
-        tr(
-            "Keep Patina open and this device awake for recordings. Recordings use local app storage and are excluded from backups.",
-        )
-    } else {
-        tr("Recordings continue when you close the player. \
-            Check Recordings settings for startup and device wake requirements. \
-            Recordings use local storage and are excluded from backups.")
-    };
+    let has_draft = move || ui.recordings.with(|s| s.draft.is_some());
     when(
         move || is_open(ui),
         move || {
-            ui_kit::screen(ui, size).test_id("recordings-screen")
-            .accessibility_elements_hidden(move || crate::overlays::Overlay::Recordings.accessibility_covered(ui))
-            .child(ui_kit::header(ui, size, tr("Recordings"), close))
-            .child(ui_kit::caption(size, requirements))
-            .child(ui_kit::caption(size,move ||ui.recordings.with(|s|s.background_notice.as_ref().map(|message|tr(message).to_owned()).unwrap_or_default())))
-            .child(ui_kit::caption(size, tr("Up/Down selects · Left/Right changes a value or filters the list · Menu shows all recordings · Back returns")))
-            .child(ui_kit::body(size, move || ui.recordings.with(|s| s.error.as_ref().map(|message| tr(message).to_owned()).unwrap_or_default())))
-            .child(ui_kit::caption(size, move || if ui.recordings.with(|s| s.busy) { tr("Saving…") } else { "" }))
-            .child(when(move || ui.recordings.with(|s| s.draft.is_some()), move || {
-                let scrolling = ui_kit::FocusScroll::new();
-                scrolling.view().test_id("recording-draft-scroll").flex_1().child(draft_view(ui, size, scrolling))
-            }))
-            .child(when(move || ui.recordings.with(|s| s.draft.is_none() && s.actions), move || action_view(ui, size)))
-            .child(when(move || ui.recordings.with(|s| s.draft.is_none() && !s.actions), move || {
-                let filters = view().flex_row().gap(move || size.px(12.0))
-                    .children([(Filter::All, "All"), (Filter::Active, "Active"), (Filter::Finished, "Finished")].into_iter().map(move |(filter, name)|
-                        ui_kit::tab(ui, size, tr(name), move || ui.recordings.with(|s| s.filter == filter), || false,
-                            move || ui.recordings.update(|s| s.set_filter(filter)))));
-                view().flex_1().gap(move || size.px(8.0)).child(filters)
-                    .child(when(move || ui.recordings.with(|s| s.visible().next().is_none()), move || {
-                        const EMPTY: &str = "No recordings here. Choose a programme in the guide, then Record or Schedule a recording.";
-                        ui_kit::body(size, tr(EMPTY))
-                    }))
-                    .child(recording_list(ui, size))
-            }))
+            view()
+                .absolute()
+                .inset_0()
+                .test_id("recordings-screen")
+                .accessibility_elements_hidden(move || {
+                    crate::overlays::Overlay::Recordings.accessibility_covered(ui)
+                })
+                .child(when(has_draft, move || schedule_panel(ui, size)))
+                .child(when(move || !has_draft(), move || library(ui, size)))
+                .child(draft::entry_layer(ui))
+                .child(rows::delete_confirmation(ui, size))
         },
     )
 }
@@ -745,31 +1036,11 @@ fn recording_list(ui: Ui, size: Scale) -> impl IntoElement {
     });
     virtual_list(
         move || ui.recordings.with(|s| s.visible().count()),
-        move |at| job_row(ui, size, at),
+        move |at| rows::job_row(ui, size, at),
     )
     .element_ref(&rows)
-    .estimated_item_size(move || size.px(ui_kit::TOUCH))
+    .estimated_item_size(move || size.px(ui_kit::ROW_THREE + 24.0))
     .flex_1()
-}
-pub fn indicator(ui: Ui) -> impl IntoElement {
-    let size = Scale::new();
-    when(
-        move || {
-            !ui.any_overlay_open()
-                && ui.recordings.with(|s| {
-                    s.jobs
-                        .iter()
-                        .any(|j| j.status == Status::Recording && j.bytes > 0)
-                })
-        },
-        move || {
-            ui_kit::button(ui, size, tr("● Recording"), || false, move || open(ui))
-                .absolute()
-                .top(move || size.px(20.0))
-                .right(move || size.px(24.0))
-                .test_id("recording-indicator")
-        },
-    )
 }
 
 fn translated_reason(message: &str) -> &str {

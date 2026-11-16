@@ -229,7 +229,7 @@ fn step(ui: Ui, f: impl FnOnce(&mut Focus, &Columns, &ListView) -> Outcome) -> O
 /// Keep preview focus on a visible, playing surface across stop/layout changes.
 pub fn bind(ui: Ui) {
     effect(move || {
-        let available = ui.playing.get().is_some()
+        let available = (ui.playing.get().is_some() || crate::on_demand::active(ui))
             && matches!(
                 ui.mode.get(),
                 crate::ViewMode::Guide | crate::ViewMode::Fullscreen
@@ -247,8 +247,11 @@ pub fn navigate(ui: Ui, m: Move) {
         && ui.mode.get_untracked() == crate::ViewMode::Guide
     {
         let mut moved = false;
-        ui.focus
-            .update(|f| moved = f.focus_preview(ui.playing.get_untracked().is_some()));
+        ui.focus.update(|f| {
+            moved = f.focus_preview(
+                ui.playing.get_untracked().is_some() || crate::on_demand::active(ui),
+            );
+        });
         if moved {
             return;
         }
@@ -323,7 +326,9 @@ fn follow(ui: Ui, outcome: Outcome) {
         Outcome::Preview => rebuild(ui, false),
         Outcome::Committed if ui.focus.with_untracked(|f| f.hint) => arm_hint(ui),
         Outcome::Watch => ui.watch(),
-        Outcome::ReturnToPlayer if ui.playing.get_untracked().is_some() => {
+        Outcome::ReturnToPlayer
+            if ui.playing.get_untracked().is_some() || crate::on_demand::active(ui) =>
+        {
             ui.mode.set(crate::ViewMode::Fullscreen);
             ui.show_playing();
         }

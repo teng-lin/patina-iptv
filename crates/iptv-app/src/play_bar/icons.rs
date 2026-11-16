@@ -12,6 +12,9 @@ pub enum Icon {
     Play,
     Pause,
     Record,
+    Trash,
+    Edit,
+    Stop,
     Forward,
     Star,
     StarFilled,
@@ -46,6 +49,11 @@ fn body(icon: Icon) -> &'static str {
         }
         Icon::Play => "<path fill='currentColor' stroke='none' d='M7 4.5v15L19.5 12z'/>",
         Icon::Record => "<circle cx='12' cy='12' r='6' fill='currentColor' stroke='none'/>",
+        Icon::Trash => "<path d='M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7'/>",
+        Icon::Edit => "<path d='M4 20l1-5L16 4l4 4L9 19zM13 7l4 4'/>",
+        Icon::Stop => {
+            "<rect x='5' y='5' width='14' height='14' rx='1' fill='currentColor' stroke='none'/>"
+        }
         Icon::Pause => {
             "<path fill='currentColor' stroke='none' d='M6 4.5h4v15H6zM14 4.5h4v15h-4z'/>"
         }

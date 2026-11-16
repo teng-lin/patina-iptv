@@ -229,8 +229,17 @@ fn choice(ui: Ui) -> impl IntoElement {
 
 /// The stepper's value and its range, in the setting's unit.
 fn number_text(ui: Ui) -> (String, String) {
-    let Some((s, value)) = editor(ui, |e| match e {
-        Editor::Number { setting, value } => Some((*setting, *value)),
+    let Some((s, value, automatic)) = editor(ui, |e| match e {
+        Editor::Number {
+            setting,
+            value,
+            was_stored,
+            edited,
+        } => Some((
+            *setting,
+            *value,
+            setting.key == "playlists.max_connections" && !was_stored && !edited,
+        )),
         _ => None,
     })
     .flatten() else {
@@ -240,7 +249,11 @@ fn number_text(ui: Ui) -> (String, String) {
         ValueType::Int { .. } => Value::Int(value),
         _ => Value::Duration(value),
     };
-    let shown = words::value(s, &value);
+    let shown = if automatic {
+        tr("Automatic").to_owned()
+    } else {
+        words::value(s, &value)
+    };
     let range = grid(&s.ty).map_or(String::new(), |(min, max, step)| {
         trf(
             "From {min} to {max}, in steps of {step}",

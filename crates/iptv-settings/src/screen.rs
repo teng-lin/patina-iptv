@@ -236,6 +236,10 @@ pub enum Editor {
     Number {
         setting: &'static Setting,
         value: i64,
+        /// Whether opening the editor read an explicit global value.
+        was_stored: bool,
+        /// A deliberate step distinguishes an explicit limit from Automatic.
+        edited: bool,
     },
     /// Text being typed; `invalid` after a rejected OK.
     Text {
@@ -463,9 +467,12 @@ impl Screen {
                     selected,
                 })
             }
-            Value::Int(value) | Value::Duration(value) => {
-                Some(Editor::Number { setting: s, value })
-            }
+            Value::Int(value) | Value::Duration(value) => Some(Editor::Number {
+                setting: s,
+                value,
+                was_stored: ctx.settings.stored(s.key, &Target::Global).is_some(),
+                edited: false,
+            }),
             Value::Text(text) if s.ty.editor_choices().is_some() => {
                 let variants = s.ty.editor_choices().map_or(&[][..], |c| c.variants);
                 let selected = variants
@@ -575,9 +582,15 @@ impl Screen {
 
     /// Moves an open stepper by `steps` (negative: less), within range.
     pub fn step(&mut self, steps: i64) {
-        if let Some(Editor::Number { setting, value }) = &mut self.editor
+        if let Some(Editor::Number {
+            setting,
+            value,
+            edited,
+            ..
+        }) = &mut self.editor
             && let Some((min, max, step)) = grid(&setting.ty)
         {
+            *edited |= steps != 0;
             *value = validate::clamp_to_grid(value.saturating_add(steps * step), min, max, step);
         }
     }
@@ -597,11 +610,22 @@ impl Screen {
     /// validate keeps the editor open, marked invalid.
     pub fn commit(&mut self) -> Effect {
         let (setting, value) = match &self.editor {
-            Some(Editor::Number { setting, value }) => {
+            Some(Editor::Number {
+                setting,
+                value,
+                was_stored,
+                edited,
+            }) => {
                 let v = match setting.ty {
                     ValueType::Int { .. } => Value::Int(*value),
                     _ => Value::Duration(*value),
                 };
+                // Merely accepting Automatic preserves it. Deliberately using
+                // the stepper selects an explicit ceiling, including one.
+                if setting.key == "playlists.max_connections" && !was_stored && !edited {
+                    self.editor = None;
+                    return Effect::None;
+                }
                 (*setting, v)
             }
             Some(Editor::Text { setting, text, .. }) => (*setting, Value::Text(text.clone())),

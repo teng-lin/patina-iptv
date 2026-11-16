@@ -9,6 +9,7 @@ Writes:
   crates/iptv-app/icon.png                     desktop icon, 1024 (nsh.json
                                                "icon": macOS .icns, Linux)
   crates/iptv-app/icon.ico                     Windows executable/window icon
+  crates/iptv-app/icon-ios.png                 opaque, full-bleed iOS icon, 1024
   hosts/android/.../mipmap-*/ic_launcher_{foreground,background}.png
   hosts/android/.../drawable/ic_launcher_monochrome.xml  themed icon (vector)
   hosts/android/.../drawable-*/banner.png      Android TV banner, 320x180 dp
@@ -16,7 +17,10 @@ Writes:
 
 Needs numpy, Pillow and rsvg-convert:
   uvx --with numpy --with pillow python -I tools/make-icons.py
+
+Use --only ios to rebuild just the iOS icon (no rsvg-convert needed).
 """
+import argparse
 import math
 import pathlib
 import subprocess
@@ -168,6 +172,13 @@ def android():
         "</vector>\n")
 
 
+def ios():
+    """Opaque square tile; iPadOS supplies the outer mask and shadow."""
+    tile(1024, p_frac=0.74, grain=0).convert("RGB").save(
+        ROOT / "crates" / "iptv-app" / "icon-ios.png", optimize=True
+    )
+
+
 def banner():
     """Android TV banner, 320x180 dp."""
     master = Image.open(ART / "banner.png").convert("RGB")
@@ -181,8 +192,12 @@ def play():
     tile(512).convert("RGB").save(ART / "play-512.png", optimize=True)
 
 
-desktop()
-android()
-banner()
-play()
-print("icons written")
+if __name__ == "__main__":
+    generators = {"desktop": desktop, "ios": ios, "android": android, "banner": banner, "play": play}
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--only", choices=["all", *generators], default="all")
+    selected = parser.parse_args().only
+    for name, generate in generators.items():
+        if selected in ("all", name):
+            generate()
+    print("icons written")
