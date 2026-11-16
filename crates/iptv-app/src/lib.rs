@@ -36,6 +36,8 @@ mod guide_inspect_view;
 mod guide_repair_view;
 mod header;
 mod i18n;
+#[cfg(feature = "test-support")]
+pub use i18n::pseudo_fixed_for_test;
 mod input;
 mod list_rows;
 mod lists;

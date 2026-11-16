@@ -318,8 +318,12 @@ fn palettes_mirror_the_theme_names() {
             .map(|n| n.to_lowercase().replace(' ', "_"))
             .collect()
     };
-    assert_eq!(names("a(\""), choices::ACCENT.variants, "accents");
-    assert_eq!(names("b(\""), choices::BACKGROUND.variants, "backgrounds");
+    assert_eq!(names("a(key(\""), choices::ACCENT.variants, "accents");
+    assert_eq!(
+        names("b(key(\""),
+        choices::BACKGROUND.variants,
+        "backgrounds"
+    );
 }
 
 #[test]

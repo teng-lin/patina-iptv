@@ -2,12 +2,8 @@
 //! value (back up, clear, restore defaults). They share the key and label
 //! space with settings but are never persisted.
 
+use super::key;
 use crate::schema::Section;
-
-// Message marker for descriptions translated by the consuming shell.
-const fn key(message: &'static str) -> &'static str {
-    message
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Command {
@@ -106,13 +102,13 @@ pub static COMMANDS: &[Command] = &[
         S::General,
         "",
         "general.backup",
-        "Write settings and customisations to a backup file.",
+        key("Write settings and customisations to a backup file."),
     ),
     Command::new(
         S::General,
         "",
         "general.restore",
-        "Replace everything with a backup's contents.",
+        key("Replace everything with a backup's contents."),
     )
     .confirm()
     .restart(),
@@ -120,115 +116,128 @@ pub static COMMANDS: &[Command] = &[
         S::General,
         "",
         "general.reset_watch_time",
-        "Forget per-channel viewing time.",
+        key("Forget per-channel viewing time."),
     )
     .confirm(),
-    Command::new(S::General, "", "general.restart", "Restart the app now.").confirm(),
+    Command::new(
+        S::General,
+        "",
+        "general.restart",
+        key("Restart the app now."),
+    )
+    .confirm(),
     Command::new(
         S::General,
         "privacy",
         "general.send_logs",
-        "Send a diagnostic log, redacted of credentials.",
+        key("Send a diagnostic log, redacted of credentials."),
     ),
     Command::new(
         S::General,
         "updates",
         "general.check_updates",
-        "Look for a newer version now.",
+        key("Look for a newer version now."),
     ),
     Command::new(
         S::General,
         "",
         "general.about",
-        "Version, licences and policies.",
+        key("Version, licences and policies."),
     ),
     Command::new(
         S::Playlists,
         "",
         "playlists.manage",
-        "Open the playlists screen: add, choose, refresh, rename, change the guide address, delete.",
+        key(
+            "Open the playlists screen: add, choose, refresh, rename, change the guide address, delete.",
+        ),
     ),
     Command::new(
         S::Playlists,
         "",
         "playlists.add",
-        "Open the add-playlist wizard.",
+        key("Open the add-playlist wizard."),
     ),
     Command::new(
         S::Playlists,
         "",
         "playlists.reorder",
-        "Arrange playlists by hand.",
+        key("Arrange playlists by hand."),
     ),
     Command::new(
         S::Playlists,
         "updates",
         "playlists.update_all",
-        "Refresh every playlist now.",
+        key("Refresh every playlist now."),
     ),
     Command::new(
         S::Channels,
         "",
         "channels.manage_groups",
-        "Show, hide, rename and arrange groups.",
+        key("Show, hide, rename and arrange groups."),
     ),
-    Command::new(S::Epg, "", "epg.add_source", "Add an XMLTV guide source."),
+    Command::new(
+        S::Epg,
+        "",
+        "epg.add_source",
+        key("Add an XMLTV guide source."),
+    ),
     Command::new(
         S::Epg,
         "",
         "epg.manage_sources",
-        "Assign, prioritise and remove guide sources.",
+        key("Assign, prioritise and remove guide sources."),
     ),
     Command::new(
         S::Epg,
         "updates",
         "epg.update_now",
-        "Download guide data now.",
+        key("Download guide data now."),
     ),
     Command::new(
         S::Epg,
         "storage",
         "epg.clear",
-        "Delete stored guide data until the next update.",
+        key("Delete stored guide data until the next update."),
     )
     .confirm(),
     Command::new(
         S::Logos,
         "",
         "logos.clear_cache",
-        "Drop downloaded logo images.",
+        key("Drop downloaded logo images."),
     ),
     Command::new(
         S::History,
         "history",
         "history.clear",
-        "Forget watch history.",
+        key("Forget watch history."),
     )
     .confirm(),
     Command::new(
         S::Search,
         "",
         "search.clear_history",
-        "Forget earlier search queries.",
+        key("Forget earlier search queries."),
     )
     .confirm(),
     Command::new(
         S::Parental,
         "",
         "parental.change_pin",
-        "Set or change the parental PIN.",
+        key("Set or change the parental PIN."),
     ),
     Command::new(
         S::Remote,
         "mapping",
         "remote.customize",
-        "Rebind keys per screen.",
+        key("Rebind keys per screen."),
     ),
     Command::new(
         S::Remote,
         "mapping",
         "remote.restore_defaults",
-        "Drop every key customisation.",
+        key("Drop every key customisation."),
     )
     .confirm()
     .resets(&["remote.key_overrides"]),

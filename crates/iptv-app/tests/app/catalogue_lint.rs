@@ -71,7 +71,7 @@ use iptv_core::i18n::is_catalogued;
 
 /// How many `[untranslated]` entries there are. Lower it with the list;
 /// it is never raised.
-const UNTRANSLATED: usize = 169;
+const UNTRANSLATED: usize = 0;
 
 /// Source directories read, relative to the workspace's `crates/`.
 const ROOTS: &[&str] = &[
@@ -170,6 +170,10 @@ const LIST_NAMES: &[(&str, &str)] = &[
 /// `key(…)` constant, a helper's label, a backup error's text, a notice,
 /// a built-in list's name. A new one needs the same before it is listed.
 const CARRIED_MESSAGES: &[(&str, &str)] = &[
+    // App-owned schema summaries are key-marked at their declaration. The
+    // footer translates only those fields, never a persisted/user value.
+    ("iptv-app/src/settings_view/view.rs", "st"),
+    ("iptv-app/src/settings_view/view.rs", "c"),
     ("iptv-app/src/vod_view.rs", "e"),
     // Core parental entry and native errors are checked MESSAGE_FILES.
     ("iptv-app/src/parental_view.rs", "message"),

@@ -12,21 +12,51 @@ script tags take precedence over regions: `zh-Hant` uses Traditional Chinese;
 
 ## What is translated
 
-Translation is partial. Translated in every language: navigation, settings
-pages and the names of the settings the app acts on, common buttons, playlist
-setup, player controls and playback errors, and the whole of these flows:
-adding and refreshing playlists and guide sources with their failures, backup
-and restore, organising channels and groups, custom groups, choosing a
-channel's guide data, and the remote-key editor. Every count and every date
-or time follows the language.
+The catalogue now covers the known application-owned UI inventory in all eleven
+languages: navigation, settings names/choices/help, playlist and guide setup,
+backup/restore, channel organisation, guide/search/multiview hints, playback and
+track controls, recordings, parental controls and movie/series flows. Counts and
+dates use the selected language's formatting rules.
 
-Not translated yet: most settings descriptions and many setting names, track
-language names, the multiview and search hints, the guide's key hints, and
-the other literals listed under `[untranslated]` in
-`crates/iptv-app/tests/app/catalogue_allowlist.txt`. That list is the exact
-inventory, and a test only lets it shrink. Missing messages always retain
-their English source. Provider channel names, playlist names, programme titles
-and descriptions are never translated.
+The original untranslated inventory contained 437 source literals. These domain
+batches reduced its pinned baseline to zero:
+
+| Domain | Original literals | Remaining |
+|---|---:|---:|
+| Settings names, choices and help | 305 | 0 |
+| Palette names | 18 | 0 |
+| Guide and channel browsing | 19 | 0 |
+| Playback, tracks and picture controls | 64 | 0 |
+| Search | 12 | 0 |
+| Multiview | 10 | 0 |
+| Favourites and channel menus | 5 | 0 |
+| Desktop menus | 3 | 0 |
+| Generated playlist name | 1 | 0 |
+| **Total** | **437** | **0** |
+
+436 entries are displayed messages. One entry, the persisted locale token
+`system`, is a configuration value that the picker displays as the translated
+**System language**; its classification is documented under `[not-shown]`.
+No displayed message was moved there to reduce the count.
+
+This is catalogue coverage, not completed human language review. The new
+translations are machine-drafted and reviewed for source meaning, conditions,
+placeholders and application context. Fluent speakers still need to review all
+ten non-English locales for grammar, natural wording and terminology consistency.
+Identical source/translation values do not establish completion: standard codec,
+protocol and brand names remain unchanged intentionally. The desktop
+`Picture-in-Picture` window title also stays stable for compositor window rules;
+its controls have localized accessible labels.
+
+Unknown messages still fall back to their English source. The token-based lint
+has the limitations described below, so a zero baseline does not prove that no
+unrecognised or dynamically built text exists. New messages must use the existing
+catalogue helpers and complete locale columns. Provider channel/playlist names,
+programme titles/descriptions and track labels remain opaque. Generated guide
+loading/gap labels and the ungrouped bucket are localized by provenance; a real
+provider title named **No information** or a provider group named **Other** stays
+unchanged. An automatically generated playlist name is localized when created
+and then behaves like any other saved name.
 
 Messages shown before the settings load (a failed start, a restore that could
 not be applied) use the device's language.
@@ -185,3 +215,21 @@ scenarios check switching languages without remounting settings, persistence,
 returning to the system preference, and the translated flows, counts, dates
 and clock. Headless tests pin their system locale through
 `IPTV_RS_TEST_LOCALE`, available only in test builds.
+
+## Layout and regression fixtures
+
+`test-support` builds can set `IPTV_RS_TEST_PSEUDOLOCALE=1` to double and accent
+fixed catalogue labels. This test-only map accepts catalogue keys; it never
+expands provider values or changes persisted language choices. It does not alter
+formatted/plural messages: Russian plural cases and real Chinese/Japanese text
+are exercised separately. Production builds contain neither this map nor the
+environment override.
+
+The interface-language scenarios cover mounted labels, settings help and
+accessible labels while switching Spanish → Traditional Chinese → system.
+The archive/restart scenario runs in English and Traditional Chinese and replaces
+the current preference before activating the archive, proving that the restored
+choice comes from the backup. A pseudolocalized scenario exercises large app text
+plus system font scaling at TV, tablet and desktop sizes. Headless geometry and
+synthetic emulator checks do not substitute for native font rendering, TalkBack,
+VoiceOver or real hardware checks; record those results separately.

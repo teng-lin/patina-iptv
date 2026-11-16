@@ -82,6 +82,8 @@ pub struct EpgSchedule {
     /// The imported channel behind each guide channel (stream and catch-up).
     sources: std::sync::Arc<Vec<Option<Channel>>>,
     group_names: std::sync::Arc<Vec<String>>,
+    /// Only the catalog adapter synthesizes the reserved ungrouped bucket.
+    generated_other: bool,
     /// The index of each group's first channel; channels are stored grouped.
     group_starts: std::sync::Arc<Vec<usize>>,
     /// The channels in the playlist's order (empty: as stored).
@@ -157,6 +159,7 @@ impl EpgSchedule {
             channels,
             sources,
             group_names,
+            generated_other,
             group_starts,
             playlist_order,
             store,
@@ -172,6 +175,7 @@ impl EpgSchedule {
             channels: std::sync::Arc::new(channels),
             sources: std::sync::Arc::new(sources),
             group_names: std::sync::Arc::new(group_names),
+            generated_other,
             group_starts: std::sync::Arc::new(group_starts),
             playlist_order: std::sync::Arc::new(playlist_order),
             store: std::sync::Arc::new(store),
@@ -537,6 +541,7 @@ struct Catalog {
     channels: Vec<GuideChannel>,
     sources: Vec<Option<Channel>>,
     group_names: Vec<String>,
+    generated_other: bool,
     group_starts: Vec<usize>,
     playlist_order: Vec<usize>,
     store: GuideStore,
@@ -585,6 +590,7 @@ impl Catalog {
             group_keys,
             channels,
             group_names,
+            generated_other: false,
             group_starts,
             playlist_order: Vec::new(),
             store,
@@ -639,6 +645,7 @@ impl Catalog {
             })
             .collect();
         let mut catalog = Self::keyed(grouped, store, now);
+        catalog.generated_other = !groups.iter().any(|g| g.id.as_str() == "__other__");
         catalog.sources = ordered.into_iter().map(Some).collect();
         catalog.playlist_order = stored_at;
         catalog
@@ -1012,7 +1019,10 @@ impl Schedule for EpgSchedule {
         let name = self.group_name(group);
         // This reserved bucket is synthesized for channels with no provider
         // group. Provider/custom groups, including ones named Other, stay opaque.
-        if self.group_key(group) == "__other__" && name == iptv_core::i18n::key("Other") {
+        if self.generated_other
+            && self.group_key(group) == "__other__"
+            && name == iptv_core::i18n::key("Other")
+        {
             iptv_core::i18n::translate(language, "Other").to_owned()
         } else {
             name

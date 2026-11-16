@@ -303,21 +303,21 @@ pub fn description(key: &str) -> Option<&'static str> {
         "recordings.disable_startup" => tr("Remove the recording host login hook."),
         "recordings.alarm_access" => tr("Allow precise recording wakeups in Android settings."),
         "remote.customize" => {
-            "Choose a key, press and action per screen; capture keys or restore defaults."
+            tr("Choose a key, press and action per screen; capture keys or restore defaults.")
         }
-        "general.about" => {
+        "general.about" => tr(
             "The version of this app. Text is set in Roboto and Roboto Condensed (Google, \
-             SIL Open Font License 1.1)."
-        }
-        "playlists.manage" => {
-            "Add, choose, refresh, rename and delete playlists, and arrange their guide sources."
-        }
-        "epg.add_source" => "Add an XMLTV guide link to the playlist on screen.",
-        "epg.manage_sources" => {
+             SIL Open Font License 1.1).",
+        ),
+        "playlists.manage" => tr(
+            "Add, choose, refresh, rename and delete playlists, and arrange their guide sources.",
+        ),
+        "epg.add_source" => tr("Add an XMLTV guide link to the playlist on screen."),
+        "epg.manage_sources" => tr(
             "The playlist's guide sources: switch on or off, order (the first with a channel \
-             wins), time shift, how each last downloaded."
-        }
-        "epg.update_now" => "Download every guide source of the playlist on screen now.",
+             wins), time shift, how each last downloaded.",
+        ),
+        "epg.update_now" => tr("Download every guide source of the playlist on screen now."),
         _ => return None,
     })
 }

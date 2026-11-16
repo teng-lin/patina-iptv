@@ -16,8 +16,8 @@ use nsh_core::Checked;
 
 const PANEL_W: f32 = 860.0;
 const PAGES_W: f32 = 230.0;
-/// The description under the rows: two lines.
-const FOOTER_H: f32 = 46.0;
+/// Help keeps four lines at the same app/system text scale as its label.
+const FOOTER_H: f32 = 72.0;
 
 pub(super) fn secondary() -> Rgba {
     ui_kit::secondary()
@@ -418,8 +418,10 @@ fn footer(ui: Ui, size: Scale) -> impl IntoElement {
             offer: &crate::settings::offer,
         };
         state(ui, |s| match s.focused_row(&ctx) {
-            Some(Row::Setting(st)) => st.summary.replace('`', ""),
-            Some(Row::Command(c)) => words::description(c.key).unwrap_or(c.summary).to_owned(),
+            Some(Row::Setting(st)) => tr(st.summary).replace('`', ""),
+            Some(Row::Command(c)) => words::description(c.key)
+                .unwrap_or_else(|| tr(c.summary))
+                .to_owned(),
             _ => match counts(s.page()) {
                 (_, 0) | (0, 1) => String::new(),
                 (0, all) => trf(
@@ -436,7 +438,9 @@ fn footer(ui: Ui, size: Scale) -> impl IntoElement {
         .unwrap_or_default()
     };
     ui_kit::body(size, description)
-        .h(move || size.px(FOOTER_H))
+        .test_id("settings-help")
+        .h(move || px(size.of(FOOTER_H) * (crate::settings::font_factor() * font_scale()).max(1.0)))
+        .flex_shrink_0()
         .px(move || size.px(4.0))
-        .number_of_lines(2)
+        .number_of_lines(4)
 }

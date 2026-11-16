@@ -11,6 +11,12 @@
 //! overlays (names, favourites, hidden, blocked, order) live in their own
 //! stores.
 
+/// Marks app-owned help text for translation by the consuming interface.
+/// The app catalogue lint checks every literal passed here.
+const fn key(message: &'static str) -> &'static str {
+    message
+}
+
 pub mod choices;
 mod commands;
 mod general;

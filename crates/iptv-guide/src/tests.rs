@@ -683,3 +683,22 @@ fn generated_guide_placeholders_localize_but_provider_titles_do_not() {
         "provider group name stays opaque"
     );
 }
+
+#[test]
+fn a_provider_group_using_the_reserved_bucket_key_still_keeps_its_name() {
+    let mut parsed = parse_m3u(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"Other\",Synthetic Channel\nhttps://synthetic.example.test/live\n",
+    );
+    parsed.groups[0].id = iptv_providers::id::GroupId::from_stored("__other__");
+    parsed.channels.items[0].groups = vec![parsed.groups[0].id.clone()];
+    let s = EpgSchedule::from_catalog(
+        &parsed.groups,
+        &parsed.channels.items,
+        GuideStore::new(),
+        NOW,
+    );
+    assert_eq!(
+        s.group_name_in(0, iptv_core::i18n::resolve("ja", None)),
+        "Other"
+    );
+}

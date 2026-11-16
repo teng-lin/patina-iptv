@@ -11,6 +11,9 @@ is below 1.0, a minor release may change behaviour.
 
 - Explain unavailable PiP/multiview actions and use current player and recording
   wake reports for feature availability, including awake-only recording limits.
+- Complete the known interface-text catalogue in eleven languages, including
+  settings help, guide/search/multiview hints and track names. New translations
+  remain drafts pending fluent-speaker review.
 
 ## [0.1.3] - 2026-11-15
 

@@ -122,6 +122,10 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     step(app.wait_for("text:☰  Todos los canales"));
     step(app.wait_for("text:TV en directo"));
     step(app.wait_for("text:Reproducir el último canal al iniciar"));
+    let language_help =
+        "Interface language: `system` follows the device, otherwise a language tag.";
+    shown(app, &Words::of("es").t(language_help).replace('`', ""));
+    shown(app, &Words::of("es").t("Keep history for"));
     // Accessibility labels of mounted views follow: the rail's item, the
     // video's tap target and the chooser's backdrop.
     step(app.wait_for("label:Ajustes"));
@@ -140,6 +144,8 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     step(app.wait_for("text:語言"));
     step(app.wait_for("text:直播電視"));
     step(app.wait_for("text:啟動時播放上次頻道"));
+    shown(app, &Words::of("zh-Hant").t(language_help).replace('`', ""));
+    shown(app, &Words::of("zh-Hant").t("Keep history for"));
     step(app.wait_for("label:關閉選擇器"));
     let path = fixture.path.parent().unwrap().join("settings.json");
     let stored = personalization::saved_settings(app, &path, |settings| {
@@ -499,4 +505,88 @@ fn custom_recording_menu_uses_the_selected_interface_language() {
     shown(&mut fixture.app, &schedule);
     step(fixture.app.press(&format!("text:{schedule}")));
     shown(&mut fixture.app, &words.t("Save recording"));
+}
+
+/// Real catalogue bindings with a deliberately doubled/accented test fixture.
+/// This checks measured headless layout; native font/AT validation is separate.
+#[test]
+fn pseudolocalized_fixed_labels_fit_large_text_on_tv_tablet_and_desktop() {
+    fn here() {}
+    let Some(home) = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[("IPTV_RS_TEST_PSEUDOLOCALE", "1")],
+    ) else {
+        return;
+    };
+    let mut settings = Settings::new();
+    settings.set("general.language", Value::text("en")).unwrap();
+    settings
+        .set("appearance.font_size", Value::choice("extra_large"))
+        .unwrap();
+    let mut fixture = personalization::start(home, settings, false);
+    let app = &mut fixture.app;
+    let expanded = |source| iptv_app::pseudo_fixed_for_test(source).unwrap();
+    rail(app);
+    step(app.press(&format!("label:{}", expanded("Settings"))));
+    for (width, height, idiom) in [
+        (960.0, 540.0, nsh_core::platform::Idiom::Tv),
+        (1280.0, 800.0, nsh_core::platform::Idiom::Pad),
+        (960.0, 540.0, nsh_core::platform::Idiom::Desktop),
+    ] {
+        step(
+            app.set_environment("large synthetic translated interface", |env| {
+                env.idiom = idiom;
+                env.font_scale = 1.3;
+            }),
+        );
+        step(app.set_viewport(nsh_core::Size::new(
+            nsh_core::prelude::px(width),
+            nsh_core::prelude::px(height),
+        )));
+        let wanted = expanded("Play the last channel on start");
+        shown(app, wanted);
+        let nodes = app.screen().layout_nodes();
+        let node = nodes
+            .iter()
+            .find(|node| {
+                !node.hidden
+                    && node
+                        .text
+                        .as_ref()
+                        .is_some_and(|text| text.text.text == wanted)
+            })
+            .expect("localized setting label");
+        assert!(
+            node.bounds.origin.x.0 >= 0.0 && node.bounds.origin.y.0 >= 0.0,
+            "{idiom:?}"
+        );
+        assert!(
+            node.bounds.origin.x.0 + node.bounds.size.width.0 <= width + 1.0,
+            "{idiom:?}"
+        );
+        assert!(
+            node.bounds.origin.y.0 + node.bounds.size.height.0 <= height + 1.0,
+            "{idiom:?}"
+        );
+        assert!(node.bounds.size.height.0 > 0.0);
+        // Synthetic provider content remains outside the expansion map.
+        assert!(!app.shows("⟦Local A Local A⟧"));
+        step(app.wait_for(&format!("label:{}", expanded("Video"))));
+    }
+}
+
+#[test]
+fn cjk_settings_help_and_live_language_labels_do_not_fall_back_to_english() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start_in(home, "ja", "auto");
+    let app = &mut fixture.app;
+    let ja = Words::of("ja");
+    rail(app);
+    step(app.press(&format!("label:{}", ja.t("Settings"))));
+    shown(app, &ja.t("Keep history for"));
+    // A focused row's explanation uses the same locale, not the schema's English.
+    let summary = "Start playing the channel that was on when the app was last closed.";
+    press(app, &ja.t("Play the last channel on start"));
+    shown(app, &ja.t(summary));
+    assert!(!app.shows(summary));
 }

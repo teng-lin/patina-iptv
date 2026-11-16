@@ -106,6 +106,11 @@ pub fn data_dir(home: &Path) -> PathBuf {
 /// `here` is the type name of a function nested in the test:
 /// `app::<module>::<test>::here`.
 pub fn run(here: &str) -> Option<Home> {
+    run_with_env(here, &[])
+}
+
+/// Isolate a scenario with explicit synthetic runtime fixture overrides.
+pub fn run_with_env(here: &str, overrides: &[(&str, &str)]) -> Option<Home> {
     initialize_key();
     let name = here
         .strip_suffix("::here")
@@ -127,6 +132,9 @@ pub fn run(here: &str) -> Option<Home> {
         // SAFETY: this process runs this one test, which sets HOME before
         // anything reads the environment.
         unsafe {
+            for (key, value) in overrides {
+                std::env::set_var(key, value);
+            }
             std::env::set_var("HOME", home.path());
             #[cfg(windows)]
             std::env::set_var("LOCALAPPDATA", home.path());
@@ -161,6 +169,7 @@ pub fn run(here: &str) -> Option<Home> {
     if let Ok(scale) = std::env::var("IPTV_TEST_WAIT_SCALE") {
         cmd.env("IPTV_TEST_WAIT_SCALE", scale);
     }
+    cmd.envs(overrides.iter().copied());
     let out = cmd
         .output()
         .unwrap_or_else(|e| panic!("{name}: cannot run {}: {e}", exe.display()));

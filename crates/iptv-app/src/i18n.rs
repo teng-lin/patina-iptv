@@ -11,6 +11,15 @@ use iptv_core::clock::{HourCycle, Style};
 use iptv_core::i18n::{self, Args, Language};
 use iptv_settings::{Target, keys};
 
+#[cfg(feature = "test-support")]
+mod pseudo;
+
+/// A deliberately expanded fixed catalogue label for synthetic layout scenarios.
+#[cfg(feature = "test-support")]
+pub fn pseudo_fixed_for_test(source: &str) -> Option<&'static str> {
+    pseudo::fixed(source)
+}
+
 fn system() -> Option<&'static str> {
     static SYSTEM: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     SYSTEM.get_or_init(system_locale).as_deref()
@@ -78,6 +87,12 @@ fn system_locale() -> Option<String> {
 
 /// Only call for application-owned messages, never provider content.
 pub fn tr(source: &str) -> &str {
+    #[cfg(feature = "test-support")]
+    if pseudo::enabled()
+        && let Some(expanded) = pseudo::fixed(source)
+    {
+        return expanded;
+    }
     i18n::translate(language(), source)
 }
 
@@ -140,6 +155,20 @@ mod tests {
     use iptv_core::clock::HourCycle;
 
     const CHANNELS: &str = "{count, plural, one {# channel} other {# channels}}";
+
+    #[test]
+    fn every_settings_help_message_has_all_locale_columns() {
+        use iptv_settings::catalogue;
+        for source in catalogue::settings()
+            .map(|setting| setting.summary)
+            .chain(catalogue::commands().map(|command| command.summary))
+        {
+            assert!(iptv_core::i18n::is_catalogued(source), "{source}");
+            for language in iptv_core::i18n::LANGUAGES {
+                assert!(!iptv_core::i18n::translate(language, source).is_empty());
+            }
+        }
+    }
 
     #[test]
     fn wording_fixtures_restore_nested_preferences_after_unwinding() {
