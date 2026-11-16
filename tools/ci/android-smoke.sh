@@ -128,6 +128,18 @@ if [ -n "$apk" ]; then
 else
   $adb shell pm clear $pkg >/dev/null
 fi
+# This fixture imports exactly one generated playlist into a fresh profile.
+# Its two-player journey needs an explicit allowance for that first source;
+# leave the product's conservative default and every other source unchanged.
+$adb shell "run-as $pkg test ! -e files/iptv.sqlite" || fail "expected a fresh synthetic profile"
+$adb shell "run-as $pkg mkdir -p files"
+$adb shell "run-as $pkg sh -c 'cat > files/settings.json'" <<'SMOKE_SETTINGS'
+{
+  "format": "iptv-rs.settings", "version": 2,
+  "global": {}, "groups": {},
+  "playlists": {"1": {"playlists.max_connections": 2}}
+}
+SMOKE_SETTINGS
 # Restore only the device settings this smoke changes, including failure paths.
 restore_setting() {
   if [ "$3" = null ] || [ -z "$3" ]; then
@@ -214,6 +226,16 @@ mark
 keys KEYCODE_DPAD_CENTER
 expect 'key=ok .*ctx=Guide' 10
 expect 'iptv player 0 state: ready' 60
+# Confirm the actual first-import identity before spending its fixture allowance.
+resume_file=
+for _ in $(seq 1 60); do
+  resume_file=$($adb shell "run-as $pkg ls files" | tr -d '\r' | sed -n '/^last_channel-[0-9][0-9]*$/p' || true)
+  [[ "$resume_file" =~ ^last_channel-[0-9]+$ ]] && break
+  pause 0.5
+done
+[[ "$resume_file" =~ ^last_channel-[0-9]+$ ]] || fail "expected one persisted playlist resume file"
+source_id=${resume_file#last_channel-}
+[ "$source_id" = 1 ] || fail "expected synthetic first source 1 for the scoped stream allowance"
 shot 04-guide-preview
 
 step "full screen"
@@ -304,14 +326,6 @@ shot 08-guide
 # The fixture starts from a clean installation and contains one playlist.
 # Its resume file stores content identity, not a list index. Keep identities
 # out of logs even though this script uses only generated input.
-resume_file=
-for _ in $(seq 1 60); do
-  resume_file=$($adb shell "run-as $pkg ls files" | tr -d '\r' | sed -n '/^last_channel-[0-9][0-9]*$/p' || true)
-  [[ "$resume_file" =~ ^last_channel-[0-9]+$ ]] && break
-  pause 0.5
-done
-[[ "$resume_file" =~ ^last_channel-[0-9]+$ ]] || fail "expected one persisted playlist resume file"
-source_id=${resume_file#last_channel-}
 resume_identity() { $adb exec-out run-as "$pkg" cat "files/$resume_file" 2>/dev/null | tr -d '\r\n'; }
 assert_resume() {
   local expected=$1 label=$2 actual
