@@ -116,6 +116,9 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
             if timing.1.is_none() { timing.1 = timing.0.map(|start| start.elapsed()); }
         }
     });
+    let reads = iptv_app::store_reads();
+    let opens = iptv_app::player_opens(0);
+    let journey = crate::performance::Sample::start("busy-guide", 0);
     let mut maximum = Duration::ZERO;
     let mut restyled_empty = 0;
     for _ in 0..24 {
@@ -129,6 +132,15 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
         maximum = maximum.max(elapsed);
         restyled_empty += timing.lock().unwrap().2;
     }
+    let at_us = journey.elapsed();
+    app.idle(Duration::from_millis(500)).unwrap();
+    journey.finish_at(
+        "navigation-mounted",
+        0,
+        at_us,
+        iptv_app::store_reads() - reads,
+        iptv_app::player_opens(0) - opens,
+    );
     lock.execute_batch("ROLLBACK").unwrap();
     eprintln!(
         "10k channels / 7 days, held SQLite writer: maximum key-to-mounted-frame {maximum:?}; \

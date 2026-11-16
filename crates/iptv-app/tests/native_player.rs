@@ -220,41 +220,11 @@ fn window(root: Root, directory: &std::path::Path) -> (gtk::Window, std::rc::Rc<
 #[test]
 #[ignore = "requires an isolated Xvfb display and software GL; coverage.sh runs it explicitly"]
 fn native_gtk_player_shares_pip_frames_and_recreates_only_after_context_loss() {
-    let _ = env_logger::Builder::new()
-        .filter_level(log::LevelFilter::Info)
-        .is_test(true)
-        .try_init();
-    gtk::init().expect("mandatory native GTK initialization");
-    nsh_platform_linux::set_components(components);
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("generated-native.ts");
-    assert!(
-        std::process::Command::new("ffmpeg")
-            .args([
-                "-nostdin",
-                "-loglevel",
-                "error",
-                "-y",
-                "-f",
-                "lavfi",
-                "-i",
-                "testsrc2=s=160x90:r=10",
-                "-t",
-                "120",
-                "-an",
-                "-c:v",
-                "mpeg2video",
-                "-f",
-                "mpegts"
-            ])
-            .arg(&path)
-            .status()
-            .expect("ffmpeg")
-            .success()
-    );
-    let server = Server::new(std::fs::read(path).unwrap());
-    URL.set(format!("http://{}/generated.ts", server.address))
-        .unwrap();
+    if !isolated_native("native_gtk_player_shares_pip_frames_and_recreates_only_after_context_loss")
+    {
+        return;
+    }
+    let (directory, server) = generated_environment();
     let mut cleanup = Cleanup::default();
     let (main, view) = window(Root::of::<PlayerProbe>(), directory.path());
     cleanup.0.push((main.clone(), view.clone()));
@@ -323,4 +293,175 @@ fn native_gtk_player_shares_pip_frames_and_recreates_only_after_context_loss() {
     view.stop();
     main.destroy();
     wait("main surface teardown", || !primary.is_realized());
+}
+
+fn generated_environment() -> (tempfile::TempDir, Server) {
+    let _ = env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Info)
+        .is_test(true)
+        .try_init();
+    gtk::init().expect("mandatory native GTK initialization");
+    nsh_platform_linux::set_components(components);
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("generated-native.ts");
+    assert!(
+        std::process::Command::new("ffmpeg")
+            .args([
+                "-nostdin",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=s=160x90:r=10",
+                "-t",
+                "120",
+                "-an",
+                "-c:v",
+                "mpeg2video",
+                "-f",
+                "mpegts"
+            ])
+            .arg(&path)
+            .status()
+            .expect("ffmpeg")
+            .success()
+    );
+    let server = Server::new(std::fs::read(path).unwrap());
+    URL.set(format!("http://{}/generated.ts", server.address))
+        .unwrap();
+    (directory, server)
+}
+
+#[test]
+#[cfg(feature = "test-support")]
+#[ignore = "explicit sequential journey runner uses its own Xvfb display"]
+fn native_selection_reaches_a_correlated_render_submission() {
+    if !isolated_native("native_selection_reaches_a_correlated_render_submission") {
+        return;
+    }
+    use iptv_providers::{
+        SecretUrl,
+        model::{M3uSourceConfig, Source, SourceConfig},
+    };
+    use iptv_store_sqlite::{DatabaseKey, SourcePolicy, Store};
+    let home = tempfile::tempdir().unwrap();
+    let sample = std::env::var_os("IPTV_PERF_SAMPLE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.path().join("selection.json"));
+    // This exact native test runs in a fresh process; configure it before GTK,
+    // the real application, or its workers can read the environment.
+    unsafe {
+        std::env::set_var("HOME", home.path());
+        std::env::set_var("IPTV_PERF_NATIVE_SAMPLE", &sample);
+        std::env::set_var("IPTV_RS_TEST_LOCALE", "en-US");
+    }
+    let ready = home.path().join("native-ready");
+    unsafe {
+        std::env::set_var("IPTV_PERF_NATIVE_READY", &ready);
+    }
+    iptv_app::install_test_key([0x54; 32]);
+    let (directory, server) = generated_environment();
+    let data = home.path().join(".local/share/iptv-rs");
+    std::fs::create_dir_all(&data).unwrap();
+    let playlist = format!(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"Synthetic\",Generated channel\nhttp://{}/generated.ts\n",
+        server.address
+    );
+    let file = home.path().join("generated.m3u");
+    std::fs::write(&file, &playlist).unwrap();
+    let mut store = Store::open_encrypted(
+        data.join("iptv.sqlite"),
+        &DatabaseKey::from_bytes([0x54; 32]),
+    )
+    .unwrap();
+    let source = store
+        .add_source(&Source {
+            name: "Generated native journey".into(),
+            config: SourceConfig::M3u(M3uSourceConfig {
+                location: SecretUrl::new(file.to_string_lossy()),
+                user_agent: None,
+                referrer: None,
+            }),
+        })
+        .unwrap();
+    let parsed = iptv_providers::m3u::parse_m3u(&playlist);
+    store
+        .replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
+        .unwrap();
+    store
+        .set_source_policy(
+            source,
+            SourcePolicy {
+                refresh_on_start: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    drop(store);
+    let mut settings = iptv_settings::Settings::new();
+    settings
+        .set("epg.update_on_start", iptv_settings::Value::Bool(false))
+        .unwrap();
+    settings
+        .set("epg.update_interval", iptv_settings::Value::Duration(0))
+        .unwrap();
+    std::fs::write(data.join("settings.json"), settings.to_json_string()).unwrap();
+    let mut cleanup = Cleanup::default();
+    let (main, view) = window(Root::of::<iptv_app::App>(), directory.path());
+    main.set_default_size(1280, 720);
+    wait("persistent native surface realized before Enter", || {
+        areas(&view.widget())
+            .iter()
+            .any(|area| area.is_realized() && area.context().is_some())
+    });
+    std::fs::write(&ready, "ready").unwrap();
+    cleanup.0.push((main, view));
+    wait(
+        "actual App Enter selection reaches its current-source render",
+        || sample.exists(),
+    );
+    let evidence: Value = serde_json::from_slice(&std::fs::read(sample).unwrap()).unwrap();
+    let events = evidence["events"].as_array().unwrap();
+    assert_eq!(events.len(), 2, "one start and one renderer terminal");
+    assert_eq!(
+        events[0]["token"], events[1]["token"],
+        "originating selection token"
+    );
+    assert_eq!(events[1]["kind"], "first-render");
+    assert_eq!(
+        evidence["counters"]["player_opens"], 1,
+        "one actual App player open"
+    );
+    drop(cleanup);
+    assert!(iptv_runtime::recordings::host::stop_background_host(&data));
+}
+
+// GTK/NSH state is process-local. Even `--ignored` without an exact filter must
+// give each scenario a fresh process rather than initialize GTK twice.
+fn isolated_native(name: &str) -> bool {
+    const CHILD: &str = "IPTV_NATIVE_TEST_CHILD";
+    if let Ok(child) = std::env::var(CHILD) {
+        assert_eq!(child, name, "native scenario identity");
+        std::fs::write(std::env::var_os("IPTV_NATIVE_TEST_MARKER").unwrap(), name).unwrap();
+        return true;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let marker = directory.path().join("ran");
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            name,
+            "--ignored",
+            "--exact",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CHILD, name)
+        .env("IPTV_NATIVE_TEST_MARKER", &marker)
+        .status()
+        .unwrap();
+    assert!(status.success(), "native scenario failed: {name}");
+    assert!(marker.exists(), "native scenario did not run: {name}");
+    false
 }

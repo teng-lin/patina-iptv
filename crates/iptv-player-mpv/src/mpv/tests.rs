@@ -585,7 +585,7 @@ fn a_source_plays_through_the_render_api() {
     let headers = json!({ "User-Agent": "SyntheticAgent/1.0", "X-Synthetic": "one" });
     p.set(
         "source",
-        json!({ "url": server.url("/red.ts"), "headers": headers }),
+        json!({ "url": server.url("/red.ts"), "headers": headers, "token": 7 }),
     );
     p.idle(None, 200);
     assert!(p.states().is_empty(), "no load before the render context");
@@ -600,6 +600,9 @@ fn a_source_plays_through_the_render_api() {
     assert!(black(p.draw(&gpu)), "black until the stream plays");
     p.wait_state(Some(&gpu), "ready");
     p.wait_picture(&gpu, "red", red);
+    assert_eq!(p.events("firstRender"), [json!({"token": 7})]);
+    p.draw(&gpu);
+    assert_eq!(p.events("firstRender").len(), 1, "once per selection");
 
     p.wait(Some(&gpu), "size", |p| !p.events("size").is_empty());
     assert_eq!(p.events("size"), [json!({ "width": 320, "height": 180 })]);
@@ -652,7 +655,13 @@ fn a_source_plays_through_the_render_api() {
     assert_eq!(p.inner.state.borrow().last_state, PlayerState::Buffering);
     assert!(!p.inner.state.borrow().shutter, "the last frame stays");
     assert!(red(p.draw(&gpu)), "the last frame stays");
+    assert!(
+        p.events("firstRender").is_empty(),
+        "held frame is not the new token"
+    );
     p.wait_state(Some(&gpu), "ready");
+    p.wait_picture(&gpu, "red", red);
+    assert_eq!(p.events("firstRender"), [json!({"token": 1})]);
     // This source names no agent: the player's own, not the last source's.
     let head = server.heads("/red.ts").pop().unwrap();
     let own = format!("user-agent: {}", DEFAULT_UA.to_ascii_lowercase());
@@ -671,6 +680,12 @@ fn a_source_plays_through_the_render_api() {
     assert!(p.inner.create_render());
     assert_eq!(p.states(), ["buffering"]);
     p.wait_state(Some(&gpu), "ready");
+
+    p.draw(&gpu);
+    assert!(
+        p.events("firstRender").is_empty(),
+        "context recreation retains selection evidence identity"
+    );
 
     // Another channel: black until it plays; then its end.
     p.clear();

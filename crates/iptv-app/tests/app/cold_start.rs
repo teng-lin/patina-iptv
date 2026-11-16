@@ -122,6 +122,7 @@ fn the_last_channel_opens_once_before_the_guide() {
     // Cold start: the shell, never the synthetic guide; channel two opens
     // at once, before the guide is read.
     let opens = iptv_app::player_opens(0);
+    let journey = crate::performance::Sample::start("cached-guide", 0);
     let mut app = app();
     assert!(!app.shows("text:Channel 1"), "the synthetic guide showed");
     step(app.wait_for_within("text:Test Channel Two", IMPORT));
@@ -134,6 +135,12 @@ fn the_last_channel_opens_once_before_the_guide() {
     // rendering before the count is read.
     step(app.wait_for_within("text:Now Show", IMPORT));
     step(app.idle(Duration::from_millis(500)).map(|_| ()));
+    journey.finish(
+        "guide-mounted",
+        0,
+        iptv_app::store_reads(),
+        iptv_app::player_opens(0) - opens,
+    );
     step(app.back());
     step(app.wait_for_within("text:Now Show", IMPORT));
     assert_eq!(

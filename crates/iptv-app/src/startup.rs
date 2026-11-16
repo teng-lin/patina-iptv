@@ -12,8 +12,10 @@
 //! the stored catalog), `channels read` and `guide window read` (on the
 //! import thread), `guide shown` (the schedule swapped in on the UI
 //! thread), `guide frame` (the next display frame after it), `player
-//! opened` (the stream handed to the player) and `video frame` (the
-//! player's first rendered frame, its `size` event).
+//! opened` (the stream handed to the player), `video size` (reported dimensions;
+//! the shared `size` event does not distinguish metadata from a renderer callback),
+//! and `video rendered` (a current-source native renderer submission where supported,
+//! never display presentation/scanout).
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};

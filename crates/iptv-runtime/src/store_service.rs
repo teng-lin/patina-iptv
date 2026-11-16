@@ -110,6 +110,8 @@ pub(crate) struct Service {
     pub(crate) guide_checks: super::guide_checks::Mirror,
     #[cfg(feature = "test-support")]
     pub(crate) hooks: super::workers::Hooks,
+    #[cfg(feature = "test-support")]
+    pub(crate) reads: AtomicU64,
 }
 impl Service {
     pub(crate) fn new(ports: crate::Ports) -> Self {
@@ -137,6 +139,8 @@ impl Service {
             guide_checks: Default::default(),
             #[cfg(feature = "test-support")]
             hooks: Default::default(),
+            #[cfg(feature = "test-support")]
+            reads: AtomicU64::new(0),
         }
     }
 
@@ -418,6 +422,8 @@ impl Services {
     {
         let (sender, receiver) = oneshot::channel();
         let queued = self.affinity().and_then(|epoch| {
+            #[cfg(feature = "test-support")]
+            self.service.reads.fetch_add(1, Ordering::Relaxed);
             let owner = self.service.clone();
             self.service.reader.queue(Box::new(move |connection| {
                 let _ = sender.send(owner.read(epoch, connection, operation));
@@ -487,6 +493,8 @@ impl Services {
     ) -> Result<R, StoreError> {
         self.service.assert_off_ui_thread("blocking store read");
         let epoch = self.affinity()?;
+        #[cfg(feature = "test-support")]
+        self.service.reads.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::sync_channel(1);
         let owner = self.service.clone();
         self.service.reader.queue(Box::new(move |connection| {

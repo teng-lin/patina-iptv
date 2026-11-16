@@ -425,6 +425,14 @@ impl HostHandle {
             .is_none_or(|service| service.files().flush(limit))
     }
 
+    /// Reader-lane jobs accepted by this owner; synthetic diagnostics only.
+    #[cfg(feature = "test-support")]
+    pub fn store_reads(&self) -> u64 {
+        self.0.upgrade().map_or(0, |service| {
+            service.reads.load(std::sync::atomic::Ordering::Relaxed)
+        })
+    }
+
     #[cfg(feature = "test-support")]
     pub fn guide_check_registered(&self, source: SourceId) -> bool {
         self.0.upgrade().is_some_and(|service| {

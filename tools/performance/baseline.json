@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "policy": "exact counter ceilings; no timing tolerance or wall-clock CI gate",
+  "journeys": {
+    "cached-guide": {
+      "store_reads": 26,
+      "player_opens": 1
+    },
+    "busy-guide": {
+      "store_reads": 7,
+      "player_opens": 0
+    },
+    "selection": {
+      "store_reads": 7,
+      "player_opens": 1
+    }
+  },
+  "rationale": "Initial Linux reference: cached guide executes 26 reader jobs, busy navigation seven, and real-App selection seven; one native source open for each selected channel. Exact work ceilings; wall-clock data is informational."
+}

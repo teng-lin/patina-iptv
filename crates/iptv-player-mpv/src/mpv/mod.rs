@@ -191,6 +191,7 @@ struct State {
     url: Option<String>,
     token: i64,
     seek_id: u64,
+    first_rendered: bool,
     /// The source is a live channel (bridged, see [`worker`]).
     live: bool,
     headers: Vec<(String, String)>,
@@ -316,6 +317,7 @@ impl Inner {
                 url: None,
                 token: 0,
                 seek_id: 0,
+                first_rendered: false,
                 live: false,
                 headers: Vec::new(),
                 public_only: true,
@@ -535,6 +537,7 @@ impl Inner {
             st.token = token;
             if changed {
                 st.seek_id = 0;
+                st.first_rendered = false;
             }
             st.live = live;
             st.headers = headers;
@@ -559,6 +562,8 @@ impl Inner {
                 st.shutter = true;
             }
             st.playing = false;
+            st.width = 0;
+            st.height = 0;
             st.buffering = false;
             st.clues = map::Clues::default();
             st.failed = None;
@@ -702,10 +707,13 @@ impl Inner {
     #[cfg(not(windows))]
     fn draw(&self, width: i32, height: i32) {
         let Some(gl) = self.gl.get() else { return };
+        if width <= 0 || height <= 0 {
+            return;
+        }
         let render = self.render.get();
-        let (shutter, playing) = {
+        let (shutter, playing, pending_evidence) = {
             let st = self.state.borrow();
-            (st.shutter, st.playing)
+            (st.shutter, st.playing, !st.first_rendered && st.token > 0)
         };
         if render.is_null() || shutter {
             gl.black();
@@ -719,16 +727,67 @@ impl Inner {
             }
             return;
         }
+        // A successful render can merely redraw a retained frame. Require mpv's
+        // pending non-redraw/non-repeat video frame as well as current entry identity.
+        // SAFETY: this render context is live and this thread owns the GL context.
+        let update = unsafe { ffi::mpv_render_context_update(render) };
+        let fresh = if pending_evidence && update & ffi::MPV_RENDER_UPDATE_FRAME != 0 {
+            let mut frame = ffi::mpv_render_frame_info {
+                flags: 0,
+                target_time: 0,
+            };
+            // SAFETY: the parameter points to a correctly sized writable frame-info value.
+            let info = unsafe {
+                ffi::mpv_render_context_get_info(
+                    render,
+                    param(ffi::MPV_RENDER_PARAM_NEXT_FRAME_INFO, &mut frame),
+                )
+            };
+            info >= 0
+                && frame.flags & ffi::MPV_RENDER_FRAME_INFO_PRESENT != 0
+                && frame.flags
+                    & (ffi::MPV_RENDER_FRAME_INFO_REDRAW | ffi::MPV_RENDER_FRAME_INFO_REPEAT)
+                    == 0
+        } else {
+            false
+        };
         let target = held.target(view, width, height);
-        Self::render_into(render, target.unwrap_or(view), width, height);
+        let rendered = Self::render_into(render, target.unwrap_or(view), width, height);
         if target.is_some() {
             held.show(view, width, height);
+        }
+        drop(held);
+        let token = {
+            let mut st = self.state.borrow_mut();
+            if rendered
+                && fresh
+                && self.current(&st)
+                && st.playing
+                && !st.suspended
+                && st.width > 0
+                && st.height > 0
+                && !st.first_rendered
+                && st.token > 0
+            {
+                st.first_rendered = true;
+                Some(st.token as u64)
+            } else {
+                None
+            }
+        };
+        if let Some(token) = token {
+            self.emit(vec![PlayerEvent::FirstRender { token }.wire()]);
         }
     }
 
     /// mpv draws its current frame into framebuffer `fbo`.
     #[cfg(not(windows))]
-    fn render_into(render: *mut ffi::mpv_render_context, fbo: i32, width: i32, height: i32) {
+    fn render_into(
+        render: *mut ffi::mpv_render_context,
+        fbo: i32,
+        width: i32,
+        height: i32,
+    ) -> bool {
         let mut fbo = ffi::mpv_opengl_fbo {
             fbo,
             w: width,
@@ -746,7 +805,7 @@ impl Inner {
             ),
         ];
         // SAFETY: the platform made its context current to draw.
-        unsafe { ffi::mpv_render_context_render(render, params.as_mut_ptr()) };
+        unsafe { ffi::mpv_render_context_render(render, params.as_mut_ptr()) >= 0 }
     }
 
     /// What the control thread reported (on the main loop).

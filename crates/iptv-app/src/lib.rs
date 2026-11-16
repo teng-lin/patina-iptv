@@ -44,6 +44,8 @@ mod lists;
 mod media;
 mod menu_view;
 pub(crate) mod parental_view;
+#[cfg(feature = "test-support")]
+mod performance_probe;
 mod recordings_view;
 mod vod_view;
 use iptv_runtime as runtime;
@@ -197,6 +199,8 @@ pub struct Ui {
     pub mode: Signal<ViewMode>,
     pub theme: Signal<Theme>,
     pub stats: Signal<Stats>,
+    #[cfg(feature = "test-support")]
+    pub(crate) performance: Signal<Option<performance_probe::Probe>>,
     pub player_status: Signal<String>,
     /// The guide rows on screen, as the list reports them.
     pub visible_rows: Signal<Option<(usize, usize)>>,
@@ -725,6 +729,8 @@ fn ready_app() -> impl IntoElement {
         mode: signal(ViewMode::Guide),
         theme: signal(Theme::default()),
         stats: signal(Stats::default()),
+        #[cfg(feature = "test-support")]
+        performance: signal(None),
         player_status: signal("idle".to_owned()),
         visible_rows: signal(None),
         panels: signal(Panels::default()),
@@ -787,6 +793,8 @@ fn ready_app() -> impl IntoElement {
     favorites::reset();
     favorites::catalog_changed(ui, &*schedule());
     input::bind(ui);
+    #[cfg(feature = "test-support")]
+    performance_probe::bind(ui);
     data::start(ui);
     time::start(ui);
     player::bind(ui);
@@ -1174,4 +1182,10 @@ pub fn occupy_writer(duration: Duration) {
     platform_data::host_handle()
         .expect("occupy_writer needs a started app")
         .occupy_writer(duration);
+}
+
+/// Reader-lane job count for the running synthetic app owner.
+#[cfg(feature = "test-support")]
+pub fn store_reads() -> u64 {
+    platform_data::host_handle().map_or(0, |owner| owner.store_reads())
 }

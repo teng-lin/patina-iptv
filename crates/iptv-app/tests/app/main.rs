@@ -76,3 +76,5 @@ mod type_drift;
 mod vod_library;
 
 mod store_latency;
+
+mod performance;
