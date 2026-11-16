@@ -2,7 +2,7 @@
 //! committed provider owner remains registered and budgeted until its upstream
 //! shutdown is acknowledged, independently of UI/capture lease removal.
 use super::*;
-use iptv_core::live::Identity;
+use iptv_core::{i18n::key, live::Identity};
 use iptv_net::live::LiveInput;
 use std::sync::atomic::AtomicU64;
 
@@ -13,7 +13,120 @@ pub(super) struct Incoming {
     pub config: SourceConfig,
     pub source: PlaySource,
     pub policy: PlaybackPolicy,
-    pub input: LiveInput,
+    pub input: Transport,
+}
+#[derive(Clone)]
+pub(super) enum Transport {
+    Shared(LiveInput),
+    Passthrough(Arc<Passthrough>),
+}
+pub(super) struct Passthrough {
+    url: String,
+    relay: Mutex<Option<iptv_net::playback::PlaybackRelay>>,
+    closing: AtomicBool,
+    closed: AtomicBool,
+    changed: tokio::sync::Notify,
+    executor: tokio::runtime::Handle,
+}
+impl Transport {
+    fn passthrough(
+        source: &PlaySource,
+        policy: PlaybackPolicy,
+    ) -> Result<Self, iptv_net::FetchError> {
+        let relay = iptv_net::playback::PlaybackRelay::start_with_policy(
+            &source.url,
+            &source.headers,
+            policy,
+        )?;
+        Ok(Self::Passthrough(Arc::new(Passthrough {
+            url: relay.url().to_owned(),
+            relay: Mutex::new(Some(relay)),
+            closing: AtomicBool::new(false),
+            closed: AtomicBool::new(false),
+            changed: tokio::sync::Notify::new(),
+            executor: tokio::runtime::Handle::current(),
+        })))
+    }
+    fn url(&self) -> &str {
+        match self {
+            Self::Shared(input) => input.url(),
+            Self::Passthrough(input) => &input.url,
+        }
+    }
+    pub(super) fn shared(&self) -> Option<&LiveInput> {
+        match self {
+            Self::Shared(input) => Some(input),
+            Self::Passthrough(_) => None,
+        }
+    }
+    fn is_ready(&self) -> bool {
+        match self {
+            Self::Shared(input) => input.is_ready(),
+            Self::Passthrough(_) => true,
+        }
+    }
+    pub(super) fn is_running(&self) -> bool {
+        match self {
+            Self::Shared(input) => input.is_running(),
+            Self::Passthrough(input) => !input.closing.load(Ordering::Acquire),
+        }
+    }
+    async fn shutdown(self) {
+        match self {
+            Self::Shared(input) => input.shutdown().await,
+            Self::Passthrough(input) => {
+                let relay = input
+                    .relay
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take();
+                if let Some(relay) = relay {
+                    input.closing.store(true, Ordering::Release);
+                    let closing = input.clone();
+                    // Closure remains owned even if this retirement waiter is
+                    // cancelled by UI teardown or another replacement.
+                    input.executor.spawn(async move {
+                        relay.shutdown().await;
+                        closing.closed.store(true, Ordering::Release);
+                        closing.changed.notify_waiters();
+                    });
+                }
+                loop {
+                    let changed = input.changed.notified();
+                    tokio::pin!(changed);
+                    changed.as_mut().enable();
+                    if input.closed.load(Ordering::Acquire) {
+                        break;
+                    }
+                    changed.await;
+                }
+            }
+        }
+    }
+}
+fn register_transport(
+    state: &State,
+    id: u64,
+    identity: &Identity,
+    config: &SourceConfig,
+    source: &PlaySource,
+    policy: &PlaybackPolicy,
+    input: Transport,
+) -> Arc<Incoming> {
+    let incoming = Arc::new(Incoming {
+        id,
+        identity: identity.clone(),
+        config: config.clone(),
+        source: source.clone(),
+        policy: policy.clone(),
+        input,
+    });
+    if let Some(registered) = state.lock().inputs.get_mut(&id) {
+        registered.lease.input = Some(incoming.clone());
+        registered.lease.pending = None;
+    }
+    state.inputs_changed.notify_waiters();
+    incoming
 }
 pub(super) struct Registered {
     pub lease: Lease,
@@ -52,6 +165,7 @@ impl Data {
                     && &incoming.identity.incarnation == incarnation
                     && &incoming.config == config
                     && self.available(incoming.id)
+                    && incoming.input.shared().is_some()
                     && incoming.input.is_ready()
                     && incoming.input.is_running()
             })
@@ -180,7 +294,6 @@ impl Runtime {
     /// A returning viewer can retain the incoming owner still held by capture.
     /// A different channel needs its own permitted connection.
     pub fn reserve_live_viewing(&self, surface: usize, source: SourceId, channel: &str) -> bool {
-        self.recordings.cancel_preparation(surface);
         if self.recordings_detached.get() {
             return false;
         }
@@ -195,6 +308,7 @@ impl Runtime {
         {
             return false;
         }
+        self.recordings.cancel_preparation(surface);
         let mut lease = data.lease(source.0);
         lease.input = input;
         data.suspended_viewers.remove(&surface);
@@ -204,15 +318,53 @@ impl Runtime {
         self.retire_previous_viewing(surface);
         true
     }
+    pub fn owns_viewing_source(&self, surface: usize, source: &PlaySource) -> bool {
+        self.recordings
+            .lock()
+            .viewers
+            .get(&surface)
+            .and_then(|lease| lease.input.as_ref())
+            .is_some_and(|input| input.input.url() == source.url)
+    }
+    pub fn prepare_live_source(
+        &self,
+        surface: usize,
+        source: SourceId,
+        channel: String,
+        stream: PlaySource,
+    ) -> impl std::future::Future<Output = Result<PlaySource, Error>> + use<> {
+        self.prepare_provider_source(surface, source, channel, stream, true)
+    }
+    /// Own HTTP VOD/catch-up/native-fallback transport without selecting HLS
+    /// variants or reading ahead. Local recordings have no provider reservation.
+    pub fn prepare_independent_source(
+        &self,
+        surface: usize,
+        provider: Option<(SourceId, String)>,
+        source: PlaySource,
+    ) -> impl std::future::Future<Output = Result<PlaySource, Error>> + use<> {
+        let retired = self.retire_viewing_inputs(surface);
+        let prepared = provider.map(|(provider, key)| {
+            self.prepare_provider_source(surface, provider, key, source.clone(), false)
+        });
+        async move {
+            retired.await;
+            match prepared {
+                Some(prepared) => prepared.await,
+                None => Ok(source),
+            }
+        }
+    }
     /// Prepare live transport on the recording host's owned I/O executor before
     /// publishing a native source. Original provider leases cover preparations
     /// as well as committed inputs, through acknowledged cancellation/closure.
-    pub fn prepare_live_source(
+    fn prepare_provider_source(
         &self,
         surface: usize,
         source_id: SourceId,
         channel: String,
         mut source: PlaySource,
+        share: bool,
     ) -> impl std::future::Future<Output = Result<PlaySource, Error>> + use<> {
         let disabled = self.recordings_detached.get()
             || self.shutdown_requested.get()
@@ -244,7 +396,7 @@ impl Runtime {
         };
         async move {
             if disabled {
-                return Err(Error::unavailable("Channel unavailable"));
+                return Err(Error::unavailable(key("Channel unavailable")));
             }
             let work = services.clone();
             let stopping = cancel.clone();
@@ -252,7 +404,7 @@ impl Runtime {
                 let _gate = gate.lock().await;
                 state.retire_unused().await;
                 if stopping.is_cancelled() || revision.is_none() {
-                    return Err(Error::unavailable("Channel unavailable"));
+                    return Err(Error::unavailable(key("Channel unavailable")));
                 }
                 let (incarnation, config) = work
                     .read(move |store| {
@@ -304,7 +456,9 @@ impl Runtime {
                 }
                 let existing = {
                     let data = state.lock();
-                    data.shared_for(source_id.0, &identity.channel)
+                    share
+                        .then(|| data.shared_for(source_id.0, &identity.channel))
+                        .flatten()
                         .filter(|incoming| {
                             incoming.identity == identity
                                 && incoming.config == config
@@ -321,7 +475,7 @@ impl Runtime {
                         if data.viewer_revision.get(&surface).copied() != revision
                             || stopping.is_cancelled()
                         {
-                            return Err(Error::unavailable("Channel unavailable"));
+                            return Err(Error::unavailable(key("Channel unavailable")));
                         }
                         if let Some(lease) = data.viewers.get_mut(&surface) {
                             lease.input = None;
@@ -335,17 +489,17 @@ impl Runtime {
                         let mut wanted = data.lease(source_id.0);
                         wanted.account = account(&config);
                         if !data.capacity_for(&wanted, Some(surface), None) {
-                            return Err(Error::unavailable(
+                            return Err(Error::unavailable(key(
                                 "No provider connection available; check Streams at once",
-                            ));
+                            )));
                         }
                         if data.viewer_revision.get(&surface).copied() != revision
                             || stopping.is_cancelled()
                         {
-                            return Err(Error::unavailable("Channel unavailable"));
+                            return Err(Error::unavailable(key("Channel unavailable")));
                         }
                         if !data.viewers.contains_key(&surface) {
-                            return Err(Error::unavailable("Channel unavailable"));
+                            return Err(Error::unavailable(key("Channel unavailable")));
                         }
                         let mut lease = data.lease(source_id.0);
                         lease.account = account(&config);
@@ -360,41 +514,59 @@ impl Runtime {
                         );
                     }
                     created = Some(id);
-                    match LiveInput::begin_with_cancel(
-                        &source.url,
-                        &source.headers,
-                        policy.clone(),
-                        stopping.clone(),
-                    ) {
-                        Ok(input) => {
-                            let incoming = Arc::new(Incoming {
-                                id,
-                                identity,
-                                config: config.clone(),
-                                source: source.clone(),
-                                policy,
-                                input,
-                            });
-                            {
-                                let mut data = state.lock();
-                                if let Some(registered) = data.inputs.get_mut(&id) {
-                                    registered.lease.input = Some(incoming.clone());
-                                    registered.lease.pending = None;
-                                }
-                            }
-                            state.inputs_changed.notify_waiters();
-                            if incoming.input.ready().await.is_ok() {
-                                Some(incoming)
-                            } else {
-                                None
-                            }
-                        }
-                        Err(_) => {
-                            state.lock().inputs.remove(&id);
-                            state.inputs_changed.notify_waiters();
-                            None
+                    let mut incoming = None;
+                    if share
+                        && let Ok(input) = LiveInput::begin_with_cancel(
+                            &source.url,
+                            &source.headers,
+                            policy.clone(),
+                            stopping.clone(),
+                        )
+                    {
+                        let shared = register_transport(
+                            &state,
+                            id,
+                            &identity,
+                            &config,
+                            &source,
+                            &policy,
+                            Transport::Shared(input),
+                        );
+                        if shared
+                            .input
+                            .shared()
+                            .expect("shared probe")
+                            .ready()
+                            .await
+                            .is_ok()
+                        {
+                            incoming = Some(shared);
+                        } else {
+                            shared.input.clone().shutdown().await;
                         }
                     }
+                    if incoming.is_none() && !stopping.is_cancelled() {
+                        if let Ok(input) = Transport::passthrough(&source, policy.clone()) {
+                            incoming = Some(register_transport(
+                                &state, id, &identity, &config, &source, &policy, input,
+                            ));
+                        }
+                    }
+                    if incoming.is_none() {
+                        // A failed/cancelled actual owner stays registered until
+                        // retire_unused joins it; a protocol with no owner can
+                        // release its provisional reservation immediately.
+                        let empty = state
+                            .lock()
+                            .inputs
+                            .get(&id)
+                            .is_some_and(|registered| registered.lease.input.is_none());
+                        if empty {
+                            state.lock().inputs.remove(&id);
+                            state.inputs_changed.notify_waiters();
+                        }
+                    }
+                    incoming
                 };
                 let valid = work
                     .read(move |store| {
@@ -438,7 +610,7 @@ impl Runtime {
                     state.retire_unused().await;
                 }
                 if !installed {
-                    return Err(Error::unavailable("Channel unavailable"));
+                    return Err(Error::unavailable(key("Channel unavailable")));
                 }
                 Ok(incoming.map_or(source, |incoming| incoming.local_source()))
             });
@@ -450,7 +622,7 @@ impl Runtime {
             }
             let _cancel = Cancel(cancel);
             task.await
-                .map_err(|_| Error::unavailable("Channel unavailable"))?
+                .map_err(|_| Error::unavailable(key("Channel unavailable")))?
         }
     }
 }

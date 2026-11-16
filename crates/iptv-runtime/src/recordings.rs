@@ -164,20 +164,18 @@ impl Data {
         // Other admissions still count that registry entry until closure joins.
         let superseded = replacing
             .and_then(|surface| self.viewers.get(&surface))
-            .and_then(|lease| lease.input.as_ref())
-            .map(|input| input.id)
+            .and_then(Lease::connection)
             .filter(|id| {
                 !self.viewers.iter().any(|(surface, lease)| {
-                    Some(*surface) != replacing
-                        && lease.input.as_ref().is_some_and(|input| input.id == *id)
+                    Some(*surface) != replacing && lease.connection() == Some(*id)
                 }) && !self
                     .active
                     .values()
-                    .any(|(lease, _)| lease.input.as_ref().is_some_and(|input| input.id == *id))
+                    .any(|(lease, _)| lease.connection() == Some(*id))
                     && !self
                         .suspended_viewers
                         .values()
-                        .any(|lease| lease.input.as_ref().is_some_and(|input| input.id == *id))
+                        .any(|lease| lease.connection() == Some(*id))
             });
         // Existing leases retain their original account and limit when a playlist is edited.
         let leases = self
@@ -478,7 +476,6 @@ impl Runtime {
     /// Called before changing a viewing surface, including multiview. A retry of
     /// an existing surface retains its reservation; PiP adds no reservation.
     pub fn reserve_viewing(&self, surface: usize, source: SourceId) -> bool {
-        self.recordings.cancel_preparation(surface);
         if self.recordings_detached.get() {
             return false;
         }
@@ -486,6 +483,7 @@ impl Runtime {
         if !data.active.is_empty() && !data.capacity(source.0, Some(surface)) {
             return false;
         }
+        self.recordings.cancel_preparation(surface);
         let lease = data.lease(source.0);
         data.suspended_viewers.remove(&surface);
         *data.viewer_revision.entry(surface).or_default() += 1;
@@ -1368,6 +1366,7 @@ async fn record(
                     && incoming.identity == resolved.identity
                     && incoming.config == resolved.config
                     && incoming.policy == policy
+                    && incoming.input.shared().is_some()
             });
             let outcome = if let Some(incoming) = shared {
                 if !incoming.input.is_running() {
@@ -1376,9 +1375,13 @@ async fn record(
                 // A shared input ending before stop/deadline retains partial
                 // media and frees capture's lease for playback's normal retry.
                 // An independent capture retry must not strand that viewer.
-                return iptv_net::recording::capture_shared(&incoming.input, &partial, MAX_BYTES)
-                    .await
-                    .map_err(|error| error.message());
+                return iptv_net::recording::capture_shared(
+                    incoming.input.shared().expect("shared capture lease"),
+                    &partial,
+                    MAX_BYTES,
+                )
+                .await
+                .map_err(|error| error.message());
             } else {
                 // A reauthentication/link change or failed incoming stream is
                 // never allowed to inherit its sharing discount. A fresh

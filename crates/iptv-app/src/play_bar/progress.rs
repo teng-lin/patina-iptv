@@ -141,9 +141,9 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
                             "decrement" => super::seek_timeline(ui, false),
                             _ => {}
                         })
+                        .disabled(move || !catch_up())
                         .accessibility_state(move || AccessibilityState {
                             selected: super::focused(ui, iptv_core::play_bar::Control::Timeline),
-                            disabled: !catch_up(),
                             ..Default::default()
                         })
                         .border(px(2.0))

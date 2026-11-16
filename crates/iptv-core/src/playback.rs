@@ -159,12 +159,27 @@ mod tests;
 /// persistent player. Selecting/preparing its successor must not relabel old
 /// native progress as belonging to the new content identity.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SourceOwnership {
+    #[default]
+    Local,
+    RuntimeProvider,
+    NativeProvider,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Publication {
     published: Option<(u64, u64)>,
+    ownership: SourceOwnership,
 }
 impl Publication {
-    pub fn publish(&mut self, session: u64, token: u64) {
+    pub fn publish(&mut self, session: u64, token: u64, ownership: SourceOwnership) {
         self.published = Some((session, token));
+        self.ownership = ownership;
+    }
+    /// Clearing callback admission retains the old transport's ownership until
+    /// its replacement publishes. Unowned provider I/O cannot be probed over.
+    pub fn may_probe_replacement(&self) -> bool {
+        self.ownership != SourceOwnership::NativeProvider
     }
     pub fn clear(&mut self) {
         self.published = None;
@@ -179,12 +194,12 @@ impl Publication {
 
 #[cfg(test)]
 mod publication_tests {
-    use super::Publication;
+    use super::{Publication, SourceOwnership};
     #[test]
     fn callbacks_belong_to_published_session_and_token() {
         let mut publication = Publication::default();
         assert!(!publication.accepts(1, None));
-        publication.publish(1, 7);
+        publication.publish(1, 7, SourceOwnership::RuntimeProvider);
         assert!(publication.accepts(1, None));
         assert!(publication.accepts(1, Some(7)));
         assert!(!publication.accepts(2, Some(7)));
@@ -193,8 +208,16 @@ mod publication_tests {
             !publication.accepts(1, Some(7)),
             "a same-session retry is also fenced during preparation"
         );
-        publication.publish(1, 8);
+        publication.publish(1, 8, SourceOwnership::RuntimeProvider);
         assert!(!publication.accepts(1, Some(7)));
         assert!(publication.accepts(1, Some(8)));
+        publication.publish(2, 9, SourceOwnership::NativeProvider);
+        publication.clear();
+        assert!(!publication.may_probe_replacement());
+        publication.publish(3, 10, SourceOwnership::Local);
+        assert!(
+            publication.may_probe_replacement(),
+            "a saved local file does not occupy a provider"
+        );
     }
 }

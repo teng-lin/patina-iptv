@@ -35,7 +35,12 @@ impl Fixture {
         let held = Arc::new(AtomicBool::new(hold));
         let paused = held.clone();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/generated.ts", listener.local_addr().unwrap());
+        let path = if master {
+            "generated.m3u8"
+        } else {
+            "generated.ts"
+        };
+        let url = format!("http://{}/{path}", listener.local_addr().unwrap());
         let requests = Arc::new(AtomicUsize::new(0));
         let active = Arc::new(AtomicUsize::new(0));
         let peak = Arc::new(AtomicUsize::new(0));
@@ -61,7 +66,7 @@ impl Fixture {
                             impl Drop for Active { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::SeqCst); } }
                             let _active = Active(count);
                             let incarnation = current.load(Ordering::SeqCst);
-                            if master {
+                            if master && !request.starts_with(b"GET /replacement.ts ") {
                                 socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl\r\nContent-Length: {}\r\n\r\n", MASTER.len()).as_bytes()).await?;
                                 socket.write_all(MASTER).await?;
                                 let _ = socket.read_u8().await;
@@ -158,6 +163,25 @@ async fn player(source: &PlaySource) -> tokio::net::TcpStream {
     socket.read_exact(&mut packet).await.unwrap();
     assert_eq!(packet[0], 0x47);
     socket
+}
+async fn manifest(source: &PlaySource) -> String {
+    let (address, path) = source
+        .url
+        .strip_prefix("http://")
+        .unwrap()
+        .split_once('/')
+        .unwrap();
+    let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
+    socket
+        .write_all(
+            format!("GET /{path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    socket.read_to_end(&mut response).await.unwrap();
+    String::from_utf8(response).unwrap()
 }
 async fn wait(mut ready: impl FnMut() -> bool) {
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -525,37 +549,24 @@ async fn adaptive_master_retires_probe_then_preserves_native_handoff_and_capture
     let dir = tempfile::tempdir().unwrap();
     let owner = owner(dir.path());
     let mut request = seed(&owner, &fixture.url).await;
-    let mut original = source(&owner, &request).await;
-    original.default_header(
-        "User-Agent",
-        &crate::settings::net_config(&owner.services().settings()).user_agent,
-    );
     let fallback = open(&owner, &request).await;
-    assert_eq!(
-        fallback, original,
-        "native adaptive choice must retain the original manifest/source"
+    assert_ne!(fallback.url, fixture.url);
+    assert!(fallback.headers.is_empty());
+    assert_eq!(owner.recordings.lock().inputs.len(), 1);
+    assert!(
+        owner
+            .recordings
+            .lock()
+            .shared_for(request.source, &request.channel)
+            .is_none()
     );
-    assert!(owner.recordings.lock().inputs.is_empty());
-    // Immediately open the native path, without a grace period for probe
-    // cleanup. The server keeps each root connection until client EOF.
-    let (address, path) = fallback
-        .url
-        .strip_prefix("http://")
-        .unwrap()
-        .split_once('/')
-        .unwrap();
-    let mut native = tokio::net::TcpStream::connect(address).await.unwrap();
-    native
-        .write_all(format!("GET /{path} HTTP/1.1\r\nHost: {address}\r\n\r\n").as_bytes())
-        .await
-        .unwrap();
-    let mut head = Vec::new();
-    while !head.ends_with(b"\r\n\r\n") {
-        head.push(native.read_u8().await.unwrap());
-    }
-    let mut manifest = vec![0; MASTER.len()];
-    native.read_exact(&mut manifest).await.unwrap();
-    assert_eq!(manifest, MASTER);
+    // Immediately open native adaptive playback through its owned capability.
+    // Its manifest still offers both variants; the probe selected neither.
+    let manifest = manifest(&fallback).await;
+    assert!(manifest.contains("BANDWIDTH=1200000"));
+    assert!(manifest.contains("BANDWIDTH=2400000"));
+    assert!(manifest.contains("low.m3u8"));
+    assert!(manifest.contains("high.m3u8"));
     assert_eq!(
         fixture.requests.load(Ordering::SeqCst),
         2,
@@ -573,7 +584,6 @@ async fn adaptive_master_retires_probe_then_preserves_native_handoff_and_capture
         "independent capture still needs a spare permitted connection"
     );
     assert_eq!(fixture.requests.load(Ordering::SeqCst), 2);
-    drop(native);
     owner.release_viewing(0);
     assert!(owner.drain_services());
 }
@@ -706,6 +716,88 @@ async fn a_new_incarnation_uses_fresh_provider_limit_after_a_stale_view_reservat
         "the newly registered owner must not retain the old incarnation's hard allowance"
     );
     assert_eq!(fixture.peak.load(Ordering::SeqCst), 1);
+    drop(playback);
+    owner.release_viewing(0);
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
+async fn owned_native_fallback_and_on_demand_retire_before_next_live_probe() {
+    for context in [None, Some("vod:generated"), Some("catch-up:generated")] {
+        let fixture = Fixture::master().await;
+        let dir = tempfile::tempdir().unwrap();
+        let owner = owner(dir.path());
+        let request = seed(&owner, &fixture.url).await;
+        refresh_accounts(&owner.services(), &owner.recordings)
+            .await
+            .unwrap();
+        let fallback = if let Some(context) = context {
+            assert!(owner.reserve_viewing(0, SourceId(request.source)));
+            owner
+                .prepare_independent_source(
+                    0,
+                    Some((SourceId(request.source), context.into())),
+                    source(&owner, &request).await,
+                )
+                .await
+                .unwrap()
+        } else {
+            open(&owner, &request).await
+        };
+        assert!(manifest(&fallback).await.contains("BANDWIDTH=2400000"));
+        wait(|| fixture.active.load(Ordering::SeqCst) == 1).await;
+        let replacement = fixture.url.replace("generated.m3u8", "replacement.ts");
+        let next = seed(&owner, &replacement).await;
+        let local = open(&owner, &next).await;
+        let playback = player(&local).await;
+        assert_eq!(
+            fixture.peak.load(Ordering::SeqCst),
+            1,
+            "the old adaptive/VOD/catch-up HTTP owner must close before probing live"
+        );
+        assert_eq!(
+            fixture.requests.load(Ordering::SeqCst),
+            if context.is_none() { 3 } else { 2 }
+        );
+        drop(playback);
+        owner.release_viewing(0);
+        assert!(owner.drain_services());
+    }
+}
+
+#[tokio::test]
+async fn rejected_live_and_independent_zaps_preserve_current_pending_preparation() {
+    let capture = Fixture::start().await;
+    let pending = Fixture::starting(true).await;
+    let dir = tempfile::tempdir().unwrap();
+    let owner = owner(dir.path());
+    let recording = seed(&owner, &capture.url).await;
+    xtream_account(&owner, &recording, &capture, "generated-capture").await;
+    let viewing = seed(&owner, &pending.url).await;
+    xtream_account(&owner, &viewing, &pending, "generated-viewing").await;
+    refresh_accounts(&owner.services(), &owner.recordings)
+        .await
+        .unwrap();
+    let id = record_now(&owner, recording.clone()).await;
+    assert!(owner.reserve_live_viewing(0, SourceId(viewing.source), &viewing.channel));
+    let prepared = tokio::spawn(owner.prepare_live_source(
+        0,
+        SourceId(viewing.source),
+        viewing.channel.clone(),
+        source(&owner, &viewing).await,
+    ));
+    wait(|| pending.requests.load(Ordering::SeqCst) == 1).await;
+    let revision = owner.recordings.lock().viewer_revision[&0];
+    assert!(!owner.reserve_viewing(0, SourceId(recording.source)));
+    assert!(!owner.reserve_live_viewing(0, SourceId(recording.source), &recording.channel));
+    assert_eq!(owner.recordings.lock().viewer_revision[&0], revision);
+    pending.held.store(false, Ordering::SeqCst);
+    let local = prepared.await.unwrap().unwrap();
+    let playback = player(&local).await;
+    assert_eq!(pending.requests.load(Ordering::SeqCst), 1);
+    assert_eq!(pending.peak.load(Ordering::SeqCst), 1);
+    owner.stop_recording(id).await.unwrap();
+    until(&owner, id, |job| !job.status.active()).await;
     drop(playback);
     owner.release_viewing(0);
     assert!(owner.drain_services());

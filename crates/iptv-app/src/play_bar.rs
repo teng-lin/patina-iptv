@@ -282,8 +282,8 @@ fn button(ui: Ui, control: Control, icon: impl Fn() -> Icon + 'static, size: f32
         .role(AccessibilityRole::Button)
         .accessible(true)
         .test_id(control_id(control))
+        .disabled(move || !enabled(ui, control))
         .accessibility_state(move || AccessibilityState {
-            disabled: !enabled(ui, control),
             selected: focused(ui, control),
             pressed: (control == Control::Record).then(|| {
                 if crate::recordings_view::recording_active(ui) {

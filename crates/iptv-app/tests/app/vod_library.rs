@@ -1133,13 +1133,15 @@ fn exercise_admission(
             step(app.press("label:Video"));
         }
         step(app.wait_for("label:Rewind"));
-        assert!(
-            app.screen()
-                .accessibility_state("label:Rewind")
-                .unwrap()
-                .disabled,
-            "seek controls stay disabled while the selected source is unpublished"
-        );
+        step(app.wait_until(
+            "seek controls disabled for unpublished source",
+            Duration::from_secs(5),
+            |screen| {
+                screen
+                    .accessibility_state("label:Rewind")
+                    .is_ok_and(|state| state.disabled)
+            },
+        ));
         for (name, data) in [
             (
                 "timeline",

@@ -6,10 +6,18 @@ come from one ingestor; HLS manifest reloads and segments are fetched sequential
 without a second playback/capture downloader.
 
 Adaptive/master HLS playlists retain native variant selection. Encrypted HLS,
-fMP4, DASH, external audio/subtitle renditions and other unsupported inputs keep
-the original native playback source. Recording uses its existing independent
-transport when a separate connection is permitted. A preparation probe closes
-and acknowledges upstream retirement before native fallback opens.
+fMP4, DASH and external audio/subtitle renditions retain native playback through
+an owned HTTP passthrough relay. The relay preserves all variant choices and
+request policy; it does not make these transports shareable with capture.
+Recording uses its existing independent transport when a separate connection
+is permitted. A preparation probe closes and acknowledges upstream retirement
+before native fallback opens. HTTP VOD and catch-up playback use the same owned
+passthrough lifetime, so a later live probe cannot overlap their retired owner.
+
+Non-HTTP native transports retain their original player path. While handing off
+from such an unowned provider transport, Patina avoids speculative shared-input
+probing and publishes the independent path after ordinary admission. A saved
+local recording is not a provider transport and does not suppress a live probe.
 
 ```mermaid
 flowchart LR
@@ -40,7 +48,8 @@ that same ID. Registered owners remain budgeted through cancellation and
 acknowledged upstream closure, even if a surface switches to another account,
 a recording finishes, a claim fails, or its UI disappears. A closing owner cannot
 acquire new consumers. Replacement may plan to retire its sole old viewer owner;
-actual replacement I/O waits for that retirement.
+actual replacement I/O waits for that retirement. Rejected selections do not
+cancel or revise an already admitted preparation.
 
 A recording retains its own reader and incoming lease. Stopping playback or
 zapping releases only viewing ownership. Returning to a still-recorded channel

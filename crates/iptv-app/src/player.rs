@@ -645,6 +645,9 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
     if stream.health.with_untracked(|h| h.session()) != session {
         return; // the viewer moved on
     }
+    let may_probe = stream
+        .publication
+        .with_untracked(|publication| publication.may_probe_replacement());
     stream.publication.update(|publication| publication.clear());
     // Recheck timed grants after asynchronous resolution, before the decoder
     // sees a stream. The runtime already checked current durable membership.
@@ -672,7 +675,7 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
     } else {
         None
     };
-    if let Some((source_id, channel)) = identity {
+    if let Some((source_id, channel)) = identity.clone().filter(|_| may_probe) {
         let prepared = owner.prepare_live_source(surface, source_id, channel, source);
         crate::data::spawn_in_app(async move {
             match prepared.await {
@@ -682,7 +685,15 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
                     surface,
                     session,
                     ErrorKind::Unavailable,
-                    error.to_string(),
+                    match error.unavailable_reason() {
+                        Some("No provider connection available; check Streams at once") => {
+                            crate::i18n::tr(
+                                "No provider connection available; check Streams at once",
+                            )
+                        }
+                        _ => crate::i18n::tr("Channel unavailable"),
+                    }
+                    .into(),
                 ),
             }
         });
@@ -700,9 +711,33 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
         } else {
             None
         };
-        let retired = owner.retire_viewing_inputs(surface);
+        let provider = identity.or_else(|| {
+            if surface == 0
+                && let Some((playing, _)) = ui.player.vod.get_untracked()
+            {
+                Some((
+                    iptv_library::SourceId(playing.key.source),
+                    format!("vod:{:?}:{}", playing.key.kind, playing.key.id),
+                ))
+            } else if ui.player.recorded.with_untracked(Option::is_none) {
+                target(ui, surface)
+                    .and_then(|(channel, _)| crate::schedule().channel_key(channel))
+                    .and_then(|key| crate::data::combined::owner(&owner, &key))
+            } else {
+                None
+            }
+        });
+        let prepared = owner.prepare_independent_source(surface, provider, source);
         crate::data::spawn_in_app(async move {
-            retired.await;
+            let source = match prepared.await {
+                Ok(source) => source,
+                Err(_) => {
+                    if stream.health.with_untracked(|health| health.session()) == session {
+                        stop_surface(ui, surface);
+                    }
+                    return;
+                }
+            };
             if let Some(authority) = authority
                 && !authority.await
             {
@@ -736,6 +771,13 @@ fn publish_source(ui: Ui, surface: usize, session: u64, source: PlaySource) {
         source.headers.len(),
         if reconnect { ", reconnecting" } else { "" }
     );
+    let ownership = if surface == 0 && ui.player.recorded.with_untracked(Option::is_some) {
+        iptv_core::playback::SourceOwnership::Local
+    } else if crate::runtime().owns_viewing_source(surface, &source) {
+        iptv_core::playback::SourceOwnership::RuntimeProvider
+    } else {
+        iptv_core::playback::SourceOwnership::NativeProvider
+    };
     // One write for the player: the `source` prop must never see the new
     // token with the old url (a host would open the old stream again
     // first, as leaving multiview did).
@@ -743,9 +785,9 @@ fn publish_source(ui: Ui, surface: usize, session: u64, source: PlaySource) {
         stream.live.set(live);
         stream.reconnect.set(reconnect);
         stream.token.update(|t| *t += 1);
-        stream
-            .publication
-            .update(|publication| publication.publish(session, stream.token.get_untracked()));
+        stream.publication.update(|publication| {
+            publication.publish(session, stream.token.get_untracked(), ownership)
+        });
         stream.position_ms.set(0);
         stream.finished.set(false);
         stream.timeline.set(Default::default());
