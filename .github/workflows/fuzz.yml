@@ -1,72 +1,34 @@
 name: Fuzz
 on:
-  # A short pass over every target when parser or rewriter code changes.
-  pull_request:
-    paths:
-      - '.github/workflows/fuzz.yml'
-      - 'crates/iptv-core/**'
-      - 'crates/iptv-settings/**'
-      - 'crates/iptv-providers/**'
-      - 'crates/iptv-epg/**'
-      - 'crates/iptv-import/**'
-      - 'crates/iptv-net/src/playback*'
-      - 'crates/iptv-net/src/playback/**'
-      - 'fuzz/**'
-      - 'tools/ci/fuzz-imports.sh'
-      - 'tools/ci/fuzz-targets.py'
-      - 'tools/ci/locked-cargo.py'
-  # The nightly Import stress workflow runs longer and keeps the corpus.
   workflow_call:
     inputs:
+      targets:
+        description: JSON array; empty selects every manifest target
+        type: string
+        default: '[]'
       seconds:
-        description: Fuzzing time per target
         type: number
         default: 60
       save-corpus:
-        description: Keep the grown corpus for later runs
         type: boolean
-        default: true
+        default: false
   workflow_dispatch:
     inputs:
+      targets:
+        type: string
+        default: '[]'
       seconds:
-        description: Fuzzing time per target
         type: number
-        default: 60
+        default: 300
       save-corpus:
-        description: Keep the grown corpus for later runs
         type: boolean
         default: true
-# Path-filtered on pull requests, so it must not be a required check.
-concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('fuzz-pr-{0}', github.event.pull_request.number) || format('fuzz-run-{0}', github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:
-  targets:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      targets: ${{ steps.list.outputs.targets }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      # Every [[bin]] of fuzz/Cargo.toml, which is what `cargo fuzz list` prints:
-      # a target added to the harness is fuzzed without editing this workflow.
-      - id: list
-        run: echo "targets=$(python3 tools/ci/fuzz-targets.py)" >> "$GITHUB_OUTPUT"
   fuzz:
-    needs: targets
-    strategy:
-      fail-fast: false
-      matrix:
-        target: ${{ fromJSON(needs.targets.outputs.targets) }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    env:
-      TARGET: ${{ matrix.target }}
-      SECONDS_PER_TARGET: ${{ inputs.seconds || 60 }}
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -77,27 +39,34 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ steps.toolchain.outputs.nightly }}
-      - run: cargo install cargo-fuzz --version 0.13.2 --locked
-      # Start from the newest corpus a nightly run saved for this target. Each
-      # saving run writes a new entry, so the corpus accumulates; pull requests
-      # read the default branch's entries and never write.
+      - uses: ./.github/actions/cargo-tool
+        with:
+          name: cargo-fuzz
+          version: 0.13.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: fuzz-v2-${{ hashFiles('fuzz/Cargo.lock', 'tools/ci/fuzz-imports.sh') }}
+          cache-bin: 'false'
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          workspaces: fuzz
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: fuzz/corpus/${{ matrix.target }}
-          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            fuzz-corpus-${{ matrix.target }}-
-      - name: Fuzz synthetic inputs
-        run: bash tools/ci/fuzz-imports.sh "$SECONDS_PER_TARGET" "$TARGET"
-      # Also after a crash: the inputs that reached new code are worth keeping.
+          path: fuzz/corpus
+          key: fuzz-corpus-all-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: fuzz-corpus-all-
+      - name: Fuzz selected synthetic boundaries with one shared dependency build
+        env:
+          TARGETS: ${{ inputs.targets }}
+          SECONDS_PER_TARGET: ${{ inputs.seconds }}
+        run: python3 tools/ci/run-fuzz.py
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        if: ${{ !cancelled() && (inputs.save-corpus || github.ref == 'refs/heads/master') }}
+        if: ${{ !cancelled() && inputs.save-corpus && github.ref == 'refs/heads/master' }}
         with:
-          path: fuzz/corpus/${{ matrix.target }}
-          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: fuzz/corpus
+          key: fuzz-corpus-all-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
-          name: fuzz-${{ matrix.target }}
+          name: fuzz-crashing-inputs
           path: fuzz/artifacts/
           if-no-files-found: ignore

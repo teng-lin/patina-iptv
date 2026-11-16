@@ -40,13 +40,14 @@ jobs:
           REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && inputs.rehearsal }}
         run: python3 tools/ci/release-plan.py
   tests:
-    uses: ./.github/workflows/ci.yml
-  windows-tests:
-    if: github.event_name == 'push' || inputs.platforms != 'android'
-    uses: ./.github/workflows/windows.yml
+    # Full validation runs at this exact candidate SHA; never inherit PR mode
+    # or accept a green report from an unrelated nightly commit.
+    uses: ./.github/workflows/validation.yml
+    with:
+      tier: release
   windows-package:
     if: github.event_name == 'push' || inputs.platforms != 'android'
-    needs: [plan, tests, windows-tests]
+    needs: [plan, tests]
     runs-on: windows-2025
     timeout-minutes: 120
     steps:
@@ -174,6 +175,23 @@ jobs:
           name: packages-windows
           path: dist/Patina-*-windows-x86_64-setup.exe
           if-no-files-found: error
+  verify-windows:
+    if: needs.windows-sign.result == 'success'
+    needs: windows-sign
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: packages-windows
+          path: dist
+      # This fresh job has no signing environment, build cache, or compiler.
+      - name: Install, launch and uninstall the final Windows artifact
+        shell: pwsh
+        run: ./tools/ci/check-windows-package.ps1
   package:
     needs: [plan, tests]
     strategy:
@@ -440,7 +458,7 @@ jobs:
           if-no-files-found: error
   publish:
     if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.rehearsal)
-    needs: [tests, package, sign, windows-package, windows-sign, sbom]
+    needs: [tests, package, sign, windows-package, windows-sign, verify-windows, sbom]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -496,3 +514,20 @@ jobs:
       - name: Clean up rehearsal release and tag
         if: always() && github.event_name == 'workflow_dispatch' && inputs.rehearsal
         run: python3 tools/ci/rehearsal.py cleanup "$TAG" "$GITHUB_SHA"
+  verify-published:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify public asset inventory, checksums and provenance without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 tools/ci/verify-public-release.py "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_REF"

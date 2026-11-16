@@ -48,14 +48,14 @@ class Parity(unittest.TestCase):
         format_argv = plan.format_plan()[0]["argv"]
         self.assertEqual({format_argv[i + 1] for i, arg in enumerate(format_argv[:-1]) if arg == "-p"}, self.members)
         script = (ROOT / "tools/check.sh").read_text(encoding="utf-8")
-        self.assertEqual(script.count("python3 tools/ci/check-plan.py run\n"), 1)
+        self.assertEqual(script.count('python3 tools/ci/check-plan.py run --tier "$tier" --host "$host"\n'), 1)
         self.assertEqual(script.count("python3 tools/ci/check-plan.py format\n"), 1)
         self.assertEqual(lines_with("tools/check.sh", "cargo test"), [])
         self.assertLess(self.wasm, self.libraries)
 
     def test_windows_check_delegates_the_same_features_scenarios_and_output(self):
         script = (ROOT / "tools/build-windows.ps1").read_text(encoding="utf-8")
-        self.assertEqual(script.count('$checkArgs = @("$PSScriptRoot/ci/check-plan.py", \'run\')'), 1)
+        self.assertEqual(script.count('$checkArgs = @("$PSScriptRoot/ci/check-plan.py", \'run\', \'--tier\', $Tier, \'--host\', \'windows\')'), 1)
         self.assertEqual(script.count("& python @checkArgs"), 1)
         self.assertIn("if ($Release) { $checkArgs += '--release' }", script)
         self.assertIn("if (!$Check)", script, "-Check's normal app build must not run twice")

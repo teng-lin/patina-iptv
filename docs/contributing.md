@@ -7,6 +7,8 @@ full checks before finishing or the release gates.
 Setup, contribution policy and physical-device validation requirements remain
 in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
+Validation scheduling and required-check behavior are documented in [CI tiers](ci.md).
+
 ## Find the owner
 
 | Change | State/policy and orchestration | Adapter or host | Closest validation |

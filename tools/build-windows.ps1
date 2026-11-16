@@ -1,5 +1,6 @@
 [CmdletBinding()]
-param([switch]$Check, [switch]$Release, [switch]$Run)
+param([switch]$Check, [switch]$Release, [switch]$Run,
+      [ValidateSet("full", "native")][string]$Tier = "full")
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Push-Location $root
@@ -26,7 +27,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'The NSH checkout is not at the commit in nsh.rev' }
         & cargo test --locked -p nsh-platform-windows --lib chrome::tests -- --format=pretty
         if ($LASTEXITCODE -ne 0) { throw 'Windows pointer regression failed' }
-        $checkArgs = @("$PSScriptRoot/ci/check-plan.py", 'run')
+        $checkArgs = @("$PSScriptRoot/ci/check-plan.py", 'run', '--tier', $Tier, '--host', 'windows')
         if ($Release) { $checkArgs += '--release' }
         & python @checkArgs
         if ($LASTEXITCODE -ne 0) { throw 'Shared Rust validation failed' }

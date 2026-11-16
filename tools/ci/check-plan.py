@@ -23,6 +23,7 @@ REPAIR = "guide_repair::tests::repair_analysis_on_100k_channels_and_1k_groups_ke
 INSPECTION = "foundation_inspection::a_hundred_thousand_channel_analysis_keeps_display_reads_responsive"
 LATENCY = "store_latency::guide_input_stays_under_budget_while_the_database_writer_is_locked"
 BUSY_READER = "store_latency::a_store_read_does_not_wait_for_a_busy_writer"
+GTK_LIFECYCLE = "native_gtk_player_shares_pip_frames_and_recreates_only_after_context_loss"
 COVERAGE_FEATURES = "iptv-runtime/test-support,iptv-app/test-support"
 
 
@@ -49,14 +50,28 @@ def step(name, *argv):
     return {"name": name, "argv": list(argv)}
 
 
-def plan(root=ROOT, release=False):
+def plan(root=ROOT, release=False, tier="full", host="linux"):
+    if tier not in ("pr", "full", "native") or host not in ("linux", "macos", "windows"):
+        raise ValueError("unsupported validation tier or host")
     workspace = package_args(workspace_crates(root))
     test_args = ["--locked", "--features", COVERAGE_FEATURES, *workspace]
+    app_build = step("app-build", "cargo", "build", "--locked", "-p", "iptv-app", "--timings",
+                     *(["--release"] if release else []))
+    if tier == "native":
+        return [
+            step("native-test-compilation", "cargo", "check", "--locked", "--workspace", "--all-targets",
+                 "--features", COVERAGE_FEATURES),
+            step("native-player-tests", "cargo", "test", "--locked", "-p", "iptv-player-mpv", "--lib",
+                 "--", "--format=pretty"),
+            app_build,
+        ]
+    memory = [argument for module in ("catalog_stream_memory::", "epg_memory::", "epg_stream_memory::")
+              for argument in ("--skip", module)] if tier == "pr" else []
     steps = [
         step("workspace-clippy", "cargo", "clippy", "--locked", "--workspace", "--all-targets",
              "--features", COVERAGE_FEATURES, "--", "-D", "warnings"),
         # One feature-unified graph, without linking the examples Clippy checks.
-        step("workspace-tests", "cargo", "test", *test_args, "--tests", "--timings", "--", "--format=pretty"),
+        step("workspace-tests", "cargo", "test", *test_args, "--tests", "--timings", "--", "--format=pretty", *memory),
         step("repair-display-independence", "cargo", "test", *test_args,
              "--lib", REPAIR, "--", "--ignored", "--exact", "--format=pretty"),
         step("inspection-display-budget", "cargo", "test", *test_args,
@@ -64,20 +79,22 @@ def plan(root=ROOT, release=False):
     ]
     steps.extend(
         step(f"wasm-{crate}", "cargo", "build", "--locked", "-p", crate, "--target", "wasm32-unknown-unknown")
-        for crate in PORTABLE
+        for crate in PORTABLE if host == "linux"
     )
     steps.extend([
         step("guide-input-budget", "cargo", "test", *test_args,
              "--test", "app", LATENCY, "--", "--ignored", "--exact", "--format=pretty"),
         step("busy-store-reader", "cargo", "test", *test_args,
              "--test", "app", BUSY_READER, "--", "--ignored", "--exact", "--format=pretty"),
-        # --tests excludes doctests; keep their compilation and execution explicit.
-        step("workspace-doctests", "cargo", "test", *test_args, "--doc", "--", "--format=pretty"),
-        # Leave the normal executable as the final artifact: integration tests
-        # may build Cargo's app binary with test-support enabled.
-        step("app-build", "cargo", "build", "--locked", "-p", "iptv-app", "--timings",
-             *(["--release"] if release else [])),
     ])
+    if host == "linux":
+        # Documentation and portable wasm output are independent of the host OS.
+        steps.append(step("workspace-doctests", "cargo", "test", *test_args, "--doc", "--", "--format=pretty"))
+        steps.append(step("native-gtk-lifecycle", sys.executable, "tools/ci/run-xvfb.py",
+                          "cargo", "test", *test_args, "--test", "native_player", GTK_LIFECYCLE,
+                          "--", "--ignored", "--exact", "--format=pretty"))
+    # Test-support builds must never replace the final production configuration.
+    steps.append(app_build)
     return steps
 
 
@@ -119,6 +136,9 @@ def main(argv=None):
     listing.add_argument("--release", action="store_true", help="build the normal app in release mode")
     running = actions.add_parser("run", help="stream the common Rust checks, failing fast")
     running.add_argument("--release", action="store_true", help="build the normal app in release mode")
+    for action in (listing, running):
+        action.add_argument("--tier", choices=("pr", "full", "native"), default="full")
+        action.add_argument("--host", choices=("linux", "macos", "windows"), default="linux")
     actions.add_parser("format", help="check formatting of workspace packages only")
     inventory = actions.add_parser("inventory", help="print the shared crate inventory")
     inventory.add_argument("--kind", choices=("workspace", "libraries", "portable"), default="workspace")
@@ -135,9 +155,9 @@ def main(argv=None):
     elif options.action == "format":
         return run(format_plan())
     elif options.action == "run":
-        return run(plan(release=options.release))
+        return run(plan(release=options.release, tier=options.tier, host=options.host))
     else:
-        checks = plan(release=options.release)
+        checks = plan(release=options.release, tier=options.tier, host=options.host)
         if options.json:
             print(json.dumps(checks, indent=2))
         else:

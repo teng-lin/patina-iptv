@@ -3,6 +3,13 @@
 # crates, and the app build. Run before committing.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+tier=${1:-full}
+case "$tier" in pr|full) ;; *) echo "usage: tools/check.sh [pr|full]" >&2; exit 2 ;; esac
+case "$(uname -s)" in
+  Linux) host=linux ;;
+  Darwin) host=macos ;;
+  *) echo 'tools/check.sh supports Linux and macOS; use tools/build-windows.ps1 on Windows' >&2; exit 2 ;;
+esac
 # macOS strips DYLD_* when starting a protected shell. Restore the selected
 # runtime inside this shell; the Python planner also restores it for Cargo.
 if [ "$(uname -s)" = Darwin ] && [ -n "${IPTV_RS_MPV_LIB_DIR:-}" ]; then
@@ -17,7 +24,7 @@ python3 tools/ci/check-plan.py format
 bash tools/ci/check-line-length.sh
 bash tools/ci/lint.sh
 cargo deny --locked check
-python3 tools/ci/check-plan.py run
+python3 tools/ci/check-plan.py run --tier "$tier" --host "$host"
 IPTV_REAL_CARGO="$(command -v cargo)" python3 tools/ci/test-locked-cargo.py
 python3 tools/ci/test-mpvkit-notices.py
 python3 tools/ci/test-macos-source-notices.py
@@ -45,6 +52,7 @@ python3 tools/ci/test-native-candidates.py
 python3 tools/mpv-runtime-ios/test_build.py
 python3 tools/ci/test-check-parity.py
 python3 tools/ci/test-check-plan.py
+python3 tools/ci/test-validation-plan.py
 python3 tools/ci/test-fuzz-targets.py
 python3 tools/performance/test_journeys.py
 echo "all checks passed"

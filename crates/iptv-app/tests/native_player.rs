@@ -218,7 +218,7 @@ fn window(root: Root, directory: &std::path::Path) -> (gtk::Window, std::rc::Rc<
     (window, view)
 }
 #[test]
-#[ignore = "requires an isolated Xvfb display and software GL; coverage.sh runs it explicitly"]
+#[ignore = "requires an isolated Xvfb display and software GL; shared CI plan runs it explicitly"]
 fn native_gtk_player_shares_pip_frames_and_recreates_only_after_context_loss() {
     if !isolated_native("native_gtk_player_shares_pip_frames_and_recreates_only_after_context_loss")
     {

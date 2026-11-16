@@ -1,45 +1,17 @@
 name: Package checks
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/package-check.yml'
-      - '.github/actions/setup/**'
-      - '.github/actions/cargo-tool/**'
-      - '.github/actions/nsh-cli/**'
-      - '.cargo/config'
-      - '.cargo/config.toml'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'crates/**/Cargo.toml'
-      - 'crates/iptv-app/build.rs'
-      - 'crates/iptv-app/nsh.json'
-      - 'crates/iptv-app/icon.png'
-      - 'crates/iptv-app/fonts/**'
-      - 'rust-toolchain.toml'
-      - 'nsh.rev'
-      - 'about.toml'
-      - 'tools/ci/**'
-      - 'tools/package-macos.sh'
-      - 'tools/bundle-macos.py'
-      - 'tools/mpv-runtime-unix/**'
-      - 'tools/mpv-runtime/prepare.py'
-  # Populate the master caches PRs restore when dependency/build recipes change.
-  push:
-    branches: [master]
-    paths:
-      - '.github/workflows/package-check.yml'
-      - '.github/actions/**'
-      - '.cargo/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'crates/**/Cargo.toml'
-      - 'rust-toolchain.toml'
-      - 'nsh.rev'
-      - 'tools/ci/check-plan.py'
-      - 'tools/ci/package-linux.sh'
-      - 'tools/package-macos.sh'
+  workflow_call:
+    inputs:
+      matrix:
+        type: string
+        default: '{"include":[{"platform":"linux","os":"ubuntu-24.04"},{"platform":"macos","os":"macos-15"}]}'
   workflow_dispatch:
-# Superseded PR checks need not keep occupying runners. Releases are never cancelled.
+    inputs:
+      matrix:
+        type: string
+        default: '{"include":[{"platform":"linux","os":"ubuntu-24.04"},{"platform":"macos","os":"macos-15"}]}'
+
+
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('packages-pr-{0}', github.event.pull_request.number) || format('packages-run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -50,12 +22,7 @@ jobs:
   desktop-packages:
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - platform: linux
-            os: ubuntu-24.04
-          - platform: macos
-            os: macos-15
+      matrix: ${{ fromJSON(inputs.matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     steps:

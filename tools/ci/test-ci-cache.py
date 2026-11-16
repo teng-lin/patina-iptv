@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check finished-tool cache identities without installing or downloading tools."""
 from contextlib import redirect_stdout
+import importlib.util
 import io
 import json
 import os
@@ -93,11 +94,14 @@ class ToolCache(unittest.TestCase):
         self.assertIn("steps.tool.outputs.cache-hit != 'true'", RECIPE)
 
     def test_packaging_cache_has_a_master_producer_on_dependency_changes(self):
-        workflow = (ROOT / ".github/workflows/package-check.yml").read_text(encoding="utf-8")
-        push = re.search(r"(?ms)^  push:\n(.*?)(?=^  [a-z_]+:)", workflow)
-        self.assertIsNotNone(push, "read-only PR caches need a master producer")
-        for required in ("branches: [master]", "Cargo.lock", "nsh.rev", ".github/actions/**"):
-            self.assertIn(required, push[1])
+        workflow = (ROOT / ".github/workflows/validation.yml").read_text(encoding="utf-8")
+        self.assertIn("  push:\n    branches: [master]", workflow)
+        self.assertIn("uses: ./.github/workflows/package-check.yml", workflow)
+        spec = importlib.util.spec_from_file_location("validation", ROOT / "tools/ci/validation-plan.py")
+        validation = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(validation)
+        for path in ("Cargo.lock", "nsh.rev", ".github/actions/setup/action.yml"):
+            self.assertTrue(validation.select([path])["packages"], path)
 
     @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "composite installation uses Bash")
     def test_tool_install_uses_its_own_root_and_fixed_bootstrap_profile(self):

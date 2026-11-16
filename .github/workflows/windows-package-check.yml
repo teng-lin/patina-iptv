@@ -1,0 +1,29 @@
+name: Windows package check
+on:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  installer:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-windows
+      - name: Set package metadata
+        shell: pwsh
+        run: python tools/ci/version.py
+      - uses: ./.github/actions/cargo-tool
+        with:
+          name: cargo-about
+          version: 0.9.3
+          features: cli
+      - name: Build and exercise the installer
+        shell: pwsh
+        run: |
+          ./tools/package-windows.ps1
+          ./tools/ci/check-windows-package.ps1

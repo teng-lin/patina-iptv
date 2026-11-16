@@ -1,10 +1,17 @@
 name: Tests
 on:
-  pull_request:
-  push:
-    branches: [master]
   workflow_call:
-# Superseded PR checks need not keep occupying runners. Releases are never cancelled.
+    inputs:
+      tier:
+        type: string
+        default: full
+  workflow_dispatch:
+    inputs:
+      tier:
+        type: choice
+        default: full
+        options: [full, pr]
+
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('tests-pr-{0}', github.event.pull_request.number) || format('tests-run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -59,7 +66,14 @@ jobs:
           fi
           echo '{"schema":1,"valid":false,"errors":["base policy passed; journeys not run because prior validation did not complete"]}' > target/performance/summary.json
           sudo apt-get install -y xvfb libgl1-mesa-dri
-      - run: bash tools/check.sh
+      - name: Validate the host tier
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            bash tools/check.sh "${{ inputs.tier == 'pr' && 'pr' || 'full' }}"
+          else
+            python3 tools/ci/check-plan.py run --host macos --tier "${{ inputs.tier == 'pr' && 'native' || 'full' }}"
+          fi
         env:
           IPTV_REQUIRE_PLAYER_TESTS: '1'
           IPTV_TEST_WAIT_SCALE: ${{ matrix.os == 'macos-15' && '2' || '1' }}

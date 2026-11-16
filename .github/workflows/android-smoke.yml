@@ -1,31 +1,8 @@
 name: Android smoke
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/android-smoke.yml'
-      - '.github/actions/android/**'
-      - '.github/actions/setup/**'
-      - '.github/actions/cargo-tool/**'
-      - '.github/actions/nsh-cli/**'
-      - 'hosts/android/**'
-      - 'crates/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'nsh.rev'
-      - 'rust-toolchain.toml'
-      - 'tools/sync-host.sh'
-      - 'tools/ci/android-smoke.sh'
-      - 'tools/ci/test-adb-timeout.py'
-      - 'tools/ci/android/**'
-      - 'tools/ci/*-hls-fixtures.py'
-      - 'tools/ci/android-ndk-env.sh'
-      - 'tools/make-hls-fixtures.sh'
-      - 'tools/make-iptv-fixtures.py'
-      - 'tools/mock-server.py'
-  schedule:
-    - cron: '23 3 * * *'
+  workflow_call:
   workflow_dispatch:
-# Superseded PR runs need not keep occupying runners.
+
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('android-smoke-pr-{0}', github.event.pull_request.number) || format('android-smoke-run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -34,7 +11,7 @@ permissions:
 # Launches the app on a tablet and a TV emulator and drives it with remote keys
 # (tools/ci/android-smoke.sh): first run, the synthetic playlist, a channel in
 # the guide, full screen, multiview, background and resume. Path-filtered and
-# new: not a required check.
+# selected by the required Validation aggregate.
 jobs:
   build:
     runs-on: ubuntu-24.04
