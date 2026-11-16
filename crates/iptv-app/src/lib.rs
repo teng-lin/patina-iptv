@@ -1194,3 +1194,9 @@ pub fn hold_writer() -> runtime::TestGate {
 pub fn hold_source_preparation() -> runtime::TestGate {
     runtime().hold_source_preparation()
 }
+
+/// Exercise revocation between preparation and native publication.
+#[cfg(feature = "test-support")]
+pub fn lock_parental_content() {
+    runtime().parental_lock();
+}

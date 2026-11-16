@@ -23,6 +23,12 @@ use std::{
 
 type Observed = Arc<Mutex<HashMap<String, Value>>>;
 fn saved_fixture(home: &crate::isolated::Home) -> (Headless, std::path::PathBuf, JobId, Observed) {
+    saved_fixture_with_protection(home, false)
+}
+fn saved_fixture_with_protection(
+    home: &crate::isolated::Home,
+    protected: bool,
+) -> (Headless, std::path::PathBuf, JobId, Observed) {
     let root = home.data_dir();
     std::fs::create_dir_all(&root).unwrap();
     let mut settings = Settings::new();
@@ -31,6 +37,9 @@ fn saved_fixture(home: &crate::isolated::Home) -> (Headless, std::path::PathBuf,
         .unwrap();
     settings
         .set("guide.autoplay", Setting::Bool(false))
+        .unwrap();
+    settings
+        .set("parental.live_enabled", Setting::Bool(protected))
         .unwrap();
     std::fs::write(root.join("settings.json"), settings.to_json_string()).unwrap();
     let database = root.join("iptv.sqlite");
@@ -60,6 +69,27 @@ fn saved_fixture(home: &crate::isolated::Home) -> (Headless, std::path::PathBuf,
             },
         )
         .unwrap();
+    if protected {
+        // Generated PIN2468, salt0x63, PBKDF2-SHA256/210000. No user credential.
+        store
+            .set_parental_credential(&iptv_store_sqlite::parental::ParentalCredential {
+                salt: [0x63; 16],
+                verifier: [
+                    108, 253, 222, 238, 40, 38, 77, 8, 100, 135, 138, 42, 133, 48, 171, 236, 123,
+                    169, 134, 85, 199, 28, 212, 46, 152, 192, 13, 230, 58, 195, 156, 119,
+                ],
+                recovery_verifier: [0; 32],
+                failures: 0,
+                retry_after: 0,
+            })
+            .unwrap();
+        store
+            .set_parental_blocked(
+                &iptv_core::parental::Target::live(source.0, parsed.channels.items[0].id.as_str()),
+                true,
+            )
+            .unwrap();
+    }
     let id = store
         .schedule_recording(
             JobId(97),
@@ -414,5 +444,48 @@ fn back_returns_to_the_library_and_delete_handles_the_playing_file_after_consent
             .layout_nodes()
             .iter()
             .any(|n| n.kind == ViewKind::Native && n.id == player)
+    );
+}
+
+#[test]
+fn a_saved_recording_grant_revoked_during_preparation_never_reaches_the_native_player() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, _database, _id, props) = saved_fixture_with_protection(&home, true);
+    let before = iptv_app::player_opens(0);
+    let preparation = iptv_app::hold_source_preparation();
+    step(app.press("id:recording-job"));
+    step(app.wait_for("id:parental-layer"));
+    for digit in ["2", "4", "6", "8"] {
+        step(app.press_key(digit));
+    }
+    step(app.press("id:parental-layer >> text:Continue"));
+    step(app.wait_until(
+        "authorized saved source waiting for retirement",
+        Duration::from_secs(10),
+        |_| preparation.wait_entered(Duration::ZERO),
+    ));
+    iptv_app::lock_parental_content();
+    preparation.release();
+    // The selected playback is cleared by final admission. This follows the
+    // actual unlock dialog, so the test revokes a real verified content grant.
+    step(
+        app.wait_until("revoked source rejected", Duration::from_secs(5), |app| {
+            app.screen()
+                .count("id:recordings-return-playback")
+                .is_ok_and(|count| count == 0)
+        }),
+    );
+    app.run_for(Duration::from_millis(100)).unwrap();
+    assert_eq!(
+        iptv_app::player_opens(0),
+        before,
+        "no native source may be submitted after revocation"
+    );
+    assert!(
+        props
+            .lock()
+            .unwrap()
+            .get("source")
+            .is_none_or(Value::is_null)
     );
 }

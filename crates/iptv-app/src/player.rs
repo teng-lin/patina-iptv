@@ -611,16 +611,9 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
     }
 }
 
-fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
-    let stream = ui.player.stream(surface);
-    if stream.health.with_untracked(|h| h.session()) != session {
-        return; // the viewer moved on
-    }
-    stream.publication.update(|publication| publication.clear());
-    // Recheck timed grants after asynchronous resolution, before the decoder
-    // sees a stream. The runtime already checked current durable membership.
+fn source_allowed(ui: Ui, surface: usize) -> bool {
     let owner = crate::runtime();
-    let allowed = if surface == 0
+    if surface == 0
         && let Some((playing, _)) = ui.player.vod.get_untracked()
     {
         owner.parental_allowed(&iptv_runtime::vod::target(&playing.key))
@@ -644,7 +637,19 @@ fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
         ))
     } else {
         true
-    };
+    }
+}
+
+fn load(ui: Ui, surface: usize, session: u64, mut source: PlaySource) {
+    let stream = ui.player.stream(surface);
+    if stream.health.with_untracked(|h| h.session()) != session {
+        return; // the viewer moved on
+    }
+    stream.publication.update(|publication| publication.clear());
+    // Recheck timed grants after asynchronous resolution, before the decoder
+    // sees a stream. The runtime already checked current durable membership.
+    let owner = crate::runtime();
+    let allowed = source_allowed(ui, surface);
     if !allowed {
         stop_surface(ui, surface);
         return;
@@ -695,17 +700,9 @@ fn publish_source(ui: Ui, surface: usize, session: u64, source: PlaySource) {
     if stream.health.with_untracked(|h| h.session()) != session {
         return;
     }
-    if stream.health.with_untracked(|health| health.live()) {
-        let target = target(ui, surface)
-            .and_then(|(channel, _)| crate::parental_view::live_target(ui, channel))
-            .or_else(|| {
-                resume::source(ui)
-                    .map(|early| iptv_core::parental::Target::live(early.source_id, early.key))
-            });
-        if target.is_some_and(|target| !crate::runtime().parental_allowed(&target)) {
-            stop_surface(ui, surface);
-            return;
-        }
+    if !source_allowed(ui, surface) {
+        stop_surface(ui, surface);
+        return;
     }
     let (live, reconnect) = stream
         .health
