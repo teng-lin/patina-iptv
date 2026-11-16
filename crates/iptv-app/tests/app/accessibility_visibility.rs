@@ -19,6 +19,7 @@ struct NativeProps {
     players: Vec<NodeId>,
     removed: Vec<NodeId>,
     inserts: HashMap<NodeId, usize>,
+    scrolls: Vec<(NodeId, f32)>,
 }
 
 #[derive(Clone, Default)]
@@ -37,6 +38,12 @@ impl Exposure {
                 }
                 MountItem::Insert { child, .. } => *native.inserts.entry(*child).or_default() += 1,
                 MountItem::Remove { id } | MountItem::Delete { id } => native.removed.push(*id),
+                MountItem::Command {
+                    id,
+                    command: nsh_core::Command::ScrollTo { y, .. },
+                } => {
+                    native.scrolls.push((*id, y.0));
+                }
                 _ => {}
             }
         }
@@ -214,6 +221,37 @@ fn largest_text_pin_keeps_cancel_visible_and_dpad_has_no_invisible_stop() {
         );
         assert!(app.screen().matches("role:button[/Cancel/]").unwrap());
     }
+    // Editing a digit in the same phase must not reset a scrolled form.
+    // Use a shorter window to force the keypad's lower row off screen.
+    step(app.set_viewport(Size::new(px(960.0), px(320.0))));
+    for key in ["down", "down", "down", "right", "right"] {
+        step(app.press_key(key));
+    }
+    step(
+        app.wait_until("Continue is revealed", Duration::from_secs(3), |screen| {
+            inside(screen, "parental-continue", "parental-scroll")
+        }),
+    );
+    let scroll = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|n| n.test_id.as_deref() == Some("parental-scroll"))
+        .unwrap()
+        .id;
+    exposure.0.lock().unwrap().scrolls.clear();
+    step(app.press_key("2"));
+    assert!(
+        !exposure
+            .0
+            .lock()
+            .unwrap()
+            .scrolls
+            .iter()
+            .any(|(id, y)| *id == scroll && *y == 0.0),
+        "digit editing must not reset the scroll offset when the phase is unchanged"
+    );
+    step(app.set_viewport(Size::new(px(960.0), px(540.0))));
     // Saturating Down reaches the actual last control, with a visible focus
     // marker. An extra non-rendered keypad index used to swallow this focus.
     for _ in 0..6 {
@@ -291,6 +329,10 @@ fn modal_back_restores_channel_identity_after_reordering_and_recovery_can_cancel
     step(app.wait_for("text:Choose a new PIN"));
     step(app.press("text:Forgot PIN?"));
     assert!(app.screen().matches("label:Recovery code").unwrap());
+    // Each vertical arrow visits the next stacked control, including Continue.
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    step(app.wait_for("text:Enter the 32-character recovery code"));
     step(app.press_key("down"));
     step(app.press_key("enter"));
     step(app.wait_for_gone("text:Recover parental PIN", Duration::from_secs(3)));
@@ -348,6 +390,13 @@ fn first_run_large_text_exposes_source_choices_and_scrolls_focused_fields() {
     step(app.press_key("down"));
     assert!(inside(&app.screen(), "wizard-submit", "wizard-form"));
     assert!(app.screen().matches("role:button[/Add playlist/]").unwrap());
+    step(app.press("id:wizard-submit"));
+    assert!(
+        app.screen()
+            .matches("role:button[/Portal.*Fill this in/]")
+            .unwrap(),
+        "the field's validation error remains in its accessible name"
+    );
     step(app.back());
     step(app.wait_for("id:wizard-types-scroll"));
     step(app.back());

@@ -29,6 +29,16 @@ pub fn is_open(ui: Ui) -> bool {
     ui.parental.with(Option::is_some)
 }
 pub fn close(ui: Ui) {
+    // Credential changes can commit before their recovery notice returns.
+    // Keep the modal until that result is shown instead of discarding it.
+    if busy(ui) {
+        return;
+    }
+    abort(ui);
+}
+/// Lifecycle teardown must invalidate an in-flight authorization even when
+/// user dismissal is temporarily disabled during a credential write.
+pub fn abort(ui: Ui) {
     ui.parental.set(None);
     crate::runtime().parental_lock();
     dismiss_keyboard();
@@ -263,8 +273,8 @@ pub fn bind(ui: Ui) {
 pub fn key(ui: Ui, action: Action) {
     match action {
         Action::Back => close(ui),
-        Action::MoveUp => move_focus(ui, -3),
-        Action::MoveDown => move_focus(ui, 3),
+        Action::MoveUp => move_focus(ui, -vertical_step(ui)),
+        Action::MoveDown => move_focus(ui, vertical_step(ui)),
         Action::MoveLeft => move_focus(ui, -1),
         Action::MoveRight => move_focus(ui, 1),
         Action::Select => {
@@ -329,6 +339,15 @@ pub fn remote(ui: Ui, key: RemoteKey) {
         _ => {}
     }
 }
+fn vertical_step(ui: Ui) -> isize {
+    if managing(ui)
+        || phase(ui).is_some_and(|p| matches!(p, Phase::Recovery | Phase::RecoveryNotice))
+    {
+        1
+    } else {
+        3
+    }
+}
 fn move_focus(ui: Ui, step: isize) {
     ui.parental.update(|o| {
         if let Some(o) = o {
@@ -345,11 +364,22 @@ fn move_focus(ui: Ui, step: isize) {
     });
 }
 fn activate(ui: Ui, index: usize) {
+    if busy(ui) {
+        return;
+    }
     if ui
         .parental
         .with_untracked(|o| o.as_ref().is_some_and(|o| o.blocks.is_some()))
     {
         manage_pick(ui, index);
+        return;
+    }
+    if phase(ui).is_some_and(|phase| matches!(phase, Phase::Recovery | Phase::RecoveryNotice)) {
+        if cancel_focused(ui) {
+            close(ui);
+        } else {
+            submit(ui);
+        }
         return;
     }
     match index {
@@ -550,6 +580,11 @@ fn keypad(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
                     move || activate(ui, index),
                 )
                 .disabled(move || busy(ui))
+                .test_id(if index == 11 {
+                    "parental-continue"
+                } else {
+                    "parental-key"
+                })
                 .flex_1(),
             );
         }
@@ -582,12 +617,13 @@ fn credentials(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
                 .child(ui_kit::body(size,tr("Keep this recovery code private. A new code replaces the previous code.")))
                 .child(ui_kit::body(size,move||ui.parental.with(|o|o.as_ref()
                     .map_or(String::new(),|o|o.dialog.recovery.to_string()))))
-                .child(ui_kit::button(ui,size,tr("I saved the code"),move||focused(ui,0),move||finish(ui)))
+                .child(scrolling.control(ui_kit::button(ui,size,tr("I saved the code"),move||focused(ui,0),move||finish(ui)),move||focused(ui,0)))
         }))
         .child(when(move||phase(ui)==Some(Phase::Recovery),move||{
             view().gap(px(8.0)).child(ui_kit::field(size,input())
                 .test_id("parental-recovery-input").masked(true).max_length(32)
                 .label(move || tr("Recovery code").to_owned())
+                .border(px(1.0)).border_color(move||ui_kit::field_border(ui,focused(ui,0)))
                 .disabled(move || busy(ui))
                 .auto_correct(false).auto_capitalize(AutoCapitalize::None)
                 .placeholder(tr("Recovery code"))
@@ -623,8 +659,9 @@ pub fn layer(ui: Ui) -> View {
             move || is_open(ui),
             move || {
                 let scrolling = ui_kit::FocusScroll::new();
+                let current_phase = computed(move || phase(ui));
                 effect(move || {
-                    phase(ui);
+                    current_phase.get();
                     scrolling.reset();
                 });
                 view()
@@ -666,6 +703,7 @@ pub fn layer(ui: Ui) -> View {
                             move || close(ui),
                         )
                         .test_id("parental-cancel")
+                        .disabled(move || busy(ui))
                         .flex_shrink_0(),
                     )
             },

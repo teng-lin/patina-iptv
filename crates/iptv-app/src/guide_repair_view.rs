@@ -663,8 +663,8 @@ fn feeds(ui: Ui, size: Scale) -> impl IntoElement {
                         }))
                 },
             )
-            .estimated_item_size(move || size.px(ROW_TWO))
-            .h(move || size.px(ROW_TWO * 2.0))
+            .estimated_item_size(crate::list_rows::pitch(size, ROW_TWO))
+            .h(move || px(crate::list_rows::pitch(size, ROW_TWO)().0 * 2.0))
         },
     )
 }
@@ -712,8 +712,8 @@ fn indirect(ui: Ui, size: Scale) -> impl IntoElement {
                         }))
                 },
             )
-            .estimated_item_size(move || size.px(ROW_TWO))
-            .h(move || size.px(ROW_TWO * 2.0))
+            .estimated_item_size(crate::list_rows::pitch(size, ROW_TWO))
+            .h(move || px(crate::list_rows::pitch(size, ROW_TWO)().0 * 2.0))
         },
     )
 }

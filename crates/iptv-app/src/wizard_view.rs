@@ -382,6 +382,7 @@ fn choose_type(ui: Ui) -> impl IntoElement {
                     .role(AccessibilityRole::Button)
                     .accessible(true)
                     .label(move || words::kind_title(kind).to_owned())
+                    .hint(move || words::kind_detail(kind))
                     .on_press(move || {
                         ui.touched();
                         send(ui, WizardEvent::Tap(target));
@@ -448,12 +449,18 @@ fn field_row(ui: Ui, size: Scale, field: Field) -> View {
         .label(move || {
             let label = words::label(field);
             let content = shown_value(field, &value());
-            if content.is_empty() {
+            let name = if content.is_empty() {
                 label.to_owned()
             } else {
                 format!("{label} · {content}")
+            };
+            if let Some(error) = error() {
+                format!("{name} · {}", words::field_error(error))
+            } else {
+                name
             }
         })
+        .hint(move || words::placeholder(field))
         .flex_row()
         .items_center()
         .justify_start()

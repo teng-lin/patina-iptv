@@ -413,6 +413,7 @@ impl Dialog {
         } else {
             Phase::Unlock
         };
+        self.focus = 0;
         self.message = message;
     }
     pub fn notice(&mut self, code: zeroize::Zeroizing<String>) {
@@ -452,11 +453,13 @@ impl Dialog {
             Phase::Old => {
                 self.old = Some(self.input.take());
                 self.phase = Phase::New;
+                self.focus = 0;
                 Submission::None
             }
             Phase::New => {
                 self.new = Some(self.input.take());
                 self.phase = Phase::Confirm;
+                self.focus = 0;
                 Submission::None
             }
             Phase::Confirm => {
@@ -468,6 +471,7 @@ impl Dialog {
                     self.input.clear();
                     self.new = None;
                     self.phase = Phase::New;
+                    self.focus = 0;
                     self.message = "PINs did not match; choose a new PIN".into();
                     return Submission::None;
                 }
@@ -502,11 +506,15 @@ mod dialog_tests {
     fn setup_requires_confirmation_and_clears_mismatch() {
         let mut d = Dialog::new(Phase::New);
         enter(&mut d, "2468");
+        d.focus = 11;
         assert!(matches!(d.submit(), Submission::None));
         assert_eq!(d.phase, Phase::Confirm);
+        assert_eq!(d.focus, 0);
         enter(&mut d, "2469");
+        d.focus = 11;
         assert!(matches!(d.submit(), Submission::None));
         assert_eq!(d.phase, Phase::New);
+        assert_eq!(d.focus, 0);
         assert!(d.input.is_empty());
         enter(&mut d, "1357");
         d.submit();
@@ -514,6 +522,15 @@ mod dialog_tests {
         assert!(matches!(d.submit(), Submission::Change { old: None, .. }));
         assert!(d.input.is_empty());
         assert!(d.busy);
+        d.focus = 11;
+        d.fail("Retry".into());
+        assert_eq!(d.focus, 0);
+        let mut changing = Dialog::new(Phase::Old);
+        enter(&mut changing, "2468");
+        changing.focus = 11;
+        changing.submit();
+        assert_eq!(changing.phase, Phase::New);
+        assert_eq!(changing.focus, 0);
     }
     #[test]
     fn recovery_never_disables_protection_without_replacing_pin() {

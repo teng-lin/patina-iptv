@@ -2,6 +2,7 @@ import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.UiAutomation;
 import android.os.HandlerThread;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.accessibility.AccessibilityNodeInfo;
 import java.lang.reflect.Constructor;
 
@@ -49,7 +50,12 @@ public class AccessibilityActionProbe {
             AccessibilityServiceInfo info = automation.getServiceInfo();
             info.flags &= ~AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS;
             automation.setServiceInfo(info);
-            AccessibilityNodeInfo node = find(automation.getRootInActiveWindow(), args[0]);
+            AccessibilityNodeInfo node;
+            long deadline = SystemClock.uptimeMillis() + 2000;
+            do {
+                node = find(automation.getRootInActiveWindow(), args[0]);
+                if (node == null) SystemClock.sleep(50);
+            } while (node == null && SystemClock.uptimeMillis() < deadline);
             if (node == null) throw new IllegalStateException("No accessible node: " + args[0]);
             while (!node.isClickable() && node.getParent() != null) node = node.getParent();
             boolean focus = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS);

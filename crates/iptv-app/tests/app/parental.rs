@@ -51,7 +51,20 @@ fn setup_block_remote_unlock_change_and_recovery() {
     digits(&mut app, "2468");
     continue_entry(&mut app);
     digits(&mut app, "2468");
+    // Delay the credential commit so Back/Cancel races are deterministic.
+    let writer = crate::store_latency::hold_writer(&fixture.home);
     continue_entry(&mut app);
+    wait(&mut app, "Checking…");
+    assert!(
+        app.screen()
+            .accessibility_state("id:parental-cancel")
+            .unwrap()
+            .disabled
+    );
+    step(app.back());
+    assert!(app.shows("Checking…"));
+    assert!(app.press("id:parental-cancel").is_err());
+    writer.execute_batch("ROLLBACK").unwrap();
     wait(&mut app, "Save your recovery code");
     let code = app
         .screen()

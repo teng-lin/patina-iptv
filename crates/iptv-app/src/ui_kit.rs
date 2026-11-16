@@ -251,13 +251,29 @@ impl FocusScroll {
                 return;
             }
             let top = item.page.y.0 - viewport.page.y.0;
-            let bottom = top + item.frame.size.height.0 - viewport.frame.size.height.0;
-            let delta = if top < 0.0 { top } else { bottom.max(0.0) };
+            let delta = reveal_delta(top, item.frame.size.height.0, viewport.frame.size.height.0);
             if delta.abs() > 0.5 {
-                self.handle
-                    .scroll_to_offset(px((self.offset.get_untracked() + delta).max(0.0)), false);
+                let offset = (self.offset.get_untracked() + delta).max(0.0);
+                self.offset.set(offset);
+                self.handle.scroll_to_offset(px(offset), false);
             }
         }));
+    }
+}
+
+fn reveal_delta(top: f32, height: f32, viewport: f32) -> f32 {
+    if viewport <= 0.0 {
+        return 0.0;
+    }
+    let bottom = top + height - viewport;
+    // A taller control cannot fit wholly. Keep its already visible portion
+    // instead of alternating between its top and bottom on later layout ticks.
+    if height > viewport {
+        if top > 0.0 { top } else { bottom.min(0.0) }
+    } else if top < 0.0 {
+        top
+    } else {
+        bottom.max(0.0)
     }
 }
 
@@ -429,6 +445,16 @@ pub fn header(
 mod tests {
     use super::*;
     use crate::fonts::{HEADER_BODY, HEADER_TIMES, HEADER_TITLE};
+
+    #[test]
+    fn revealing_a_tall_control_does_not_oscillate_between_edges() {
+        assert_eq!(reveal_delta(40.0, 500.0, 300.0), 40.0);
+        assert_eq!(reveal_delta(0.0, 500.0, 300.0), 0.0);
+        assert_eq!(reveal_delta(-100.0, 500.0, 300.0), 0.0);
+        assert_eq!(reveal_delta(-240.0, 500.0, 300.0), -40.0);
+        assert_eq!(reveal_delta(-10.0, 40.0, 300.0), -10.0);
+        assert_eq!(reveal_delta(280.0, 40.0, 300.0), 20.0);
+    }
 
     #[test]
     fn the_kit_uses_the_lists_scale() {

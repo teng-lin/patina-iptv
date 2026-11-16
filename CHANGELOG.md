@@ -24,7 +24,8 @@ is below 1.0, a minor release may change behaviour.
   small-file writes, including during unwinding, to avoid racing SQLCipher's
   process-exit cleanup.
 - Keep enlarged PIN dialogs and recording actions reachable, show D-pad focus
-  after touch entry, and announce on-demand selection and recovery fields.
+  after touch entry, announce on-demand selection and recovery fields, and
+  preserve the recovery notice while a credential change is committing.
 
 ## [0.1.3] - 2026-11-15
 

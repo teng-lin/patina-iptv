@@ -414,7 +414,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     virtual_list(count, row)
                         .estimated_item_size(list_rows::pitch(size, ROW))
                         .element_ref(&list)
-                        .h(move || px(count().clamp(1, MAX_ROWS) as f32 * size.whole(ROW))),
+                        .h(move || {
+                            px(count().clamp(1, MAX_ROWS) as f32 * list_rows::pitch(size, ROW)().0)
+                        })
+                        .max_h(move || px(window().height.0 * 0.7)),
                 ),
         )
 }
