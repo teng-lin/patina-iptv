@@ -2,6 +2,7 @@
 //! (a press or a drag seeks there, `seek.rs`), live how far the programme
 //! is; its times at both ends.
 
+use crate::i18n::tr;
 use iptv_core::play_bar::seek_target;
 use nsh_core::prelude::*;
 use nsh_core::{TouchEvent, TouchPhase};
@@ -121,6 +122,41 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
                 .child(
                     view()
                         .test_id("play-bar-seek")
+                        .role(AccessibilityRole::Adjustable)
+                        .label(move || {
+                            format!("{} · {} / {}", tr("Playback position"), ends().0, ends().1)
+                        })
+                        .accessibility_actions(vec![
+                            nsh_core::AccessibilityActionDef {
+                                name: "increment".into(),
+                                label: None,
+                            },
+                            nsh_core::AccessibilityActionDef {
+                                name: "decrement".into(),
+                                label: None,
+                            },
+                        ])
+                        .on_accessibility_action(move |action: &str| match action {
+                            "increment" => super::seek_timeline(ui, true),
+                            "decrement" => super::seek_timeline(ui, false),
+                            _ => {}
+                        })
+                        .accessibility_state(move || AccessibilityState {
+                            selected: super::focused(ui, iptv_core::play_bar::Control::Timeline),
+                            disabled: !catch_up(),
+                            ..Default::default()
+                        })
+                        .border(px(2.0))
+                        .border_color(move || {
+                            tint(
+                                ui.theme.with(|t| t.accent.light),
+                                if super::focused(ui, iptv_core::play_bar::Control::Timeline) {
+                                    255
+                                } else {
+                                    0
+                                },
+                            )
+                        })
                         .absolute()
                         .inset_0()
                         .rounded(px(RADIUS))

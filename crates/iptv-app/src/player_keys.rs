@@ -132,6 +132,9 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
         }
         Action::ShowPanels => ui.update_panels(|p, now| p.show_card(now)),
         Action::ShowControls if !fullscreen => return false,
+        Action::ShowControls if nsh_core::prelude::idiom() == nsh_core::platform::Idiom::Tv => {
+            crate::play_bar::remote(ui)
+        }
         Action::ShowControls if key == RemoteKey::Menu => {
             ui.update_panels(|p, now| p.toggle_controls(now))
         }

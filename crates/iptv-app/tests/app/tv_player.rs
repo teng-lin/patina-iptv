@@ -3,9 +3,8 @@
 //! desktop host reports no releases): entering full screen and zapping
 //! show the compact banner, which hides by itself; OK shows the info card
 //! with its action cards and one time line, OK again hides it; Right
-//! reaches the cards and OK presses one; Menu (`M`) shows the control
-//! strip in place of the card and hides it again; Shift + Right (Long
-//! Right) opens the history. No play bar on a TV.
+//! reaches the cards and OK presses one; Menu (`M`) opens the shared play
+//! bar and hides it again; Shift + Right (Long Right) opens history.
 //!
 //! Synthetic data only: a three-channel playlist "picked" from a file.
 
@@ -114,14 +113,20 @@ fn the_remote_shows_one_time_line_a_banner_on_zap_the_card_on_ok_and_the_strip_o
     step(app.press_key("up"));
     step(app.wait_for(&format!("{CARD} >> text:/Test Channel One$/")));
 
-    // Menu: the control strip in place of the card, no time line; Menu
-    // again hides it.
+    // Menu opens the same bar as desktop/tablet, with remote focus on
+    // Play/pause. Menu again hides it without changing playback.
     step(app.press_key("m"));
-    step(app.wait_for("text:/M or Esc hide/"));
+    step(app.wait_for("id:play-bar-layer"));
     step(gone(&mut app, CARD));
-    assert_eq!(count(&app, LINE), 0, "the strip has no time line");
+    assert_eq!(count(&app, LINE), 0, "the info card's time line is hidden");
+    assert!(
+        app.screen()
+            .accessibility_state("id:play-bar-play-pause")
+            .unwrap()
+            .selected
+    );
     step(app.press_key("m"));
-    step(gone(&mut app, "text:/M or Esc hide/"));
+    step(gone(&mut app, "id:play-bar-layer"));
 
     // Shift + Right (Long Right on a remote): the history.
     step(app.press_key("shift+right"));
@@ -131,7 +136,7 @@ fn the_remote_shows_one_time_line_a_banner_on_zap_the_card_on_ok_and_the_strip_o
 
     assert!(
         !app.screen().matches("label:Mute").unwrap(),
-        "no play bar on a TV"
+        "the shared bar stays hidden after Menu closes it"
     );
     // Back with nothing over the video: the guide.
     step(app.press_key("backspace"));

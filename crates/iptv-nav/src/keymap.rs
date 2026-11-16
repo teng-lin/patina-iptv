@@ -321,6 +321,87 @@ mod tests {
     }
 
     #[test]
+    fn a_late_release_opens_controls_when_the_long_press_timer_has_not_run() {
+        use crate::{Phase, PressDetector};
+        let keys = Keymap::for_profile(Profile::Remote);
+        for context in [Player, Controls] {
+            let short = if context == Player {
+                Action::ShowPanels
+            } else {
+                Action::Select
+            };
+            for (repeat_at, release_at, expected) in [
+                (Some(399), 404, Action::ShowControls),
+                (None, 400, Action::ShowControls),
+                (None, 399, short),
+            ] {
+                let mut detector = PressDetector::new(400);
+                assert_eq!(detector.feed(RemoteKey::Ok, Phase::Down, 0, true), None);
+                // Native Android can report its repeat just before the threshold,
+                // with release queued ahead of the UI timer under rendering load.
+                if let Some(at) = repeat_at {
+                    assert_eq!(detector.feed(RemoteKey::Ok, Phase::Repeat, at, true), None);
+                }
+                let released = detector.feed(RemoteKey::Ok, Phase::Up, release_at, true);
+                assert_eq!(
+                    released.and_then(|(key, press)| keys.resolve(context, key, press)),
+                    Some(expected),
+                    "{context:?}: release at {release_at} respects the hold threshold"
+                );
+                assert_eq!(detector.poll(500), None, "late timer cannot fire twice");
+                assert_eq!(detector.feed(RemoteKey::Ok, Phase::Up, 501, true), None);
+            }
+        }
+    }
+
+    #[test]
+    fn long_ok_opens_controls_once_even_after_the_context_changes() {
+        use crate::{Phase, PressDetector};
+        let keys = Keymap::for_profile(Profile::Remote);
+        for repeated in [false, true] {
+            let mut detector = PressDetector::new(400);
+            assert_eq!(
+                detector.feed(
+                    RemoteKey::Ok,
+                    Phase::Down,
+                    0,
+                    keys.has_long(Player, RemoteKey::Ok)
+                ),
+                None
+            );
+            let long = if repeated {
+                detector.feed(RemoteKey::Ok, Phase::Repeat, 400, true)
+            } else {
+                detector.poll(400)
+            };
+            assert_eq!(
+                long.and_then(|(key, press)| keys.resolve(Player, key, press)),
+                Some(Action::ShowControls)
+            );
+            // Opening the bar changes Player to Controls before release.
+            assert_eq!(
+                detector.feed(
+                    RemoteKey::Ok,
+                    Phase::Repeat,
+                    600,
+                    keys.has_long(Controls, RemoteKey::Ok)
+                ),
+                None
+            );
+            assert_eq!(
+                detector.feed(
+                    RemoteKey::Ok,
+                    Phase::Up,
+                    700,
+                    keys.has_long(Controls, RemoteKey::Ok)
+                ),
+                None
+            );
+            assert_eq!(detector.poll(800), None);
+        }
+    }
+
+    #[test]
     fn search_opens_from_everywhere() {
         let k = Keymap::defaults();
         for ctx in [Guide, Groups, Player, Controls, ChannelList, Menu] {

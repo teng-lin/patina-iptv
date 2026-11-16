@@ -357,6 +357,8 @@ pub enum Pane {
     Rail,
     Groups,
     Guide,
+    /// The existing playing video above the first guide row.
+    Preview,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -484,7 +486,7 @@ impl Focus {
     /// the groups column move through [`Focus::navigate`].
     pub fn apply(&mut self, m: Move, s: &dyn Schedule) {
         match (self.pane, m) {
-            (Pane::Rail | Pane::Groups, _) => return,
+            (Pane::Rail | Pane::Groups | Pane::Preview, _) => return,
             // Rows keep the time column, but not before a row's floor: on a
             // row without catch-up the focus is on now's programme at least.
             (Pane::Guide, Move::Up) => {

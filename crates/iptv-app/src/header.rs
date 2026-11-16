@@ -62,8 +62,23 @@ fn preview(ui: Ui, size: Scale) -> impl IntoElement {
     // Transparent while something plays: the video layer sits under this
     // rectangle in guide mode. A tap opens full screen.
     let idle = move || ui.playing.get().is_none();
+    let focused = move || ui.keys_shown() && ui.focus.with(|f| f.pane == Pane::Preview);
     view()
+        .test_id("guide-preview")
         .role(AccessibilityRole::Button)
+        .label(move || tr("Back to the player"))
+        .accessibility_state(move || AccessibilityState {
+            selected: focused(),
+            disabled: idle(),
+            ..Default::default()
+        })
+        .border(px(3.0))
+        .border_color(move || {
+            tint(
+                ui.theme.with(|t| t.accent.light),
+                if focused() { 255 } else { 0 },
+            )
+        })
         .w(move || px(header_now().1))
         .h(move || px(header_now().2))
         .rounded(px(PREVIEW_RADIUS))
@@ -81,6 +96,7 @@ fn preview(ui: Ui, size: Scale) -> impl IntoElement {
             ui.touched();
             if ui.playing.get().is_some() {
                 ui.mode.set(crate::ViewMode::Fullscreen);
+                ui.show_playing();
             }
         })
         .child(

@@ -22,6 +22,9 @@ is below 1.0, a minor release may change behaviour.
   repeats exactly the failed page, details or episode playback (keeping the
   episode and a restart), with fresh details, link and parental check; it
   never plays from a playlist deleted and re-added or edited since.
+- Open the shared playback bar on Android TV with long OK or Menu and navigate
+  its enabled controls with the D-pad. Up from the guide's first channel focuses
+  the mini-player; OK returns the current stream to full screen.
 
 ### Changed
 

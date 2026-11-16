@@ -480,14 +480,15 @@ fn inactive_player_ui_stays_out_of_accessibility_and_returns_without_recreating_
     exposure.shown(app, "player-card", true);
     exposure.shown(app, "player-controls", false);
     step(app.press_key("m"));
-    exposure.shown(app, "player-controls", true);
-    step(app.press("text:Picture size · Normal"));
+    exposure.shown(app, "player-panels", false);
+    exposure.shown(app, "play-bar-layer", true);
+    step(app.press("label:Picture size"));
     exposure.shown(app, "chooser-layer", true);
     exposure.shown(app, "player-panels", false);
     exposure.shown(app, "video", false);
     step(app.back());
     exposure.shown(app, "chooser-layer", false);
-    exposure.shown(app, "player-controls", true);
+    exposure.shown(app, "play-bar-layer", true);
     step(app.back());
     step(app.back());
     exposure.shown(app, "guide-ui", true);

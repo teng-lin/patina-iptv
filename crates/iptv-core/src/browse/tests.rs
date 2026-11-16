@@ -632,3 +632,30 @@ fn a_removed_shelf_focus_returns_to_tv_instead_of_another_row() {
         assert_eq!(screen.focus.pane, Pane::Groups);
     }
 }
+
+#[test]
+fn preview_focus_keeps_the_guide_anchor_and_returns_the_existing_player() {
+    let mut screen = Screen::new();
+    assert!(!screen.focus.focus_preview(false));
+    screen.focus.channel = 1;
+    assert!(!screen.focus.focus_preview(true));
+    screen.focus.channel = 0;
+    let cursor = screen.focus.cursor;
+    assert!(screen.focus.focus_preview(true));
+    assert!(!screen.focus.columns_shown());
+    assert_eq!(screen.ok(), Outcome::ReturnToPlayer);
+    screen.rebuild(true);
+    assert_eq!(screen.focus.pane, Pane::Preview);
+    assert_eq!(screen.mv(Move::Down), Outcome::Moved);
+    assert_eq!(
+        (screen.focus.pane, screen.focus.channel, screen.focus.cursor),
+        (Pane::Guide, 0, cursor)
+    );
+    assert!(screen.focus.focus_preview(true));
+    assert_eq!(screen.back(), Outcome::Moved);
+    assert_eq!(screen.focus.pane, Pane::Guide);
+    assert!(screen.focus.focus_preview(true));
+    screen.focus.retain_preview(false);
+    assert_eq!(screen.focus.pane, Pane::Guide);
+    assert_eq!(screen.focus.channel, 0);
+}

@@ -1,5 +1,5 @@
 //! The pointer's play bar over full-screen video (desktop mouse, tablet
-//! touch; never a TV remote): when it shows and when it hides on its own,
+//! touch and TV remote): when it shows and when it hides on its own,
 //! and where a press on its progress bar seeks to.
 //!
 //! The mouse moving over the video shows it; a tap (or a click) on the
@@ -12,9 +12,31 @@
 /// How long the bar stays after the last pointer input.
 pub const HIDE_AFTER_MS: u64 = 3_000;
 
+/// Stable identities shared by pointer buttons and remote focus. Hosts supply
+/// the currently enabled controls; focus never depends on a rendered index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Control {
+    Mute,
+    Rewind,
+    PlayPause,
+    Forward,
+    Record,
+    Favourite,
+    Tracks,
+    Details,
+    Picture,
+    Channels,
+    Multiview,
+    Pip,
+    Guide,
+    Fullscreen,
+    Timeline,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PlayBar {
     pub shown: bool,
+    pub focus: Option<Control>,
     /// The mouse is over the bar: it stays.
     pub hovered: bool,
     /// A popup it opened is open: it stays.
@@ -26,6 +48,7 @@ impl PlayBar {
     /// The mouse moved over the video.
     pub fn pointer_moved(&mut self, now_ms: u64) {
         self.shown = true;
+        self.focus = None;
         self.restart(now_ms);
     }
 
@@ -36,8 +59,37 @@ impl PlayBar {
             self.hide();
         } else {
             self.shown = true;
+            self.focus = None;
             self.restart(now_ms);
         }
+    }
+
+    /// Explicit remote activation opens the same bar with transport focus.
+    pub fn remote(&mut self, now_ms: u64) {
+        self.shown = true;
+        self.hovered = false;
+        self.focus = Some(Control::PlayPause);
+        self.restart(now_ms);
+    }
+
+    pub fn focus_control(&mut self, control: Control, now_ms: u64) {
+        self.focus = Some(control);
+        self.used(now_ms);
+    }
+
+    /// Traverse available controls by identity, including after capabilities
+    /// change while the bar is visible.
+    pub fn move_focus(&mut self, step: isize, enabled: &[Control], now_ms: u64) {
+        if enabled.is_empty() {
+            return;
+        }
+        let current = self
+            .focus
+            .and_then(|c| enabled.iter().position(|v| *v == c))
+            .or_else(|| enabled.iter().position(|c| *c == Control::PlayPause))
+            .unwrap_or(0);
+        let next = (current as isize + step).clamp(0, enabled.len() as isize - 1) as usize;
+        self.focus_control(enabled[next], now_ms);
     }
 
     /// One of the bar's controls was used: it stays a while longer.
@@ -66,6 +118,7 @@ impl PlayBar {
 
     pub fn hide(&mut self) {
         self.shown = false;
+        self.focus = None;
         self.hovered = false;
         self.hide_at_ms = None;
     }
@@ -176,6 +229,24 @@ mod tests {
         bar.used(3_000);
         assert!(!bar.shown);
         assert_eq!(bar.hide_at_ms(), None);
+    }
+
+    #[test]
+    fn remote_focus_skips_unavailable_controls_and_recovers_by_identity() {
+        use Control::*;
+        let mut bar = PlayBar::default();
+        bar.remote(0);
+        assert_eq!(bar.focus, Some(PlayPause));
+        bar.move_focus(1, &[Mute, PlayPause, Favourite, Guide], 100);
+        assert_eq!(bar.focus, Some(Favourite));
+        // Favourite disappears: recover from transport, not its old index.
+        bar.move_focus(1, &[Mute, PlayPause, Picture, Guide], 200);
+        assert_eq!(bar.focus, Some(Picture));
+        bar.move_focus(-99, &[Mute, PlayPause, Picture, Guide], 300);
+        assert_eq!(bar.focus, Some(Mute));
+        assert!(!bar.tick(3_299));
+        assert!(bar.tick(3_300));
+        assert_eq!(bar.focus, None);
     }
 
     #[test]
