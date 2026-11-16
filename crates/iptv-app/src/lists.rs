@@ -145,13 +145,14 @@ fn keep_list(focus: Focus, list: Rc<ChannelList>, catalog: Rc<dyn Schedule>) -> 
 /// After a catalog swap: the same list and channel by identity, at the new
 /// catalog's now, with the same column focused.
 pub fn restore(ui: Ui, kept: Kept) {
-    let (focus, list) = restored_list(
+    let (mut focus, list) = restored_list(
         kept,
         crate::schedule(),
         &crate::favorites::favorite_channels(),
         &crate::favorites::recent_channels(),
         crate::time::now_minute(),
     );
+    focus.retain_rail(&rail_untracked(ui));
     batch(|| {
         ui.list.set(list);
         ui.focus.set(focus);
@@ -448,6 +449,46 @@ mod identity_tests {
             let kept = keep_list(focus, list, catalog.clone());
             let (_, list) = restored_list(kept, catalog.clone(), &[2], &[2], 0);
             assert_eq!(keys(catalog.clone(), list), ["c"]);
+        }
+    }
+
+    #[test]
+    fn a_catalogue_bookmark_retains_rail_action_identity_as_vod_rows_change() {
+        for item in [RailItem::Recordings, RailItem::Settings, RailItem::Movies] {
+            let before: Rc<dyn Schedule> = Rc::new(catalog(&[("Generated", &["a", "b"])]));
+            let mut focus = Focus::at(0);
+            focus.pane = Pane::Rail;
+            focus.rail = item;
+            focus.channel = 1;
+            let list = Rc::new(ChannelList::build(focus.group, &*before, &[], &[]));
+            let kept = keep_list(focus, list, before);
+            let after: Rc<dyn Schedule> = Rc::new(catalog(&[("Generated", &["b", "a"])]));
+            let (mut restored, list) = restored_list(kept, after.clone(), &[], &[], 60);
+            assert_eq!(
+                restored.rail, item,
+                "bookmark stores the action, not its old position"
+            );
+            restored.retain_rail(&rail_items(VodAvailability {
+                shown: true,
+                any: true,
+            }));
+            assert_eq!(restored.rail, item);
+            restored.retain_rail(&rail_items(VodAvailability::default()));
+            assert_eq!(
+                restored.rail,
+                if item == RailItem::Movies {
+                    RailItem::Tv
+                } else {
+                    item
+                }
+            );
+            assert_eq!(restored.pane, Pane::Rail);
+            assert_eq!(
+                ListView::new(after, list)
+                    .channel_key(restored.channel)
+                    .as_deref(),
+                Some("b")
+            );
         }
     }
 }

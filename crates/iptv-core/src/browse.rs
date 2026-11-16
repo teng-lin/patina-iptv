@@ -103,15 +103,24 @@ pub fn rail_items(vod: VodAvailability) -> Vec<RailItem> {
 }
 
 /// The rail's current item (TV): where Back from the groups focuses it.
-pub fn rail_home(items: &[RailItem]) -> usize {
-    items.iter().position(|&i| i == RailItem::Tv).unwrap_or(0)
+pub fn rail_home(items: &[RailItem]) -> RailItem {
+    if items.contains(&RailItem::Tv) {
+        RailItem::Tv
+    } else {
+        items
+            .iter()
+            .copied()
+            .find(|item| item.enabled())
+            .unwrap_or(RailItem::Tv)
+    }
 }
 
 /// The rail's Search: where Left from the groups focuses it.
-pub fn rail_search(items: &[RailItem]) -> usize {
+pub fn rail_search(items: &[RailItem]) -> RailItem {
     items
         .iter()
-        .position(|&i| i == RailItem::Search)
+        .copied()
+        .find(|&i| i == RailItem::Search)
         .unwrap_or_else(|| rail_home(items))
 }
 
@@ -147,6 +156,14 @@ pub enum Outcome {
 }
 
 impl Focus {
+    /// Retain the same rail action as shelves appear or disappear. A removed
+    /// or disabled action returns to TV rather than borrowing another row.
+    pub fn retain_rail(&mut self, items: &[RailItem]) {
+        if !items.contains(&self.rail) || !self.rail.enabled() {
+            self.rail = rail_home(items);
+        }
+    }
+
     /// Whether the rail and the groups column are shown.
     pub fn columns_shown(&self) -> bool {
         self.pane != Pane::Guide
@@ -154,6 +171,7 @@ impl Focus {
 
     /// A direction on the guide screen. `list` is the list the guide shows.
     pub fn navigate(&mut self, m: Move, cols: &Columns, list: &dyn Schedule) -> Outcome {
+        self.retain_rail(cols.rail);
         self.hint = false;
         match (self.pane, m) {
             (Pane::Guide, _) => {
@@ -195,6 +213,7 @@ impl Focus {
 
     /// OK on the guide screen.
     pub fn ok(&mut self, cols: &Columns, list: &dyn Schedule) -> Outcome {
+        self.retain_rail(cols.rail);
         self.hint = false;
         match self.pane {
             Pane::Guide => Outcome::Watch,
@@ -205,12 +224,12 @@ impl Focus {
                 self.hint = true;
                 Outcome::Committed
             }
-            Pane::Rail => match cols.rail.get(self.rail) {
-                Some(RailItem::Tv) => {
+            Pane::Rail => match self.rail {
+                RailItem::Tv => {
                     self.pane = Pane::Groups;
                     Outcome::Moved
                 }
-                Some(&item) if item.enabled() => Outcome::Open(item),
+                item if item.enabled() && cols.rail.contains(&item) => Outcome::Open(item),
                 _ => Outcome::None,
             },
         }
@@ -290,7 +309,7 @@ impl Focus {
         match cols.rail.get(index) {
             Some(item) if item.enabled() => {
                 self.pane = Pane::Rail;
-                self.rail = index;
+                self.rail = *item;
                 self.ok(cols, list)
             }
             _ => Outcome::None,
@@ -326,11 +345,14 @@ impl Focus {
 }
 
 /// The next enabled rail item from `from` in direction `step`, or `from`.
-fn rail_step(items: &[RailItem], from: usize, step: isize) -> usize {
-    let mut i = from as isize + step;
+fn rail_step(items: &[RailItem], from: RailItem, step: isize) -> RailItem {
+    let Some(position) = items.iter().position(|&item| item == from) else {
+        return rail_home(items);
+    };
+    let mut i = position as isize + step;
     while i >= 0 && (i as usize) < items.len() {
         if items[i as usize].enabled() {
-            return i as usize;
+            return items[i as usize];
         }
         i += step;
     }

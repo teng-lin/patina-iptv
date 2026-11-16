@@ -134,7 +134,7 @@ fn left_from_the_live_programme_opens_the_groups_and_the_rail() {
     // Left again: the rail, on Search; OK searches.
     assert_eq!(s.mv(Move::Left), Outcome::Moved);
     assert_eq!(s.focus.pane, Pane::Rail);
-    assert_eq!(s.rail[s.focus.rail], RailItem::Search);
+    assert_eq!(s.focus.rail, RailItem::Search);
     assert_eq!(s.ok(), Outcome::Open(RailItem::Search));
 }
 
@@ -227,7 +227,7 @@ fn back_walks_hint_guide_groups_rail_then_leaves() {
     assert_eq!(s.focus.pane, Pane::Groups);
     assert_eq!(s.back(), Outcome::Moved);
     assert_eq!(s.focus.pane, Pane::Rail);
-    assert_eq!(s.rail[s.focus.rail], RailItem::Tv, "the rail opens on TV");
+    assert_eq!(s.focus.rail, RailItem::Tv, "the rail opens on TV");
     assert_eq!(s.back(), Outcome::Leave);
 }
 
@@ -289,12 +289,12 @@ fn the_rail_skips_items_without_a_screen() {
     s.focus.open_groups();
     assert_eq!(s.mv(Move::Left), Outcome::Moved);
     assert_eq!(s.focus.pane, Pane::Rail);
-    assert_eq!(s.rail[s.focus.rail], RailItem::Search);
+    assert_eq!(s.focus.rail, RailItem::Search);
     assert_eq!(s.mv(Move::Down), Outcome::Moved);
-    assert_eq!(s.rail[s.focus.rail], RailItem::Tv);
+    assert_eq!(s.focus.rail, RailItem::Tv);
     assert_eq!(s.mv(Move::Down), Outcome::Moved);
     assert_eq!(
-        s.rail[s.focus.rail],
+        s.focus.rail,
         RailItem::Recordings,
         "Recordings has its own screen"
     );
@@ -302,12 +302,12 @@ fn the_rail_skips_items_without_a_screen() {
     s.mv(Move::Down);
     assert_eq!(s.ok(), Outcome::Open(RailItem::Playlists));
     s.mv(Move::Down);
-    assert_eq!(s.rail[s.focus.rail], RailItem::Settings);
+    assert_eq!(s.focus.rail, RailItem::Settings);
     assert_eq!(s.mv(Move::Down), Outcome::None, "Settings is last");
     s.mv(Move::Up);
     s.mv(Move::Up);
     s.mv(Move::Up);
-    assert_eq!(s.rail[s.focus.rail], RailItem::Tv);
+    assert_eq!(s.focus.rail, RailItem::Tv);
     s.mv(Move::Up);
     assert_eq!(s.ok(), Outcome::Open(RailItem::Search));
     assert_eq!(s.mv(Move::Left), Outcome::None);
@@ -356,7 +356,7 @@ fn rail_items_follow_the_playlist() {
     let items = rail_items(both);
     assert_eq!(
         rail_home(&items),
-        1,
+        RailItem::Tv,
         "TV stays home: discovery entries do not replace the guide"
     );
     let cols = Columns {
@@ -565,4 +565,70 @@ fn the_groups_back_button_opens_the_rail_as_back_does() {
     assert_eq!(s.focus.pane, Pane::Rail);
     assert_eq!(s.focus.rail, by_back.rail);
     assert!(!s.focus.hint, "the hint goes");
+}
+
+#[test]
+fn dynamic_shelves_preserve_recordings_and_settings_action_identity() {
+    for item in [RailItem::Recordings, RailItem::Settings] {
+        let mut screen = Screen::new();
+        screen.focus.pane = Pane::Rail;
+        screen.focus.rail = item;
+        for available in [
+            VodAvailability {
+                shown: false,
+                any: true,
+            },
+            VodAvailability {
+                shown: true,
+                any: true,
+            },
+            VodAvailability::default(),
+        ] {
+            screen.rail = rail_items(available);
+            screen.focus.retain_rail(&screen.rail);
+            assert_eq!(screen.focus.rail, item);
+            assert_eq!(
+                screen.ok(),
+                Outcome::Open(item),
+                "availability must not change OK's action"
+            );
+        }
+        if item == RailItem::Settings {
+            assert_eq!(screen.mv(Move::Up), Outcome::Moved);
+            assert_eq!(screen.focus.rail, RailItem::Playlists);
+            assert_eq!(screen.mv(Move::Down), Outcome::Moved);
+            assert_eq!(screen.focus.rail, RailItem::Settings);
+        }
+    }
+}
+
+#[test]
+fn a_removed_shelf_focus_returns_to_tv_instead_of_another_row() {
+    for (removed, available) in [
+        (RailItem::Continue, VodAvailability::default()),
+        (RailItem::Recent, VodAvailability::default()),
+        (
+            RailItem::Movies,
+            VodAvailability {
+                shown: false,
+                any: true,
+            },
+        ),
+        (
+            RailItem::Shows,
+            VodAvailability {
+                shown: false,
+                any: true,
+            },
+        ),
+    ] {
+        let mut screen = Screen::new();
+        screen.focus.pane = Pane::Rail;
+        screen.focus.rail = removed;
+        screen.rail = rail_items(available);
+        screen.focus.retain_rail(&screen.rail);
+        assert_eq!(screen.focus.rail, RailItem::Tv, "removed {removed:?}");
+        assert_eq!(screen.ok(), Outcome::Moved);
+        assert_eq!(screen.focus.pane, Pane::Groups);
+    }
 }
