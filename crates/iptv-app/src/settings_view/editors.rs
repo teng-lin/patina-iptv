@@ -119,14 +119,14 @@ fn side(ui: Ui, size: Scale, width: f32) -> View {
         .pt_safe_area()
         .p(move || size.px(14.0))
         .gap(move || size.px(4.0))
-        .bg(move || rgb(ui.theme.with(|t| t.background.alt)))
+        .bg(move || rgb(ui.app.theme.with(|t| t.background.alt)))
 }
 
 /// A dialog in the middle over a backdrop.
 fn dialog(ui: Ui, size: Scale) -> View {
     ui_kit::card(ui, size, DIALOG_W)
         .gap(move || size.px(14.0))
-        .bg(move || rgb(ui.theme.with(|t| t.background.alt)))
+        .bg(move || rgb(ui.app.theme.with(|t| t.background.alt)))
 }
 
 /// A choice: the variants, the current one marked; on the right like the
@@ -318,7 +318,7 @@ fn stepper(ui: Ui) -> impl IntoElement {
                         .child(step_button(ui, size, "−", step(-1)))
                         .child(
                             ui_kit::title(size, move || format!("◀  {}  ▶", number_text(ui).0))
-                                .text_color(move || rgb(ui.theme.with(|t| t.accent.light))),
+                                .text_color(move || rgb(ui.app.theme.with(|t| t.accent.light))),
                         )
                         .child(step_button(ui, size, "+", step(1))),
                 )

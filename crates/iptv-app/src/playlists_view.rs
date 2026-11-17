@@ -45,8 +45,8 @@ pub fn open(ui: Ui) {
     if is_open(ui) || crate::wizard_view::is_open(ui) {
         return;
     }
-    let mut screen = Screen::new(load(), ui.library.shown.get_untracked());
-    if ui.library.all.get_untracked() {
+    let mut screen = Screen::new(load(), ui.app.library.shown.get_untracked());
+    if ui.app.library.all.get_untracked() {
         screen.focus_all();
     }
     ui.playlists.set(Some(screen));
@@ -266,8 +266,8 @@ fn contents_hidden(ui: Ui) -> bool {
 pub fn layer(ui: Ui) -> impl IntoElement {
     // What is stored changed (refreshed, renamed, deleted, added): reload.
     effect(move || {
-        ui.library.version.get();
-        ui.settings.get();
+        ui.app.library.version.get();
+        ui.app.settings.get();
         if ui.playlists.with_untracked(Option::is_some) {
             let rows = load();
             ui.playlists.update(|s| {
@@ -279,7 +279,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     });
     // New details checked: saved closes the form, refused keeps it.
     effect(move || {
-        let ended = ui.library.activity.with(|a| {
+        let ended = ui.app.library.activity.with(|a| {
             a.iter()
                 .filter_map(|(id, act)| match act {
                     Activity::Done(Ok(_)) => Some((*id, true)),
@@ -373,17 +373,18 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
     let playlist = move || state(ui, |s| s.rows().get(index).cloned()).flatten();
     let item = move || state(ui, |s| s.items().get(index).copied()).flatten();
     let refreshing = move || {
-        ui.library.activity.with(|a| {
+        ui.app.library.activity.with(|a| {
             a.values()
                 .filter(|act| matches!(act, Activity::Running(_) | Activity::Checking(_)))
                 .count()
         })
     };
     let shown = move || {
-        playlist().is_some_and(|p| !ui.library.all.get() && ui.library.shown.get() == Some(p.id))
-            || (item() == Some(Item::AllPlaylists) && ui.library.all.get())
+        playlist()
+            .is_some_and(|p| !ui.app.library.all.get() && ui.app.library.shown.get() == Some(p.id))
+            || (item() == Some(Item::AllPlaylists) && ui.app.library.all.get())
     };
-    let activity = move |id: SourceId| ui.library.activity.with(|a| a.get(&id).cloned());
+    let activity = move |id: SourceId| ui.app.library.activity.with(|a| a.get(&id).cloned());
     let status = move || match (playlist(), item()) {
         (Some(p), _) => words::status(&p, activity(p.id).as_ref(), crate::time::wall_unix()),
         (None, Some(Item::RefreshAll)) => (words::refreshing(refreshing()), false),
@@ -429,7 +430,7 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
                 .rounded(px(4.0))
                 .bg(move || {
                     if shown() {
-                        rgb(ui.theme.with(|t| {
+                        rgb(ui.app.theme.with(|t| {
                             if mark() == Mark::Focused {
                                 t.accent.main
                             } else {
@@ -460,7 +461,7 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
             ui_kit::caption(size, move || if shown() { tr("On screen") } else { "" }).text_color(
                 move || match mark() {
                     Mark::Focused => Mark::Focused.text(),
-                    _ => rgb(ui.theme.with(|t| t.accent.light)),
+                    _ => rgb(ui.app.theme.with(|t| t.accent.light)),
                 },
             ),
         )
@@ -528,7 +529,7 @@ fn card(ui: Ui, size: Scale) -> View {
 fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
     let playlist = move || state(ui, |s| s.row(id).cloned()).flatten();
     let running = move || {
-        ui.library.activity.with(|a| {
+        ui.app.library.activity.with(|a| {
             matches!(
                 a.get(&id),
                 Some(Activity::Running(_) | Activity::Checking(_))
@@ -541,7 +542,7 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
         let focused =
             move || state(ui, |s| s.layer() == Layer::Actions { id, focus: act }).unwrap_or(false);
         let label = move || {
-            let shown = ui.library.shown.get() == Some(id);
+            let shown = ui.app.library.shown.get() == Some(id);
             let kind = playlist().map(|p| p.kind);
             match (act, playlist()) {
                 (Act::Enabled, Some(p)) => trf(
@@ -624,7 +625,7 @@ fn confirm_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
             .rev()
             .find(|r| r.id != id)
             .map(|r| r.name.as_str());
-        let shown = ui.library.shown.get_untracked() == Some(id);
+        let shown = ui.app.library.shown.get_untracked() == Some(id);
         (
             trf("Delete “{name}”?", &[("name", (&p.name).into())]),
             words::delete_consequences(p, next, shown),

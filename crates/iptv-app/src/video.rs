@@ -211,7 +211,8 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
         seek: Box::new(move || stream.seek.get()),
         picture_size: Box::new(move || {
             let identity = crate::chooser::picture_identity(ui, surface);
-            ui.picture
+            ui.app
+                .picture
                 .with(|p| p.for_channel(identity.as_deref()))
                 .key()
                 .to_owned()

@@ -92,7 +92,7 @@ pub(super) fn ruler(
         .text_size(move || size.text_px(RULER))
         .text_color(tint(WHITE, TEXT_SECONDARY_ALPHA))
     };
-    let separator = move || fill(ui, ui.theme.with(|t| t.guide().separator));
+    let separator = move || fill(ui, ui.app.theme.with(|t| t.guide().separator));
     view()
         .child(
             view()
@@ -160,7 +160,7 @@ pub(super) fn ruler(
                                 .h(move || size.px(DOT))
                                 .rounded(move || size.px(DOT / 2.0))
                                 .left(move || px(now_x.get().unwrap_or(0.0) - size.of(DOT) / 2.0))
-                                .bg(move || fill(ui, ui.theme.with(|t| t.guide().now_line))),
+                                .bg(move || fill(ui, ui.app.theme.with(|t| t.guide().now_line))),
                         )
                         .child(
                             view()
@@ -169,7 +169,7 @@ pub(super) fn ruler(
                                 .h(move || px(SEPARATOR_H + size.of(DOT) / 2.0))
                                 .w(px(NOW_W))
                                 .left(move || px(now_x.get().unwrap_or(0.0) - NOW_W / 2.0))
-                                .bg(move || fill(ui, ui.theme.with(|t| t.guide().now_line))),
+                                .bg(move || fill(ui, ui.app.theme.with(|t| t.guide().now_line))),
                         ),
                 ),
         )
@@ -196,5 +196,5 @@ fn date_time(ui: Ui, size: Scale, pan: Pan) -> Text {
     .number_of_lines(1)
     .font_family(SANS)
     .text_size(move || size.text_px(RULER))
-    .text_color(move || rgb(ui.theme.with(|t| t.guide().ruler_date)))
+    .text_color(move || rgb(ui.app.theme.with(|t| t.guide().ruler_date)))
 }

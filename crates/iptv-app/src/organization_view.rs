@@ -432,7 +432,7 @@ fn contents_hidden(ui: Ui) -> bool {
 pub fn layer(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     effect(move || {
-        ui.library.version.get();
+        ui.app.library.version.get();
         if let Some(s) = untracked(|| state(ui, Clone::clone)) {
             let generation = OPEN_GENERATION.get();
             data::spawn_in_app(async move {

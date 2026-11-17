@@ -237,7 +237,7 @@ fn notify_setting_error(error: crate::settings::SaveError) {
 
 /// Tells the rows to read their status again.
 pub(crate) fn refresh(ui: Ui) {
-    ui.settings.update(|v| *v += 1);
+    ui.app.settings.update(|v| *v += 1);
 }
 
 /// Runs a command (`settings::COMMANDS`).

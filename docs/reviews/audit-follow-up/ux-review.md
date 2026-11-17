@@ -43,8 +43,12 @@ foreground hooks; iOS reaches the shared mpv `resume` implementation.
 The recording notification uses Android localized resources and the selected
 application language. The backup export note explicitly identifies the file as
 unencrypted in all catalog languages. Auxiliary player windows now receive
-independent numeric/search-generation state and do not inherit main-window
-on-demand state. The post-root shell runtime thread contract now asserts in
+independent presentation state through the exhaustive `Ui::new` constructor.
+Application-wide settings, catalog signals and picture choices live in named
+`SharedUi`; native stream handles and their task owner cross the window boundary
+explicitly through `Player::for_window`. This removes parent-copy/manual-reset
+inheritance, including the previously missed `Ui.vod.open` signal that let main
+Movies/Shows capture auxiliary input. The post-root shell runtime thread contract now asserts in
 release builds too; JNI recording callbacks use explicit host ownership.
 
 The architecture peer review identified a real ordering defect in the first
@@ -69,6 +73,12 @@ Direct validation:
   Numeric entry asserts the exact synthetic native source, and tile semantics are
   scoped to the multiview presentation. The source catalogue has 1,479 unique rows
   with all ten locale columns populated.
+- The later P12 app recompile and existing `guide_player_windows` journey passed
+  after adding main Movies/Shows browsing while an auxiliary player stays open.
+  Both pointer and keyboard pause controls remained local; the main pause state,
+  both exact native source values and the auxiliary native node were unchanged.
+  The complete journey also retained its existing track, volume, channel-change,
+  multiple-window, PiP and close assertions (one scenario, approximately 30 seconds).
 - Gradle reported SDK metadata, existing manifest extraction, and deprecated API
   warnings. No device, emulator, real provider, or credentials were used by this
   agent. A separate core test invocation lost its captured completion output;
@@ -80,6 +90,17 @@ The parent runner owns required final Rust checks and muted disposable emulator
 runs. No physical Android TV testing is authorized tonight. iOS execution,
 notification language appearance during an actual recording, and spoken
 accessibility remain native/manual validation limits; semantic tree assertions
-and resource compilation do not prove spoken output. The large `Ui` aggregate
-and duplicated auxiliary-window construction were only narrowly corrected, not
-fully decomposed. Native teardown was not speculatively rewritten in this scope.
+and resource compilation do not prove spoken output. Native teardown was not
+speculatively rewritten in this scope.
+
+## Store queue peer review
+
+The later P11 diff in `store_service.rs` adds numeric-only queue observations and
+skips dropped read/analysis replies before opening SQLite. Reviewed the RAII
+queue-ticket lifecycle, failed-send cleanup, execution paths and four synthetic
+regressions; no blocking defect found. Writer work still executes in FIFO order
+when its caller drops the reply. Metrics retain only pending timestamps and
+aggregate maxima/counts, with no provider/query/path values or completed-request
+history. The explicit accepted test blocker replaces the old intentionally
+unpolled analysis request. The architecture owner reports 13 scoped store-service
+tests passing; this review did not repeat those executions.

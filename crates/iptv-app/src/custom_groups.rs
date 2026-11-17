@@ -745,7 +745,7 @@ fn contents_hidden(ui: Ui) -> bool {
 
 pub fn layer(ui: Ui) -> impl IntoElement {
     effect(move || {
-        ui.library.version.get();
+        ui.app.library.version.get();
         untracked(|| reload(ui));
     });
     let size = Scale::new();

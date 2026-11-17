@@ -93,7 +93,7 @@ fn status_of(ui: Ui) -> Status {
 pub fn status(ui: Ui) -> impl IntoElement {
     let status = computed(move || status_of(ui));
     let compact = move || ui.mode.get() == ViewMode::Guide;
-    let panel = move || tint(ui.theme.with(|t| t.background.panel), PANEL_ALPHA);
+    let panel = move || tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA);
     let size = move |full: f32| px(if compact() { full * 0.6 } else { full });
     let waiting = move || matches!(status.get(), Status::Waiting(_));
     let card = move || matches!(status.get(), Status::Failed { .. } | Status::Over);
@@ -190,7 +190,7 @@ pub fn status(ui: Ui) -> impl IntoElement {
                     .text_color(rgb(WHITE))
                     .bg(move || {
                         tint(
-                            ui.theme.with(|t| t.accent.main),
+                            ui.app.theme.with(|t| t.accent.main),
                             if retry_active() {
                                 FOCUS_ALPHA
                             } else {
@@ -201,7 +201,7 @@ pub fn status(ui: Ui) -> impl IntoElement {
                     .border(px(2.0))
                     .border_color(move || {
                         tint(
-                            ui.theme.with(|t| t.accent.light),
+                            ui.app.theme.with(|t| t.accent.light),
                             if retry_active() { 255 } else { 0 },
                         )
                     })

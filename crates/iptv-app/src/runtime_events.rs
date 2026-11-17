@@ -10,7 +10,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         }
         RuntimeEvent::SchedulePresented(steps) => crate::startup::shown(&steps),
         RuntimeEvent::CatalogChanged => {
-            ui.data_version.update(|version| *version += 1);
+            ui.app.data_version.update(|version| *version += 1);
             crate::data::spawn_in_app(async move {
                 let _ = crate::runtime().parental_refresh().await;
                 crate::parental_view::enforce(ui);
@@ -24,24 +24,24 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::SettingsSaveFailed(failure) => crate::settings_view::save_failed(failure),
         RuntimeEvent::BackupProgress(phase) => {
             log::debug!("iptv backup: {phase:?}");
-            ui.settings.update(|version| *version += 1);
+            ui.app.settings.update(|version| *version += 1);
         }
         RuntimeEvent::FavoritesChanged {
             channels,
             has_vod,
             any_vod,
         } => {
-            ui.favorites.set(channels);
-            ui.has_vod.set(has_vod);
-            ui.any_vod.set(any_vod);
-            ui.list_version.update(|version| *version += 1);
+            ui.app.favorites.set(channels);
+            ui.app.has_vod.set(has_vod);
+            ui.app.any_vod.set(any_vod);
+            ui.app.list_version.update(|version| *version += 1);
         }
         RuntimeEvent::FavoriteOrderChanged => {
             crate::lists::favorites_changed(ui);
-            ui.list_version.update(|version| *version += 1);
+            ui.app.list_version.update(|version| *version += 1);
         }
         RuntimeEvent::RefreshProgress(source, activity) => {
-            ui.library.activity.update(|activities| {
+            ui.app.library.activity.update(|activities| {
                 if let Some(activity) = activity {
                     activities.insert(source, activity);
                 } else {
@@ -49,8 +49,8 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
                 }
             })
         }
-        RuntimeEvent::BrowsingAll(all) => ui.library.all.set(all),
-        RuntimeEvent::ShownSource(source) => ui.library.shown.set(source),
+        RuntimeEvent::BrowsingAll(all) => ui.app.library.all.set(all),
+        RuntimeEvent::ShownSource(source) => ui.app.library.shown.set(source),
         RuntimeEvent::ScheduleReady(schedule) => crate::set_schedule(&ui, schedule),
         RuntimeEvent::OrganizationReady {
             source,
@@ -77,7 +77,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
                 );
                 crate::runtime().set_schedule(replacement);
                 crate::lists::restore(ui, kept);
-                ui.data_version.update(|version| *version += 1);
+                ui.app.data_version.update(|version| *version += 1);
             }
         }
         RuntimeEvent::SourceReady(resume) => crate::player::source_ready(ui, resume),
@@ -94,9 +94,9 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
                 ui.show_playing();
             }
         }
-        RuntimeEvent::GuideChanged => ui.guide_pages.update(|version| *version += 1),
-        RuntimeEvent::LibraryChanged => ui.library.version.update(|version| *version += 1),
-        RuntimeEvent::SettingsChanged => ui.settings.update(|version| *version += 1),
+        RuntimeEvent::GuideChanged => ui.app.guide_pages.update(|version| *version += 1),
+        RuntimeEvent::LibraryChanged => ui.app.library.version.update(|version| *version += 1),
+        RuntimeEvent::SettingsChanged => ui.app.settings.update(|version| *version += 1),
     }
 }
 

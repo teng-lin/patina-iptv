@@ -41,7 +41,7 @@ pub(crate) fn bind(ui: Ui) {
             return;
         }
         if !crate::startup::marked("guide frame")
-            || ui.library.shown.get_untracked().is_none()
+            || ui.app.library.shown.get_untracked().is_none()
             || ui.visible_rows.get_untracked().is_none()
         {
             return;

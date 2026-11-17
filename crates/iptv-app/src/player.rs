@@ -149,6 +149,23 @@ impl Player {
         }
     }
 
+    /// A fresh window presentation controlling an existing persistent surface.
+    /// Only native streams and their task owner cross the window boundary;
+    /// on-demand targets, history and startup-resume state remain independent.
+    pub(crate) fn for_window(self, surface: usize) -> Self {
+        let mut streams = self.streams;
+        streams[0] = self.stream(surface);
+        Self {
+            vod: signal(None),
+            recorded: signal(None),
+            streams,
+            history: signal(ChannelHistory::default()),
+            resume: signal(false),
+            early: signal(None),
+            owner: self.owner,
+        }
+    }
+
     /// The full-screen player's (surface 0).
     pub fn main(&self) -> Stream {
         self.streams[0]
@@ -261,10 +278,10 @@ pub fn start(ui: &Ui, channel: usize) {
                 }
                 crate::runtime().save_combined_channel(&key);
             } else {
-                save_last_channel(ui.library.shown.get_untracked(), &key);
+                save_last_channel(ui.app.library.shown.get_untracked(), &key);
             }
             crate::favorites::played(&key);
-            ui.list_version.update(|v| *v += 1);
+            ui.app.list_version.update(|v| *v += 1);
         }
     }
     open(ui, 0, session);
@@ -1100,7 +1117,7 @@ pub fn source_changed(ui: Ui) {
 pub fn bind(ui: Ui) {
     cleanup(move || crate::on_demand::flush(ui, false));
     effect(move || {
-        ui.data_version.get();
+        ui.app.data_version.get();
         // Out of the effect: following the row writes signals.
         later(ui, Duration::ZERO, move || follow_playing(ui));
     });
@@ -1210,7 +1227,7 @@ pub fn source_ready(ui: Ui, refresh: bool) {
     {
         return;
     }
-    let last = load_last_channel(ui.library.shown.get_untracked());
+    let last = load_last_channel(ui.app.library.shown.get_untracked());
     let Some(channel) = last.and_then(|k| crate::schedule().find_channel(&k)) else {
         return;
     };

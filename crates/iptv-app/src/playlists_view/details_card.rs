@@ -25,7 +25,7 @@ pub(super) fn card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
         if let Some(n) = state(ui, |s| s.notice()).flatten() {
             return (words::notice(n).to_owned(), true);
         }
-        match ui.library.activity.with(|a| a.get(&id).cloned()) {
+        match ui.app.library.activity.with(|a| a.get(&id).cloned()) {
             Some(Activity::Checking(progress)) if checking() => (
                 trf(
                     "Checking: {stage}",

@@ -59,8 +59,8 @@ pub fn preview_rect() -> (f32, f32, f32, f32) {
 /// The foreground stays clear in guide mode, so the video shows wherever it is
 /// laid out: today the preview rectangle.
 pub fn backdrop(ui: Ui) -> impl IntoElement {
-    let panel = move || rgb(ui.theme.with(|t| t.background.panel));
-    let window = move || rgb(ui.theme.with(|t| t.background.window));
+    let panel = move || rgb(ui.app.theme.with(|t| t.background.panel));
+    let window = move || rgb(ui.app.theme.with(|t| t.background.window));
     view()
         .absolute()
         .inset_0()
@@ -118,7 +118,7 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
                         crate::lists::browser_entry_name(at.index())
                     })
                     .text_color(move || match mark() {
-                        Mark::Current => rgb(ui.theme.with(|t| t.accent.light)),
+                        Mark::Current => rgb(ui.app.theme.with(|t| t.accent.light)),
                         m => m.text(),
                     }),
                 )
@@ -130,7 +130,7 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
     .element_ref(&groups)
     .w(move || px(groups_width(ui)))
     .py(px(6.0))
-    .bg(move || ui.surface(ui.theme.with(|t| t.background.window)))
+    .bg(move || ui.surface(ui.app.theme.with(|t| t.background.window)))
 }
 
 #[cfg(test)]

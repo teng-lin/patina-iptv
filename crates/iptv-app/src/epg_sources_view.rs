@@ -149,7 +149,7 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
             });
             if started {
                 // Shows tr("Updating…").
-                ui.library.version.update(|v| *v += 1);
+                ui.app.library.version.update(|v| *v += 1);
             } else {
                 crate::settings_view::notify(tr("No guide source is switched on"));
             }
@@ -195,9 +195,9 @@ fn contents_hidden(ui: Ui) -> bool {
 pub fn layer(ui: Ui) -> impl IntoElement {
     // What is stored changed (an edit, an update, a guide download): reload.
     effect(move || {
-        ui.library.version.get();
-        ui.settings.get();
-        ui.data_version.get();
+        ui.app.library.version.get();
+        ui.app.settings.get();
+        ui.app.data_version.get();
         let playlist = ui
             .guide_sources
             .with_untracked(|s| s.as_ref().map(Screen::playlist));
@@ -263,7 +263,7 @@ fn hint(ui: Ui) -> &'static str {
 fn header(ui: Ui, size: Scale) -> View {
     let name = move || {
         let playlist = state(ui, Screen::playlist);
-        ui.library.version.get();
+        ui.app.library.version.get();
         let name = playlist.and_then(|id| {
             crate::runtime()
                 .playlists()
@@ -424,7 +424,7 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
             list_rows::second(size, switched, crate::fonts::SANS).text_color(move || {
                 match (mark(), enabled()) {
                     (Mark::Focused, _) => Mark::Focused.text(),
-                    (_, true) => rgb(ui.theme.with(|t| t.accent.light)),
+                    (_, true) => rgb(ui.app.theme.with(|t| t.accent.light)),
                     (_, false) => ui_kit::secondary(),
                 }
             }),

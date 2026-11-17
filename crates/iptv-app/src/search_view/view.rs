@@ -35,7 +35,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     });
     // New guide data while open: fresh indexes, the query searched again.
     effect(move || {
-        ui.data_version.get();
+        ui.app.data_version.get();
         if ui.search.with_untracked(Option::is_some) {
             prepare(ui);
             search_again(ui);
@@ -309,7 +309,7 @@ fn result_row(
             let Some(c) = crate::runtime().resolve_search_channel(&id, &*schedule) else {
                 return String::new();
             };
-            let star = ui.favorites.with(|f| f.contains(&c));
+            let star = ui.app.favorites.with(|f| f.contains(&c));
             format!(
                 "{}   {}{}",
                 crate::schedule().channel_number(c),
@@ -368,7 +368,7 @@ fn result_row(
         .child(
             list_rows::small(size, marker, CAPTION).text_color(move || match item() {
                 Some((_, Some(h))) if h.airing == Airing::Live && mark() != Mark::Focused => {
-                    rgb(ui.theme.with(|t| t.accent.light))
+                    rgb(ui.app.theme.with(|t| t.accent.light))
                 }
                 _ => mark().secondary(),
             }),

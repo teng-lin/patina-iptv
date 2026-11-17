@@ -244,7 +244,7 @@ const CAPTION: &str = crate::i18n::key(
 /// What the chosen key does now and whether that is the user's binding;
 /// while a key is being captured, what the editor waits for.
 fn status(ui: Ui) -> String {
-    ui.settings.get();
+    ui.app.settings.get();
     state(ui, |s| {
         if s.capturing {
             return tr("Press a key now. Back cancels capture.").into();

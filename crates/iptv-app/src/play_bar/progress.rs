@@ -14,7 +14,7 @@ const WHITE: u32 = 0xFFFFFF;
 
 /// The programme on screen: live now, or the replayed one.
 pub(super) fn programme(ui: Ui) -> (usize, crate::guide::Program) {
-    ui.data_version.get();
+    ui.app.data_version.get();
     let channel = ui.playing.get().unwrap_or(0);
     let minute = match ui.playback.get() {
         Playback::Live => ui.focus.with(|f| f.now),
@@ -71,7 +71,7 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
         }
         super::used(ui);
     };
-    let accent = move || rgb(ui.theme.with(|t| t.accent.light));
+    let accent = move || rgb(ui.app.theme.with(|t| t.accent.light));
     let time = move |s: Box<dyn Fn() -> String>| {
         text(s)
             .w(px(64.0))
@@ -149,7 +149,7 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
                         .border(px(2.0))
                         .border_color(move || {
                             tint(
-                                ui.theme.with(|t| t.accent.light),
+                                ui.app.theme.with(|t| t.accent.light),
                                 if super::focused(ui, iptv_core::play_bar::Control::Timeline) {
                                     255
                                 } else {

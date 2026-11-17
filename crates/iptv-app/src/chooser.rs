@@ -76,7 +76,7 @@ pub(crate) fn picture_identity(ui: Ui, surface: usize) -> Option<String> {
 /// The current picture size's name (the control row shows it).
 pub fn picture_name(ui: Ui) -> &'static str {
     let ch = picture_identity(ui, ui.player_surface);
-    picture_label(ui.picture.with(|p| p.for_channel(ch.as_deref())))
+    picture_label(ui.app.picture.with(|p| p.for_channel(ch.as_deref())))
 }
 
 fn title(kind: Kind) -> &'static str {
@@ -96,7 +96,10 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
     match kind {
         Kind::Picture => {
             let ch = picture_identity(ui, ui.player_surface);
-            let size = ui.picture.with_untracked(|p| p.for_channel(ch.as_deref()));
+            let size = ui
+                .app
+                .picture
+                .with_untracked(|p| p.for_channel(ch.as_deref()));
             let labels = PictureSize::ALL
                 .iter()
                 .map(|p| picture_label(*p).to_owned())
@@ -248,8 +251,11 @@ pub fn pick(ui: Ui, index: usize) {
         Kind::Picture => {
             let ch = picture_identity(ui, ui.player_surface);
             match PictureSize::ALL.get(index) {
-                Some(size) => ui.picture.update(|p| p.set_channel(ch.as_deref(), *size)),
-                None => ui.picture.update(|p| p.apply_to_all(ch.as_deref())),
+                Some(size) => ui
+                    .app
+                    .picture
+                    .update(|p| p.set_channel(ch.as_deref(), *size)),
+                None => ui.app.picture.update(|p| p.apply_to_all(ch.as_deref())),
             }
         }
         Kind::Sleep => match index.checked_sub(1).and_then(|i| SLEEP_MINUTES.get(i)) {
@@ -414,7 +420,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .gap(px(2.0))
                 .rounded(px(RADIUS_LARGE))
                 // Translucent over moving video, like the reference's choosers.
-                .bg(move || tint(ui.theme.with(|t| t.background.panel), 0xD0))
+                .bg(move || tint(ui.app.theme.with(|t| t.background.panel), 0xD0))
                 .child(
                     ui_kit::heading(size, move || kind().map_or("", title))
                         .px(move || size.px(list_rows::INSET))

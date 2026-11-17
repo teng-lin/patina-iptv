@@ -325,7 +325,7 @@ fn set_programmes(ui: Ui, status: Programmes) {
 /// channels at once, programmes a moment later (about 0.1 s for a large
 /// EPG), so the screen shows first.
 fn prepare(ui: Ui) {
-    let version = ui.data_version.get_untracked();
+    let version = ui.app.data_version.get_untracked();
     let schedule = crate::schedule();
     crate::runtime().prepare_search_channels(version, &*schedule);
     if epg(&*schedule).is_none()
@@ -381,7 +381,7 @@ fn prepare(ui: Ui) {
 
 /// Runs both searches for `query` now and hands the results to the state.
 fn run_search(ui: Ui, query: &str) {
-    let favourites = ui.favorites.get_untracked();
+    let favourites = ui.app.favorites.get_untracked();
     let schedule = crate::schedule();
     let days = |c: usize| schedule.catchup_days(c);
     let visible = |c: usize| !schedule.channel_hidden(c);

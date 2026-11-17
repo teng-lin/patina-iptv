@@ -2,8 +2,8 @@ use crate::Ui;
 use nsh_core::prelude::*;
 pub fn bind(ui: Ui) {
     effect(move || {
-        ui.library.version.get();
-        ui.data_version.get();
+        ui.app.library.version.get();
+        ui.app.data_version.get();
         crate::runtime::data::stored::refresh_status(&crate::runtime());
     });
 }

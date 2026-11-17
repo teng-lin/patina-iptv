@@ -74,7 +74,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     let title = move || {
         ui.editor.with(|e| {
             e.as_ref().map_or(String::new(), |e| {
-                let starred = ui.favorites.with(|f| e.starred(f));
+                let starred = ui.app.favorites.with(|f| e.starred(f));
                 let group = crate::lists::entry_name(e.group, &*crate::schedule());
                 trf(
                     "Favourites · {group} · {starred} of {total}",
@@ -95,7 +95,8 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             ui.editor
                 .with(|e| e.as_ref().and_then(|e| e.channel(at.index())))
         };
-        let starred = move || channel().is_some_and(|ch| ui.favorites.with(|f| f.contains(&ch)));
+        let starred =
+            move || channel().is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)));
         let focused = move || ui.keys_shown() && focus.get() == Some(at.index());
         let mark = move || Mark::of(focused(), false);
         list_rows::row(size, ROW, mark)
@@ -124,7 +125,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     .text_size(move || size.text_px(LIST_ITEM))
                     .text_color(move || {
                         if starred() && mark() != Mark::Focused {
-                            rgb(ui.theme.with(|t| t.accent.light))
+                            rgb(ui.app.theme.with(|t| t.accent.light))
                         } else if starred() {
                             mark().text()
                         } else {
@@ -146,7 +147,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .px(px(48.0))
         .py(px(24.0))
         .gap(px(12.0))
-        .bg(move || rgb(ui.theme.with(|t| t.background.window)))
+        .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
         .test_id("favorites-editor")
         .accessibility_elements_hidden(move || {
             crate::overlays::Overlay::FavoritesEditor.accessibility_hidden(ui)

@@ -331,7 +331,7 @@ pub fn tab(
                     if pill() {
                         Mark::Focused.text()
                     } else if selected() {
-                        rgb(ui.theme.with(|t| t.accent.light))
+                        rgb(ui.app.theme.with(|t| t.accent.light))
                     } else {
                         secondary()
                     }
@@ -389,7 +389,7 @@ pub fn field(size: Scale, input: Input) -> Input {
 /// A field's light outline makes keyboard focus distinct from resting fills.
 pub fn field_border(ui: Ui, focused: bool) -> Rgba {
     tint(
-        ui.theme.with(|t| t.accent.light),
+        ui.app.theme.with(|t| t.accent.light),
         if focused && ui.keys_shown() { 255 } else { 0 },
     )
 }
@@ -397,7 +397,7 @@ pub fn field_border(ui: Ui, focused: bool) -> Rgba {
 /// Opaque dark accent for focused input, subtle resting fill otherwise.
 pub fn field_fill(ui: Ui, focused: bool) -> Rgba {
     if focused && ui.keys_shown() {
-        tint(ui.theme.with(|t| t.accent.main), FOCUS_ALPHA)
+        tint(ui.app.theme.with(|t| t.accent.main), FOCUS_ALPHA)
     } else {
         tint(WHITE, RESTING_ALPHA)
     }
@@ -412,7 +412,7 @@ pub fn card(ui: Ui, size: Scale, width: f32) -> View {
         .py(move || size.px(24.0))
         .gap(move || size.px(8.0))
         .rounded(px(RADIUS_LARGE))
-        .bg(move || rgb(ui.theme.with(|t| t.background.panel)))
+        .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
 }
 
 /// A full-screen screen (search, playlists, guide sources): the window's
@@ -425,7 +425,7 @@ pub fn screen(ui: Ui, size: Scale) -> View {
         .px(move || size.px(MARGIN_X))
         .py(move || size.px(MARGIN_Y))
         .gap(move || size.px(12.0))
-        .bg(move || rgb(ui.theme.with(|t| t.background.window)))
+        .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
 }
 
 /// A screen's top line: its title, then a Close button.

@@ -113,7 +113,7 @@ fn ends(ui: Ui) -> (String, String) {
 /// The time line: a track with the programme's progress; a replay's seek
 /// bar has a dot where it plays.
 pub(super) fn time_line(ui: Ui) -> View {
-    let accent = move || rgb(ui.theme.with(|t| t.accent.light));
+    let accent = move || rgb(ui.app.theme.with(|t| t.accent.light));
     let dot = move || line_kind(ui) == Line::Seek;
     view()
         .test_id("player-time-line")

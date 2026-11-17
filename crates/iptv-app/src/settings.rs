@@ -4,7 +4,7 @@
 //! - [`get`]: the effective settings, from any thread (the import threads
 //!   read the guide's refresh and storage settings).
 //! - [`read`]: the same inside a reactive closure; it subscribes to
-//!   `Ui::settings`, which [`set`] bumps after every change.
+//!   `Ui::app.settings`, which [`set`] bumps after every change.
 //! - [`set`]: validates and applies at once; the file is saved in the
 //!   background (`file_writer`), and a save that fails is reported and
 //!   undone, so the live settings never stay ahead of what a restart
@@ -201,7 +201,7 @@ pub fn get() -> std::sync::Arc<iptv_settings::Settings> {
 
 /// [`get`], subscribing the calling reactive closure to changes.
 pub fn read(ui: Ui) -> Arc<Settings> {
-    ui.settings.get();
+    ui.app.settings.get();
     get()
 }
 
@@ -290,7 +290,7 @@ pub fn overlay_alpha(s: &Settings) -> u8 {
 /// Applies the settings that live in `Ui` state: colours and panel
 /// timeouts, now and after every change.
 pub fn bind(ui: Ui) {
-    REVISION.with(|r| r.set(Some(ui.settings)));
+    REVISION.with(|r| r.set(Some(ui.app.settings)));
     #[cfg(target_os = "android")]
     effect(move || crate::recording_host::set_language(crate::i18n::language().tag));
     let last_mode = std::cell::Cell::new(None);
@@ -301,7 +301,7 @@ pub fn bind(ui: Ui) {
         let changed = last_mode.replace(Some(mode)) != Some(mode);
         let span = s.int(iptv_settings::keys::GUIDE_VISIBLE_MINUTES, &Target::Global) as i32;
         untracked(|| {
-            ui.theme.set(theme);
+            ui.app.theme.set(theme);
             if ui.focus.with_untracked(|f| f.visible) != span {
                 let view = crate::lists::view(ui);
                 ui.focus.update(|f| f.set_visible(span, &view));
