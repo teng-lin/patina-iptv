@@ -1351,6 +1351,7 @@ mod tests {
         });
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn each_native_guard_refusal_completes_its_request_before_network_io() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1392,6 +1393,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn response_only_commands_notify_without_another_native_event() {
         let mpv = mpv();
