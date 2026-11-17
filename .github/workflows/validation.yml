@@ -89,6 +89,7 @@ jobs:
         run: |
           export IPTV_REAL_CARGO
           IPTV_REAL_CARGO=$(command -v cargo)
+          python3 tools/ci/check-package-lock.py
           for script in tools/ci/test-*.py; do python3 "$script"; done
           python3 -m unittest discover -s tools -p test_version.py
           python3 tools/performance/test_journeys.py

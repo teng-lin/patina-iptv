@@ -99,6 +99,14 @@ class Workflows(unittest.TestCase):
             with self.subTest(event=event, tier=tier):
                 self.assertEqual(expressions.evaluate(expression, context), expected)
 
+    def test_delegated_helpers_retain_the_real_runner_lock_check(self):
+        text = (ROOT / '.github/workflows/validation.yml').read_text()
+        helpers = text.split('  helpers:\n', 1)[1].split('  host:\n', 1)[0]
+        self.assertIn('python3 tools/ci/check-package-lock.py', helpers)
+        host = text.split('  host:\n', 1)[1].split('  ios:\n', 1)[0]
+        self.assertIn('needs: [plan, helpers]', host)
+        self.assertIn('helpers-checked: true', host)
+
     def test_master_candidate_owns_shipping_builds_and_release_uses_same_recipe(self):
         text = (ROOT / '.github/workflows/validation.yml').read_text()
         self.assertIn("&& 'validation-master'", text)
