@@ -601,11 +601,20 @@ in Actions. A promoted release publishes `candidate-manifest.json` with checksum
 and final-workflow provenance, retaining the unsigned input/check record after
 the Actions bundle expires.
 Use **Re-run failed jobs** to retry a failed validation, package, signing or
-publication stage while preserving successful immutable artifacts. A retry must
-retain the same source SHA and candidate run attempt; a changed source requires
-new validation. Candidate selection rejects mismatched run attempts. If all jobs
-must be rerun, remove only unpublished Actions artifacts through a deliberate
-maintenance operation first; upload jobs never overwrite retained inputs.
+publication stage while preserving successful package outputs at the same source
+SHA. GitHub increments the run attempt automatically; a changed source requires
+new validation. If a failed job already uploaded part of its output, remove only
+that job's unpublished Actions artifacts before retrying it: uploads never
+overwrite retained inputs. Keep successful package jobs' artifacts.
+
+If a protected-context alias fails after `seal-candidate` succeeded, retrying only
+the alias leaves a manifest from the previous attempt. Selection deliberately
+rejects that mismatch. Before tagging, delete only the unpublished Actions artifact
+named `release-candidate`, then rerun the `seal-candidate` job (using its job ID).
+It checks and seals the retained unsigned packages under GitHub's new attempt;
+it does not rerun the successful package builds. Never delete their signing inputs,
+SBOMs, source archives, or any public release asset for this recovery. A full-job
+rerun requires deliberate cleanup of unpublished Actions artifacts first.
 
 If a build fails before publication, fix the cause and rerun the same candidate
 only while its release is absent or a draft. A public release is immutable. For a
