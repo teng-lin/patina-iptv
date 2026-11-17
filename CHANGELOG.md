@@ -9,6 +9,7 @@ is below 1.0, a minor release may change behaviour.
 
 ### Added
 
+- Select live channels by number and clear viewing or search history from settings.
 - Continue watching and Recently added in the navigation rail: movies and
   series from every enabled playlist in one list, read a bounded page at a
   time in a stable order, with the playlist named on each row. Continue
@@ -36,6 +37,15 @@ is below 1.0, a minor release may change behaviour.
 
 ### Fixed
 
+- Recover completed recordings after interrupted publication, drain queued media
+  writes before finalization, and avoid counting active recording bytes twice
+  when checking storage reservations.
+- Keep picture overrides attached to channel identity and recheck playback access
+  on foreground return without treating resume as a transport failure.
+- Keep auxiliary player controls independent when Movies or Shows is open in the
+  main window, and skip abandoned queued database reads while preserving writes.
+- Bound downloaded artwork dimensions before decoding, and restrict private
+  Xtream playback exceptions to the selected account's origin.
 - Keep guide pages, search selections and pending playback attached to their
   original content when playlists refresh, reorder or are replaced; failed
   guide reads remain retryable.

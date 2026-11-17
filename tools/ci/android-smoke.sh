@@ -96,6 +96,10 @@ mark() {
   # causes before clearing buffers; the app's redacted error code alone cannot
   # distinguish an emulator renderer failure from a playback regression.
   adb logcat -d -s MediaCodec:D CCodec:D Codec2Client:D ExoPlayerImplInternal:E '*:S' >> "$out/codec.log"
+  adb logcat -d -s ActivityTaskManager:I ActivityManager:I WindowManager:I '*:S' >> "$out/lifecycle.log"
+  adb logcat -b events -d -s wm_create_activity:I wm_destroy_activity:I wm_relaunch_resume_activity:I \
+    wm_restart_activity:I wm_resume_activity:I wm_on_destroy_called:I wm_on_create_called:I \
+    am_kill:I am_low_memory:I '*:S' > "$out/lifecycle-events.log"
   adb logcat -d -b crash >> "$out/crash.log"
   adb logcat -b main -b system -b crash -c
 }
@@ -354,14 +358,17 @@ pause 2
 shot 06-multiview
 
 step "background and resume"
+adb shell dumpsys activity -p "$pkg" activities > "$out/activities-before-home.log"
 mark
 keys KEYCODE_HOME
 wait_stopped 20
 echo "  ok: activity stopped"
 pause 3
 alive || fail "the app died in the background"
+adb shell dumpsys activity -p "$pkg" activities > "$out/activities-stopped.log"
 mark
 adb shell am start -W -n $act >/dev/null
+adb shell dumpsys activity -p "$pkg" activities > "$out/activities-resumed.log"
 expect 'iptv player 0 state: ready' 60
 expect 'iptv player 1 state: ready' 60
 shot 07-resumed

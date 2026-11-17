@@ -211,6 +211,7 @@ pub(super) async fn recover(services: &Services, id: JobId) -> Option<Transition
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use std::process::{Command, Stdio};
 
     fn owner(root: &Path) -> Runtime {
@@ -239,8 +240,12 @@ mod tests {
         let directory = media_directory(root);
         std::fs::create_dir_all(directory).unwrap();
         let partial = path(&owner.services(), job.id, true);
-        std::fs::write(&partial, [0x47; 188]).unwrap();
-        std::fs::File::open(&partial).unwrap().sync_all().unwrap();
+        // Windows FlushFileBuffers requires a writable handle. Sync the same
+        // descriptor that wrote the fixture, then close it before verification.
+        let mut spool = std::fs::File::create(&partial).unwrap();
+        spool.write_all(&[0x47; 188]).unwrap();
+        spool.sync_all().unwrap();
+        drop(spool);
         let (bytes, digest) = digest(&partial).unwrap();
         let receipt = RecordingCompletion {
             job: job.id,
@@ -305,7 +310,7 @@ mod tests {
                 .env("PATINA_SYNTHETIC_COMPLETION_ROOT", &root)
                 .env("PATINA_SYNTHETIC_COMPLETION_STAGE", stage)
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stderr(Stdio::inherit())
                 .spawn()
                 .unwrap();
             let deadline = std::time::Instant::now() + Duration::from_secs(20);
