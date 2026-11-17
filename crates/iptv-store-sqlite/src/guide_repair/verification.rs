@@ -17,10 +17,7 @@ pub struct RepairVerification {
 impl Store {
     /// Consistent read snapshot for preview preparation on the analysis lane.
     pub fn guide_repair_snapshot<T>(&self, read: impl FnOnce(&Self) -> Result<T>) -> Result<T> {
-        let transaction = self.conn.unchecked_transaction()?;
-        let result = read(self)?;
-        transaction.commit()?;
-        Ok(result)
+        self.read_snapshot(read)
     }
 
     pub fn verify_guide_repair(

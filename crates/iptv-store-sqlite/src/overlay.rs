@@ -177,7 +177,9 @@ impl Store {
         value: Value,
     ) -> Result<()> {
         let now = self.now();
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         set_overlay_columns(&tx, source, id, &[(column, value)], now)?;
         tx.commit()?;
         Ok(())
@@ -186,7 +188,9 @@ impl Store {
     /// Adds to (at the end) or removes from favourites. Idempotent.
     pub fn set_favourite(&mut self, source: SourceId, id: &ContentId, on: bool) -> Result<()> {
         let now = self.now();
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         ensure_source(&tx, source)?;
         if on {
             tx.execute(
@@ -229,7 +233,9 @@ impl Store {
         id: &ContentId,
         index: usize,
     ) -> Result<bool> {
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let mut list: Vec<String> = {
             let mut stmt = tx.prepare_cached(
                 "SELECT channel_id FROM favourites WHERE source_id = ?1 ORDER BY position",
@@ -276,7 +282,9 @@ impl Store {
             .map(str::trim)
             .filter(|n| !n.is_empty())
             .map_or(Value::Null, |n| Value::Text(n.to_owned()));
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         set_overlay_columns(&tx, source, id, &[("custom_name", value)], now)?;
         search::reindex_channel(&tx, fts, source, id)?;
         tx.commit()?;
@@ -315,7 +323,9 @@ impl Store {
             ),
         };
         let now = self.now();
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         set_overlay_columns(
             &tx,
             source,
@@ -360,7 +370,9 @@ impl Store {
 
     /// Deletes a source's orphaned overlays. Returns the rows removed.
     pub fn purge_orphaned_overlays(&mut self, source: SourceId) -> Result<usize> {
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let mut removed = 0;
         for sql in PURGE_ORPHANS {
             removed += tx.execute(sql, [source.0])?;

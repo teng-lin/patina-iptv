@@ -239,3 +239,184 @@ fn concurrent_guide_source_edits_wait_for_each_other() {
         w.join().unwrap();
     }
 }
+
+/// Hold another writer through the beginning of a mutation. Deferred readers
+/// see the old commit and cannot promote that snapshot; Immediate mutations
+/// wait before reading, then use the newly committed state.
+fn held_mutation_writer(
+    path: &std::path::Path,
+    update: impl FnOnce(&rusqlite::Connection),
+) -> std::thread::JoinHandle<()> {
+    let raw = rusqlite::Connection::open(path).unwrap();
+    raw.execute_batch("BEGIN IMMEDIATE").unwrap();
+    update(&raw);
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(200));
+        raw.execute_batch("COMMIT").unwrap();
+    })
+}
+
+#[test]
+fn recording_favourite_and_custom_order_mutations_wait_for_the_other_writer() {
+    use iptv_core::recording::{JobId, Request};
+    use iptv_store_sqlite::{ChannelOrder, ChannelScope, MoveTarget};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("synthetic-mutations.db");
+    let mut writer = Store::open(&path).unwrap();
+    let source = writer
+        .add_source(&m3u_source("Synthetic mutations"))
+        .unwrap();
+    let catalogue = catalog(3, 3, XT_PASSWORD);
+    replace(&mut writer, source, &catalogue);
+    let first = &catalogue.channels[0].id;
+    let second = &catalogue.channels[1].id;
+    writer.set_favourite(source, first, true).unwrap();
+    writer.set_favourite(source, second, true).unwrap();
+    let group = writer
+        .create_custom_group(source, "Synthetic custom")
+        .unwrap();
+    for channel in &catalogue.channels {
+        writer.add_to_custom_group(group, &channel.id).unwrap();
+    }
+    let mut mutation = Store::open(&path).unwrap();
+    let hold = |path: &std::path::Path| {
+        held_mutation_writer(path, |raw| {
+            raw.execute("UPDATE sources SET updated_at=updated_at+1", [])
+                .unwrap();
+        })
+    };
+    let request = Request {
+        source: source.0,
+        channel: first.as_str().into(),
+        channel_name: "Synthetic channel".into(),
+        title: "Synthetic programme".into(),
+        start: 1_800_000_000,
+        end: 1_800_003_600,
+    };
+    let other = hold(&path);
+    let scheduled = mutation.schedule_recording(JobId(101), &request, request.start - 1);
+    other.join().unwrap();
+    assert_eq!(scheduled.unwrap(), JobId(101));
+
+    let other = hold(&path);
+    let moved = mutation.move_favourite(source, first, 1);
+    other.join().unwrap();
+    assert!(moved.unwrap());
+    let favourites = mutation
+        .load_channels(
+            source,
+            &ChannelQuery {
+                scope: ChannelScope::All,
+                favourites_only: true,
+                order: ChannelOrder::Effective,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(&favourites[0].channel.id, second);
+    assert_eq!(&favourites[1].channel.id, first);
+
+    let other = hold(&path);
+    let moved = mutation.move_in_custom_group_to(group, first, MoveTarget::Step(1));
+    other.join().unwrap();
+    assert!(moved.unwrap());
+    let custom = mutation
+        .load_channels(
+            source,
+            &ChannelQuery {
+                scope: ChannelScope::Custom(group),
+                order: ChannelOrder::Effective,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(&custom[0].channel.id, second);
+    assert_eq!(&custom[1].channel.id, first);
+}
+
+#[test]
+fn group_move_reads_the_order_after_a_competing_commit() {
+    use iptv_store_sqlite::MoveTarget;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("synthetic-group-order.db");
+    let mut writer = Store::open(&path).unwrap();
+    let source = writer.add_source(&m3u_source("Synthetic groups")).unwrap();
+    let catalogue = catalog(3, 3, XT_PASSWORD);
+    replace(&mut writer, source, &catalogue);
+    let groups: Vec<_> = writer
+        .library_groups(source)
+        .unwrap()
+        .into_iter()
+        .filter(|row| row.group.kind == iptv_providers::model::ContentKind::Live)
+        .map(|row| row.group.id)
+        .collect();
+    assert_eq!(groups.len(), 3);
+    let mut mutation = Store::open(&path).unwrap();
+    let other = held_mutation_writer(&path, |raw| {
+        for (position, id) in [&groups[1], &groups[2], &groups[0]].into_iter().enumerate() {
+            raw.execute(
+                "INSERT INTO group_overlays(source_id,group_id,position) VALUES(?1,?2,?3)
+                 ON CONFLICT(source_id,group_id) DO UPDATE SET position=excluded.position",
+                rusqlite::params![source.0, id.as_str(), position as i64],
+            )
+            .unwrap();
+        }
+    });
+    let moved = mutation.move_group_to(source, &groups[1], MoveTarget::Step(1));
+    other.join().unwrap();
+    moved.unwrap();
+    let after: Vec<_> = mutation
+        .library_groups(source)
+        .unwrap()
+        .into_iter()
+        .filter(|row| row.group.kind == iptv_providers::model::ContentKind::Live)
+        .map(|row| row.group.id)
+        .collect();
+    assert_eq!(
+        after,
+        [groups[2].clone(), groups[1].clone(), groups[0].clone()]
+    );
+}
+
+#[test]
+fn concurrent_identical_recording_requests_commit_one_job() {
+    use iptv_core::recording::{JobId, Request};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("synthetic-identical-recordings.db");
+    let mut setup = Store::open(&path).unwrap();
+    let source = setup
+        .add_source(&m3u_source("Synthetic recordings"))
+        .unwrap();
+    let catalogue = catalog(1, 1, XT_PASSWORD);
+    replace(&mut setup, source, &catalogue);
+    let request = Request {
+        source: source.0,
+        channel: catalogue.channels[0].id.as_str().into(),
+        channel_name: "Synthetic channel".into(),
+        title: "Synthetic programme".into(),
+        start: 1_800_000_000,
+        end: 1_800_003_600,
+    };
+    let ready = Arc::new(Barrier::new(2));
+    let writers: Vec<_> = (0..2)
+        .map(|index| {
+            let path = path.clone();
+            let request = request.clone();
+            let ready = ready.clone();
+            thread::spawn(move || {
+                let mut store = Store::open(path).unwrap();
+                ready.wait();
+                store.schedule_recording(JobId(201 + index), &request, request.start - 1)
+            })
+        })
+        .collect();
+    let jobs: Vec<_> = writers
+        .into_iter()
+        .map(|writer| writer.join().unwrap().unwrap())
+        .collect();
+    assert_eq!(jobs[0], jobs[1]);
+    assert_eq!(setup.recording_jobs().unwrap().len(), 1);
+}

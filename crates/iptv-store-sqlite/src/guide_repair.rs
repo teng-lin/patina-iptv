@@ -366,6 +366,37 @@ fn feed_high_water(
     Ok(highest)
 }
 
+/// Shared reservation floor for repair, ordinary edits and catalog refreshes.
+pub(crate) fn feed_high_water_in(conn: &Connection, source: SourceId, now: i64) -> Result<u32> {
+    let incarnation: String = conn
+        .query_row(
+            "SELECT incarnation FROM guide_revisions WHERE source_id=?1",
+            [source.0],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or(StoreError::SourceNotFound(source))?;
+    feed_high_water(conn, source, &incarnation, now)
+}
+
+/// Remember removed and newly configured identities in the caller's transaction.
+pub(crate) fn remember_feed_high_water(
+    conn: &Connection,
+    source: SourceId,
+    highest: u32,
+) -> Result<()> {
+    let incarnation: String = conn.query_row(
+        "SELECT incarnation FROM guide_revisions WHERE source_id=?1",
+        [source.0],
+        |row| row.get(0),
+    )?;
+    conn.execute(
+        "INSERT INTO store_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        params![allocation_key(source, &incarnation), highest.to_string()],
+    )?;
+    Ok(())
+}
+
 fn revisions(conn: &Connection, source: SourceId) -> Result<(u64, u64)> {
     Ok(conn.query_row(
         "SELECT mapping_revision,configuration_revision FROM guide_revisions
@@ -487,7 +518,7 @@ fn reorder(feeds: &mut [GuideSource], order: &[FeedId]) -> bool {
 }
 
 impl Store {
-    /// Adapter-only identity reservation for immutable preview construction.
+    /// Shared identity reservation for previews, ordinary edits and import planning.
     /// Legacy seeding reads only this incarnation's unexpired inverses, at most
     /// 4096 receipts / 32 MiB total / 8 MiB each. Larger seeds fail closed;
     /// successful commits cache the monotonic reservation for subsequent reads.
@@ -696,7 +727,13 @@ impl Store {
                 current.push(after.clone());
             }
         }
-        let mut next = feed_high_water(&tx, batch.source, &batch.source_incarnation, now)?;
+        let mut next = feed_high_water(&tx, batch.source, &batch.source_incarnation, now)?.max(
+            current
+                .iter()
+                .map(|config| config.feed.0)
+                .max()
+                .unwrap_or(0),
+        );
         if next.checked_add(batch.additions.len() as u32).is_none() {
             return Ok(RepairResult::Invalid);
         }
@@ -758,14 +795,7 @@ impl Store {
                 now,
             )?;
         }
-        tx.execute(
-            "INSERT INTO store_meta(key,value) VALUES(?1,?2)
-            ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            params![
-                allocation_key(batch.source, &batch.source_incarnation),
-                next.to_string()
-            ],
-        )?;
+        // set_guide_sources_in persisted the complete current allocation floor.
         let (mapping_revision, configuration_revision) = revisions(&tx, batch.source)?;
         let payload = json!({"digest":digest,"rows":mapping_payload,"feeds":feed_payload,
             "added":additions.iter().map(|f|f.0).collect::<Vec<_>>(),
@@ -1552,5 +1582,32 @@ mod tests {
             RepairResult::Conflict(_)
         ));
         assert!(!disabled(&store, id, "birch"));
+    }
+    #[test]
+    fn feed_patches_and_additions_share_the_same_reservation_floor() {
+        let mut store = Store::open_in_memory().unwrap();
+        let id = source(&mut store);
+        let mut prepared = batch(&store, id);
+        prepared.feeds.push(RepairFeed {
+            before: None,
+            after: Some(GuideSource {
+                feed: FeedId(5000),
+                ..feed()
+            }),
+        });
+        prepared.additions.push(feed());
+        let applied = committed(
+            store
+                .apply_guide_repair("generated-patch", "digest", &prepared)
+                .unwrap(),
+        );
+        assert_eq!(applied.added_feeds, [FeedId(5001)]);
+        assert_eq!(store.guide_repair_feed_high_water(id).unwrap(), 5001);
+        store.set_guide_sources(id, &[]).unwrap();
+        assert_eq!(store.guide_repair_feed_high_water(id).unwrap(), 5001);
+        let planned = store
+            .plan_provider_guides(id, &[SecretUrl::new("https://guide.example.test/new.xml")])
+            .unwrap();
+        assert_eq!(planned[0].feed, FeedId(5002));
     }
 }

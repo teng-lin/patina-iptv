@@ -57,12 +57,32 @@ fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         message: r.get(9)?,
     })
 }
+// Raw callers have no in-memory parental grant. Checked callers must establish
+// that authority inside this same transaction; accepted recurrence keeps it.
+fn require_channel(conn: &rusqlite::Connection, request: &Request, authorized: bool) -> Result<()> {
+    let allowed: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM channels c JOIN sources s ON s.id=c.source_id
+         LEFT JOIN channel_overlays o ON o.source_id=c.source_id AND o.channel_id=c.id
+         LEFT JOIN source_policy p ON p.source_id=c.source_id
+         WHERE c.source_id=?1 AND c.id=?2 AND (?3 OR COALESCE(o.blocked,0)=0)
+         AND COALESCE(p.enabled,1)=1)",
+        params![request.source, request.channel, authorized],
+        |r| r.get(0),
+    )?;
+    if !allowed {
+        return Err(StoreError::Unavailable("Channel unavailable or blocked"));
+    }
+    Ok(())
+}
+
 fn insert_job(
     tx: &rusqlite::Transaction<'_>,
     id: JobId,
     request: &Request,
     now: i64,
+    authorized: bool,
 ) -> Result<JobId> {
+    require_channel(tx, request, authorized)?;
     request
         .validate(now)
         .map_err(|m| StoreError::InvalidData(m.into()))?;
@@ -85,18 +105,6 @@ fn insert_job(
             "Remove older recordings before adding more",
         ));
     }
-    // Recheck current channel and access policy in the writer transaction.
-    let allowed: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM channels c JOIN sources s ON s.id=c.source_id
-             LEFT JOIN channel_overlays o ON o.source_id=c.source_id AND o.channel_id=c.id
-             LEFT JOIN source_policy p ON p.source_id=c.source_id
-             WHERE c.source_id=?1 AND c.id=?2 AND COALESCE(o.blocked,0)=0 AND COALESCE(p.enabled,1)=1)",
-            params![request.source, request.channel],
-            |r| r.get(0),
-        )?;
-    if !allowed {
-        return Err(StoreError::Unavailable("Channel unavailable or blocked"));
-    }
     tx.execute("INSERT INTO recording_jobs(source_id,channel_id,channel_name,title,starts_at,ends_at,status,id,source_incarnation)
             VALUES(?1,?2,?3,?4,?5,?6,'scheduled',?7,(SELECT incarnation FROM guide_revisions WHERE source_id=?1))",
             params![request.source, request.channel, request.channel_name, request.title, request.start, request.end, id.0])?;
@@ -107,6 +115,7 @@ fn insert_rule(
     tx: &rusqlite::Transaction<'_>,
     rule: &iptv_core::recording::Rule,
     now: i64,
+    authorized: bool,
 ) -> Result<iptv_core::recording::RuleId> {
     use iptv_core::recording::Repeat;
     rule.request
@@ -128,14 +137,7 @@ fn insert_rule(
             "Recording padding is too long".into(),
         ));
     }
-    let allowed: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM channels c LEFT JOIN channel_overlays o
-             ON o.source_id=c.source_id AND o.channel_id=c.id LEFT JOIN source_policy p ON p.source_id=c.source_id
-             WHERE c.source_id=?1 AND c.id=?2 AND COALESCE(o.blocked,0)=0 AND COALESCE(p.enabled,1)=1)",
-            params![request.source, request.channel], |r| r.get(0))?;
-    if !allowed {
-        return Err(StoreError::Unavailable("Channel unavailable or blocked"));
-    }
+    require_channel(tx, request, authorized)?;
     let duplicate: Option<i64> = tx
         .query_row(
             "SELECT id FROM recording_rules WHERE source_id=?1 AND channel_id=?2 AND repeat=?3
@@ -191,8 +193,28 @@ impl Store {
             .optional()?)
     }
     pub fn schedule_recording(&mut self, id: JobId, request: &Request, now: i64) -> Result<JobId> {
-        let tx = self.conn.transaction()?;
-        let id = insert_job(&tx, id, request, now)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let id = insert_job(&tx, id, request, now, false)?;
+        tx.commit()?;
+        Ok(id)
+    }
+    /// Authorize against this writer snapshot before accepting even an idempotent retry.
+    /// The callback must validate the current owner, original source, and parental grant.
+    pub fn schedule_recording_checked(
+        &mut self,
+        id: JobId,
+        request: &Request,
+        now: i64,
+        authorize: impl FnOnce(&Store) -> Result<()>,
+    ) -> Result<JobId> {
+        let tx = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
+        authorize(self)?;
+        let id = insert_job(&tx, id, request, now, true)?;
         tx.commit()?;
         Ok(id)
     }
@@ -236,10 +258,36 @@ impl Store {
         )? == 1)
     }
     pub fn update_recording(&mut self, id: JobId, request: &Request, now: i64) -> Result<bool> {
+        self.update_recording_authorized(id, request, now, false, |_| Ok(()))
+    }
+    /// The callback runs after acquiring the writer transaction, before the edit.
+    pub fn update_recording_checked(
+        &mut self,
+        id: JobId,
+        request: &Request,
+        now: i64,
+        authorize: impl FnOnce(&Store) -> Result<()>,
+    ) -> Result<bool> {
+        self.update_recording_authorized(id, request, now, true, authorize)
+    }
+    fn update_recording_authorized(
+        &mut self,
+        id: JobId,
+        request: &Request,
+        now: i64,
+        authorized: bool,
+        authorize: impl FnOnce(&Store) -> Result<()>,
+    ) -> Result<bool> {
+        let tx = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
+        authorize(self)?;
+        require_channel(&tx, request, authorized)?;
         request
             .validate(now)
             .map_err(|m| StoreError::InvalidData(m.into()))?;
-        Ok(self.conn.execute(
+        let changed = tx.execute(
             "UPDATE recording_jobs SET starts_at=?1,ends_at=?2
             WHERE id=?3 AND source_id=?4 AND channel_id=?5 AND status='scheduled'
             AND source_incarnation=(SELECT incarnation FROM guide_revisions WHERE source_id=?4)",
@@ -250,7 +298,9 @@ impl Store {
                 request.source,
                 request.channel
             ],
-        )? == 1)
+        )? == 1;
+        tx.commit()?;
+        Ok(changed)
     }
     pub fn remove_recording(&mut self, id: JobId) -> Result<bool> {
         Ok(self.conn.execute(
@@ -315,8 +365,10 @@ impl Store {
         rule: &iptv_core::recording::Rule,
         now: i64,
     ) -> Result<iptv_core::recording::RuleId> {
-        let tx = self.conn.transaction()?;
-        let id = insert_rule(&tx, rule, now)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let id = insert_rule(&tx, rule, now, false)?;
         tx.commit()?;
         Ok(id)
     }
@@ -347,6 +399,43 @@ impl Store {
         occurrence_start: i64,
         now: i64,
     ) -> Result<JobId> {
+        self.schedule_recording_rule_with_first_authorized(
+            rule,
+            job,
+            first,
+            occurrence_start,
+            now,
+            None::<fn(&Store) -> Result<()>>,
+        )
+    }
+    /// The callback validates current authority in the transaction that accepts both intents.
+    pub fn schedule_recording_rule_with_first_checked(
+        &mut self,
+        rule: &iptv_core::recording::Rule,
+        job: JobId,
+        first: &Request,
+        occurrence_start: i64,
+        now: i64,
+        authorize: impl FnOnce(&Store) -> Result<()>,
+    ) -> Result<JobId> {
+        self.schedule_recording_rule_with_first_authorized(
+            rule,
+            job,
+            first,
+            occurrence_start,
+            now,
+            Some(authorize),
+        )
+    }
+    fn schedule_recording_rule_with_first_authorized(
+        &mut self,
+        rule: &iptv_core::recording::Rule,
+        job: JobId,
+        first: &Request,
+        occurrence_start: i64,
+        now: i64,
+        authorize: Option<impl FnOnce(&Store) -> Result<()>>,
+    ) -> Result<JobId> {
         if occurrence_start < 0
             || first.source != rule.request.source
             || first.channel != rule.request.channel
@@ -355,8 +444,15 @@ impl Store {
                 "Recording occurrence does not match its rule".into(),
             ));
         }
-        let tx = self.conn.transaction()?;
-        let id = insert_rule(&tx, rule, now)?;
+        let tx = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
+        let authorized = authorize.is_some();
+        if let Some(authorize) = authorize {
+            authorize(self)?;
+        }
+        let id = insert_rule(&tx, rule, now, authorized)?;
         if let Some(previous) = tx
             .query_row(
                 "SELECT job_id FROM recording_rule_jobs WHERE rule_id=?1 AND starts_at=?2",
@@ -378,7 +474,7 @@ impl Store {
             tx.commit()?;
             return Ok(JobId(previous));
         }
-        let job = insert_job(&tx, job, first, now)?;
+        let job = insert_job(&tx, job, first, now, authorized)?;
         let previous: Option<i64> = tx
             .query_row(
                 "SELECT rule_id FROM recording_rule_jobs WHERE job_id=?1",
@@ -443,7 +539,9 @@ impl Store {
         occurrence_start: i64,
         now: i64,
     ) -> Result<Option<JobId>> {
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let allowed: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM recording_rules q JOIN guide_revisions r
             ON r.source_id=q.source_id AND r.incarnation=q.source_incarnation
@@ -459,7 +557,7 @@ impl Store {
         if !allowed || exists {
             return Ok(None);
         }
-        let id = insert_job(&tx, id, request, now)?;
+        let id = insert_job(&tx, id, request, now, true)?;
         tx.execute(
             "INSERT INTO recording_rule_jobs(job_id,rule_id,starts_at) VALUES(?1,?2,?3)",
             params![id.0, rule.0, occurrence_start],
@@ -487,7 +585,48 @@ impl Store {
         enabled: bool,
         now: i64,
     ) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        self.set_recording_rule_enabled_authorized(rule, enabled, now, false, |_| Ok(()))
+    }
+    /// Disabling remains unconditional; re-enabling requires the callback's current authority.
+    pub fn set_recording_rule_enabled_checked(
+        &mut self,
+        rule: iptv_core::recording::RuleId,
+        enabled: bool,
+        now: i64,
+        authorize: impl FnOnce(&Store) -> Result<()>,
+    ) -> Result<()> {
+        self.set_recording_rule_enabled_authorized(rule, enabled, now, true, authorize)
+    }
+    fn set_recording_rule_enabled_authorized(
+        &mut self,
+        rule: iptv_core::recording::RuleId,
+        enabled: bool,
+        now: i64,
+        authorized: bool,
+        authorize: impl FnOnce(&Store) -> Result<()>,
+    ) -> Result<()> {
+        let tx = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
+        if enabled {
+            authorize(self)?;
+            let allowed: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM recording_rules q JOIN guide_revisions r
+                 ON r.source_id=q.source_id AND r.incarnation=q.source_incarnation
+                 JOIN channels c ON c.source_id=q.source_id AND c.id=q.channel_id
+                 LEFT JOIN channel_overlays o ON o.source_id=c.source_id AND o.channel_id=c.id
+                 LEFT JOIN source_policy p ON p.source_id=c.source_id
+                 WHERE q.id=?1 AND (?2 OR COALESCE(o.blocked,0)=0) AND COALESCE(p.enabled,1)=1)",
+                params![rule.0, authorized],
+                |r| r.get(0),
+            )?;
+            if !allowed {
+                return Err(StoreError::Unavailable(
+                    "Recording rule unavailable or blocked",
+                ));
+            }
+        }
         tx.execute(
             "UPDATE recording_rules SET enabled=?1 WHERE id=?2",
             params![enabled, rule.0],
@@ -512,7 +651,9 @@ impl Store {
     /// Permanent cancellation removes the rule's authority, while retaining all
     /// media/history. Pausing via set_recording_rule_enabled retains tombstones.
     pub fn cancel_recording_rule(&mut self, rule: iptv_core::recording::RuleId) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         cancel_rule(&tx, rule)?;
         tx.commit()?;
         Ok(())
@@ -521,7 +662,9 @@ impl Store {
     /// The UI's cancellation applies to every recurring intent attached to the
     /// selected recording, rather than choosing an arbitrary rule after overlap.
     pub fn cancel_recording_rules_for_job(&mut self, job: JobId) -> Result<bool> {
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let rules = tx
             .prepare("SELECT rule_id FROM recording_rule_jobs WHERE job_id=?1")?
             .query_map([job.0], |row| row.get::<_, i64>(0))?

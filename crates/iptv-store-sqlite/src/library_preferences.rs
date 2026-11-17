@@ -116,6 +116,10 @@ impl Store {
         id: &GroupId,
         target: crate::MoveTarget,
     ) -> Result<()> {
+        let tx = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
         let groups = self.library_groups(source)?;
         let Some(kind) = groups
             .iter()
@@ -145,7 +149,6 @@ impl Store {
                 }
             })
             .collect();
-        let tx = self.conn.transaction()?;
         for (position, id) in ids.iter().enumerate() {
             tx.execute(
                 UPSERT_GROUP_POSITION,
@@ -164,7 +167,9 @@ impl Store {
         hidden: bool,
     ) -> Result<()> {
         ensure_source(&self.conn, source)?;
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let sql = if groups {
             UPSERT_GROUP_HIDDEN
         } else {

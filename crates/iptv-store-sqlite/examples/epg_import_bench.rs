@@ -99,7 +99,9 @@ async fn main() {
         store_descriptions: std::env::var_os("BENCH_NO_DESC").is_none(),
         past_days_to_keep: Some(7),
     };
-    let mut configs = catalog.epg_sources(1);
+    let mut configs = catalog
+        .epg_sources(1)
+        .expect("bounded header guide identities fit from 1");
     for c in &mut configs {
         c.store = opts;
     }

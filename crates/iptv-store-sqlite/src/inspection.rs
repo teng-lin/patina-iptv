@@ -14,6 +14,14 @@ use sha2::{Digest, Sha256};
 
 use crate::{EpgOverride, Store};
 
+/// Effective live-content access supplied by the accepting runtime owner.
+/// The adapter translates this captured authority into pre-limit predicates.
+#[derive(Clone, Debug)]
+pub struct InspectionAccess {
+    pub unrestricted: bool,
+    pub grants: Vec<iptv_core::parental::Target>,
+}
+
 type Result<T> = crate::Result<InspectionResult<T>>;
 
 pub fn digest(parts: impl IntoIterator<Item = impl AsRef<[u8]>>) -> String {
@@ -200,6 +208,99 @@ fn page<T>(
 }
 
 impl Store {
+    /// Scope trusted runtime access to one coherent read; restore prior context on every exit.
+    pub fn inspection_with_access<T>(
+        &self,
+        access: InspectionAccess,
+        read: impl FnOnce(&Self) -> crate::Result<T>,
+    ) -> crate::Result<T> {
+        struct Restore<'a> {
+            slot: &'a std::cell::RefCell<Option<InspectionAccess>>,
+            previous: Option<InspectionAccess>,
+        }
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                self.slot.replace(self.previous.take());
+            }
+        }
+        let restore = Restore {
+            slot: &self.inspection_access,
+            previous: self.inspection_access.replace(Some(access)),
+        };
+        let result = self.read_snapshot(read);
+        drop(restore);
+        result
+    }
+
+    fn inspection_live_filter(
+        &self,
+        channel: &str,
+        overlay: &str,
+        args: &mut Vec<Value>,
+    ) -> String {
+        let access = self.inspection_access.borrow();
+        if access.as_ref().is_some_and(|access| access.unrestricted) {
+            return "1".into();
+        }
+        // No trusted runtime context means restricted, with no implicit grants.
+        let grants: Vec<_> = access
+            .as_ref()
+            .into_iter()
+            .flat_map(|access| &access.grants)
+            .map(|target| {
+                serde_json::json!([
+                    target.source,
+                    crate::parental::kind_slug(target.kind),
+                    target.id
+                ])
+            })
+            .collect();
+        args.push(Value::Text(
+            serde_json::to_string(&grants).expect("target tuples serialize"),
+        ));
+        let grant_arg = args.len();
+        let granted = |kind: &str, id: &str| {
+            format!(
+                "EXISTS(SELECT 1 FROM json_each(?{grant_arg}) granted
+                 WHERE json_extract(granted.value,'$[0]')={channel}.source_id
+                 AND json_extract(granted.value,'$[1]')='{kind}'
+                 AND json_extract(granted.value,'$[2]')={id})"
+            )
+        };
+        let own_grant = granted("live", &format!("{channel}.id"));
+        let parent_grant = granted("group", "membership.group_id");
+        format!("({own_grant} OR (COALESCE({overlay}.blocked,0)=0
+            AND NOT EXISTS(SELECT 1 FROM parental_blocks block WHERE block.source_id={channel}.source_id AND block.kind='live' AND block.content_id={channel}.id AND block.blocked=1)
+            AND NOT EXISTS(SELECT 1 FROM (
+                SELECT group_id FROM channel_groups WHERE source_id={channel}.source_id AND channel_id={channel}.id
+                UNION SELECT 'custom:'||g.id FROM custom_groups g JOIN custom_group_members m ON m.group_id=g.id WHERE g.source_id={channel}.source_id AND m.channel_id={channel}.id
+            ) membership WHERE NOT ({parent_grant}) AND (
+                EXISTS(SELECT 1 FROM parental_blocks block WHERE block.source_id={channel}.source_id AND block.kind='group' AND block.content_id=membership.group_id AND block.blocked=1)
+                OR EXISTS(SELECT 1 FROM groups adult WHERE adult.source_id={channel}.source_id AND adult.id=membership.group_id AND adult.kind IN ('live','radio') AND adult.adult=1
+                    AND NOT EXISTS(SELECT 1 FROM parental_blocks allow WHERE allow.source_id={channel}.source_id
+                        AND allow.kind='group' AND allow.content_id=adult.id AND allow.blocked=0))
+            ))))")
+    }
+
+    fn inspection_live_allowed(&self, key: &ChannelRef) -> crate::Result<bool> {
+        let mut args = vec![
+            Value::Integer(key.source.0),
+            Value::Text(key.content.as_str().to_owned()),
+        ];
+        let access = self.inspection_live_filter("c", "o", &mut args);
+        self.conn
+            .query_row(
+                &format!(
+                    "SELECT EXISTS(SELECT 1 FROM channels c LEFT JOIN channel_overlays o
+                ON o.source_id=c.source_id AND o.channel_id=c.id
+                WHERE c.source_id=?1 AND c.id=?2 AND ({access}))"
+                ),
+                params_from_iter(args),
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
     /// Incarnation of the cached evidence, only while it still describes the
     /// current enabled configured feed. A reused ID cannot borrow old rows.
     pub fn inspection_stored_feed_incarnation(
@@ -271,6 +372,10 @@ impl Store {
     }
 
     pub fn inspection_channel(&self, key: &ChannelRef) -> Result<ChannelInfo> {
+        self.read_snapshot(|store| store.inspection_channel_inner(key))
+    }
+
+    fn inspection_channel_inner(&self, key: &ChannelRef) -> Result<ChannelInfo> {
         let query = Query::source(key.source);
         if let Err(error) = scope(self, &query)? {
             return Ok(Err(error));
@@ -278,7 +383,7 @@ impl Store {
         let Some(channel) = self.channel(key.source, &key.content)? else {
             return Ok(Err(InspectionError::ChannelMissing));
         };
-        if channel.blocked {
+        if !self.inspection_live_allowed(key)? {
             return Ok(Err(InspectionError::PermissionDenied));
         }
         Ok(Ok(info(channel)))
@@ -287,9 +392,11 @@ impl Store {
     /// Stable ordering is `(source, content)`; search matches displayed/provider
     /// names, with the same literal behavior on FTS and non-FTS hosts.
     pub fn inspection_channels(&self, query: &Query) -> Result<Page<ChannelInfo>> {
-        let tx = self.conn.unchecked_transaction()?;
+        let tx = self.begin_read_snapshot()?;
         let result = self.inspection_channels_inner(query);
-        tx.commit()?;
+        if let Some(tx) = tx {
+            tx.commit()?;
+        }
         result
     }
 
@@ -339,9 +446,10 @@ impl Store {
             } else {
                 " AND COALESCE(o.hidden,0)=0"
             };
+            let access = self.inspection_live_filter("c", "o", &mut args);
             let sql = format!(
                 "SELECT {} FROM channels c {} WHERE c.source_id=?1
-                AND c.id>?2 AND COALESCE(o.blocked,0)=0 {visible} {filters}
+                AND c.id>?2 AND ({access}) {visible} {filters}
                 ORDER BY c.id LIMIT ?3",
                 crate::channels::ROW_COLUMNS,
                 crate::channels::OVERLAY_JOINS
@@ -372,6 +480,7 @@ impl Store {
         if !window.valid() {
             return Ok(Err(InspectionError::InvalidRequest));
         }
+        let tx = self.begin_read_snapshot()?;
         let ids = match scope(self, query)? {
             Ok(ids) => ids,
             Err(e) => return Ok(Err(e)),
@@ -384,28 +493,29 @@ impl Store {
         {
             return Ok(Err(e));
         }
-        let tx = self.conn.unchecked_transaction()?;
         let context = query_context(query, &format!("programmes:{window:?}:{channel:?}"));
         let mut hash = Sha256::new();
         hash.update(snapshot(self, &ids)?.as_bytes());
         let mut items = Vec::new();
         for source in &ids {
             let incarnation = self.source_incarnation(*source)?;
-            let mut statement = self.conn.prepare_cached(
+            let mut args = vec![
+                Value::Integer(source.0),
+                Value::Integer(window.from),
+                Value::Integer(window.to),
+                Value::Integer(i64::from(query.include_hidden)),
+            ];
+            let access = self.inspection_live_filter("ch", "o", &mut args);
+            let mut statement = self.conn.prepare_cached(&format!(
                 "SELECT b.channel_key,c.feed_id,c.epg_channel,p.start,p.stop,p.title
                  FROM epg_bindings b JOIN epg_channels c ON c.id=b.epg_channel_id
                  JOIN epg_programmes p ON p.channel_id=c.id
                  JOIN channels ch ON ch.source_id=b.source_id AND ch.id=b.channel_key
                  LEFT JOIN channel_overlays o ON o.source_id=b.source_id AND o.channel_id=b.channel_key
                  WHERE b.source_id=?1 AND p.start<?3 AND p.stop>?2
-                   AND COALESCE(o.blocked,0)=0 AND (?4 OR COALESCE(o.hidden,0)=0)
-                 ORDER BY b.channel_key,p.start")?;
-            let mut rows = statement.query(params![
-                source.0,
-                window.from,
-                window.to,
-                query.include_hidden
-            ])?;
+                   AND ({access}) AND (?4 OR COALESCE(o.hidden,0)=0)
+                 ORDER BY b.channel_key,p.start"))?;
+            let mut rows = statement.query(params_from_iter(args))?;
             while let Some(row) = rows.next()? {
                 let key: String = row.get(0)?;
                 if channel.is_some_and(|ch| ch.source != *source || ch.content.as_str() != key) {
@@ -471,7 +581,9 @@ impl Store {
         for item in &mut items {
             item.evidence_revision = snapshot.clone();
         }
-        tx.commit()?;
+        if let Some(tx) = tx {
+            tx.commit()?;
+        }
         Ok(Ok(page(items, query.limit, context, snapshot, |p| {
             vec![
                 p.channel.source.0.to_string(),
@@ -486,6 +598,7 @@ impl Store {
         key: &ChannelRef,
         query: &Query,
     ) -> Result<Page<Candidate>> {
+        let tx = self.begin_read_snapshot()?;
         let subject = match self.inspection_channel(key)? {
             Ok(c) => c,
             Err(e) => return Ok(Err(e)),
@@ -493,7 +606,6 @@ impl Store {
         if query.scope != SourceScope::Source(key.source) || !query.valid() {
             return Ok(Err(InspectionError::InvalidRequest));
         }
-        let tx = self.conn.unchecked_transaction()?;
         let context = query_context(query, &format!("candidates:{key:?}"));
         let channels = self.guide_channels(key.source)?;
         let mut rows = Vec::new();
@@ -568,7 +680,9 @@ impl Store {
                 (c.key.feed.0, c.key.epg_channel.as_str()) > (feed, cursor.after[1].as_str())
             });
         }
-        tx.commit()?;
+        if let Some(tx) = tx {
+            tx.commit()?;
+        }
         Ok(Ok(page(rows, query.limit, context, snapshot, |c| {
             vec![c.key.feed.0.to_string(), c.key.epg_channel.clone()]
         })))
@@ -578,11 +692,11 @@ impl Store {
         if !window.valid() {
             return Ok(Err(InspectionError::InvalidRequest));
         }
+        let tx = self.begin_read_snapshot()?;
         let ids = match scope(self, query)? {
             Ok(ids) => ids,
             Err(e) => return Ok(Err(e)),
         };
-        let tx = self.conn.unchecked_transaction()?;
         let context = query_context(query, &format!("audit:{window:?}"));
         let channel_snapshot = snapshot(self, &ids)?;
         let mut hash = SemanticHash::new();
@@ -793,7 +907,9 @@ impl Store {
                 identity_verified: false,
             });
         }
-        tx.commit()?;
+        if let Some(tx) = tx {
+            tx.commit()?;
+        }
         Ok(Ok(Page {
             items,
             next: channels.next.map(|mut cursor| {
