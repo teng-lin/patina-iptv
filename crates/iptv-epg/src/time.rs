@@ -50,7 +50,7 @@ pub fn parse_xmltv_time(s: &str, policy: TimePolicy) -> Option<UnixTime> {
     let hour = if digits >= 10 { num(8, 2) } else { 0 };
     let minute = if digits >= 12 { num(10, 2) } else { 0 };
     // A leap second is folded into the preceding second.
-    let second = if digits >= 14 { num(12, 2).min(59) } else { 0 };
+    let second = if digits >= 14 { num(12, 2) } else { 0 };
     if !(1..=12).contains(&month)
         || day == 0
         || day > days_in_month(year, month)
@@ -60,6 +60,7 @@ pub fn parse_xmltv_time(s: &str, policy: TimePolicy) -> Option<UnixTime> {
     {
         return None;
     }
+    let second = second.min(59);
     let offset = match parse_offset(s[digits..].trim_start())? {
         Some(minutes) => minutes,
         None => i64::from(policy.assumed_offset_minutes),
@@ -234,5 +235,24 @@ mod tests {
             assert_eq!(parse_xmltv_time(&s, UTC), Some(t), "{s}");
         }
         assert_eq!(format_xmltv_time(T), "20260301123045 +0000");
+    }
+}
+
+#[cfg(test)]
+mod seconds_regression {
+    use super::*;
+    #[test]
+    fn validates_seconds_before_folding_only_the_leap_second() {
+        let end = parse_xmltv_time("20260301123059 +0000", TimePolicy::UTC).unwrap();
+        assert_eq!(
+            parse_xmltv_time("20260301123060 +0000", TimePolicy::UTC),
+            Some(end)
+        );
+        for seconds in [61, 99] {
+            assert_eq!(
+                parse_xmltv_time(&format!("202603011230{seconds} +0000"), TimePolicy::UTC),
+                None
+            );
+        }
     }
 }

@@ -189,7 +189,7 @@ fn opt_secret(s: Option<&Secret>) -> Option<Secret> {
 }
 
 /// One portal account: endpoint, mode and device identity.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct StalkerPortal {
     endpoint: url::Url,
     mode: PortalMode,
@@ -203,6 +203,16 @@ pub struct StalkerPortal {
     password: Option<Secret>,
     language: String,
     timezone: String,
+}
+
+impl std::fmt::Debug for StalkerPortal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StalkerPortal")
+            .field("endpoint", &"[redacted]")
+            .field("mode", &self.mode)
+            .field("mac", &self.mac)
+            .finish_non_exhaustive()
+    }
 }
 
 impl StalkerPortal {

@@ -29,3 +29,65 @@ pub use programmes::{GroupBy, ProgrammeHit, ProgrammeIndex, ProgrammeSearchOptio
 pub use programmes_builder::ProgrammeIndexBuilder;
 pub use state::{Focus, Phase, ResultId, SearchAction, SearchEffect, SearchState, Tab};
 pub use text::{MIN_INFIX, MatchQuality, Query, fold, tokens};
+
+/// Source-qualified content identity, independent of catalogue position.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ChannelId {
+    pub source: Option<i64>,
+    pub content: String,
+    incarnation: Option<String>,
+    anonymous: Option<u64>,
+}
+impl ChannelId {
+    pub fn new(source: Option<i64>, content: impl Into<String>) -> Self {
+        Self {
+            source,
+            content: content.into(),
+            incarnation: None,
+            anonymous: None,
+        }
+    }
+
+    /// Bind stored content to the accepting source incarnation. Connection edits
+    /// and delete/recreate change it; ordinary catalogue refreshes do not.
+    pub fn in_source(
+        source: i64,
+        incarnation: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        Self {
+            source: Some(source),
+            content: content.into(),
+            incarnation: Some(incarnation.into()),
+            anonymous: None,
+        }
+    }
+
+    /// Anonymous rows have identity only within the index that created them.
+    /// Set an explicit content identity to retain focus across index rebuilds.
+    pub fn is_anonymous(&self) -> bool {
+        self.anonymous.is_some()
+    }
+
+    pub(crate) fn anonymous() -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let id = NEXT
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .expect("anonymous search identity space exhausted");
+        Self {
+            source: None,
+            content: String::new(),
+            incarnation: None,
+            anonymous: Some(id),
+        }
+    }
+
+    pub fn incarnation(&self) -> Option<&str> {
+        self.incarnation.as_deref()
+    }
+
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.content.capacity() + self.incarnation.as_ref().map_or(0, String::capacity)
+    }
+}

@@ -242,6 +242,7 @@ fn hit_fields_and_index_stats() {
     assert_eq!(
         hits,
         [ProgrammeHit {
+            identity: crate::ChannelId::new(None, "d"),
             channel: 3,
             start: NOW - 10 * MIN,
             end: NOW + 10 * MIN,

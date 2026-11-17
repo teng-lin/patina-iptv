@@ -60,7 +60,7 @@ impl EpisodeNum {
                 if p.is_empty() {
                     None
                 } else {
-                    p.parse::<u32>().ok().map(|n| n + 1)
+                    p.parse::<u32>().ok().and_then(|n| n.checked_add(1))
                 }
             };
             let season = field(parts.next());
@@ -112,6 +112,22 @@ mod tests {
 
     #[test]
     fn episode_numbers() {
+        assert_eq!(
+            EpisodeNum {
+                system: Some("xmltv_ns".into()),
+                value: "4294967295.0.".into()
+            }
+            .season_episode(),
+            Some((None, Some(1)))
+        );
+        assert_eq!(
+            EpisodeNum {
+                system: Some("xmltv_ns".into()),
+                value: "4294967294.0.".into()
+            }
+            .season_episode(),
+            Some((Some(u32::MAX), Some(1)))
+        );
         assert_eq!(ep(Some("xmltv_ns"), "0.4."), Some((Some(1), Some(5))));
         assert_eq!(
             ep(Some("xmltv_ns"), "2/5.11/20.0/1"),

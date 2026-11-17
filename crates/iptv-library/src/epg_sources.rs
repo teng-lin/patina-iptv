@@ -54,7 +54,7 @@ pub enum Layer {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum EditKind {
     /// A new source's link.
     AddLink,
@@ -66,7 +66,7 @@ pub enum EditKind {
     Relink(Feed),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Editing {
     pub kind: EditKind,
     pub text: String,
@@ -436,3 +436,46 @@ impl Screen {
 #[cfg(test)]
 #[path = "epg_sources_tests.rs"]
 mod tests;
+
+impl std::fmt::Debug for EditKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AddLink => f.write_str("AddLink"),
+            Self::AddName { .. } => f
+                .debug_struct("AddName")
+                .field("url", &"[redacted]")
+                .finish(),
+            Self::Rename(feed) => f.debug_tuple("Rename").field(feed).finish(),
+            Self::Relink(feed) => f.debug_tuple("Relink").field(feed).finish(),
+        }
+    }
+}
+impl std::fmt::Debug for Editing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Editing")
+            .field("kind", &self.kind)
+            .field("text", &"[redacted]")
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod editing_diagnostic_regression {
+    use super::*;
+    #[test]
+    fn leaf_and_retained_retry_edits_redact_raw_input() {
+        let kind = EditKind::AddName {
+            url: "synthetic-private-marker".into(),
+        };
+        assert!(!format!("{kind:?}").contains("synthetic-private-marker"));
+        let editing = Editing {
+            kind,
+            text: "synthetic-private-marker".into(),
+        };
+        assert!(!format!("{editing:?}").contains("synthetic-private-marker"));
+        let mut screen = Screen::new(SourceId(1), Vec::new());
+        screen.retry = Some(editing.clone());
+        screen.editing = Some(editing);
+        assert!(!format!("{screen:?}").contains("synthetic-private-marker"));
+    }
+}

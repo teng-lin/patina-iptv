@@ -853,3 +853,26 @@ fn unlisted_locale_is_preserved_until_a_suggestion_is_chosen() {
         Value::text("es-MX")
     );
 }
+
+#[test]
+fn numeric_stepper_accepts_full_width_step_counts() {
+    let settings = Settings::default();
+    let mut screen = Screen::new(PAGES, "playback");
+    screen.tap_row(
+        "player.info_panel_timeout",
+        &Ctx {
+            settings: &settings,
+            offer: &everything,
+        },
+    );
+    screen.step(i64::MAX);
+    assert!(matches!(
+        screen.editor(),
+        Some(Editor::Number { value: 30_000, .. })
+    ));
+    screen.step(i64::MIN);
+    assert!(matches!(
+        screen.editor(),
+        Some(Editor::Number { value: 1_000, .. })
+    ));
+}

@@ -18,6 +18,7 @@ fn sources() -> Vec<GuideSource> {
             "http://panel.example.test/xmltv.php?password=p",
         )],
     )
+    .unwrap()
 }
 
 fn lines(sources: &[GuideSource]) -> Vec<SourceLine> {
@@ -47,7 +48,7 @@ fn applied(s: &mut Screen, effect: Option<Effect>) {
         panic!("no edit: {effect:?}");
     };
     let now: Vec<GuideSource> = s.lines.iter().map(|l| l.source.clone()).collect();
-    s.set_lines(lines(&guides::apply(&now, &edit).unwrap()));
+    s.set_lines(lines(&guides::apply(&now, &edit).unwrap().unwrap()));
 }
 
 #[test]

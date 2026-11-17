@@ -152,7 +152,7 @@ fn gzip_error(e: std::io::Error) -> ImportError {
 
 /// Turns a parsed playlist into a catalog, or explains why it is not one.
 fn into_catalog(
-    playlist: M3uPlaylist,
+    mut playlist: M3uPlaylist,
     sniff: &[u8],
     stats: crate::catalog::ImportStats,
     allow_private_fixture: bool,
@@ -161,6 +161,7 @@ fn into_catalog(
     let fail = |p| Err(ImportError::parse(Step::Playlist, p));
     let head = String::from_utf8_lossy(sniff);
     let head = head.trim_start_matches('\u{feff}').trim_start();
+    let dropped_guides = crate::catalog::limit_header_guides(&mut playlist.header);
     let header = &playlist.header;
     if header.looks_like_hls {
         return fail(ParseProblem::HlsManifest);
@@ -214,6 +215,7 @@ fn into_catalog(
     let mut catalog = Catalog::new(SourceMeta::M3u {
         header: playlist.header,
     });
+    catalog.warn_guide_limit(dropped_guides);
     catalog.stats = stats;
     catalog.stats.content_items = emitted + playlist.channels.items.len() as u64;
     catalog.groups = playlist.groups;

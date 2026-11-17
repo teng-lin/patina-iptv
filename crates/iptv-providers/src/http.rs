@@ -42,7 +42,6 @@ pub struct HttpRequest {
 }
 
 /// Headers whose values are always redacted in `Debug`.
-const SENSITIVE_HEADERS: &[&str] = &["authorization", "cookie", "sn"];
 /// Query keys whose values are always redacted in [`HttpRequest::redacted_url`].
 const SENSITIVE_QUERY_KEYS: &[&str] = &[
     "username",
@@ -150,20 +149,10 @@ impl HttpRequest {
 
 impl fmt::Debug for HttpRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let headers: Vec<(String, String)> = self
+        let headers: Vec<_> = self
             .headers
             .iter()
-            .map(|(n, v)| {
-                let sensitive = SENSITIVE_HEADERS.iter().any(|s| n.eq_ignore_ascii_case(s));
-                (
-                    n.clone(),
-                    if sensitive {
-                        "***".to_owned()
-                    } else {
-                        v.clone()
-                    },
-                )
-            })
+            .map(|(name, _)| (name, "[redacted]"))
             .collect();
         f.debug_struct("HttpRequest")
             .field("method", &self.method)
@@ -302,5 +291,25 @@ mod tests {
             json_body(&HttpResponse::ok("  ")),
             Err(ProviderError::InvalidBody(_))
         ));
+    }
+}
+
+#[cfg(test)]
+mod arbitrary_header_regression {
+    use super::*;
+    #[test]
+    fn debug_redacts_every_header_value() {
+        let mut request = HttpRequest::get("http://media.example.test/");
+        for name in [
+            "X-Api-Key",
+            "X-Auth-Token",
+            "Proxy-Authorization",
+            "Referer",
+        ] {
+            request
+                .headers
+                .push((name.into(), "synthetic-header-secret".into()));
+        }
+        assert!(!format!("{request:?}").contains("synthetic-header-secret"));
     }
 }

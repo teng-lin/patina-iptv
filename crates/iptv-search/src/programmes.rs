@@ -91,6 +91,7 @@ impl Default for ProgrammeSearchOptions<'_> {
 /// One programme result.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProgrammeHit {
+    pub identity: crate::ChannelId,
     pub channel: usize,
     pub start: UnixTime,
     pub end: UnixTime,
@@ -115,6 +116,7 @@ struct Occ {
 pub struct ProgrammeIndex {
     base: i64,
     channels: usize,
+    identities: Vec<crate::ChannelId>,
     /// Distinct folded words, sorted.
     vocab: Vec<Box<str>>,
     /// Titles containing each word: `post[post_off[w]..post_off[w + 1]]`.
@@ -151,9 +153,9 @@ impl ProgrammeIndex {
         let mut ids: HashMap<&str, u32> = HashMap::new();
         let mut titles: Vec<&str> = Vec::new();
         let mut raw: Vec<(u32, u32, i64, i64)> = Vec::new();
-        let mut n_channels = 0;
+        let mut identities = Vec::new();
         for (ch, key) in channels.into_iter().enumerate() {
-            n_channels = ch + 1;
+            identities.push(crate::ChannelId::new(None, key.as_str()));
             let Some(sched) = store.schedule(key) else {
                 continue;
             };
@@ -166,7 +168,7 @@ impl ProgrammeIndex {
                 raw.push((id, ch as u32, p.start(), p.stop()));
             }
         }
-        Self::assemble(&titles, &raw, n_channels)
+        Self::assemble(&titles, &raw, identities)
     }
 
     /// The index of `raw` (title id, channel, start, stop) with the titles
@@ -174,9 +176,14 @@ impl ProgrammeIndex {
     pub(crate) fn assemble(
         titles: &[&str],
         raw: &[(u32, u32, i64, i64)],
-        n_channels: usize,
+        identities: Vec<crate::ChannelId>,
     ) -> Self {
-        let base = raw.iter().map(|r| r.2).min().unwrap_or(0);
+        let valid = raw
+            .iter()
+            .filter(|r| r.3 > r.2 && u32::try_from(i128::from(r.3) - i128::from(r.2)).is_ok());
+        let base = valid.clone().map(|r| r.2).min().unwrap_or(0);
+        // Omit rows outside the compact range instead of fabricating offsets.
+        let raw = valid.filter(|r| u32::try_from(i128::from(r.2) - i128::from(base)).is_ok());
 
         // Words in first-seen order, then sorted and renumbered.
         let mut word_ids: HashMap<String, u32> = HashMap::new();
@@ -242,7 +249,7 @@ impl ProgrammeIndex {
 
         // Occurrences grouped by title (counting sort keeps input order).
         let mut counts = vec![0u32; titles.len()];
-        for r in raw {
+        for r in raw.clone() {
             counts[r.0 as usize] += 1;
         }
         let occ_off = offsets_from_counts(&counts);
@@ -253,21 +260,22 @@ impl ProgrammeIndex {
                 start: 0,
                 dur: 0
             };
-            raw.len()
+            raw.clone().count()
         ];
         for &(t, channel, start, stop) in raw {
             let i = &mut fill[t as usize];
             occ[*i as usize] = Occ {
                 channel,
-                start: u32::try_from(start - base).unwrap_or(u32::MAX),
-                dur: u32::try_from(stop - start).unwrap_or(0),
+                start: (i128::from(start) - i128::from(base)) as u32,
+                dur: (i128::from(stop) - i128::from(start)) as u32,
             };
             *i += 1;
         }
 
         ProgrammeIndex {
             base,
-            channels: n_channels,
+            channels: identities.len(),
+            identities,
             vocab,
             post_off,
             post,
@@ -278,6 +286,18 @@ impl ProgrammeIndex {
             occ_off,
             occ,
         }
+    }
+
+    /// Bind a channel's occurrences to their accepting source identity.
+    pub fn set_identity(&mut self, channel: usize, identity: crate::ChannelId) {
+        if let Some(current) = self.identities.get_mut(channel) {
+            *current = identity;
+        }
+    }
+
+    /// Channel identities in the index's row order, including rows with no titles.
+    pub fn channel_identities(&self) -> &[crate::ChannelId] {
+        &self.identities
     }
 
     /// Programmes indexed.
@@ -303,7 +323,13 @@ impl ProgrammeIndex {
             + self.word_off.capacity()
             + self.words.capacity()
             + self.occ_off.capacity();
-        u32s * 4
+        self.identities.capacity() * size_of::<crate::ChannelId>()
+            + self
+                .identities
+                .iter()
+                .map(crate::ChannelId::heap_bytes)
+                .sum::<usize>()
+            + u32s * 4
             + self.occ.capacity() * size_of::<Occ>()
             + self.text.capacity()
             + self.vocab.capacity() * size_of::<Box<str>>()
@@ -396,7 +422,10 @@ impl ProgrammeIndex {
             Some(f) => (0..self.channels).map(f).collect(),
             None => vec![0; self.channels],
         };
-        let (from, to) = (now - opts.look_back, now + opts.look_ahead);
+        let (from, to) = (
+            now.saturating_sub(opts.look_back),
+            now.saturating_add(opts.look_ahead),
+        );
         let mut cands = Vec::new();
         for (wi, &bits) in self.candidates(&q).iter().enumerate() {
             let mut bits = bits;
@@ -418,13 +447,13 @@ impl ProgrammeIndex {
                     if opts.visible.is_some_and(|f| !f(ch)) {
                         continue;
                     }
-                    let archive = now - i64::from(days[ch]) * DAY;
+                    let archive = now.saturating_sub(i64::from(days[ch]) * DAY);
                     let (airing, class, dist) = if end <= now {
-                        (Airing::Ended, 2, now - end)
+                        (Airing::Ended, 2, now.abs_diff(end))
                     } else if start <= now {
                         (Airing::Live, 0, 0)
                     } else {
-                        (Airing::Upcoming, 1, start - now)
+                        (Airing::Upcoming, 1, start.abs_diff(now))
                     };
                     let catchup = airing != Airing::Upcoming && days[ch] > 0 && start >= archive;
                     if airing == Airing::Ended && !catchup && !opts.include_past_without_catchup {
@@ -451,6 +480,7 @@ impl ProgrammeIndex {
         cands
             .into_iter()
             .map(|c| ProgrammeHit {
+                identity: self.identities[c.channel as usize].clone(),
                 channel: c.channel as usize,
                 start: c.start,
                 end: c.end,
@@ -469,7 +499,7 @@ struct Cand {
     /// 0 live, 1 upcoming, 2 past.
     class: u8,
     /// Seconds from now (live: 0).
-    dist: i64,
+    dist: u64,
     channel: u32,
     start: i64,
     end: i64,

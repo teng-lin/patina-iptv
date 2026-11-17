@@ -84,7 +84,7 @@ fn live_import_without_vod_requests() {
     assert_eq!(account.status, AccountStatus::Active);
     assert_eq!(account.allowed_output_formats, ["m3u8", "ts"]);
     assert!(xmltv_url.expose().contains("xmltv.php"));
-    assert_eq!(catalog.epg_sources(3)[0].id.0, 3);
+    assert_eq!(catalog.epg_sources(3).unwrap()[0].id.0, 3);
     assert_eq!(catalog.guide_urls(), std::slice::from_ref(xmltv_url));
     for req in fetch.requests() {
         let shown = format!("{req:?}");

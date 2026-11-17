@@ -6,6 +6,7 @@ use crate::text::MatchQuality;
 
 fn ch(channel: usize) -> ChannelHit {
     ChannelHit {
+        identity: crate::ChannelId::new(None, format!("synthetic-{channel}")),
         channel,
         score: MatchQuality::Prefix,
     }
@@ -13,6 +14,7 @@ fn ch(channel: usize) -> ChannelHit {
 
 fn pr(channel: usize, start: UnixTime) -> ProgrammeHit {
     ProgrammeHit {
+        identity: crate::ChannelId::new(None, format!("synthetic-{channel}")),
         channel,
         start,
         end: start + 1800,
@@ -29,7 +31,10 @@ fn typed(q: &str) -> SearchState {
     s
 }
 
-const P: fn(usize, UnixTime) -> ResultId = |channel, start| ResultId::Programme { channel, start };
+const P: fn(usize, UnixTime) -> ResultId = |channel, start| ResultId::Programme {
+    channel: crate::ChannelId::new(None, format!("synthetic-{channel}")),
+    start,
+};
 
 #[test]
 fn idle_shows_history_and_picks_an_entry() {
@@ -52,7 +57,13 @@ fn idle_shows_history_and_picks_an_entry() {
     assert_eq!(s.history().entries(), ["orchard", "kestrel"]);
     // Keyboard hidden: results take focus.
     assert!(s.set_results("orchard", vec![ch(5)], vec![]));
-    assert_eq!(s.focus(), &Focus::Result(ResultId::Channel(5)));
+    assert_eq!(
+        s.focus(),
+        &Focus::Result(ResultId::Channel(crate::ChannelId::new(
+            None,
+            "synthetic-5"
+        )))
+    );
     // Up from history's first entry goes back to the input.
     let mut s = SearchState::new(SearchHistory::from_list(["one"], 20));
     s.apply(Down);
@@ -74,7 +85,13 @@ fn typing_drops_stale_results_and_submit_moves_focus() {
     assert_eq!(s.focus(), &Focus::Input, "keyboard still up");
     assert_eq!(s.apply(Ok), SearchEffect::None);
     assert!(!s.keyboard_visible());
-    assert_eq!(s.focus(), &Focus::Result(ResultId::Channel(1)));
+    assert_eq!(
+        s.focus(),
+        &Focus::Result(ResultId::Channel(crate::ChannelId::new(
+            None,
+            "synthetic-1"
+        )))
+    );
     assert_eq!(s.history().entries(), ["kes"]);
 }
 
@@ -87,7 +104,13 @@ fn moves_between_input_tabs_and_results_keeping_focus_per_tab() {
     s.apply(Down);
     s.apply(Down);
     s.apply(Down);
-    assert_eq!(s.focus(), &Focus::Result(ResultId::Channel(7)));
+    assert_eq!(
+        s.focus(),
+        &Focus::Result(ResultId::Channel(crate::ChannelId::new(
+            None,
+            "synthetic-7"
+        )))
+    );
     s.apply(Right);
     assert_eq!(s.tab(), Tab::Programs);
     assert_eq!(s.focus(), &Focus::Result(P(2, 100)));
@@ -95,7 +118,10 @@ fn moves_between_input_tabs_and_results_keeping_focus_per_tab() {
     s.apply(Left);
     assert_eq!(
         s.focus(),
-        &Focus::Result(ResultId::Channel(7)),
+        &Focus::Result(ResultId::Channel(crate::ChannelId::new(
+            None,
+            "synthetic-7"
+        ))),
         "remembered"
     );
     s.apply(Right);
@@ -209,7 +235,13 @@ fn taps_pick_history_results_and_tabs() {
     );
     // Tab labels: back to channels lands on the first, then the remembered one.
     s.apply(ShowTab(Tab::Channels));
-    assert_eq!(s.focus(), &Focus::Result(ResultId::Channel(1)));
+    assert_eq!(
+        s.focus(),
+        &Focus::Result(ResultId::Channel(crate::ChannelId::new(
+            None,
+            "synthetic-1"
+        )))
+    );
     s.apply(ShowTab(Tab::Programs));
     assert_eq!(s.focus(), &Focus::Result(P(4, 200)));
     // A tab without results does not open; from the field, focus goes to the tabs.
@@ -233,7 +265,116 @@ fn keyboard_hidden_by_the_platform_keeps_the_screen() {
     // Idle: tapping history entries works, results do not exist.
     let mut s = SearchState::new(SearchHistory::default());
     assert_eq!(
-        s.apply(Pick(Focus::Result(ResultId::Channel(0)))),
+        s.apply(Pick(Focus::Result(ResultId::Channel(
+            crate::ChannelId::new(None, "synthetic-0")
+        )))),
         SearchEffect::None
+    );
+}
+
+#[test]
+fn catalogue_reordering_preserves_semantic_focus_and_play_identity() {
+    let mut state = typed("synthetic");
+    let first = ch(3);
+    let id = ResultId::Channel(first.identity.clone());
+    state.set_results("synthetic", vec![first.clone()], Vec::new());
+    state.apply(Pick(Focus::Result(id.clone())));
+    let mut reordered = first;
+    reordered.channel = 0;
+    state.set_results("synthetic", vec![reordered], Vec::new());
+    assert_eq!(state.focus(), &Focus::Result(id.clone()));
+    assert_eq!(state.apply(Ok), SearchEffect::Play(id));
+}
+
+#[test]
+fn programme_fallback_stays_on_the_semantic_channel_after_positions_change() {
+    let mut state = typed("synthetic");
+    let original = pr(3, 100);
+    state.set_results("synthetic", Vec::new(), vec![original.clone()]);
+    state.apply(Pick(Focus::Result(P(3, 100))));
+    let mut replacement = original;
+    replacement.channel = 9;
+    replacement.start = 200;
+    state.set_results("synthetic", Vec::new(), vec![replacement]);
+    assert_eq!(state.focus(), &Focus::Result(P(3, 200)));
+}
+
+#[test]
+fn programme_fallback_never_follows_a_recreated_source_with_the_same_content_key() {
+    let mut state = typed("synthetic");
+    let old_channel = crate::ChannelId::in_source(1, "generated-original", "shared-provider-key");
+    let mut original = pr(3, 100);
+    original.identity = old_channel.clone();
+    state.set_results("synthetic", Vec::new(), vec![original.clone()]);
+    state.apply(Pick(Focus::Result(ResultId::Programme {
+        channel: old_channel.clone(),
+        start: 100,
+    })));
+    let mut refreshed = original.clone();
+    refreshed.channel = 9;
+    refreshed.start = 200;
+    state.set_results("synthetic", Vec::new(), vec![pr(0, 200), refreshed]);
+    assert_eq!(
+        state.focus(),
+        &Focus::Result(ResultId::Programme {
+            channel: old_channel,
+            start: 200
+        })
+    );
+    let first = pr(0, 300);
+    let first_id = ResultId::Programme {
+        channel: first.identity.clone(),
+        start: first.start,
+    };
+    let mut recreated = original;
+    recreated.identity =
+        crate::ChannelId::in_source(1, "generated-recreated", "shared-provider-key");
+    recreated.channel = 9;
+    recreated.start = 300;
+    state.set_results("synthetic", Vec::new(), vec![first, recreated]);
+    assert_eq!(state.focus(), &Focus::Result(first_id.clone()));
+    assert_eq!(state.apply(Ok), SearchEffect::Play(first_id));
+}
+
+#[test]
+fn duplicate_name_only_rows_have_distinct_index_scoped_navigation_identity() {
+    let mut index = crate::ChannelIndex::from_names(["Generated", "Generated"]);
+    index.add_key(0, "first-extra");
+    index.add_key(1, "second-extra");
+    let hits = index.search_channels("generated", &Default::default(), Default::default());
+    assert_eq!(hits.len(), 2);
+    assert_ne!(hits[0].identity, hits[1].identity);
+    assert!(hits.iter().all(|hit| hit.identity.is_anonymous()));
+    let mut state = typed("generated");
+    state.set_results("generated", hits.clone(), Vec::new());
+    state.apply(Down);
+    state.apply(Down);
+    assert_eq!(
+        state.focus(),
+        &Focus::Result(ResultId::Channel(hits[0].identity.clone()))
+    );
+    state.apply(Down);
+    assert_eq!(
+        state.apply(Ok),
+        SearchEffect::Play(ResultId::Channel(hits[1].identity.clone()))
+    );
+    assert_eq!(
+        index.search_channels("second-extra", &Default::default(), Default::default())[0].identity,
+        hits[1].identity
+    );
+    let replacement = crate::ChannelIndex::from_names(["Generated", "Generated"]).search_channels(
+        "generated",
+        &Default::default(),
+        Default::default(),
+    );
+    assert!(
+        replacement
+            .iter()
+            .all(|hit| hits.iter().all(|old| old.identity != hit.identity))
+    );
+    state.set_results("generated", replacement.clone(), Vec::new());
+    assert_eq!(
+        state.focus(),
+        &Focus::Result(ResultId::Channel(replacement[0].identity.clone()))
     );
 }

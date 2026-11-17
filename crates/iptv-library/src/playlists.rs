@@ -67,7 +67,7 @@ pub enum EditKind {
 }
 
 /// Text entry over the actions sheet.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Editing {
     pub id: SourceId,
     pub kind: EditKind,
@@ -843,5 +843,31 @@ mod tests {
             s.commit(),
             Some(Effect::SetUserAgent(A, Some("Other/2".into())))
         );
+    }
+}
+
+impl std::fmt::Debug for Editing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Editing")
+            .field("id", &self.id)
+            .field("kind", &self.kind)
+            .field("text", &"[redacted]")
+            .field("prefilled", &self.prefilled)
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod editing_diagnostic_regression {
+    use super::*;
+    #[test]
+    fn raw_edit_text_is_redacted() {
+        let editing = Editing {
+            id: SourceId(1),
+            kind: EditKind::Rename,
+            text: "synthetic-private-marker".into(),
+            prefilled: false,
+        };
+        assert!(!format!("{editing:?}").contains("synthetic-private-marker"));
     }
 }

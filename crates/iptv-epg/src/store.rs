@@ -399,8 +399,8 @@ impl SourceBuilder {
                     let p = &raw[i];
                     // `settle` checked that both fit.
                     slots.push(Slot {
-                        start: (p.start - base) as u32,
-                        dur: (stop - p.start) as u32,
+                        start: (i128::from(p.start) - i128::from(base)) as u32,
+                        dur: (i128::from(stop) - i128::from(p.start)) as u32,
                         title: p.title,
                         extra: p.extra,
                     });

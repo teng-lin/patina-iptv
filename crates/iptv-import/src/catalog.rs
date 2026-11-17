@@ -119,9 +119,25 @@ pub struct Catalog {
     pub stats: ImportStats,
 }
 
+/// Discard surplus declared guides before fetching or validating their destinations.
+pub(crate) fn limit_header_guides(header: &mut M3uHeader) -> usize {
+    let dropped = header
+        .epg_urls
+        .len()
+        .saturating_sub(iptv_library::guides::MAX_PROVIDER_GUIDES);
+    header
+        .epg_urls
+        .truncate(iptv_library::guides::MAX_PROVIDER_GUIDES);
+    dropped
+}
+
 impl Catalog {
-    pub(crate) fn new(source: SourceMeta) -> Self {
-        Self {
+    pub(crate) fn new(mut source: SourceMeta) -> Self {
+        let dropped = match &mut source {
+            SourceMeta::M3u { header } => limit_header_guides(header),
+            _ => 0,
+        };
+        let mut catalog = Self {
             source,
             groups: Vec::new(),
             channels: Vec::new(),
@@ -130,6 +146,20 @@ impl Catalog {
             warnings: Vec::new(),
             warnings_dropped: 0,
             stats: ImportStats::default(),
+        };
+        catalog.warn_guide_limit(dropped);
+        catalog
+    }
+
+    pub(crate) fn warn_guide_limit(&mut self, dropped: usize) {
+        if dropped > 0 {
+            self.warn(
+                Step::Playlist,
+                format!(
+                    "ignored {dropped} surplus provider guide URLs (limit {})",
+                    iptv_library::guides::MAX_PROVIDER_GUIDES
+                ),
+            );
         }
     }
 
@@ -149,20 +179,32 @@ impl Catalog {
     /// EPG sources the source itself declares: the M3U header's
     /// `url-tvg`/`x-tvg-url`, or the Xtream panel's `xmltv.php`. Ids start
     /// at `first_id`; earlier URLs get higher priority.
-    pub fn epg_sources(&self, first_id: u32) -> Vec<EpgSourceConfig> {
+    pub fn epg_sources(
+        &self,
+        first_id: u32,
+    ) -> Result<Vec<EpgSourceConfig>, iptv_library::guides::GuideFeedError> {
         match &self.source {
             SourceMeta::M3u { header } => EpgSourceConfig::from_m3u_header(header, first_id),
-            SourceMeta::Xtream { xmltv_url, .. } => {
-                vec![EpgSourceConfig::new(FeedId(first_id), xmltv_url.clone())]
-            }
-            SourceMeta::Stalker { .. } => Vec::new(),
+            SourceMeta::Xtream { xmltv_url, .. } => Ok(vec![EpgSourceConfig::new(
+                FeedId(first_id),
+                xmltv_url.clone(),
+            )]),
+            SourceMeta::Stalker { .. } => Ok(Vec::new()),
         }
     }
 
     /// The provider's own guide addresses, in its order (the playlist
     /// header's, or the Xtream panel's `xmltv.php`; none for Stalker).
     pub fn guide_urls(&self) -> Vec<SecretUrl> {
-        self.epg_sources(0).into_iter().map(|c| c.url).collect()
+        match &self.source {
+            SourceMeta::M3u { header } => header
+                .epg_urls
+                .iter()
+                .map(|url| SecretUrl::new(url.clone()))
+                .collect(),
+            SourceMeta::Xtream { xmltv_url, .. } => vec![xmltv_url.clone()],
+            SourceMeta::Stalker { .. } => Vec::new(),
+        }
     }
 
     /// Copies the request counters gathered by the driver.

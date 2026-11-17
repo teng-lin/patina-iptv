@@ -64,7 +64,7 @@ fn imports_a_streamed_playlist_with_headers_and_progress() {
         header.epg_urls,
         ["http://fixture.example.test:8089/iptv/guide.xml.gz"]
     );
-    let epg = catalog.epg_sources(1);
+    let epg = catalog.epg_sources(1).unwrap();
     assert_eq!(epg.len(), 1);
     assert_eq!(
         epg[0].url.expose(),
@@ -351,4 +351,37 @@ fn embedded_local_and_private_destinations_fail_without_a_partial_catalog() {
             ));
         }
     }
+}
+
+#[test]
+fn surplus_header_guides_warn_without_rejecting_or_fetching_them() {
+    let cap = iptv_library::guides::MAX_PROVIDER_GUIDES;
+    let mut urls: Vec<_> = (0..cap)
+        .map(|index| format!("https://guide.example.test/{index}.xml"))
+        .collect();
+    // A surplus destination must not be validated or fetched after the cap.
+    urls.push("http://127.0.0.1/synthetic-ignored.xml".into());
+    let playlist = format!(
+        "#EXTM3U url-tvg=\"{}\"\n#EXTINF:-1,Generated channel\nhttps://media.example.test/live.ts\n",
+        urls.join(",")
+    );
+    let fetch = FakeFetch::body(playlist);
+    let catalog = run(&fetch).unwrap();
+    assert_eq!(catalog.channels.len(), 1);
+    assert_eq!(fetch.requests().len(), 1, "only the playlist was requested");
+    assert_eq!(catalog.guide_urls().len(), cap);
+    let guides = catalog.epg_sources(1).unwrap();
+    assert_eq!(guides.len(), cap);
+    assert_eq!(guides.last().unwrap().id.0, cap as u32);
+    assert_eq!(catalog.warning_count(), 1);
+    assert!(
+        catalog.warnings[0]
+            .message
+            .contains("ignored 1 surplus provider guide URLs")
+    );
+    assert!(!format!("{:?}", catalog.warnings).contains("synthetic-ignored"));
+    assert!(matches!(
+        catalog.epg_sources(u32::MAX),
+        Err(iptv_library::guides::GuideFeedError::Exhausted)
+    ));
 }

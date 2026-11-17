@@ -551,61 +551,18 @@ fn typed_reads_of_every_type() {
     assert!(st.bool(keys::CONFIRM_EXIT, G));
 }
 
-/// The message of the panic `read` raises.
-fn panic_message<R: std::fmt::Debug>(read: impl FnOnce() -> R) -> String {
-    // (The panic is also printed to this test's captured output.)
-    let payload =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(read)).expect_err("the read panics");
-    payload
-        .downcast_ref::<String>()
-        .cloned()
-        .unwrap_or_default()
-}
-
-/// A typed key of the wrong type is a bug in this crate: the read panics
-/// and names the key and what it holds.
 #[test]
-fn typed_reads_of_the_wrong_type_panic() {
-    use iptv_settings::keys::{
-        BindingsKey, BoolKey, ColourKey, DurationKey, EnumKey, IntKey, TextKey,
-    };
-    let st = Settings::new();
-    let holds = |key: &str, ty: &str| format!("typed settings key {key} holds a {ty}");
-    assert_eq!(
-        panic_message(|| st.bool(BoolKey("guide.switch_delay"), G)),
-        holds("guide.switch_delay", "duration")
-    );
-    assert_eq!(
-        panic_message(|| st.int(IntKey("guide.autoplay"), G)),
-        holds("guide.autoplay", "bool")
-    );
-    assert_eq!(
-        panic_message(|| st.duration_ms(DurationKey("history.recent_count"), G)),
-        holds("history.recent_count", "integer")
-    );
-    assert_eq!(
-        panic_message(|| st.choice(EnumKey("general.user_agent"), G)),
-        holds("general.user_agent", "text")
-    );
-    assert_eq!(
-        panic_message(|| st.colour(ColourKey("guide.autoplay"), G)),
-        holds("guide.autoplay", "bool")
-    );
-    assert_eq!(
-        panic_message(|| st.text(TextKey("appearance.accent"), G)),
-        holds("appearance.accent", "colour")
-    );
-    assert_eq!(
-        panic_message(|| st.key_bindings(BindingsKey("appearance.font_size"), G)),
-        holds("appearance.font_size", "enum")
-    );
-    let unknown = r#"typed settings key: unknown setting "no.such_key""#;
-    assert_eq!(
-        panic_message(|| st.bool(BoolKey("no.such_key"), G)),
-        unknown
-    );
-    assert_eq!(
-        panic_message(|| st.choice(EnumKey("no.such_key"), G)),
-        unknown
-    );
+fn typed_keys_reject_wrong_types_and_unknown_names_before_reading() {
+    use iptv_settings::keys::*;
+    assert!(BoolKey::try_new("guide.switch_delay").is_err());
+    assert!(IntKey::try_new("guide.autoplay").is_err());
+    assert!(DurationKey::try_new("history.recent_count").is_err());
+    assert!(EnumKey::try_new("general.user_agent").is_err());
+    assert!(ColourKey::try_new("guide.autoplay").is_err());
+    assert!(TextKey::try_new("appearance.accent").is_err());
+    assert!(BindingsKey::try_new("appearance.font_size").is_err());
+    assert!(BoolKey::try_new("no.such_key").is_err());
+    assert!(EnumKey::try_new("no.such_key").is_err());
+    assert_eq!(BoolKey::try_new("guide.autoplay").unwrap(), AUTOPLAY);
+    assert_eq!(AUTOPLAY.as_str(), "guide.autoplay");
 }

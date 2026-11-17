@@ -660,3 +660,26 @@ fn malformed_fields_never_panic() {
         });
     }
 }
+
+#[test]
+fn malformed_clock_values_are_rejected_before_arithmetic() {
+    for epoch in [i64::MIN, i64::MAX] {
+        assert_eq!(
+            ServerClock::new(None, Some("2026-03-01 12:00:00"), Some(epoch)).offset_minutes(),
+            None
+        );
+    }
+    for zone in [
+        "UTC+2147483647:00",
+        "UTC+-1:00",
+        "UTC+1:-2",
+        "UTC+é1",
+        "UTC+15:00",
+    ] {
+        assert_eq!(
+            ServerClock::new(Some(zone), None, None).offset_minutes(),
+            None,
+            "{zone}"
+        );
+    }
+}

@@ -89,15 +89,20 @@ impl SettledBuilder {
         };
         let sched = &mut self.schedules[at];
         let (base, after) = match sched.slots.last() {
-            Some(last) => (sched.base, sched.base + i64::from(last.start + last.dur)),
-            None => (p.start, i64::MIN),
+            Some(last) => (
+                sched.base,
+                i128::from(sched.base) + i128::from(last.start) + i128::from(last.dur),
+            ),
+            None => (p.start, i128::from(i64::MIN)),
         };
-        if p.start < after {
+        if i128::from(p.start) < after {
             r.dropped_duplicate += 1;
             return false;
         }
-        let (Ok(start), Ok(dur)) = (u32::try_from(p.start - base), u32::try_from(stop - p.start))
-        else {
+        let (Ok(start), Ok(dur)) = (
+            u32::try_from(i128::from(p.start) - i128::from(base)),
+            u32::try_from(i128::from(stop) - i128::from(p.start)),
+        ) else {
             r.dropped_bad_duration += 1;
             return false;
         };
@@ -177,6 +182,20 @@ mod tests {
         assert_eq!(p.season_episode(), (Some(2), Some(5)));
         assert_eq!(settled.priority(), 5);
         assert_eq!(settled.report().kept, 3);
+    }
+
+    #[test]
+    fn compact_boundaries_and_full_width_timestamps_do_not_overflow() {
+        let mut b = SettledBuilder::new(FeedId(1), 0, false);
+        b.channel("synthetic");
+        assert!(b.push(&data(0, 1, "A")));
+        assert!(b.push(&data(i64::from(u32::MAX) - 1, i64::from(u32::MAX) + 2, "B")));
+        assert!(!b.push(&data(i64::from(u32::MAX) + 2, i64::from(u32::MAX) + 3, "C")));
+        let mut extremes = SettledBuilder::new(FeedId(1), 0, false);
+        extremes.channel("synthetic");
+        assert!(!extremes.push(&data(i64::MIN, i64::MAX, "Too long")));
+        assert!(extremes.push(&data(i64::MIN, i64::MIN + 1, "First")));
+        assert!(!extremes.push(&data(i64::MAX - 1, i64::MAX, "Too far")));
     }
 
     #[test]

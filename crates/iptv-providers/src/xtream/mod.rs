@@ -202,9 +202,9 @@ impl ServerClock {
             timestamp_now,
         ) {
             (Some(wall), Some(epoch)) if epoch > 0 => {
-                let raw = (wall - epoch) as f64 / 60.0;
-                let snapped = (raw / 15.0).round() as i32 * 15;
-                (snapped.abs() <= 14 * 60).then_some(snapped)
+                let raw = (i128::from(wall) - i128::from(epoch)) as f64 / 60.0;
+                let snapped = (raw / 15.0).round() * 15.0;
+                (snapped.abs() <= 14.0 * 60.0).then_some(snapped as i32)
             }
             _ => None,
         };
@@ -239,22 +239,36 @@ fn parse_fixed_offset(name: &str) -> Option<i32> {
         b'-' => (-1, &rest[1..]),
         _ => return None,
     };
+    if !digits.bytes().all(|b| b.is_ascii_digit() || b == b':') {
+        return None;
+    }
     let (h, m) = match digits.split_once(':') {
         Some((h, m)) => (h, m),
         None if digits.len() > 2 => digits.split_at(digits.len() - 2),
         None => (digits, "0"),
     };
     let (h, m): (i32, i32) = (h.parse().ok()?, m.parse().ok()?);
-    (h <= 14 && m < 60).then_some(sign * (h * 60 + m))
+    (h <= 14 && m < 60).then(|| sign * (h * 60 + m))
 }
 
 /// An authenticated Xtream account. `Debug` is safe to log.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct XtreamClient {
     base: String,
     username: Secret,
     password: Secret,
     user_agent: String,
+}
+
+impl std::fmt::Debug for XtreamClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("XtreamClient")
+            .field("base", &"[redacted]")
+            .field("username", &self.username)
+            .field("password", &self.password)
+            .field("user_agent", &"[redacted]")
+            .finish()
+    }
 }
 
 impl XtreamClient {

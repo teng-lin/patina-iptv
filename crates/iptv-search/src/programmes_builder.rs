@@ -22,23 +22,38 @@ use crate::programmes::ProgrammeIndex;
 #[derive(Default)]
 pub struct ProgrammeIndexBuilder {
     channels: usize,
+    identities: Vec<crate::ChannelId>,
     ids: HashMap<Box<str>, u32>,
     /// Title id, channel, start, stop.
     raw: Vec<(u32, u32, i64, i64)>,
 }
 
 impl ProgrammeIndexBuilder {
-    /// For `channels` channels (indexes `0..channels`).
+    /// For `channels` channels (indexes `0..channels`). Initial identities are
+    /// anonymous and scoped to this builder/index; supply real content IDs with
+    /// [`Self::set_identity`] to retain focus across rebuilt indexes.
     pub fn new(channels: usize) -> Self {
         ProgrammeIndexBuilder {
             channels,
+            identities: (0..channels)
+                .map(|_| crate::ChannelId::anonymous())
+                .collect(),
             ..Default::default()
         }
     }
 
-    /// Adds one programme of `channel` (beyond `channels`: ignored).
+    pub fn set_identity(&mut self, channel: usize, identity: crate::ChannelId) {
+        if let Some(current) = self.identities.get_mut(channel) {
+            *current = identity;
+        }
+    }
+
+    /// Adds one programme; invalid channels, nonpositive or unrepresentable durations are ignored.
     pub fn push(&mut self, channel: usize, start: UnixTime, stop: UnixTime, title: &str) {
-        if channel >= self.channels {
+        if channel >= self.channels
+            || stop <= start
+            || u32::try_from(i128::from(stop) - i128::from(start)).is_err()
+        {
             return;
         }
         let next = self.ids.len() as u32;
@@ -66,7 +81,7 @@ impl ProgrammeIndexBuilder {
         for (title, &id) in &self.ids {
             titles[id as usize] = title;
         }
-        ProgrammeIndex::assemble(&titles, &self.raw, self.channels)
+        ProgrammeIndex::assemble(&titles, &self.raw, self.identities)
     }
 }
 
@@ -80,6 +95,54 @@ mod tests {
     use crate::ProgrammeSearchOptions;
 
     #[test]
+    fn compressed_titles_keep_source_incarnations_and_allow_memory_qualification() {
+        let first = crate::ChannelId::in_source(1, "generated-first", "shared-key");
+        let second = crate::ChannelId::in_source(2, "generated-second", "shared-key");
+        let mut builder = ProgrammeIndexBuilder::new(2);
+        builder.set_identity(0, first.clone());
+        builder.set_identity(1, second.clone());
+        for channel in 0..2 {
+            builder.push(channel, 1000, 4600, "Generated bulletin");
+        }
+        let mut index = builder.finish();
+        let hits = index.search_programmes("bulletin", 2000, Default::default());
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].identity, first);
+        assert_eq!(hits[1].identity, second);
+        let recreated = crate::ChannelId::in_source(1, "generated-recreated", "shared-key");
+        index.set_identity(0, recreated.clone());
+        let qualified = index.search_programmes("bulletin", 2000, Default::default());
+        assert_eq!(qualified[0].identity, recreated);
+        assert_ne!(qualified[0].identity, hits[0].identity);
+        assert_eq!(qualified[1].identity, hits[1].identity);
+    }
+
+    #[test]
+    fn invalid_or_unrepresentable_intervals_are_skipped_without_corrupting_hits() {
+        let mut b = ProgrammeIndexBuilder::new(1);
+        b.push(0, i64::MIN, i64::MAX, "Invalid span");
+        b.push(0, 0, 10, "Synthetic news");
+        b.push(
+            0,
+            i64::from(u32::MAX) + 1,
+            i64::from(u32::MAX) + 2,
+            "Outside compact range",
+        );
+        let index = b.finish();
+        assert_eq!(index.programme_count(), 1);
+        let opts = ProgrammeSearchOptions {
+            include_past_without_catchup: true,
+            ..Default::default()
+        };
+        let hits = index.search_programmes("synthetic", 5, opts);
+        assert_eq!(hits.len(), 1);
+        assert_eq!((hits[0].start, hits[0].end), (0, 10));
+        for now in [i64::MIN, i64::MAX] {
+            let _ = index.search_programmes("synthetic", now, opts);
+        }
+    }
+
+    #[test]
     fn built_from_rows_it_finds_what_the_store_index_finds() {
         let rows = [
             (0, 1000, 2000, "Morning News"),
@@ -89,6 +152,8 @@ mod tests {
         ];
         let mut b = SourceBuilder::new(FeedId(1), 0, StoreOptions::default(), 0);
         let mut built = ProgrammeIndexBuilder::new(2);
+        built.set_identity(0, crate::ChannelId::new(None, "a"));
+        built.set_identity(1, crate::ChannelId::new(None, "b"));
         for (ch, start, stop, title) in rows {
             b.push_data(
                 &format!("e{ch}"),

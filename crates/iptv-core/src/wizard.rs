@@ -536,7 +536,7 @@ pub enum Target {
     ChooseAnotherType,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum WizardEvent {
     Up,
     Down,
@@ -574,6 +574,47 @@ pub enum WizardEvent {
         id: ImportId,
         failure: ImportFailure,
     },
+}
+
+impl std::fmt::Debug for WizardEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Up => f.write_str("Up"),
+            Self::Down => f.write_str("Down"),
+            Self::Ok => f.write_str("Ok"),
+            Self::Back => f.write_str("Back"),
+            Self::Tap(target) => f.debug_tuple("Tap").field(target).finish(),
+            Self::SetField { field, .. } => f
+                .debug_struct("SetField")
+                .field("field", field)
+                .field("value", &"[redacted]")
+                .finish(),
+            Self::Paste => f.write_str("Paste"),
+            Self::PasteInto(field) => f.debug_tuple("PasteInto").field(field).finish(),
+            Self::ClipboardText { field, .. } => f
+                .debug_struct("ClipboardText")
+                .field("field", field)
+                .field("text", &"[redacted]")
+                .finish(),
+            Self::FilePicked(_) => f.debug_tuple("FilePicked").field(&"[redacted]").finish(),
+            Self::Cancel => f.write_str("Cancel"),
+            Self::Progress { id, progress } => f
+                .debug_struct("Progress")
+                .field("id", id)
+                .field("progress", progress)
+                .finish(),
+            Self::Succeeded { id, counts } => f
+                .debug_struct("Succeeded")
+                .field("id", id)
+                .field("counts", counts)
+                .finish(),
+            Self::Failed { id, failure } => f
+                .debug_struct("Failed")
+                .field("id", id)
+                .field("failure", failure)
+                .finish(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1814,5 +1855,26 @@ mod tests {
         assert_eq!(url_origin("example.test"), "example.test");
         assert_eq!(url_origin("http://u:p@h.test:81"), "http://h.test:81/…");
         assert_eq!(url_origin("https://h.test"), "https://h.test");
+    }
+}
+
+#[cfg(test)]
+mod event_diagnostic_regression {
+    use super::*;
+    #[test]
+    fn entry_clipboard_and_file_events_redact_their_text() {
+        for event in [
+            WizardEvent::SetField {
+                field: Field::Password,
+                value: "synthetic-private-marker".into(),
+            },
+            WizardEvent::ClipboardText {
+                field: Field::PlaylistUrl,
+                text: Some("synthetic-private-marker".into()),
+            },
+            WizardEvent::FilePicked(Some("synthetic-private-marker".into())),
+        ] {
+            assert!(!format!("{event:?}").contains("synthetic-private-marker"));
+        }
     }
 }

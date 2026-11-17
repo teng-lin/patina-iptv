@@ -7,15 +7,30 @@ pub struct Member {
     pub id: String,
     pub name: String,
 }
+/// Filtered membership whose cached positions can only change through its methods.
+/// ```compile_fail
+/// let mut membership = iptv_core::membership::Membership::default();
+/// membership.rows.clear();
+/// ```
+/// ```compile_fail
+/// let mut membership = iptv_core::membership::Membership::default();
+/// membership.query = "news".into();
+/// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Membership {
-    pub rows: Vec<Member>,
-    pub query: String,
+    rows: Vec<Member>,
+    query: String,
     pub selected: BTreeSet<String>,
     pub focus: Option<String>,
     matching: Vec<usize>,
 }
 impl Membership {
+    pub fn rows(&self) -> &[Member] {
+        &self.rows
+    }
+    pub fn query(&self) -> &str {
+        &self.query
+    }
     pub fn new(rows: Vec<Member>) -> Self {
         let focus = rows.first().map(|r| r.id.clone());
         let matching = (0..rows.len()).collect();

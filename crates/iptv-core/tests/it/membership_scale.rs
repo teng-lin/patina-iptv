@@ -7,7 +7,7 @@ fn reload_large_membership_retains_selection_and_focus_by_identity() {
         name: format!("Generated channel {index}"),
     };
     let mut membership = Membership::new((0..100_000).map(row).collect());
-    membership.selected = membership.rows.iter().map(|row| row.id.clone()).collect();
+    membership.selected = membership.rows().iter().map(|row| row.id.clone()).collect();
     membership.focus = Some("generated-75000".into());
     membership.reload((50_000..150_000).rev().map(row).collect());
     assert_eq!(membership.selected.len(), 50_000);

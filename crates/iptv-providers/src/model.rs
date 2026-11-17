@@ -77,7 +77,7 @@ pub enum SourceConfig {
     Stalker(StalkerCredentials),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct M3uSourceConfig {
     /// Playlist URL or local path; may embed credentials.
     pub location: SecretUrl,
@@ -86,7 +86,7 @@ pub struct M3uSourceConfig {
     pub referrer: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct XtreamCredentials {
     /// Portal base as typed; normalise with [`crate::xtream::normalize_server_url`].
     pub server_url: String,
@@ -95,7 +95,7 @@ pub struct XtreamCredentials {
     pub user_agent: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct StalkerCredentials {
     /// Portal address as typed (`…/c/`, `…/stalker_portal/`, or an API `.php`).
     pub portal_url: String,
@@ -401,5 +401,23 @@ impl fmt::Debug for MacAddress {
             Some(m) => write!(f, "MacAddress({}:**:**:**)", &m.0[..8]),
             None => f.write_str("MacAddress(***)"),
         }
+    }
+}
+
+impl std::fmt::Debug for M3uSourceConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("M3uSourceConfig").finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for XtreamCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("XtreamCredentials").finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for StalkerCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StalkerCredentials").finish_non_exhaustive()
     }
 }
