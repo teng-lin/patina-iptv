@@ -63,6 +63,12 @@ Direct validation:
   25 tests, zero failures/errors/skips, including the shared typed player-event
   fixture. This compiled Android Kotlin and all localized resources. The command
   used Java 21, the installed SDK, and the adjacent NSH Java source explicitly.
+- After the full app run exposed stale expectations and missing recovery-message
+  rows, the rebuilt app harness passed all 25 targeted catalogue, interface-language,
+  numeric-entry, and multiview tests (two catalogue tools intentionally ignored).
+  Numeric entry asserts the exact synthetic native source, and tile semantics are
+  scoped to the multiview presentation. The source catalogue has 1,479 unique rows
+  with all ten locale columns populated.
 - Gradle reported SDK metadata, existing manifest extraction, and deprecated API
   warnings. No device, emulator, real provider, or credentials were used by this
   agent. A separate core test invocation lost its captured completion output;

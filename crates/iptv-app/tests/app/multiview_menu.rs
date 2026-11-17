@@ -286,17 +286,17 @@ fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
     assert_eq!(tiles(&app), 2);
     assert!(
         app.screen()
-            .matches("role:button[/^Test Channel One$/]")
+            .matches("id:multiview-ui >> role:button[/^Test Channel One$/]")
             .unwrap()
     );
     assert!(
         app.screen()
-            .matches("role:button[/^Test Channel Three$/]")
+            .matches("id:multiview-ui >> role:button[/^Test Channel Three$/]")
             .unwrap()
     );
     assert!(
         app.screen()
-            .accessibility_state("role:button[/^Test Channel Three$/]")
+            .accessibility_state("id:multiview-ui >> role:button[/^Test Channel Three$/]")
             .unwrap()
             .selected
     );

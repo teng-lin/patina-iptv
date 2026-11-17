@@ -13,6 +13,7 @@ struct Lifetime {
     players: Vec<NodeId>,
     removed: Vec<NodeId>,
     inserts: HashMap<NodeId, usize>,
+    sources: Vec<String>,
 }
 fn selected(app: &crate::Headless, id: &str) -> bool {
     app.screen()
@@ -59,6 +60,17 @@ fn preview_fixture(
                 match item {
                     MountItem::Component { id, name } if name.as_ref() == "tv.player" => {
                         recorded.players.push(*id)
+                    }
+                    MountItem::ComponentProps { props, .. } => {
+                        for (key, value) in props {
+                            if key.as_ref() == "source"
+                                && let Some(source) =
+                                    value.as_ref().map(crate::support::upstream_source)
+                                && let Some(url) = source["url"].as_str()
+                            {
+                                recorded.sources.push(url.into());
+                            }
+                        }
                     }
                     MountItem::Insert { child, .. } => {
                         *recorded.inserts.entry(*child).or_default() += 1
@@ -310,11 +322,18 @@ fn numeric_channel_entry_commits_corrected_identity_and_invalid_input_does_not_z
     step(app.press_key("backspace"));
     step(app.press_key("enter"));
     step(app.wait_until(
-        "numeric choice starts playback",
+        "corrected numeric choice publishes Local B's identified source",
         Duration::from_secs(10),
-        |_| iptv_app::player_has_source(0),
+        |_| {
+            lifetime
+                .lock()
+                .unwrap()
+                .sources
+                .last()
+                .is_some_and(|url| url == "http://example.test/b")
+        },
     ));
-    step(app.wait_for("text:Local B"));
+    assert_eq!(lifetime.lock().unwrap().sources, ["http://example.test/b"]);
     let opens = iptv_app::player_opens(0);
     step(app.press_key("9"));
     step(app.press_key("9"));
