@@ -95,9 +95,10 @@ class ToolCache(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "invalid Cargo tool name"):
             self.identity(TOOL_NAME="../generated")
 
-    def test_release_setup_disables_tool_restore_and_save(self):
+    def test_clean_shipping_builds_can_reuse_exact_tools_without_bulk_cargo_cache(self):
         setup = (ROOT / ".github/actions/setup/action.yml").read_text(encoding="utf-8")
-        self.assertIn("cache: ${{ inputs.cache }}", setup)
+        self.assertIn("cache: ${{ inputs.tool-cache }}", setup)
+        self.assertIn("if: inputs.cache == 'true'", setup)
         self.assertIn("if: inputs.cache == 'true'", RECIPE)
         self.assertIn("github.ref == 'refs/heads/master'", RECIPE)
         self.assertIn("steps.tool.outputs.cache-hit != 'true'", RECIPE)

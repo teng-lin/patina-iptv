@@ -9,10 +9,10 @@ on:
   workflow_dispatch:
     inputs:
       tier:
-        description: Full validation, or PR selection for the requested ref
+        description: Full/PR validation, or full candidate validation and unsigned shipping packages
         type: choice
         default: full
-        options: [full, pr]
+        options: [full, pr, candidate]
   workflow_call:
     inputs:
       tier:
@@ -54,7 +54,7 @@ jobs:
         id: select
         env:
           EVENT: ${{ github.event_name }}
-          TIER: ${{ inputs.tier || (github.event_name == 'push' && github.ref == 'refs/heads/master' && 'release') }}
+          TIER: ${{ inputs.tier == 'candidate' && 'release' || inputs.tier || (github.event_name == 'push' && github.ref == 'refs/heads/master' && 'release') }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: python3 tools/ci/validation-plan.py plan >> "$GITHUB_OUTPUT"
@@ -186,7 +186,7 @@ jobs:
         run: test "$RESULT" = success
   candidate:
     needs: [plan, validation]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.tier != 'release'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.tier != 'release') || (github.event_name == 'workflow_dispatch' && inputs.tier == 'candidate')
     uses: ./.github/workflows/unsigned-candidate.yml
     with:
       matrix: '{"include":[{"platform":"android","os":"ubuntu-24.04"},{"platform":"linux","os":"ubuntu-24.04"},{"platform":"macos","os":"macos-15"}]}'

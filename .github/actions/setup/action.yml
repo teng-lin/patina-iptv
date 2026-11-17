@@ -2,7 +2,10 @@ name: Build prerequisites
 description: Check out the pinned NSH fork alongside this repository
 inputs:
   cache:
-    description: Restore and save shared build caches
+    description: Restore and save bulk Cargo build caches
+    default: 'true'
+  tool-cache:
+    description: Reuse exact-key pinned finished tools independently of bulk Cargo caches
     default: 'true'
   cache-on-failure:
     description: Preserve compiled dependencies when a package validation fails
@@ -75,4 +78,4 @@ runs:
       with:
         name: cargo-deny
         version: 0.20.2
-        cache: ${{ inputs.cache }}
+        cache: ${{ inputs.tool-cache }}

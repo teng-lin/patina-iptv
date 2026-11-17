@@ -1,5 +1,13 @@
 name: Unsigned candidate packages
 on:
+  workflow_dispatch:
+    inputs:
+      matrix:
+        type: string
+        default: '{"include":[{"platform":"android","os":"ubuntu-24.04"},{"platform":"linux","os":"ubuntu-24.04"},{"platform":"macos","os":"macos-15"}]}'
+      windows:
+        type: boolean
+        default: true
   workflow_call:
     inputs:
       matrix:
@@ -200,10 +208,12 @@ jobs:
           cache: 'false'
       - name: Set release metadata
         run: python3 tools/ci/version.py
+      - uses: ./.github/actions/cargo-tool
+        with:
+          name: cargo-cyclonedx
+          version: 0.5.10
       - name: Write the CycloneDX SBOM for the locked Rust graph
-        run: |
-          cargo install cargo-cyclonedx --version 0.5.10 --locked
-          python3 tools/ci/sbom.py "dist/Patina-$VERSION-sbom.cdx.json"
+        run: python3 tools/ci/sbom.py "dist/Patina-$VERSION-sbom.cdx.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: packages-sbom

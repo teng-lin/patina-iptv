@@ -97,7 +97,9 @@ same bytes into the release's isolated signing jobs. PR artifacts, another SHA
 cannot qualify. Full candidate tests and unsigned compilation are skipped only
 after this verification succeeds. Missing/expired evidence runs complete release
 validation and the same unsigned build workflow; malformed evidence fails closed.
-Manual release/rehearsal runs always exercise the full path and requested matrix,
+A manual Validation dispatch with `tier=candidate` exercises full checks and the
+unsigned recipe on a branch without sealing trusted evidence or signing. Manual
+release/rehearsal runs always exercise the full path and requested matrix,
 including optional iOS packaging. Publication still attests the final signed
 bytes under the release workflow/tag/SHA and verifies public bytes afterwards.
 
