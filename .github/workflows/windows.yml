@@ -1,16 +1,22 @@
 name: Windows
 on:
-  pull_request:
-  push:
-    branches: [master]
-  merge_group:
   workflow_call:
+    inputs:
+      tier:
+        type: string
+        default: full
   workflow_dispatch:
+    inputs:
+      tier:
+        type: choice
+        default: full
+        options: [full, native]
+
 permissions:
   contents: read
   actions: read
 concurrency:
-  group: windows-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.event_name == 'pull_request' && format('windows-pr-{0}', github.event.pull_request.number) || format('windows-run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   windows:
@@ -21,6 +27,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-windows
+        with:
+          cache-on-failure: 'true'
       - name: Verify dependency packaging helpers
         shell: pwsh
         run: |
@@ -39,7 +47,7 @@ jobs:
         env:
           IPTV_TEST_WAIT_SCALE: '2'
         run: |
-          ./tools/build-windows.ps1 -Check
+          ./tools/build-windows.ps1 -Check -Tier "${{ inputs.tier }}"
           python tools/ci/check-windows-icon.py target/debug/iptv-app.exe
           if ($LASTEXITCODE -ne 0) { throw 'Windows executable icon check failed.' }
           python tools/ci/check-package-lock.py

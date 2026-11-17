@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check finished-tool cache identities without installing or downloading tools."""
 from contextlib import redirect_stdout
+import importlib.util
 import io
 import json
 import os
@@ -32,6 +33,7 @@ class ToolCache(unittest.TestCase):
         ACTION.write_text(RECIPE, encoding="utf-8")
         self.environment = {
             "RUNNER_TEMP": str(self.root / "runner"),
+            "RUNNER_OS": "Windows" if os.name == "nt" else "Linux",
             "CARGO_HOME": str(self.root / "cargo"),
             "TOOL_NAME": "cargo-about",
             "TOOL_VERSION": "0.9.3",
@@ -50,7 +52,15 @@ class ToolCache(unittest.TestCase):
         Path("Cargo.lock").write_text("generated dependency change\n")
         Path("app.rs").write_text("generated application change\n")
         self.assertEqual(self.identity(), before)
-        self.assertEqual(Path(before["path"]), Path(before["root"]) / "bin/cargo-about")
+        executable = "cargo-about.exe" if os.name == "nt" else "cargo-about"
+        self.assertEqual(Path(before["path"]), Path(before["root"]) / "bin" / executable)
+
+    def test_tool_cache_targets_the_installed_executable_on_each_platform(self):
+        for platform, executable in (("Windows", "cargo-about.exe"), ("Linux", "cargo-about"),
+                                     ("macOS", "cargo-about")):
+            with self.subTest(platform=platform):
+                identity = self.identity(RUNNER_OS=platform)
+                self.assertEqual(Path(identity["path"]), Path(identity["root"]) / "bin" / executable)
 
     def test_explicit_cargo_home_never_requires_a_system_home_directory(self):
         with patch.object(Path, "home", side_effect=RuntimeError("no system home")):
@@ -93,11 +103,24 @@ class ToolCache(unittest.TestCase):
         self.assertIn("steps.tool.outputs.cache-hit != 'true'", RECIPE)
 
     def test_packaging_cache_has_a_master_producer_on_dependency_changes(self):
-        workflow = (ROOT / ".github/workflows/package-check.yml").read_text(encoding="utf-8")
-        push = re.search(r"(?ms)^  push:\n(.*?)(?=^  [a-z_]+:)", workflow)
-        self.assertIsNotNone(push, "read-only PR caches need a master producer")
-        for required in ("branches: [master]", "Cargo.lock", "nsh.rev", ".github/actions/**"):
-            self.assertIn(required, push[1])
+        workflow = (ROOT / ".github/workflows/validation.yml").read_text(encoding="utf-8")
+        self.assertIn("  push:\n    branches: [master]", workflow)
+        self.assertIn("uses: ./.github/workflows/package-check.yml", workflow)
+        spec = importlib.util.spec_from_file_location("validation", ROOT / "tools/ci/validation-plan.py")
+        validation = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(validation)
+        for path in ("Cargo.lock", "nsh.rev", ".github/actions/setup/action.yml"):
+            self.assertTrue(validation.select([path])["packages"], path)
+
+    def test_validation_retains_successful_dependency_work_after_test_failure_only_on_master(self):
+        for action in ("setup", "setup-windows"):
+            text = (ROOT / f".github/actions/{action}/action.yml").read_text()
+            self.assertIn("cache-on-failure: ${{ inputs.cache-on-failure }}", text)
+            self.assertIn("save-if: ${{ github.ref == 'refs/heads/master' }}", text)
+            self.assertIn("if: inputs.cache == 'true'", text)
+        for workflow in ("ci", "windows", "coverage", "import-stress"):
+            text = (ROOT / f".github/workflows/{workflow}.yml").read_text()
+            self.assertIn("cache-on-failure: 'true'", text)
 
     @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "composite installation uses Bash")
     def test_tool_install_uses_its_own_root_and_fixed_bootstrap_profile(self):

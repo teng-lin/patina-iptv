@@ -224,7 +224,7 @@ class Workflow(unittest.TestCase):
         return found
 
     def test_the_file_is_read_as_expected(self):
-        self.assertEqual(set(self.jobs), {"plan", "tests", "windows-tests", "windows-package", "windows-sign", "package",
+        self.assertEqual(set(self.jobs), {"plan", "tests", "windows-package", "windows-sign", "verify-windows", "verify-published", "package",
                                           "sbom", "sign", "publish"})
         self.assertGreaterEqual(len(SECRET_NAMES), 20)
         for name in ("ANDROID_KEYSTORE_BASE64", "ANDROID_STORE_PASSWORD", "ANDROID_KEY_PASSWORD", "ANDROID_KEY_ALIAS",

@@ -1,0 +1,174 @@
+name: Validation
+on:
+  pull_request:
+  push:
+    branches: [master]
+  merge_group:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: Full validation, or PR selection for the requested ref
+        type: choice
+        default: full
+        options: [full, pr]
+  workflow_call:
+    inputs:
+      tier:
+        description: Release callers must request release explicitly
+        type: string
+        default: full
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('validation-pr-{0}', github.event.pull_request.number) || format('validation-run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      plan: ${{ steps.select.outputs.plan }}
+      tier: ${{ steps.select.outputs.tier }}
+      host: ${{ steps.select.outputs.host }}
+      helpers_full: ${{ steps.select.outputs.helpers_full }}
+      windows: ${{ steps.select.outputs.windows }}
+      android: ${{ steps.select.outputs.android }}
+      android_package: ${{ steps.select.outputs.android_package }}
+      packages: ${{ steps.select.outputs.packages }}
+      package_matrix: ${{ steps.select.outputs.package_matrix }}
+      windows-package: ${{ steps.select.outputs.windows-package }}
+      coverage: ${{ steps.select.outputs.coverage }}
+      fuzz: ${{ steps.select.outputs.fuzz }}
+      smoke: ${{ steps.select.outputs.smoke }}
+      stress: ${{ steps.select.outputs.stress }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Select validation for this commit
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          TIER: ${{ inputs.tier }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: python3 tools/ci/validation-plan.py plan >> "$GITHUB_OUTPUT"
+  helpers:
+    needs: plan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Test tier selection and failure propagation
+        run: python3 tools/ci/test-validation-plan.py
+      - name: Read the compiler and NSH pins
+        if: needs.plan.outputs.helpers_full == 'true'
+        id: pins
+        run: python3 tools/ci/pins.py >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: needs.plan.outputs.helpers_full == 'true'
+        with:
+          repository: teng-lin/nsh
+          ref: ${{ steps.pins.outputs.nsh }}
+          path: nsh-source
+          persist-credentials: false
+      - if: needs.plan.outputs.helpers_full == 'true'
+        run: mv nsh-source ../nsh
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        if: needs.plan.outputs.helpers_full == 'true'
+        with:
+          toolchain: ${{ steps.pins.outputs.toolchain }}
+      - name: Check CI helpers without compiling the application
+        if: needs.plan.outputs.helpers_full == 'true'
+        run: |
+          export IPTV_REAL_CARGO
+          IPTV_REAL_CARGO=$(command -v cargo)
+          for script in tools/ci/test-*.py; do python3 "$script"; done
+          python3 -m unittest discover -s tools -p test_version.py
+          python3 tools/performance/test_journeys.py
+          python3 tools/mpv-runtime-ios/test_build.py
+          python3 tools/mpv-runtime/test_prepare.py
+          python3 tools/mpv-runtime/test_package.py
+          python3 -m venv "$RUNNER_TEMP/helper-linters"
+          "$RUNNER_TEMP/helper-linters/bin/pip" install ruff==0.11.13 shellcheck-py==0.10.0.1
+          "$RUNNER_TEMP/helper-linters/bin/ruff" check tools/
+          git ls-files -z '*.sh' | xargs -0 "$RUNNER_TEMP/helper-linters/bin/shellcheck"
+  host:
+    needs: plan
+    if: needs.plan.outputs.host == 'true'
+    uses: ./.github/workflows/ci.yml
+    with:
+      tier: ${{ needs.plan.outputs.tier == 'pr' && 'pr' || 'full' }}
+  windows:
+    needs: plan
+    if: needs.plan.outputs.windows == 'true'
+    uses: ./.github/workflows/windows.yml
+    with:
+      tier: ${{ needs.plan.outputs.tier == 'pr' && 'native' || 'full' }}
+  android:
+    needs: plan
+    if: needs.plan.outputs.android == 'true'
+    uses: ./.github/workflows/android.yml
+    with:
+      package: ${{ needs.plan.outputs.android_package == 'true' }}
+  packages:
+    needs: plan
+    if: needs.plan.outputs.packages == 'true'
+    uses: ./.github/workflows/package-check.yml
+    with:
+      matrix: ${{ needs.plan.outputs.package_matrix }}
+  windows-package:
+    needs: plan
+    if: needs.plan.outputs.windows-package == 'true'
+    uses: ./.github/workflows/windows-package-check.yml
+  coverage:
+    needs: plan
+    if: needs.plan.outputs.coverage == 'true'
+    uses: ./.github/workflows/coverage.yml
+  fuzz:
+    needs: plan
+    if: needs.plan.outputs.fuzz != '[]'
+    uses: ./.github/workflows/fuzz.yml
+    with:
+      targets: ${{ needs.plan.outputs.fuzz }}
+      seconds: ${{ needs.plan.outputs.tier == 'full' && 300 || 30 }}
+      save-corpus: ${{ github.ref == 'refs/heads/master' && needs.plan.outputs.tier == 'full' }}
+  smoke:
+    needs: plan
+    if: needs.plan.outputs.smoke == 'true'
+    uses: ./.github/workflows/android-smoke.yml
+  stress:
+    needs: plan
+    if: needs.plan.outputs.stress == 'true'
+    uses: ./.github/workflows/import-stress.yml
+  validation:
+    needs: [plan, helpers, host, windows, android, packages, windows-package, coverage, fuzz, smoke, stress]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Require every selected lane to pass
+        env:
+          PLAN: ${{ needs.plan.outputs.plan }}
+          NEEDS: ${{ toJSON(needs) }}
+        run: python3 tools/ci/validation-plan.py gate
+  # Preserve the current protected contexts during migration. Each alias mirrors
+  # the entire aggregate, including Windows and source-only Android compilation.
+  protected-contexts:
+    needs: validation
+    if: always()
+    strategy:
+      matrix:
+        context: ['test (ubuntu-24.04)', 'test (macos-15)', android]
+    name: ${{ matrix.context }}
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          RESULT: ${{ needs.validation.result }}
+        run: test "$RESULT" = success

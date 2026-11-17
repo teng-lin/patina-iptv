@@ -114,6 +114,7 @@ class Plan(unittest.TestCase):
         sources = {
             checks.REPAIR: "crates/iptv-runtime/src/guide_repair/tests.rs",
             checks.INSPECTION: "crates/iptv-runtime/tests/it/foundation_inspection.rs",
+            checks.GTK_LIFECYCLE: "crates/iptv-app/tests/native_player.rs",
             checks.LATENCY: "crates/iptv-app/tests/app/store_latency.rs",
             checks.BUSY_READER: "crates/iptv-app/tests/app/store_latency.rs",
         }
@@ -149,6 +150,27 @@ class Plan(unittest.TestCase):
         self.assertEqual(packages(argv), list(checks.workspace_crates()))
         self.assertEqual(argv[argv.index("--features") + 1].split(","),
                          ["iptv-runtime/test-support", "iptv-app/test-support"])
+
+    def test_pr_runs_correctness_once_and_defers_allocator_measurements(self):
+        pr = {step["name"]: step["argv"] for step in checks.plan(tier="pr")}
+        self.assertEqual(set(pr), set(self.by_name))
+        command = pr["workspace-tests"]
+        self.assertEqual(packages(command), list(checks.workspace_crates()))
+        for module in ("catalog_stream_memory::", "epg_memory::", "epg_stream_memory::"):
+            self.assertIn(module, command[command.index("--") + 1:])
+        self.assertNotIn("--skip", self.by_name["workspace-tests"])
+
+    def test_native_tier_compiles_tests_and_builds_production_without_shared_execution(self):
+        for host in ("macos", "windows"):
+            native = {step["name"]: step["argv"] for step in checks.plan(tier="native", host=host)}
+            self.assertEqual(set(native), {"native-test-compilation", "native-player-tests", "app-build"})
+            self.assertIn("--all-targets", native["native-test-compilation"])
+            self.assertNotIn("--features", native["app-build"])
+            full = checks.plan(tier="full", host=host)
+            self.assertTrue(any(step["name"] == "workspace-tests" for step in full))
+            self.assertFalse(any(step["name"].startswith("wasm-") for step in full))
+            self.assertFalse(any(step["name"] == "workspace-doctests" for step in full))
+            self.assertFalse(any(step["name"] == "native-gtk-lifecycle" for step in full))
 
     def test_runner_streams_argv_in_root_and_stops_at_first_failure(self):
         runner = Mock(side_effect=[subprocess.CompletedProcess([], 0), subprocess.CompletedProcess([], 7)])

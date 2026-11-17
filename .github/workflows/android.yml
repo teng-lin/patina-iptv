@@ -1,50 +1,28 @@
 name: Android packages
 on:
-  pull_request:
-  push:
-    branches: [master]
+  workflow_call:
+    inputs:
+      package:
+        description: Package both ARM ABIs instead of compiling them twice
+        type: boolean
+        default: true
   workflow_dispatch:
-# Cancel only superseded PR builds; keep pushes and manual runs independent.
+    inputs:
+      package:
+        type: boolean
+        default: true
+
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('android-pr-{0}', github.event.pull_request.number) || format('android-run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:
-  changes:
-    runs-on: ubuntu-24.04
-    outputs:
-      package: ${{ steps.paths.outputs.package }}
-      compile: ${{ steps.paths.outputs.compile }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-          # A pull request's changed paths need both sides of the comparison.
-          # Pull requests diff base...head, which needs both commits. Not
-          # `&& 0 || 1`: 0 is falsy in expressions, so that is always 1.
-          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
-      - id: paths
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        # The path lists and their tests: tools/ci/android-changes.py.
-        run: python3 tools/ci/android-changes.py >> "$GITHUB_OUTPUT"
   android-check:
-    needs: changes
-    # Rust sources are not packaging inputs, so the android job below skips
-    # pull requests that change only them. This cheaper job compiles the app
-    # library for Android instead: no other pull request check builds
-    # cfg(target_os = "android") code. Like the android job it stays present
-    # when skipped, and a detection failure fails it, so it can be required.
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.compile == 'true') }}
+    if: inputs.package != true
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - name: Require successful change detection
-        if: needs.changes.result != 'success'
-        run: exit 1
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
@@ -64,17 +42,10 @@ jobs:
           bash tools/ci/check-android.sh aarch64-linux-android
           bash tools/ci/check-android.sh armv7-linux-androideabi
   android:
-    needs: changes
-    # Keep the required android check present even when packaging is skipped.
-    # A detection failure must fail this check, not silently skip it. Unlike
-    # always(), !cancelled() lets superseded PR runs release their runner.
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.package == 'true') }}
+    if: inputs.package == true
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - name: Require successful change detection
-        if: needs.changes.result != 'success'
-        run: exit 1
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false

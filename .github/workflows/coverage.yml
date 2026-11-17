@@ -1,24 +1,8 @@
 name: Coverage
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/coverage.yml'
-      - '.github/actions/setup/**'
-      - '.github/actions/cargo-tool/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'crates/**'
-      - 'rust-toolchain.toml'
-      - 'tools/ci/coverage.sh'
-      - 'tools/ci/check-plan.py'
-      - 'tools/ci/test-check-plan.py'
-      - 'tools/ci/run-xvfb.py'
-      - 'tools/ci/check-coverage-floors.py'
-      - 'tools/ci/test-coverage-floors.py'
-  push:
-    branches: [master]
+  workflow_call:
   workflow_dispatch:
-# Superseded PR measurements need not keep occupying runners.
+
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('coverage-pr-{0}', github.event.pull_request.number) || format('coverage-run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -37,6 +21,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
         with:
+          cache-on-failure: 'true'
           cache-key: coverage-v2-${{ hashFiles('tools/ci/coverage.sh', '.github/workflows/coverage.yml') }}
       - name: Prepare the isolated native player display
         run: sudo apt-get install -y xvfb libgl1-mesa-dri
