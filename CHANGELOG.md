@@ -7,6 +7,15 @@ is below 1.0, a minor release may change behaviour.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-17
+
+### Distribution
+
+- Android distribution-signed APK/AAB for tablets and TVs; Linux packages,
+  an ad hoc signed macOS preview and an unsigned Windows preview.
+- Catalog schema 20 adds recording completion recovery. Downgrading an existing
+  catalog is unsupported; retain a compatible backup before upgrading.
+
 ### Added
 
 - Select live channels by number and clear viewing or search history from settings.
