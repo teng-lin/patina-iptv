@@ -297,15 +297,7 @@ impl Runtime {
     /// Entry acknowledgement makes contention tests independent of scheduling.
     /// Dropping the release sender, or the watchdog, always releases the lane.
     pub fn hold_analysis(&self) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
-        let (entered, observed) = std::sync::mpsc::channel();
-        let (release, resume) = std::sync::mpsc::channel();
-        // Analyze transfers the queued work immediately; its reply is unused.
-        drop(self.services().analyze(move |_| {
-            let _ = entered.send(());
-            let _ = resume.recv_timeout(std::time::Duration::from_secs(10));
-            Ok(())
-        }));
-        (observed, release)
+        self.services().hold_analysis()
     }
 
     /// Pauses the next inspection after SQLite has actually executed scan work.

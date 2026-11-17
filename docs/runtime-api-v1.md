@@ -222,3 +222,22 @@ architecture/signature checks, portable builds, full repository checks,
 contention/scale budgets and affected host/device tests. Keep these gates
 and the explicit platform/provider limits when extending v1. A missing, skipped
 or narrow test cannot establish a broader capability.
+
+
+## Operational queue diagnostics (experimental)
+
+`Runtime::store_queue_stats()` returns an in-memory snapshot for the writer,
+reader and analysis lanes without opening SQLite or starting a worker. Each
+`StoreQueueStats` contains only its fixed lane name, pending count, oldest
+pending age, longest observed queue wait and skipped-read count. Ages exclude
+running work; completed jobs retain no timestamp entries. These instantaneous
+observations are not an atomic snapshot across all three lanes and are outside
+the stable query/repair v1 contract.
+
+A dropped reply future cancels a queued reader or analysis job before it opens
+or queries SQLite. A running read is still governed by its operation's existing
+cancellation checks. Dropping a writer reply does not retract an accepted write:
+the writer preserves FIFO order and shutdown barriers. Settings-file writes
+already coalesce superseded snapshots; this change preserves that separate
+mechanism. Diagnostics contain no paths, queries or provider data and send no
+telemetry.

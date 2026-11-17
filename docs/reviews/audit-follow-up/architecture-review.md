@@ -63,3 +63,41 @@ cannot be forcibly interrupted safely: its worker retains bounded capacity until
 termination, and finalization waits for the close acknowledgement. Native Unix
 publication syncs file-directory metadata; portable non-Unix directory-sync
 semantics remain platform dependent.
+
+## Plan acceptance review: P11 and P12
+
+A later pass against the implementation plan found two feasible requirements that
+were not covered by the initial tracker dispositions:
+
+- P11 lacked store queue depth/age observations. The existing file writer already
+  coalesces pending settings content per path while acknowledging every waiter;
+  that behavior is preserved. The follow-up adds numeric-only per-lane pending
+  depth, oldest pending age, maximum observed queue wait and skipped-read counts.
+  Reader and analysis jobs whose reply futures were dropped are skipped before
+  opening SQLite or scanning data. Accepted writer jobs keep FIFO semantics even
+  if their reply is dropped. Queue tickets are reclaimed at start or failed send;
+  completed requests do not accumulate metric records. This is cooperative
+  cancellation of queued reads, not interruption of already-running native work.
+- P12 still copied the parent Ui and manually replaced many signals. This had a
+  concrete omission: the main VOD browser state remained shared, allowing Movies
+  or Shows in the main window to become an invisible input-owning overlay in an
+  auxiliary player. Reported to the UX author. The correction groups deliberately
+  shared catalog/settings signals in SharedUi and constructs every presentation
+  afresh, including VOD. Player::for_window explicitly retains native stream
+  handles and task ownership while allocating independent presentation state.
+  The existing auxiliary-window journey now covers main Movies/Shows remaining
+  open while auxiliary mouse and keyboard playback controls work independently.
+
+Reviewed the P12 correction from source with no further blocking finding. The UX
+agent independently reviewed P11's queue/cancellation implementation with no
+blocker. Scoped runtime store-service validation passed 13 tests, including four
+new cases: 64 canceled requests on each read lane without SQLite opening, durable
+FIFO writes despite dropped replies, failed-send ticket cleanup, and idle metric
+observation without worker startup. P12 GUI execution and final shared checks are
+owned by the UX/root agents.
+
+Other named limits remain distinct from these coding gaps: native teardown and
+locale initialization require evidence before a behavioral redesign; physical
+hardware, listened-to assistive speech, fluent translation and shipping-artifact
+acceptance cannot be inferred from automated source/headless checks. They remain
+explicit limits, not substitutes for the P11/P12 corrections above.
