@@ -41,7 +41,9 @@ the distribution key, `IPTV_UNSIGNED_RELEASE=1` asks for an unsigned build (as
 `tools/ci/prepare-android.sh` does before the separate signing job), or
 `IPTV_DEBUG_SIGNED_RELEASE=1` explicitly asks for a debug-signed one.
 
-Release runs require full candidate validation before shipping package builds.
+Release runs require full candidate validation before signing or publication.
+Unsigned compilation and package checks run alongside candidate validation; only
+the sealed successful result can be promoted.
 Wait for the complete master Validation run, including `seal-candidate`, before
 tagging that same commit. A successful exact-SHA candidate is verified and promoted
 without repeating tests or compilation. If none is retained, the tag runs the full

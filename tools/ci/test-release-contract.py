@@ -162,6 +162,23 @@ class Candidate(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'empty'):
             self.verify()
 
+    def test_manifest_check_and_artifact_membership_cannot_be_weakened(self):
+        manifest_path = self.directory / 'manifest.json'
+        manifest = self.json.loads(manifest_path.read_text())
+        for field, value in (('plan', {}), ('checks', {'validation': 'success'}),
+                             ('build', {**manifest['build'], 'credentials': True}),
+                             ('sha', 'b' * 40), ('run_id', 18), ('attempt', 1)):
+            with self.subTest(field=field):
+                manifest_path.write_text(self.json.dumps({**manifest, field: value}))
+                with self.assertRaisesRegex(ValueError, 'identity'):
+                    self.verify()
+        manifest_path.write_text(self.json.dumps(manifest))
+        extra = self.directory / 'packages-unexpected'
+        extra.mkdir()
+        (extra / 'synthetic.bin').write_bytes(b'extra group')
+        with self.assertRaisesRegex(ValueError, 'groups'):
+            self.verify()
+
     def test_pr_and_partial_or_failed_checks_cannot_seal(self):
         for key, value in (('GITHUB_EVENT_NAME', 'pull_request'), ('GITHUB_REF', 'refs/heads/synthetic'),
                            ('PLAN', '{}'), ('NEEDS', '{}'),

@@ -104,7 +104,8 @@ class Workflows(unittest.TestCase):
         self.assertIn("&& 'validation-master'", text)
         self.assertIn("inputs.tier != 'release'", text)
         candidate = text.split('  candidate:\n', 1)[1].split('  seal-candidate:', 1)[0]
-        self.assertIn('needs: [plan, validation]', candidate)
+        self.assertIn('needs: plan', candidate)
+        self.assertIn('needs: [plan, validation, candidate]', text)
         self.assertIn('uses: ./.github/workflows/unsigned-candidate.yml', candidate)
         self.assertIn('release-candidate.py seal', text)
         release = (ROOT / '.github/workflows/release.yml').read_text()

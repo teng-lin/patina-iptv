@@ -213,8 +213,8 @@ jobs:
         shell: pwsh
         run: ./tools/ci/check-windows-package.ps1
   package:
-    needs: [plan, tests]
-    if: always() && needs.plan.result == 'success' && needs.plan.outputs.candidate == '' && needs.tests.result == 'success'
+    needs: [plan]
+    if: needs.plan.outputs.candidate == ''
     uses: ./.github/workflows/unsigned-candidate.yml
     with:
       matrix: ${{ needs.plan.outputs.matrix }}

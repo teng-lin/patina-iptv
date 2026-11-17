@@ -185,7 +185,7 @@ jobs:
           RESULT: ${{ needs.validation.result }}
         run: test "$RESULT" = success
   candidate:
-    needs: [plan, validation]
+    needs: plan
     if: (github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.tier != 'release') || (github.event_name == 'workflow_dispatch' && inputs.tier == 'candidate')
     uses: ./.github/workflows/unsigned-candidate.yml
     with:

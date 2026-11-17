@@ -69,7 +69,7 @@ change is effective. This implementation does not modify repository settings.
 
 ## Release artifacts
 
-Master pushes run the complete `release` validation tier and then call
+Master pushes run the complete `release` validation tier alongside
 [Unsigned candidate packages](../.github/workflows/unsigned-candidate.yml). This
 replaces master's selective preview installer jobs; it does not add another copy
 of packaging. Every candidate has coverage, all native host suites, both emulator
@@ -95,7 +95,10 @@ mandatory artifact groups, file inventory and all digests before uploading the
 same bytes into the release's isolated signing jobs. PR artifacts, another SHA
 (including a squash-equivalent source tree), a failed run or an earlier attempt
 cannot qualify. Full candidate tests and unsigned compilation are skipped only
-after this verification succeeds. Missing/expired evidence runs complete release
+after this verification succeeds. Without a candidate, unsigned builds can run
+concurrently with full checks; signing waits for both. Master sealing likewise
+waits for validation and unsigned packaging, so a failed check cannot authorize
+promotion. Missing/expired evidence runs complete release
 validation and the same unsigned build workflow; malformed evidence fails closed.
 A manual Validation dispatch with `tier=candidate` exercises full checks and the
 unsigned recipe on a branch without sealing trusted evidence or signing. Manual
