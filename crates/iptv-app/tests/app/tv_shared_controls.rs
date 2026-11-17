@@ -221,10 +221,13 @@ fn tv_rail_keeps_settings_inside_the_available_height() {
     let Some(home) = isolated!() else { return };
     let (mut fixture, _) = preview_fixture(home);
     let app = &mut fixture.app;
-    step(app.set_environment("TV remote", |env| env.idiom = Idiom::Tv));
+    step(app.set_environment("TV remote with a bottom inset", |env| {
+        env.idiom = Idiom::Tv;
+        env.safe_area.bottom = nsh_core::prelude::px(24.0);
+    }));
     step(app.set_viewport(nsh_core::Size::new(
-        nsh_core::prelude::px(960.0),
-        nsh_core::prelude::px(540.0),
+        nsh_core::prelude::px(640.0),
+        nsh_core::prelude::px(360.0),
     )));
     step(app.press_key("left"));
     step(app.press_key("left"));
@@ -243,8 +246,8 @@ fn tv_rail_keeps_settings_inside_the_available_height() {
         })
         .expect("Settings is laid out in the visible rail");
     assert!(
-        settings.bounds.origin.y.0 + settings.bounds.size.height.0 <= 540.0,
-        "Settings is fully inside the TV viewport: {:?}",
+        settings.bounds.origin.y.0 + settings.bounds.size.height.0 <= 336.0,
+        "Settings is fully inside the 24-point bottom-safe TV viewport: {:?}",
         settings.bounds
     );
 }

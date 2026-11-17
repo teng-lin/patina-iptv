@@ -27,7 +27,7 @@ const ITEM_MARGIN: f32 = 2.0;
 
 fn item_height_for(available: f32, count: usize) -> f32 {
     let count = count.max(1) as f32;
-    (available / count - ITEM_MARGIN * 2.0).clamp(ICON, ITEM_H)
+    (available / count - ITEM_MARGIN * 2.0).clamp(0.0, ITEM_H)
 }
 
 fn item_height(ui: Ui) -> f32 {
@@ -134,7 +134,7 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
         .px(px(11.0))
         .flex_row()
         .items_center()
-        .gap(px(14.0))
+        .gap(move || px(item_height(ui) * 0.4))
         .rounded(px(RADIUS))
         .overflow_hidden()
         .bg(move || {
@@ -153,13 +153,17 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
                 crate::lists::tap_rail(ui, i);
             }
         })
-        .child(svg(icon(item)).size(px(ICON)).text_color(colour))
+        .child(
+            svg(icon(item))
+                .size(move || px(item_height(ui).min(ICON)))
+                .text_color(colour),
+        )
         .child(
             text(move || label(item))
                 .number_of_lines(1)
                 .accessibility_elements_hidden(move || !open())
                 .opacity(move || if open() { 1.0_f32 } else { 0.0 })
-                .text_size(px(TEXT_SIZE))
+                .text_size(move || px(TEXT_SIZE.min(item_height(ui) * 0.8)))
                 .text_color(colour),
         )
 }
@@ -200,12 +204,15 @@ pub fn column(ui: Ui) -> impl IntoElement {
 
 #[cfg(test)]
 mod tests {
-    use super::item_height_for;
+    use super::{ITEM_MARGIN, item_height_for};
 
     #[test]
     fn rail_rows_shrink_to_keep_bottom_actions_in_a_tv_height() {
         assert_eq!(item_height_for(346.0, 8), 39.25);
-        assert_eq!(item_height_for(346.0, 10), 30.6);
+        assert!((item_height_for(346.0, 10) - 30.6).abs() < 0.001);
         assert_eq!(item_height_for(500.0, 8), 44.0);
+        let short = item_height_for(201.0, 10);
+        assert!((short - 16.1).abs() < 0.001);
+        assert!(short + ITEM_MARGIN * 2.0 <= 201.0 / 10.0);
     }
 }
