@@ -572,18 +572,45 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     assert_eq!(opens(), before + 1);
     state(&mut app, "ready");
 
-    // A fatal error (the provider has no such stream): the card at once,
-    // no retries, its code as the detail.
+    // A live stream can leave the provider's rolling window while paused.
+    // Resuming may play briefly before its old HTTP resource expires; the
+    // app should reopen the live stream automatically instead of dead-ending.
+    step(app.press_key("space"));
+    step(app.wait_for("text:PAUSED"));
+    run(&mut app, Duration::from_secs(3 * 60));
+    step(app.press_key("space"));
+    step(app.wait_for_gone("text:PAUSED", Duration::from_secs(1)));
+    let before = opens();
+    let previous = prop(&app, &props, "source");
     send(
         &mut app,
         "error",
-        json!({ "code": "ERROR_CODE_IO_BAD_HTTP_STATUS", "http": 404 }),
+        json!({ "code": "ERROR_CODE_IO_BAD_HTTP_STATUS", "http": 410 }),
     );
-    step(app.wait_for("text:The provider doesn't have this stream."));
-    step(app.wait_for("text:ERROR_CODE_IO_BAD_HTTP_STATUS 404"));
+    run(&mut app, Duration::from_secs(1));
+    step(app.wait_until(
+        "expired live resource retried",
+        Duration::from_secs(5),
+        |_| opens() > before,
+    ));
+    wait_live_reload(&mut app, &props, &previous, true);
+    assert!(
+        !seen(&app, "text:/^Can't play/"),
+        "reconnect instead of failure"
+    );
+    state(&mut app, "ready");
+
+    // An unsupported format remains a fatal failure and keeps Try again.
+    send(
+        &mut app,
+        "error",
+        json!({ "code": "ERROR_CODE_PARSING_MANIFEST_MALFORMED" }),
+    );
+    step(app.wait_for("text:This stream's format isn't supported."));
+    step(app.wait_for("text:/ERROR_CODE_PARSING_MANIFEST_MALFORMED/"));
     let before = opens();
     run(&mut app, Duration::from_secs(40));
-    assert_eq!(opens(), before, "no retries");
+    assert_eq!(opens(), before, "fatal errors do not retry");
 
     // Try again; a stream that never plays gives the fast attempts, then
     // the card (retrying behind it).
@@ -1003,7 +1030,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     send(
         &mut app,
         "error",
-        json!({ "code": "ERROR_CODE_IO_BAD_HTTP_STATUS", "http": 410 }),
+        json!({ "code": "ERROR_CODE_PARSING_MANIFEST_MALFORMED" }),
     );
     step(app.wait_for("text:Try again"));
     let before = opens();

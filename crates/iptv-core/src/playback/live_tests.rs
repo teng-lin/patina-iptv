@@ -104,6 +104,33 @@ fn time_away_does_not_count_towards_the_card() {
 }
 
 #[test]
+fn a_paused_live_stream_retries_a_gone_http_resource_after_resuming() {
+    let mut h = Health::new(policy());
+    h.start(true, 0);
+    plays(&mut h, 0);
+    h.set_paused(true, 1_000);
+    h.set_paused(false, 181_000);
+
+    let retry = h
+        .on_error(ErrorKind::Http(410), "HTTP 410".into(), 182_000)
+        .expect("a fresh live resolution can recover an expired stream resource");
+
+    assert!(h.failure().is_none(), "no dead-end card while retrying");
+    assert!(h.due(retry, retry.at_ms), "the live stream retries");
+    plays(&mut h, retry.at_ms);
+    assert!(h.failure().is_none(), "playback recovery clears the outage");
+
+    let mut catch_up = Health::new(policy());
+    catch_up.start(false, 0);
+    plays(&mut catch_up, 0);
+    assert_eq!(
+        catch_up.on_error(ErrorKind::Http(410), "HTTP 410".into(), 1_000),
+        None,
+        "an expired catch-up resource remains fatal"
+    );
+}
+
+#[test]
 fn try_again_after_the_card_starts_over_at_once() {
     let mut h = Health::new(policy());
     h.start(true, 0);
