@@ -12,6 +12,24 @@ use tokio::sync::Semaphore;
 
 const IMAGE_BYTES: u64 = 4 << 20;
 const CACHE_BYTES: usize = 8 << 20;
+const IMAGE_SIDE: u32 = 8192;
+const IMAGE_PIXELS: u64 = 16 * 1024 * 1024;
+
+/// Encoded size alone does not bound a raster decoder's allocation. Read its
+/// header before handing bytes to any native backend. SVG uses NSH's bounded
+/// parser/rasterizer, which also disables external resources.
+fn acceptable_dimensions(bytes: &[u8]) -> bool {
+    use nsh_core::image::Natural;
+    match Natural::of(bytes) {
+        Some(Natural::Pixels(width, height)) => {
+            width <= IMAGE_SIDE
+                && height <= IMAGE_SIDE
+                && u64::from(width) * u64::from(height) <= IMAGE_PIXELS
+        }
+        Some(Natural::Vector(_)) => true,
+        None => false,
+    }
+}
 type Reply = oneshot::Sender<String>;
 #[derive(Default)]
 struct Cache {
@@ -118,7 +136,7 @@ async fn download(net: &iptv_net::NetClient, url: &str) -> Option<String> {
     let mut request = iptv_providers::HttpRequest::get(url);
     request.public_only = true;
     let response = net.fetch(request).await.ok()?;
-    if !response.is_success() {
+    if !response.is_success() || !acceptable_dimensions(&response.body) {
         return None;
     }
     // All native SVG paths use nsh_core::svg: its resolver resolves neither
@@ -164,6 +182,33 @@ pub(crate) fn source(url: impl Fn() -> String + 'static) -> impl Fn() -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn raster_headers_cannot_expand_beyond_the_decode_budget() {
+        // Synthetic PNG IHDR: enough to inspect dimensions without allocating
+        // pixels or accepting the header as a complete, decodable image.
+        fn png(width: u32, height: u32) -> Vec<u8> {
+            let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+            bytes.extend(width.to_be_bytes());
+            bytes.extend(height.to_be_bytes());
+            bytes.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+            bytes
+        }
+        assert!(acceptable_dimensions(&png(4096, 4096)));
+        for (width, height) in [
+            (0, 1),
+            (1, 0),
+            (8193, 1),
+            (4097, 4096),
+            (u32::MAX, u32::MAX),
+        ] {
+            assert!(
+                !acceptable_dimensions(&png(width, height)),
+                "{width}x{height}"
+            );
+        }
+        assert!(!acceptable_dimensions(b"synthetic invalid artwork"));
+    }
+
     #[test]
     fn cache_has_byte_and_entry_bounds() {
         let mut c = Cache::default();

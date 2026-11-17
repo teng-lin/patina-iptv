@@ -1,8 +1,8 @@
 //! Interface languages and translations. Pure, deterministic and platform independent.
 //! English source messages are keys; untranslated messages retain their source text.
 //!
-//! [`translate`] looks a fixed message up. [`format`] does the same for a
-//! [message](message) with named placeholders and plural forms, chosen by
+//! [`translate`] looks a fixed message up. [`format()`] does the same for a
+//! [message] with named placeholders and plural forms, chosen by
 //! the language's own [plural rules](plural). [`calendar`] has each
 //! language's day and month names; [`clock`](crate::clock) writes dates
 //! and times with them.
@@ -142,7 +142,7 @@ pub fn translate<'a>(language: &Language, source: &'a str) -> &'a str {
     find(language, source).unwrap_or(source)
 }
 
-/// As [`translate`], for a [message](message) with placeholders: `source`
+/// As [`translate`], for a [message] with placeholders: `source`
 /// in `language` with `args` filled in and each plural's form chosen by
 /// the count it names.
 ///
@@ -156,7 +156,7 @@ pub fn format(language: &Language, source: &str, args: &Args<'_>) -> String {
 }
 
 /// Whether the catalogue has a row for `source`: for the checks that no
-/// message reaches [`translate`] or [`format`] without one.
+/// message reaches [`translate`] or [`format()`] without one.
 pub fn is_catalogued(source: &str) -> bool {
     messages().contains_key(source)
 }

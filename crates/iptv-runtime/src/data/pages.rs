@@ -1,16 +1,16 @@
 //! The stored guide's older days, read in on demand.
 //!
-//! A shown schedule holds the stored guide from [`crate::paging::LOADED_PAST_DAYS`]
+//! A shown schedule holds the stored guide from `crate::paging::LOADED_PAST_DAYS`
 //! before its start on ([`window`]: the guide's first screen, a day of
 //! "earlier programmes" and the play bar's archive of the last day need
 //! nothing more), not every day `epg.keep_past` keeps: on Android a week
 //! of a large guide was most of the app's memory. Older days are pages
 //! (`iptv_guide::pages`): the first guide cell, programme detail or
-//! catch-up that needs one asks [`loader`] for it, which reads it on its
+//! catch-up that needs one asks `loader` for it, which reads it on its
 //! own thread (`Store::load_epg` of that day) and puts it in the schedule
 //! on screen; `RuntimeEvent::GuideChanged` asks the shell to redraw programmes.
 //!
-//! Pages go again when the guide's window is back at now ([`bind`]); the
+//! Pages go again when the guide's window is back at now (`bind`); the
 //! day of the programme playing from the archive is pinned meanwhile, and
 //! catch-up waits for its day before it resolves the archive ([`ready`]).
 

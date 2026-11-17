@@ -311,6 +311,17 @@ impl XtreamClient {
         &self.base
     }
 
+    /// Public accounts cannot make the relay reach private destinations.
+    /// A user-selected LAN account permits only its own stream origin.
+    pub fn stream_must_be_public(&self, stream_url: &str) -> bool {
+        let private_account = crate::content_url::validate(&self.base).is_err();
+        let same_origin = url::Url::parse(&self.base)
+            .ok()
+            .zip(url::Url::parse(stream_url).ok())
+            .is_some_and(|(base, stream)| base.origin() == stream.origin());
+        !(private_account && same_origin)
+    }
+
     pub fn user_agent(&self) -> &str {
         &self.user_agent
     }

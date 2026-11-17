@@ -7,7 +7,7 @@ use iptv_store_sqlite::EpgWindow;
 pub const LOADED_PAST_DAYS: u32 = 1;
 
 /// What a schedule shown at `now` holds of the stored guide: from
-/// [`LOADED_PAST_DAYS`] (at most `keep_past_days`) before the hour of
+/// `LOADED_PAST_DAYS` (at most `keep_past_days`) before the hour of
 /// `now` on; the store keeps nothing that ended before `keep_past_days`.
 pub fn window(now: UnixTime, keep_past_days: u32) -> PagedWindow {
     let days = i64::from(LOADED_PAST_DAYS.min(keep_past_days));

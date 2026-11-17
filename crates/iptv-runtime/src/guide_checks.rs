@@ -199,16 +199,16 @@ impl crate::Runtime {
     pub fn has_guide_check(&self, source: SourceId) -> bool {
         self.guide_checks.borrow().entries.contains_key(&source)
     }
-    /// Other work takes `source`'s guide over (see [`GuideChecks::cancel`]).
+    /// Other work takes `source`'s guide over (see `GuideChecks::cancel`).
     pub fn cancel_guide_check(&self, source: SourceId) {
         self.guide_checks.borrow_mut().cancel(source);
     }
-    /// `source`'s own read ended (see [`GuideChecks::end`]).
+    /// `source`'s own read ended (see `GuideChecks::end`).
     pub fn end_guide_check(&self, source: SourceId) {
         self.guide_checks.borrow_mut().end(source);
     }
     /// A guide action replaces what `source`'s in-flight read would show
-    /// or store (see [`GuideChecks::interrupt_read`]).
+    /// or store (see `GuideChecks::interrupt_read`).
     pub fn interrupt_guide_read(&self, source: SourceId) -> Option<GuideWork> {
         self.guide_checks.borrow_mut().interrupt_read(source)
     }
@@ -217,7 +217,7 @@ impl crate::Runtime {
     pub fn take_owed_guide_check(&self, source: SourceId) -> Option<i64> {
         self.guide_checks.borrow_mut().take_owed(source)
     }
-    /// See [`GuideChecks::owe`].
+    /// See `GuideChecks::owe`.
     pub fn owe_guide_check(&self, source: SourceId, at: i64) {
         self.guide_checks.borrow_mut().owe(source, at);
     }
@@ -225,7 +225,7 @@ impl crate::Runtime {
         self.guide_checks.borrow_mut().clear(None);
     }
     /// A new generation begins while `shown` is on screen (see
-    /// [`GuideChecks::clear`]).
+    /// `GuideChecks::clear`).
     pub fn cancel_guide_checks_keeping(&self, shown: Option<SourceId>) {
         self.guide_checks.borrow_mut().clear(shown);
     }

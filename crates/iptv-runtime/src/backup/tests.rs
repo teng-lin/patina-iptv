@@ -542,3 +542,73 @@ fn a_failed_operation_keeps_its_cause_for_the_log_without_paths() {
         "Choose a backup destination outside application storage"
     );
 }
+
+/// Exits without destructors only in the explicitly selected child test.
+pub(super) fn crash_boundary(boundary: &str) {
+    if std::env::var("IPTV_TEST_RESTORE_CRASH").as_deref() == Ok(boundary) {
+        std::process::exit(73);
+    }
+}
+
+#[test]
+fn restore_crash_child() {
+    let Some(root) = std::env::var_os("IPTV_TEST_RESTORE_ROOT") else {
+        return;
+    };
+    activate(Path::new(&root)).unwrap();
+    panic!("the requested restore boundary was not reached");
+}
+
+#[test]
+fn process_death_at_each_restore_swap_boundary_preserves_the_committed_snapshot() {
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+    for boundary in ["validated", "previous", "installed", "synced"] {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("live");
+        let replacement = directory.path().join("replacement");
+        seed(&root, "Generated current");
+        seed(&replacement, "Generated restored");
+        let archive = directory.path().join("snapshot");
+        export(&replacement, &archive, &Settings::new().to_json_string()).unwrap();
+        stage(&root, &mut File::open(archive).unwrap()).unwrap();
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "backup::tests::restore_crash_child",
+                "--nocapture",
+            ])
+            .env("IPTV_TEST_RESTORE_ROOT", &root)
+            .env("IPTV_TEST_RESTORE_CRASH", boundary)
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("restore child did not acknowledge {boundary}");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(status.code(), Some(73), "boundary {boundary}");
+        // Reopen through actual startup recovery, not a manually reconstructed
+        // directory layout. Repeated recovery must remain idempotent.
+        activate(&root).unwrap();
+        activate(&root).unwrap();
+        assert_eq!(
+            Store::open(root.join("iptv.sqlite"))
+                .unwrap()
+                .sources()
+                .unwrap()[0]
+                .name,
+            "Generated restored",
+            "boundary {boundary}"
+        );
+        assert!(!sibling(&root, "restore-pending").exists());
+        assert!(!sibling(&root, "restore-previous").exists());
+    }
+}

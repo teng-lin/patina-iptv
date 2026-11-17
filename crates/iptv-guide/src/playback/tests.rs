@@ -439,3 +439,28 @@ fn resolution_authority_diagnostics_never_include_stream_or_credential_details()
         assert!(!debug.contains(secret));
     }
 }
+
+#[test]
+fn xtream_public_accounts_keep_dns_checks_and_lan_trust_is_origin_scoped() {
+    let channel = xtream_channel(42, None);
+    for (server, public) in [
+        ("https://panel.example.test", true),
+        ("http://127.0.0.1:8080", false),
+    ] {
+        let mut credentials = creds(None);
+        credentials.server_url = server.into();
+        let context = PlaybackContext::xtream(&credentials, None, StreamFormat::Auto).unwrap();
+        assert_eq!(
+            play(resolve(Some(&context), &channel, None, CLOCK)).public_only,
+            public
+        );
+        let client = iptv_providers::xtream::XtreamClient::from_credentials(&credentials).unwrap();
+        for target in [
+            "http://127.0.0.1:8081/stream",
+            "http://10.0.0.2/stream",
+            "https://cdn.example.test/stream",
+        ] {
+            assert!(client.stream_must_be_public(target));
+        }
+    }
+}

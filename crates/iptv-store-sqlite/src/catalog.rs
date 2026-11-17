@@ -243,7 +243,11 @@ impl Store {
             duplicates: count(total - groups_n - channels_n - vod_n - series_n),
         };
         record_import_success(&tx, source, &counts, now)?;
+        #[cfg(test)]
+        crash_tests::boundary("staged");
         tx.commit()?;
+        #[cfg(test)]
+        crash_tests::boundary("committed");
         Ok(counts)
     }
 
@@ -398,3 +402,7 @@ impl Store {
         .collect()
     }
 }
+
+#[cfg(test)]
+#[path = "catalog/crash_tests.rs"]
+mod crash_tests;
