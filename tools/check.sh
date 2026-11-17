@@ -40,6 +40,7 @@ python3 tools/ci/test-ci-cache.py
 python3 tools/ci/test-pins.py
 python3 tools/ci/test-android-changes.py
 python3 tools/ci/test-adb-timeout.py
+python3 tools/ci/test-android-lifecycle.py
 python3 tools/ci/test-android-artifacts.py
 python3 tools/ci/test-publish-release.py
 python3 tools/ci/test-rehearsal.py

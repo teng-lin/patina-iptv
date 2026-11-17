@@ -62,6 +62,7 @@ fail() {
   phase="failure diagnostics"
   echo "FAIL: $*" >&2
   adb exec-out screencap -p > "$out/failure.png" 2>/dev/null || true
+  adb shell dumpsys activity -p "$pkg" activities > "$out/activities-at-failure.log" 2>/dev/null || true
   mark || true
   echo "last app log lines:" >&2
   tail -20 "$out/app.log" >&2 || true
@@ -100,6 +101,25 @@ keys() {
 }
 shot() { adb exec-out screencap -p > "$out/$1.png" || true; }
 step() { phase=$*; echo "== $*"; }
+
+wait_stopped() {
+  local attempts=${1:-40} activities=
+  for _ in $(seq 1 "$attempts"); do
+    if ! activities=$(adb shell dumpsys activity -p "$pkg" activities); then
+      printf '%s\n' "$activities" > "$out/activities.log"
+      fail "cannot inspect activity shutdown"
+    fi
+    # ActivityManager emits compact and full state fields on different images.
+    # Keep the successful observation: a second dump can race a state change.
+    if printf '%s\n' "$activities" | grep -E \
+      '(^|[[:space:]{])(state|mState)=STOPPED([[:space:],}]|$)|(^|[[:space:]{])mAppStopped=true([[:space:],}]|$)' >/dev/null; then
+      return 0
+    fi
+    pause 0.5
+  done
+  printf '%s\n' "$activities" > "$out/activities.log"
+  fail "activity did not stop and flush its queued writes"
+}
 
 [ "$(curl -sf --max-time 10 "http://127.0.0.1:$port/iptv/playlist.m3u" | head -c 7)" = "#EXTM3U" ] ||
   fail "no synthetic playlist at http://127.0.0.1:$port/iptv/playlist.m3u (see the usage)"
@@ -315,12 +335,7 @@ shot 06-multiview
 step "background and resume"
 mark
 keys KEYCODE_HOME
-for _ in $(seq 1 20); do
-  adb shell dumpsys activity -p $pkg activities | grep 'state=STOPPED' >/dev/null && break
-  pause 0.5
-done
-adb shell dumpsys activity -p $pkg activities | grep 'state=STOPPED' >/dev/null ||
-  fail "the activity did not stop in the background"
+wait_stopped 20
 echo "  ok: activity stopped"
 pause 3
 alive || fail "the app died in the background"
@@ -357,13 +372,6 @@ assert_resume() {
   if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
     fail "$label: persisted channel changed"
   fi
-}
-wait_stopped() {
-  for _ in $(seq 1 40); do
-    adb shell dumpsys activity -p "$pkg" activities | grep -E 'state=STOPPED|mAppStopped=true' >/dev/null && return 0
-    pause 0.5
-  done
-  fail "activity did not stop and flush its queued writes"
 }
 wait_destroyed() {
   local activities
