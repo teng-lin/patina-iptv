@@ -285,5 +285,57 @@ class Policy(unittest.TestCase):
             j.policy(self.base, self.candidate, [record])
 
 
+class BaselineAncestry(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('base_policy', j.HERE / 'base-policy.py')
+        self.base = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.base)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        previous = Path.cwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, previous)
+        self.git('init', '-q')
+        self.git('config', 'user.name', 'Synthetic')
+        self.git('config', 'user.email', 'synthetic@example.invalid')
+        self.git('commit', '--allow-empty', '-qm', 'Synthetic root')
+        self.first = self.git('rev-parse', 'HEAD')
+
+    def git(self, *args):
+        return subprocess.check_output(['git', *args], text=True).strip()
+
+    def test_root_and_tag_replacement_use_source_ancestry(self):
+        environment = {'PERF_EVENT': 'push', 'PERF_REF': 'refs/tags/v9.8.7', 'PERF_BASE': 'f' * 40}
+        self.assertIsNone(self.base.baseline(environment))
+        self.git('commit', '--allow-empty', '-qm', 'Synthetic candidate')
+        self.assertEqual(self.base.baseline(environment), self.first)
+        self.assertEqual(self.base.baseline({'PERF_EVENT': 'workflow_dispatch', 'PERF_BASE': 'f' * 40}), self.first)
+        self.assertEqual(self.base.baseline({'PERF_EVENT': 'push', 'PERF_REF': 'refs/heads/master', 'PERF_BASE': '0' * 40}), self.first)
+
+    def test_explicit_missing_base_cannot_silently_fall_back(self):
+        for event in ('pull_request', 'merge_group', 'push'):
+            environment = {'PERF_EVENT': event, 'PERF_REF': 'refs/heads/master', 'PERF_BASE': 'f' * 40}
+            with self.subTest(event=event), self.assertRaises(subprocess.CalledProcessError):
+                self.base.baseline(environment)
+        with self.assertRaises(ValueError):
+            self.base.baseline({'PERF_EVENT': 'pull_request'})
+
+    def test_shallow_history_and_missing_reachable_base_are_fetched(self):
+        self.git('commit', '--allow-empty', '-qm', 'Synthetic candidate')
+        origin = self.root
+        shallow = self.root / 'shallow'
+        subprocess.run(['git', 'clone', '-q', '--depth=1', origin.as_uri(), str(shallow)], check=True)
+        os.chdir(shallow)
+        self.assertEqual(self.base.baseline({'PERF_EVENT': 'push', 'PERF_REF': 'refs/tags/v9.8.7', 'PERF_BASE': 'f' * 40}), self.first)
+        self.assertEqual(self.git('rev-parse', '--is-shallow-repository'), 'false')
+        # New origin commit is not in the clone until an explicit base fetch.
+        os.chdir(origin)
+        self.git('commit', '--allow-empty', '-qm', 'Synthetic explicit base')
+        explicit = self.git('rev-parse', 'HEAD')
+        os.chdir(shallow)
+        self.assertEqual(self.base.baseline({'PERF_EVENT': 'pull_request', 'PERF_BASE': explicit}), explicit)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -37,7 +37,7 @@ jobs:
           CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: 'true'
         run: |
           bash tools/sync-host.sh
-          (cd hosts/android && ./gradlew --no-daemon assembleDebug)
+          (cd hosts/android && ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug)
       - name: Generate the synthetic fixtures
         run: |
           bash tools/make-hls-fixtures.sh

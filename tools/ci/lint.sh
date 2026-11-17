@@ -13,18 +13,20 @@ missing() {
   fi
 }
 
-echo "==> ShellCheck"
-if command -v shellcheck >/dev/null 2>&1; then
-  git ls-files -z '*.sh' | xargs -0 shellcheck || failed=1
-else
-  missing shellcheck
-fi
+if [ "${IPTV_HELPERS_CHECKED:-false}" != true ]; then
+  echo "==> ShellCheck"
+  if command -v shellcheck >/dev/null 2>&1; then
+    git ls-files -z '*.sh' | xargs -0 shellcheck || failed=1
+  else
+    missing shellcheck
+  fi
 
-echo "==> Ruff"
-if command -v ruff >/dev/null 2>&1; then
-  ruff check tools/ || failed=1
-else
-  missing ruff
+  echo "==> Ruff"
+  if command -v ruff >/dev/null 2>&1; then
+    ruff check tools/ || failed=1
+  else
+    missing ruff
+  fi
 fi
 
 echo "==> ktlint"

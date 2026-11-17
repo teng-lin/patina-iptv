@@ -12,7 +12,7 @@ rm -rf hosts/android/app/build/nsh/assets/notices
 mkdir -p hosts/android/app/build/nsh/assets/notices
 cp -R target/notices/. hosts/android/app/build/nsh/assets/notices/
 cp -R hosts/android/app/build/reports/dependency-license hosts/android/app/build/nsh/assets/notices/gradle
-(cd hosts/android && ./gradlew --no-daemon lintRelease assembleRelease bundleRelease)
+(cd hosts/android && ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease bundleRelease)
 rm -rf target/android-unsigned
 mkdir -p target/android-unsigned
 python3 tools/ci/sbom.py android-classpath \

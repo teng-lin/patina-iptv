@@ -59,7 +59,7 @@ class Workflows(unittest.TestCase):
         text = (ROOT / ".github/workflows/validation.yml").read_text()
         aggregate = text.split("  validation:\n", 1)[1].split("  protected-contexts:", 1)[0]
         needs = re.search(r"needs: \[(.*?)\]", aggregate)[1].split(", ")
-        self.assertEqual(set(needs), {"plan", "helpers", *plan.LANES})
+        self.assertEqual(set(needs), {"plan", "helpers", "candidate", *plan.LANES})
         self.assertIn("if: always()", aggregate)
         aliases = text.split("  protected-contexts:\n", 1)[1]
         self.assertIn("needs: validation", aliases)
@@ -70,7 +70,7 @@ class Workflows(unittest.TestCase):
 
     def test_release_explicitly_requests_candidate_tier_and_publishes_after_artifact_checks(self):
         text = (ROOT / ".github/workflows/release.yml").read_text()
-        tests = text.split("  tests:\n", 1)[1].split("  windows-package:\n", 1)[0]
+        tests = text.split("  tests:\n", 1)[1].split("  windows-sign:\n", 1)[0]
         self.assertIn("uses: ./.github/workflows/validation.yml", tests)
         self.assertIn("tier: release", tests)
         publish = text.split("  publish:\n", 1)[1].split("    runs-on:", 1)[0]
@@ -81,6 +81,59 @@ class Workflows(unittest.TestCase):
         self.assertNotIn("environment:", verify)
         self.assertNotIn("setup-windows", verify)
         self.assertIn("name: packages-windows", verify)
+
+    def test_event_tier_expression_never_serializes_false_as_a_tier(self):
+        expressions = module('test-release-workflow')
+        workflow = (ROOT / '.github/workflows/validation.yml').read_text()
+        expression = re.search(r'TIER: \$\{\{(.*?)\}\}', workflow)[1]
+        candidate_expression = re.search(r'CANDIDATE_BUILD: \$\{\{(.*?)\}\}', workflow)[1]
+        for event, ref, tier, expected in (
+                ('pull_request', 'refs/pull/17/merge', '', 'pr'),
+                ('merge_group', 'refs/heads/gh-readonly-queue/master/synthetic', '', 'pr'),
+                ('push', 'refs/heads/master', '', 'release'),
+                ('push', 'refs/tags/v9.8.7', 'release', 'release'),
+                ('schedule', 'refs/heads/master', '', 'full'),
+                ('workflow_dispatch', 'refs/heads/synthetic', 'candidate', 'release'),
+                ('workflow_dispatch', 'refs/heads/master', 'full', 'full'),
+                ('workflow_dispatch', 'refs/heads/master', 'release', 'release')):
+            context = {'github': {'event_name': event, 'ref': ref}, 'inputs': {'tier': tier}}
+            with self.subTest(event=event, tier=tier):
+                self.assertEqual(expressions.evaluate(expression, context), expected)
+                self.assertEqual(expressions.evaluate(candidate_expression, context),
+                                 (event == 'push' and ref == 'refs/heads/master' and tier != 'release')
+                                 or (event == 'workflow_dispatch' and tier == 'candidate'))
+
+    def test_delegated_helpers_retain_the_real_runner_lock_check(self):
+        text = (ROOT / '.github/workflows/validation.yml').read_text()
+        helpers = text.split('  helpers:\n', 1)[1].split('  host:\n', 1)[0]
+        self.assertIn('python3 tools/ci/check-package-lock.py', helpers)
+        host = text.split('  host:\n', 1)[1].split('  ios:\n', 1)[0]
+        self.assertIn('needs: [plan, helpers]', host)
+        self.assertIn('helpers-checked: true', host)
+
+    def test_master_candidate_owns_shipping_builds_and_release_uses_same_recipe(self):
+        text = (ROOT / '.github/workflows/validation.yml').read_text()
+        self.assertIn("&& 'validation-master'", text)
+        self.assertIn("inputs.tier != 'release'", text)
+        candidate = text.split('  candidate:\n', 1)[1].split('  seal-candidate:', 1)[0]
+        self.assertIn('needs: plan', candidate)
+        self.assertIn("needs.plan.outputs.candidate_build == 'true'", candidate)
+        self.assertIn('needs: [plan, validation, candidate]', text)
+        self.assertIn('uses: ./.github/workflows/unsigned-candidate.yml', candidate)
+        self.assertIn('release-candidate.py seal', text)
+        release = (ROOT / '.github/workflows/release.yml').read_text()
+        self.assertIn('release-candidate.py select', release)
+        self.assertIn('uses: ./.github/workflows/unsigned-candidate.yml', release)
+        unsigned = (ROOT / '.github/workflows/unsigned-candidate.yml').read_text()
+        self.assertNotIn('environment:', unsigned)
+        self.assertNotIn('secrets.', unsigned)
+        self.assertIn('check-linux-packages.sh', unsigned)
+        self.assertIn('check-windows-package.ps1', unsigned)
+        self.assertIn('prepare-android.sh', unsigned)
+        self.assertNotIn('bundleDebug', (ROOT / '.github/workflows/android.yml').read_text())
+        smoke = (ROOT / '.github/workflows/android-smoke.yml').read_text()
+        self.assertIn('testDebugUnitTest lintDebug assembleDebug', smoke)
+        self.assertIn('testReleaseUnitTest lintRelease', (ROOT / 'tools/ci/prepare-android.sh').read_text())
 
     def test_large_epg_case_is_not_silently_omitted(self):
         script = (ROOT / "tools/ci/import-stress.sh").read_text()
