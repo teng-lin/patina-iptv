@@ -747,16 +747,29 @@ fn adding_second_playlist_opens_combined_browser_without_management_switch() {
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     })
     .unwrap();
-    app.on_pick(|_| vec![PickedFile::new("Beta.m3u", "audio/x-mpegurl", ImageData::new(
-        b"#EXTM3U\n#EXTINF:-1 group-title=\"Sport\",Added Beta\nhttp://stream.example.test/added-beta\n".to_vec()
-    ))]);
+    app.answer_picks_myself();
     step(app.wait_for_within("text:Only Alpha", Duration::from_secs(20)));
     step(app.press("text:☰  All channels"));
     step(app.press_key("m"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));
-    step(app.press("text:Choose a file…"));
+    // The form focuses its file field by identity. The request can arrive
+    // after the key press settles; wait_for does not answer late picks.
+    step(app.press_key("enter"));
+    step(app.wait_until(
+        "the second playlist file picker",
+        Duration::from_secs(5),
+        |screen| !screen.picks().is_empty(),
+    ));
+    step(app.answer_pick(vec![PickedFile::new(
+        "Beta.m3u",
+        "audio/x-mpegurl",
+        ImageData::new(
+            b"#EXTM3U\n#EXTINF:-1 group-title=\"Sport\",Added Beta\nhttp://stream.example.test/added-beta\n"
+                .to_vec(),
+        ),
+    )]));
     step(app.wait_for("text:Beta.m3u"));
     step(app.press("text:Add playlist"));
     step(app.wait_for_within("text:Playlist added", Duration::from_secs(20)));
