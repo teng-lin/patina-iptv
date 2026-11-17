@@ -326,6 +326,9 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
     local.recordings_open = computed(move || local.recordings.with(|s| s.open));
     local.player_status = signal(String::new());
     local.pending_zap = signal(None);
+    local.channel_number = signal(Default::default());
+    local.search_history_revision = signal(0);
+    local.player.vod = signal(None);
     local.browse_playback = signal(Default::default());
     local.focus = signal(parent.focus.get_untracked());
     local.list = signal(parent.list.get_untracked());

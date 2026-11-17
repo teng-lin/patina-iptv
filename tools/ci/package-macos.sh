@@ -2,6 +2,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 : "${VERSION:?}"
+if [ "${IPTV_SIGNING_STAGE:-}" = 1 ]; then
+  python3 tools/ci/signing-config.py macos
+else
+  python3 tools/ci/signing-config.py macos --prepare
+fi
 test -d target/package/Patina.app
 if [ -n "${MACOS_CERTIFICATE:-}" ]; then
   : "${MACOS_CERTIFICATE_PASSWORD:?}"

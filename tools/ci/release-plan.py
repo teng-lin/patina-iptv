@@ -22,6 +22,9 @@ Reads EVENT_NAME, REF, PLATFORMS and REHEARSAL from the environment and writes
 """
 import json
 import os
+from pathlib import Path
+import re
+import tomllib
 
 SELECTIONS = ("android-desktop", "android", "desktop", "all")
 REHEARSAL_SELECTION = "android-desktop"
@@ -66,11 +69,23 @@ def plan(event, ref, selection, rehearsal):
     return platforms
 
 
+def check_changelog(root, ref):
+    version = tomllib.loads((root / "Cargo.toml").read_text())["workspace"]["package"]["version"]
+    if ref.startswith("refs/tags/") and ref != "refs/tags/v" + version:
+        raise ValueError("release tag must match the workspace version")
+    text = (root / "CHANGELOG.md").read_text()
+    section = re.search(r"(?m)^## \[" + re.escape(version) + r"\](?:[^\n]*)\n(.*?)(?=^## |\Z)", text, re.S)
+    if section is None or not re.search(r"(?m)^- \S", section[1]):
+        raise ValueError(f"CHANGELOG.md needs a nonempty [{version}] release section")
+
+
 def main():
     environment = os.environ
     rehearsal = environment.get("REHEARSAL", "")
     platforms = plan(environment.get("EVENT_NAME", ""), environment.get("REF", ""),
                      environment.get("PLATFORMS", ""), rehearsal)
+    if rehearsal != "true":
+        check_changelog(Path.cwd(), environment.get("REF", ""))
     # Linux packages are not platform-signed; the others pass through the signing job.
     signing = [entry for entry in platforms if entry["platform"] != "linux"]
     with open(environment["GITHUB_OUTPUT"], "a") as output:

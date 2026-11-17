@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recording_channel">Geplante Aufnahmen</string>
+    <string name="recording_title">Patina nimmt auf</string>
+    <string name="recording_background">Deine geplante Aufnahme läuft im Hintergrund</string>
+</resources>

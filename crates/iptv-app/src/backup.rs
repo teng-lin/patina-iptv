@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 /// What a backup holds, before its file is chosen.
 const EXPORT_NOTE: &str = key(
-    "The backup includes playlist logins and passwords, settings, \
+    "The unencrypted backup includes playlist logins and passwords, settings, \
      channel arrangements, history and cached guide data. \
      Keep the file private.",
 );

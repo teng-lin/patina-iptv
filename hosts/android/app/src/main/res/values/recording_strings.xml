@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recording_channel">Scheduled recordings</string>
+    <string name="recording_title">Patina is recording</string>
+    <string name="recording_background">Your scheduled recording runs in the background</string>
+</resources>

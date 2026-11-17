@@ -1,0 +1,22 @@
+name: iOS compile
+on:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  compile:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: ios-compile-v1
+      - name: Compile device and simulator adapters without credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/ci/check-ios.sh

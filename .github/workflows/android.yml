@@ -42,6 +42,7 @@ jobs:
           bash tools/ci/check-android.sh aarch64-linux-android
           bash tools/ci/check-android.sh armv7-linux-androideabi
   android:
+    name: android-packaging
     if: inputs.package == true
     runs-on: ubuntu-24.04
     timeout-minutes: 60

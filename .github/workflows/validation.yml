@@ -32,6 +32,8 @@ jobs:
       plan: ${{ steps.select.outputs.plan }}
       tier: ${{ steps.select.outputs.tier }}
       host: ${{ steps.select.outputs.host }}
+      ios: ${{ steps.select.outputs.ios }}
+      credentials: ${{ steps.select.outputs.credentials }}
       helpers_full: ${{ steps.select.outputs.helpers_full }}
       windows: ${{ steps.select.outputs.windows }}
       android: ${{ steps.select.outputs.android }}
@@ -103,6 +105,14 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       tier: ${{ needs.plan.outputs.tier == 'pr' && 'pr' || 'full' }}
+  ios:
+    needs: plan
+    if: needs.plan.outputs.ios == 'true'
+    uses: ./.github/workflows/ios.yml
+  credentials:
+    needs: plan
+    if: needs.plan.outputs.credentials == 'true'
+    uses: ./.github/workflows/credentials.yml
   windows:
     needs: plan
     if: needs.plan.outputs.windows == 'true'
@@ -146,7 +156,7 @@ jobs:
     if: needs.plan.outputs.stress == 'true'
     uses: ./.github/workflows/import-stress.yml
   validation:
-    needs: [plan, helpers, host, windows, android, packages, windows-package, coverage, fuzz, smoke, stress]
+    needs: [plan, helpers, host, windows, android, packages, windows-package, coverage, fuzz, smoke, stress, ios, credentials]
     if: always()
     runs-on: ubuntu-24.04
     steps:

@@ -6,8 +6,7 @@
 //! it, stores what it answers through `crate::settings` (saved at once,
 //! applied where the app reads it) and runs its commands.
 //!
-//! Rows the app does not act on yet are dimmed and say so ("later" for
-//! recordings, reminders, movies and series); none of
+//! Globally unimplemented settings are hidden consistently on every build; none of
 //! the rows it acts on can be switched off by another setting yet;
 //! device-level features of TV boxes are left out (`settings::offer`). Remote: Up/Down move, Right/OK
 //! enter a page, OK changes a row, Left/Back go back, Back on the pages
@@ -252,6 +251,18 @@ fn run(ui: Ui, key: &'static str) {
         return;
     }
     match key {
+        "history.clear" => {
+            let saved = crate::runtime().clear_watch_history();
+            ui.player
+                .history
+                .set(iptv_core::playback::ChannelHistory::default());
+            crate::data::spawn_in_app(async move {
+                if !saved.await {
+                    notify(tr("Recent channel changes could not be saved; try again"));
+                }
+            });
+        }
+        "search.clear_history" => crate::search_view::clear_history(ui),
         "parental.change_pin" => crate::parental_view::change_pin(ui),
         "recordings.quit_host" => crate::desktop::quit(),
         "recordings.background_status"

@@ -803,12 +803,27 @@ pub fn save_search_history(
     owner: &crate::Runtime,
     history: Vec<String>,
 ) -> impl Future<Output = Result<(), crate::Error>> + use<> {
-    let services = owner.services();
-    async move {
-        save_search_history_native(&services, history)
-            .await
-            .map_err(crate::Error::from)
-    }
+    // Submit now: polling order must never let an older save follow a clear.
+    let saved = save_search_history_native(&owner.services(), history);
+    async move { saved.await.map_err(crate::Error::from) }
+}
+
+/// Clears durable history and any unconsumed legacy file in writer order.
+pub fn clear_search_history(
+    owner: &crate::Runtime,
+    legacy: std::path::PathBuf,
+) -> impl Future<Output = Result<(), crate::Error>> + use<> {
+    let cleared = owner.services().call(move |store| {
+        store.set_search_history(&[])?;
+        match std::fs::remove_file(legacy) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(StoreError::Unavailable(
+                "legacy search history could not be removed",
+            )),
+        }
+    });
+    async move { cleared.await.map_err(crate::Error::from) }
 }
 
 pub fn organization_items(
@@ -873,12 +888,9 @@ pub fn load_search_history(
     owner: &crate::Runtime,
     legacy: std::path::PathBuf,
 ) -> impl Future<Output = Result<Vec<String>, crate::Error>> + use<> {
-    let services = owner.services();
-    async move {
-        load_search_history_native(&services, legacy)
-            .await
-            .map_err(crate::Error::from)
-    }
+    // Legacy migration is a write and follows invocation order, like saves.
+    let loaded = load_search_history_native(&owner.services(), legacy);
+    async move { loaded.await.map_err(crate::Error::from) }
 }
 
 pub(crate) fn load_organization(

@@ -8,6 +8,11 @@ Setup, contribution policy and physical-device validation requirements remain
 in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 Validation scheduling and required-check behavior are documented in [CI tiers](ci.md).
+The [documentation map](index.md), [NSH fork ledger](nsh-fork.md),
+[disposable emulator runbook](android-validation.md) and
+[release recovery procedure](release.md#release-contract-and-recovery) cover
+operational handoff. Keep one Cargo target directory per worktree; record both
+application and pinned framework SHAs with validation evidence.
 
 ## Find the owner
 

@@ -291,3 +291,39 @@ fn sidebar_up_reaches_preview_on_desktop_and_tv_without_reopening_video() {
         persistent(app, &lifetime, player);
     }
 }
+
+#[test]
+fn numeric_channel_entry_commits_corrected_identity_and_invalid_input_does_not_zap() {
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, lifetime) = preview_fixture(home);
+    let app = &mut fixture.app;
+    step(app.set_environment("TV digits", |env| env.idiom = Idiom::Tv));
+    let player = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.kind == ViewKind::Native)
+        .unwrap()
+        .id;
+    step(app.press_key("2"));
+    step(app.press_key("9"));
+    step(app.press_key("backspace"));
+    step(app.press_key("enter"));
+    step(app.wait_until(
+        "numeric choice starts playback",
+        Duration::from_secs(10),
+        |_| iptv_app::player_has_source(0),
+    ));
+    step(app.wait_for("text:Local B"));
+    let opens = iptv_app::player_opens(0);
+    step(app.press_key("9"));
+    step(app.press_key("9"));
+    step(app.press_key("enter"));
+    step(app.wait(Duration::from_millis(100)));
+    assert_eq!(
+        iptv_app::player_opens(0),
+        opens,
+        "unknown number never aliases channel zero"
+    );
+    persistent(app, &lifetime, player);
+}

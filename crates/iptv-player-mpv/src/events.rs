@@ -17,6 +17,7 @@ wire_enum! {
         Size = "size",
         FirstRender = "firstRender",
         Error = "error",
+        Reauthorize = "reauthorize",
         Position = "position",
         Timeline = "timeline",
         Tracks = "tracks",
@@ -41,6 +42,8 @@ wire_enum! {
 pub enum PlayerEvent {
     /// `state` {state}.
     State(PlayerState),
+    /// Foreground return requests fresh authority for this exact source token.
+    Reauthorize { token: u64, allowed: bool },
     /// `size` {width, height}: the video's, in pixels.
     Size { width: u64, height: u64 },
     /// Current-source frame submitted to a native renderer, once per source identity/token.
@@ -120,6 +123,7 @@ impl PlayerEvent {
     pub fn kind(&self) -> PlayerEventKind {
         match self {
             Self::State(_) => PlayerEventKind::State,
+            Self::Reauthorize { .. } => PlayerEventKind::Reauthorize,
             Self::Size { .. } => PlayerEventKind::Size,
             Self::FirstRender { .. } => PlayerEventKind::FirstRender,
             Self::Error { .. } => PlayerEventKind::Error,
@@ -136,6 +140,7 @@ impl PlayerEvent {
     pub fn data(&self) -> Value {
         match self {
             Self::State(state) => json!({ "state": state.name() }),
+            Self::Reauthorize { token, allowed } => json!({ "token": token, "allowed": allowed }),
             Self::Size { width, height } => json!({ "width": width, "height": height }),
             Self::FirstRender { token } => json!({ "token": token }),
             Self::Error { code, http } => {
@@ -214,6 +219,13 @@ impl PlayerEvent {
                     .as_u64()
                     .filter(|token| *token > 0)
                     .ok_or(PlayerEventError::NoRenderToken)?,
+            },
+            PlayerEventKind::Reauthorize => Self::Reauthorize {
+                token: data["token"]
+                    .as_u64()
+                    .filter(|token| *token > 0)
+                    .ok_or(PlayerEventError::NoRenderToken)?,
+                allowed: data["allowed"].as_bool().unwrap_or(false),
             },
             PlayerEventKind::Error => Self::Error {
                 code: data["code"].as_str().unwrap_or("?").to_owned(),
@@ -312,6 +324,10 @@ mod tests {
             PlayerEvent::Size {
                 width: 1280,
                 height: 720,
+            },
+            PlayerEvent::Reauthorize {
+                token: 37,
+                allowed: true,
             },
             error("ERROR_CODE_IO_BAD_HTTP_STATUS", Some(404)),
             error("ERROR_CODE_IO_NETWORK_CONNECTION_FAILED", None),

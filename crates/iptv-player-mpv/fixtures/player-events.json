@@ -4,6 +4,7 @@
   { "name": "state", "data": { "state": "ready" } },
   { "name": "state", "data": { "state": "ended" } },
   { "name": "size", "data": { "width": 1280, "height": 720 } },
+  { "name": "reauthorize", "data": { "token": 37, "allowed": true } },
   { "name": "error", "data": { "code": "ERROR_CODE_IO_BAD_HTTP_STATUS", "http": 404 } },
   { "name": "error", "data": { "code": "ERROR_CODE_IO_NETWORK_CONNECTION_FAILED" } },
   { "name": "position", "data": { "ms": 4000 } },

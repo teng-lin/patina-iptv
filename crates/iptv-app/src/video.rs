@@ -210,13 +210,9 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
         }),
         seek: Box::new(move || stream.seek.get()),
         picture_size: Box::new(move || {
-            let ch = if surface == 0 {
-                ui.playing.get()
-            } else {
-                stream.channel.get()
-            };
+            let identity = crate::chooser::picture_identity(ui, surface);
             ui.picture
-                .with(|p| p.for_channel(ch.unwrap_or(0)))
+                .with(|p| p.for_channel(identity.as_deref()))
                 .key()
                 .to_owned()
         }),
@@ -313,7 +309,9 @@ fn report(ui: Ui, surface: usize, kind: PlayerEventKind, status: String) {
 fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
     let stream = ui.player.stream(surface);
     let token = match &event {
-        PlayerEvent::Timeline { token, .. } | PlayerEvent::FirstRender { token } => Some(*token),
+        PlayerEvent::Reauthorize { token, .. }
+        | PlayerEvent::Timeline { token, .. }
+        | PlayerEvent::FirstRender { token } => Some(*token),
         _ => None,
     };
     if !matches!(&event, PlayerEvent::Pip { .. } | PlayerEvent::PipAction(_))
@@ -324,6 +322,10 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
     let kind = event.kind();
     let status = match event {
         // Once a second while playing: not logged.
+        PlayerEvent::Reauthorize { allowed, .. } => {
+            crate::player::reauthorize(ui, surface, allowed);
+            return;
+        }
         PlayerEvent::Position { ms } => {
             stream.position_ms.set(ms);
             return;

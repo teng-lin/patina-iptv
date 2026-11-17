@@ -14,6 +14,7 @@ use crate::{Input, Ui, ViewMode};
 
 mod back;
 mod keys;
+mod number;
 
 use back::act;
 pub(crate) use back::swallow_back;
@@ -59,6 +60,7 @@ pub fn context(ui: &Ui) -> Context {
 }
 
 pub fn bind(ui: Ui) {
+    number::bind(ui);
     let nav = Rc::new(RefCell::new(Nav {
         keymap: crate::remote_editor::keymap(),
         detector: PressDetector::default(),
@@ -89,6 +91,9 @@ pub fn bind(ui: Ui) {
     // Back on a PC keyboard: Escape is the platform's (NSH), Backspace ours
     // (it does not fire while a text field edits).
     on_key("backspace", move |_| {
+        if number::backspace(ui) {
+            return;
+        }
         if ui.player_surface != 0 && crate::pip::exit(ui, iptv_core::pip_window::Exit::BackToApp) {
             return;
         }
@@ -375,6 +380,9 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
     }
     if crate::multiview::is_open(ui) {
         crate::multiview::key(ui, action);
+        return;
+    }
+    if number::apply(ui, action) {
         return;
     }
     // The preview owns focus, not the guide row left underneath it. Keep

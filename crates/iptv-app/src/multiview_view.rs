@@ -129,6 +129,12 @@ fn tile(ui: Ui, index: usize) -> impl IntoElement {
     let status = move || surface().map_or(TileStatus::Playing, |s| tile_status(ui, s));
     view()
         .test_id("multiview-tile")
+        .role(AccessibilityRole::Button)
+        .label(move || channel().map_or_else(|| tr("Channels").to_owned(), channel_name))
+        .accessibility_state(move || AccessibilityState {
+            selected: active(),
+            ..Default::default()
+        })
         .accessibility_elements_hidden(move || {
             with_state(ui, |state| state.dialog().is_some()).unwrap_or(false)
         })

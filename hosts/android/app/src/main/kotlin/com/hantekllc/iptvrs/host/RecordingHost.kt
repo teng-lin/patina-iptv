@@ -18,11 +18,22 @@ import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 
-/** Only UTC scheduling metadata crosses JNI; streams and credentials stay in Rust. */
+/** Scheduling metadata and interface language cross JNI; credentials stay in Rust. */
 object RecordingHost {
     @Volatile private var desiredActive = false
     private lateinit var context: Context
     private var activity: java.lang.ref.WeakReference<Activity>? = null
+
+    @JvmStatic fun setLanguage(tag: String) {
+        main.post {
+            if (!::context.isInitialized) return@post
+            val preferences = context.getSharedPreferences("recording-host", Context.MODE_PRIVATE)
+            if (preferences.getString("language", "") != tag) {
+                preferences.edit().putString("language", tag).apply()
+                RecordingService.refresh()
+            }
+        }
+    }
 
     @JvmStatic fun requestAlarmAccess() {
         main.post { activity?.get()?.let { requestExactAlarms(it) } }
@@ -171,13 +182,15 @@ class RecordingService : Service() {
 
     override fun onBind(intent: Intent?) = null
 
-    override fun onCreate() {
-        super.onCreate()
-        running = this
+    fun refreshNotification() {
+        val tag = getSharedPreferences("recording-host", Context.MODE_PRIVATE).getString("language", "")
+        val configuration = android.content.res.Configuration(resources.configuration)
+        if (!tag.isNullOrEmpty()) configuration.setLocale(java.util.Locale.forLanguageTag(tag))
+        val localized = createConfigurationContext(configuration)
         val notifications = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) {
             notifications.createNotificationChannel(
-                NotificationChannel(CHANNEL, "Scheduled recordings", NotificationManager.IMPORTANCE_LOW),
+                NotificationChannel(CHANNEL, localized.getString(R.string.recording_channel), NotificationManager.IMPORTANCE_LOW),
             )
         }
         val open =
@@ -191,13 +204,19 @@ class RecordingService : Service() {
         startForeground(
             472,
             builder
-                .setContentTitle("Patina is recording")
-                .setContentText("Your scheduled recording runs in the background")
+                .setContentTitle(localized.getString(R.string.recording_title))
+                .setContentText(localized.getString(R.string.recording_background))
                 .setSmallIcon(android.R.drawable.ic_menu_save)
                 .setContentIntent(open)
                 .setOngoing(true)
                 .build(),
         )
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        running = this
+        refreshNotification()
         val wake =
             getSystemService(PowerManager::class.java)
                 .newWakeLock(
@@ -258,6 +277,8 @@ class RecordingService : Service() {
     companion object {
         private const val CHANNEL = "recording"
         private var running: RecordingService? = null
+
+        fun refresh() { running?.refreshNotification() }
 
         fun idle(context: Context) {
             running?.stopSelf()

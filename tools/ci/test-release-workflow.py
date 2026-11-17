@@ -400,8 +400,10 @@ class Plan(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
             output.write_text("")
+            (Path(directory) / "Cargo.toml").write_text('[workspace.package]\nversion="9.8.7"\n')
+            (Path(directory) / "CHANGELOG.md").write_text('## [9.8.7] - 2026-01-01\n\n- Synthetic change.\n')
             result = subprocess.run(
-                [sys.executable, str(PLAN)], capture_output=True, text=True,
+                [sys.executable, str(PLAN)], cwd=directory, capture_output=True, text=True,
                 env={"PATH": os.environ["PATH"], "GITHUB_OUTPUT": str(output), "EVENT_NAME": event, "REF": ref,
                      "PLATFORMS": platforms, "REHEARSAL": rehearsal, **environment})
             written = dict(line.split("=", 1) for line in output.read_text().splitlines())

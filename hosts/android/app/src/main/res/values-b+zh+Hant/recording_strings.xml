@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recording_channel">預約錄影</string>
+    <string name="recording_title">Patina 正在錄影</string>
+    <string name="recording_background">預約錄影正在背景執行</string>
+</resources>

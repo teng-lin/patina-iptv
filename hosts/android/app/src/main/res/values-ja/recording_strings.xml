@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recording_channel">予約録画</string>
+    <string name="recording_title">Patina で録画中</string>
+    <string name="recording_background">予約録画はバックグラウンドで実行されています</string>
+</resources>

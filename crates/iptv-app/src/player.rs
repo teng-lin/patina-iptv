@@ -421,6 +421,29 @@ fn close(ui: Ui, surface: usize) {
     crate::media::reset(ui, surface);
 }
 
+/// Resume through fresh authorization, separate from transport recovery/backoff.
+pub(crate) fn reauthorize(ui: Ui, surface: usize, allowed: bool) {
+    let stream = ui.player.stream(surface);
+    if !allowed {
+        stop_surface(ui, surface);
+        crate::settings_view::notify(crate::i18n::tr(
+            "Provider connection reserved for recording",
+        ));
+        return;
+    }
+    let mut session = None;
+    stream
+        .health
+        .update(|health| session = health.reauthorize(ui.now_ms()));
+    if let Some(session) = session {
+        stream.parked.set(None);
+        if surface == 0 {
+            recover::resume_position(ui);
+        }
+        open(ui, surface, session);
+    }
+}
+
 /// Resolves what `surface` plays and hands the stream to its player.
 fn open(ui: Ui, surface: usize, session: u64) {
     let stream = ui.player.stream(surface);
@@ -434,7 +457,11 @@ fn open(ui: Ui, surface: usize, session: u64) {
         let position = if ui.player.main().finished.get_untracked() {
             0
         } else {
-            ui.player.main().timeline.get_untracked().position_ms
+            ui.player
+                .main()
+                .resume_ms
+                .get_untracked()
+                .unwrap_or_else(|| ui.player.main().timeline.get_untracked().position_ms)
         };
         let key = playing.key.clone();
         crate::data::spawn_in_app(async move {
@@ -523,7 +550,11 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
         let position = if ui.player.main().finished.get_untracked() {
             0
         } else {
-            ui.player.main().timeline.get_untracked().position_ms
+            ui.player
+                .main()
+                .resume_ms
+                .get_untracked()
+                .unwrap_or_else(|| ui.player.main().timeline.get_untracked().position_ms)
         };
         let owner = crate::runtime();
         crate::data::spawn_in_app(async move {

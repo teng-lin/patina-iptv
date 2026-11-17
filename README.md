@@ -94,7 +94,8 @@ The AppImage bundles them: GTK and GStreamer from Ubuntu 24.04, and Patina's
 own libmpv, built with an LGPL-only FFmpeg from pinned sources. The macOS
 disk image and the Windows installer bundle the same build of libmpv.
 
-Each release has a `SHA256SUMS` file and build provenance attestations.
+Release artifacts carry `SHA256SUMS`. The automated pipeline also produces build
+provenance; historical exceptions below must not be treated as verified builds.
 With the [GitHub CLI](https://cli.github.com/) you can check that a download
 was built by this repository's release workflow:
 
@@ -104,7 +105,10 @@ gh attestation verify Patina-<version>-linux-x86_64.AppImage --repo teng-lin/pat
 
 [The release guide](docs/release.md#checksums-provenance-and-sbom) has the
 stricter form, checksum verification and the SBOM. Releases up to v0.1.1
-predate the attestations.
+predate the attestations. **v0.1.4 is also an exception:** its assets have release
+membership attestations, but no release-workflow build provenance was found in the
+November 17, 2026 audit. That verification command therefore cannot establish its
+build origin. The separate `macos-v0.1.4` download is part of this exception.
 
 ### Opening the macOS and Windows builds
 
@@ -112,7 +116,8 @@ The macOS and Windows packages are **previews** until platform signing is
 configured: they are not signed with an Apple Developer ID or a Windows
 code-signing certificate, and the macOS image is not notarized, so the
 system warns before the first launch. Each release's notes say whether its
-packages are signed. Verify the download as above first.
+packages are signed. Check hashes and, where available, build provenance first;
+the v0.1.4 exception above remains unverified by the build-provenance command.
 
 - **macOS (Gatekeeper):** drag Patina to Applications and open it once; macOS
   refuses. Then open System Settings, Privacy & Security, scroll to the

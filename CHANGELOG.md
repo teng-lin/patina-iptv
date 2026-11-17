@@ -56,6 +56,19 @@ is below 1.0, a minor release may change behaviour.
   preserve a pending recovery code across a recording-window hide while requiring
   the PIN again before showing it.
 
+## [0.1.4] - 2026-11-16
+
+### Distribution
+
+- Android tablet/TV packages include ARM64 and ARMv7 native libraries.
+- Linux packages and the unsigned Windows preview were published under v0.1.4;
+  the ad hoc signed macOS preview was published separately as macos-v0.1.4.
+- Historical provenance exception: publication occurred outside successful
+  completion of the automated publish job. The November 17 audit found release
+  membership attestations for the v0.1.4 assets, not build-workflow provenance.
+  These public assets remain immutable; a later release must use the complete
+  verified publication workflow.
+
 ## [0.1.3] - 2026-11-15
 
 ### Added

@@ -28,6 +28,15 @@ class Plan(unittest.TestCase):
         self.steps = checks.plan()
         self.by_name = {step["name"]: step["argv"] for step in self.steps}
 
+    def test_rustdoc_warnings_fail_on_linux_and_environment_reaches_child(self):
+        rustdoc = next(check for check in self.steps if check["name"] == "workspace-rustdoc")
+        self.assertEqual(rustdoc["env"], {"RUSTDOCFLAGS": "-D warnings"})
+        self.assertIn("--no-deps", rustdoc["argv"])
+        runner = Mock(return_value=subprocess.CompletedProcess([], 0))
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(checks.run([rustdoc], runner=runner), 0)
+        self.assertEqual(runner.call_args.kwargs["env"]["RUSTDOCFLAGS"], "-D warnings")
+
     def test_workspace_inventory_reads_package_names_not_directory_names(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

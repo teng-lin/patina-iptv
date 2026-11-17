@@ -238,6 +238,7 @@ pub struct Ui {
     /// views showing programmes re-read them ([`Ui::guide_data`]).
     pub guide_pages: Signal<u64>,
     pub picture: Signal<PictureSettings>,
+    pub channel_number: Signal<iptv_core::channel_number::ChannelNumber<iptv_search::ChannelId>>,
     pub sleep: Signal<SleepTimer>,
     /// The open chooser over the video (picture size, sleep timer).
     pub chooser: Signal<Option<chooser::Open>>,
@@ -248,6 +249,7 @@ pub struct Ui {
     pub remote_editor: Signal<Option<iptv_nav::remap::Editor>>,
     /// The search screen, while open (also while a result it chose plays).
     pub search: Signal<Option<search_view::Screen>>,
+    pub search_history_revision: Signal<u64>,
     /// The add-playlist wizard, when open.
     pub wizard: Signal<Option<wizard_view::Open>>,
     /// The playlists screen, when open.
@@ -482,17 +484,13 @@ pub(crate) fn runtime() -> Rc<runtime::Runtime> {
         runtime
             .borrow_mut()
             .get_or_insert_with(|| {
-                // Before any root (unit tests of shell code), the first use
-                // makes the owner. After one, only its thread may ask: a
-                // debug build stops here; a release build says so and goes
-                // on as it always did, with an owner that is never started.
-                if ROOT_STARTED.load(std::sync::atomic::Ordering::Acquire) {
-                    debug_assert!(
-                        false,
-                        "the application handle was requested off the application thread"
-                    );
-                    log::error!("iptv app: application handle requested off its thread");
-                }
+                // Pre-root shell tests may construct an owner. Once a root
+                // exists, callbacks must dispatch to its shell thread; a second
+                // dormant owner would silently fork state in release builds.
+                assert!(
+                    !ROOT_STARTED.load(std::sync::atomic::Ordering::Acquire),
+                    "the application handle was requested off the application thread"
+                );
                 let directory = platform_data::resolve_data_dir()
                     .expect("private storage must be resolved before using runtime services");
                 Rc::new(new_runtime(directory))
@@ -752,6 +750,7 @@ fn ready_app() -> impl IntoElement {
         data_version: signal(0),
         guide_pages: signal(0),
         picture: signal(PictureSettings::default()),
+        channel_number: signal(Default::default()),
         sleep: signal(SleepTimer::default()),
         chooser: signal(None),
         editor: signal(None),
@@ -759,6 +758,7 @@ fn ready_app() -> impl IntoElement {
         custom_groups: signal(None),
         remote_editor: signal(None),
         search: signal(None),
+        search_history_revision: signal(0),
         wizard: signal(None),
         playlists: signal(None),
         guide_sources: signal(None),
@@ -1066,6 +1066,12 @@ fn bind_back(ui: Ui) {
 /// One step back (the platform's Back, or a key standing in for it);
 /// `false` where Back leaves the app.
 pub(crate) fn go_back(ui: Ui) -> bool {
+    if ui.channel_number.with(|entry| entry.active()) {
+        ui.channel_number.update(|entry| {
+            entry.take();
+        });
+        return true;
+    }
     ui.pending_zap.set(None);
     browse_playback::activity(ui);
     untracked(|| {

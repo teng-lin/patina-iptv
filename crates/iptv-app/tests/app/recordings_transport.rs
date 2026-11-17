@@ -561,3 +561,57 @@ fn a_saved_recording_grant_revoked_during_preparation_never_reaches_the_native_p
             .is_none_or(Value::is_null)
     );
 }
+
+#[test]
+fn foreground_before_ready_reauthorizes_retained_recording_without_transport_error() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, _, _, props) = saved_fixture(&home);
+    step(app.long_press("id:recording-job"));
+    step(app.wait_for("text:Resume recording"));
+    step(app.press("text:Resume recording"));
+    step(app.wait_for_gone("id:recordings-screen", Duration::from_secs(10)));
+    let source = props.lock().unwrap()["source"].clone();
+    let token = source["token"].as_u64().unwrap();
+    let player = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.kind == ViewKind::Native)
+        .unwrap()
+        .id;
+    let before = iptv_app::player_opens(0);
+    app.engine().control().dispatch_event(
+        player,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "reauthorize".into(),
+            data: json!({"token":token,"allowed":true}),
+        },
+    );
+    step(app.wait_until(
+        "foreground publishes a newly authorized token",
+        Duration::from_secs(10),
+        |_| iptv_app::player_opens(0) > before,
+    ));
+    let next = props.lock().unwrap()["source"]["token"].clone();
+    assert_ne!(next, source["token"]);
+    assert!(
+        !app.screen()
+            .matches("text:On-demand playback unavailable")
+            .unwrap()
+    );
+    app.engine().control().dispatch_event(
+        player,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "reauthorize".into(),
+            data: json!({"token":token,"allowed":true}),
+        },
+    );
+    step(app.wait(Duration::from_millis(100)));
+    assert_eq!(
+        props.lock().unwrap()["source"]["token"],
+        next,
+        "old foreground event cannot reopen a newer source"
+    );
+}

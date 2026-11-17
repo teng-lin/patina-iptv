@@ -20,6 +20,7 @@ Usage (with GH_TOKEN and GH_REPO in the environment for checksums/publish):
   publish-release.py notes DIR OUTPUT           write release notes from DIR's signing records
 """
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -27,6 +28,9 @@ import subprocess
 import sys
 
 CHECKSUMS = "SHA256SUMS"
+SPEC = importlib.util.spec_from_file_location("build_provenance", Path(__file__).with_name("build-provenance.py"))
+provenance = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(provenance)
 
 
 def gh(*arguments):
@@ -135,7 +139,7 @@ def release_notes(directory):
         name, trust, warning = SIGNED_PLATFORMS[platform]
         lines.append(f"- The {name} is a **preview**: it is not {trust}, so {warning}. "
                      "The README explains how to open it.")
-    lines += ["", "Signed packages follow once signing credentials are configured. SHA256SUMS and the "
+    lines += ["", "Signed packages follow once signed policy and credentials are configured. SHA256SUMS and the "
               "build provenance attestations cover every file either way.", ""]
     return "\n".join(lines)
 
@@ -143,6 +147,10 @@ def release_notes(directory):
 def publish(directory, tag, notes=None, rehearsal=False):
     state = refuse_public(tag)
     verify_checksums(directory)
+    # Verify actual final bytes before creating, uploading to or publishing a draft.
+    # A GitHub release-membership predicate is not build provenance.
+    provenance.verify(directory, os.environ.get("GH_REPO"), os.environ.get("GITHUB_SHA"),
+                      os.environ.get("GITHUB_REF"))
     if state == "absent":
         extra = ["--notes-file", str(notes)] if notes is not None and notes.read_text().strip() else []
         must("release", "create", tag, "--verify-tag", "--draft", "--generate-notes", *extra)

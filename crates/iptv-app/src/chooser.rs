@@ -61,10 +61,22 @@ fn picture_label(size: PictureSize) -> &'static str {
     }
 }
 
+/// Stable source-scoped identity; on-demand content uses the global size.
+pub(crate) fn picture_identity(ui: Ui, surface: usize) -> Option<String> {
+    if surface == 0 && crate::on_demand::active(ui) {
+        return None;
+    }
+    let key = ui.player.stream(surface).key.get()?;
+    let schedule = crate::schedule();
+    let channel = schedule.find_channel(&key)?;
+    let identity = crate::runtime().search_channel_identity(&*schedule, channel)?;
+    Some(serde_json::json!([identity.source, identity.incarnation(), identity.content]).to_string())
+}
+
 /// The current picture size's name (the control row shows it).
 pub fn picture_name(ui: Ui) -> &'static str {
-    let ch = ui.playing.get().unwrap_or(0);
-    picture_label(ui.picture.with(|p| p.for_channel(ch)))
+    let ch = picture_identity(ui, ui.player_surface);
+    picture_label(ui.picture.with(|p| p.for_channel(ch.as_deref())))
 }
 
 fn title(kind: Kind) -> &'static str {
@@ -83,8 +95,8 @@ fn title(kind: Kind) -> &'static str {
 fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
     match kind {
         Kind::Picture => {
-            let ch = ui.playing.get_untracked().unwrap_or(0);
-            let size = ui.picture.with_untracked(|p| p.for_channel(ch));
+            let ch = picture_identity(ui, ui.player_surface);
+            let size = ui.picture.with_untracked(|p| p.for_channel(ch.as_deref()));
             let labels = PictureSize::ALL
                 .iter()
                 .map(|p| picture_label(*p).to_owned())
@@ -234,10 +246,10 @@ pub fn pick(ui: Ui, index: usize) {
     close(ui);
     match open.kind {
         Kind::Picture => {
-            let ch = ui.playing.get_untracked().unwrap_or(0);
+            let ch = picture_identity(ui, ui.player_surface);
             match PictureSize::ALL.get(index) {
-                Some(size) => ui.picture.update(|p| p.set_channel(ch, *size)),
-                None => ui.picture.update(|p| p.apply_to_all(ch)),
+                Some(size) => ui.picture.update(|p| p.set_channel(ch.as_deref(), *size)),
+                None => ui.picture.update(|p| p.apply_to_all(ch.as_deref())),
             }
         }
         Kind::Sleep => match index.checked_sub(1).and_then(|i| SLEEP_MINUTES.get(i)) {

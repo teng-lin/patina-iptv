@@ -14,6 +14,28 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_initialize(
         let _ = HOST.set((vm, class));
     }
 }
+pub(crate) fn set_language(tag: &str) {
+    let Some((vm, class)) = HOST.get() else {
+        return;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+    let Ok(tag) = env.new_string(tag) else {
+        return;
+    };
+    let class: &JClass = class.as_obj().into();
+    let _ = env.call_static_method(
+        class,
+        "setLanguage",
+        "(Ljava/lang/String;)V",
+        &[JValue::Object(&tag)],
+    );
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_clear();
+    }
+}
+
 pub(crate) fn schedule(next: i64, active: bool) -> iptv_core::recording::WakeCapability {
     use iptv_core::recording::WakeCapability;
     let Some((vm, class)) = HOST.get() else {

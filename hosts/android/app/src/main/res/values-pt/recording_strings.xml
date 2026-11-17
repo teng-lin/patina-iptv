@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recording_channel">Gravações agendadas</string>
+    <string name="recording_title">Patina está a gravar</string>
+    <string name="recording_background">A gravação agendada continua em segundo plano</string>
+</resources>
