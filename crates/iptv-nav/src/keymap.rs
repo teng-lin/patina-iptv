@@ -134,10 +134,18 @@ const fn b(context: Option<Context>, key: RemoteKey, press: Press, action: Actio
     }
 }
 
-#[derive(Clone, Debug, Default)]
+/// Layered navigation bindings. [`Default`] installs the built-in map with
+/// no user overrides, just like [`Keymap::defaults`].
+#[derive(Clone, Debug)]
 pub struct Keymap {
     defaults: Vec<Binding>,
     overrides: Vec<Binding>,
+}
+
+impl Default for Keymap {
+    fn default() -> Self {
+        Self::defaults()
+    }
 }
 
 impl Keymap {
@@ -147,6 +155,7 @@ impl Keymap {
     }
 
     /// iptv-rs's default map: the remote's ([`Profile::Remote`]).
+    /// Equivalent to [`Keymap::default`], with no user overrides.
     pub fn defaults() -> Keymap {
         use Action as A;
         use Context::{Controls, Groups, Guide, Menu, Multiview, Player};
@@ -291,6 +300,51 @@ impl Keymap {
 mod tests {
     use super::*;
     use Context::{ChannelList, Controls, Groups, Guide, Menu, Player};
+
+    #[test]
+    fn default_installs_the_same_bindings_as_the_explicit_constructors() {
+        let default: Keymap = Default::default();
+        assert_eq!(
+            default.resolve(Guide, RemoteKey::Up, Press::Short),
+            Some(Action::MoveUp)
+        );
+        assert_eq!(
+            default.resolve(Player, RemoteKey::Ok, Press::Short),
+            Some(Action::ShowPanels)
+        );
+        assert!(default.has_long(Player, RemoteKey::Ok));
+        assert!(default.overrides().is_empty());
+        for map in [
+            Keymap::defaults(),
+            Keymap::for_profile(Profile::Remote),
+            Keymap::for_profile(Profile::Keyboard),
+        ] {
+            assert!(map.overrides().is_empty());
+            for context in [
+                Guide,
+                Groups,
+                Player,
+                Controls,
+                ChannelList,
+                Context::Search,
+                Context::Editor,
+                Menu,
+                Context::Multiview,
+            ] {
+                for binding in &map.defaults {
+                    assert_eq!(
+                        default.resolve(context, binding.key, binding.press),
+                        map.resolve(context, binding.key, binding.press),
+                        "{context:?}: {binding:?}"
+                    );
+                    assert_eq!(
+                        default.has_long(context, binding.key),
+                        map.has_long(context, binding.key)
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn the_keyboard_and_the_remote_share_one_left() {

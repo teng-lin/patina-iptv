@@ -337,13 +337,15 @@ impl Default for Editor {
     }
 }
 impl Editor {
+    /// Moves focus by `by` fields, clamping at the first and last field.
+    /// While confirming, toggles acceptance instead.
     pub fn step(&mut self, by: isize) {
         if self.confirm.is_some() {
             self.accept = !self.accept;
             return;
         }
         let at = FIELDS.iter().position(|v| *v == self.focus).unwrap_or(0);
-        self.focus = FIELDS[(at as isize + by).clamp(0, FIELDS.len() as isize - 1) as usize];
+        self.focus = FIELDS[at.saturating_add_signed(by).min(FIELDS.len() - 1)];
     }
     pub fn binding(&self) -> Option<Binding> {
         allowed(self.context, self.key, self.press, self.action).then_some(Binding {
@@ -372,6 +374,28 @@ impl Editor {
 #[cfg(test)]
 mod editor_tests {
     use super::*;
+
+    #[test]
+    fn focus_steps_clamp_even_for_extreme_offsets() {
+        for &focus in FIELDS {
+            let mut editor = Editor {
+                focus,
+                ..Editor::default()
+            };
+            editor.step(0);
+            assert_eq!(editor.focus, focus);
+            editor.step(isize::MAX);
+            assert_eq!(editor.focus, Field::Reset);
+            editor.focus = focus;
+            editor.step(isize::MIN);
+            assert_eq!(editor.focus, Field::Context);
+            editor.step(-1);
+            assert_eq!(editor.focus, Field::Context);
+            editor.step(1);
+            assert_eq!(editor.focus, Field::Key);
+        }
+    }
+
     #[test]
     fn draft_and_escape_are_safe_and_search_is_isolated() {
         let mut e = Editor {

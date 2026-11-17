@@ -90,8 +90,11 @@ impl PressDetector {
                 self.long_if_due(now_ms)
             }
             Phase::Up => {
+                if self.held.as_ref()?.key != key {
+                    return None;
+                }
                 let held = self.held.take()?;
-                if held.key != key || !held.deferred || held.long_fired {
+                if !held.deferred || held.long_fired {
                     return None;
                 }
                 // A repeat can precede the threshold by a millisecond and the
@@ -113,10 +116,11 @@ impl PressDetector {
     }
 
     /// When the held key (if deferred and undecided) becomes long.
+    /// Returns `None` if that deadline exceeds the `u64` timestamp range.
     pub fn long_deadline_ms(&self) -> Option<u64> {
         self.held
             .filter(|h| h.deferred && !h.long_fired)
-            .map(|h| h.since_ms + self.threshold_ms)
+            .and_then(|h| h.since_ms.checked_add(self.threshold_ms))
     }
 
     fn long_if_due(&mut self, now_ms: u64) -> Option<(RemoteKey, Press)> {
@@ -206,6 +210,68 @@ mod tests {
         );
         assert_eq!(d.feed(Ok, Phase::Up, 60, true), None);
         assert_eq!(d.feed(Left, Phase::Up, 70, false), None);
+    }
+
+    #[test]
+    fn an_overlapping_release_preserves_the_new_keys_short_press() {
+        let mut d = PressDetector::default();
+        assert_eq!(d.feed(Ok, Phase::Down, 0, true), None);
+        assert_eq!(d.feed(Left, Phase::Down, 50, true), None);
+        assert_eq!(d.feed(Ok, Phase::Up, 60, true), None);
+        assert_eq!(d.feed(Down, Phase::Up, 70, false), None);
+        assert_eq!(d.long_deadline_ms(), Some(450));
+        assert_eq!(
+            d.feed(Left, Phase::Up, 120, true),
+            Some((Left, Press::Short))
+        );
+        assert_eq!(d.poll(450), None);
+        assert_eq!(d.feed(Left, Phase::Up, 460, true), None);
+    }
+
+    #[test]
+    fn an_overlapping_release_preserves_long_press_detection() {
+        for phase in [None, Some(Phase::Repeat), Some(Phase::Up)] {
+            let mut d = PressDetector::default();
+            d.feed(Ok, Phase::Down, 0, true);
+            d.feed(Left, Phase::Down, 50, true);
+            assert_eq!(d.feed(Ok, Phase::Up, 60, true), None);
+            assert_eq!(d.poll(449), None);
+            let press = match phase {
+                None => d.poll(450),
+                Some(phase) => d.feed(Left, phase, 450, true),
+            };
+            assert_eq!(press, Some((Left, Press::Long)), "{phase:?}");
+            assert_eq!(d.long_deadline_ms(), None);
+            assert_eq!(d.poll(460), None);
+            assert_eq!(d.feed(Left, Phase::Up, 470, true), None);
+        }
+    }
+
+    #[test]
+    fn long_deadlines_handle_the_timestamp_limit() {
+        for (threshold, since, deadline) in [
+            (u64::MAX, 1, None),
+            (400, u64::MAX - 399, None),
+            (u64::MAX, 0, Some(u64::MAX)),
+            (400, u64::MAX - 400, Some(u64::MAX)),
+            (0, u64::MAX, Some(u64::MAX)),
+        ] {
+            let mut d = PressDetector::new(threshold);
+            assert_eq!(d.long_deadline_ms(), None);
+            assert_eq!(d.feed(Ok, Phase::Down, since, true), None);
+            assert_eq!(d.long_deadline_ms(), deadline);
+            if deadline.is_some() {
+                assert_eq!(d.poll(u64::MAX), Some((Ok, Press::Long)));
+                assert_eq!(d.feed(Ok, Phase::Up, u64::MAX, true), None);
+            } else {
+                assert_eq!(d.poll(u64::MAX), None);
+                assert_eq!(
+                    d.feed(Ok, Phase::Up, u64::MAX, true),
+                    Some((Ok, Press::Short))
+                );
+            }
+            assert_eq!(d.long_deadline_ms(), None);
+        }
     }
 
     #[test]
