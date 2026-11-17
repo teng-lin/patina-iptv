@@ -3,7 +3,13 @@
 version = 2
 # NSH uses this font parser; there is no patched release. Replace it in the
 # NSH font backend before widening font input beyond bundled/system fonts.
-ignore = [{ id = "RUSTSEC-2026-0192", reason = "Transitive NSH font parser is unmaintained; migration to skrifa tracked for the NSH fork." }]
+ignore = [
+  { id = "RUSTSEC-2026-0192", reason = "Transitive NSH font parser is unmaintained; migration to skrifa tracked for the NSH fork." },
+  # Maintenance notice, not a reported vulnerability; no patched version exists.
+  # Used for local-time/DST conversion in recording schedules and by NSH.
+  # Revisit by 2026-12-17: migrate these callers and NSH together to jiff.
+  { id = "RUSTSEC-2026-0543", reason = "chrono maintenance advisory accepted for v0.1.5; coordinate local-time/DST migration with NSH before the next release." },
+]
 
 [licenses]
 version = 2
