@@ -10,6 +10,46 @@
 [untranslated]
 
 [not-shown]
+# Redacted Debug type/variant labels; views render typed state with their own wording.
+iptv-core/src/playback.rs	PlaySource
+iptv-core/src/wizard.rs	Back
+iptv-core/src/wizard.rs	Cancel
+iptv-core/src/wizard.rs	ClipboardText
+iptv-core/src/wizard.rs	Down
+iptv-core/src/wizard.rs	Failed
+iptv-core/src/wizard.rs	FilePicked
+iptv-core/src/wizard.rs	Ok
+iptv-core/src/wizard.rs	Paste
+iptv-core/src/wizard.rs	PasteInto
+iptv-core/src/wizard.rs	Progress
+iptv-core/src/wizard.rs	SetField
+iptv-core/src/wizard.rs	Succeeded
+iptv-core/src/wizard.rs	Tap
+iptv-core/src/wizard.rs	Up
+iptv-guide/src/playback.rs	Stalker
+iptv-guide/src/playback.rs	StalkerLink
+iptv-guide/src/playback.rs	Xtream
+iptv-library/src/epg_sources.rs	AddLink
+iptv-library/src/epg_sources.rs	AddName
+iptv-library/src/epg_sources.rs	Editing
+iptv-library/src/epg_sources.rs	Relink
+iptv-library/src/epg_sources.rs	Rename
+iptv-library/src/guide_inspect.rs	Screen
+iptv-library/src/playlists.rs	Editing
+# Search build errors are logged; the screen uses translated Programmes status labels.
+iptv-app/src/search_view/programme_index.rs	Search guide is unavailable
+iptv-app/src/search_view/programme_index.rs	Search source is unavailable
+iptv-runtime/src/search.rs	search source changed while indexing
+# Guide identity diagnostics become typed failures in the import wizard;
+# guide edits log their error. Neither path displays the Display implementation.
+iptv-library/src/guides.rs	duplicate guide feed id {}
+iptv-library/src/guides.rs	duplicate provider guide index {index}
+iptv-library/src/guides.rs	guide feed identity space exhausted
+iptv-library/src/guides.rs	{count} provider guides exceed the limit of {MAX_PROVIDER_GUIDES}
+# Page-reader causes are logged; playback maps the completion to its translated notice.
+iptv-runtime/src/commands.rs	guide page has no source authority
+iptv-runtime/src/commands.rs	guide page source changed
+iptv-runtime/src/data/pages.rs	guide page read failed
 # Opaque authority type names in redacted Rust diagnostics, never rendered.
 iptv-guide/src/playback.rs	ResolutionAuthority
 iptv-guide/src/playback.rs	SourceAuthority

@@ -788,7 +788,11 @@ fn discover(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
         )
         .unwrap();
     drop(store);
-    let mut app = Headless::start(engine(idiom)).unwrap();
+    let mut config = engine(idiom);
+    if idiom == nsh_core::platform::Idiom::Pad {
+        config.clock = nsh_core::time::Clock::manual(std::time::SystemTime::now());
+    }
+    let mut app = Headless::start(config).unwrap();
     let props = observe_props(&mut app);
     // The guide stays the start screen.
     step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
