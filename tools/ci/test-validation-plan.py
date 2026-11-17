@@ -160,7 +160,19 @@ class Aggregate(unittest.TestCase):
     def setUp(self):
         self.plan = v.select(["crates/iptv-core/src/guide.rs"])
         self.needs = {lane: {"result": "success" if self.plan[lane] else "skipped"} for lane in v.LANES}
-        self.needs.update(plan={"result": "success"}, helpers={"result": "success"})
+        self.needs.update(plan={"result": "success"}, helpers={"result": "success"}, candidate={"result": "skipped"})
+
+    def test_shipping_candidate_builds_are_part_of_the_same_aggregate(self):
+        self.plan = v.select([], 'release', candidate_build=True)
+        self.needs = {lane: {'result': 'success' if self.plan[lane] else 'skipped'} for lane in v.LANES}
+        self.needs.update(plan={'result': 'success'}, helpers={'result': 'success'}, candidate={'result': 'success'})
+        self.assertEqual(v.gate(self.plan, self.needs), [])
+        for result in ('failure', 'skipped', 'cancelled', None):
+            self.needs['candidate']['result'] = result
+            self.assertTrue(v.gate(self.plan, self.needs), result)
+        for tier in ('pr', 'full'):
+            with self.assertRaises(ValueError):
+                v.select([], tier, candidate_build=True)
 
     def test_successful_selection_and_deliberate_skips_pass(self):
         self.assertEqual(v.gate(self.plan, self.needs), [])

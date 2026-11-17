@@ -85,7 +85,7 @@ def seal(directory, environment=os.environ, root=ROOT):
         raise ValueError('only a master push can seal a candidate')
     plan = json.loads(environment['PLAN'])
     needs = json.loads(environment['NEEDS'])
-    if plan != validation.select([], 'release', root) or any(needs.get(job, {}).get('result') != 'success'
+    if plan != validation.select([], 'release', root, candidate_build=True) or any(needs.get(job, {}).get('result') != 'success'
                                                           for job in ('plan', 'validation', 'candidate')):
         raise ValueError('full candidate validation and unsigned packages must pass before sealing')
     manifest = {'schema': 1, 'repository': environment['GITHUB_REPOSITORY'], 'sha': environment['GITHUB_SHA'],
@@ -103,7 +103,7 @@ def verify(directory, run, repository, sha, root=ROOT):
     manifest = json.loads((directory / 'manifest.json').read_text())
     if (manifest.get('schema') != 1 or manifest.get('repository') != repository or manifest.get('sha') != sha
             or manifest.get('run_id') != run['id'] or manifest.get('attempt') != run['run_attempt']
-            or manifest.get('inputs') != identity(root) or manifest.get('build') != build_identity(root) or manifest.get('plan') != validation.select([], 'release', root)
+            or manifest.get('inputs') != identity(root) or manifest.get('build') != build_identity(root) or manifest.get('plan') != validation.select([], 'release', root, candidate_build=True)
             or manifest.get('checks') != {'plan': 'success', 'validation': 'success', 'candidate': 'success'}):
         raise ValueError('candidate manifest identity or checks do not match')
     if inventory(directory) != manifest.get('files'):

@@ -102,9 +102,11 @@ def fuzz_targets(paths, full=False, root=ROOT):
     return sorted(selected)
 
 
-def select(paths, tier="pr", root=ROOT):
+def select(paths, tier="pr", root=ROOT, candidate_build=False):
     if tier not in ("pr", "full", "release"):
         raise ValueError(f"unknown validation tier: {tier}")
+    if type(candidate_build) is not bool or (candidate_build and tier != "release"):
+        raise ValueError("unsigned candidate builds require the release validation tier")
     full = tier != "pr"
     ci = matches(paths, CI)
     rust = matches(paths, (*BUILD, "crates/**/*.rs"))
@@ -122,6 +124,7 @@ def select(paths, tier="pr", root=ROOT):
     android_package_inputs = full or ci or matches(paths, ANDROID_PACKAGE)
     result = {
         "tier": tier,
+        "candidate_build": candidate_build,
         "ios": full or ci or matches(paths, IOS),
         "credentials": full or ci or matches(paths, CREDENTIALS),
         "host": host,
@@ -156,6 +159,11 @@ def gate(plan, needs):
         return errors + ["validation plan is missing or incomplete"]
     if plan.get("tier") not in ("pr", "full", "release"):
         return errors + ["validation tier is missing or invalid"]
+    candidate = plan.get("candidate_build")
+    if type(candidate) is not bool:
+        errors.append("unsigned candidate selection is missing or invalid")
+    elif needs.get("candidate", {}).get("result") not in (("success",) if candidate else ("success", "skipped")):
+        errors.append("unsigned candidate packages did not meet the validation plan")
     for lane in LANES:
         if (lane == "fuzz" and not isinstance(plan[lane], list)) or (lane != "fuzz" and type(plan[lane]) is not bool):
             errors.append(f"invalid selection for {lane}")
@@ -198,7 +206,7 @@ def main():
     event = os.environ["EVENT"]
     tier = os.environ.get("TIER", "") or ("full" if event in ("schedule", "workflow_dispatch") else "pr")
     paths = changed_paths() if tier == "pr" else []
-    plan = select(paths, tier)
+    plan = select(paths, tier, candidate_build=os.environ.get("CANDIDATE_BUILD", "false") == "true")
     print("plan=" + json.dumps(plan, separators=(",", ":")))
     for key, value in plan.items():
         print(f"{key}=" + (str(value).lower() if isinstance(value, bool) else json.dumps(value) if isinstance(value, (list, dict)) else value))

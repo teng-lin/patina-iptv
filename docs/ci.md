@@ -49,7 +49,9 @@ restore neither build nor tool caches.
 
 ## Required checks and migration
 
-The `validation` job runs even when selection or another lane fails. It accepts
+The `validation` job runs even when selection or another lane fails. For master
+and manual candidates it also requires the selected unsigned shipping build;
+a failed package cannot leave the aggregate or protected aliases green. It accepts
 only successful selected jobs and deliberate skips, and rejects canceled,
 missing and unexpectedly skipped selected jobs. It also requires helper tests
 and successful change detection. This closes the previous gap where the actual

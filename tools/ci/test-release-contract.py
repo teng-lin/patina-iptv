@@ -115,7 +115,7 @@ class Candidate(unittest.TestCase):
         self.environment = {'GITHUB_EVENT_NAME': 'push', 'GITHUB_REF': 'refs/heads/master',
                             'GITHUB_REPOSITORY': 'synthetic/repo', 'GITHUB_SHA': 'a' * 40,
                             'GITHUB_RUN_ID': '17', 'GITHUB_RUN_ATTEMPT': '2',
-                            'PLAN': json.dumps(self.candidate.validation.select([], 'release', self.root)),
+                            'PLAN': json.dumps(self.candidate.validation.select([], 'release', self.root, candidate_build=True)),
                             'NEEDS': json.dumps({job: {'result': 'success'} for job in ('plan', 'validation', 'candidate')})}
         self.run = {'event': 'push', 'head_branch': 'master', 'head_sha': 'a' * 40,
                     'status': 'completed', 'conclusion': 'success', 'path': '.github/workflows/validation.yml',

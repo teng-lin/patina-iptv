@@ -59,7 +59,7 @@ class Workflows(unittest.TestCase):
         text = (ROOT / ".github/workflows/validation.yml").read_text()
         aggregate = text.split("  validation:\n", 1)[1].split("  protected-contexts:", 1)[0]
         needs = re.search(r"needs: \[(.*?)\]", aggregate)[1].split(", ")
-        self.assertEqual(set(needs), {"plan", "helpers", *plan.LANES})
+        self.assertEqual(set(needs), {"plan", "helpers", "candidate", *plan.LANES})
         self.assertIn("if: always()", aggregate)
         aliases = text.split("  protected-contexts:\n", 1)[1]
         self.assertIn("needs: validation", aliases)
@@ -86,6 +86,7 @@ class Workflows(unittest.TestCase):
         expressions = module('test-release-workflow')
         workflow = (ROOT / '.github/workflows/validation.yml').read_text()
         expression = re.search(r'TIER: \$\{\{(.*?)\}\}', workflow)[1]
+        candidate_expression = re.search(r'CANDIDATE_BUILD: \$\{\{(.*?)\}\}', workflow)[1]
         for event, ref, tier, expected in (
                 ('pull_request', 'refs/pull/17/merge', '', 'pr'),
                 ('merge_group', 'refs/heads/gh-readonly-queue/master/synthetic', '', 'pr'),
@@ -98,6 +99,9 @@ class Workflows(unittest.TestCase):
             context = {'github': {'event_name': event, 'ref': ref}, 'inputs': {'tier': tier}}
             with self.subTest(event=event, tier=tier):
                 self.assertEqual(expressions.evaluate(expression, context), expected)
+                self.assertEqual(expressions.evaluate(candidate_expression, context),
+                                 (event == 'push' and ref == 'refs/heads/master' and tier != 'release')
+                                 or (event == 'workflow_dispatch' and tier == 'candidate'))
 
     def test_delegated_helpers_retain_the_real_runner_lock_check(self):
         text = (ROOT / '.github/workflows/validation.yml').read_text()
@@ -113,6 +117,7 @@ class Workflows(unittest.TestCase):
         self.assertIn("inputs.tier != 'release'", text)
         candidate = text.split('  candidate:\n', 1)[1].split('  seal-candidate:', 1)[0]
         self.assertIn('needs: plan', candidate)
+        self.assertIn("needs.plan.outputs.candidate_build == 'true'", candidate)
         self.assertIn('needs: [plan, validation, candidate]', text)
         self.assertIn('uses: ./.github/workflows/unsigned-candidate.yml', candidate)
         self.assertIn('release-candidate.py seal', text)
