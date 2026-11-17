@@ -113,6 +113,21 @@ class Selection(unittest.TestCase):
         self.assertTrue(plan["windows-package"])
         self.assertTrue(plan["packages"])
         self.assertEqual([entry["platform"] for entry in plan["package_matrix"]["include"]], ["linux", "macos"])
+
+    def test_windows_resource_changes_exercise_compilation_and_installer(self):
+        for path in ("crates/iptv-app/windows.rc", "crates/iptv-app/icon.ico"):
+            with self.subTest(path=path):
+                plan = v.select([path])
+                self.assertTrue(plan["windows"])
+                self.assertTrue(plan["windows-package"])
+
+    def test_installer_definition_and_compiler_setup_exercise_windows_packaging(self):
+        for path in ("tools/ci/windows-installer.iss", "tools/ci/setup-inno.ps1"):
+            with self.subTest(path=path):
+                plan = v.select([path])
+                self.assertTrue(plan["windows-package"])
+                self.assertFalse(plan["packages"])
+                self.assertFalse(plan["android_package"])
     def test_platform_specific_package_changes_do_not_build_the_other_installer(self):
         for path, platform in (("tools/ci/package-linux.sh", "linux"), ("tools/package-macos.sh", "macos")):
             matrix = v.select([path])["package_matrix"]
