@@ -166,7 +166,7 @@ pub fn live_target(ui: Ui, channel: usize) -> Option<Target> {
         let (source, id) = crate::data::combined::owner(&crate::runtime(), &key)?;
         Some(Target::live(source.0, id))
     } else {
-        Some(Target::live(ui.library.shown.get_untracked()?.0, key))
+        Some(Target::live(ui.app.library.shown.get_untracked()?.0, key))
     }
 }
 /// Synchronous gate is fed from a complete native membership snapshot at boot
@@ -806,7 +806,7 @@ pub fn layer(ui: Ui) -> View {
                     .p(move || size.px(16.0))
                     .gap(px(8.0))
                     .rounded(px(crate::theme::RADIUS_LARGE))
-                    .bg(move || tint(ui.theme.with(|t| t.background.panel), 255))
+                    .bg(move || tint(ui.app.theme.with(|t| t.background.panel), 255))
                     .child(ui_kit::heading(size, move || {
                         let title = label(ui);
                         crate::i18n::tr(&title).to_owned()

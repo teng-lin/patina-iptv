@@ -13,6 +13,7 @@ struct Lifetime {
     players: Vec<NodeId>,
     removed: Vec<NodeId>,
     inserts: HashMap<NodeId, usize>,
+    sources: Vec<String>,
 }
 fn selected(app: &crate::Headless, id: &str) -> bool {
     app.screen()
@@ -59,6 +60,17 @@ fn preview_fixture(
                 match item {
                     MountItem::Component { id, name } if name.as_ref() == "tv.player" => {
                         recorded.players.push(*id)
+                    }
+                    MountItem::ComponentProps { props, .. } => {
+                        for (key, value) in props {
+                            if key.as_ref() == "source"
+                                && let Some(source) =
+                                    value.as_ref().map(crate::support::upstream_source)
+                                && let Some(url) = source["url"].as_str()
+                            {
+                                recorded.sources.push(url.into());
+                            }
+                        }
                     }
                     MountItem::Insert { child, .. } => {
                         *recorded.inserts.entry(*child).or_default() += 1
@@ -290,4 +302,47 @@ fn sidebar_up_reaches_preview_on_desktop_and_tv_without_reopening_video() {
         assert_eq!(iptv_app::player_opens(0), opens);
         persistent(app, &lifetime, player);
     }
+}
+
+#[test]
+fn numeric_channel_entry_commits_corrected_identity_and_invalid_input_does_not_zap() {
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, lifetime) = preview_fixture(home);
+    let app = &mut fixture.app;
+    step(app.set_environment("TV digits", |env| env.idiom = Idiom::Tv));
+    let player = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.kind == ViewKind::Native)
+        .unwrap()
+        .id;
+    step(app.press_key("2"));
+    step(app.press_key("9"));
+    step(app.press_key("backspace"));
+    step(app.press_key("enter"));
+    step(app.wait_until(
+        "corrected numeric choice publishes Local B's identified source",
+        Duration::from_secs(10),
+        |_| {
+            lifetime
+                .lock()
+                .unwrap()
+                .sources
+                .last()
+                .is_some_and(|url| url == "http://example.test/b")
+        },
+    ));
+    assert_eq!(lifetime.lock().unwrap().sources, ["http://example.test/b"]);
+    let opens = iptv_app::player_opens(0);
+    step(app.press_key("9"));
+    step(app.press_key("9"));
+    step(app.press_key("enter"));
+    step(app.wait(Duration::from_millis(100)));
+    assert_eq!(
+        iptv_app::player_opens(0),
+        opens,
+        "unknown number never aliases channel zero"
+    );
+    persistent(app, &lifetime, player);
 }

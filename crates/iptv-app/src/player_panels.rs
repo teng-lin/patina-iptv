@@ -124,7 +124,7 @@ fn label(ui: Ui, control: Control) -> String {
 fn is_favorite(ui: Ui) -> bool {
     ui.playing
         .get()
-        .is_some_and(|ch| ui.favorites.with(|f| f.contains(&ch)))
+        .is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)))
 }
 
 /// Whether a control can act now; the rest show disabled.
@@ -170,7 +170,7 @@ fn events(hidden: bool, open: PointerEvents) -> PointerEvents {
 
 pub fn layer(ui: Ui) -> impl IntoElement {
     let shown = computed(move || shown(ui));
-    let panel = move || tint(ui.theme.with(|t| t.background.panel), PANEL_ALPHA);
+    let panel = move || tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA);
     let hidden = move || shown.get() == Shown::Hidden;
     let banner = move || shown.get() == Shown::Banner;
     let card = move || matches!(shown.get(), Shown::Info | Shown::Card);
@@ -307,7 +307,7 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
             })
             .bg(move || {
                 if live() {
-                    rgb(ui.theme.with(|t| t.accent.light))
+                    rgb(ui.app.theme.with(|t| t.accent.light))
                 } else {
                     tint(WHITE, RESTING_ALPHA * 3)
                 }
@@ -358,13 +358,13 @@ fn pill(
         .border(px(2.0))
         .border_color(move || {
             tint(
-                ui.theme.with(|t| t.accent.light),
+                ui.app.theme.with(|t| t.accent.light),
                 if focused() { 255 } else { 0 },
             )
         })
         .bg(move || {
             if focused() {
-                tint(ui.theme.with(|t| t.accent.main), FOCUS_ALPHA)
+                tint(ui.app.theme.with(|t| t.accent.main), FOCUS_ALPHA)
             } else {
                 tint(WHITE, RESTING_ALPHA)
             }
@@ -425,7 +425,7 @@ fn hint_line(ui: Ui, shown: Memo<Shown>) -> impl IntoElement {
         let focused = ui.panels.with(|p| p.quick.is_some());
         let replay = matches!(ui.playback.get(), Playback::CatchUp { .. });
         let seek = replay.then(|| {
-            ui.settings.get();
+            ui.app.settings.get();
             crate::settings::choice(iptv_settings::keys::SEEK_KEYS)
         });
         words::hint(crate::input::PROFILE, shown.get(), focused, seek)
@@ -433,7 +433,7 @@ fn hint_line(ui: Ui, shown: Memo<Shown>) -> impl IntoElement {
     text(words)
         .px(px(8.0))
         .rounded(px(RADIUS))
-        .bg(move || tint(ui.theme.with(|t| t.background.panel), PANEL_ALPHA))
+        .bg(move || tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA))
         .text_size(px(OSD_DETAIL))
         .text_color(tint(WHITE, TEXT_SECONDARY_ALPHA))
         .accessibility_elements_hidden(move || words().is_empty())

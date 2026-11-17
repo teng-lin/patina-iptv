@@ -32,6 +32,7 @@ jobs:
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target
           ABIS: x86_64
+          IPTV_VALIDATION_APP_ID: com.hantekllc.iptvrs.validation
           IPTV_RS_DEV_PLAYLIST: http://10.0.2.2:8089/iptv/playlist.m3u
           CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: 'true'
         run: |
@@ -96,7 +97,9 @@ jobs:
         env:
           IPTV_SMOKE_OUT: target/android-smoke
           IPTV_SMOKE_SETTLE: 45
+          IPTV_SMOKE_DISPOSABLE_AVD: patina-validation-ci
         with:
+          avd-name: patina-validation-ci
           api-level: 36
           target: ${{ matrix.target }}
           arch: x86_64
@@ -105,16 +108,16 @@ jobs:
           disk-size: 4096M
           force-avd-creation: true
           disable-animations: true
-          emulator-options: -no-window -no-snapshot -no-audio -no-boot-anim -gpu swiftshader_indirect
+          emulator-options: -no-window -no-snapshot -no-audio -no-boot-anim -gpu swiftshader
           # If the emulator's own system dies (not the app: the script fails
           # at once on an app crash), reboot it and run once more.
           script: >-
-            bash tools/ci/android-smoke.sh "" hosts/android/app/build/outputs/apk/debug/app-debug.apk || {
+            bash tools/ci/android-smoke.sh emulator-5554 hosts/android/app/build/outputs/apk/debug/app-debug.apk || {
             grep -q DeadSystemException target/android-smoke/crash.log &&
             echo "emulator system died; rebooting for one more run" &&
-            python3 tools/ci/android/adb.py --phase "system recovery" --category reboot --timeout 30 -- adb reboot &&
-            python3 tools/ci/android/adb.py --phase "system recovery" --category wait-for-device --timeout 120 -- adb wait-for-device &&
-            bash tools/ci/android-smoke.sh "" hosts/android/app/build/outputs/apk/debug/app-debug.apk;
+            python3 tools/ci/android/adb.py --phase "system recovery" --category reboot --timeout 30 -- adb -s emulator-5554 reboot &&
+            python3 tools/ci/android/adb.py --phase "system recovery" --category wait-for-device --timeout 120 -- adb -s emulator-5554 wait-for-device &&
+            bash tools/ci/android-smoke.sh emulator-5554 hosts/android/app/build/outputs/apk/debug/app-debug.apk;
             }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()

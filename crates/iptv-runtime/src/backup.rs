@@ -793,10 +793,14 @@ fn activate(ports: &crate::Ports, root: &Path) -> Result<()> {
         &pending.join("settings.json"),
         "settings.json",
     )?)?;
+    #[cfg(test)]
+    tests::crash_boundary("validated");
     if root.exists() {
         fs::rename(root, &previous)
             .context("Could not prepare the restore; current data was kept")?;
     }
+    #[cfg(test)]
+    tests::crash_boundary("previous");
     if let Err(error) = fs::rename(&pending, root) {
         if previous.exists() {
             let _ = fs::rename(&previous, root);
@@ -806,7 +810,11 @@ fn activate(ports: &crate::Ports, root: &Path) -> Result<()> {
             error,
         ));
     }
+    #[cfg(test)]
+    tests::crash_boundary("installed");
     sync_dir(root.parent().ok_or("Application storage has no parent")?)?;
+    #[cfg(test)]
+    tests::crash_boundary("synced");
     if previous.exists() {
         fs::remove_dir_all(previous)
             .context("Restore succeeded; could not remove the previous private copy")?;

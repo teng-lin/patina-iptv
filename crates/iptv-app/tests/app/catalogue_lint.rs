@@ -140,6 +140,7 @@ const MESSAGE_FILES: &[&str] = &[
     "iptv-runtime/src/backup.rs",
     "iptv-runtime/src/backup/instance.rs",
     "iptv-runtime/src/recordings.rs",
+    "iptv-runtime/src/recordings/completion.rs",
     "iptv-runtime/src/recordings/host.rs",
     "iptv-runtime/src/recordings/rules.rs",
     "iptv-core/src/recording.rs",
@@ -2253,6 +2254,10 @@ fn the_verdicts_tell_messages_from_text_and_from_the_rest() {
 fn extracted_runtime_messages_and_shell_failures_remain_checked() {
     let sources = read_sources();
     for (file, message) in [
+        (
+            "iptv-runtime/src/recordings/completion.rs",
+            "Recording storage unavailable; retained media needs recovery",
+        ),
         (
             "iptv-app/src/custom_groups.rs",
             "The list could not be reloaded. Reopen it and try again.",

@@ -181,9 +181,40 @@ pub struct Stats {
     pub max_us: u128,
 }
 
-/// The app's state, shared by the regions (signals are `Copy`).
+/// Application-wide signals deliberately shared by every presentation window.
+#[derive(Clone, Copy)]
+pub struct SharedUi {
+    /// Ordered favourites/recent lists changed, including while a popup owns its list.
+    pub list_version: Signal<u64>,
+    pub theme: Signal<Theme>,
+    /// The app's monotonic clock origin (core state machines take ms), on
+    /// the engine's clock: the one its timers run on.
+    pub epoch: Instant,
+    /// The favourite channels on screen (catalog channels); kept by key
+    /// and changed through `favorites.rs`.
+    pub favorites: Signal<BTreeSet<usize>>,
+    /// The source has movies or shows (the rail lists them).
+    pub has_vod: Signal<bool>,
+    /// Some enabled playlist has movies or shows: the rail's cross-source
+    /// Continue watching and Recently added entries.
+    pub any_vod: Signal<bool>,
+    /// Bumped when the guide data changes (views re-read `schedule()`).
+    pub data_version: Signal<u64>,
+    /// Bumped when an older day of the guide was paged in (`data/pages.rs`):
+    /// views showing programmes re-read them ([`Ui::guide_data`]).
+    pub guide_pages: Signal<u64>,
+    pub picture: Signal<PictureSettings>,
+    /// The stored playlists: which one is shown, their refreshes (`data.rs`).
+    pub library: data::Library,
+    /// Bumped when a setting changes; read values with `settings::read`.
+    pub settings: Signal<u64>,
+}
+
+/// One window's presentation. Copying handles is only for regions of that window;
+/// a new window must allocate fresh state through `Ui::new`.
 #[derive(Clone, Copy)]
 pub struct Ui {
+    pub app: SharedUi,
     /// The remote's focus; its `channel` is a row of `list`.
     pub focus: Signal<Focus>,
     pub browse_playback: Signal<iptv_core::browse_playback::BrowsePlayback>,
@@ -191,13 +222,10 @@ pub struct Ui {
     pub guide_panning: Signal<bool>,
     /// The list the guide shows: catalog channels (`lists.rs`).
     pub list: Signal<Rc<ChannelList>>,
-    /// Ordered favourites/recent lists changed, including while a popup owns its list.
-    pub list_version: Signal<u64>,
     /// The playing channel (catalog).
     pub playing: Signal<Option<usize>>,
     pub input: Signal<Input>,
     pub mode: Signal<ViewMode>,
-    pub theme: Signal<Theme>,
     pub stats: Signal<Stats>,
     #[cfg(feature = "test-support")]
     pub(crate) performance: Signal<Option<performance_probe::Probe>>,
@@ -212,9 +240,6 @@ pub struct Ui {
     /// A catch-up seek being chosen: the target, in seconds into the
     /// programme, opened once the keys pause (`seek.rs`).
     pub seek_target: Signal<Option<i32>>,
-    /// The app's monotonic clock origin (core state machines take ms), on
-    /// the engine's clock: the one its timers run on.
-    pub epoch: Instant,
     /// The open context menu, if any.
     pub menu: Signal<Option<Menu>>,
     /// The programme description popover, if open.
@@ -222,22 +247,9 @@ pub struct Ui {
     pub recordings: Signal<iptv_core::recording::Screen>,
     pub vod: Signal<iptv_core::vod::Screen>,
     pub recordings_open: Memo<bool>,
-    /// The favourite channels on screen (catalog channels); kept by key
-    /// and changed through `favorites.rs`.
-    pub favorites: Signal<BTreeSet<usize>>,
-    /// The source has movies or shows (the rail lists them).
-    pub has_vod: Signal<bool>,
-    /// Some enabled playlist has movies or shows: the rail's cross-source
-    /// Continue watching and Recently added entries.
-    pub any_vod: Signal<bool>,
     /// Live or catch-up for the playing channel.
     pub playback: Signal<Playback>,
-    /// Bumped when the guide data changes (views re-read `schedule()`).
-    pub data_version: Signal<u64>,
-    /// Bumped when an older day of the guide was paged in (`data/pages.rs`):
-    /// views showing programmes re-read them ([`Ui::guide_data`]).
-    pub guide_pages: Signal<u64>,
-    pub picture: Signal<PictureSettings>,
+    pub channel_number: Signal<iptv_core::channel_number::ChannelNumber<iptv_search::ChannelId>>,
     pub sleep: Signal<SleepTimer>,
     /// The open chooser over the video (picture size, sleep timer).
     pub chooser: Signal<Option<chooser::Open>>,
@@ -248,6 +260,7 @@ pub struct Ui {
     pub remote_editor: Signal<Option<iptv_nav::remap::Editor>>,
     /// The search screen, while open (also while a result it chose plays).
     pub search: Signal<Option<search_view::Screen>>,
+    pub search_history_revision: Signal<u64>,
     /// The add-playlist wizard, when open.
     pub wizard: Signal<Option<wizard_view::Open>>,
     /// The playlists screen, when open.
@@ -261,10 +274,6 @@ pub struct Ui {
     pub guide_inspect_cancel: Stored<Option<iptv_import::CancelToken>>,
     /// The guide data chooser of a channel, when open.
     pub guide_assign: Signal<Option<guide_assign_view::Open>>,
-    /// The stored playlists: which one is shown, their refreshes (`data.rs`).
-    pub library: data::Library,
-    /// Bumped when a setting changes; read values with `settings::read`.
-    pub settings: Signal<u64>,
     /// The settings screen, when open.
     pub parental: Signal<Option<parental_view::Open>>,
     pub settings_screen: Signal<Option<iptv_settings::screen::Screen>>,
@@ -288,11 +297,102 @@ pub struct Ui {
     pub back_guard: Signal<iptv_nav::BackGuard>,
 }
 
+impl SharedUi {
+    fn new() -> Self {
+        Self {
+            list_version: signal(0),
+            theme: signal(Theme::default()),
+            epoch: nsh_core::time::now(),
+            favorites: signal(BTreeSet::new()),
+            has_vod: signal(false),
+            any_vod: signal(false),
+            data_version: signal(0),
+            guide_pages: signal(0),
+            picture: signal(PictureSettings::default()),
+            library: data::Library::new(),
+            settings: signal(0),
+        }
+    }
+}
+
+impl Ui {
+    /// Allocate all presentation state afresh; shared signals and native stream
+    /// ownership are supplied explicitly, never inherited from another window.
+    pub(crate) fn new(app: SharedUi, player: player::Player) -> Self {
+        let recordings = signal(iptv_core::recording::Screen::default());
+        let recordings_open = computed(move || recordings.with(|s| s.open));
+        Self {
+            app,
+            focus: signal(Focus::default()),
+            browse_playback: signal(Default::default()),
+            pending_zap: signal(None),
+            guide_panning: signal(false),
+            list: signal(Rc::new(ChannelList::build(
+                iptv_core::lists::ALL,
+                &*schedule(),
+                &[],
+                &[],
+            ))),
+            playing: signal(None),
+            // An iPad is touched first: no remote hints until a key is used.
+            input: signal(if cfg!(target_os = "ios") {
+                Input::Touch
+            } else {
+                Input::Keys
+            }),
+            mode: signal(ViewMode::Guide),
+            stats: signal(Stats::default()),
+            #[cfg(feature = "test-support")]
+            performance: signal(None),
+            player_status: signal("idle".to_owned()),
+            visible_rows: signal(None),
+            panels: signal(Panels::default()),
+            play_bar: signal(Default::default()),
+            paused: signal(false),
+            seek_target: signal(None),
+            menu: signal(None),
+            description: signal(None),
+            recordings,
+            vod: signal(iptv_core::vod::Screen::default()),
+            recordings_open,
+            playback: signal(Playback::Live),
+            channel_number: signal(Default::default()),
+            sleep: signal(SleepTimer::default()),
+            chooser: signal(None),
+            editor: signal(None),
+            organization: signal(None),
+            custom_groups: signal(None),
+            remote_editor: signal(None),
+            search: signal(None),
+            search_history_revision: signal(0),
+            wizard: signal(None),
+            playlists: signal(None),
+            guide_sources: signal(None),
+            guide_inspect: signal(None),
+            guide_repair: signal(None),
+            guide_repair_cancel: stored(None),
+            guide_inspect_cancel: stored(None),
+            guide_assign: signal(None),
+            parental: signal(None),
+            settings_screen: signal(None),
+            player,
+            player_surface: 0,
+            media: media::Media::new(),
+            multiview: signal(None),
+            player_windows: signal(Default::default()),
+            channels: signal(None),
+            channel_picker: signal(None),
+            pip: signal(Default::default()),
+            back_guard: signal(iptv_nav::BackGuard::default()),
+        }
+    }
+}
+
 impl Ui {
     /// Tracks the programmes on screen: a new schedule or a day paged in.
     /// The value changes with either.
     pub fn guide_data(&self) -> u64 {
-        self.data_version.get() << 32 | (self.guide_pages.get() & 0xFFFF_FFFF)
+        self.app.data_version.get() << 32 | (self.app.guide_pages.get() & 0xFFFF_FFFF)
     }
 
     /// OK or a tap on the focused programme: a live one plays (OK on the
@@ -417,7 +517,7 @@ impl Ui {
     /// test's manual clock moves it with the timers).
     pub fn now_ms(&self) -> u64 {
         nsh_core::time::now()
-            .saturating_duration_since(self.epoch)
+            .saturating_duration_since(self.app.epoch)
             .as_millis() as u64
     }
 
@@ -482,17 +582,13 @@ pub(crate) fn runtime() -> Rc<runtime::Runtime> {
         runtime
             .borrow_mut()
             .get_or_insert_with(|| {
-                // Before any root (unit tests of shell code), the first use
-                // makes the owner. After one, only its thread may ask: a
-                // debug build stops here; a release build says so and goes
-                // on as it always did, with an owner that is never started.
-                if ROOT_STARTED.load(std::sync::atomic::Ordering::Acquire) {
-                    debug_assert!(
-                        false,
-                        "the application handle was requested off the application thread"
-                    );
-                    log::error!("iptv app: application handle requested off its thread");
-                }
+                // Pre-root shell tests may construct an owner. Once a root
+                // exists, callbacks must dispatch to its shell thread; a second
+                // dormant owner would silently fork state in release builds.
+                assert!(
+                    !ROOT_STARTED.load(std::sync::atomic::Ordering::Acquire),
+                    "the application handle was requested off the application thread"
+                );
                 let directory = platform_data::resolve_data_dir()
                     .expect("private storage must be resolved before using runtime services");
                 Rc::new(new_runtime(directory))
@@ -573,7 +669,7 @@ pub fn set_schedule(ui: &Ui, schedule: Rc<dyn Schedule>) {
     ui.menu.set(None);
     ui.description.set(None);
     ui.editor.set(None);
-    ui.data_version.update(|v| *v += 1);
+    ui.app.data_version.update(|v| *v += 1);
 }
 
 /// Whether `program` on `channel` is inside the channel's catch-up window
@@ -707,80 +803,7 @@ pub fn App() -> impl IntoElement {
 fn ready_app() -> impl IntoElement {
     settings::load();
     startup::mark("settings loaded");
-    let recordings = signal(iptv_core::recording::Screen::default());
-    let recordings_open = computed(move || recordings.with(|s| s.open));
-    let ui = Ui {
-        focus: signal(Focus::default()),
-        browse_playback: signal(Default::default()),
-        pending_zap: signal(None),
-        guide_panning: signal(false),
-        list: signal(Rc::new(ChannelList::build(
-            iptv_core::lists::ALL,
-            &*schedule(),
-            &[],
-            &[],
-        ))),
-        list_version: signal(0),
-        playing: signal(None),
-        // An iPad is touched first: no remote hints until a key is used.
-        input: signal(if cfg!(target_os = "ios") {
-            Input::Touch
-        } else {
-            Input::Keys
-        }),
-        mode: signal(ViewMode::Guide),
-        theme: signal(Theme::default()),
-        stats: signal(Stats::default()),
-        #[cfg(feature = "test-support")]
-        performance: signal(None),
-        player_status: signal("idle".to_owned()),
-        visible_rows: signal(None),
-        panels: signal(Panels::default()),
-        play_bar: signal(Default::default()),
-        paused: signal(false),
-        seek_target: signal(None),
-        epoch: nsh_core::time::now(),
-        menu: signal(None),
-        description: signal(None),
-        recordings,
-        vod: signal(iptv_core::vod::Screen::default()),
-        recordings_open,
-        favorites: signal(BTreeSet::new()),
-        has_vod: signal(false),
-        any_vod: signal(false),
-        playback: signal(Playback::Live),
-        data_version: signal(0),
-        guide_pages: signal(0),
-        picture: signal(PictureSettings::default()),
-        sleep: signal(SleepTimer::default()),
-        chooser: signal(None),
-        editor: signal(None),
-        organization: signal(None),
-        custom_groups: signal(None),
-        remote_editor: signal(None),
-        search: signal(None),
-        wizard: signal(None),
-        playlists: signal(None),
-        guide_sources: signal(None),
-        guide_inspect: signal(None),
-        guide_repair: signal(None),
-        guide_repair_cancel: stored(None),
-        guide_inspect_cancel: stored(None),
-        guide_assign: signal(None),
-        library: data::Library::new(),
-        settings: signal(0),
-        parental: signal(None),
-        settings_screen: signal(None),
-        player: player::Player::new(),
-        player_surface: 0,
-        media: media::Media::new(),
-        multiview: signal(None),
-        player_windows: signal(Default::default()),
-        channels: signal(None),
-        channel_picker: signal(None),
-        pip: signal(Default::default()),
-        back_guard: signal(iptv_nav::BackGuard::default()),
-    };
+    let ui = Ui::new(SharedUi::new(), player::Player::new());
     settings::bind(ui);
     browse_playback::bind(ui);
     desktop::bind(ui);
@@ -851,7 +874,7 @@ fn ready_app() -> impl IntoElement {
 
     view()
         .flex_1()
-        .bg(move || rgb(ui.theme.with(|t| t.background.window)))
+        .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
         // A moving mouse over full-screen video shows the player panels.
         .on_mouse_move(move |e: &MouseEvent| pointer_moved(ui, e))
         // Layers, bottom to top: opaque backdrop, video (multiview's other
@@ -1066,6 +1089,12 @@ fn bind_back(ui: Ui) {
 /// One step back (the platform's Back, or a key standing in for it);
 /// `false` where Back leaves the app.
 pub(crate) fn go_back(ui: Ui) -> bool {
+    if ui.channel_number.with(|entry| entry.active()) {
+        ui.channel_number.update(|entry| {
+            entry.take();
+        });
+        return true;
+    }
     ui.pending_zap.set(None);
     browse_playback::activity(ui);
     untracked(|| {

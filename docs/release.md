@@ -1,70 +1,16 @@
 # Releases and CI
 
-PRs and pushes to master run tools/check.sh on Linux and macOS, including
-the headless app scenarios and portable crates' wasm builds.
+[The validation guide](ci.md) is the authoritative matrix for PR, master, nightly
+and release-candidate checks, lane selection, required-check migration and retained
+evidence. The shared tested plan drives host checks; do not infer coverage from
+an old workflow name or a skipped unselected lane. Documentation consumed by tests
+is a build input. Coverage includes the application; its floors are enforced when
+the coverage lane is selected.
 
-The Android workflow (`.github/workflows/android.yml`) has two jobs behind one
-lightweight change check, `tools/ci/android-changes.py`:
-
-- `android` builds the ARM64 and ARMv7 native libraries and the Gradle host.
-  On PRs it runs only when Android host files, Cargo manifests/lockfile, app build or package
-  metadata/assets, packaging tooling, the NSH or Rust pin, or its workflow/setup
-  actions change.
-- `android-check` runs `tools/ci/check-android.sh`, a `cargo check` of the app
-  library for `aarch64-linux-android` and `armv7-linux-androideabi`. On PRs it
-  runs when Rust sources or manifests change and `android` does not already build them. The host checks
-  never compile `cfg(target_os = "android")` code, so this is the check that
-  stops a Rust-only change from breaking the Android build.
-
-Both jobs run on every master push (which also keeps their build caches warm
-for PRs) and can be started manually. The change check runs on every PR, so
-both jobs always report: skipped when not needed, failed when change detection
-itself fails. Either can therefore be a required check. Desktop packaging is
-path-filtered at the workflow level and must not be required, since skipped
-workflows can remain pending.
-
-## Android smoke test
-
-`.github/workflows/android-smoke.yml` builds an x86_64 debug APK whose wizard
-starts with the mock server's playlist (`IPTV_RS_DEV_PLAYLIST`, with debug
-assertions so it may reach the emulator's host address), generates the
-synthetic fixtures, and runs `tools/ci/android-smoke.sh` on a tablet
-(`pixel_tablet`, Google APIs) and a TV (`tv_1080p`, Android TV) emulator,
-API 36. The script drives the app with remote keys and checks its log: first
-run, adding the playlist, a channel in the guide, full screen, multiview with
-a second player, background (the activity stops) and resume (both players
-reopen), and back to the guide; it fails on a crash or a player load refused
-outside its relay. Logs and a screenshot per step are uploaded as
-`android-smoke-<form>`. It runs on PRs that touch the Android host, the app or
-network crates, or its own inputs, and nightly. It is new and path-filtered:
-do not make it a required check. The script's header says how to run it on a
-local emulator.
-
-## Coverage and fuzzing
-
-Neither of these gates a merge. Both workflows are path-filtered on PRs, so do
-not make them required checks.
-
-- **Coverage** (`.github/workflows/coverage.yml`) runs `tools/ci/coverage.sh` on
-  Linux for PRs that touch `crates/**` and on every master push. It measures the
-  library crates' tests with `cargo llvm-cov` 0.9.1 (everything except
-  `iptv-app`, whose scenario tests run the whole app), prints the per-file table
-  in the job summary, and uploads `lcov.info` and an HTML report as the
-  `coverage` artifact. The job is allowed to fail. Run it locally with
-  `rustup component add llvm-tools` and `cargo install cargo-llvm-cov --version
-  0.9.1 --locked`.
-- **Fuzzing** (`.github/workflows/fuzz.yml`) runs `tools/ci/fuzz-imports.sh` once
-  per fuzz target, in parallel. The targets are the `[[bin]]` entries of
-  `fuzz/Cargo.toml` (what `cargo fuzz list` prints), so a new target is picked up
-  without touching the workflow. PRs that change the playlist, guide or provider
-  parsers, the import pipeline, the playback manifest rewriters or the harness
-  get 60 seconds per target. The nightly Import stress workflow calls the same
-  workflow with 300 seconds per target and saves each target's corpus to the
-  Actions cache; every later run, including PR passes, starts from the newest
-  saved corpus plus the committed seeds. Crashing inputs are uploaded as the
-  `fuzz-<target>` artifact. The harness has its own `fuzz/Cargo.lock`, built
-  with `--locked`; `tools/bump-version.py` keeps its workspace crate versions in
-  step.
+Android emulator smoke uses a dedicated validation application ID and explicit
+serials. For local execution use [disposable AVD validation](android-validation.md),
+which copies the complete profile and never resets original images. x86_64 debug
+smoke is not proof of signed ARM release playback or physical accessibility.
 
 ## Packaging and releases
 
@@ -93,9 +39,8 @@ the distribution key, `IPTV_UNSIGNED_RELEASE=1` asks for an unsigned build (as
 `tools/ci/prepare-android.sh` does before the separate signing job), or
 `IPTV_DEBUG_SIGNED_RELEASE=1` explicitly asks for a debug-signed one.
 
-Release runs repeat the host checks while packaging runs in parallel; the
-signed Android build takes the place of the PR's debug build. Publication
-waits for both the checks and packaging to pass.
+Release runs require full candidate validation before shipping package builds.
+Publication waits for package verification and candidate-bound build provenance.
 Tags and manual runs default to platforms=android-desktop: Android ARM64 and ARMv7,
 Linux x86_64 and macOS Apple silicon. Android produces one distribution-signed
 APK and AAB for tablets and TVs, each containing both ARM architectures.
@@ -139,35 +84,41 @@ checks that the copy in `Contents/Frameworks` has the runtime's Mach-O UUID.
 
 ### Platform signing
 
-The macOS disk image and the Windows installer are platform-signed only when
-their credentials exist. Without them the release still ships, and the
+The reviewed `tools/ci/signing-policy.json` declares `signed` or `preview` for
+each desktop platform. Signed mode requires every credential; preview mode
+requires none. A partial or mismatched configuration fails before signing, even
+when the certificate itself is missing. Rehearsals always require preview mode
+and receive no credentials. Change the policy and provision the complete signing
+configuration together; credential presence never silently downgrades a release.
+For intentional previews, the
 release notes start with a "Preview builds" section naming each unsigned
 package (`tools/ci/publish-release.py notes`, from a record each signing job
 writes). The README's download table and its "Opening the macOS and Windows
 builds" section describe the previews. File names do not change.
 
 - **macOS.** `tools/ci/package-macos.sh` checks for `MACOS_CERTIFICATE`: when
-  it is set, the sign job imports the certificate into a temporary keychain,
+  signed mode is configured, the sign job imports the certificate into a temporary keychain,
   signs every Mach-O file in the app, the pinned libmpv runtime included, with
   the hardened runtime and a secure timestamp, checks that each one carries
   both, notarizes and staples the app (`tools/ci/notarize-macos.sh`), then
   signs, notarizes and staples the disk image. A partly configured set of
-  Apple secrets fails the job. When the certificate is not set, the script
-  says so and produces an ad hoc signed preview.
+  Apple secrets fails the job. Explicit preview mode requires all Apple signing inputs to be absent and
+  produces an ad hoc signed preview.
 - **Windows.** The `windows-sign` job takes the installer that
   `windows-package` built and tested, on a fresh runner in the `release`
   environment. With all six `AZURE_*` secrets set it signs the installer
   through Azure Trusted Signing (now named Artifact Signing) with
   `Azure/artifact-signing-action` v2.0.0, pinned by commit, SHA-256 digest and
   an RFC 3161 timestamp, then requires `Get-AuthenticodeSignature` to report a
-  valid, timestamped signature. With none set the installer is an unsigned
-  preview; with some set the job fails. Only the installer is signed: the
+  valid, timestamped signature. Explicit preview mode requires none set; signed mode requires all six.
+  A mismatch fails rather than falling back. Only the installer is signed: the
   `iptv-app.exe` and `libmpv-2.dll` it installs are not (a follow-up). SmartScreen
   reputation attaches to the signing identity, so expect warnings to fade only
   after a signed release has been downloaded for a while.
 
-As of v0.1.1 neither set of secrets is configured: every DMG and installer
-released so far is unsigned, and Gatekeeper and SmartScreen warn about them.
+The checked-in policy intentionally selects previews for macOS and Windows.
+Historical releases through v0.1.4 were documented as previews; this does not
+assert current hosted secret configuration.
 
 Create a GitHub environment named release and set these secrets for Android:
 - ANDROID_KEYSTORE_BASE64, ANDROID_STORE_PASSWORD, ANDROID_KEY_PASSWORD,
@@ -368,8 +319,14 @@ gh attestation verify SHA256SUMS --repo teng-lin/patina-iptv \
 sha256sum --check --ignore-missing SHA256SUMS
 ```
 
-Releases up to v0.1.1 predate this and have no attestations; their
-`SHA256SUMS` is unsigned. An attestation proves which workflow run built a
+Releases up to v0.1.1 predate build provenance; their `SHA256SUMS` is unsigned.
+v0.1.4 is a second historical exception. Read-only inspection on November 17,
+2026 at 04:02 UTC still found v0.1.4 as latest and release run 43941768397 failed
+at its existing-public-release guard. The earlier audit decoded all 14 asset
+attestations as `release/v0.2`, not SLSA build provenance; those asset digests
+were unchanged in this recheck. The separate macos-v0.1.4 release is also outside
+the complete release workflow. Do not claim these downloads pass the documented
+build-origin verification. Preserve their bytes and record the exception. An attestation proves which workflow run built a
 file from which commit. It does not replace platform code signing: the macOS
 and Windows packages are still not trusted by Gatekeeper or SmartScreen (see
 below).
@@ -547,14 +504,9 @@ only on a wrapper environment variable would not protect those nested builds.
 
 ## Windows installer (experimental)
 
-Windows PR checks run `tools/build-windows.ps1 -Check`. It and `tools/check.sh`
-execute `tools/ci/check-plan.py run`: the same Clippy flags, library tests with
-`iptv-runtime/test-support`, ordinary app tests with `test-support`, portable wasm
-builds, normal app build, and exact isolated repair/guide-latency/busy-reader tests.
-Every test passes `--format=pretty`, preserving named results on all three hosts.
-`python tools/ci/check-plan.py list --json` prints the exact plan without running
-Cargo; `-Check -Release` changes only its normal app build to release mode.
-Coverage reads the same package/test-support inventory from the planner.
+Windows validation follows [the shared tier matrix](ci.md). The native PR tier
+compiles test targets and executes platform checks; nightly and release candidates
+execute the full host suite. wasm and ordinary doctests run once on Linux.
 
 The planner and parity tests enforce more than crate names: features, target
 selection, exact ignored filters, output flags, wrapper delegation and failure
@@ -570,7 +522,7 @@ only master saves it. Formatting, shell/Python/Kotlin tooling and workspace-wide
 audit includes Windows dependencies; `audit-runners.sh` additionally audits the
 graph the Windows executable ships, for its own target.
 
-Installer generation runs only in the
+Installer generation runs in selected package checks and the
 release workflow for tags and manual desktop selections, using
 `tools/package-windows.ps1`. It produces one x64 `.exe` installer, with no portable
 ZIP. The per-user install bundles libmpv and the VC runtime, adds a Start menu
@@ -615,3 +567,42 @@ Every distributed installer must retain access to its matching sources, includin
 after a newer runtime is selected. Keep notices and the same source availability
 when redistributing installers. If a dependency release is incomplete or invalid,
 correct the inputs and publish a new digest; do not overwrite published bytes.
+
+
+## Release contract and recovery
+
+Before a non-rehearsal build, `release-plan.py` requires the workspace version's
+nonempty changelog section; a release tag must match that version. Record platform
+preview/signing state and known compatibility changes there. Do not move a public
+tag or publish manually while a job is still running.
+
+`publish-release.py` verifies checksums and **each final artifact's** SLSA predicate,
+repository release workflow, candidate commit and source ref before any draft
+creation or upload. Missing provenance or a release-membership predicate fails.
+Rehearsals verify the actual branch ref and remain drafts; they do not prove a
+later tag or signing configuration. Post-publication verification downloads and
+checks the public bytes again. Never bypass a failure by replacing public files.
+
+If a build fails before publication, fix the cause and rerun the same candidate
+only while its release is absent or a draft. A public release is immutable. For a
+harmful release, stop recommending it in documentation, publish an advisory with
+exact affected versions/artifact hashes, and ship a corrected version. Do not
+silently delete or rewrite artifacts/checksums or retarget the tag. A deliberate
+asset withdrawal requires a separately reviewed incident decision and a retained
+public explanation; this runbook does not automate deletion.
+
+Before upgrading, retain an application backup and recordings separately using
+synthetic data for validation. Catalog migrations can be irreversible: installing
+an older binary over a newer encrypted catalog is not a supported rollback. To
+recover, stop the app and recording host, keep the newer profile intact, and restore
+a backup compatible with the older version into a separate profile with its
+corresponding platform key. If key or schema compatibility is unknown, remain on
+the newer version and seek a fixed release. Do not promise downgrade support from
+fresh-install package smoke. Validate install-over-previous, catalog reopen,
+recording retention and backup restore before claiming an upgrade path passed.
+
+
+Desktop release artifacts also retain a `*-build-environment.json` beside their
+SBOMs: candidate commit, lock/pin file hashes, compiler/tool versions and installed
+apt/Homebrew package versions. These inventories aid reconstruction and diagnosis;
+they neither freeze the host repositories nor promise byte-identical rebuilds.

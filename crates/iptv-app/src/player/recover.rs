@@ -78,7 +78,7 @@ pub(super) fn resume(ui: Ui, surface: usize) {
 
 /// A catch-up programme that played reopens where it was, not where it
 /// was last opened.
-fn resume_position(ui: Ui) {
+pub(super) fn resume_position(ui: Ui) {
     let Playback::CatchUp { start, offset } = ui.playback.get_untracked() else {
         return;
     };

@@ -4,8 +4,18 @@ use iptv_epg::{ChannelKey, UnixTime};
 use iptv_library::SourceId;
 use iptv_search::{ChannelIndex, ProgrammeIndex, ProgrammeIndexBuilder};
 use iptv_store_sqlite::StoreError;
+use std::cell::{Cell, RefCell};
+
+/// Search lifetime state stays together; only this module can mutate it.
 #[derive(Default)]
-pub struct Indexes {
+pub(crate) struct State {
+    indexes: RefCell<Indexes>,
+    history: RefCell<Option<Vec<String>>>,
+    generation: Cell<u64>,
+}
+
+#[derive(Default)]
+struct Indexes {
     /// The `data_version` they were built for.
     pub version: Option<u64>,
     pub channels: ChannelIndex,
@@ -57,8 +67,29 @@ fn programmes_native(
 }
 
 impl crate::Runtime {
+    pub fn search_history(&self) -> Vec<String> {
+        self.search.history.borrow().clone().unwrap_or_default()
+    }
+    pub fn clear_loaded_search_history(&self) {
+        *self.search.history.borrow_mut() = None;
+    }
+    pub fn install_search_history(&self, history: Vec<String>) {
+        *self.search.history.borrow_mut() = Some(history);
+    }
+    pub fn search_history_matches(&self, history: &[String]) -> bool {
+        self.search.history.borrow().as_deref() == Some(history)
+    }
+    pub fn begin_search(&self) -> u64 {
+        let next = self.search.generation.get() + 1;
+        self.search.generation.set(next);
+        next
+    }
+    pub fn search_is_current(&self, ticket: u64) -> bool {
+        self.search.generation.get() == ticket
+    }
+
     pub fn prepare_search_channels(&self, version: u64, schedule: &dyn iptv_core::guide::Schedule) {
-        if self.search_indexes.borrow().version == Some(version) {
+        if self.search.indexes.borrow().version == Some(version) {
             return;
         }
         let mut channels = ChannelIndex::from_schedule(schedule);
@@ -70,7 +101,7 @@ impl crate::Runtime {
                 channels.add_key(channel, &schedule.channel_number(channel).to_string());
             }
         }
-        *self.search_indexes.borrow_mut() = Indexes {
+        *self.search.indexes.borrow_mut() = Indexes {
             version: Some(version),
             channels,
             programmes: None,
@@ -149,25 +180,25 @@ impl crate::Runtime {
     }
 
     pub fn has_programme_index(&self) -> bool {
-        self.search_indexes.borrow().programmes.is_some()
+        self.search.indexes.borrow().programmes.is_some()
     }
     pub fn begin_programme_index(&self, version: u64) -> bool {
-        let mut indexes = self.search_indexes.borrow_mut();
+        let mut indexes = self.search.indexes.borrow_mut();
         let wanted = indexes.version == Some(version) && indexes.programmes.is_none();
         wanted && indexes.building.replace(version) != Some(version)
     }
     pub fn finish_programme_index(&self, version: u64) -> bool {
-        let mut indexes = self.search_indexes.borrow_mut();
+        let mut indexes = self.search.indexes.borrow_mut();
         if indexes.building == Some(version) {
             indexes.building = None;
         }
         indexes.version == Some(version)
     }
     pub fn install_programme_index(&self, index: ProgrammeIndex) {
-        self.search_indexes.borrow_mut().programmes = Some(index);
+        self.search.indexes.borrow_mut().programmes = Some(index);
     }
     pub fn release_programme_index(&self) {
-        self.search_indexes.borrow_mut().programmes = None;
+        self.search.indexes.borrow_mut().programmes = None;
     }
     pub fn search_channels(
         &self,
@@ -175,7 +206,8 @@ impl crate::Runtime {
         favorites: &std::collections::BTreeSet<usize>,
         options: iptv_search::ChannelSearchOptions,
     ) -> Vec<iptv_search::ChannelHit> {
-        self.search_indexes
+        self.search
+            .indexes
             .borrow()
             .channels
             .search_channels(query, favorites, options)
@@ -187,7 +219,8 @@ impl crate::Runtime {
         schedule: &dyn Schedule,
         options: iptv_search::ProgrammeSearchOptions<'_>,
     ) -> Vec<iptv_search::ProgrammeHit> {
-        self.search_indexes
+        self.search
+            .indexes
             .borrow()
             .programmes
             .as_ref()

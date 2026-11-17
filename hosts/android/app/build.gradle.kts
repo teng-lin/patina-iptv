@@ -18,6 +18,13 @@ val releaseSigning: String? = when {
     else -> null
 }
 
+// Disposable validation can never replace the installed application, including
+// when an operator accidentally points the test at a non-disposable device.
+val validationAppId = System.getenv("IPTV_VALIDATION_APP_ID")
+require(validationAppId == null || validationAppId == "com.hantekllc.iptvrs.validation") {
+    "IPTV_VALIDATION_APP_ID must be com.hantekllc.iptvrs.validation"
+}
+
 android {
     namespace = "com.hantekllc.iptvrs.host"
     compileSdk = 35
@@ -43,6 +50,9 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            if (validationAppId != null) applicationIdSuffix = ".validation"
+        }
         // What a viewer installs: not debuggable, so ART compiles the host's
         // and Media3's Java instead of interpreting it (a debuggable APK runs
         // it in the slow interpreter: seconds of a cold start on a TV box;

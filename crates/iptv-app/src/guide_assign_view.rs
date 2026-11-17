@@ -213,7 +213,7 @@ fn panel(ui: Ui) -> impl IntoElement {
                 .px(move || size.px(20.0))
                 .py(move || size.px(16.0))
                 .gap(move || size.px(8.0))
-                .bg(move || rgb(ui.theme.with(|t| t.background.panel)))
+                .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
                 .child(header(ui, size))
                 .child(list(ui, size)),
         )
@@ -353,7 +353,7 @@ fn row(ui: Ui, size: Scale, index: usize, focused: Memo<Option<usize>>) -> AnyEl
             ui_kit::caption(size, move || if current() { tr("Current") } else { "" }).text_color(
                 move || match mark() {
                     Mark::Focused => Mark::Focused.text(),
-                    _ => rgb(ui.theme.with(|t| t.accent.light)),
+                    _ => rgb(ui.app.theme.with(|t| t.accent.light)),
                 },
             ),
         )

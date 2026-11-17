@@ -236,11 +236,11 @@ fn back(ui: Ui) -> impl IntoElement {
 /// The round ‹'s colour over video (the player's, the guide's over its
 /// preview): the bar's panel.
 pub(crate) fn back_bg(ui: Ui) -> impl Fn() -> Rgba + Copy + 'static {
-    move || tint(ui.theme.with(|t| t.background.panel), PANEL_ALPHA)
+    move || tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA)
 }
 
 fn bar(ui: Ui) -> impl IntoElement {
-    let panel = move || tint(ui.theme.with(|t| t.background.panel), PANEL_ALPHA);
+    let panel = move || tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA);
     view()
         .absolute()
         .left(px(0.0))
@@ -301,7 +301,7 @@ fn button(ui: Ui, control: Control, icon: impl Fn() -> Icon + 'static, size: f32
         .border(px(2.0))
         .border_color(move || {
             tint(
-                ui.theme.with(|t| t.accent.light),
+                ui.app.theme.with(|t| t.accent.light),
                 if focused(ui, control) { 255 } else { 0 },
             )
         })
@@ -634,7 +634,7 @@ fn left(ui: Ui) -> impl IntoElement {
         .child(badge(class))
         .child(
             text(move || {
-                ui.data_version.get();
+                ui.app.data_version.get();
                 crate::on_demand::title(ui)
                     .or_else(|| ui.playing.get().map(channel_name))
                     .unwrap_or_default()
@@ -717,7 +717,7 @@ fn right(ui: Ui) -> impl IntoElement {
     let favourite = move || {
         ui.playing
             .get()
-            .is_some_and(|ch| ui.favorites.with(|f| f.contains(&ch)))
+            .is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)))
     };
     // Reserve space for every control, including recording and optional
     // native window controls, so none overlap the transport hit targets.

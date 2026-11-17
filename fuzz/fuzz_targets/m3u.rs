@@ -9,5 +9,8 @@ fuzz_target!(|data: &[u8]| {
     for c in data.chunks(1 + data.len() % 97) {
         p.feed(c);
     }
-    let _ = p.finish();
+    let chunked = p.finish();
+    let mut whole = iptv_providers::m3u::M3uParser::new();
+    whole.feed(data);
+    assert_eq!(chunked, whole.finish(), "input chunking must not change the playlist");
 });

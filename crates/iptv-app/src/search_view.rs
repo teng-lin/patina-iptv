@@ -241,6 +241,7 @@ fn load_history() -> SearchHistory {
 /// then deleted). A screen opened before the answer started empty and is
 /// given them unless a search was made meanwhile.
 pub(crate) fn load_saved_history(ui: Ui) {
+    let revision = ui.search_history_revision.get_untracked();
     crate::runtime().clear_loaded_search_history();
     let legacy = crate::data::data_dir().join(LEGACY_HISTORY_FILE);
     let loaded = crate::runtime::commands::load_search_history(&crate::runtime(), legacy);
@@ -252,6 +253,9 @@ pub(crate) fn load_saved_history(ui: Ui) {
                 return;
             }
         };
+        if ui.search_history_revision.get_untracked() != revision {
+            return;
+        }
         if options(&crate::settings::get()).show_history {
             ui.search.update(|screen| {
                 if let Some(screen) = screen
@@ -266,9 +270,28 @@ pub(crate) fn load_saved_history(ui: Ui) {
     });
 }
 
-/// Moves the recent searches of a legacy file into an empty store table,
-/// then deletes the file. An unreadable file is deleted too: it held only
-/// recent searches, and plaintext must not stay behind.
+/// Clears saved searches immediately and invalidates pending startup loads.
+pub(crate) fn clear_history(ui: Ui) {
+    ui.search_history_revision.update(|revision| *revision += 1);
+    let saved = crate::runtime::commands::clear_search_history(
+        &crate::runtime(),
+        crate::data::data_dir().join(LEGACY_HISTORY_FILE),
+    );
+    crate::runtime().install_search_history(Vec::new());
+    ui.search.update(|screen| {
+        if let Some(screen) = screen {
+            *screen.state.history_mut() = SearchHistory::default();
+        }
+    });
+    crate::data::spawn_in_app(async move {
+        if saved.await.is_err() {
+            crate::settings_view::notify(tr(
+                "Recent channel changes could not be saved; try again",
+            ));
+        }
+    });
+}
+
 fn save_history(ui: Ui) {
     let Some(session) = ui
         .search
@@ -302,7 +325,7 @@ fn set_programmes(ui: Ui, status: Programmes) {
 /// channels at once, programmes a moment later (about 0.1 s for a large
 /// EPG), so the screen shows first.
 fn prepare(ui: Ui) {
-    let version = ui.data_version.get_untracked();
+    let version = ui.app.data_version.get_untracked();
     let schedule = crate::schedule();
     crate::runtime().prepare_search_channels(version, &*schedule);
     if epg(&*schedule).is_none()
@@ -358,7 +381,7 @@ fn prepare(ui: Ui) {
 
 /// Runs both searches for `query` now and hands the results to the state.
 fn run_search(ui: Ui, query: &str) {
-    let favourites = ui.favorites.get_untracked();
+    let favourites = ui.app.favorites.get_untracked();
     let schedule = crate::schedule();
     let days = |c: usize| schedule.catchup_days(c);
     let visible = |c: usize| !schedule.channel_hidden(c);

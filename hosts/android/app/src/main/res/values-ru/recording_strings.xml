@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recording_channel">Запланированные записи</string>
+    <string name="recording_title">Patina ведёт запись</string>
+    <string name="recording_background">Запланированная запись продолжается в фоне</string>
+</resources>

@@ -43,3 +43,5 @@ pub mod on_demand;
 pub mod organization;
 
 pub mod vod;
+
+pub mod channel_number;

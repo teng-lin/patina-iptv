@@ -61,27 +61,6 @@ impl Runtime {
     pub fn finish_wizard_import(&self) {
         self.wizard_import.borrow_mut().take();
     }
-    pub fn search_history(&self) -> Vec<String> {
-        self.saved_search.borrow().clone().unwrap_or_default()
-    }
-    pub fn clear_loaded_search_history(&self) {
-        *self.saved_search.borrow_mut() = None;
-    }
-    pub fn install_search_history(&self, history: Vec<String>) {
-        *self.saved_search.borrow_mut() = Some(history);
-    }
-    pub fn search_history_matches(&self, history: &[String]) -> bool {
-        self.saved_search.borrow().as_deref() == Some(history)
-    }
-    pub fn begin_search(&self) -> u64 {
-        let next = self.pending_search.get() + 1;
-        self.pending_search.set(next);
-        next
-    }
-    pub fn search_is_current(&self, ticket: u64) -> bool {
-        self.pending_search.get() == ticket
-    }
-
     /// Starts a backup operation unless one is running (the user is told).
     pub fn begin_backup(self: &Rc<Self>) -> Option<crate::backup::Busy> {
         crate::backup::Busy::begin(self.clone())
@@ -229,6 +208,11 @@ impl Runtime {
         crate::favorites::toggle(self, channel);
     }
 
+    /// Clears persisted viewing history and invalidates the recent-channel list.
+    pub fn clear_watch_history(&self) -> impl Future<Output = bool> + use<> {
+        crate::favorites::clear_history(self)
+    }
+
     pub fn record_played(&self, key: &str) {
         crate::favorites::played(self, key);
     }
@@ -313,15 +297,7 @@ impl Runtime {
     /// Entry acknowledgement makes contention tests independent of scheduling.
     /// Dropping the release sender, or the watchdog, always releases the lane.
     pub fn hold_analysis(&self) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
-        let (entered, observed) = std::sync::mpsc::channel();
-        let (release, resume) = std::sync::mpsc::channel();
-        // Analyze transfers the queued work immediately; its reply is unused.
-        drop(self.services().analyze(move |_| {
-            let _ = entered.send(());
-            let _ = resume.recv_timeout(std::time::Duration::from_secs(10));
-            Ok(())
-        }));
-        (observed, release)
+        self.services().hold_analysis()
     }
 
     /// Pauses the next inspection after SQLite has actually executed scan work.

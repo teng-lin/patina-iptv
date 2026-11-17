@@ -317,3 +317,69 @@ fn legacy_history_is_consumed_once_and_cannot_replace_newer_committed_history() 
     assert!(!legacy.exists());
     assert!(runtime.drain_services());
 }
+
+#[test]
+fn privacy_clears_remove_durable_watch_and_search_history() {
+    let (dir, key, first, _, keys) = seeded();
+    {
+        let mut store = Store::open_encrypted(dir.path().join("iptv.sqlite"), &key).unwrap();
+        store
+            .record_watch(
+                first,
+                &keys[0],
+                iptv_providers::model::ContentKind::Live,
+                1,
+                None,
+            )
+            .unwrap();
+        store
+            .set_search_history(&["Generated private query".into()])
+            .unwrap();
+    }
+    let runtime = owner(dir.path(), &key);
+    assert!(block_on(runtime.clear_watch_history()));
+    block_on(commands::save_search_history(&runtime, Vec::new())).unwrap();
+    assert!(runtime.drain_services());
+    drop(runtime);
+    let store = Store::open_encrypted(dir.path().join("iptv.sqlite"), &key).unwrap();
+    assert!(store.recent(None, None, 20).unwrap().is_empty());
+    assert!(store.search_history().unwrap().is_empty());
+}
+
+#[test]
+fn search_history_clear_orders_unpolled_saves_and_consumes_legacy_input() {
+    let (dir, key, _, _, _) = seeded();
+    let legacy = dir.path().join("generated-history.json");
+    std::fs::write(&legacy, br#"["Generated legacy search"]"#).unwrap();
+    let runtime = owner(dir.path(), &key);
+    let startup = commands::load_search_history(&runtime, legacy.clone());
+    let older = commands::save_search_history(&runtime, vec!["Generated older search".into()]);
+    let cleared = commands::clear_search_history(&runtime, legacy.clone());
+    block_on(cleared).unwrap();
+    // Replies may be polled in any order: invocation determines writer order.
+    block_on(older).unwrap();
+    block_on(startup).unwrap();
+    assert!(
+        block_on(commands::load_search_history(&runtime, legacy.clone()))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(!legacy.exists());
+
+    // Clearing also consumes a legacy file when startup has not loaded it yet.
+    std::fs::write(&legacy, br#"["Generated legacy search"]"#).unwrap();
+    let cleared = commands::clear_search_history(&runtime, legacy.clone());
+    let loaded = commands::load_search_history(&runtime, legacy.clone());
+    assert!(block_on(loaded).unwrap().is_empty());
+    block_on(cleared).unwrap();
+    assert!(!legacy.exists());
+    assert!(runtime.drain_services());
+    drop(runtime);
+    assert!(
+        Store::open_encrypted(dir.path().join("iptv.sqlite"), &key)
+            .unwrap()
+            .search_history()
+            .unwrap()
+            .is_empty()
+    );
+}

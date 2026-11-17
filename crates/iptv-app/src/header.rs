@@ -75,7 +75,7 @@ fn preview(ui: Ui, size: Scale) -> impl IntoElement {
         .border(px(3.0))
         .border_color(move || {
             tint(
-                ui.theme.with(|t| t.accent.light),
+                ui.app.theme.with(|t| t.accent.light),
                 if focused() { 255 } else { 0 },
             )
         })
@@ -83,7 +83,7 @@ fn preview(ui: Ui, size: Scale) -> impl IntoElement {
         .h(move || px(header_now().2))
         .rounded(px(PREVIEW_RADIUS))
         .bg(move || {
-            let cell = ui.theme.with(|t| t.guide().cell);
+            let cell = ui.app.theme.with(|t| t.guide().cell);
             if idle() {
                 crate::grid::fill(ui, cell)
             } else {
@@ -118,7 +118,7 @@ fn preview_ring(ui: Ui) -> impl IntoElement {
         .h(move || px(header_now().2 + 2.0 * RING))
         .border(px(RING))
         .rounded(px(PREVIEW_RADIUS + RING))
-        .border_color(move || rgb(ui.theme.with(|t| t.background.window)))
+        .border_color(move || rgb(ui.app.theme.with(|t| t.background.window)))
         .opacity(move || {
             let shown = ui.mode.get() == ViewMode::Guide
                 && (ui.playing.get().is_some() || crate::on_demand::active(ui));
@@ -170,7 +170,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
     let settled = settled(ui, program);
     // Read once per focused programme (a stored guide reads it from disk).
     let description = computed(move || {
-        ui.guide_pages.get();
+        ui.app.guide_pages.get();
         settled.with(|p| {
             let (_, _, _, ch, p) = (*p)?;
             let schedule = crate::schedule();
@@ -180,7 +180,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
     let favourite = move || {
         program
             .with(|p| p.map(|p| p.3))
-            .is_some_and(|ch| ui.favorites.with(|f| f.contains(&ch)))
+            .is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)))
     };
     let live =
         move || program.with(|p| p.is_some_and(|(_, now, _, _, p)| p.airing(now) == Airing::Live));
@@ -217,7 +217,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                 .child(
                     text(move || if favourite() { "★" } else { "" })
                         .text_size(move || size.text_px(HEADER_TITLE * 0.8))
-                        .text_color(move || rgb(ui.theme.with(|t| t.accent.light))),
+                        .text_color(move || rgb(ui.app.theme.with(|t| t.accent.light))),
                 ),
         )
         .child(
@@ -253,7 +253,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                                         0.0
                                     })
                                 })
-                                .bg(move || rgb(ui.theme.with(|t| t.accent.light))),
+                                .bg(move || rgb(ui.app.theme.with(|t| t.accent.light))),
                         ),
                 )
                 .child(
@@ -390,7 +390,7 @@ pub fn header(ui: Ui) -> impl IntoElement {
     });
     view()
         .pt_safe_area()
-        .bg(move || ui.surface(ui.theme.with(|t| t.background.window)))
+        .bg(move || ui.surface(ui.app.theme.with(|t| t.background.window)))
         .child(
             view()
                 .h(move || px(header_now().0))

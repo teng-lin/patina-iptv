@@ -27,6 +27,7 @@ pub(crate) struct State {
     combined_sources: Vec<SourceId>,
     favorites: Favorites,
     recent: Recent,
+    history_revision: u64,
     /// The catalog on screen, by key.
     index: KeyIndex,
     /// The source has movies or shows.
@@ -119,6 +120,7 @@ pub(crate) fn refresh_vod_availability(
 
 /// A store write, in the order made.
 pub(crate) enum Write {
+    ClearHistory,
     Barrier(futures_channel::oneshot::Sender<bool>),
     Shutdown(mpsc::Sender<bool>),
     MoveFavourite {
@@ -140,6 +142,7 @@ pub(crate) enum Write {
 
 #[derive(Clone)]
 enum PendingWrite {
+    ClearHistory,
     MoveFavourite {
         source: SourceId,
         key: String,
@@ -203,6 +206,9 @@ pub async fn prepare_source(
     let generation = owner.generation.get();
     let id = source?;
     let services = owner.services();
+    let history_revision = owner
+        .favorites
+        .with(|state| state.borrow().history_revision);
     let request = begin_vod_request(owner);
     let loaded = load(owner, move |store| {
         let has_vod = source_has_vod(store, id).unwrap_or(false);
@@ -260,6 +266,7 @@ pub async fn prepare_source(
             state.recent = Recent::from_keys(
                 recent
                     .into_iter()
+                    .filter(|_| state.history_revision == history_revision)
                     .map(|row| row.item_id.as_str().to_owned()),
             );
         })
@@ -268,6 +275,9 @@ pub async fn prepare_source(
 
 /// Load enabled-source favourites while preserving edits already held in memory.
 pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<impl FnOnce()> {
+    let history_revision = owner
+        .favorites
+        .with(|state| state.borrow().history_revision);
     let generation = owner.generation.get();
     let services = owner.services();
     let request = begin_vod_request(owner);
@@ -337,7 +347,7 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
             state.source = None;
             state.combined_sources = ids.clone();
             state.favorites = Favorites::from_keys(keys);
-            if previous != ids {
+            if previous != ids && state.history_revision == history_revision {
                 state.recent = Recent::from_keys(
                     recent
                         .into_iter()
@@ -506,6 +516,20 @@ fn send(owner: &super::Runtime, write: Write) {
     });
 }
 
+/// Clear in writer order so older queued plays cannot resurrect deleted history.
+pub fn clear_history(owner: &super::Runtime) -> impl std::future::Future<Output = bool> + use<> {
+    send(owner, Write::ClearHistory);
+    let (tx, rx) = futures_channel::oneshot::channel();
+    send(owner, Write::Barrier(tx));
+    owner.favorites.with(|state| {
+        let mut state = state.borrow_mut();
+        state.history_revision += 1;
+        state.recent = Recent::default();
+    });
+    publish(owner);
+    async move { rx.await.unwrap_or(false) }
+}
+
 /// The writer thread: one store connection, writes in order.
 pub async fn flush(owner: &super::Runtime) -> bool {
     let (tx, rx) = futures_channel::oneshot::channel();
@@ -546,6 +570,7 @@ fn write_all(
     write_all_with(rx, |write| {
         let operation = write.clone();
         let result = services.blocking(move |store| match operation {
+            PendingWrite::ClearHistory => store.clear_history(None).map(|_| ()),
             PendingWrite::MoveFavourite { source, key, index } => store
                 .move_favourite(source, &ContentId::from_stored(key), index)
                 .map(|_| ()),
@@ -592,6 +617,10 @@ fn write_all_with(rx: Receiver<Write>, mut persist: impl FnMut(&PendingWrite) ->
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => None,
             Ok(write) => match write {
+                Write::ClearHistory => {
+                    pending.push_back(PendingWrite::ClearHistory);
+                    None
+                }
                 Write::Barrier(done) => Some(Box::new(move |saved| {
                     let _ = done.send(saved);
                 })),
@@ -846,6 +875,7 @@ mod writer_tests {
                 return false;
             }
             persisted.push(match write {
+                PendingWrite::ClearHistory => "clear",
                 PendingWrite::Favourite { on, .. } => {
                     assert!(*on);
                     "favorite"
@@ -865,6 +895,30 @@ mod writer_tests {
         assert_eq!(retry_result.try_recv().unwrap(), Some(true));
         assert_eq!(last_result.try_recv().unwrap(), Some(true));
         assert_eq!(persisted, ["favorite", "order", "history"]);
+    }
+
+    #[test]
+    fn history_clear_is_ordered_between_older_and_newer_plays() {
+        let (tx, rx) = mpsc::channel();
+        let watched = |key: &str| Write::Watched {
+            source: SourceId(1),
+            key: key.into(),
+            at: 1,
+        };
+        tx.send(watched("old")).unwrap();
+        tx.send(Write::ClearHistory).unwrap();
+        tx.send(watched("new")).unwrap();
+        drop(tx);
+        let mut retained = Vec::new();
+        write_all_with(rx, |write| {
+            match write {
+                PendingWrite::Watched { key, .. } => retained.push(key.clone()),
+                PendingWrite::ClearHistory => retained.clear(),
+                _ => unreachable!(),
+            }
+            true
+        });
+        assert_eq!(retained, ["new"]);
     }
 
     #[test]

@@ -3,6 +3,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import tempfile
 
 spec = importlib.util.spec_from_file_location("check_coverage_floors", Path(__file__).with_name("check-coverage-floors.py"))
 checker = importlib.util.module_from_spec(spec)
@@ -16,6 +17,23 @@ home/runner/work/patina/patina/crates/iptv-nav/src/action.rs     100 0 100.00% 1
 
 
 class CoverageFloors(unittest.TestCase):
+    def test_current_workspace_has_explicit_policy_for_every_crate(self):
+        checker.validate_inventory(Path(__file__).resolve().parents[2])
+
+    def test_new_stale_and_ambiguous_policy_entries_fail(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "Cargo.toml").write_text('[workspace]\nmembers=["generated"]\n')
+            (root / "generated").mkdir()
+            (root / "generated/Cargo.toml").write_text('[package]\nname="generated"\n')
+            checker.validate_inventory(root, {"generated": 90}, {})
+            checker.validate_inventory(root, {}, {"generated": "isolated process"})
+            for floors, exemptions in (({}, {}), ({"stale": 90}, {}),
+                                      ({"generated": 90}, {"generated": "reason"}),
+                                      ({}, {"generated": ""})):
+                with self.assertRaises(ValueError):
+                    checker.validate_inventory(root, floors, exemptions)
+
     def test_parse_summary(self):
         totals = checker.parse_summary(SYNTHETIC_SUMMARY)
         self.assertEqual(totals["iptv-core"], [100, 5])

@@ -14,10 +14,7 @@ SPEC.loader.exec_module(release)
 
 def verify(directory, repository, commit, ref, runner=subprocess.run):
     release.verify_checksums(directory)
-    for artifact in sorted(directory.iterdir()):
-        runner(["gh", "attestation", "verify", str(artifact), "--repo", repository,
-                "--signer-workflow", repository + "/.github/workflows/release.yml",
-                "--source-digest", commit, "--source-ref", ref], check=True)
+    release.provenance.verify(directory, repository, commit, ref, runner)
 
 
 def main():

@@ -15,7 +15,7 @@ fn current(ui: Ui) -> Option<Target> {
             context,
             Context::Player | Context::Controls | Context::ChannelList
         )
-        && target.source == ui.library.shown.get().map(|s| s.0)
+        && target.source == ui.app.library.shown.get().map(|s| s.0)
     {
         return Some(target);
     }
@@ -49,7 +49,7 @@ fn current(ui: Ui) -> Option<Target> {
     };
     Some(Target {
         key: crate::schedule().channel_key(ch)?,
-        source: ui.library.shown.get().map(|s| s.0),
+        source: ui.app.library.shown.get().map(|s| s.0),
         surface,
     })
 }
@@ -180,7 +180,7 @@ pub fn zap(ui: Ui, channel: usize) {
     if let Some(key) = crate::schedule().channel_key(channel) {
         ui.pending_zap.set(Some(Target {
             key,
-            source: ui.library.shown.get_untracked().map(|s| s.0),
+            source: ui.app.library.shown.get_untracked().map(|s| s.0),
             surface: Surface::Player,
         }));
         select(ui);

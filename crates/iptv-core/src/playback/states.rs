@@ -127,7 +127,7 @@ pub enum Phase {
     Failed(Failure),
 }
 
-/// The waiting indicator over the video ([`Health::indicator`]).
+/// The waiting indicator over the video ([`crate::playback::Health::indicator`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Waiting {
     Loading,
@@ -138,7 +138,7 @@ pub enum Waiting {
     },
 }
 
-/// A retry the shell should run at `at_ms` (then call [`Health::due`]).
+/// A retry the shell should run at `at_ms` (then call [`crate::playback::Health::due`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Retry {
     pub at_ms: u64,

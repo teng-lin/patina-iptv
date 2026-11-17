@@ -1,0 +1,30 @@
+name: Cargo dependency candidate
+on:
+  schedule:
+    - cron: '43 5 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: dependency-candidate-v1
+      - run: sudo apt-get install -y xvfb libgl1-mesa-dri
+      - name: Prepare lockfile candidate and run host validation
+        env:
+          IPTV_REQUIRE_PLAYER_TESTS: '1'
+        run: python3 tools/ci/dependency-candidate.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: cargo-dependency-candidate
+          path: target/dependency-candidate
+          if-no-files-found: error

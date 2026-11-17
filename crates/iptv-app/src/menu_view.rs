@@ -209,7 +209,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         MenuItem::HideChannel => {
             close(ui);
             if let (Some(source), Some(id)) = (
-                ui.library.shown.get_untracked(),
+                ui.app.library.shown.get_untracked(),
                 crate::schedule().channel_key(origin.channel),
             ) {
                 let saved = crate::runtime::commands::hide_channel(&crate::runtime(), source, id);
@@ -223,7 +223,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         }
         MenuItem::CreateGroup | MenuItem::CopyChannels => {
             close(ui);
-            if let Some(source) = ui.library.shown.get_untracked() {
+            if let Some(source) = ui.app.library.shown.get_untracked() {
                 crate::custom_groups::open(ui, source, item == MenuItem::CopyChannels);
             }
         }
@@ -232,7 +232,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         | MenuItem::ReorderChannels
         | MenuItem::GroupOptions => {
             close(ui);
-            if let Some(source) = ui.library.shown.get_untracked() {
+            if let Some(source) = ui.app.library.shown.get_untracked() {
                 let groups = item == MenuItem::GroupOptions;
                 let preferred = if groups {
                     Some(
@@ -323,7 +323,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         };
         let favorite = move || {
             let ch = ui.menu.with(|m| m.as_ref().map(|m| m.origin.channel));
-            ch.is_some_and(|ch| ui.favorites.with(|f| f.contains(&ch)))
+            ch.is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)))
         };
         let focused = move || ui.keys_shown() && focus.get() == Some(at.index());
         let mark = move || Mark::of(focused(), false);
@@ -416,7 +416,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .pt_safe_area()
                 .px(px(12.0))
                 .py(px(16.0))
-                .bg(move || rgb(ui.theme.with(|t| t.background.panel)))
+                .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
                 .child(
                     virtual_list(count, row)
                         .estimated_item_size(list_rows::pitch(size, ROW))
@@ -470,7 +470,7 @@ fn description(ui: Ui) -> impl IntoElement {
                 .gap(px(10.0))
                 .p(px(24.0))
                 .rounded(px(RADIUS_LARGE))
-                .bg(move || rgb(ui.theme.with(|t| t.background.panel)))
+                .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
                 .child(
                     text(move || program().map_or(String::new(), |(ch, p)| title(ch, p)))
                         .font_family(SANS)
@@ -491,7 +491,7 @@ fn description(ui: Ui) -> impl IntoElement {
                 .child(
                     text(move || {
                         ui.guide_data();
-                        ui.guide_pages.get();
+                        ui.app.guide_pages.get();
                         program()
                             .and_then(|(channel, programme)| {
                                 crate::header::programme_description(

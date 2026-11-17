@@ -98,7 +98,7 @@ fn screen(ui: Ui, size: Scale) -> impl IntoElement {
                 .px(move || size.px(20.0))
                 .py(move || size.px(16.0))
                 .gap(move || size.px(10.0))
-                .bg(move || rgb(ui.theme.with(|t| t.background.panel)))
+                .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
                 .child(header(ui, size))
                 .child(
                     view()
@@ -182,7 +182,7 @@ fn pages(ui: Ui, size: Scale) -> impl IntoElement {
                         crate::settings::read(ui);
                         match mark() {
                             Mark::Focused => Mark::Focused.text(),
-                            Mark::Current => rgb(ui.theme.with(|t| t.accent.light)),
+                            Mark::Current => rgb(ui.app.theme.with(|t| t.accent.light)),
                             Mark::Plain if page().is_some_and(lit_page) => rgb(LIST_TEXT),
                             Mark::Plain => tint(WHITE, DIM_ALPHA),
                         }
@@ -312,8 +312,8 @@ fn row_view(
                 )
             }
             Some(Row::Command(c)) => {
-                ui.data_version.get();
-                ui.library.version.get();
+                ui.app.data_version.get();
+                ui.app.library.version.get();
                 (command_value(c.key), None)
             }
             _ => (String::new(), None),
@@ -423,7 +423,7 @@ fn row_view(
             list_rows::second(size, move || current().0, SANS).text_color(move || {
                 match (mark(), lit()) {
                     (Mark::Focused, true) => Mark::Focused.text(),
-                    (_, true) => rgb(ui.theme.with(|t| t.accent.light)),
+                    (_, true) => rgb(ui.app.theme.with(|t| t.accent.light)),
                     (Mark::Focused, false) => Mark::Focused.disabled(),
                     (_, false) => tint(WHITE, TEXT_DISABLED_ALPHA),
                 }

@@ -21,6 +21,7 @@
 //! The reader's connection is made by the writer ([`Store::open_reader`]):
 //! the platform key is fetched, and the file migrated, only there.
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::Path;
 use std::sync::{
@@ -29,6 +30,7 @@ use std::sync::{
     mpsc,
 };
 use std::thread::ThreadId;
+use std::time::{Duration, Instant};
 
 use futures_channel::oneshot;
 use iptv_import::CancelToken;
@@ -42,6 +44,90 @@ struct Connection {
     retry_open_at: Option<std::time::Instant>,
 }
 
+/// Numeric-only observations for one store lane; no query, path or provider data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StoreQueueStats {
+    /// Fixed lane name: writer, reader or analysis.
+    pub lane: &'static str,
+    /// Requests waiting to start, excluding the request currently running.
+    pub pending: usize,
+    /// Time since the oldest still-pending request was admitted; zero when empty.
+    pub oldest_age: Duration,
+    /// Longest observed wait before a request started during this owner's lifetime.
+    pub max_wait: Duration,
+    /// Queued reader requests skipped because their reply futures were dropped.
+    pub skipped_reads: u64,
+}
+
+#[derive(Default)]
+struct QueueMetrics {
+    // One timestamp per pending request, reclaimed when started or discarded.
+    // Equal clock ticks share a counter; completed requests retain no entries.
+    waiting: BTreeMap<Instant, usize>,
+    pending: usize,
+    max_wait: Duration,
+    skipped_reads: u64,
+}
+
+struct QueueTicket {
+    metrics: Arc<Mutex<QueueMetrics>>,
+    admitted: Instant,
+    waiting: bool,
+}
+impl QueueTicket {
+    fn new(metrics: Arc<Mutex<QueueMetrics>>) -> Self {
+        let admitted = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap_or_else(|e| e.into_inner());
+            *state.waiting.entry(admitted).or_default() += 1;
+            state.pending += 1;
+        }
+        Self {
+            metrics,
+            admitted,
+            waiting: true,
+        }
+    }
+    fn start(mut self) {
+        self.remove(true);
+    }
+    fn remove(&mut self, started: bool) {
+        if !self.waiting {
+            return;
+        }
+        let mut state = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(count) = state.waiting.get_mut(&self.admitted) {
+            *count -= 1;
+            if *count == 0 {
+                state.waiting.remove(&self.admitted);
+            }
+            state.pending -= 1;
+        }
+        if started {
+            state.max_wait = state.max_wait.max(self.admitted.elapsed());
+        }
+        self.waiting = false;
+    }
+}
+impl Drop for QueueTicket {
+    fn drop(&mut self) {
+        // Failed sends and discarded jobs must not leave phantom queue entries.
+        self.remove(false);
+    }
+}
+
+impl crate::Runtime {
+    /// Observe store contention without opening connections or starting workers.
+    /// Counts are instantaneous per lane; this does not acquire a database lock.
+    pub fn store_queue_stats(&self) -> [StoreQueueStats; 3] {
+        [
+            self.store.writer.stats("writer"),
+            self.store.reader.stats("reader"),
+            self.store.analysis.stats("analysis"),
+        ]
+    }
+}
+
 type Job = Box<dyn FnOnce(&mut Connection) + Send>;
 
 /// One connection's worker: a thread that owns the connection and runs
@@ -51,6 +137,7 @@ struct Lane {
     /// The job queue and its thread: a job may not queue on its own lane
     /// and wait for itself.
     jobs: OnceLock<(mpsc::Sender<Job>, ThreadId)>,
+    metrics: Arc<Mutex<QueueMetrics>>,
 }
 
 #[derive(Default)]
@@ -120,14 +207,17 @@ impl Service {
             writer: Lane {
                 name: "iptv-store",
                 jobs: OnceLock::new(),
+                metrics: Arc::default(),
             },
             reader: Lane {
                 name: "iptv-store-read",
                 jobs: OnceLock::new(),
+                metrics: Arc::default(),
             },
             analysis: Lane {
                 name: "iptv-store-analysis",
                 jobs: OnceLock::new(),
+                metrics: Arc::default(),
             },
             epochs: Epochs::default(),
             executor: Default::default(),
@@ -415,7 +505,8 @@ impl Services {
 
     /// Queues `operation` on the reader and returns its reply: a read of the
     /// last commit that does not wait for the writer (see the module docs).
-    /// The first read opens the reader's connection through the writer.
+    /// The first read opens the reader's connection through the writer. Dropping
+    /// its reply skips a still-queued read; an already-started read may finish.
     pub(crate) fn read<R, F>(
         &self,
         operation: F,
@@ -428,6 +519,12 @@ impl Services {
         let queued = self.affinity().and_then(|epoch| {
             let owner = self.service.clone();
             self.service.reader.queue(Box::new(move |connection| {
+                // Superseded/dropped UI reads have no durable effect. Skip them
+                // before opening SQLite or scanning data; writer jobs always run.
+                if sender.is_canceled() {
+                    owner.reader.skipped_read();
+                    return;
+                }
                 let _ = sender.send(owner.read(epoch, connection, operation));
             }))?;
             #[cfg(feature = "test-support")]
@@ -443,7 +540,8 @@ impl Services {
     }
 
     /// Bounded inspection uses its own lazy query-only lane so a scan cannot
-    /// queue guide-page reads behind itself.
+    /// queue guide-page reads behind itself. Dropping its reply skips queued
+    /// work; already-running inspections retain their own cancellation contract.
     pub(crate) fn analyze<R, F>(
         &self,
         operation: F,
@@ -456,6 +554,10 @@ impl Services {
         let queued = self.affinity().and_then(|epoch| {
             let owner = self.service.clone();
             self.service.analysis.queue(Box::new(move |connection| {
+                if sender.is_canceled() {
+                    owner.analysis.skipped_read();
+                    return;
+                }
                 let _ = sender.send(with_epoch(
                     &owner.epochs,
                     epoch,
@@ -526,6 +628,21 @@ impl Services {
     #[cfg(feature = "test-support")]
     pub(crate) fn take_source_preparation(&self) -> Option<Arc<crate::testing::GateState>> {
         self.service.hooks.take_source_preparation()
+    }
+
+    /// Explicit synthetic accepted work, independent of read-reply lifetime.
+    #[cfg(feature = "test-support")]
+    pub(crate) fn hold_analysis(&self) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+        let (entered, observed) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        self.service
+            .analysis
+            .queue(Box::new(move |_| {
+                let _ = entered.send(());
+                let _ = resume.recv_timeout(Duration::from_secs(10));
+            }))
+            .expect("queue synthetic analysis blocker");
+        (observed, release)
     }
 
     #[cfg(feature = "test-support")]
@@ -630,9 +747,33 @@ impl Lane {
     }
 
     fn queue(&self, job: Job) -> Result<(), StoreError> {
-        self.sender()?
-            .send(job)
+        let sender = self.sender()?;
+        let ticket = QueueTicket::new(self.metrics.clone());
+        sender
+            .send(Box::new(move |connection| {
+                ticket.start();
+                job(connection);
+            }))
             .map_err(|_| StoreError::Unavailable("store worker stopped"))
+    }
+
+    fn skipped_read(&self) {
+        let mut metrics = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
+        metrics.skipped_reads = metrics.skipped_reads.saturating_add(1);
+    }
+
+    fn stats(&self, lane: &'static str) -> StoreQueueStats {
+        let state = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
+        StoreQueueStats {
+            lane,
+            pending: state.pending,
+            oldest_age: state
+                .waiting
+                .first_key_value()
+                .map_or(Duration::ZERO, |(at, _)| at.elapsed()),
+            max_wait: state.max_wait,
+            skipped_reads: state.skipped_reads,
+        }
     }
 
     /// Runs `job` after everything queued before it and waits, at most
@@ -722,6 +863,135 @@ impl Services {
 mod tests {
     use super::{Connection, Service};
     use std::sync::Arc;
+
+    fn hold_lane(lane: &super::Lane) -> std::sync::mpsc::Sender<()> {
+        let (entered, observed) = std::sync::mpsc::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        lane.queue(Box::new(move |_| {
+            entered.send(()).unwrap();
+            wait.recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap();
+        }))
+        .unwrap();
+        observed
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        release
+    }
+
+    #[tokio::test]
+    async fn dropped_reads_leave_observable_contention_but_do_not_open_or_query_sqlite() {
+        use std::time::Duration;
+        let directory = tempfile::tempdir().unwrap();
+        let owner = service(directory.path(), 0x71);
+        owner.epochs.begin();
+        let services = owner.accept();
+        let release = hold_lane(&owner.reader);
+        let release_analysis = hold_lane(&owner.analysis);
+        for _ in 0..64 {
+            drop(
+                services.read(|_| -> Result<(), iptv_store_sqlite::StoreError> {
+                    panic!("a superseded read must not execute");
+                }),
+            );
+            drop(
+                services.analyze(|_| -> Result<(), iptv_store_sqlite::StoreError> {
+                    panic!("a superseded analysis must not execute");
+                }),
+            );
+        }
+        assert_eq!(owner.analysis.stats("analysis").pending, 64);
+        let queued = owner.reader.stats("reader");
+        assert_eq!(queued.pending, 64);
+        assert!(queued.oldest_age > Duration::ZERO);
+        assert_eq!(owner.writer.stats("writer").pending, 0);
+        release.send(()).unwrap();
+        release_analysis.send(()).unwrap();
+        assert!(owner.analysis.barrier(Duration::from_secs(5), |_| {}));
+        assert_eq!(owner.analysis.stats("analysis").skipped_reads, 64);
+        assert_eq!(owner.analysis.stats("analysis").pending, 0);
+        assert!(owner.reader.barrier(Duration::from_secs(5), |_| {}));
+        let drained = owner.reader.stats("reader");
+        assert_eq!(drained.pending, 0);
+        assert_eq!(drained.oldest_age, Duration::ZERO);
+        assert_eq!(drained.skipped_reads, 64);
+        assert!(drained.max_wait >= queued.oldest_age);
+        assert!(owner.reader.metrics.lock().unwrap().waiting.is_empty());
+        assert!(!directory.path().join("iptv.sqlite").exists());
+        // A still-wanted read uses the same lane normally after the burst.
+        assert_eq!(
+            services
+                .read(|store| store.combined_last_channel())
+                .await
+                .unwrap(),
+            None
+        );
+        assert!(directory.path().join("iptv.sqlite").is_file());
+        assert!(owner.drain_on_shutdown());
+    }
+
+    #[tokio::test]
+    async fn dropped_write_replies_preserve_durable_fifo_order() {
+        use std::time::Duration;
+        let directory = tempfile::tempdir().unwrap();
+        let owner = service(directory.path(), 0x72);
+        owner.epochs.begin();
+        let services = owner.accept();
+        let release = hold_lane(&owner.writer);
+        drop(services.call(|store| store.set_combined_last_channel("synthetic-first")));
+        drop(services.call(|store| {
+            assert_eq!(
+                store.combined_last_channel()?.as_deref(),
+                Some("synthetic-first")
+            );
+            store.set_combined_last_channel("synthetic-second")
+        }));
+        let latest = services.call(|store| store.combined_last_channel());
+        assert_eq!(owner.writer.stats("writer").pending, 3);
+        release.send(()).unwrap();
+        assert_eq!(latest.await.unwrap().as_deref(), Some("synthetic-second"));
+        assert!(owner.writer.barrier(Duration::from_secs(5), |_| {}));
+        let drained = owner.writer.stats("writer");
+        assert_eq!(drained.pending, 0);
+        assert_eq!(drained.skipped_reads, 0);
+        assert!(owner.drain_on_shutdown());
+    }
+
+    #[test]
+    fn failed_lane_send_reclaims_its_queue_ticket() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        drop(receiver);
+        let other = std::thread::spawn(|| std::thread::current().id())
+            .join()
+            .unwrap();
+        let lane = super::Lane {
+            name: "synthetic-disconnected",
+            jobs: std::sync::OnceLock::from((sender, other)),
+            metrics: Arc::default(),
+        };
+        assert!(
+            lane.queue(Box::new(|_| panic!("disconnected work")))
+                .is_err()
+        );
+        let snapshot = lane.stats("writer");
+        assert_eq!(snapshot.pending, 0);
+        assert_eq!(snapshot.oldest_age, std::time::Duration::ZERO);
+        assert!(lane.metrics.lock().unwrap().waiting.is_empty());
+    }
+
+    #[test]
+    fn observing_idle_lanes_does_not_start_workers() {
+        let owner = super::super::Runtime::default();
+        let snapshots = owner.store_queue_stats();
+        assert_eq!(snapshots.map(|s| s.lane), ["writer", "reader", "analysis"]);
+        for snapshot in snapshots {
+            assert_eq!(snapshot.pending, 0);
+            assert_eq!(snapshot.oldest_age, std::time::Duration::ZERO);
+        }
+        assert!(owner.store.writer.jobs.get().is_none());
+        assert!(owner.store.reader.jobs.get().is_none());
+        assert!(owner.store.analysis.jobs.get().is_none());
+    }
 
     #[test]
     #[cfg(feature = "test-support")]

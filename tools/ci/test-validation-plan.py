@@ -14,6 +14,26 @@ class Selection(unittest.TestCase):
         plan = v.select(["README.md", "docs/architecture.md", "AGENTS.md"])
         self.assertFalse(any(plan[lane] for lane in v.LANES))
 
+    def test_consumed_docs_select_their_actual_consumers(self):
+        self.assertTrue(v.select(["docs/capabilities.md"])["host"])
+        self.assertTrue(v.select(["docs/contributing.md"])["helpers_full"])
+        self.assertFalse(v.select(["docs/contributing.md"])["host"])
+        self.assertFalse(v.select(["docs/release.md"])["helpers_full"])
+
+    def test_changed_lint_wrappers_execute_as_well_as_receive_syntax_checks(self):
+        for path in ("tools/ci/lint.sh", "tools/ci/check-line-length.sh"):
+            self.assertTrue(v.select([path])["host"], path)
+            self.assertTrue(v.select([path])["helpers_full"], path)
+
+    def test_platform_and_production_key_inputs_have_required_lanes(self):
+        for path in ("crates/iptv-app/src/credential_key.rs", "crates/iptv-app/src/credential_key/linux.rs",
+                     "tools/ci/isolated-credentials.py", "crates/iptv-store-sqlite/src/lib.rs"):
+            self.assertTrue(v.select([path])["credentials"], path)
+        for path in ("tools/fetch-mpvkit.sh", "tools/mpv-runtime-ios/runtime-ios.json",
+                     "crates/iptv-player-mpv/src/mpv/ios.rs", "tools/ci/check-ios.sh"):
+            self.assertTrue(v.select([path])["ios"], path)
+        self.assertFalse(v.select(["docs/architecture.md"])["ios"])
+
     def test_embedded_markdown_assets_are_code_inputs_even_when_deleted(self):
         for path in ("crates/iptv-app/assets/help.md", "crates/iptv-core/src/schema.md"):
             plan = v.select([path])

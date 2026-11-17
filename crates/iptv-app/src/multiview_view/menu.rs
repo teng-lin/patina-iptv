@@ -88,7 +88,7 @@ pub fn panel(ui: Ui) -> impl IntoElement {
                 .w(move || size.px(PANEL_W))
                 .p(move || size.px(PAD))
                 .rounded(move || size.px(CORNER))
-                .bg(move || rgb(ui.theme.with(|t| t.background.panel)))
+                .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
                 .pointer_events(PointerEvents::Auto)
                 // Between the rows: nothing (not the tile under it).
                 .on_press(|| {})

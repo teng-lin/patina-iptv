@@ -180,6 +180,20 @@ impl Health {
         self.start(live, now)
     }
 
+    /// A suspended native player needs fresh authority, without consuming retries.
+    /// Stopped sessions must never restart because of a delayed host event.
+    pub fn reauthorize(&mut self, now: u64) -> Option<u64> {
+        if self.phase == Phase::Idle {
+            return None;
+        }
+        self.session += 1;
+        self.card = None;
+        self.reconnecting_since = None;
+        self.outage_since = None;
+        self.enter(Phase::Resolving, now);
+        Some(self.session)
+    }
+
     /// The stream address is known and handed to the player.
     pub fn resolved(&mut self, now: u64) {
         if self.phase == Phase::Resolving {
@@ -340,5 +354,28 @@ impl Health {
     fn enter(&mut self, phase: Phase, now: u64) {
         self.phase = phase;
         self.since_ms = now;
+    }
+}
+
+#[cfg(test)]
+mod foreground_tests {
+    use super::*;
+
+    #[test]
+    fn foreground_loading_vod_does_not_consume_retry_budget_or_restart_stop() {
+        let mut health = Health::default();
+        let session = health.start(false, 0);
+        health.resolved(1);
+        health.set_paused(true, 2);
+        let next = health
+            .reauthorize(100)
+            .expect("loading session remains active");
+        assert_ne!(session, next);
+        assert_eq!(health.attempts, 0);
+        assert!(health.paused);
+        assert!(matches!(health.phase, Phase::Resolving));
+        health.resolved(101);
+        health.stop();
+        assert_eq!(health.reauthorize(200), None);
     }
 }

@@ -20,7 +20,7 @@ def module(name):
 class Workflows(unittest.TestCase):
     def test_only_the_orchestrator_subscribes_validation_lanes_to_pr_push_and_schedule(self):
         for name in ("ci", "windows", "android", "coverage", "package-check", "windows-package-check",
-                     "android-smoke", "import-stress", "fuzz"):
+                     "android-smoke", "import-stress", "fuzz", "ios", "credentials"):
             text = (ROOT / f".github/workflows/{name}.yml").read_text()
             triggers = text.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
             self.assertIn("  workflow_call:", triggers, name)
@@ -30,6 +30,24 @@ class Workflows(unittest.TestCase):
         for event in ("pull_request", "push", "schedule", "merge_group"):
             self.assertRegex(text, rf"(?m)^  {event}:")
         self.assertIn("branches: [master]", text)
+
+    def test_every_ci_helper_test_is_in_the_local_check_wrapper(self):
+        wrapper = (ROOT / "tools/check.sh").read_text()
+        for path in (ROOT / "tools/ci").glob("test-*.py"):
+            self.assertIn(path.relative_to(ROOT).as_posix(), wrapper)
+
+    def test_standalone_lanes_do_not_emit_legacy_required_names(self):
+        host = (ROOT / ".github/workflows/ci.yml").read_text()
+        android = (ROOT / ".github/workflows/android.yml").read_text()
+        self.assertIn("name: host-tests (${{ matrix.os }})", host)
+        self.assertIn("name: android-packaging", android)
+
+    def test_native_validation_has_no_signing_environment(self):
+        for name in ("ios", "credentials"):
+            text = (ROOT / f".github/workflows/{name}.yml").read_text()
+            self.assertNotIn("secrets.", text)
+            self.assertNotIn("environment:", text)
+            self.assertIn("timeout-minutes:", text)
 
     def test_non_pr_windows_runs_have_independent_concurrency_groups(self):
         text = (ROOT / ".github/workflows/windows.yml").read_text()

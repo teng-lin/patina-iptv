@@ -8,7 +8,7 @@
 //! ```
 //!
 //! A count chooses between whole alternatives, one per plural category of
-//! the language ([`plural`](super::plural)). Inside an alternative `#` is
+//! the language ([`super::plural`]). Inside an alternative `#` is
 //! the number, and other placeholders work as usual:
 //!
 //! ```text

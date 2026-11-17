@@ -76,8 +76,8 @@ fn button(ui: Ui, size: Scale, label: &'static str, act: fn(Ui)) -> impl IntoEle
 pub(crate) fn sheet_field(ui: Ui, size: Scale) -> Input {
     ui_kit::field(size, input())
         .border_1()
-        .border_color(move || rgb(ui.theme.with(|t| t.accent.light)))
-        .bg(move || rgb(ui.theme.with(|t| t.background.window)))
+        .border_color(move || rgb(ui.app.theme.with(|t| t.accent.light)))
+        .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
 }
 
 /// A text sheet's frame: near the top (the keyboard takes the lower

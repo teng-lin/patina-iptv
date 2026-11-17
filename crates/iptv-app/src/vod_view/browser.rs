@@ -53,7 +53,7 @@ fn navigation(ui: Ui, size: Scale) -> View {
         })
         .h_full()
         .flex_shrink_0()
-        .bg(move || rgb(ui.theme.with(|t| t.background.panel)))
+        .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
         .py(move || size.px(24.0))
         .gap(move || size.px(10.0))
         .child(
@@ -491,7 +491,7 @@ fn poster(
         .child(
             view()
                 .h(move || px(width.get() * 1.5))
-                .bg(move || rgb(ui.theme.with(|t| t.background.panel)))
+                .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
                 .child(
                     when(
                         move || {
@@ -540,7 +540,7 @@ fn poster(
                         .bottom(move || size.px(6.0))
                         .px(move || size.px(4.0))
                         .rounded(move || size.px(3.0))
-                        .bg(move || rgb(ui.theme.with(|t| t.accent.main)))
+                        .bg(move || rgb(ui.app.theme.with(|t| t.accent.main)))
                         .text_color(rgb(crate::theme::LIST_TEXT))
                     },
                 )),
@@ -561,7 +561,7 @@ fn poster(
                     rgb(if focused() {
                         crate::theme::FOCUSED_CELL
                     } else {
-                        ui.theme.with(|t| t.background.panel)
+                        ui.app.theme.with(|t| t.background.panel)
                     })
                 }),
         )
@@ -706,7 +706,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         }
     });
     view().absolute().inset_0().pt_safe_area().pb_safe_area().flex_row()
-        .test_id("vod-screen").bg(move || rgb(ui.theme.with(|t| t.background.window)))
+        .test_id("vod-screen").bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
         .accessibility_elements_hidden(move || crate::overlays::Overlay::Vod.accessibility_covered(ui))
         .child(when(move || ui.vod.with(|s| s.categories_open), move || navigation(ui, size))).child(categories(ui, size))
         .child(view().flex_1().min_w(px(0.0)).px(move || size.px(30.0))

@@ -1542,7 +1542,7 @@ fn suspend_requires_shell_authorization_before_decoding_again() {
     p.inner.suspend(); // already
     p.set(
         "source",
-        json!({ "url": "http://stream.example.test/two.ts" }),
+        json!({ "url": "http://stream.example.test/two.ts", "token": 8 }),
     );
     assert!(
         !p.inner.state.borrow().deferred,
@@ -1554,14 +1554,15 @@ fn suspend_requires_shell_authorization_before_decoding_again() {
     assert!(!st.deferred, "resumption cannot open a retained URL");
     assert!(!st.shutter, "the last frame stays");
     drop(st);
-    assert_eq!(
-        p.events("error"),
-        [json!({"code":"ERROR_CODE_IO_UNSPECIFIED"})]
-    );
+    assert_eq!(p.events("reauthorize"), [json!({"token":8,"allowed":true})]);
     p.inner.resume(); // not suspended: nothing
     p.idle(None, 50);
-    assert_eq!(p.events("error").len(), 1);
+    assert_eq!(p.events("reauthorize").len(), 1);
     assert!(p.states().is_empty());
+    assert!(
+        p.events("error").is_empty(),
+        "foreground does not spend transport retry budget"
+    );
     p.set(
         "source",
         json!({"url":"http://stream.example.test/two.ts","token":9}),

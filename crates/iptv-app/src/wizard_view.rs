@@ -284,7 +284,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .pt_safe_area()
                 .items_center()
                 .justify_center()
-                .bg(move || rgb(ui.theme.with(|t| t.background.window)))
+                .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
                 .child(dynamic(move || {
                     let shown = screen.get();
                     // Built untracked: only a change of screen rebuilds it.
@@ -614,7 +614,7 @@ fn processing(ui: Ui) -> impl IntoElement {
                         .h_full()
                         .rounded(px(2.0))
                         .w(move || percentage(f32::from(percent().unwrap_or(0)) / 100.0))
-                        .bg(move || rgb(ui.theme.with(|t| t.accent.light))),
+                        .bg(move || rgb(ui.app.theme.with(|t| t.accent.light))),
                 ),
         )
         // OK does nothing here (no accidental cancel); Back or a tap cancels.

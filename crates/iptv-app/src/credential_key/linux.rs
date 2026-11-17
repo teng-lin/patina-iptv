@@ -50,4 +50,22 @@ impl Entry {
             .map_err(error)?;
         Ok(())
     }
+
+    #[cfg(test)]
+    pub(super) fn lock_collection(&self) -> Result<(), keyring::Error> {
+        self.0
+            .get_default_collection()
+            .map_err(error)?
+            .lock()
+            .map_err(error)
+    }
+
+    #[cfg(test)]
+    pub(super) fn delete_secret(&self) -> Result<(), keyring::Error> {
+        let found = self.0.search_items(attributes()).map_err(error)?;
+        for item in found.unlocked.iter().chain(&found.locked) {
+            item.delete().map_err(error)?;
+        }
+        Ok(())
+    }
 }

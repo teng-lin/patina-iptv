@@ -4,7 +4,7 @@
 //! - [`get`]: the effective settings, from any thread (the import threads
 //!   read the guide's refresh and storage settings).
 //! - [`read`]: the same inside a reactive closure; it subscribes to
-//!   `Ui::settings`, which [`set`] bumps after every change.
+//!   `Ui::app.settings`, which [`set`] bumps after every change.
 //! - [`set`]: validates and applies at once; the file is saved in the
 //!   background (`file_writer`), and a save that fails is reported and
 //!   undone, so the live settings never stay ahead of what a restart
@@ -36,6 +36,7 @@ use crate::theme::{ACCENTS, BACKGROUNDS, Theme};
 
 /// The settings the app acts on.
 pub const WIRED: &[&str] = &[
+    "remote.digit_timeout",
     "parental.live_enabled",
     "parental.vod_enabled",
     "parental.require_pin_for",
@@ -87,6 +88,8 @@ pub const WIRED: &[&str] = &[
 
 /// The commands the app runs (`settings_view::run`).
 pub const COMMANDS: &[&str] = &[
+    "history.clear",
+    "search.clear_history",
     "parental.change_pin",
     "recordings.quit_host",
     "recordings.background_status",
@@ -131,9 +134,6 @@ const NOT_OFFERED: &[&str] = &[
     "search.prefer_voice",
 ];
 
-/// Sections planned for later versions.
-const LATER: &[&str] = &["recordings.", "vod."];
-
 thread_local! { static REVISION: std::cell::Cell<Option<Signal<u64>>> = const { std::cell::Cell::new(None) }; }
 
 pub fn observe() {
@@ -176,6 +176,9 @@ pub fn offer(key: &str) -> Offer {
     if matches!(key, "general.backup" | "general.restore") && cfg!(target_os = "ios") {
         return Offer::NotYet;
     }
+    if NOT_OFFERED.contains(&key) {
+        return Offer::Hidden;
+    }
     if WIRED.contains(&key)
         || COMMANDS.contains(&key)
         || (key == keys::LONG_PRESS.as_str() && crate::input::LONG_PRESS)
@@ -186,12 +189,8 @@ pub fn offer(key: &str) -> Offer {
         Offer::Hidden
     } else if READ_ONLY.contains(&key) {
         Offer::ReadOnly
-    } else if NOT_OFFERED.contains(&key) {
-        Offer::Hidden
-    } else if LATER.iter().any(|p| key.starts_with(p)) {
-        Offer::Later
     } else {
-        Offer::NotYet
+        Offer::Hidden
     }
 }
 
@@ -202,7 +201,7 @@ pub fn get() -> std::sync::Arc<iptv_settings::Settings> {
 
 /// [`get`], subscribing the calling reactive closure to changes.
 pub fn read(ui: Ui) -> Arc<Settings> {
-    ui.settings.get();
+    ui.app.settings.get();
     get()
 }
 
@@ -291,7 +290,9 @@ pub fn overlay_alpha(s: &Settings) -> u8 {
 /// Applies the settings that live in `Ui` state: colours and panel
 /// timeouts, now and after every change.
 pub fn bind(ui: Ui) {
-    REVISION.with(|r| r.set(Some(ui.settings)));
+    REVISION.with(|r| r.set(Some(ui.app.settings)));
+    #[cfg(target_os = "android")]
+    effect(move || crate::recording_host::set_language(crate::i18n::language().tag));
     let last_mode = std::cell::Cell::new(None);
     effect(move || {
         let s = read(ui);
@@ -300,7 +301,7 @@ pub fn bind(ui: Ui) {
         let changed = last_mode.replace(Some(mode)) != Some(mode);
         let span = s.int(iptv_settings::keys::GUIDE_VISIBLE_MINUTES, &Target::Global) as i32;
         untracked(|| {
-            ui.theme.set(theme);
+            ui.app.theme.set(theme);
             if ui.focus.with_untracked(|f| f.visible) != span {
                 let view = crate::lists::view(ui);
                 ui.focus.update(|f| f.set_visible(span, &view));
@@ -366,7 +367,7 @@ mod tests {
         assert_eq!(offer("vod.sort"), Offer::Active);
         assert_eq!(offer("parental.live_enabled"), Offer::Active);
         assert_eq!(offer("parental.change_pin"), Offer::Active);
-        assert_eq!(offer("history.keep_days"), Offer::NotYet);
+        assert_eq!(offer("history.keep_days"), Offer::Hidden);
         assert_eq!(offer("remote.key_overrides"), Offer::ReadOnly);
         let pip = if cfg!(target_os = "android") {
             Offer::Active

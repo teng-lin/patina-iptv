@@ -37,6 +37,7 @@ pub mod parental;
 pub mod recordings;
 pub mod vod;
 pub use error::Error;
+pub use store_service::StoreQueueStats;
 #[cfg(feature = "test-support")]
 mod testing;
 #[cfg(feature = "test-support")]
@@ -120,9 +121,7 @@ pub struct Runtime {
         std::sync::Arc<std::sync::Mutex<Option<(iptv_net::NetConfig, iptv_net::NetClient)>>>,
     backup_busy: Cell<bool>,
     backup_progress: Cell<backup::Progress>,
-    search_indexes: Slot<RefCell<search::Indexes>>,
-    saved_search: Slot<RefCell<Option<Vec<String>>>>,
-    pending_search: Slot<Cell<u64>>,
+    search: search::State,
     favorites: Slot<RefCell<favorites::State>>,
     favorite_writer: Slot<RefCell<Option<std::sync::mpsc::Sender<favorites::Write>>>>,
     favorite_unsaved: std::sync::Arc<std::sync::atomic::AtomicUsize>,
@@ -190,9 +189,7 @@ impl Runtime {
             link_client: Default::default(),
             backup_busy: Cell::new(false),
             backup_progress: Cell::new(backup::Progress::Idle),
-            search_indexes: Slot::default(),
-            saved_search: Slot::default(),
-            pending_search: Slot::default(),
+            search: search::State::default(),
             favorites: Slot::default(),
             favorite_writer: Slot::default(),
             favorite_unsaved: Default::default(),

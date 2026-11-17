@@ -112,7 +112,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
     scroll_to_focus_on_new_list(ui, rows);
     view()
         .flex_1()
-        .bg(move || ui.surface(ui.theme.with(|t| t.background.window)))
+        .bg(move || ui.surface(ui.app.theme.with(|t| t.background.window)))
         .child(ruler::ruler(ui, size, column, pan, now_x, width))
         .child(
             wheel::trackball(
@@ -154,7 +154,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
                                     )
                                     .left(move || px(now_x.get().unwrap_or(0.0) - NOW_W / 2.0))
                                     .bind_translate_x(&pan.offset())
-                                    .bg(move || rgb(ui.theme.with(|t| t.guide().now_line)))
+                                    .bg(move || rgb(ui.app.theme.with(|t| t.guide().now_line)))
                                     .child(
                                         view()
                                             .absolute()
@@ -211,7 +211,7 @@ fn hint_card(ui: Ui) -> impl IntoElement {
         .py(px(12.0))
         .gap(px(4.0))
         .rounded(px(RADIUS))
-        .bg(move || tint(ui.theme.with(|t| t.background.alt), 0xF0))
+        .bg(move || tint(ui.app.theme.with(|t| t.background.alt), 0xF0))
         .accessibility_elements_hidden(move || !shown())
         .opacity(move || if shown() { 1.0_f32 } else { 0.0 })
         .pointer_events(PointerEvents::None)

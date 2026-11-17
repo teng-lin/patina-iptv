@@ -241,6 +241,49 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
         step(app.press("id:auxiliary-player-1 >> label:Video"));
     }
 
+    // Main-window on-demand browsing must never become the auxiliary window's
+    // invisible overlay or capture its keyboard. Both catalogue kinds use VOD.
+    for section in ["Movies", "Shows"] {
+        step(app.right_click("id:guide-ui >> label:Local A"));
+        step(app.back());
+        step(app.wait_for_gone("text:Watch in new window", Duration::from_secs(3)));
+        assert!(app.window_state("player-window-1").unwrap().is_some());
+        step(app.press_key("tab"));
+        step(app.press_key("left"));
+        step(app.press(&format!("id:navigation-rail >> label:{section}")));
+        step(app.wait_for("id:vod-screen"));
+        step(app.hover("id:auxiliary-player-1 >> label:Video"));
+        if !app
+            .screen()
+            .matches("id:auxiliary-player-1 >> label:Play or pause")
+            .unwrap()
+        {
+            step(app.press("id:auxiliary-player-1 >> label:Video"));
+        }
+        step(app.wait_for("id:auxiliary-player-1 >> label:Play or pause"));
+        step(app.press("id:auxiliary-player-1 >> label:Play or pause"));
+        app.settle();
+        assert_eq!(prop(&props, 1, "paused"), json!(true));
+        assert_eq!(prop(&props, 0, "paused"), json!(false));
+        step(app.press_key("space"));
+        app.settle();
+        assert_eq!(prop(&props, 1, "paused"), json!(false));
+        assert_eq!(prop(&props, 0, "source"), main_source);
+        assert_eq!(prop(&props, 1, "source"), auxiliary_source);
+        assert_eq!(player_node(&props, 1), auxiliary_node);
+        assert!(app.screen().matches("id:vod-screen").unwrap());
+        step(app.press("id:vod-screen >> label:Close"));
+        step(app.wait_for_gone("id:vod-screen", Duration::from_secs(3)));
+    }
+    step(app.hover("id:auxiliary-player-1 >> label:Video"));
+    if !app
+        .screen()
+        .matches("id:auxiliary-player-1 >> label:Subtitles and tracks")
+        .unwrap()
+    {
+        step(app.press("id:auxiliary-player-1 >> label:Video"));
+    }
+
     // Native track events and the original chooser route back to B only.
     app.engine().control().dispatch_event(
         auxiliary_node,

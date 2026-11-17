@@ -275,6 +275,7 @@ class PlayerContractTest {
                 PlayerEvent.State(PlayerState.READY),
                 PlayerEvent.State(PlayerState.ENDED),
                 PlayerEvent.Size(1280, 720),
+                PlayerEvent.Reauthorize(37L, true),
                 PlayerEvent.Error("ERROR_CODE_IO_BAD_HTTP_STATUS", 404),
                 PlayerEvent.Error("ERROR_CODE_IO_NETWORK_CONNECTION_FAILED"),
                 PlayerEvent.Position(4000L),

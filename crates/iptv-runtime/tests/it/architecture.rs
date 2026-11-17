@@ -64,6 +64,7 @@ const STORE_ADAPTER_USERS: &[&str] = &[
     "parental.rs",
     "private_files.rs",
     "recordings.rs",
+    "recordings/completion.rs",
     "recordings/shared.rs", // Owned transport preparation queues durable authority reads.
     "recordings/shared_tests.rs", // Synthetic ownership and authority fixtures.
     "recordings/tests.rs",

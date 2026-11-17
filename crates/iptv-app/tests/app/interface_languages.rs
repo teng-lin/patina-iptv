@@ -128,7 +128,7 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     let language_help =
         "Interface language: `system` follows the device, otherwise a language tag.";
     shown(app, &Words::of("es").t(language_help).replace('`', ""));
-    shown(app, &Words::of("es").t("Keep history for"));
+    shown(app, &Words::of("es").t("Clear history"));
     // Accessibility labels of mounted views follow: the rail's item, the
     // video's tap target and the chooser's backdrop.
     step(app.wait_for("label:Ajustes"));
@@ -148,7 +148,7 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     step(app.wait_for("text:直播電視"));
     step(app.wait_for("text:啟動時播放上次頻道"));
     shown(app, &Words::of("zh-Hant").t(language_help).replace('`', ""));
-    shown(app, &Words::of("zh-Hant").t("Keep history for"));
+    shown(app, &Words::of("zh-Hant").t("Clear history"));
     step(app.wait_for("label:關閉選擇器"));
     let path = fixture.path.parent().unwrap().join("settings.json");
     let stored = personalization::saved_settings(app, &path, |settings| {
@@ -392,7 +392,7 @@ fn backup_remote_keys_and_the_clock_speak_the_interface_language() {
     assert_eq!(title, ja.t("Back up Patina"));
     assert_eq!(
         message,
-        ja.t("The backup includes playlist logins and passwords, settings, channel arrangements, history and cached guide data. Keep the file private.")
+        ja.t("The unencrypted backup includes playlist logins and passwords, settings, channel arrangements, history and cached guide data. Keep the file private.")
     );
     assert_eq!(buttons, [ja.t("Cancel"), ja.t("Choose file…")]);
     // Restoring explains itself before any file is chosen.
@@ -647,7 +647,11 @@ fn cjk_settings_help_and_live_language_labels_do_not_fall_back_to_english() {
     let ja = Words::of("ja");
     rail(app);
     step(app.press(&format!("label:{}", ja.t("Settings"))));
-    shown(app, &ja.t("Keep history for"));
+    shown(app, &ja.t("Clear history"));
+    assert!(
+        !app.shows(&ja.t("Keep history for")),
+        "unsupported history retention is hidden"
+    );
     // A focused row's explanation uses the same locale, not the schema's English.
     let summary = "Start playing the channel that was on when the app was last closed.";
     press(app, &ja.t("Play the last channel on start"));

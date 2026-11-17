@@ -199,7 +199,7 @@ fn focused(ui: Ui, pane: Pane) -> bool {
 
 pub fn layer(ui: Ui) -> impl IntoElement {
     effect(move || {
-        ui.data_version.get();
+        ui.app.data_version.get();
         if untracked(|| is_open(ui)) {
             untracked(|| refresh_catalog(ui));
         }
@@ -221,14 +221,14 @@ fn screen(ui: Ui) -> impl IntoElement {
     let groups = element_ref();
     let row = computed(move || state(ui, ChannelPicker::row).flatten());
     let entry = computed(move || {
-        ui.data_version.get();
+        ui.app.data_version.get();
         state(ui, |p| p.entry(&*catalog(ui))).unwrap_or(0)
     });
     // A touch scroll does not move selection. Changing the group or query must
     // reveal it again even when the selected channel still occupies the same
     // row (or a query keeps the exact same results).
     let scroll_target = computed(move || {
-        ui.data_version.get();
+        ui.app.data_version.get();
         let catalog = catalog(ui);
         state(ui, |p| {
             let row = p.row()?;
@@ -269,7 +269,7 @@ fn screen(ui: Ui) -> impl IntoElement {
                         .child(ui_kit::heading(size, move || tr("Groups")))
                         .child(
                             virtual_list(
-                                move || { ui.data_version.get(); entry_count(&*catalog(ui)) },
+                                move || { ui.app.data_version.get(); entry_count(&*catalog(ui)) },
                                 move |at| group_row(ui, at, size, entry),
                             ).element_ref(&groups).estimated_item_size(list_rows::pitch(size, ROW)).flex_1(),
                         ),
@@ -277,7 +277,7 @@ fn screen(ui: Ui) -> impl IntoElement {
                 .child(
                     view().flex_1().gap(move || size.px(8.0))
                         .child(ui_kit::heading(size, move || {
-                            ui.data_version.get();
+                            ui.app.data_version.get();
                             let catalog = catalog(ui);
                             state(ui, |p| {
                                 let name = entry_name(p.entry(&*catalog), &*catalog);
@@ -405,7 +405,7 @@ fn group_row(ui: Ui, at: Position, size: Scale, entry: Memo<usize>) -> impl Into
         })
         .child(
             list_rows::name(size, move || {
-                ui.data_version.get();
+                ui.app.data_version.get();
                 group_name(ui, at.index())
             })
             .text_color(move || mark().text()),

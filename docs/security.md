@@ -129,3 +129,59 @@ handles (unlike Unix). Pending/previous restore directories still provide
 restart recovery; directory metadata durability across sudden power loss is
 not guaranteed. Legacy encryption closes its SQLite handle before replacing
 the database on Windows, under the application's process-lifetime instance lock.
+
+
+## Artwork and provider-selected destinations
+
+Artwork passes through the public-address/DNS-pinning transport before NSH sees
+bytes. Each response is capped at 4 MiB. Raster headers must describe nonzero
+sizes of at most 8,192 pixels per side and 16,777,216 pixels total before reaching
+a native decoder. This bounds one raster canvas, not all frames of an animation;
+NSH's shared decoded-image budget remains responsible for cached frames. Malformed
+or unsupported headers use the placeholder. SVG uses NSH's bounded parser and
+rasterizer, with external files, remote references and embedded images disabled.
+
+A public Xtream account keeps public-address checks enabled for its generated
+stream URLs. A deliberately selected LAN account permits its own scheme, host
+and effective port only; another origin does not inherit that exception. Stalker
+uses its private-portal/owned-host policy. Playlist-supplied direct links remain
+untrusted content. Redirect and subresource transport checks still apply. Explicit
+HTTP media remains unencrypted on the network even though catalog storage is encrypted.
+The compile-time `IPTV_RS_DEV_PLAYLIST` fixture hook is absent from release builds.
+
+## Export, recordings and local authority
+
+Portable exports are unencrypted, including their credential-bearing database;
+the export dialog says so before choosing the destination. Recorded media is
+also unencrypted content in the user's selected directory. Catalog encryption
+protects recording metadata, not video files. Completion receipts live inside the
+encrypted database and bind a recording to its source incarnation and retained
+file digest. The application does not persist stream URLs in those receipts.
+
+Parental controls govern actions inside Patina; they are not an OS security
+boundary against a user who can inspect process memory, replace app binaries or
+manage the credential broker. Android private data/Keystore backup rules do not
+make a portable export encrypted. Other OS backup tools may copy app files;
+restoring encrypted files alone cannot reconstruct a lost platform credential.
+Keep an intentionally exported portable backup separately and protect it as a
+credential. No automatic telemetry or support upload is enabled.
+
+## Native assumptions and dependency exceptions
+
+The libmpv client header requires process-wide `LC_NUMERIC=C`. Current Unix
+initialization sets it once before the first mpv handle; that does **not** prove
+other GTK or network threads cannot read the locale concurrently. A safe move
+requires tracing toolkit startup on every native host. This follow-up does not
+claim that `Once` establishes that missing precondition, and retains the current
+behavior pending a separately tested host initialization change. The native
+teardown ownership decision likewise remains evidence-led; it is not replaced
+by an unproven detached destructor.
+
+The `RUSTSEC-2026-0192` exception in `deny.toml` covers the transitive NSH font
+parser's maintenance status. Owner: NSH dependency maintainer (repository
+maintainers until assigned). Review by 2026-12-16, and whenever NSH changes;
+remove it after the tracked skrifa migration and full text/render validation.
+The pinned Rust, NSH, mpv/FFmpeg and platform dependency inventories are in
+`tools/ci/pins.py`, the Cargo lockfiles and platform build manifests. An advisory
+exception is scoped acceptance, not a claim that all native dependencies are
+vulnerability-free.

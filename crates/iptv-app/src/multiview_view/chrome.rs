@@ -37,7 +37,7 @@ fn target() -> f32 {
 }
 
 fn panel(ui: Ui) -> Rgba {
-    tint(ui.theme.with(|t| t.background.panel), PANEL_ALPHA)
+    tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA)
 }
 
 /// Add screen (or the device's limit) and Exit multiview, at the top
@@ -130,7 +130,7 @@ pub fn tile_buttons(ui: Ui, index: usize) -> impl IntoElement {
     let several = move || with_state(ui, |m| m.tiles().len() > 1).unwrap_or(false);
     let shown = computed(move || multiview::chrome_shows(ui) && several());
     let name = move || {
-        ui.data_version.get();
+        ui.app.data_version.get();
         with_state(ui, |m| {
             m.tiles().get(index).map(|t| channel_name(t.channel))
         })

@@ -225,6 +225,14 @@ internal sealed class PlayerEvent(
         override fun data(): Map<String, Any?> = mapOf("width" to width, "height" to height)
     }
 
+    /** Fresh foreground authority, never a synthetic transport error. */
+    data class Reauthorize(
+        val token: Long,
+        val allowed: Boolean,
+    ) : PlayerEvent("reauthorize") {
+        override fun data(): Map<String, Any?> = mapOf("token" to token, "allowed" to allowed)
+    }
+
     /** Media3's error code name, and the HTTP status behind it if a server answered one. */
     data class Error(
         val code: String,

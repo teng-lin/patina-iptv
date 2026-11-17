@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recording_channel">Enregistrements programmés</string>
+    <string name="recording_title">Patina enregistre</string>
+    <string name="recording_background">Votre enregistrement programmé continue en arrière-plan</string>
+</resources>

@@ -65,6 +65,7 @@ mod organise;
 mod overlay;
 pub mod parental;
 mod recordings;
+pub use recordings::RecordingCompletion;
 mod search;
 mod search_history;
 mod source_settings;

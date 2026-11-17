@@ -52,15 +52,15 @@ pub fn number(ui: Ui, channel: usize) -> u32 {
 /// with imported movies or shows.
 pub fn rail(ui: Ui) -> Vec<RailItem> {
     rail_items(VodAvailability {
-        shown: ui.has_vod.get(),
-        any: ui.any_vod.get(),
+        shown: ui.app.has_vod.get(),
+        any: ui.app.any_vod.get(),
     })
 }
 
 fn rail_untracked(ui: Ui) -> Vec<RailItem> {
     rail_items(VodAvailability {
-        shown: ui.has_vod.get_untracked(),
-        any: ui.any_vod.get_untracked(),
+        shown: ui.app.has_vod.get_untracked(),
+        any: ui.app.any_vod.get_untracked(),
     })
 }
 
@@ -75,7 +75,7 @@ pub fn entry_name(entry: usize, catalog: &dyn Schedule) -> String {
 
 /// The name of the list on screen.
 pub fn list_name(ui: Ui) -> String {
-    ui.data_version.get();
+    ui.app.data_version.get();
     let entry = ui.list.with(|l| l.entry());
     entry_name(entry, &*crate::schedule())
 }

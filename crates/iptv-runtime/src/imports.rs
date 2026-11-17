@@ -1045,4 +1045,8 @@ pub(crate) fn network_due(services: &Services, id: SourceId, purpose: Purpose) -
         .unwrap_or(true)
 }
 
+/// Synthetic development fixture hook; never embedded in release builds.
+#[cfg(debug_assertions)]
 pub const DEV_PLAYLIST: Option<&str> = option_env!("IPTV_RS_DEV_PLAYLIST");
+#[cfg(not(debug_assertions))]
+pub const DEV_PLAYLIST: Option<&str> = None;

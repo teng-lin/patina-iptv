@@ -170,7 +170,8 @@ class Integration(unittest.TestCase):
         script = (ROOT / "tools/ci/android-smoke.sh").read_text()
         self.assertNotRegex(script, r"\$adb(?:\s|$)")
         self.assertIn("adb() {", script)
-        self.assertEqual(script.count('--diagnostic-fd 3 -- adb'), 2)
+        self.assertEqual(script.count('--diagnostic-fd 3 -- adb'), 1)
+        self.assertIn('--diagnostic-fd 3 -- adb -s "$serial"', script)
         self.assertIn('phase="failure diagnostics"', script)
         self.assertIn("phase=cleanup", script)
         self.assertIn('step() { phase=$*;', script)
@@ -224,7 +225,7 @@ with open("adb-calls.jsonl", "a") as stream: stream.write(json.dumps(sys.argv[1:
                 self.assertEqual((root / "second-run").exists(), system_crash)
                 if system_crash:
                     calls = [json.loads(line) for line in (root / "adb-calls.jsonl").read_text().splitlines()]
-                    self.assertEqual(calls, [["reboot"], ["wait-for-device"]])
+                    self.assertEqual(calls, [["-s", "emulator-5554", "reboot"], ["-s", "emulator-5554", "wait-for-device"]])
                 else:
                     self.assertFalse((root / "adb-calls.jsonl").exists())
 

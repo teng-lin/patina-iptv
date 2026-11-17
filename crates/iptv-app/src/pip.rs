@@ -172,7 +172,7 @@ pub fn prop(ui: Ui, surface: usize) -> Option<iptv_player_mpv::PipProps> {
     if surface != 0 {
         return None;
     }
-    ui.settings.get();
+    ui.app.settings.get();
     let on_leave = OnLeave::from_key(crate::settings::choice(PIP_ON_LEAVE));
     let playing = playing(ui);
     let (auto, enter, window) = ui

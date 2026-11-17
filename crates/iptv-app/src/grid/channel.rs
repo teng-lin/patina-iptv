@@ -46,7 +46,7 @@ pub(super) fn cell(
     let playing = move || channel.get().is_some() && ui.playing.get() == channel.get();
     let colour = move || {
         if playing() {
-            rgb(ui.theme.with(|t| t.guide().playing))
+            rgb(ui.app.theme.with(|t| t.guide().playing))
         } else {
             rgb(BRIGHT_TEXT)
         }
@@ -123,7 +123,7 @@ pub(super) fn cell(
                 .h(move || px(size.whole(CELL_H)))
                 .p(move || size.px(if show_logo() { LOGO_PAD } else { 0.0 }))
                 .rounded(move || size.px(CELL_RADIUS))
-                .bg(move || fill(ui, ui.theme.with(|t| t.guide().cell)))
+                .bg(move || fill(ui, ui.app.theme.with(|t| t.guide().cell)))
                 .items_center()
                 .justify_center()
                 .child(
@@ -142,7 +142,7 @@ pub(super) fn cell(
                 let Some(ch) = channel.get() else {
                     return String::new();
                 };
-                let star = ui.favorites.with(|f| f.contains(&ch));
+                let star = ui.app.favorites.with(|f| f.contains(&ch));
                 let name = format!("{}{}", if star { "★ " } else { "" }, channel_name(ch));
                 let scale = size.get();
                 crate::fonts::fit(
@@ -163,7 +163,7 @@ pub(super) fn cell(
             // The playing marker, after the name.
             text(move || if playing() { "▶" } else { "" })
                 .text_size(move || size.text_px(CHANNEL * 0.6))
-                .text_color(move || rgb(ui.theme.with(|t| t.guide().playing))),
+                .text_color(move || rgb(ui.app.theme.with(|t| t.guide().playing))),
         )
 }
 

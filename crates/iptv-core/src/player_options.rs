@@ -59,26 +59,35 @@ impl PictureSize {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct PictureSettings {
     pub all: PictureSize,
-    pub per_channel: BTreeMap<usize, PictureSize>,
+    /// Opaque stable identities scoped by source and content, never list offsets.
+    pub per_channel: BTreeMap<String, PictureSize>,
 }
 
 impl PictureSettings {
-    pub fn for_channel(&self, channel: usize) -> PictureSize {
-        self.per_channel.get(&channel).copied().unwrap_or(self.all)
+    /// Missing live identity (such as on-demand playback) uses the global size.
+    pub fn for_channel(&self, channel: Option<&str>) -> PictureSize {
+        channel
+            .and_then(|key| self.per_channel.get(key))
+            .copied()
+            .unwrap_or(self.all)
     }
 
-    /// Choosing a size applies to the playing channel only.
-    pub fn set_channel(&mut self, channel: usize, size: PictureSize) {
+    /// Chooses a size for a live identity, or the global default without one.
+    pub fn set_channel(&mut self, channel: Option<&str>, size: PictureSize) {
+        let Some(channel) = channel else {
+            self.all = size;
+            return;
+        };
         if size == self.all {
-            self.per_channel.remove(&channel);
+            self.per_channel.remove(channel);
         } else {
-            self.per_channel.insert(channel, size);
+            self.per_channel.insert(channel.to_owned(), size);
         }
     }
 
     /// "Apply to all channels": the channel's size becomes everyone's, and
     /// per-channel choices are cleared.
-    pub fn apply_to_all(&mut self, channel: usize) {
+    pub fn apply_to_all(&mut self, channel: Option<&str>) {
         self.all = self.for_channel(channel);
         self.per_channel.clear();
     }
@@ -163,18 +172,35 @@ mod tests {
     #[test]
     fn picture_size_is_per_channel_until_applied_to_all() {
         let mut p = PictureSettings::default();
-        p.set_channel(3, PictureSize::Zoom);
-        assert_eq!(p.for_channel(3), PictureSize::Zoom);
-        assert_eq!(p.for_channel(4), PictureSize::Normal);
-        p.apply_to_all(3);
+        p.set_channel(Some("source:3:channel"), PictureSize::Zoom);
+        assert_eq!(p.for_channel(Some("source:3:channel")), PictureSize::Zoom);
+        assert_eq!(p.for_channel(Some("source:4:channel")), PictureSize::Normal);
+        p.apply_to_all(Some("source:3:channel"));
         assert_eq!(
-            (p.for_channel(4), p.per_channel.len()),
+            (p.for_channel(Some("source:4:channel")), p.per_channel.len()),
             (PictureSize::Zoom, 0)
         );
-        p.set_channel(4, PictureSize::Zoom);
+        p.set_channel(Some("source:4:channel"), PictureSize::Zoom);
         assert!(
             p.per_channel.is_empty(),
             "same as everyone's: no override kept"
+        );
+    }
+
+    #[test]
+    fn missing_live_identity_uses_global_without_aliasing_a_channel() {
+        let mut p = PictureSettings::default();
+        p.set_channel(Some("source:1:same-name"), PictureSize::Zoom);
+        p.set_channel(Some("source:2:same-name"), PictureSize::Full);
+        assert_eq!(p.for_channel(None), PictureSize::Normal);
+        p.set_channel(None, PictureSize::Reduced);
+        assert_eq!(p.for_channel(None), PictureSize::Reduced);
+        assert_eq!(p.for_channel(Some("source:1:same-name")), PictureSize::Zoom);
+        assert_eq!(p.for_channel(Some("source:2:same-name")), PictureSize::Full);
+        p.apply_to_all(None);
+        assert_eq!(
+            p.for_channel(Some("source:1:same-name")),
+            PictureSize::Reduced
         );
     }
 

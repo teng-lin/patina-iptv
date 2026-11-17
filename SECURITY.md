@@ -47,6 +47,10 @@ transport rules for provider and playback traffic, and what backups contain.
 
 ## Verifying a download
 
-Releases carry `SHA256SUMS` and build provenance attestations.
+Releases carry `SHA256SUMS`; the automated pipeline additionally requires build
+provenance before publication. Releases up to v0.1.1 predate this guarantee.
+v0.1.4 (including its separate macOS release) is a documented exception: the
+November 17, 2026 audit found release-membership attestations, not release-workflow
+build provenance. Do not infer build origin from a release-membership predicate.
 [docs/release.md](docs/release.md#checksums-provenance-and-sbom) shows how to
 verify that a file was built by this repository's release workflow.

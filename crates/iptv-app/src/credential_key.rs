@@ -181,6 +181,16 @@ mod tests {
             std::env::var("IPTV_TEST_ISOLATED_BROKER").as_deref(),
             Ok("1")
         );
+        if std::env::var_os("IPTV_TEST_BROKER_UNAVAILABLE_CHILD").is_some() {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("iptv.sqlite");
+            assert!(database_key(&path).is_err());
+            assert!(
+                !path.exists(),
+                "broker failure must not create a plaintext catalog"
+            );
+            return;
+        }
         let directory = tempfile::tempdir().unwrap();
         let owner = || {
             std::rc::Rc::new(crate::runtime::Runtime::new(crate::runtime::Ports::new(
@@ -202,11 +212,77 @@ mod tests {
         let saved = block_on(crate::runtime::commands::combined_resume_key(&second)).unwrap();
         assert_eq!(saved.as_deref(), Some("synthetic-secret"));
         assert!(second.drain_services());
+        drop(second);
+        let path = directory.path().join("iptv.sqlite");
+        let encrypted = std::fs::read(&path).unwrap();
         assert!(
-            !std::fs::read(directory.path().join("iptv.sqlite"))
-                .unwrap()
+            !encrypted
                 .windows(16)
                 .any(|bytes| bytes == b"synthetic-secret")
         );
+
+        let entry = linux::Entry::new("org.iptv-rs.database", "catalog-v1").unwrap();
+        let original = zeroize::Zeroizing::new(entry.get_secret().unwrap());
+        let assert_closed = || {
+            let failed = owner();
+            failed.start_services();
+            assert!(block_on(crate::runtime::commands::combined_resume_key(&failed)).is_err());
+            assert!(failed.drain_services());
+            drop(failed);
+            assert_eq!(std::fs::read(&path).unwrap(), encrypted);
+        };
+        // These replacements are synthetic and occur only in the disposable broker.
+        entry.set_secret(&[b'0'; 64]).unwrap();
+        assert_closed();
+        entry.set_secret(b"invalid-key-encoding").unwrap();
+        assert_closed();
+        entry.delete_secret().unwrap();
+        assert_closed();
+        assert!(matches!(entry.get_secret(), Err(keyring::Error::NoEntry)));
+        entry.set_secret(&original).unwrap();
+        let restored = owner();
+        restored.start_services();
+        assert_eq!(
+            block_on(crate::runtime::commands::combined_resume_key(&restored))
+                .unwrap()
+                .as_deref(),
+            Some("synthetic-secret")
+        );
+        assert!(restored.drain_services());
+        drop(restored);
+
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "credential_key::tests::isolated_secret_service_persists_key_and_reopens_catalog",
+                "--ignored",
+            ])
+            .env("IPTV_TEST_BROKER_UNAVAILABLE_CHILD", "1")
+            .env(
+                "DBUS_SESSION_BUS_ADDRESS",
+                format!("unix:path={}/absent-bus", directory.path().display()),
+            )
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(45);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("missing-broker child exceeded its deadline");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(
+            status.success(),
+            "missing broker must fail closed in a fresh process"
+        );
+        // No unlock UI is available in the disposable session. The existing
+        // catalog must stay intact when its broker collection is locked.
+        entry.lock_collection().unwrap();
+        assert_closed();
     }
 }

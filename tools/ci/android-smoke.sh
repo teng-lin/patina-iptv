@@ -6,15 +6,16 @@
 # stop and reopen), and back to the guide. Fails on a crash, on a load the
 # player refused outside its playback relay, or on a step that never happens.
 #
-#   tools/ci/android-smoke.sh [serial] [apk]
+#   tools/ci/disposable-avd.py ~/.android/avd/tab36.avd <validation-debug.apk>
 #
 # Requires a JDK with javac (Java 11 target) and Android SDK build-tools d8.
 # The APK must be a debug build of a library made with the development
 # playlist, which also needs debug assertions for private fixture addresses:
 #
-#   CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true ABIS=x86_64 \
+#   IPTV_VALIDATION_APP_ID=com.hantekllc.iptvrs.validation \
+#     CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true ABIS=x86_64 \
 #     IPTV_RS_DEV_PLAYLIST=http://10.0.2.2:8089/iptv/playlist.m3u tools/sync-host.sh
-#   (cd hosts/android && ./gradlew assembleDebug)
+#   (cd hosts/android && IPTV_VALIDATION_APP_ID=com.hantekllc.iptvrs.validation ./gradlew assembleDebug)
 #
 # and the mock server must serve the fixtures on this machine's port 8089
 # (IPTV_SMOKE_PORT), which the emulator reaches as 10.0.2.2:
@@ -29,6 +30,10 @@
 set -euo pipefail
 export PATH="${ANDROID_HOME:-$HOME/Android/Sdk}/platform-tools:$PATH"
 serial=${1:-${ANDROID_SERIAL:-}}
+if [[ ! "$serial" =~ ^emulator-[0-9]+$ ]]; then
+  echo 'Smoke requires an explicit disposable emulator serial; use disposable-avd.py.' >&2
+  exit 2
+fi
 apk=${2:-}
 port=${IPTV_SMOKE_PORT:-8089}
 out=${IPTV_SMOKE_OUT:-target/android-smoke}
@@ -44,16 +49,28 @@ adb() {
     shell) [ "${2:-} ${3:-}" != "am start" ] || limit=60 ;;
   esac
   case "$phase" in "failure diagnostics"|cleanup) limit=5 ;; esac
-  if [ -n "$serial" ]; then
-    python3 "$adb_guard" --timeout "$limit" --phase "$phase" --category "$1" \
-      --diagnostic-fd 3 -- adb -s "$serial" "$@"
-  else
-    python3 "$adb_guard" --timeout "$limit" --phase "$phase" --category "$1" \
-      --diagnostic-fd 3 -- adb "$@"
-  fi
+  python3 "$adb_guard" --timeout "$limit" --phase "$phase" --category "$1" \
+    --diagnostic-fd 3 -- adb -s "$serial" "$@"
 }
-pkg=com.hantekllc.iptvrs
-act=$pkg/.host.TvActivity
+expected_avd=${IPTV_SMOKE_DISPOSABLE_AVD:-}
+if [[ ! "$expected_avd" =~ ^patina-validation-[a-zA-Z0-9_-]+$ ]]; then
+  echo 'Smoke requires an owned disposable AVD name from disposable-avd.py or CI.' >&2
+  exit 2
+fi
+actual_avd=$(adb emu avd name | tr -d '\r' | head -n 1)
+if [ "$actual_avd" != "$expected_avd" ]; then
+  echo 'Refusing device actions: serial does not identify the owned disposable AVD.' >&2
+  exit 2
+fi
+pkg=com.hantekllc.iptvrs.validation
+act=$pkg/com.hantekllc.iptvrs.host.TvActivity
+if [ -n "$apk" ]; then
+  analyzer=${ANDROID_HOME:-$HOME/Android/Sdk}/cmdline-tools/latest/bin/apkanalyzer
+  if [ "$("$analyzer" manifest application-id "$apk")" != "$pkg" ]; then
+    echo 'Refusing to install an APK without the dedicated validation application ID.' >&2
+    exit 2
+  fi
+fi
 mkdir -p "$out"
 rm -f "$out"/*.png "$out"/*.log
 
@@ -75,6 +92,14 @@ applog() { adb logcat -d -s nsh:I | tr -d '\r'; }
 # Keeps the logs so far ($out) and starts afresh.
 mark() {
   applog >> "$out/app.log"
+  # Dedicated fresh validation profile and synthetic media only. Preserve codec
+  # causes before clearing buffers; the app's redacted error code alone cannot
+  # distinguish an emulator renderer failure from a playback regression.
+  adb logcat -d -s MediaCodec:D CCodec:D Codec2Client:D ExoPlayerImplInternal:E '*:S' >> "$out/codec.log"
+  adb logcat -d -s ActivityTaskManager:I ActivityManager:I WindowManager:I '*:S' >> "$out/lifecycle.log"
+  adb logcat -b events -d -s wm_create_activity:I wm_destroy_activity:I wm_relaunch_resume_activity:I \
+    wm_restart_activity:I wm_resume_activity:I wm_on_destroy_called:I wm_on_create_called:I \
+    am_kill:I am_low_memory:I '*:S' > "$out/lifecycle-events.log"
   adb logcat -d -b crash >> "$out/crash.log"
   adb logcat -b main -b system -b crash -c
 }
@@ -333,14 +358,17 @@ pause 2
 shot 06-multiview
 
 step "background and resume"
+adb shell dumpsys activity -p "$pkg" activities > "$out/activities-before-home.log"
 mark
 keys KEYCODE_HOME
 wait_stopped 20
 echo "  ok: activity stopped"
 pause 3
 alive || fail "the app died in the background"
+adb shell dumpsys activity -p "$pkg" activities > "$out/activities-stopped.log"
 mark
 adb shell am start -W -n $act >/dev/null
+adb shell dumpsys activity -p "$pkg" activities > "$out/activities-resumed.log"
 expect 'iptv player 0 state: ready' 60
 expect 'iptv player 1 state: ready' 60
 shot 07-resumed

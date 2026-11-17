@@ -365,10 +365,7 @@ fn settings(app: &mut Headless, home: &Path) {
     step(app.wait_for("text:Write settings and customisations to a backup file."));
     step(app.press_key("down"));
     step(app.wait_for("text:Replace everything with a backup's contents."));
-    // Unavailable command rows still take remote focus; passing them does
-    // not invoke a command or open an editor.
-    step(app.press_key("down"));
-    step(app.press_key("down"));
+    // Globally unavailable command rows no longer interrupt navigation.
     step(app.press_key("down"));
     step(app.wait_for("text:Start playing the channel that was on when the app was last closed."));
     // A failed write is visible and leaves the live setting unchanged.
@@ -386,12 +383,9 @@ fn settings(app: &mut Headless, home: &Path) {
     step(app.press_key("enter"));
     row_value(app, "Play the last channel on start", "Off");
     saved(app, home, "general.resume_last_channel");
-    // Rows the app does not act on say so, and do nothing.
-    step(app.wait_for("text:Not available yet"));
-    step(app.press("text:On-screen keyboard"));
-    step(app.wait(Duration::from_millis(100)));
-    assert!(field_id(app.screen()).is_none(), "no editor for that row");
-    step(app.wait_for("text:Tap a page, then a setting to change it"));
+    // Unimplemented settings are absent on test and production configurations alike.
+    assert!(!app.screen().matches("text:On-screen keyboard").unwrap());
+    assert!(!app.screen().matches("text:Not available yet").unwrap());
 
     // Text: the entry sheet; too long a value is refused, a good one kept.
     step(app.press("text:User-Agent"));

@@ -9,6 +9,8 @@ subscriptions, so each selected lane runs once. Selection and the aggregate use
 |---|---|---|---|
 | Formatting, lint, dependency policy and CI helper tests | Relevant code/build changes; documentation-only changes run tier-contract tests | Full | Full |
 | Linux unit/integration correctness and doctests | Full suite for application/Rust changes | Full | Full |
+| iOS device/simulator adapters | Compile shared Rust/iOS input changes with verified MPVKit | Compile | Compile |
+| Production Linux credential broker | Credential/storage/build changes, isolated DBus and disposable keyring | Full | Full |
 | Nine portable crates built for wasm | Once, on Linux | Once, on Linux | Once, on Linux |
 | macOS/Windows | Compile all test targets, native player tests, Windows chrome tests, production app build | Full host suites | Full host suites |
 | Linux GTK PiP/context-loss and correlated first-render journeys | Ordinary host checks; no dependency on coverage | Full | Full |
@@ -106,3 +108,48 @@ runtime. All fixtures and network traffic are synthetic. Hosted CI uploads Cargo
 timing reports, coverage and performance reports. Compare critical-path duration
 and total runner-minutes after master caches warm; cold runs and queue time are
 not steady-state measurements.
+
+
+## Executable inputs and production-only behavior
+
+`docs/capabilities.md` is consumed by a core test and selects host validation;
+`docs/contributing.md` is consumed by helper tests and selects those tests. Changes
+to lint and line-length wrappers execute the wrappers in the host lane. Other
+prose-only changes retain inexpensive planner validation. Every workspace crate
+must have a coverage floor or a nonempty documented exemption; SQLCipher's small
+process-global initializer is explicitly exempt while its isolated store tests run.
+Linux also builds workspace rustdoc with warnings denied, keeping API links valid.
+
+The iOS lane prepares the checksum-pinned MPVKit frameworks and checks both device
+and simulator Rust targets without signing credentials. It establishes compilation,
+not simulator execution, signing or iPad playback. Linux production credential
+validation compiles without test-support, checks that the exact ignored broker test
+exists, then runs it inside a fresh D-Bus session and disposable Secret Service home.
+It never inherits the login bus, display or keyring. Package window startup remains
+separate from persistence/reopen evidence.
+
+Standalone host and Android jobs now have distinct display names; compatibility
+contexts continue to mirror the aggregate. Migration to the unique `validation`
+check remains a separate hosted setting change. Test a prose-only PR and a failing
+selected lane before removing old required contexts, and keep the previous
+protection configuration available for rollback.
+
+Full nightly and release tiers select every validation lane (shipping packaging
+replaces duplicate Android/desktop package lanes for releases). The release depends
+on the candidate's full validation, never a different nightly SHA. Workflow failures
+remain visible in Actions; maintainers should enable GitHub workflow-failure
+notifications and inspect the full nightly result before release preparation.
+No automatic issue posting or account notification setting is configured here.
+
+## Dependency update candidates
+
+Read-only inspection on November 17, 2026 confirmed Cargo Dependabot run
+43337334688 failed while fetching the sibling `../nsh` manifests; this was a
+file-fetch error, not a guessed resolver failure. The native Cargo Dependabot
+version-update entry is replaced by the weekly/manual `dependency-candidate.yml`.
+It checks out the pinned sibling, updates Cargo.lock, checks dependency policy and
+runs the host PR plan, then retains the candidate lockfile and patch even on failure.
+It has read-only permissions and never pushes, posts or opens a PR. Maintainers
+review the diff, reconcile generated shipping-runner locks and submit it through
+normal PR/native/package gates before adoption. Actions and Gradle updates remain
+on Dependabot. A workflow definition is not evidence its first scheduled run passed.

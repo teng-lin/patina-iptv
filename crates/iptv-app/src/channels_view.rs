@@ -184,7 +184,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     });
     let shown = std::cell::Cell::new(None);
     effect(move || {
-        let version = ui.data_version.get();
+        let version = ui.app.data_version.get();
         if shown.replace(Some(version)).is_some_and(|v| v != version) && untracked(|| is_open(ui)) {
             untracked(|| close(ui));
         }
@@ -209,7 +209,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     });
     let panel = move || {
         let alpha = if overlay() { 0xE0 } else { 0xFF };
-        tint(ui.theme.with(|t| t.background.panel), alpha)
+        tint(ui.app.theme.with(|t| t.background.panel), alpha)
     };
     let size = Scale::new();
     let heading = move |s: Box<dyn Fn() -> String>| {
@@ -231,7 +231,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .child(
             virtual_list(
                 move || {
-                    ui.data_version.get();
+                    ui.app.data_version.get();
                     entry_count(&*crate::schedule())
                 },
                 move |at| entry_row(ui, at, entry_focus, size),
@@ -337,7 +337,7 @@ fn entry_row(
         })
         .child(
             list_rows::name(size, move || {
-                ui.data_version.get();
+                ui.app.data_version.get();
                 let schedule = crate::schedule();
                 let name = entry_name(at.index(), &*schedule);
                 if let Entry::Group(g) = Entry::at(at.index())
@@ -361,7 +361,7 @@ fn channel_row(
     size: Scale,
 ) -> impl IntoElement {
     let entry = move || {
-        ui.data_version.get();
+        ui.app.data_version.get();
         let ch = ui.list.with(|l| l.channel(at.index()))?;
         let s = crate::schedule();
         let now = ui.focus.with(|f| f.now);
@@ -420,7 +420,7 @@ fn channel_row(
 /// In the guide header's type.
 fn preview_info(ui: Ui, size: Scale) -> impl IntoElement {
     let info = move || {
-        ui.data_version.get();
+        ui.app.data_version.get();
         let row = ui.channels.get()?.row;
         let ch = ui.list.with(|l| l.channel(row))?;
         let s = crate::schedule();

@@ -76,10 +76,12 @@ jobs:
           python tools/ci/sbom.py media-runtime target/mpv/components.json $output "$env:VERSION" `
             --platform windows --manifest tools/mpv-runtime/runtime.json
           if ($LASTEXITCODE -ne 0) { throw 'Media runtime SBOM failed.' }
+          python tools/ci/build-inventory.py "target/media-sbom/Patina-$env:VERSION-windows-build-environment.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Build inventory failed.' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: packages-windows-media-sbom
-          path: target/media-sbom/*.cdx.json
+          path: target/media-sbom/*
           if-no-files-found: error
       # Signed (or not) on a fresh runner that never builds code: windows-sign.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -116,6 +118,7 @@ jobs:
         id: config
         shell: bash
         env:
+          REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && inputs.rehearsal }}
           TENANT: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.AZURE_TENANT_ID != '' }}
           CLIENT: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.AZURE_CLIENT_ID != '' }}
           CLIENT_SECRET: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.AZURE_CLIENT_SECRET != '' }}
@@ -125,16 +128,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(find dist -type f | wc -l)" -eq 1
-          states="$TENANT $CLIENT $CLIENT_SECRET $ENDPOINT $ACCOUNT $PROFILE"
-          case "$states" in
-            *false*true*|*true*false*)
-              echo "Windows signing is partly configured ($states): set all six AZURE_* secrets or none" >&2
-              exit 1 ;;
-            *true*) echo "sign=true" >> "$GITHUB_OUTPUT" ;;
-            *)
-              echo "Authenticode credentials absent: the installer is released as an unsigned preview"
-              echo "sign=false" >> "$GITHUB_OUTPUT" ;;
-          esac
+          python tools/ci/signing-config.py windows
       - name: Sign the installer
         if: steps.config.outputs.sign == 'true'
         uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
@@ -285,11 +279,12 @@ jobs:
           python3 tools/ci/sbom.py media-runtime "$inventory" \
             "target/media-sbom/Patina-$VERSION-$PLATFORM-media-runtime-sbom.cdx.json" "$VERSION" \
             --platform "$PLATFORM" --manifest "tools/mpv-runtime-unix/runtime-$PLATFORM.json"
+          python3 tools/ci/build-inventory.py "target/media-sbom/Patina-$VERSION-$PLATFORM-build-environment.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: matrix.platform == 'linux' || matrix.platform == 'macos'
         with:
           name: packages-${{ matrix.platform }}-media-sbom
-          path: target/media-sbom/*.cdx.json
+          path: target/media-sbom/*
           if-no-files-found: error
       - name: Preserve prepared signing inputs
         if: matrix.platform != 'linux'
@@ -400,6 +395,7 @@ jobs:
       - name: macOS disk image
         env:
           IPTV_SIGNING_STAGE: '1'
+          REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && inputs.rehearsal }}
           MACOS_CERTIFICATE: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.MACOS_CERTIFICATE_BASE64 || '' }}
           MACOS_CERTIFICATE_PASSWORD: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
           MACOS_SIGN_IDENTITY: ${{ !(github.event_name == 'workflow_dispatch' && inputs.rehearsal) && secrets.MACOS_SIGN_IDENTITY || '' }}

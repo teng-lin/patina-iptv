@@ -579,15 +579,10 @@ class PlayerComponent(
         ticker.postDelayed(tick, 1_000)
         val what = reopen
         reopen = Reopen.NONE
-        val target = url ?: return
-        if (!allowed) {
-            emit(PlayerEvent.Error("ERROR_CODE_IO_BAD_HTTP_STATUS", 429))
-            return
-        }
-        // A retained URL is no longer authority to decode: a parental grant
-        // may have expired while away. Rust retries with fresh authorization,
-        // stream reservation and a new source token (and restores position).
-        if (what != Reopen.NONE) emit(PlayerEvent.Error("ERROR_CODE_IO_UNSPECIFIED"))
+        if (url == null) return
+        // Rust obtains fresh parental authority and a stream reservation; retained
+        // URLs never authorize reopening. Stop clears both url and reopen intent.
+        if (what != Reopen.NONE) emit(PlayerEvent.Reauthorize(token, allowed))
     }
 
     private fun applyHeaders() {

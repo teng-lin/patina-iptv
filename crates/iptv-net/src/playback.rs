@@ -1,13 +1,13 @@
 //! A per-player loopback transport. Every upstream fetch, including redirects
 //! and HLS/DASH subresources, scopes the stream's headers to the original
-//! stream's origin: another origin gets only what [`crate::cross_origin`]
+//! stream's origin: another origin gets only what `crate::cross_origin`
 //! allows. Players receive no identity headers. Media bodies stream; only
 //! manifests are buffered (at most 2 MiB). Dropping the owner cancels every
 //! open fetch.
 //!
 //! The relay serves only requests that name its capability, a random path.
-//! A peer has a second to send it ([`UNAUTHENTICATED`]) and is cut off as
-//! soon as its first bytes cannot become such a request ([`admit`]).
+//! A peer has a second to send it (`UNAUTHENTICATED`) and is cut off as
+//! soon as its first bytes cannot become such a request (`admit`).
 //! Absolute-form HTTP requests are admitted only when they name this
 //! relay and its capability. This does not constrain requests a player
 //! makes directly; manifest rewriting remains the native load boundary.
@@ -916,7 +916,7 @@ fn admit(head: &[u8], proxy: &str, capability: &str) -> Admission {
 }
 
 /// The request head of a connection that asks for the capability
-/// ([`admit`]); an error for every other, which closes it unanswered.
+/// (`admit`); an error for every other, which closes it unanswered.
 async fn read_request(socket: &mut TcpStream, session: &Session) -> io::Result<String> {
     let refused = || io::Error::other("Invalid local request");
     let accepted = tokio::time::Instant::now();

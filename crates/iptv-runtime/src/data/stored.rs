@@ -4,7 +4,7 @@
 //!
 //! A guide download streams into a stage file next to the store
 //! (`super::download_guide`, `crate::model::EpgStage`) and replaces
-//! the stored guide only once it loaded ([`replace`]); it is read back from
+//! the stored guide only once it loaded (`replace`); it is read back from
 //! the store without descriptions (a few MiB for thousands of channels
 //! instead of the parsed feed's hundreds); the guide's details read a
 //! description on demand ([`description_lookup`]).
@@ -18,12 +18,12 @@
 //!
 //! The guides to download are the playlist's guide sources (`guides.rs`,
 //! kept in the store); the channels whose guide the user chose by hand
-//! (`assign.rs`) are matched with those choices ([`overrides`]).
+//! (`assign.rs`) are matched with those choices (`overrides`).
 //!
 //! The settings screen's guide commands act on the source on screen
 //! ([`note_shown`]): [`update_now`] downloads its guide (every source
-//! switched on), [`clear`] deletes the stored one, [`guide_status`] says
-//! how the last update went and [`source_lines`] how each source did.
+//! switched on), [`clear`] deletes the stored one, `guide_status` says
+//! how the last update went and `source_lines` how each source did.
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;

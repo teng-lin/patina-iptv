@@ -382,10 +382,11 @@ impl Inner {
             // A retained URL is not authority after suspension. The shell must
             // recheck parental access and the provider budget, then reopen with
             // a new source token and the saved on-demand position.
+            let token = self.state.borrow().token as u64;
             self.emit(vec![
-                PlayerEvent::Error {
-                    code: "ERROR_CODE_IO_UNSPECIFIED".into(),
-                    http: None,
+                PlayerEvent::Reauthorize {
+                    token,
+                    allowed: true,
                 }
                 .wire(),
             ]);

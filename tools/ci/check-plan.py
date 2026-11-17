@@ -89,6 +89,8 @@ def plan(root=ROOT, release=False, tier="full", host="linux"):
     ])
     if host == "linux":
         # Documentation and portable wasm output are independent of the host OS.
+        steps.append({**step("workspace-rustdoc", "cargo", "doc", "--locked", "--workspace", "--no-deps"),
+                      "env": {"RUSTDOCFLAGS": "-D warnings"}})
         steps.append(step("workspace-doctests", "cargo", "test", *test_args, "--doc", "--", "--format=pretty"))
         steps.append(step("native-gtk-lifecycle", sys.executable, "tools/ci/run-xvfb.py",
                           "cargo", "test", *test_args, "--test", "native_player", GTK_LIFECYCLE,
@@ -113,10 +115,12 @@ def run(steps, root=ROOT, runner=subprocess.run):
         # This is a display string only; execution always uses the argv array.
         print(shlex.join(check["argv"]), flush=True)
         options = {"cwd": root, "check": False}
+        if check.get("env"):
+            options["env"] = dict(os.environ, **check["env"])
         # A protected macOS Python may strip the shell's DYLD_* variables.
         # Restore the selected runtime for Cargo without changing our environment.
         if sys.platform == "darwin" and (directory := os.environ.get("IPTV_RS_MPV_LIB_DIR")):
-            options["env"] = dict(os.environ, DYLD_LIBRARY_PATH=directory)
+            options["env"] = dict(options.get("env", os.environ), DYLD_LIBRARY_PATH=directory)
         try:
             result = runner(check["argv"], **options)
         except OSError as error:

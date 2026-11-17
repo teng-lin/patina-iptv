@@ -56,4 +56,10 @@ python3 tools/ci/test-check-plan.py
 python3 tools/ci/test-validation-plan.py
 python3 tools/ci/test-fuzz-targets.py
 python3 tools/performance/test_journeys.py
+python3 tools/ci/test-disposable-avd.py
+python3 tools/ci/test-isolated-credentials.py
+python3 tools/ci/test-release-contract.py
+python3 tools/ci/test-repeat-hls-fixtures.py
+python3 tools/ci/test-validation-workflow.py
+python3 tools/ci/test-dependency-candidate.py
 echo "all checks passed"

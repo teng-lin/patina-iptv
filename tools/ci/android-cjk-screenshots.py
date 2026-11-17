@@ -25,7 +25,7 @@ def main():
         parser.error("use a disposable emulator, not a physical device")
     if args.wait <= 0:
         parser.error("--wait must be positive")
-    pkg = "com.hantekllc.iptvrs"
+    pkg = "com.hantekllc.iptvrs.validation"
 
     def adb(*command, data=None):
         return subprocess.run(
@@ -57,7 +57,7 @@ def main():
             "shell", "run-as", pkg, "sh", "-c", "'cat > files/settings.json'",
             data=json.dumps(settings).encode(),
         )
-        adb("shell", "am", "start", "-W", "-n", pkg + "/.host.TvActivity")
+        adb("shell", "am", "start", "-W", "-n", pkg + "/com.hantekllc.iptvrs.host.TvActivity")
         time.sleep(args.wait)
         (args.out / (locale + ".png")).write_bytes(adb("exec-out", "screencap", "-p"))
     print(f"Captured four scenarios in {args.out}; review glyphs and clipping manually.")

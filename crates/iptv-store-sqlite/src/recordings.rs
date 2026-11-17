@@ -703,3 +703,140 @@ impl Store {
             .collect::<rusqlite::Result<_>>()?)
     }
 }
+
+/// A durable terminal intent for a synced recording spool. Contains no paths or URLs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecordingCompletion {
+    pub job: JobId,
+    pub status: Status,
+    pub bytes: u64,
+    pub digest: String,
+    pub message: String,
+}
+impl Store {
+    /// Record terminal intent before touching the final filename. False means the
+    /// accepted job changed or another receipt already won; callers must not overwrite it.
+    pub fn prepare_recording_completion(
+        &mut self,
+        job: &Job,
+        completion: &RecordingCompletion,
+    ) -> Result<bool> {
+        if job.id != completion.job
+            || job.status != Status::Recording
+            || !matches!(
+                completion.status,
+                Status::Completed | Status::Partial | Status::Failed
+            )
+            || completion.bytes > iptv_core::recording::MAX_BYTES
+            || completion.digest.len() != 64
+            || !completion.digest.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err(StoreError::InvalidData(
+                "invalid recording completion".into(),
+            ));
+        }
+        self.durable_recording_write(|| {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT OR IGNORE INTO recording_completions(job_id,source_incarnation,outcome,bytes,digest,message)
+             SELECT id,source_incarnation,?1,?2,?3,?4 FROM recording_jobs
+             WHERE id=?5 AND status='recording' AND source_id=?6 AND channel_id=?7
+             AND starts_at=?8 AND ends_at=?9",
+            params![stored(completion.status), completion.bytes as i64, completion.digest,
+                completion.message, job.id.0, job.request.source, job.request.channel,
+                job.request.start, job.request.end],
+        )?;
+        let matches = self.recording_completion(job.id)?.as_ref() == Some(completion);
+        tx.commit()?;
+        Ok(matches)
+        })
+    }
+
+    /// A receipt is usable only for the same accepted job incarnation still Recording.
+    pub fn recording_completion(&self, id: JobId) -> Result<Option<RecordingCompletion>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT c.outcome,c.bytes,c.digest,c.message FROM recording_completions c
+             JOIN recording_jobs j ON j.id=c.job_id AND j.source_incarnation=c.source_incarnation
+             WHERE j.id=?1 AND j.status='recording'",
+                [id.0],
+                |row| {
+                    Ok(RecordingCompletion {
+                        job: id,
+                        status: status(&row.get::<_, String>(0)?),
+                        bytes: row.get::<_, i64>(1)? as u64,
+                        digest: row.get(2)?,
+                        message: row.get(3)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    /// Reconcile verified retained content. A superseded/deleted job is never overwritten.
+    /// Repeating an already committed receipt succeeds without modifying newer state.
+    pub fn commit_recording_completion(
+        &mut self,
+        completion: &RecordingCompletion,
+    ) -> Result<bool> {
+        self.durable_recording_write(|| {
+            let tx = self.conn.unchecked_transaction()?;
+            let current = self.recording_completion(completion.job)?;
+            let applied = if current.as_ref() == Some(completion) {
+                tx.execute(
+                    "UPDATE recording_jobs SET status=?1,bytes=?2,message=?3
+                WHERE id=?4 AND status='recording'",
+                    params![
+                        stored(completion.status),
+                        completion.bytes as i64,
+                        completion.message,
+                        completion.job.0
+                    ],
+                )? == 1
+            } else {
+                self.recording_job(completion.job)?.is_some_and(|job| {
+                    job.status == completion.status
+                        && job.bytes == completion.bytes
+                        && job.message == completion.message
+                })
+            };
+            tx.commit()?;
+            Ok(applied)
+        })
+    }
+
+    /// Preserve verified spool media as Partial when its final name cannot be
+    /// published. This requires the original receipt; newer catalog state wins.
+    pub fn retain_partial_recording_completion(
+        &mut self,
+        completion: &RecordingCompletion,
+    ) -> Result<bool> {
+        self.durable_recording_write(|| {
+            let tx = self.conn.unchecked_transaction()?;
+            if self.recording_completion(completion.job)?.as_ref() != Some(completion) {
+                return Ok(false);
+            }
+            let changed = tx.execute(
+                "UPDATE recording_jobs SET status='partial',bytes=?1,
+                message='Could not finalize the recording; partial media was retained'
+                WHERE id=?2 AND status='recording'",
+                params![completion.bytes as i64, completion.job.0],
+            )? == 1;
+            tx.commit()?;
+            Ok(changed)
+        })
+    }
+
+    fn durable_recording_write<T>(&self, write: impl FnOnce() -> Result<T>) -> Result<T> {
+        // WAL NORMAL does not guarantee survival of a power loss between rename
+        // and the next checkpoint. Completion receipts and acknowledgements do.
+        let previous: i64 = self
+            .conn
+            .pragma_query_value(None, "synchronous", |r| r.get(0))?;
+        self.conn.pragma_update(None, "synchronous", "FULL")?;
+        let result = write();
+        self.conn.pragma_update(None, "synchronous", previous)?;
+        result
+    }
+}

@@ -4,6 +4,7 @@ from collections import defaultdict
 from pathlib import Path
 import re
 import sys
+import tomllib
 
 FLOORS = {
     "iptv-core": 94.0,
@@ -21,6 +22,22 @@ FLOORS = {
     "iptv-runtime": 90.0,
     "iptv-app": 90.0,
 }
+
+
+# SQLCipher initialization is process-global and exercised through the store's
+# isolated-child tests. Coverage collection includes it; a stable independent
+# percentage is not yet established. A new crate must never inherit this exemption.
+EXEMPTIONS = {"iptv-sqlcipher-init": "process-global FFI initialization; store child-process regressions"}
+
+
+def validate_inventory(root, floors=FLOORS, exemptions=EXEMPTIONS):
+    workspace = tomllib.loads((root / "Cargo.toml").read_text())["workspace"]["members"]
+    crates = {tomllib.loads((root / member / "Cargo.toml").read_text())["package"]["name"] for member in workspace}
+    policy = set(floors) | set(exemptions)
+    if (crates != policy or set(floors) & set(exemptions)
+            or any(not isinstance(reason, str) or not reason.strip() for reason in exemptions.values())):
+        raise ValueError(f"coverage inventory mismatch: missing={sorted(crates - policy)}, "
+                         f"stale={sorted(policy - crates)}; exemptions need nonempty reasons and no floor")
 
 
 def parse_summary(summary_text):
@@ -65,6 +82,7 @@ def evaluate(totals, floors=FLOORS):
 
 
 def main(summary_path="target/coverage/summary.txt"):
+    validate_inventory(Path(__file__).resolve().parents[2])
     text = Path(summary_path).read_text(encoding="utf-8")
     totals = parse_summary(text)
     results, failed = evaluate(totals)

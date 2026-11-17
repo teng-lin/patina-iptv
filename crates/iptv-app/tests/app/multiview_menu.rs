@@ -284,6 +284,22 @@ fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
     step(gone(&mut app, picker));
     step(app.wait_for(&format!("{TILE} >> text:/Test Channel Three$/")));
     assert_eq!(tiles(&app), 2);
+    assert!(
+        app.screen()
+            .matches("id:multiview-ui >> role:button[/^Test Channel One$/]")
+            .unwrap()
+    );
+    assert!(
+        app.screen()
+            .matches("id:multiview-ui >> role:button[/^Test Channel Three$/]")
+            .unwrap()
+    );
+    assert!(
+        app.screen()
+            .accessibility_state("id:multiview-ui >> role:button[/^Test Channel Three$/]")
+            .unwrap()
+            .selected
+    );
     step(
         app.wait_until("both synthetic tile sources are published", IMPORT, |_| {
             iptv_app::player_has_source(0) && iptv_app::player_has_source(1)

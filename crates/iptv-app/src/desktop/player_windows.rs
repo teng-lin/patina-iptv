@@ -93,8 +93,8 @@ fn follow_clock(
 fn follow_lists(local: Ui) {
     let catalog = std::cell::RefCell::new(crate::schedule());
     effect(move || {
-        local.data_version.get();
-        local.list_version.get();
+        local.app.data_version.get();
+        local.app.list_version.get();
         untracked(|| {
             let next = crate::schedule();
             let previous = catalog.replace(next.clone());
@@ -137,7 +137,7 @@ pub fn close_all(ui: Ui) {
 
 pub fn bind(ui: Ui) {
     effect(move || {
-        ui.data_version.get();
+        ui.app.data_version.get();
         untracked(|| {
             let sessions = ui.player_windows.with(|w| w.sessions().to_vec());
             let schedule = crate::schedule();
@@ -308,66 +308,21 @@ fn cascade_position(
 /// Reuse the app's actual full-screen player views with a window-local
 /// presentation context. Its main stream aliases this auxiliary surface.
 fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement {
-    let mut local = parent;
-    local.player_surface = surface;
-    local.mode = signal(crate::ViewMode::Fullscreen);
-    local.input = signal(crate::Input::Touch);
-    local.playing = parent.player.stream(surface).channel;
-    local.playback = signal(crate::Playback::Live);
-    local.paused = signal(
-        parent
-            .player_windows
-            .with_untracked(|w| w.on_surface(surface).is_some_and(|s| s.paused)),
-    );
-    local.player.streams[0] = parent.player.stream(surface);
-    local.player.history = signal(Default::default());
-    local.player.recorded = signal(None);
-    local.recordings = signal(Default::default());
-    local.recordings_open = computed(move || local.recordings.with(|s| s.open));
-    local.player_status = signal(String::new());
-    local.pending_zap = signal(None);
-    local.browse_playback = signal(Default::default());
-    local.focus = signal(parent.focus.get_untracked());
-    local.list = signal(parent.list.get_untracked());
-    follow_clock(parent.focus, local.focus, move || crate::lists::view(local));
-    local.guide_panning = signal(false);
-    local.visible_rows = signal(None);
-    local.stats = signal(Default::default());
-    local.back_guard = signal(Default::default());
-    local.panels = signal(Default::default());
-    local.play_bar = signal(Default::default());
-    local.channels = signal(None);
-    local.channel_picker = signal(None);
-    local.multiview = signal(None);
-    local.player_windows = signal(Default::default());
-    local.menu = signal(None);
-    local.description = signal(None);
-    local.chooser = signal(None);
-    local.search = signal(None);
-    local.wizard = signal(None);
-    local.playlists = signal(None);
-    local.settings_screen = signal(None);
-    local.parental = signal(None);
-    // These screens belong to the main window. Its open state must never
-    // capture keys or cover controls in an auxiliary player's presentation.
-    local.editor = signal(None);
-    local.organization = signal(None);
-    local.custom_groups = signal(None);
-    local.remote_editor = signal(None);
-    local.guide_sources = signal(None);
-    local.guide_inspect = signal(None);
-    local.guide_repair = signal(None);
-    local.guide_assign = signal(None);
-    local.guide_repair_cancel = stored(None);
-    local.guide_inspect_cancel = stored(None);
-    local.pip = signal(Default::default());
-    local.seek_target = signal(None);
-    local.sleep = signal(Default::default());
-    local.media = crate::media::Media::new();
     let initial = parent
         .player_windows
         .with_untracked(|w| w.on_surface(surface).cloned())
         .unwrap();
+    let mut local = Ui::new(parent.app, parent.player.for_window(surface));
+    local.player_surface = surface;
+    // This presentation controls the already-mounted native surface. The
+    // catalog and settings are shared; overlays and input state are fresh.
+    local.playing = parent.player.stream(surface).channel;
+    local.mode.set(crate::ViewMode::Fullscreen);
+    local.input.set(crate::Input::Touch);
+    local.paused.set(initial.paused);
+    local.focus.set(parent.focus.get_untracked());
+    local.list.set(parent.list.get_untracked());
+    follow_clock(parent.focus, local.focus, move || crate::lists::view(local));
     local.media.volume.set(initial.volume);
     local.media.delay_ms.set(initial.audio_delay);
     effect(move || {

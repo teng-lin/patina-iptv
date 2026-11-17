@@ -1173,7 +1173,7 @@ fn detail_screen(ui: Ui, size: Scale) -> View {
         .pb_safe_area()
         .px(move || size.px(30.0))
         .pb(move || size.px(24.0))
-        .bg(move || rgb(ui.theme.with(|t| t.background.window)))
+        .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
         .test_id("vod-screen")
         .accessibility_elements_hidden(move || {
             crate::overlays::Overlay::Vod.accessibility_covered(ui)

@@ -2,7 +2,7 @@
 #[cfg(target_os = "android")]
 mod android;
 #[cfg(target_os = "android")]
-pub(crate) use android::schedule;
+pub(crate) use android::{schedule, set_language};
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]

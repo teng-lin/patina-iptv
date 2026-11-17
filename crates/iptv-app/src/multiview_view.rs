@@ -124,11 +124,17 @@ fn tile(ui: Ui, index: usize) -> impl IntoElement {
     let active = move || with_state(ui, |m| m.active_index() == index).unwrap_or(false);
     let paused =
         move || with_state(ui, |m| m.tiles().get(index).is_some_and(|t| t.paused)).unwrap_or(false);
-    let accent = move || ui.theme.with(|t| t.accent.main);
-    let panel = move || tint(ui.theme.with(|t| t.background.panel), PANEL_ALPHA);
+    let accent = move || ui.app.theme.with(|t| t.accent.main);
+    let panel = move || tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA);
     let status = move || surface().map_or(TileStatus::Playing, |s| tile_status(ui, s));
     view()
         .test_id("multiview-tile")
+        .role(AccessibilityRole::Button)
+        .label(move || channel().map_or_else(|| tr("Channels").to_owned(), channel_name))
+        .accessibility_state(move || AccessibilityState {
+            selected: active(),
+            ..Default::default()
+        })
         .accessibility_elements_hidden(move || {
             with_state(ui, |state| state.dialog().is_some()).unwrap_or(false)
         })
@@ -193,7 +199,7 @@ fn tile(ui: Ui, index: usize) -> impl IntoElement {
                             .text_color(rgb(WHITE))
                             .bg(move || tint(accent(), FOCUS_ALPHA))
                             .border(px(2.0))
-                            .border_color(move || rgb(ui.theme.with(|t| t.accent.light)))
+                            .border_color(move || rgb(ui.app.theme.with(|t| t.accent.light)))
                             .on_press(move || {
                                 ui.touched();
                                 if let Some(s) = surface() {
@@ -259,15 +265,15 @@ fn warning_content(ui: Ui) -> (String, String, usize) {
 /// a row.
 fn warning(ui: Ui) -> impl IntoElement {
     let content = computed(move || warning_content(ui));
-    let panel = move || tint(ui.theme.with(|t| t.background.panel), 0xF0);
-    let accent = move || ui.theme.with(|t| t.accent.main);
+    let panel = move || tint(ui.app.theme.with(|t| t.background.panel), 0xF0);
+    let accent = move || ui.app.theme.with(|t| t.accent.main);
     let choice = move |i: usize| {
         let focused = move || ui.keys_shown() && content.with(|c| c.2 == i);
         text(warning_label(WARNING_CHOICES[i]))
             .border(px(2.0))
             .border_color(move || {
                 tint(
-                    ui.theme.with(|t| t.accent.light),
+                    ui.app.theme.with(|t| t.accent.light),
                     if focused() { 255 } else { 0 },
                 )
             })

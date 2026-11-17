@@ -119,7 +119,7 @@ fn next_generation(owner: &std::rc::Rc<crate::Runtime>, shown: Option<SourceId>)
 }
 
 /// Imports `job` on its own thread. `on_update` hears progress (coalesced,
-/// at most one per [`PROGRESS_FRAME`]) and then one [`Update::Done`]; on
+/// at most one per `PROGRESS_FRAME`) and then one [`Update::Done`]; on
 /// success (unless the job is a [`Purpose::Background`] refresh) the guide
 /// switches to the source at once and again when its guide data arrives.
 /// Cancel with the returned token.

@@ -14,11 +14,12 @@ import sys
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
-LANES = ("host", "windows", "android", "packages", "windows-package", "coverage", "fuzz", "smoke", "stress")
+LANES = ("host", "windows", "android", "packages", "windows-package", "coverage", "fuzz", "smoke", "stress", "ios", "credentials")
 BUILD = ("Cargo.toml", "Cargo.lock", "crates/**/Cargo.toml", "rust-toolchain.toml", "nsh.rev", ".cargo/**")
 CI = (".github/workflows/**", ".github/actions/**", "tools/ci/validation-plan.py", "tools/ci/check-plan.py",
       "tools/ci/pins.py", "tools/ci/locked-build-env.sh", "tools/ci/locked-cargo.py", "tools/check.sh",
-      "tools/ci/native-candidates.json", "tools/ci/native_candidates.py", "tools/ci/run-xvfb.py")
+      "tools/ci/build-inventory.py", "tools/ci/build-provenance.py", "tools/ci/release-plan.py", "tools/ci/signing-config.py",
+      "tools/ci/signing-policy.json", "tools/ci/publish-release.py", "tools/ci/native-candidates.json", "tools/ci/native_candidates.py", "tools/ci/run-xvfb.py")
 NOTICES = ("about.toml", "LICENSE", "tools/ci/notices.hbs", "tools/ci/component-inventory.py",
            "tools/ci/crypto-native-notices.py", "tools/ci/check-notices.py", "tools/ci/notices.sh",
            "tools/ci/package.Cargo.lock", "tools/ci/check-package-lock.py", "tools/ci/audit-runners.sh")
@@ -43,13 +44,20 @@ WINDOWS_PACKAGE = (*NOTICES, *BUILD, *WINDOWS_RESOURCES, "crates/iptv-app/build.
                     "about.toml", "LICENSE", "crates/iptv-app/icon.png", "crates/iptv-app/fonts/**")
 SMOKE = (*BUILD, "hosts/android/**", "crates/iptv-app/**", "crates/iptv-runtime/**",
          "crates/iptv-player-mpv/**", "crates/iptv-net/**", "crates/iptv-nav/**", "tools/sync-host.sh",
-         "tools/ci/android/**", "tools/ci/android-smoke.sh", "tools/ci/*hls-fixtures.py",
+         "tools/ci/android/**", "tools/ci/android-smoke.sh", "tools/ci/disposable-avd.py", "tools/ci/*hls-fixtures.py",
          "tools/ci/android-ndk-env.sh", "tools/make-*fixtures*", "tools/mock-server.py", "tools/mpv-runtime/**")
 # Include the parsers, schedules, and models exercised by the allocation fixtures.
 STRESS_CRATES = ("iptv-store-sqlite", "iptv-sqlcipher-init", "iptv-import", "iptv-epg",
                  "iptv-providers", "iptv-guide", "iptv-core", "iptv-library", "iptv-settings")
 STRESS = (*BUILD, *(f"crates/{crate}/**" for crate in STRESS_CRATES), "tools/ci/import-stress.sh")
 COVERAGE = ("tools/ci/coverage.sh", "tools/ci/*coverage*.py")
+HOST_INPUTS = ("docs/capabilities.md", "tools/ci/lint.sh", "tools/ci/check-line-length.sh")
+HELPER_INPUTS = ("docs/contributing.md",)
+IOS = (*BUILD, "crates/**/*.rs", "tools/fetch-mpvkit.sh", "tools/ci/check-ios.sh",
+       "tools/mpv-runtime-ios/**", "hosts/ios/**")
+CREDENTIALS = (*BUILD, "crates/iptv-app/src/credential_key*", "crates/iptv-app/src/credential_key/**",
+               "crates/iptv-store-sqlite/**", "crates/iptv-sqlcipher-init/**",
+               "tools/ci/isolated-credentials.py")
 DOCS = ("docs/**", ".gitignore", ".editorconfig")
 
 
@@ -104,7 +112,7 @@ def select(paths, tier="pr", root=ROOT):
     # change alone never installs GTK, Rust targets, media runtimes, or Android.
     helper_paths = ("tools/ci/**", "tools/mpv-runtime*/**", "tools/*windows*.ps1", "tools/sync-host.sh",
                     "tools/package-*", "tools/bundle-*.py", "tools/mock-server.py", "tools/make-*fixtures*")
-    host = full or ci or any(not documentation(path) and not matches([path], helper_paths) for path in paths)
+    host = full or ci or matches(paths, HOST_INPUTS) or any(not documentation(path) and not matches([path], helper_paths) for path in paths)
     common_package = full or ci or any(matches([path], PACKAGES) and not matches([path], (*LINUX_PACKAGE, *MACOS_PACKAGE))
                                       for path in paths)
     platforms = [entry for entry, selected in (
@@ -114,8 +122,10 @@ def select(paths, tier="pr", root=ROOT):
     android_package = full or ci or matches(paths, ANDROID_PACKAGE)
     result = {
         "tier": tier,
+        "ios": full or ci or matches(paths, IOS),
+        "credentials": full or ci or matches(paths, CREDENTIALS),
         "host": host,
-        "helpers_full": full or any(not documentation(path) for path in paths),
+        "helpers_full": full or matches(paths, (*HOST_INPUTS, *HELPER_INPUTS)) or any(not documentation(path) for path in paths),
         "windows": full or ci or rust or matches(paths, (*WINDOWS_RESOURCES, "hosts/windows/**", "tools/*windows*.ps1")),
         "android": full or ci or rust or android_package,
         "android_package": android_package,

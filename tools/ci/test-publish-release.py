@@ -23,6 +23,12 @@ state = json.loads(state_file.read_text())
 arguments = sys.argv[1:]
 with (home / "calls.log").open("a") as log:
     log.write(json.dumps(arguments) + "\n")
+if arguments[:2] == ["attestation", "verify"]:
+    if state.get("fail_provenance"):
+        sys.exit("synthetic missing or wrong provenance")
+    if "--predicate-type" not in arguments or "https://slsa.dev/provenance/v1" not in arguments:
+        sys.exit("build predicate required")
+    sys.exit(0)
 if arguments[:2] != ["release", arguments[1]] or arguments[2] != "v9.8.7":
     sys.exit("unexpected gh call")
 action = arguments[1]
@@ -77,7 +83,8 @@ class Publishing(unittest.TestCase):
         (bin_directory / "gh").write_text(STUB)
         (bin_directory / "gh").chmod(0o755)
         self.environment = dict(os.environ, STUB_HOME=str(self.home),
-                                PATH=str(bin_directory) + os.pathsep + os.environ["PATH"])
+                                PATH=str(bin_directory) + os.pathsep + os.environ["PATH"],
+                                GH_REPO="synthetic/repo", GITHUB_SHA="a" * 40, GITHUB_REF="refs/tags/" + TAG)
 
     def release(self, state, **extra):
         (self.home / "state.json").write_text(json.dumps({"release": state, **extra}))
@@ -91,11 +98,20 @@ class Publishing(unittest.TestCase):
         return json.loads((self.home / "state.json").read_text())
 
     def actions(self):
-        return [json.loads(line)[1] for line in (self.home / "calls.log").read_text().splitlines()]
+        return [call[1] for line in (self.home / "calls.log").read_text().splitlines()
+                if (call := json.loads(line))[0] == "release"]
 
     def checksums(self):
         self.release("absent")
         self.assertEqual(self.run_script("checksums").returncode, 0)
+
+    def test_missing_or_wrong_build_provenance_prevents_all_release_mutation(self):
+        self.checksums()
+        self.release("absent", fail_provenance=True)
+        result = self.run_script("publish")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.actions(), ["view"])
+        self.assertEqual(self.state()["release"], "absent")
 
     def test_absent_release_is_created_as_a_draft_then_published_once(self):
         self.checksums()

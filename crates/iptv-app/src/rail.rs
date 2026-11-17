@@ -97,7 +97,7 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
         } else if focused() {
             rgb(FOCUSED_TEXT)
         } else if item == RailItem::Tv {
-            rgb(ui.theme.with(|t| t.accent.light))
+            rgb(ui.app.theme.with(|t| t.accent.light))
         } else {
             tint(WHITE, TEXT_SECONDARY_ALPHA)
         }
@@ -172,7 +172,7 @@ pub fn column(ui: Ui) -> impl IntoElement {
         .w(move || px(width(ui)))
         .overflow_hidden()
         .py(px(8.0))
-        .bg(move || ui.surface(ui.theme.with(|t| t.background.panel)))
+        .bg(move || ui.surface(ui.app.theme.with(|t| t.background.panel)))
         .child(part(false))
         .child(view().flex_1())
         .child(part(true))

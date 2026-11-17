@@ -134,7 +134,7 @@ pub(super) fn cell(
             ViewMode::Overlay => Some(crate::settings::overlay_alpha(&crate::settings::read(ui))),
             ViewMode::Guide | ViewMode::Fullscreen => None,
         };
-        let (g, window) = ui.theme.with(|t| (t.guide(), t.background.window));
+        let (g, window) = ui.app.theme.with(|t| (t.guide(), t.background.window));
         colours(look.get(), dim.get(), &g, window, overlay)
     });
     let title_text = move || {

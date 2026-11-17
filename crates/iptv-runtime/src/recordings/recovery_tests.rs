@@ -2,7 +2,7 @@
 use super::*;
 use iptv_providers::{SecretUrl, model::M3uSourceConfig};
 
-async fn fixture(root: &Path) -> (Runtime, Request) {
+pub(super) async fn fixture(root: &Path) -> (Runtime, Request) {
     let owner = Runtime::new(crate::Ports::new(root.to_owned(), |_| {
         Ok(crate::model::DatabaseKey::from_bytes([0x75; 32]))
     }));
@@ -106,7 +106,7 @@ async fn assert_retained(owner: &Runtime, id: JobId) {
 #[tokio::test]
 async fn startup_retains_parked_media_after_the_recording_window_elapsed() {
     let directory = tempfile::tempdir().unwrap();
-    let (owner, request) = fixture(directory.path()).await;
+    let (owner, request) = fixture(&directory.path().join("profile")).await;
     let id = park(&owner, request).await;
     recover(&owner.services()).await.unwrap();
     assert_retained(&owner, id).await;
@@ -116,7 +116,7 @@ async fn startup_retains_parked_media_after_the_recording_window_elapsed() {
 #[tokio::test]
 async fn running_host_retains_parked_media_after_a_missed_window() {
     let directory = tempfile::tempdir().unwrap();
-    let (owner, request) = fixture(directory.path()).await;
+    let (owner, request) = fixture(&directory.path().join("profile")).await;
     ready(&owner).await;
     let id = park(&owner, request).await;
     assert_retained(&owner, id).await;
@@ -126,7 +126,7 @@ async fn running_host_retains_parked_media_after_a_missed_window() {
 #[tokio::test]
 async fn running_host_retains_parked_media_when_viewing_uses_the_only_connection() {
     let directory = tempfile::tempdir().unwrap();
-    let (owner, mut request) = fixture(directory.path()).await;
+    let (owner, mut request) = fixture(&directory.path().join("profile")).await;
     assert!(owner.reserve_viewing(0, SourceId(request.source)));
     ready(&owner).await;
     request.start = now() - 1;
@@ -134,4 +134,25 @@ async fn running_host_retains_parked_media_when_viewing_uses_the_only_connection
     let id = park(&owner, request).await;
     assert_retained(&owner, id).await;
     assert!(owner.drain_services());
+}
+
+#[test]
+fn quota_reserves_remaining_bytes_and_accepts_four_growing_captures() {
+    let directory = tempfile::tempdir().unwrap();
+    let active = [JobId(1), JobId(2), JobId(3), JobId(4)];
+    for job in active {
+        let file = std::fs::File::create(directory.path().join(format!("{}.part", job.0))).unwrap();
+        file.set_len(188).unwrap();
+    }
+    assert!(storage_admission(directory.path(), &active).is_ok());
+    // An unrelated retained recording consumes capacity beyond the four reservations.
+    std::fs::write(directory.path().join("5.ts"), [0x47; 188]).unwrap();
+    assert_eq!(
+        storage_admission(directory.path(), &active)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::StorageFull
+    );
+    // Removing one active reservation leaves room for retained bytes.
+    assert!(storage_admission(directory.path(), &active[..3]).is_ok());
 }

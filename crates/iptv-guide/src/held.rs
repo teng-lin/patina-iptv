@@ -11,7 +11,7 @@ use crate::{EpgSchedule, SLOT};
 impl EpgSchedule {
     /// `store` holds only the programmes overlapping `[from, to)` (a cold
     /// start's first screen, read before the rest of the window): other
-    /// times show as [`LOADING`], and ask for nothing; the schedule with the
+    /// times show as [`crate::LOADING`], and ask for nothing; the schedule with the
     /// whole window replaces this one.
     pub fn held_only(mut self, from: UnixTime, to: UnixTime) -> Self {
         self.held = Some((from, to));

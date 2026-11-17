@@ -6,7 +6,7 @@ use std::cell::Cell;
 /// the guide's window is back at now.
 pub fn bind(ui: Ui) {
     effect(move || {
-        ui.data_version.get();
+        ui.app.data_version.get();
         let archive = match (ui.playing.get(), ui.playback.get()) {
             (Some(channel), Playback::CatchUp { start, .. }) => Some((channel, start)),
             _ => None,
@@ -23,7 +23,7 @@ pub fn bind(ui: Ui) {
     });
     let away = Cell::new(false);
     effect(move || {
-        ui.data_version.get();
+        ui.app.data_version.get();
         let home = ui.focus.with(|f| f.window == home_window(f.now));
         if home && away.replace(false) {
             untracked(|| {
