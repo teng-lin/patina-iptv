@@ -217,6 +217,39 @@ fn width(app: &crate::Headless, id: &str) -> f32 {
 }
 
 #[test]
+fn tv_rail_keeps_settings_inside_the_available_height() {
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, _) = preview_fixture(home);
+    let app = &mut fixture.app;
+    step(app.set_environment("TV remote", |env| env.idiom = Idiom::Tv));
+    step(app.set_viewport(nsh_core::Size::new(
+        nsh_core::prelude::px(960.0),
+        nsh_core::prelude::px(540.0),
+    )));
+    step(app.press_key("left"));
+    step(app.press_key("left"));
+    step(app.wait_for("id:navigation-rail >> text:Settings"));
+
+    let settings = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| {
+            !node.hidden
+                && node
+                    .text
+                    .as_ref()
+                    .is_some_and(|text| text.text.text == "Settings")
+        })
+        .expect("Settings is laid out in the visible rail");
+    assert!(
+        settings.bounds.origin.y.0 + settings.bounds.size.height.0 <= 540.0,
+        "Settings is fully inside the TV viewport: {:?}",
+        settings.bounds
+    );
+}
+
+#[test]
 fn sidebar_up_reaches_preview_on_desktop_and_tv_without_reopening_video() {
     let Some(home) = isolated!() else { return };
     let (mut fixture, lifetime) = preview_fixture(home);

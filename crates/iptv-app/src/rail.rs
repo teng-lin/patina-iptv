@@ -23,6 +23,19 @@ pub const RAIL_W: f32 = 56.0;
 pub const RAIL_OPEN_W: f32 = 196.0;
 const ITEM_H: f32 = 44.0;
 const ICON: f32 = 22.0;
+const ITEM_MARGIN: f32 = 2.0;
+
+fn item_height_for(available: f32, count: usize) -> f32 {
+    let count = count.max(1) as f32;
+    (available / count - ITEM_MARGIN * 2.0).clamp(ICON, ITEM_H)
+}
+
+fn item_height(ui: Ui) -> f32 {
+    let inset = safe_area();
+    let available =
+        window().height.0 - crate::panels::header_now().0 - inset.top.0 - inset.bottom.0 - 16.0;
+    item_height_for(available.max(0.0), crate::lists::rail(ui).len())
+}
 
 /// The rail's width now (0 while the guide has the focus).
 pub fn width(ui: Ui) -> f32 {
@@ -60,7 +73,7 @@ pub(crate) fn icon(item: RailItem) -> ImageSrc {
             "<rect x='3' y='7' width='13' height='13' rx='2'/><path d='M19 2v7M15.5 5.5h7'/>"
         }
         RailItem::Movies => {
-            "<rect x='3' y='4' width='18' height='16' rx='2'/><path d='M8 4v16M16 4v16M3 12h18'/>"
+            "<rect x='3' y='9' width='18' height='12' rx='1.5'/><path d='M3 9l2-6h17l-2 6M7 3l4 6M14 3l4 6M3 14h18'/>"
         }
         RailItem::Shows => {
             "<rect x='3' y='7' width='18' height='13' rx='2'/><path d='M8 3l4 4 4-4'/>"
@@ -109,9 +122,15 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
             selected: item == RailItem::Tv,
             ..Default::default()
         })
-        .h(move || px(if index().is_some() { ITEM_H } else { 0.0 }))
+        .h(move || {
+            px(if index().is_some() {
+                item_height(ui)
+            } else {
+                0.0
+            })
+        })
         .mx(px(6.0))
-        .my(move || px(if index().is_some() { 2.0 } else { 0.0 }))
+        .my(move || px(if index().is_some() { ITEM_MARGIN } else { 0.0 }))
         .px(px(11.0))
         .flex_row()
         .items_center()
@@ -172,8 +191,21 @@ pub fn column(ui: Ui) -> impl IntoElement {
         .w(move || px(width(ui)))
         .overflow_hidden()
         .py(px(8.0))
+        .pb_safe_area()
         .bg(move || ui.surface(ui.app.theme.with(|t| t.background.panel)))
         .child(part(false))
         .child(view().flex_1())
         .child(part(true))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::item_height_for;
+
+    #[test]
+    fn rail_rows_shrink_to_keep_bottom_actions_in_a_tv_height() {
+        assert_eq!(item_height_for(346.0, 8), 39.25);
+        assert_eq!(item_height_for(346.0, 10), 30.6);
+        assert_eq!(item_height_for(500.0, 8), 44.0);
+    }
 }
