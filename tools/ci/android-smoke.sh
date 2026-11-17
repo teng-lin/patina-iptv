@@ -92,6 +92,10 @@ applog() { adb logcat -d -s nsh:I | tr -d '\r'; }
 # Keeps the logs so far ($out) and starts afresh.
 mark() {
   applog >> "$out/app.log"
+  # Dedicated fresh validation profile and synthetic media only. Preserve codec
+  # causes before clearing buffers; the app's redacted error code alone cannot
+  # distinguish an emulator renderer failure from a playback regression.
+  adb logcat -d -s MediaCodec:D CCodec:D Codec2Client:D ExoPlayerImplInternal:E '*:S' >> "$out/codec.log"
   adb logcat -d -b crash >> "$out/crash.log"
   adb logcat -b main -b system -b crash -c
 }

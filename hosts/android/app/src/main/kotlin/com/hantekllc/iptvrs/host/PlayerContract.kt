@@ -226,7 +226,10 @@ internal sealed class PlayerEvent(
     }
 
     /** Fresh foreground authority, never a synthetic transport error. */
-    data class Reauthorize(val token: Long, val allowed: Boolean) : PlayerEvent("reauthorize") {
+    data class Reauthorize(
+        val token: Long,
+        val allowed: Boolean,
+    ) : PlayerEvent("reauthorize") {
         override fun data(): Map<String, Any?> = mapOf("token" to token, "allowed" to allowed)
     }
 

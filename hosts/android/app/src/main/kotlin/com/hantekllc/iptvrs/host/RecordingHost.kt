@@ -278,7 +278,9 @@ class RecordingService : Service() {
         private const val CHANNEL = "recording"
         private var running: RecordingService? = null
 
-        fun refresh() { running?.refreshNotification() }
+        fun refresh() {
+            running?.refreshNotification()
+        }
 
         fun idle(context: Context) {
             running?.stopSelf()

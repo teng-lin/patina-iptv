@@ -116,7 +116,7 @@ def prepare(source, scratch, copier=shutil.copytree, sdk=None, qemu_img=None, im
         raise
 
 
-def cleanup(root, scratch, token):
+def validate_owned(root, scratch, token):
     root, scratch = plain_path(root), plain_path(scratch)
     if root.parent != scratch or not re.fullmatch(r"patina-avd-[a-zA-Z0-9_-]+", root.name):
         raise ValueError("refusing cleanup outside the owned scratch directory")
@@ -127,7 +127,24 @@ def cleanup(root, scratch, token):
     if (record.get("schema") != 1 or record.get("token") != token or record.get("scratch") != str(scratch)
             or Path(record.get("source", "/")) == root or not token):
         raise ValueError("refusing cleanup with a mismatched ownership marker")
-    shutil.rmtree(root)
+    return root
+
+
+def boot_config(root, scratch, token, name, emulator, port, gpu="swiftshader"):
+    root = validate_owned(root, scratch, token)
+    if name != "patina-validation-" + token or not (root / "avd" / (name + ".avd")).is_dir():
+        raise ValueError("refusing boot/reset of an unowned AVD")
+    env = dict(os.environ, ANDROID_AVD_HOME=str(root / "avd"),
+               ANDROID_USER_HOME=str(root / "android"), ANDROID_EMULATOR_HOME=str(root / "android"))
+    # Reset only the verified private copy. Copied apps/accounts must never start.
+    command = [emulator, "-avd", name, "-port", str(port), "-wipe-data",
+               "-no-snapshot", "-no-window", "-no-audio", "-no-boot-anim",
+               "-gpu", gpu]
+    return command, env
+
+
+def cleanup(root, scratch, token):
+    shutil.rmtree(validate_owned(root, scratch, token))
 
 
 def adb(serial, *arguments, **kwargs):
@@ -165,6 +182,8 @@ def main():
     parser.add_argument("--out", type=Path, default=ROOT / "target/android-validation")
     parser.add_argument("--port", type=int, default=5580)
     parser.add_argument("--emulator", default="emulator")
+    parser.add_argument("--gpu", choices=("auto", "host", "software", "lavapipe", "swiftshader", "swangle", "swiftshader_indirect"),
+                        default="swiftshader", help="renderer to record and compare during emulator diagnostics")
     parser.add_argument("--qemu-img", default=shutil.which("qemu-img"), help="SDK qemu-img or a compatible host tool")
     args = parser.parse_args()
     if args.port % 2 or not 5554 <= args.port <= 5682:
@@ -197,19 +216,19 @@ def main():
         serial = f"emulator-{args.port}"
         operation = {"schema": 1, "avd": name, "serial": serial, "package": package,
                      "source": str(args.source.resolve()), "copy": str(root), "audio_enabled": False,
+                     "fresh_userdata": True,
+                     "gpu": args.gpu,
                      "apk_sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
                      "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
                      "result": "incomplete"}
         manifest = output / "operation.json"
         manifest.write_text(json.dumps(operation, indent=2) + "\n")
-        env = dict(os.environ, ANDROID_AVD_HOME=str(root / "avd"), ANDROID_USER_HOME=str(root / "android"),
-                   ANDROID_EMULATOR_HOME=str(root / "android"), ANDROID_SERIAL=serial,
+        command, env = boot_config(root, args.scratch, token, name, args.emulator, args.port, args.gpu)
+        env.update(ANDROID_SERIAL=serial,
                    IPTV_SMOKE_OUT=str(output / "smoke"), IPTV_SMOKE_DISPOSABLE_AVD=name)
         (root / "android").mkdir()
         log = (output / "emulator.log").open("w")
-        process = subprocess.Popen([args.emulator, "-avd", name, "-port", str(args.port),
-                                    "-no-snapshot", "-no-window", "-no-audio", "-no-boot-anim",
-                                    "-gpu", "swiftshader_indirect"], env=env, stdout=log,
+        process = subprocess.Popen(command, env=env, stdout=log,
                                    stderr=subprocess.STDOUT, start_new_session=True)
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline:

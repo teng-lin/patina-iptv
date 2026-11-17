@@ -1,6 +1,6 @@
 # Audit follow-up implementation and validation
 
-Status: implementation and independent review in progress. User authorized one
+Status: [PR #99](https://github.com/teng-lin/patina-iptv/pull/99) open as draft; final validation and CI repair in progress. User authorized one
 PR, review/CI/conflict repair and merge when ready. No release or protection-rule
 change is included.
 
@@ -28,8 +28,8 @@ change is included.
 | P8 | Numeric entry, clear viewing/search history, unsupported controls hidden. |
 | P9 | Multiview semantics and localized native notification/export text; spoken AT and fluent-human acceptance remain manual. |
 | P10 | Raster header allocation bounds, Xtream origin-scoped LAN trust, release-only fixture exclusion, documented plaintext/authority/native assumptions; M3U chunk-invariance fuzz oracle. |
-| P11 | Real process-death restore/catalog tests, bounded recording retirement and durable retry tests. Performance/backend choices need representative hardware measurements. |
-| P12 | Search state consolidated behind runtime facade; rustdoc repairs and contributor/runbook documentation. |
+| P11 | Real process-death restore/catalog tests, bounded recording retirement/retry, numeric queue-depth/age diagnostics, dropped queued reader/analysis cancellation with durable FIFO writes preserved. Existing settings coalescing retained. Performance/backend choices need representative hardware measurements. |
+| P12 | Search state consolidated behind runtime facade; explicit SharedUi and exhaustive per-window presentation construction, independent auxiliary VOD state; rustdoc repairs and contributor/runbook documentation. |
 | P13 | Disposable AVD and broker tools, explicit ownership and cleanup bounds, durable validation record. |
 | P14 | Existing teardown ordering retained; no new native proof supports a safe asynchronous ownership redesign. |
 
@@ -37,11 +37,33 @@ change is included.
 
 Initial required `cargo test -p iptv-core` and workspace all-target compilation
 passed on the accepted base. These are baseline checks, not final-change evidence.
-Final checks and independent agent findings will be recorded here before merge.
+The first implementation snapshot passed 1,976 ordinary tests across all crates
+(combined workspace and corrected runtime-contract/store tail runs), all nine
+portable wasm builds, 16 doctests, warning-free workspace rustdoc with `-D warnings`,
+and the production app build. Clippy and all required local linters passed after
+five Kotlin formatting findings were corrected. The production broker test passed
+all refusal/reopen cases in a disposable session. Changed M3U fuzzing passed
+144,742 executions in 31 seconds under the pinned nightly/ASan.
+
+The final plan check subsequently identified feasible P11/P12 gaps: queue
+observability/canceled reads and inherited auxiliary VOD presentation. These were
+implemented and independently cross-reviewed; 13 store-service tests passed.
+Affected final suites and native artifacts are being rerun for these changes.
+
+Independent records: [architecture review](../reviews/audit-follow-up/architecture-review.md),
+[UI/recording review](../reviews/audit-follow-up/ux-review.md),
+[security/delivery review](../reviews/audit-follow-up/delivery-review.md),
+[integration review](../reviews/audit-follow-up/integration-review.md), and
+[Android evidence](../reviews/audit-follow-up/android-validation.md).
+
+Hosted first pass: [Validation](https://github.com/teng-lin/patina-iptv/actions/runs/44016645135)
+and explicit [full Windows](https://github.com/teng-lin/patina-iptv/actions/runs/44016976625).
+These are initial candidate runs, not final-head acceptance.
 
 ## Explicit limits
 
-Automated emulator tests cannot establish physical tablet cover behavior, spoken
+The user explicitly requested no physical Android TV testing tonight and muted
+emulators; this run follows that instruction. Automated emulator tests cannot establish physical tablet cover behavior, spoken
 TalkBack/VoiceOver output, fluent translation review or representative Windows
 software-render/multiview performance. Debug validation is not shipping-release
 artifact acceptance. No such result will be inferred from compilation or source

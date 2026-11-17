@@ -108,7 +108,7 @@ jobs:
           disk-size: 4096M
           force-avd-creation: true
           disable-animations: true
-          emulator-options: -no-window -no-snapshot -no-audio -no-boot-anim -gpu swiftshader_indirect
+          emulator-options: -no-window -no-snapshot -no-audio -no-boot-anim -gpu swiftshader
           # If the emulator's own system dies (not the app: the script fails
           # at once on an app crash), reboot it and run once more.
           script: >-

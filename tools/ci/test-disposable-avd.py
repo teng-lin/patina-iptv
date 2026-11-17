@@ -165,6 +165,23 @@ class Profiles(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     a.adb(serial, "shell", "true")
 
+    def test_fresh_muted_boot_is_confined_to_marker_owned_copy(self):
+        root, token, name = a.prepare(self.source, self.scratch)
+        command, env = a.boot_config(root, self.scratch, token, name, "emulator", 5580)
+        self.assertEqual(command[command.index("-avd") + 1], name)
+        for flag in ("-wipe-data", "-no-snapshot", "-no-audio"):
+            self.assertIn(flag, command)
+        modern, _ = a.boot_config(root, self.scratch, token, name, "emulator", 5580, "swiftshader")
+        self.assertEqual(modern[modern.index("-gpu") + 1], "swiftshader")
+        for key in ("ANDROID_AVD_HOME", "ANDROID_USER_HOME", "ANDROID_EMULATOR_HOME"):
+            self.assertTrue(Path(env[key]).is_relative_to(root))
+        for boot_root, boot_token, boot_name in ((self.source, token, "tab36"),
+                                                  (root, "wrong", name), (root, token, "tab36")):
+            with self.assertRaises(ValueError):
+                a.boot_config(boot_root, self.scratch, boot_token, boot_name, "emulator", 5580)
+        self.assert_original()
+        a.cleanup(root, self.scratch, token)
+
 
 if __name__ == "__main__":
     unittest.main()

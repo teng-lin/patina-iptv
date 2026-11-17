@@ -24,9 +24,13 @@ python3 tools/ci/disposable-avd.py "$HOME/.android/avd/tv36.avd" \
 
 The runner copies the complete AVD into `target/disposable-avds/patina-avd-*`,
 including userdata, cache and encryption images. Emulator sound is always disabled
-with `-no-audio`; this runner never targets physical devices. It rewrites copied writable paths,
-creates a unique AVD name and isolates the Android emulator directories. It never
-uses `-wipe-data`, deletes source locks or edits the source profile. It refuses
+with `-no-audio`; this runner never targets physical devices. Rendering defaults to
+the supported `swiftshader` software mode. `--gpu` records an alternate mode for
+bounded diagnostics without changing smoke assertions. It rewrites copied writable paths,
+creates a unique AVD name and isolates the Android emulator directories. It
+resets the verified private copy with `-wipe-data` before boot so copied accounts
+and apps cannot start; it never resets the source, deletes source locks or edits
+the source profile. It refuses
 symlink roots, external writable-image paths and scratch directories inside source
 or Android profile roots. All adb operations specify the selected emulator serial;
 the runner and smoke script verify the serial's AVD name before device mutations.
