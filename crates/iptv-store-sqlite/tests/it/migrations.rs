@@ -349,6 +349,31 @@ const HISTORY: &[Version] = &[
             "data_v19.sql",
         ],
     },
+    Version {
+        version: 20,
+        data: &[
+            "data_v1.sql",
+            "data_v2.sql",
+            "data_v3.sql",
+            "data_v4.sql",
+            "data_v5.sql",
+            "data_v6.sql",
+            "data_v7.sql",
+            "data_v8.sql",
+            "data_v9.sql",
+            "data_v10.sql",
+            "data_v11.sql",
+            "data_v12.sql",
+            "data_v13.sql",
+            "data_v14.sql",
+            "data_v15.sql",
+            "data_v16.sql",
+            "data_v17.sql",
+            "data_v18.sql",
+            "data_v19.sql",
+            "data_v20.sql",
+        ],
+    },
 ];
 
 fn fixture(name: &str) -> String {
@@ -598,6 +623,7 @@ fn every_historical_version_migrates_with_its_data() {
         check_settings(&store, v.version);
         check_feed_results(&store, v.version);
         check_search_history(&store, v.version);
+        check_recording_completion(&store, v.version);
         drop(store);
 
         // Opening again (every app start) changes nothing.
@@ -613,6 +639,21 @@ fn every_historical_version_migrates_with_its_data() {
         check_settings(&again, v.version);
         check_feed_results(&again, v.version);
         check_search_history(&again, v.version);
+        check_recording_completion(&again, v.version);
+    }
+}
+
+fn check_recording_completion(store: &Store, version: u32) {
+    let receipt = store
+        .recording_completion(iptv_core::recording::JobId(42))
+        .unwrap();
+    if version >= 20 {
+        let receipt = receipt.expect("synced synthetic recording intent survives migration");
+        assert_eq!(receipt.status, iptv_core::recording::Status::Completed);
+        assert_eq!(receipt.bytes, 188);
+        assert_eq!(receipt.digest, "a".repeat(64));
+    } else {
+        assert!(receipt.is_none());
     }
 }
 

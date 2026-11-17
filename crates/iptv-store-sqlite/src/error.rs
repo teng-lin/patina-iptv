@@ -38,6 +38,14 @@ pub enum StoreError {
 pub type Result<T, E = StoreError> = std::result::Result<T, E>;
 
 impl StoreError {
+    /// Transient contention or device write failure may succeed on a bounded retry.
+    pub fn retryable_write(&self) -> bool {
+        matches!(self, Self::Sqlite(rusqlite::Error::SqliteFailure(error, _))
+            if matches!(error.code, rusqlite::ErrorCode::DatabaseBusy
+                | rusqlite::ErrorCode::DatabaseLocked | rusqlite::ErrorCode::DiskFull
+                | rusqlite::ErrorCode::SystemIoFailure))
+    }
+
     /// The bytes could not be interpreted as a database with the supplied key.
     /// I/O, locking and schema errors deliberately do not match this class.
     pub fn is_not_database(&self) -> bool {

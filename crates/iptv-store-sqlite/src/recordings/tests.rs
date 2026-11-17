@@ -718,3 +718,110 @@ fn raw_recording_admission_stays_closed_while_checked_and_accepted_intent_can_pr
             .is_none()
     );
 }
+
+fn completion_fixture() -> (Store, Job, RecordingCompletion) {
+    let (mut store, request) = fixture();
+    let id = store
+        .schedule_recording(JobId(700), &request, request.start - 1)
+        .unwrap();
+    let mut job = store.recording_job(id).unwrap().unwrap();
+    assert!(store.claim_recording(&job).unwrap());
+    job.status = Status::Recording;
+    let completion = RecordingCompletion {
+        job: id,
+        status: Status::Completed,
+        bytes: 188,
+        digest: "ab".repeat(32),
+        message: "Recording finished".into(),
+    };
+    (store, job, completion)
+}
+
+#[test]
+fn completion_intent_is_idempotent_and_cannot_replace_a_different_receipt() {
+    let (mut store, job, completion) = completion_fixture();
+    assert!(
+        store
+            .prepare_recording_completion(&job, &completion)
+            .unwrap()
+    );
+    assert!(
+        store
+            .prepare_recording_completion(&job, &completion)
+            .unwrap()
+    );
+    let mut wrong = completion.clone();
+    wrong.digest = "cd".repeat(32);
+    assert!(!store.prepare_recording_completion(&job, &wrong).unwrap());
+    assert!(!store.commit_recording_completion(&wrong).unwrap());
+    assert!(store.commit_recording_completion(&completion).unwrap());
+    assert!(store.commit_recording_completion(&completion).unwrap());
+    assert!(store.recording_completion(job.id).unwrap().is_none());
+    assert_eq!(
+        store.recording_job(job.id).unwrap().unwrap().status,
+        Status::Completed
+    );
+    let sync: i64 = store
+        .conn
+        .pragma_query_value(None, "synchronous", |r| r.get(0))
+        .unwrap();
+    assert_eq!(sync, 1, "receipt must restore connection policy");
+}
+
+#[test]
+fn newer_state_and_deleted_jobs_supersede_pending_completion() {
+    for delete in [false, true] {
+        let (mut store, job, completion) = completion_fixture();
+        assert!(
+            store
+                .prepare_recording_completion(&job, &completion)
+                .unwrap()
+        );
+        assert!(
+            store
+                .transition_recording(
+                    job.id,
+                    Status::Recording,
+                    Status::Cancelled,
+                    0,
+                    "Synthetic cancellation"
+                )
+                .unwrap()
+        );
+        if delete {
+            assert!(store.remove_recording(job.id).unwrap());
+        }
+        assert!(!store.commit_recording_completion(&completion).unwrap());
+        assert!(
+            !store
+                .prepare_recording_completion(&job, &completion)
+                .unwrap()
+        );
+        assert!(store.recording_completion(job.id).unwrap().is_none());
+        assert_eq!(
+            store.recording_job(job.id).unwrap().map(|job| job.status),
+            (!delete).then_some(Status::Cancelled)
+        );
+    }
+}
+
+#[test]
+fn failed_terminal_update_retains_receipt_for_retry() {
+    let (mut store, job, completion) = completion_fixture();
+    assert!(
+        store
+            .prepare_recording_completion(&job, &completion)
+            .unwrap()
+    );
+    store.conn.execute_batch("CREATE TEMP TRIGGER synthetic_full BEFORE UPDATE OF status ON recording_jobs BEGIN SELECT RAISE(FAIL, 'synthetic storage failure'); END;").unwrap();
+    assert!(store.commit_recording_completion(&completion).is_err());
+    assert_eq!(
+        store.recording_completion(job.id).unwrap(),
+        Some(completion.clone())
+    );
+    store
+        .conn
+        .execute_batch("DROP TRIGGER synthetic_full")
+        .unwrap();
+    assert!(store.commit_recording_completion(&completion).unwrap());
+}

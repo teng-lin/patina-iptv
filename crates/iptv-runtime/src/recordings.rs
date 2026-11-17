@@ -1,5 +1,6 @@
 //! App-open DVR. Durable intent is committed before acknowledgement; media workers
 //! have no rendered player and use the same connection budget as viewing surfaces.
+mod completion;
 pub mod host;
 #[cfg(test)]
 mod recovery_tests;
@@ -125,6 +126,7 @@ struct Data {
     suspended_viewers: HashMap<usize, Lease>,
     active: HashMap<JobId, (Lease, CancelToken)>,
     jobs: Vec<Job>,
+    finalization_errors: std::collections::HashSet<JobId>,
     wake_capability: iptv_core::recording::WakeCapability,
     wake_reported: bool,
     published_schedule: Option<(i64, bool)>,
@@ -743,7 +745,14 @@ impl Runtime {
                 // the spool: no capture may append during this rename.
                 let mut stopped = job;
                 stopped.status = Status::Partial;
-                recover_media(&self.services(), &stopped).await;
+                if matches!(
+                    recover_media(&self.services(), &stopped).await,
+                    completion::Transition::Failed
+                ) {
+                    return Err(Error::unavailable(
+                        "Recording media needs recovery; check storage",
+                    ));
+                }
                 return Ok(());
             }
         }
@@ -785,6 +794,13 @@ impl Runtime {
             })
             .await
             .map_err(|_| Error::unavailable("Recordings unavailable"))?;
+        for job in &mut jobs {
+            if job.status.active() && self.recordings.lock().finalization_errors.contains(&job.id) {
+                job.message =
+                    "Recording state could not be saved; check storage and restart to recover"
+                        .into();
+            }
+        }
         Ok(jobs)
     }
     #[cfg(test)]
@@ -1038,13 +1054,24 @@ fn connection_limit(settings: &iptv_settings::Settings, source: i64, observed: O
     // override an allowance actually reported by an authenticated provider.
     observed.filter(|limit| *limit > 0).unwrap_or(1)
 }
-async fn transition(services: &Services, job: &Job, to: Status, bytes: u64, message: &'static str) {
+async fn transition(
+    services: &Services,
+    job: &Job,
+    to: Status,
+    bytes: u64,
+    message: &'static str,
+) -> completion::Transition {
     let (id, from) = (job.id, job.status);
-    let _ = services
-        .call(move |store| store.transition_recording(id, from, to, bytes, message))
-        .await;
+    completion::retry(services, move |store| {
+        store.transition_recording(id, from, to, bytes, message)
+    })
+    .await
 }
-async fn recover_media(services: &Services, job: &Job) {
+
+async fn recover_media(services: &Services, job: &Job) -> completion::Transition {
+    if let Some(result) = completion::recover(services, job.id).await {
+        return result;
+    }
     let p = path(services, job.id, true);
     let complete = path(services, job.id, false);
     let files = services.clone();
@@ -1057,7 +1084,7 @@ async fn recover_media(services: &Services, job: &Job) {
         .await
         .unwrap_or(0);
     if job.status == Status::Partial && bytes > 0 {
-        return;
+        return completion::Transition::Applied;
     }
     transition(
         services,
@@ -1070,17 +1097,26 @@ async fn recover_media(services: &Services, job: &Job) {
         bytes,
         "Interrupted when the app closed",
     )
-    .await;
+    .await
 }
-async fn finish_unstarted(services: &Services, job: &Job, status: Status, message: &'static str) {
+async fn finish_unstarted(
+    services: &Services,
+    job: &Job,
+    status: Status,
+    message: &'static str,
+) -> completion::Transition {
     if job.bytes > 0 {
-        recover_media(services, job).await;
+        recover_media(services, job).await
     } else {
-        transition(services, job, status, 0, message).await;
+        transition(services, job, status, 0, message).await
     }
 }
+
 async fn recover(services: &Services) -> Result<(), crate::model::StoreError> {
     for job in services.read(|store| store.recording_jobs()).await? {
+        if completion::recover(services, job.id).await.is_some() {
+            continue;
+        }
         if job.status == Status::Recording && job.request.end > now() {
             let partial = path(services, job.id, true);
             let bytes = services
@@ -1115,6 +1151,7 @@ async fn recover(services: &Services) -> Result<(), crate::model::StoreError> {
     Ok(())
 }
 async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
+    state.lock().finalization_errors.clear();
     let mut retry = Duration::from_millis(250);
     loop {
         if !services.is_current() || shutdown.is_cancelled() {
@@ -1203,21 +1240,36 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
         #[cfg(test)]
         state.changed.notify_all();
         for mut job in jobs {
+            if state.lock().finalization_errors.contains(&job.id) {
+                continue;
+            }
             if job.status == Status::Recording && !state.lock().active.contains_key(&job.id) {
-                recover_media(&services, &job).await;
+                if !state.lock().finalization_errors.contains(&job.id)
+                    && matches!(
+                        recover_media(&services, &job).await,
+                        completion::Transition::Failed
+                    )
+                {
+                    state.lock().finalization_errors.insert(job.id);
+                }
                 continue;
             }
             if job.status != Status::Scheduled || job.request.start > now() {
                 continue;
             }
             if job.request.end <= now() {
-                finish_unstarted(
-                    &services,
-                    &job,
-                    Status::Missed,
-                    "The scheduled recording window was missed",
-                )
-                .await;
+                if matches!(
+                    finish_unstarted(
+                        &services,
+                        &job,
+                        Status::Missed,
+                        "The scheduled recording window was missed"
+                    )
+                    .await,
+                    completion::Transition::Failed
+                ) {
+                    state.lock().finalization_errors.insert(job.id);
+                }
                 continue;
             }
             let stop = CancelToken::new();
@@ -1233,13 +1285,18 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
                 }
             };
             if !reserved {
-                finish_unstarted(
-                    &services,
-                    &job,
-                    Status::Failed,
-                    "No provider connection available; check Streams at once",
-                )
-                .await;
+                if matches!(
+                    finish_unstarted(
+                        &services,
+                        &job,
+                        Status::Failed,
+                        "No provider connection available; check Streams at once"
+                    )
+                    .await,
+                    completion::Transition::Failed
+                ) {
+                    state.lock().finalization_errors.insert(job.id);
+                }
                 continue;
             }
             let id = job.id;
@@ -1404,32 +1461,36 @@ async fn record(
     shutdown: &CancelToken,
 ) {
     let partial = path(services, job.id, true);
-    let destination = path(services, job.id, false);
     let directory = media_directory(services.directory());
     let exclude = services.ports().exclude_from_backup;
-    let reserved = state.lock().active.len() as u64 * MAX_BYTES;
+    let active: Vec<_> = state.lock().active.keys().copied().collect();
     let prepared = services
         .spawn_blocking(move || -> std::io::Result<()> {
             crate::storage::protect_directory(&directory, exclude)?;
-            let mut total = reserved;
-            for entry in std::fs::read_dir(&directory)? {
-                let metadata = entry?.metadata()?;
-                total = total.saturating_add(metadata.len());
-            }
-            if total > 32 * 1024 * 1024 * 1024 {
+            storage_admission(&directory, &active)?;
+            // Advisory only: another process may consume space after this check.
+            // ENOSPC during writes still flows through acknowledged finalization.
+            if available_space(&directory).is_some_and(|bytes| bytes < 256 * 1024) {
                 return Err(std::io::ErrorKind::StorageFull.into());
             }
             Ok(())
         })
         .await;
+    let mut file = if matches!(prepared, Ok(Ok(()))) {
+        iptv_net::recording::CaptureFile::open(&partial, MAX_BYTES, true)
+            .await
+            .ok()
+    } else {
+        None
+    };
     let had_gap = Arc::new(AtomicBool::new(
         job.request.start < now().saturating_sub(5) || job.bytes > 0,
     ));
     let gap = had_gap.clone();
     let result = async {
-        if !matches!(prepared, Ok(Ok(()))) {
+        let Some(file) = file.as_mut() else {
             return Err("Recording storage unavailable");
-        }
+        };
         let mut retry = Duration::from_secs(1);
         let mut capture = iptv_net::recording::CaptureState::default();
         loop {
@@ -1489,13 +1550,10 @@ async fn record(
                 // A shared input ending before stop/deadline retains partial
                 // media and frees capture's lease for playback's normal retry.
                 // An independent capture retry must not strand that viewer.
-                return iptv_net::recording::capture_shared(
-                    incoming.input.shared().expect("shared capture lease"),
-                    &partial,
-                    MAX_BYTES,
-                )
-                .await
-                .map_err(|error| error.message());
+                return file
+                    .capture_shared(incoming.input.shared().expect("shared capture lease"))
+                    .await
+                    .map_err(|error| error.message());
             } else {
                 // A reauthentication/link change or failed incoming stream is
                 // never allowed to inherit its sharing discount. A fresh
@@ -1512,15 +1570,8 @@ async fn record(
                         }
                     }
                 }
-                iptv_net::recording::capture_resume_with_state(
-                    &source.url,
-                    &source.headers,
-                    policy,
-                    &partial,
-                    MAX_BYTES,
-                    &mut capture,
-                )
-                .await
+                file.capture_stream(&source.url, &source.headers, policy, &mut capture)
+                    .await
             };
             match outcome {
                 Err(iptv_net::recording::Failure::Network | iptv_net::recording::Failure::Gap) => {
@@ -1546,16 +1597,33 @@ async fn record(
         } => Ok("Recording finished"),
         result = result => result.map(|_| "Recording finished"),
     };
+    // The cancelled receive future no longer owns file writes. Keep the active
+    // reservation until its worker acknowledges drain, sync and descriptor close.
+    let outcome = match file {
+        Some(file) => {
+            if file.finish().await.is_ok() {
+                outcome
+            } else {
+                Err("Recording storage unavailable")
+            }
+        }
+        None => Err("Recording storage unavailable"),
+    };
     if shutdown.is_cancelled() && state.background() && job.request.end > now() {
         let bytes = std::fs::symlink_metadata(&partial).map_or(0, |m| m.len() / 188 * 188);
-        transition(
-            services,
-            job,
-            Status::Scheduled,
-            bytes,
-            "Resuming interrupted recording",
-        )
-        .await;
+        if matches!(
+            transition(
+                services,
+                job,
+                Status::Scheduled,
+                bytes,
+                "Resuming interrupted recording"
+            )
+            .await,
+            completion::Transition::Failed
+        ) {
+            state.lock().finalization_errors.insert(job.id);
+        }
         return;
     }
     let outcome = if outcome.is_ok() && had_gap.load(Ordering::SeqCst) {
@@ -1563,65 +1631,70 @@ async fn record(
     } else {
         outcome
     };
-    // capture uses synchronous file writes on this native worker: dropping its
-    // future cannot leave an asynchronous write racing finalization/deletion.
-    let finalized = services
-        .spawn_blocking(move || -> std::io::Result<u64> {
-            let metadata = match std::fs::symlink_metadata(&partial) {
-                Ok(m) => m,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-                Err(e) => return Err(e),
-            };
-            if !metadata.is_file() || metadata.file_type().is_symlink() {
-                return Err(std::io::ErrorKind::InvalidData.into());
-            }
-            let bytes = metadata.len() / 188 * 188;
-            if bytes == 0 {
-                std::fs::remove_file(partial)?;
-                return Ok(0);
-            }
-            let file = std::fs::OpenOptions::new().write(true).open(&partial)?;
-            file.set_len(bytes)?;
-            file.sync_all()?;
-            // Never replace a previous completed file, even after a lost acknowledgement.
-            finalize_name(&partial, &destination)?;
-            #[cfg(unix)]
-            std::fs::File::open(
-                destination
-                    .parent()
-                    .ok_or(std::io::ErrorKind::InvalidInput)?,
-            )?
-            .sync_all()?;
-            Ok(bytes)
-        })
-        .await;
-    let (bytes, storage_ok) = match finalized {
-        Ok(Ok(n)) => (n, true),
-        _ => {
-            let files = services.clone();
-            let id = job.id;
-            let bytes = services
-                .spawn_blocking(move || {
-                    retained_media(&files, id, true).map_or(0, |(_, bytes)| bytes)
-                })
-                .await
-                .unwrap_or(0);
-            (bytes, false)
+    if matches!(
+        completion::finish(services, job, outcome).await,
+        completion::Transition::Failed
+    ) {
+        state.lock().finalization_errors.insert(job.id);
+    }
+}
+
+/// Retained bytes plus the unfilled part of every active reservation. Active
+/// spool bytes are already on disk and must not be counted twice.
+fn storage_admission(directory: &Path, active: &[JobId]) -> std::io::Result<()> {
+    let mut total = 0u64;
+    let mut remaining = active
+        .iter()
+        .map(|id| (*id, MAX_BYTES))
+        .collect::<HashMap<_, _>>();
+    for entry in std::fs::read_dir(directory)? {
+        let entry = entry?;
+        let metadata = entry.path().symlink_metadata()?;
+        total = total.saturating_add(metadata.len());
+        if let Some(id) = entry
+            .path()
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.parse::<i64>().ok())
+            && entry
+                .path()
+                .extension()
+                .is_some_and(|s| s == "part" || s == "ts")
+            && let Some(reserved) = remaining.get_mut(&JobId(id))
+        {
+            *reserved = reserved.saturating_sub(metadata.len());
         }
-    };
-    let message = if !storage_ok {
-        "Could not finalize the recording; partial media was retained"
-    } else if bytes == 0 && outcome.is_ok() {
-        "No media was recorded"
-    } else {
-        outcome.unwrap_or_else(|m| m)
-    };
-    let status = if bytes == 0 {
-        Status::Failed
-    } else if outcome.is_ok() && storage_ok {
-        Status::Completed
-    } else {
-        Status::Partial
-    };
-    transition(services, job, status, bytes, message).await;
+    }
+    total = remaining
+        .values()
+        .fold(total, |total, bytes| total.saturating_add(*bytes));
+    if total > 32 * 1024 * 1024 * 1024 {
+        return Err(std::io::ErrorKind::StorageFull.into());
+    }
+    Ok(())
+}
+
+/// Native hosts with statvfs can reject already-exhausted storage. Other hosts
+/// rely on the write result; inability to query capacity is not an empty disk.
+#[cfg(unix)]
+fn available_space(directory: &Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let path = std::ffi::CString::new(directory.as_os_str().as_bytes()).ok()?;
+    let mut space = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // SAFETY: path is NUL-terminated; the out pointer is valid and read only when
+    // statvfs reports success, which initializes the entire structure.
+    let status = unsafe { libc::statvfs(path.as_ptr(), space.as_mut_ptr()) };
+    if status != 0 {
+        return None;
+    }
+    // SAFETY: successful statvfs initialized space above.
+    let space = unsafe { space.assume_init() };
+    Some(
+        (u128::from(space.f_bavail).saturating_mul(u128::from(space.f_frsize)))
+            .min(u128::from(u64::MAX)) as u64,
+    )
+}
+#[cfg(not(unix))]
+fn available_space(_: &Path) -> Option<u64> {
+    None
 }

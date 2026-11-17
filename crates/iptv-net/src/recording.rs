@@ -4,6 +4,9 @@ use crate::playback::{PlaybackPolicy, PlaybackRelay};
 use std::io::{Seek, SeekFrom, Write};
 use std::{future::Future, path::Path, time::Duration};
 
+mod writer;
+pub use writer::CaptureFile;
+
 const STALL_TOLERANCE: Duration = Duration::from_secs(30);
 
 /// Retain this state across in-process retries of the same recording spool.
@@ -34,8 +37,8 @@ impl Failure {
     }
 }
 
-/// Dropping the capture future closes the file and relay, including a stalled fetch.
-/// The caller owns stop/deadline selection and finalizes the acknowledged byte count.
+/// Convenience capture. For cancellable recording/finalization use [`CaptureFile`]
+/// outside the cancelled future and await its finish acknowledgement.
 pub async fn capture(
     url: &str,
     headers: &[(String, String)],
@@ -99,9 +102,9 @@ async fn capture_inner(
     let relay =
         PlaybackRelay::start_with_policy(url, headers, policy).map_err(|_| Failure::Network)?;
     let client = client()?;
-    let mut writer = writer(path, max_bytes, resume)?;
+    let mut writer = CaptureFile::open(path, max_bytes, resume).await?;
     let result = receive(&client, &relay, &mut writer, state).await;
-    writer.file.sync_all().map_err(|_| Failure::Storage)?;
+    writer.finish().await?;
     result
 }
 
@@ -112,12 +115,40 @@ pub async fn capture_shared(
     path: &Path,
     max_bytes: u64,
 ) -> Result<(), Failure> {
-    let mut writer = writer(path, max_bytes, true)?;
-    let mut reader = input.subscribe();
-    loop {
-        let bytes = reader.next().await?;
-        writer.write(&bytes).await?;
+    let mut writer = CaptureFile::open(path, max_bytes, true).await?;
+    let result = writer.capture_shared(input).await;
+    writer.finish().await?;
+    result
+}
+
+impl CaptureFile {
+    /// Receive into this spool; dropping this future stops input, not accepted writes.
+    pub async fn capture_stream(
+        &mut self,
+        url: &str,
+        headers: &[(String, String)],
+        policy: PlaybackPolicy,
+        state: &mut CaptureState,
+    ) -> Result<(), Failure> {
+        let relay =
+            PlaybackRelay::start_with_policy(url, headers, policy).map_err(|_| Failure::Network)?;
+        receive(&client()?, &relay, self, state).await
     }
+
+    /// Attach to shared ingest without creating another provider connection.
+    pub async fn capture_shared(&mut self, input: &crate::live::LiveInput) -> Result<(), Failure> {
+        let mut reader = input.subscribe();
+        loop {
+            let bytes = reader.next().await?;
+            self.write(&bytes).await?;
+        }
+    }
+}
+
+/// Opens retained private media without following symlinks/reparse points.
+/// Used on file workers for finalization verification, never on an async executor.
+pub fn open_retained(path: &Path) -> std::io::Result<std::fs::File> {
+    crate::file::open_private_regular(path, crate::file::PrivateAccess::Read).map(|(file, _)| file)
 }
 
 fn writer(path: &Path, max_bytes: u64, resume: bool) -> Result<Writer, Failure> {
@@ -153,8 +184,8 @@ fn writer(path: &Path, max_bytes: u64, resume: bool) -> Result<Writer, Failure> 
     })
 }
 
-/// A synchronous, bounded sink: cancellation cannot leave a queued write racing
-/// recording finalization. Live fanout uses the same parser and validation.
+/// Bounded sink used by file capture and live fanout. File owners acknowledge
+/// shutdown separately before finalization.
 pub(crate) trait Sink {
     fn accepts_master_playlist(&self) -> bool {
         true
@@ -233,8 +264,8 @@ struct Writer {
     bytes: u64,
     max_bytes: u64,
 }
-impl Sink for Writer {
-    async fn write(&mut self, bytes: &[u8]) -> Result<(), Failure> {
+impl Writer {
+    fn write_blocking(&mut self, bytes: &[u8]) -> Result<(), Failure> {
         if self.bytes.saturating_add(bytes.len() as u64) > self.max_bytes {
             return Err(Failure::Limit);
         }
