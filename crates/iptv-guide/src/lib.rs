@@ -231,7 +231,18 @@ impl EpgSchedule {
     /// Whether the programmes around `t` are in memory; asks for their day
     /// when they are not.
     pub fn ensure_loaded(&self, t: UnixTime) -> bool {
+        self.pages.retry_failed(t);
         self.with_store(t, |_| ()).is_some()
+    }
+
+    /// Complete exactly this failed read without caching successful empty data.
+    pub fn fail_page(&self, request: PageRequest) -> bool {
+        self.pages.fail(request)
+    }
+
+    /// Identity of the pending read holding `t`, for completion waiters.
+    pub fn pending_page(&self, t: UnixTime) -> Option<PageRequest> {
+        self.pages.pending(t)
     }
 
     /// Drops the older days read in (except one pinned with

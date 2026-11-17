@@ -21,6 +21,12 @@ struct Entry {
     episode: Option<u32>,
 }
 
+#[cfg(test)]
+type PlaybackCompletion = (
+    tokio::sync::oneshot::Sender<()>,
+    tokio::sync::oneshot::Receiver<()>,
+);
+
 #[derive(Default)]
 pub(crate) struct State {
     entries: Mutex<BTreeMap<Key, Entry>>,
@@ -28,6 +34,8 @@ pub(crate) struct State {
     /// The discovery read in progress: one shelf is shown at a time, so a
     /// newer read, a closed shelf or a closed application cancels it.
     discovery: Mutex<Option<iptv_import::CancelToken>>,
+    #[cfg(test)]
+    playback_completion: Mutex<Option<PlaybackCompletion>>,
 }
 impl State {
     /// A token for a new discovery read, cancelling the one before.
@@ -748,7 +756,22 @@ url,
                         .is_some_and(|s| s.source.config == expected_config))
             })
             .await?;
-        if !current {
+        #[cfg(test)]
+        {
+            let completion = self.vod.playback_completion.lock().unwrap().take();
+            if let Some((arrived, release)) = completion {
+                let _ = arrived.send(());
+                let _ = release.await;
+            }
+        }
+        if !current
+            || !services.is_current()
+            || !self.parental_allowed(&target(&playing.key))
+            || playing
+                .parent
+                .as_ref()
+                .is_some_and(|parent| !self.parental_allowed(&target(parent)))
+        {
             return Err(unavailable());
         }
         self.vod_update_session(playing_source);
@@ -1018,6 +1041,140 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test(flavor = "current_thread")]
+    async fn playback_rechecks_movie_and_episode_parent_grants_after_the_final_read() {
+        use iptv_core::parental::Pin;
+        use iptv_providers::{
+            ContentId, SecretUrl,
+            model::{M3uSourceConfig, Source, VodItem},
+        };
+        for episode in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let owner = Runtime::new(crate::Ports::new(directory.path().to_owned(), |_| {
+                Ok(crate::model::DatabaseKey::from_bytes([0x68; 32]))
+            }));
+            owner.start_services();
+            let config = SourceConfig::M3u(M3uSourceConfig {
+                location: SecretUrl::new("https://example.test/generated.m3u"),
+                user_agent: None,
+                referrer: None,
+            });
+            let stored = config.clone();
+            let source = owner
+                .services()
+                .call(move |store| {
+                    let source = store.add_source(&Source {
+                        name: "Generated completion fence".into(),
+                        config: stored,
+                    })?;
+                    let item = VodItem {
+                        id: ContentId::from_stored("generated-parent"),
+                        provider_id: None,
+                        name: "Generated title".into(),
+                        groups: vec![],
+                        poster: None,
+                        plot: None,
+                        year: None,
+                        rating_x10: None,
+                        added: None,
+                        duration_secs: None,
+                        stream: StreamLocator::Url {
+                            url: "https://example.test/generated.mp4".into(),
+                            headers: vec![],
+                            properties: vec![],
+                        },
+                        is_series: episode,
+                        episode_numbers: vec![],
+                    };
+                    if episode {
+                        let series = iptv_providers::model::Series {
+                            id: item.id,
+                            provider_id: item.provider_id,
+                            name: item.name,
+                            groups: item.groups,
+                            poster: item.poster,
+                            plot: item.plot,
+                            year: item.year,
+                            rating_x10: item.rating_x10,
+                            last_modified: None,
+                        };
+                        store.replace_catalog(source, &[], &[], &[], &[series])?;
+                    } else {
+                        store.replace_catalog(source, &[], &[], &[item], &[])?;
+                    }
+                    Ok(source)
+                })
+                .await
+                .unwrap();
+            let parent = Key {
+                source: source.0,
+                kind: if episode { Kind::Series } else { Kind::Movie },
+                id: "generated-parent".into(),
+            };
+            let mut settings = (*owner.settings()).clone();
+            settings
+                .set("parental.vod_enabled", iptv_settings::Value::Bool(true))
+                .unwrap();
+            *owner.services().shared_settings().write().unwrap() =
+                Some(std::sync::Arc::new(settings));
+            owner
+                .parental_change_pin(None, Pin::parse("2468").unwrap())
+                .await
+                .unwrap();
+            let protected = target(&parent);
+            owner
+                .parental_set_blocked(protected.clone(), true)
+                .await
+                .unwrap();
+            owner
+                .parental_authorize(protected, Pin::parse("2468").unwrap())
+                .await
+                .unwrap();
+            let details = owner.vod_details(parent.clone()).await.unwrap();
+            let key = if episode {
+                let key = Key {
+                    kind: Kind::Episode,
+                    id: "generated-episode".into(),
+                    ..parent.clone()
+                };
+                let incarnation = details.incarnation.clone();
+                owner.vod.entries.lock().unwrap().insert(
+                    key.clone(),
+                    Entry {
+                        incarnation,
+                        config: config.clone(),
+                        locator: StreamLocator::Url {
+                            url: "https://example.test/generated-episode.mp4".into(),
+                            headers: vec![],
+                            properties: vec![],
+                        },
+                        parent: Some(parent),
+                        episode: None,
+                    },
+                );
+                key
+            } else {
+                parent
+            };
+            let (arrived, waiting) = tokio::sync::oneshot::channel();
+            let (release, held) = tokio::sync::oneshot::channel();
+            *owner.vod.playback_completion.lock().unwrap() = Some((arrived, held));
+            let playing = owner.vod_play(details, key, false);
+            tokio::pin!(playing);
+            tokio::select! {
+                result = &mut playing => panic!("playback passed its final completion hold: {}", result.is_ok()),
+                arrived = tokio::time::timeout(std::time::Duration::from_secs(5), waiting) => arrived.unwrap().unwrap(),
+            }
+            owner.parental_lock();
+            release.send(()).unwrap();
+            assert!(
+                playing.await.is_err(),
+                "revocation must fence the final movie or parent capability"
+            );
+            assert!(owner.drain_services());
+        }
+    }
+
     #[test]
     fn catalogue_authorization_only_loads_the_returned_movie_identities() {
         use iptv_providers::{

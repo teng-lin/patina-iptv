@@ -961,6 +961,14 @@ async fn rejected_reused_viewer_releases_only_its_own_capture_input_reference() 
     );
     owner.stop_recording(id).await.unwrap();
     until(&owner, id, |job| !job.status.active()).await;
+    // Durable completion and the remote socket closing can precede the
+    // capture task's lease release and the registry's acknowledged shutdown.
+    // Observe the actual owner release, then join retirement before inspecting
+    // accounting; a closing entry deliberately remains counted until that join.
+    wait(|| !owner.recordings.lock().active.contains_key(&id)).await;
+    tokio::time::timeout(Duration::from_secs(5), owner.retire_viewing_inputs(1))
+        .await
+        .expect("capture input retirement acknowledged");
     wait(|| fixture.active.load(Ordering::SeqCst) == 0).await;
     assert!(owner.recordings.lock().inputs.is_empty());
     assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
@@ -1095,9 +1103,10 @@ async fn recording_link_resolution_revalidates_member_authority_before_shared_at
             .await
             .unwrap();
         release.send(()).unwrap();
-        assert!(
+        assert_eq!(
             resolving.await.unwrap().is_err(),
-            "late {mutation} must reject the prior recording link"
+            mutation != "blocked",
+            "accepted intent survives a viewing block; late {mutation} still validates operational authority"
         );
         server.await.unwrap();
         assert!(owner.drain_services());

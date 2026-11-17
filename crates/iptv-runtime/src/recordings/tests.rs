@@ -1334,3 +1334,335 @@ async fn a_denied_wake_is_explicit_and_does_not_discard_the_accepted_job() {
     );
     assert!(owner.drain_services());
 }
+
+async fn protect_recording(owner: &Runtime, request: &Request) -> iptv_core::parental::Target {
+    use iptv_core::parental::{Pin, Target};
+    let mut settings = (*owner.settings()).clone();
+    settings
+        .set("parental.live_enabled", iptv_settings::Value::Bool(true))
+        .unwrap();
+    *owner.services().shared_settings().write().unwrap() = Some(Arc::new(settings));
+    owner
+        .parental_change_pin(None, Pin::parse("2468").unwrap())
+        .await
+        .unwrap();
+    let target = Target::live(request.source, request.channel.as_str());
+    let source = SourceId(request.source);
+    let channel = ContentId::from_stored(request.channel.clone());
+    owner
+        .services()
+        .call(move |store| store.set_blocked(source, &channel, true))
+        .await
+        .unwrap();
+    owner
+        .parental_authorize(target.clone(), Pin::parse("2468").unwrap())
+        .await
+        .unwrap();
+    target
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn queued_recording_mutations_recheck_the_grant_in_the_accepting_writer() {
+    use iptv_core::recording::{Repeat, Rule, RuleId};
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(directory.path());
+    let request = seed(&owner, "https://example.test/generated.ts").await;
+    let initial = request.clone();
+    let rule = Rule {
+        id: RuleId(952),
+        request: Request {
+            start: request.start + 86400,
+            end: request.end + 86400,
+            ..request.clone()
+        },
+        local_start: request.start + 86400,
+        repeat: Repeat::Daily,
+        enabled: true,
+        lead_seconds: 0,
+        trail_seconds: 0,
+    };
+    let existing = rule.clone();
+    let services = owner.services();
+    services
+        .call(move |store| {
+            store.schedule_recording(JobId(951), &initial, now())?;
+            store.schedule_recording_rule_and_first(&existing, JobId(953), now())?;
+            store.set_recording_rule_enabled(existing.id, false, now())
+        })
+        .await
+        .unwrap();
+    let target = protect_recording(&owner, &request).await;
+    let admission = owner.recording_admission(&request).await.unwrap();
+    let (entered, arrived) = std::sync::mpsc::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    let writer = services.call(move |_| {
+        entered.send(()).unwrap();
+        held.recv_timeout(Duration::from_secs(5)).unwrap();
+        Ok(())
+    });
+    arrived.recv_timeout(Duration::from_secs(2)).unwrap();
+    let accepted = admission.clone();
+    let duplicate = request.clone();
+    let scheduling = services.call(move |store| {
+        store.schedule_recording_checked(JobId(954), &duplicate, now(), |store| {
+            accepted.authorize(store)
+        })
+    });
+    let accepted = admission.clone();
+    let edited = Request {
+        end: request.end + 60,
+        ..request.clone()
+    };
+    let updating = services.call(move |store| {
+        store.update_recording_checked(JobId(951), &edited, now(), |store| {
+            accepted.authorize(store)
+        })
+    });
+    let accepted = admission.clone();
+    let repeated = Rule {
+        id: RuleId(955),
+        request: Request {
+            start: request.start + 172800,
+            end: request.end + 172800,
+            ..request.clone()
+        },
+        ..rule.clone()
+    };
+    let repeating = services.call(move |store| {
+        store.schedule_recording_rule_with_first_checked(
+            &repeated,
+            JobId(956),
+            &repeated.request,
+            repeated.request.start,
+            now(),
+            |store| accepted.authorize(store),
+        )
+    });
+    let enabling = services.call(move |store| {
+        store.set_recording_rule_enabled_checked(RuleId(952), true, now(), |store| {
+            admission.authorize(store)
+        })
+    });
+    owner.parental_lock();
+    release.send(()).unwrap();
+    writer.await.unwrap();
+    assert!(scheduling.await.is_err());
+    assert!(updating.await.is_err());
+    assert!(repeating.await.is_err());
+    assert!(enabling.await.is_err());
+    let end = request.end;
+    services
+        .read(move |store| {
+            assert_eq!(store.recording_jobs()?.len(), 2);
+            assert_eq!(store.recording_job(JobId(951))?.unwrap().request.end, end);
+            let rules = store.recording_rules()?;
+            assert_eq!(rules.len(), 1);
+            assert!(!rules[0].enabled);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // A fresh unlock admits the legacy blocked channel; the raw store still cannot.
+    owner
+        .parental_authorize(target, iptv_core::parental::Pin::parse("2468").unwrap())
+        .await
+        .unwrap();
+    let admission = owner.recording_admission(&request).await.unwrap();
+    assert_eq!(
+        services
+            .call(move |store| store.schedule_recording_checked(
+                JobId(957),
+                &request,
+                now(),
+                |store| admission.authorize(store)
+            ))
+            .await
+            .unwrap(),
+        JobId(951)
+    );
+    assert!(owner.drain_services());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn recording_admission_cannot_follow_a_reused_numeric_source() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(directory.path());
+    let request = seed(&owner, "https://example.test/generated.ts").await;
+    let admission = owner.recording_admission(&request).await.unwrap();
+    let source = SourceId(request.source);
+    owner.services().call(move |store| {
+        let config = store.source(source)?.unwrap().source;
+        store.delete_source(source)?;
+        assert_eq!(store.add_source(&config)?, source);
+        let parsed = iptv_providers::m3u::parse_m3u("#EXTM3U\n#EXTINF:-1 tvg-id=\"generated\",Generated channel\nhttps://example.test/generated.ts\n");
+        store.replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
+    }).await.unwrap();
+    assert!(
+        owner
+            .services()
+            .call(move |store| store.schedule_recording_checked(
+                JobId(961),
+                &request,
+                now(),
+                |store| admission.authorize(store)
+            ))
+            .await
+            .is_err()
+    );
+    assert!(
+        owner
+            .services()
+            .read(|store| store.recording_jobs())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(owner.drain_services());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn recording_file_and_relay_reject_relock_after_their_last_service_await() {
+    for stage in ["file", "relay"] {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = owner(directory.path());
+        let request = seed(&owner, "https://example.test/generated.ts").await;
+        let id = JobId(971);
+        let staged = request.clone();
+        owner
+            .services()
+            .call(move |store| {
+                store.schedule_recording(id, &staged, now())?;
+                assert!(store.transition_recording(
+                    id,
+                    Status::Scheduled,
+                    Status::Completed,
+                    188,
+                    "Synthetic retained media"
+                )?);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        std::fs::create_dir_all(media_directory(owner.data_dir())).unwrap();
+        std::fs::write(path(&owner.services(), id, false), [0x47; 188]).unwrap();
+        protect_recording(&owner, &request).await;
+        let (arrived, waiting) = tokio::sync::oneshot::channel();
+        let (release, held) = tokio::sync::oneshot::channel();
+        *owner.recordings.playback_completion.lock().unwrap() = Some((stage, arrived, held));
+        let opening = async {
+            if stage == "file" {
+                owner.recording_file(id).await.map(drop)
+            } else {
+                owner.open_recording(id).await.map(drop)
+            }
+        };
+        tokio::pin!(opening);
+        tokio::select! {
+            result = &mut opening => panic!("{stage} passed the completion hold: {result:?}"),
+            arrived = tokio::time::timeout(Duration::from_secs(5), waiting) => arrived.unwrap().unwrap(),
+        }
+        owner.parental_lock();
+        release.send(()).unwrap();
+        assert!(
+            opening.await.is_err(),
+            "{stage} must not return a revoked capability"
+        );
+        assert!(
+            owner.recordings.playback.lock().unwrap().is_none(),
+            "an unaccepted relay must not acquire the playback lease"
+        );
+        assert!(owner.drain_services());
+    }
+}
+
+async fn capture_accepted_media(owner: &Runtime, id: JobId) {
+    until(owner, id, |job| job.status == Status::Recording).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !std::fs::metadata(path(&owner.services(), id, true)).is_ok_and(|m| m.len() >= 188) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("accepted capture writes actual transport packets");
+    owner.stop_recording(id).await.unwrap();
+    let retained = until(owner, id, |job| !job.status.active()).await;
+    assert_eq!(retained.status, Status::Completed, "{retained:?}");
+    assert!(retained.bytes >= 188);
+    assert!(
+        std::fs::read(path(&owner.services(), id, false))
+            .unwrap()
+            .starts_with(&[0x47])
+    );
+    // Retained recording authority is distinct from acquiring a playback grant.
+    assert!(owner.recording_file(id).await.is_err());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_unlocked_legacy_blocked_recording_captures_after_the_viewer_relocks() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(directory.path());
+    let mut request = seed(&owner, &server()).await;
+    let target = protect_recording(&owner, &request).await;
+    request.start = now();
+    request.end = now() + 60;
+    let id = owner.schedule_recording(request.clone()).await.unwrap();
+    owner.parental_lock();
+    assert!(owner.parental_check(&target).await.is_err());
+    assert!(
+        owner.schedule_recording(request).await.is_err(),
+        "new requests still need a current unlock"
+    );
+    capture_accepted_media(&owner, id).await;
+    assert!(owner.drain_services());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_accepted_series_captures_a_new_occurrence_materialized_after_block_and_relock() {
+    use iptv_core::{
+        parental::{Pin, Target},
+        recording::Repeat,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(directory.path());
+    let request = seed(&owner, &server()).await;
+    let mut settings = (*owner.settings()).clone();
+    settings
+        .set("parental.live_enabled", iptv_settings::Value::Bool(true))
+        .unwrap();
+    *owner.services().shared_settings().write().unwrap() = Some(Arc::new(settings));
+    owner
+        .parental_change_pin(None, Pin::parse("2468").unwrap())
+        .await
+        .unwrap();
+    // Accept the series while available, before its currently airing episode
+    // exists in the guide. Later viewing protection does not cancel this rule.
+    let first = owner
+        .schedule_repeating_recording(request.clone(), Repeat::Series)
+        .await
+        .unwrap();
+    let source = SourceId(request.source);
+    let channel = ContentId::from_stored(request.channel.clone());
+    owner
+        .services()
+        .call(move |store| store.set_blocked(source, &channel, true))
+        .await
+        .unwrap();
+    owner.parental_lock();
+    let target = Target::live(request.source, request.channel.as_str());
+    assert!(owner.parental_check(&target).await.is_err());
+    let start = now();
+    seed_series_guide(&owner, &request, start, start + 60);
+    rules::materialize(&owner.services()).await.unwrap();
+    let occurrence = owner
+        .recording_jobs()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|job| job.id != first && job.request.start == start)
+        .expect("accepted rule materializes newly discovered blocked occurrence");
+    capture_accepted_media(&owner, occurrence.id).await;
+    // Stopping the accepted rule remains available while viewing stays locked.
+    owner.stop_repeating_recording(first).await.unwrap();
+    assert!(owner.recording_rules().await.unwrap().is_empty());
+    assert!(owner.drain_services());
+}

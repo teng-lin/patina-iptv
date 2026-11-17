@@ -146,30 +146,94 @@ where
     query_with_deadline(owner, control, QUERY_DEADLINE, operation)
 }
 
+fn authorized_query<T, F, K>(
+    owner: &Runtime,
+    control: InspectionControl,
+    authorization: crate::parental::Snapshot,
+    operation: F,
+    channels: K,
+) -> impl Future<Output = InspectionResult<T>> + use<T, F, K>
+where
+    T: Send + 'static,
+    F: FnOnce(&iptv_store_sqlite::Store) -> iptv_store_sqlite::Result<InspectionResult<T>>
+        + Send
+        + 'static,
+    K: FnOnce(&T) -> Vec<ChannelRef> + Send + 'static,
+{
+    let services = owner.services();
+    let reading = authorization.clone();
+    let read = query(owner, control, move |store| {
+        store.inspection_with_access(reading.inspection_access(), |store| {
+            let value = match operation(store)? {
+                Ok(value) => value,
+                Err(error) => return Ok(Err(error)),
+            };
+            let mut grants = Vec::new();
+            for channel in channels(&value) {
+                grants.extend(reading.inspection_dependencies(store, &channel)?);
+            }
+            Ok(Ok((value, grants)))
+        })
+    });
+    async move {
+        let (value, grants) = read.await?;
+        if !services.is_current() {
+            return Err(InspectionError::OwnerClosed);
+        }
+        if !authorization.inspection_current(&grants) {
+            return Err(InspectionError::PermissionDenied);
+        }
+        Ok(value)
+    }
+}
+
 impl Runtime {
     pub fn inspect_channel(
         &self,
         key: ChannelRef,
         control: InspectionControl,
     ) -> impl Future<Output = InspectionResult<ChannelInfo>> + use<> {
-        query(self, control, move |store| store.inspection_channel(&key))
+        let authorization = self.parental_snapshot();
+        authorized_query(
+            self,
+            control,
+            authorization,
+            move |store| store.inspection_channel(&key),
+            |channel| vec![channel.key.clone()],
+        )
     }
     pub fn query_channels(
         &self,
         mut request: Query,
         control: InspectionControl,
     ) -> impl Future<Output = InspectionResult<Page<ChannelInfo>>> + use<> {
-        let owner = self.inspection.context(self.services().epoch());
-        query(self, control, move |store| {
-            let cursor = request.cursor.take();
-            request.cursor = match unseal(cursor, &owner) {
-                Ok(c) => c,
-                Err(e) => return Ok(Err(e)),
-            };
-            Ok(store
-                .inspection_channels(&request)?
-                .map(|page| seal(page, &owner)))
-        })
+        let authorization = self.parental_snapshot();
+        let owner = format!(
+            "{}:{}",
+            self.inspection.context(self.services().epoch()),
+            authorization.inspection_context()
+        );
+        authorized_query(
+            self,
+            control,
+            authorization,
+            move |store| {
+                let cursor = request.cursor.take();
+                request.cursor = match unseal(cursor, &owner) {
+                    Ok(c) => c,
+                    Err(e) => return Ok(Err(e)),
+                };
+                Ok(store
+                    .inspection_channels(&request)?
+                    .map(|page| seal(page, &owner)))
+            },
+            |page| {
+                page.items
+                    .iter()
+                    .map(|channel| channel.key.clone())
+                    .collect()
+            },
+        )
     }
     pub fn query_programmes(
         &self,
@@ -178,16 +242,33 @@ impl Runtime {
         channel: Option<ChannelRef>,
         control: InspectionControl,
     ) -> impl Future<Output = InspectionResult<Page<ProgrammeInfo>>> + use<> {
-        let owner = self.inspection.context(self.services().epoch());
-        query(self, control, move |store| {
-            request.cursor = match unseal(request.cursor.take(), &owner) {
-                Ok(c) => c,
-                Err(e) => return Ok(Err(e)),
-            };
-            Ok(store
-                .inspection_programmes(&request, window, channel.as_ref())?
-                .map(|p| seal(p, &owner)))
-        })
+        let subject = channel.clone();
+        let authorization = self.parental_snapshot();
+        let owner = format!(
+            "{}:{}",
+            self.inspection.context(self.services().epoch()),
+            authorization.inspection_context()
+        );
+        authorized_query(
+            self,
+            control,
+            authorization,
+            move |store| {
+                request.cursor = match unseal(request.cursor.take(), &owner) {
+                    Ok(c) => c,
+                    Err(e) => return Ok(Err(e)),
+                };
+                Ok(store
+                    .inspection_programmes(&request, window, channel.as_ref())?
+                    .map(|p| seal(p, &owner)))
+            },
+            move |page| {
+                subject
+                    .into_iter()
+                    .chain(page.items.iter().map(|programme| programme.channel.clone()))
+                    .collect()
+            },
+        )
     }
     pub fn epg_candidates(
         &self,
@@ -195,16 +276,28 @@ impl Runtime {
         mut request: Query,
         control: InspectionControl,
     ) -> impl Future<Output = InspectionResult<Page<Candidate>>> + use<> {
-        let owner = self.inspection.context(self.services().epoch());
-        query(self, control, move |store| {
-            request.cursor = match unseal(request.cursor.take(), &owner) {
-                Ok(c) => c,
-                Err(e) => return Ok(Err(e)),
-            };
-            Ok(store
-                .inspection_candidates(&key, &request)?
-                .map(|p| seal(p, &owner)))
-        })
+        let subject = key.clone();
+        let authorization = self.parental_snapshot();
+        let owner = format!(
+            "{}:{}",
+            self.inspection.context(self.services().epoch()),
+            authorization.inspection_context()
+        );
+        authorized_query(
+            self,
+            control,
+            authorization,
+            move |store| {
+                request.cursor = match unseal(request.cursor.take(), &owner) {
+                    Ok(c) => c,
+                    Err(e) => return Ok(Err(e)),
+                };
+                Ok(store
+                    .inspection_candidates(&key, &request)?
+                    .map(|p| seal(p, &owner)))
+            },
+            move |_| vec![subject],
+        )
     }
     pub fn epg_audit(
         &self,
@@ -212,16 +305,32 @@ impl Runtime {
         window: TimeWindow,
         control: InspectionControl,
     ) -> impl Future<Output = InspectionResult<Page<Coverage>>> + use<> {
-        let owner = self.inspection.context(self.services().epoch());
-        query(self, control, move |store| {
-            request.cursor = match unseal(request.cursor.take(), &owner) {
-                Ok(c) => c,
-                Err(e) => return Ok(Err(e)),
-            };
-            Ok(store
-                .inspection_coverage(&request, window)?
-                .map(|p| seal(p, &owner)))
-        })
+        let authorization = self.parental_snapshot();
+        let owner = format!(
+            "{}:{}",
+            self.inspection.context(self.services().epoch()),
+            authorization.inspection_context()
+        );
+        authorized_query(
+            self,
+            control,
+            authorization,
+            move |store| {
+                request.cursor = match unseal(request.cursor.take(), &owner) {
+                    Ok(c) => c,
+                    Err(e) => return Ok(Err(e)),
+                };
+                Ok(store
+                    .inspection_coverage(&request, window)?
+                    .map(|p| seal(p, &owner)))
+            },
+            |page| {
+                page.items
+                    .iter()
+                    .map(|coverage| coverage.channel.key.clone())
+                    .collect()
+            },
+        )
     }
 }
 fn seal<T>(mut page: Page<T>, owner: &str) -> Page<T> {

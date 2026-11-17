@@ -46,12 +46,7 @@ impl Runtime {
         if repeat == Repeat::Once {
             return self.schedule_recording(request).await;
         }
-        self.parental_check(&iptv_core::parental::Target::live(
-            request.source,
-            request.channel.clone(),
-        ))
-        .await
-        .map_err(|_| Error::unavailable("Parental access is locked"))?;
+        let admission = self.recording_admission(&request).await?;
         request.validate(now()).map_err(Error::unavailable)?;
         if self.recordings.is_stopping() || !self.services().is_current() {
             return Err(Error::unavailable(
@@ -117,12 +112,13 @@ impl Runtime {
         let first = self
             .services()
             .call(move |store| {
-                store.schedule_recording_rule_with_first(
+                store.schedule_recording_rule_with_first_checked(
                     &rule,
                     job,
                     &request,
                     occurrence_start,
                     now(),
+                    |store| admission.authorize(store),
                 )
             })
             .await?;
@@ -139,7 +135,7 @@ impl Runtime {
             .map_err(Into::into)
     }
     pub async fn set_recording_rule_enabled(&self, id: RuleId, enabled: bool) -> Result<(), Error> {
-        if enabled {
+        let admission = if enabled {
             let rule = self
                 .services()
                 .read(move |store| {
@@ -150,20 +146,24 @@ impl Runtime {
                 })
                 .await?
                 .ok_or_else(|| Error::unavailable("This recording does not repeat"))?;
-            self.parental_check(&iptv_core::parental::Target::live(
-                rule.request.source,
-                rule.request.channel,
-            ))
-            .await
-            .map_err(|_| Error::unavailable("Parental access is locked"))?;
-        }
+            Some(self.recording_admission(&rule.request).await?)
+        } else {
+            None
+        };
         if enabled && self.recordings.is_stopping() {
             return Err(Error::unavailable(
                 "Restart Patina before scheduling a recording",
             ));
         }
         self.services()
-            .call(move |store| store.set_recording_rule_enabled(id, enabled, now()))
+            .call(move |store| match admission {
+                Some(admission) => {
+                    store.set_recording_rule_enabled_checked(id, true, now(), |store| {
+                        admission.authorize(store)
+                    })
+                }
+                None => store.set_recording_rule_enabled(id, false, now()),
+            })
             .await?;
         if enabled {
             self.start_recordings();

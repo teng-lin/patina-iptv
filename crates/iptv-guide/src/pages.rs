@@ -15,6 +15,9 @@
 //! without being read.
 
 use std::cell::{Cell, RefCell};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_OWNER: AtomicU64 = AtomicU64::new(1);
 
 use iptv_epg::{DAY, GuideStore, UnixTime};
 
@@ -35,6 +38,8 @@ pub struct PagedWindow {
 /// One older day to read: programmes overlapping `[from, to)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PageRequest {
+    pub(crate) owner: u64,
+    pub(crate) attempt: u64,
     pub page: u32,
     pub from: UnixTime,
     pub to: UnixTime,
@@ -45,14 +50,22 @@ pub struct PageRequest {
 /// it must not call back into the schedule before it returns.
 pub type PageLoader = Box<dyn Fn(PageRequest)>;
 
+enum PageState {
+    Loading,
+    Failed,
+    Loaded(GuideStore),
+}
+
 struct Page {
     index: u32,
     /// `None` while it loads.
-    store: Option<GuideStore>,
+    request: PageRequest,
+    state: PageState,
     used: Cell<u64>,
 }
 
 pub(crate) struct Pages {
+    owner: u64,
     /// `UnixTime::MIN`: everything is in the schedule's own store.
     loaded_from: UnixTime,
     oldest: UnixTime,
@@ -66,6 +79,11 @@ pub(crate) struct Pages {
 impl Default for Pages {
     fn default() -> Self {
         Pages {
+            owner: NEXT_OWNER
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
+                    next.checked_add(1)
+                })
+                .expect("page owner identity exhausted"),
             loaded_from: UnixTime::MIN,
             oldest: UnixTime::MIN,
             loader: None,
@@ -126,7 +144,10 @@ impl Pages {
             let pages = self.pages.borrow();
             if let Some(page) = pages.iter().find(|p| p.index == index) {
                 page.used.set(self.tick());
-                return page.store.as_ref().map(f);
+                return match &page.state {
+                    PageState::Loaded(store) => Some(f(store)),
+                    _ => None,
+                };
             }
         }
         self.request(index);
@@ -137,39 +158,51 @@ impl Pages {
         let Some(loader) = &self.loader else {
             return;
         };
-        self.pages.borrow_mut().push(Page {
-            index,
-            store: None,
-            used: Cell::new(self.tick()),
-        });
         let (from, to) = self.range(index);
-        loader(PageRequest {
+        let request = PageRequest {
+            owner: self.owner,
+            attempt: self.tick(),
             page: index,
             from,
             to,
+        };
+        self.pages.borrow_mut().push(Page {
+            index,
+            request,
+            state: PageState::Loading,
+            used: Cell::new(self.tick()),
         });
+        loader(request);
     }
 
     /// A page read for `request`; false (and dropped) when it is no longer
     /// wanted or belongs to another window.
     pub(crate) fn insert(&self, request: PageRequest, store: GuideStore) -> bool {
-        if self.loader.is_none() || self.range(request.page) != (request.from, request.to) {
+        if self.loader.is_none()
+            || request.owner != self.owner
+            || self.range(request.page) != (request.from, request.to)
+        {
             return false;
         }
         let mut pages = self.pages.borrow_mut();
         let Some(page) = pages
             .iter_mut()
-            .find(|p| p.index == request.page && p.store.is_none())
+            .find(|p| p.request == request && matches!(p.state, PageState::Loading))
         else {
             return false;
         };
-        page.store = Some(store);
+        page.state = PageState::Loaded(store);
         page.used.set(self.tick());
-        while pages.iter().filter(|p| p.store.is_some()).count() > MAX_PAGES {
+        while pages
+            .iter()
+            .filter(|p| matches!(p.state, PageState::Loaded(_)))
+            .count()
+            > MAX_PAGES
+        {
             let victim = pages
                 .iter()
                 .enumerate()
-                .filter(|(_, p)| p.store.is_some() && p.index != request.page)
+                .filter(|(_, p)| matches!(p.state, PageState::Loaded(_)) && p.index != request.page)
                 .filter(|(_, p)| Some(p.index) != self.pinned.get())
                 .min_by_key(|(_, p)| p.used.get())
                 .map(|(i, _)| i);
@@ -181,13 +214,57 @@ impl Pages {
         true
     }
 
+    pub(crate) fn fail(&self, request: PageRequest) -> bool {
+        if request.owner != self.owner {
+            return false;
+        }
+        let mut pages = self.pages.borrow_mut();
+        let Some(page) = pages
+            .iter_mut()
+            .find(|page| page.request == request && matches!(page.state, PageState::Loading))
+        else {
+            return false;
+        };
+        page.state = PageState::Failed;
+        true
+    }
+
+    pub(crate) fn pending(&self, t: UnixTime) -> Option<PageRequest> {
+        if self.in_window(t) {
+            return None;
+        }
+        self.pages
+            .borrow()
+            .iter()
+            .find(|page| page.index == self.index_of(t) && matches!(page.state, PageState::Loading))
+            .map(|page| page.request)
+    }
+
+    /// Explicit user demand may retry a failed page; render reads never do.
+    pub(crate) fn retry_failed(&self, t: UnixTime) {
+        if self.in_window(t) {
+            return;
+        }
+        let index = self.index_of(t);
+        self.pages
+            .borrow_mut()
+            .retain(|page| !(page.index == index && matches!(page.state, PageState::Failed)));
+    }
+
     /// Drops every page (loaded or loading) but the pinned one; returns
     /// how many loaded ones went.
     pub(crate) fn evict(&self) -> usize {
         let mut pages = self.pages.borrow_mut();
-        let loaded = pages.iter().filter(|p| p.store.is_some()).count();
+        let loaded = pages
+            .iter()
+            .filter(|p| matches!(p.state, PageState::Loaded(_)))
+            .count();
         pages.retain(|p| Some(p.index) == self.pinned.get());
-        loaded - pages.iter().filter(|p| p.store.is_some()).count()
+        loaded
+            - pages
+                .iter()
+                .filter(|p| matches!(p.state, PageState::Loaded(_)))
+                .count()
     }
 
     /// Keeps the page holding `t` (none: no page is kept).
@@ -201,7 +278,7 @@ impl Pages {
         self.pages
             .borrow()
             .iter()
-            .filter(|p| p.store.is_some())
+            .filter(|p| matches!(p.state, PageState::Loaded(_)))
             .count()
     }
 }

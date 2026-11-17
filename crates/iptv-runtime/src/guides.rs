@@ -56,22 +56,24 @@ mod tests {
     fn priorities_follow_the_list_and_keep_a_v5_arrangement() {
         let typed = user_source(FIRST_USER_FEED, url("typed"), None);
         // As a v5 build had an Xtream source with a typed guide.
-        let v5 = sync_provider(&[typed], &[url("xtream")]);
+        let v5 = sync_provider(&[typed], &[url("xtream")]).unwrap();
         let c = configs_of(&v5, &template());
         assert_eq!(
             c.iter().map(|c| (c.id.0, c.priority)).collect::<Vec<_>>(),
             [(1, 1000), (2, 0)]
         );
         // The provider's guide first: above the user's.
-        let moved = apply(&v5, &Edit::Move(FeedId(2), -1)).unwrap();
+        let moved = apply(&v5, &Edit::Move(FeedId(2), -1)).unwrap().unwrap();
         let c = configs_of(&moved, &template());
         assert_eq!(
             c.iter().map(|c| (c.id.0, c.priority)).collect::<Vec<_>>(),
             [(2, 1001), (1, 1000)]
         );
         // Switched off: not downloaded; the shift travels with the config.
-        let off = apply(&moved, &Edit::SetEnabled(FeedId(1), false)).unwrap();
-        let shifted = apply(&off, &Edit::Shift(FeedId(2), -120)).unwrap();
+        let off = apply(&moved, &Edit::SetEnabled(FeedId(1), false))
+            .unwrap()
+            .unwrap();
+        let shifted = apply(&off, &Edit::Shift(FeedId(2), -120)).unwrap().unwrap();
         let c = configs_of(&shifted, &template());
         assert_eq!(c.len(), 1);
         assert_eq!(

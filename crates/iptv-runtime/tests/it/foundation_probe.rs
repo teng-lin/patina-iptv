@@ -905,17 +905,14 @@ fn staged_reads_share_query_admission_until_the_actual_blocking_workers_exit() {
         "admission rejection cannot wait behind held analysis"
     );
     drop(pending);
-    assert_eq!(
-        support::block_on(runtime.probe_candidates(
-            summary.evidence.clone(),
-            String::new(),
-            None,
-            50,
-            control(),
-        )),
-        Err(InspectionError::Busy),
-        "dropping replies cannot release slots held by live workers"
-    );
+    // Dropping the public replies requests cancellation. Capacity is released
+    // only once those actual workers observe it, including while their
+    // configuration read is queued behind this held analysis lane.
+    let cancelled_by = Instant::now() + Duration::from_secs(2);
+    while runtime.active_inspection_workers() != 0 && Instant::now() < cancelled_by {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(runtime.active_inspection_workers(), 0);
     release.send(()).unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
@@ -978,4 +975,65 @@ fn two_held_feed_downloads_refuse_more_work_until_heavy_workers_finish() {
     assert_eq!(servers[0].requests.load(Ordering::SeqCst), 2);
     assert_eq!(servers[1].requests.load(Ordering::SeqCst), 1);
     runtime.drain_services();
+}
+
+#[test]
+fn queued_probe_configuration_honors_original_cancel_and_deadline_until_worker_exit() {
+    for cancel_explicitly in [false, true] {
+        let server = Mock::new(XML.as_bytes().to_vec(), false);
+        let directory = tempfile::tempdir().unwrap();
+        let source = seed(directory.path(), server.url(), 0);
+        let runtime = owner(directory.path());
+        let summary = probe(&runtime, source).unwrap();
+        let candidate = CandidateRef {
+            source,
+            feed: FeedId(1),
+            incarnation: summary.evidence.incarnation.clone(),
+            epg_channel: "amber.alt".into(),
+        };
+        let (entered, release) = runtime.hold_analysis();
+        entered.recv_timeout(Duration::from_secs(2)).unwrap();
+        let options = InspectionControl {
+            timeout: if cancel_explicitly {
+                Duration::from_secs(60)
+            } else {
+                Duration::from_millis(50)
+            },
+            ..Default::default()
+        };
+        let cancel = options.cancel.clone();
+        let work = runtime.probe_schedule(summary.evidence, candidate, window(), options);
+        if cancel_explicitly {
+            assert_eq!(runtime.active_inspection_workers(), 1);
+            cancel.cancel();
+        }
+        // The deadline worker may already have exited if this test thread was
+        // descheduled; its reply and final active count prove bounded release.
+        assert_eq!(
+            support::block_on(work),
+            Err(if cancel_explicitly {
+                InspectionError::Cancelled
+            } else {
+                InspectionError::Deadline
+            })
+        );
+        let until = std::time::Instant::now() + Duration::from_secs(2);
+        while runtime.active_inspection_workers() != 0 && std::time::Instant::now() < until {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            runtime.active_inspection_workers(),
+            0,
+            "actual worker must release capacity while analysis is still held"
+        );
+        release.send(()).unwrap();
+        assert!(
+            support::block_on(runtime.query_channels(Query::source(source), control()))
+                .unwrap()
+                .items
+                .is_empty(),
+            "the empty synthetic catalogue remains queryable after worker exit"
+        );
+        runtime.drain_services();
+    }
 }

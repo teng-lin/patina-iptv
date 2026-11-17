@@ -215,6 +215,20 @@ async fn cancellation_after_staging_cannot_publish_or_mark_a_failed_refresh() {
     let (url, _, _, server) = server(false);
     let (owner, job) = fixture(directory.path(), &url).await;
     let id = job.stored.unwrap();
+    let retained_guide = iptv_library::GuideSource {
+        feed: iptv_epg::FeedId(5000),
+        provider_index: Some(0),
+        url: SecretUrl::new("https://guide.example.test/retained.xml"),
+        name: None,
+        enabled: true,
+        shift_minutes: 0,
+    };
+    let initial = retained_guide.clone();
+    owner
+        .services()
+        .call(move |store| store.set_guide_sources(id, &[initial]))
+        .await
+        .unwrap();
     let gate = owner.host_handle().hold_import_publication().unwrap();
     let cancel = CancelToken::new();
     let (task, mut rx) = start(&owner, job, &cancel);
@@ -224,6 +238,15 @@ async fn cancellation_after_staging_cannot_publish_or_mark_a_failed_refresh() {
     tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
     assert_eq!(failure(&mut rx), FailureKind::Cancelled);
     assert_retained(&owner, id, "Generated retained source").await;
+    owner
+        .services()
+        .read(move |store| {
+            assert_eq!(store.guide_sources(id)?, [retained_guide]);
+            assert_eq!(store.guide_repair_feed_high_water(id)?, 5000);
+            Ok(())
+        })
+        .await
+        .unwrap();
     assert_clean_stage(directory.path());
     server.join().unwrap();
     assert!(owner.drain_services());
@@ -502,4 +525,49 @@ async fn added_and_edited_playback_contexts_retain_the_committed_source_authorit
         server.join().unwrap();
         assert!(owner.drain_services());
     }
+}
+
+#[tokio::test]
+async fn exhausted_guide_identity_planning_preserves_the_retained_catalogue() {
+    const WITH_GUIDE: &str = "#EXTM3U url-tvg=\"https://guide.example.test/new.xml\"\n#EXTINF:-1,Generated incoming\nhttps://media.example.test/incoming.ts\n";
+    let directory = tempfile::tempdir().unwrap();
+    let (url, _, _, server) = response_server(WITH_GUIDE, false);
+    let (owner, job) = fixture(directory.path(), &url).await;
+    let id = job.stored.unwrap();
+    let retained_guide = guides::user_source(
+        iptv_epg::FeedId(u32::MAX),
+        SecretUrl::new("https://guide.example.test/retained.xml"),
+        None,
+    );
+    let initial = retained_guide.clone();
+    owner
+        .services()
+        .call(move |store| store.set_guide_sources(id, &[initial]))
+        .await
+        .unwrap();
+    let (task, mut rx) = start(&owner, job, &CancelToken::new());
+    tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
+    assert_eq!(failure(&mut rx), FailureKind::Storage);
+    owner
+        .services()
+        .read(move |store| {
+            assert_eq!(
+                store.source(id)?.unwrap().source.name,
+                "Generated retained source"
+            );
+            assert_eq!(
+                store.load_channels(id, &Default::default())?[0]
+                    .channel
+                    .name,
+                "Generated retained"
+            );
+            assert_eq!(store.guide_sources(id)?, [retained_guide]);
+            assert_eq!(store.guide_repair_feed_high_water(id)?, u32::MAX);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_clean_stage(directory.path());
+    server.join().unwrap();
+    assert!(owner.drain_services());
 }

@@ -46,6 +46,7 @@ pub(crate) struct State {
     pub has_pin: bool,
     complete: bool,
     epoch: Arc<AtomicU64>,
+    policy_revision: Arc<AtomicU64>,
     blocked: BTreeSet<Target>,
     ancestry: std::collections::BTreeMap<Target, Vec<Target>>,
     names: std::collections::BTreeMap<Target, String>,
@@ -57,6 +58,7 @@ fn apply_policy(state: &mut State, new: Policy) {
     }
     let settings = state.access.granted(&Target::settings(), now_ms());
     state.epoch.fetch_add(1, Ordering::SeqCst);
+    state.policy_revision.fetch_add(1, Ordering::SeqCst);
     state.access.lock();
     state.access.policy = new;
     if settings {
@@ -75,12 +77,9 @@ fn policy(owner: &Runtime) -> Policy {
     policy_settings(&owner.settings())
 }
 pub(crate) fn policy_settings(settings: &iptv_settings::Settings) -> Policy {
-    use iptv_settings::{
-        Target as Scope,
-        keys::{BoolKey, EnumKey},
-    };
+    use iptv_settings::Target as Scope;
     let scope = Scope::Global;
-    let window = match settings.choice(EnumKey("parental.unlock_window"), &scope) {
+    let window = match settings.choice(iptv_settings::keys::PARENTAL_UNLOCK_WINDOW, &scope) {
         "min_10" => UnlockWindow::Minutes(10),
         "min_30" => UnlockWindow::Minutes(30),
         "hour_1" => UnlockWindow::Minutes(60),
@@ -90,9 +89,9 @@ pub(crate) fn policy_settings(settings: &iptv_settings::Settings) -> Policy {
         _ => UnlockWindow::EveryTime,
     };
     Policy {
-        live: settings.bool(BoolKey("parental.live_enabled"), &scope),
-        vod: settings.bool(BoolKey("parental.vod_enabled"), &scope),
-        settings: settings.choice(EnumKey("parental.require_pin_for"), &scope)
+        live: settings.bool(iptv_settings::keys::PARENTAL_LIVE_ENABLED, &scope),
+        vod: settings.bool(iptv_settings::keys::PARENTAL_VOD_ENABLED, &scope),
+        settings: settings.choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR, &scope)
             == "blocked_content_and_settings",
         window,
     }
@@ -177,19 +176,21 @@ impl Runtime {
         let services = self.services();
         let (has_pin, blocked, ancestry, names) = services
             .read(|store| {
-                let blocked = store.parental_blocks()?;
-                let mut names = std::collections::BTreeMap::new();
-                for target in &blocked {
-                    if let Some(name) = store.parental_name(target)? {
-                        names.insert(target.clone(), name);
+                store.read_snapshot(|store| {
+                    let blocked = store.parental_blocks()?;
+                    let mut names = std::collections::BTreeMap::new();
+                    for target in &blocked {
+                        if let Some(name) = store.parental_name(target)? {
+                            names.insert(target.clone(), name);
+                        }
                     }
-                }
-                Ok((
-                    store.parental_credential()?.is_some(),
-                    blocked,
-                    store.parental_memberships()?,
-                    names,
-                ))
+                    Ok((
+                        store.parental_credential()?.is_some(),
+                        blocked,
+                        store.parental_memberships()?,
+                        names,
+                    ))
+                })
             })
             .await
             .map_err(|_| Error::Storage)?;
@@ -199,8 +200,32 @@ impl Runtime {
         let mut state = self.parental.borrow_mut();
         state.has_pin = has_pin;
         state.ready = true;
+        let blocked: BTreeSet<_> = blocked.into_iter().collect();
+        let mut ancestry = ancestry;
+        for parents in ancestry.values_mut() {
+            parents.sort_unstable();
+            parents.dedup();
+        }
+        // Targeted reads cache empty parent lists; full membership reads omit
+        // them. Neither cache population nor SQL row order changes authority.
+        let ancestry_changed = if state.complete {
+            state
+                .ancestry
+                .iter()
+                .filter(|(_, parents)| !parents.is_empty())
+                .ne(ancestry.iter())
+        } else {
+            state.ancestry.iter().any(|(target, parents)| {
+                ancestry
+                    .get(target)
+                    .map_or(!parents.is_empty(), |current| current != parents)
+            })
+        };
+        if state.blocked != blocked || ancestry_changed {
+            state.policy_revision.fetch_add(1, Ordering::SeqCst);
+        }
         state.complete = true;
-        state.blocked = blocked.into_iter().collect();
+        state.blocked = blocked;
         state.ancestry = ancestry;
         state.names = names;
         apply_policy(&mut state, policy(self));
@@ -212,18 +237,22 @@ impl Runtime {
         let services = self.services();
         let result = services
             .read(move |store| {
-                let mut entries = Vec::new();
-                for target in targets {
-                    let parents = store.parental_ancestors(&target)?;
-                    let blocked = std::iter::once(&target)
-                        .chain(parents.iter())
-                        .map(|candidate| {
-                            Ok((candidate.clone(), store.parental_target_blocked(candidate)?))
-                        })
-                        .collect::<iptv_store_sqlite::Result<Vec<_>>>()?;
-                    entries.push((target, parents, blocked));
-                }
-                Ok((store.parental_credential()?.is_some(), entries))
+                store.read_snapshot(|store| {
+                    let mut entries = Vec::new();
+                    for target in targets {
+                        let mut parents = store.parental_ancestors(&target)?;
+                        parents.sort_unstable();
+                        parents.dedup();
+                        let blocked = std::iter::once(&target)
+                            .chain(parents.iter())
+                            .map(|candidate| {
+                                Ok((candidate.clone(), store.parental_target_blocked(candidate)?))
+                            })
+                            .collect::<iptv_store_sqlite::Result<Vec<_>>>()?;
+                        entries.push((target, parents, blocked));
+                    }
+                    Ok((store.parental_credential()?.is_some(), entries))
+                })
             })
             .await
             .map_err(|_| Error::Storage)?;
@@ -233,15 +262,36 @@ impl Runtime {
         let mut state = self.parental.borrow_mut();
         state.has_pin = result.0;
         state.ready = true;
+        let mut changed = false;
         for (target, parents, blocked) in result.1 {
-            state.ancestry.insert(target, parents);
+            let known_target = state.complete || state.ancestry.contains_key(&target);
+            changed |= state
+                .ancestry
+                .get(&target)
+                .map_or(state.complete && !parents.is_empty(), |previous| {
+                    previous != &parents
+                });
+            // Absence from a partial cache says nothing about a new identity.
+            // Previously resolved parents, including allowed ones, are known.
             for (candidate, blocked) in blocked {
+                let known = known_target
+                    || state.blocked.contains(&candidate)
+                    || state.ancestry.contains_key(&candidate)
+                    || state
+                        .ancestry
+                        .values()
+                        .any(|parents| parents.contains(&candidate));
+                changed |= known && state.blocked.contains(&candidate) != blocked;
                 if blocked {
                     state.blocked.insert(candidate);
                 } else {
                     state.blocked.remove(&candidate);
                 }
             }
+            state.ancestry.insert(target, parents);
+        }
+        if changed {
+            state.policy_revision.fetch_add(1, Ordering::SeqCst);
         }
         apply_policy(&mut state, policy(self));
         Ok(())
@@ -419,6 +469,8 @@ impl Runtime {
             access: state.access.clone(),
             epoch: state.epoch.clone(),
             at: state.epoch.load(Ordering::SeqCst),
+            policy_revision: state.policy_revision.clone(),
+            policy_at: state.policy_revision.load(Ordering::SeqCst),
         }
     }
     pub fn parental_explicitly_blocked(&self, target: &Target) -> bool {
@@ -460,6 +512,7 @@ impl Runtime {
             return Err(Error::Locked);
         }
         let access = self.parental_snapshot();
+        access.policy_revision.fetch_add(1, Ordering::SeqCst);
         self.services()
             .call(move |store| {
                 require_admin(store, &access)?;
@@ -484,7 +537,65 @@ pub(crate) struct Snapshot {
     pub access: Access,
     epoch: Arc<AtomicU64>,
     at: u64,
+    policy_revision: Arc<AtomicU64>,
+    policy_at: u64,
 }
+impl Snapshot {
+    pub(crate) fn inspection_access(&self) -> iptv_store_sqlite::InspectionAccess {
+        let current = self.epoch.load(Ordering::SeqCst) == self.at;
+        let now = now_ms();
+        iptv_store_sqlite::InspectionAccess {
+            unrestricted: !self.access.policy.protects(ContentKind::Live)
+                || (current && self.access.all_content_granted(now)),
+            grants: if current {
+                self.access.content_grants().cloned().collect()
+            } else {
+                Vec::new()
+            },
+        }
+    }
+    pub(crate) fn inspection_context(&self) -> String {
+        let access = self.inspection_access();
+        use sha2::Digest;
+        format!(
+            "{:x}",
+            sha2::Sha256::digest(format!("{}:{access:?}", self.policy_at).as_bytes())
+        )
+    }
+    pub(crate) fn inspection_dependencies(
+        &self,
+        store: &iptv_store_sqlite::Store,
+        key: &iptv_library::inspection::ChannelRef,
+    ) -> iptv_store_sqlite::Result<Vec<Target>> {
+        if !self.access.policy.protects(ContentKind::Live) {
+            return Ok(Vec::new());
+        }
+        let target = Target::live(key.source.0, key.content.as_str());
+        let mut blocked = Vec::new();
+        for candidate in std::iter::once(target.clone()).chain(store.parental_ancestors(&target)?) {
+            if store.parental_target_blocked(&candidate)? {
+                blocked.push(candidate);
+            }
+        }
+        if blocked.is_empty() {
+            return Ok(Vec::new());
+        }
+        if self.access.granted(&target, now_ms()) {
+            Ok(vec![target])
+        } else {
+            Ok(blocked)
+        }
+    }
+    pub(crate) fn inspection_current(&self, grants: &[Target]) -> bool {
+        self.policy_revision.load(Ordering::SeqCst) == self.policy_at
+            && (grants.is_empty()
+                || (self.epoch.load(Ordering::SeqCst) == self.at
+                    && grants
+                        .iter()
+                        .all(|target| self.access.granted(target, now_ms()))))
+    }
+}
+
 /// Administrative changes are gated against the credential that exists at
 /// execution time, including PIN setup or relock after work was queued.
 pub(crate) fn require_admin(
@@ -539,24 +650,101 @@ pub(crate) fn native_allowed(
     target: &Target,
     snapshot: &Snapshot,
 ) -> iptv_store_sqlite::Result<bool> {
-    let access = snapshot.access.clone();
-    if snapshot.epoch.load(Ordering::SeqCst) != snapshot.at {
+    if snapshot.policy_revision.load(Ordering::SeqCst) != snapshot.policy_at {
         return Ok(false);
     }
+    let access = snapshot.access.clone();
+    let grants_current = snapshot.epoch.load(Ordering::SeqCst) == snapshot.at;
     if !access.policy.protects(target.kind) {
         return Ok(true);
     }
     let parents = store.parental_ancestors(target)?;
     let mut denied = store.parental_target_blocked(target)?;
     for parent in parents {
-        denied |= store.parental_target_blocked(&parent)? && !access.granted(&parent, now_ms());
+        denied |= store.parental_target_blocked(&parent)?
+            && !(grants_current && access.granted(&parent, now_ms()));
     }
-    Ok(!denied || access.granted(target, now_ms()))
+    Ok(!denied || (grants_current && access.granted(target, now_ms())))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn snapshot() -> Snapshot {
+        Snapshot {
+            access: Access::default(),
+            epoch: Arc::new(AtomicU64::new(0)),
+            at: 0,
+            policy_revision: Arc::new(AtomicU64::new(0)),
+            policy_at: 0,
+        }
+    }
+
+    #[test]
+    fn final_inspection_fence_only_needs_live_grants_when_the_result_used_them() {
+        let target = Target::live(1, "synthetic-channel");
+        let mut authority = snapshot();
+        authority.access.policy.live = true;
+        authority.access.unlock(target.clone(), now_ms());
+        assert!(authority.inspection_current(std::slice::from_ref(&target)));
+        authority.epoch.fetch_add(1, Ordering::SeqCst);
+        assert!(!authority.inspection_current(std::slice::from_ref(&target)));
+        assert!(
+            authority.inspection_current(&[]),
+            "unblocked results survive unrelated zapping"
+        );
+        authority.policy_revision.fetch_add(1, Ordering::SeqCst);
+        assert!(
+            !authority.inspection_current(&[]),
+            "policy/block changes invalidate publication"
+        );
+        let mut expired = snapshot();
+        expired.access.policy.window = UnlockWindow::Minutes(10);
+        expired
+            .access
+            .unlock(target.clone(), now_ms().saturating_sub(600_000));
+        assert!(!expired.inspection_current(&[target]));
+    }
+
+    #[test]
+    fn queued_native_admission_distinguishes_grant_revocation_from_unprotected_zapping() {
+        let mut store = iptv_store_sqlite::Store::open_in_memory().unwrap();
+        let source = store
+            .add_source(&iptv_providers::model::Source {
+                name: "Synthetic authority fixture".into(),
+                config: iptv_providers::model::SourceConfig::M3u(
+                    iptv_providers::model::M3uSourceConfig {
+                        location: iptv_providers::SecretUrl::new(
+                            "https://source.example.test/generated.m3u",
+                        ),
+                        user_agent: None,
+                        referrer: None,
+                    },
+                ),
+            })
+            .unwrap();
+        let target = Target::live(source.0, "synthetic-blocked");
+        store.set_parental_blocked(&target, true).unwrap();
+        let mut authority = snapshot();
+        authority.access.policy.live = true;
+        authority.access.unlock(target.clone(), now_ms());
+        assert!(native_allowed(&store, &target, &authority).unwrap());
+        authority.epoch.fetch_add(1, Ordering::SeqCst);
+        assert!(!native_allowed(&store, &target, &authority).unwrap());
+        assert!(
+            native_allowed(
+                &store,
+                &Target::live(source.0, "synthetic-unblocked"),
+                &authority
+            )
+            .unwrap()
+        );
+        authority.access.policy.live = false;
+        assert!(native_allowed(&store, &target, &authority).unwrap());
+        authority.policy_revision.fetch_add(1, Ordering::SeqCst);
+        assert!(!native_allowed(&store, &target, &authority).unwrap());
+    }
+
     #[test]
     fn administrative_worker_gate_rejects_expired_and_revoked_snapshots() {
         let mut store = iptv_store_sqlite::Store::open_in_memory().unwrap();
@@ -565,6 +753,8 @@ mod tests {
             access: Access::default(),
             epoch: Arc::new(AtomicU64::new(0)),
             at: 0,
+            policy_revision: Arc::new(AtomicU64::new(0)),
+            policy_at: 0,
         };
         snapshot.access.policy.window = UnlockWindow::Minutes(10);
         snapshot.access.unlock(Target::settings(), 0);
@@ -747,6 +937,143 @@ mod source_tests {
         assert!(owner.parental_allowed(&other));
         assert!(owner.drain_services());
     }
+    #[tokio::test(flavor = "current_thread")]
+    async fn full_refresh_preserves_authority_after_an_empty_targeted_parent_cache_fill() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = Runtime::new(crate::Ports::new(directory.path().to_owned(), |_| {
+            Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x79; 32]))
+        }));
+        owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+        owner.start_services();
+        let id = owner
+            .services()
+            .call(|store| store.add_source(&source("generated-empty-parent-cache")))
+            .await
+            .unwrap();
+        owner.parental_refresh().await.unwrap();
+        let authority = owner.parental_snapshot();
+        owner
+            .parental_refresh_targets(vec![Target::live(id.0, "generated-ungrouped")])
+            .await
+            .unwrap();
+        assert!(authority.inspection_current(&[]));
+        owner.parental_refresh().await.unwrap();
+        assert!(
+            authority.inspection_current(&[]),
+            "empty parent cache entries are not a policy change"
+        );
+        assert!(owner.drain_services());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn targeted_refresh_invalidates_changed_known_policy_but_not_new_cache_entries() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = Runtime::new(crate::Ports::new(directory.path().to_owned(), |_| {
+            Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x78; 32]))
+        }));
+        owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+        owner.start_services();
+        let services = owner.services();
+        let (id, targets, group) = services.call(|store| {
+            let id = store.add_source(&source("generated-policy-refresh"))?;
+            let parsed = iptv_providers::m3u::parse_m3u(concat!(
+                "#EXTM3U\n",
+                "#EXTINF:-1 group-title=\"Generated A\",Generated first\nhttps://example.test/first.ts\n",
+                "#EXTINF:-1 group-title=\"Generated A\",Generated second\nhttps://example.test/second.ts\n",
+                "#EXTINF:-1 group-title=\"Generated B\",Generated third\nhttps://example.test/third.ts\n",
+            ));
+            store.replace_catalog(id, &parsed.groups, &parsed.channels.items, &[], &[])?;
+            let targets: Vec<_> = parsed.channels.items.iter().map(|channel| Target::live(id.0, channel.id.as_str())).collect();
+            let group = Target { source: id.0, kind: ContentKind::Group, id: parsed.channels.items[0].groups[0].as_str().into() };
+            Ok((id, targets, group))
+        }).await.unwrap();
+        let first = owner.parental_snapshot();
+        owner
+            .parental_refresh_targets(vec![targets[0].clone()])
+            .await
+            .unwrap();
+        assert!(
+            first.inspection_current(&[]),
+            "first cache fill is not a policy change"
+        );
+
+        let parent = group.clone();
+        services
+            .call(move |store| store.set_parental_blocked(&parent, true))
+            .await
+            .unwrap();
+        owner
+            .parental_refresh_targets(vec![targets[1].clone()])
+            .await
+            .unwrap();
+        assert!(
+            !first.inspection_current(&[]),
+            "a known parent's changed block invalidates even on a new child"
+        );
+
+        let before_fill = owner.parental_snapshot();
+        owner
+            .parental_refresh_targets(vec![targets[2].clone()])
+            .await
+            .unwrap();
+        assert!(
+            before_fill.inspection_current(&[]),
+            "unrelated new unblocked content remains a cache fill"
+        );
+        owner.parental_content_left(&targets[2]);
+        owner
+            .parental_refresh_targets(vec![targets[2].clone()])
+            .await
+            .unwrap();
+        assert!(
+            before_fill.inspection_current(&[]),
+            "ordinary unblocked zapping does not change policy"
+        );
+
+        let direct = targets[2].clone();
+        services
+            .call(move |store| store.set_parental_blocked(&direct, true))
+            .await
+            .unwrap();
+        owner
+            .parental_refresh_targets(vec![targets[2].clone()])
+            .await
+            .unwrap();
+        assert!(
+            !before_fill.inspection_current(&[]),
+            "a known subject's changed block invalidates publication"
+        );
+
+        let before_membership = owner.parental_snapshot();
+        let member = iptv_providers::ContentId::from_stored(targets[2].id.clone());
+        services
+            .call(move |store| {
+                let group = store.create_custom_group(id, "Generated additional parent")?;
+                assert!(store.add_to_custom_group(group, &member)?);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        owner
+            .parental_refresh_targets(vec![targets[2].clone()])
+            .await
+            .unwrap();
+        assert!(
+            !before_membership.inspection_current(&[]),
+            "changed known ancestry invalidates publication"
+        );
+        let stable = owner.parental_snapshot();
+        owner
+            .parental_refresh_targets(vec![targets[2].clone()])
+            .await
+            .unwrap();
+        assert!(
+            stable.inspection_current(&[]),
+            "unchanged known metadata does not invalidate"
+        );
+        assert!(owner.drain_services());
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn content_unlocks_cannot_mutate_parental_policy_or_sources_for_any_window() {
         let directory = tempfile::tempdir().unwrap();
