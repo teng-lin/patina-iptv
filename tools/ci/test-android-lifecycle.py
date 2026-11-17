@@ -19,6 +19,17 @@ if WAIT is None or BACKGROUND is None:
 
 MOCK = '''import json, os, pathlib, sys
 root = pathlib.Path(os.environ["LIFECYCLE_CASE"])
+# Diagnostic snapshots write directly to a named file. Poll observations are
+# captured through a pipe by wait_stopped; keep their response sequence separate.
+snapshot = next((path for path in root.glob("activities-*.log")
+                 if os.path.samestat(path.stat(), os.fstat(sys.stdout.fileno()))), None)
+if snapshot is not None:
+    calls = root / "snapshots.json"
+    history = json.loads(calls.read_text()) if calls.exists() else []
+    history.append({"file": snapshot.name, "args": sys.argv[1:]})
+    calls.write_text(json.dumps(history))
+    print("mState=RESUMED")
+    raise SystemExit(0)
 calls = root / "calls.json"
 history = json.loads(calls.read_text()) if calls.exists() else []
 responses = json.loads((root / "responses.json").read_text())
@@ -57,8 +68,16 @@ fail() { echo "$*" >&2; exit 1; }
                 env=dict(os.environ, LIFECYCLE_CASE=str(root), LIFECYCLE_PYTHON=sys.executable),
             )
             calls = json.loads((root / "calls.json").read_text())
+            expected_call = ["shell", "dumpsys", "activity", "-p", "com.synthetic.patina", "activities"]
             for call in calls:
-                self.assertEqual(call, ["shell", "dumpsys", "activity", "-p", "com.synthetic.patina", "activities"])
+                self.assertEqual(call, expected_call)
+            snapshots_file = root / "snapshots.json"
+            snapshots = json.loads(snapshots_file.read_text()) if snapshots_file.exists() else []
+            self.assertEqual(snapshots, [
+                {"file": "activities-before-home.log", "args": expected_call},
+            ] if background else [])
+            if background:
+                self.assertEqual((root / "activities-before-home.log").read_text(), "mState=RESUMED\n")
             diagnostic = root / "activities.log"
             return result, calls, diagnostic.read_text() if diagnostic.exists() else None
 

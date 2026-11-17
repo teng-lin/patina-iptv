@@ -1,8 +1,9 @@
 # Audit follow-up implementation and validation
 
-Status: [PR #99](https://github.com/teng-lin/patina-iptv/pull/99) open as draft; final validation and CI repair in progress. User authorized one
-PR, review/CI/conflict repair and merge when ready. No release or protection-rule
-change is included.
+Implementation and local validation are complete. Hosted acceptance and merge
+state are recorded on [PR #99](https://github.com/teng-lin/patina-iptv/pull/99).
+User authorized one PR, review/CI/conflict repair and merge when ready. No release
+or protection-rule change is included.
 
 ## Accepted base and isolation
 
@@ -48,7 +49,23 @@ all refusal/reopen cases in a disposable session. Changed M3U fuzzing passed
 The final plan check subsequently identified feasible P11/P12 gaps: queue
 observability/canceled reads and inherited auxiliary VOD presentation. These were
 implemented and independently cross-reviewed; 13 store-service tests passed.
-Affected final suites and native artifacts are being rerun for these changes.
+The final affected run passed 658 app/runtime tests (135 app unit, 175 app
+integration, 257 runtime unit and 91 runtime integration), workspace all-target
+Clippy, all 16 doctests, warning-free rustdoc, the production app build and required
+ShellCheck/Ruff/ktlint checks. Four strict shared-plan timing gates and the guarded
+native GTK/PiP lifecycle test passed in isolation before Android rebuild/testing.
+All 34 CI-helper scripts passed (360 tests, with tool-dependent skips retained).
+The auxiliary-window journey exercises both Movies and Shows while verifying
+independent mouse/keyboard controls and unchanged native surfaces/stream sources.
+Both final muted API 36 emulator runs passed with zero player errors, including
+ordinary two-player Home/resume and deliberate recreation/restart recovery. See
+the linked Android record for the exact source, APK digest and cleaned-up resources.
+
+The first explicit full Windows run found a test-fixture portability error:
+`File::open().sync_all()` uses a read-only handle, which Windows rejects. The
+fixture now writes and syncs with one writable handle, then closes it before
+verification. Production capture already uses writable handles. Child stderr is
+retained to make any later crash-boundary failure diagnosable.
 
 Independent records: [architecture review](../reviews/audit-follow-up/architecture-review.md),
 [UI/recording review](../reviews/audit-follow-up/ux-review.md),
@@ -59,6 +76,14 @@ Independent records: [architecture review](../reviews/audit-follow-up/architectu
 Hosted first pass: [Validation](https://github.com/teng-lin/patina-iptv/actions/runs/44016645135)
 and explicit [full Windows](https://github.com/teng-lin/patina-iptv/actions/runs/44016976625).
 These are initial candidate runs, not final-head acceptance.
+The revised source candidate is `bd8158e01fc4353bdc3b6dafe7db9344793b47b8`:
+[Validation](https://github.com/teng-lin/patina-iptv/actions/runs/44019639619) and
+[full Windows execution](https://github.com/teng-lin/patina-iptv/actions/runs/44019652184).
+Hosted acceptance is tracked on PR #99; a run must pass before it is credited.
+The initial hosted TV smoke recreated its activity in the same process during
+Home/resume and lost the transient second player. Retained evidence did not show
+the destruction cause. Additional activity/event diagnostics preserve that
+evidence; both-player resume assertions remain unchanged.
 
 ## Explicit limits
 

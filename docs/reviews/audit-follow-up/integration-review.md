@@ -50,3 +50,25 @@ release has been published or every hosted workflow has completed.
 The user explicitly requested no physical Android TV testing tonight and muted
 emulators. This run uses emulator validation only, with `-no-audio`; physical-device
 and spoken-screen-reader acceptance are not inferred from it.
+
+## Final acceptance pass
+
+The architecture reviewer checked the completed P11/P12 work against the accepted
+plan at `34f214e` and found no additional feasible coding gap or critical
+regression. Queue observations/canceled reads and the explicit per-window
+constructor now meet those requirements; native experiments and manual platform
+acceptance remain qualified separately.
+
+Root validation of that implementation passed 658 affected app/runtime tests,
+workspace Clippy, warning-free rustdoc, 16 doctests and the production app build.
+All four strict shared-plan responsiveness gates and the GTK/PiP lifecycle test
+passed before emulator workloads started. The corrected Windows fixture's four
+completion tests passed locally after `bd8158e`; Windows execution remains a
+separate hosted check. The fixture now syncs a writable descriptor, matching the
+production writer's existing access mode.
+
+New Android lifecycle diagnostics exposed a helper-test coupling: its mock
+consumed diagnostic snapshots as polling responses. The UI reviewer separated
+snapshot output from poll observations without changing the 1/20/40 observation
+assertions; all six lifecycle and 13 ADB-timeout tests passed. This correction
+does not change either emulator's two-player resume acceptance.

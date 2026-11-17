@@ -1,11 +1,69 @@
 # Android emulator validation, November 16–17, 2026
 
-Executed locally on November 17, approximately 04:23–04:35 UTC. Tablet smoke
-passed; TV smoke passed on a bounded renderer-mode retry after its initial
-first-video decode failure. This is emulator-only evidence;
-no physical Android TV was contacted. Emulator audio was disabled throughout.
+The final source passed the complete local smoke suite on both tablet and TV
+emulators on November 17, approximately 04:48–04:55 UTC. No physical Android TV
+was contacted, and emulator audio was disabled throughout.
 
-## Artifact and environment
+## Final artifact and lifecycle evidence
+
+- Application source: `34f214ec1fbf46d2379f6f385d1de24353423056`, including the
+  shared/presentation state split and bounded store-read metrics.
+- Execution manifest HEAD: `bd8158e01fc4353bdc3b6dafe7db9344793b47b8`. The
+  intervening change fixes a Windows-only test fixture and adds smoke lifecycle
+  diagnostics; it does not alter production APK behavior.
+- APK SHA-256:
+  `7d14f8ee24e7514c131446d3f4ebe8df0745c7b413e17a22a190ff40730cdfca`.
+- Rebuilt x86_64 crate in 26.7 seconds and Android library in 57.7 seconds;
+  packaging and Gradle `assembleDebug` passed (Gradle: 10 seconds).
+- Both runs used fresh userdata in verified disposable copies, the dedicated
+  validation application ID, `swiftshader`, `-no-audio` and the synthetic media
+  described below. Both final operation manifests report `passed`.
+
+Both forms passed startup/import, guide video, fullscreen, two-player multiview,
+Home/resume, refresh without reopening, process kill/reopen, deliberate activity
+recreation and interrupted restore recovery. TV also passed its long-OK/shared
+controls checks. Both final gates reported zero crashes, refused loads and player
+errors. No assertions were weakened after the earlier failures.
+
+The added before-Home/stopped/resumed activity snapshots prove ordinary Home
+retained the same activity: tablet `ActivityRecord{73602642}`, task 8; TV
+`ActivityRecord{197262636}`, task 6. The separate deliberate recreation step
+exercised `always-finish` destruction and recovered successfully. Lifecycle and
+event logs are retained alongside the app/codec diagnostics.
+
+After completion, all owned emulator processes, copied profiles and the fixture
+server were stopped/removed. The original profile file sets, sizes and modification
+timestamps still matched the pre-run inventory; zero disposable roots remained.
+
+Final local evidence:
+
+- [Tablet manifest](../../../target/android-validation/tab36-34f214e/run-nykq8omi/operation.json)
+  and [driver log](../../../target/android-validation/tab36-34f214e/run-nykq8omi/driver.log).
+- [TV manifest](../../../target/android-validation/tv36-34f214e/run-yqmsy95x/operation.json)
+  and [driver log](../../../target/android-validation/tv36-34f214e/run-yqmsy95x/driver.log).
+- Each run's adjacent `smoke/` directory contains the three activity snapshots,
+  `lifecycle.log`, `lifecycle-events.log`, `codec.log`, app logs and screenshots.
+- [Final build/sync log](../../../target/android-validation/android-34f214e-sync.log),
+  [Gradle log](../../../target/android-validation/android-34f214e-gradle.log) and
+  [result receipt](../../../target/android-validation/android-validation-34f214e-result.json).
+
+## Distinct hosted failure, not yet explained
+
+Read-only inspection of [TV job 133822328646](https://github.com/teng-lin/patina-iptv/actions/runs/44016645135/job/133822328646)
+and its uploaded artifact showed both initial players ready, followed by a new
+`TvActivity.onCreate` during ordinary Home/resume in the same PID 3458. Only the
+last channel resumed; the second-player assertion timed out. This differs from
+the initial local decode failure described below. Its crash log was empty, and
+the old harness had discarded ActivityManager/event diagnostics, so the cause
+of activity replacement is unproven. The later local passes do not establish that
+this hosted failure was fixed by changing the renderer. New hosted candidate
+results remained pending at this report's 04:55 UTC update.
+
+## Earlier artifact and environment
+
+Earlier local runs executed approximately 04:23–04:35 UTC. Tablet smoke
+passed; TV smoke passed on a bounded renderer-mode retry after its initial
+first-video decode failure. Their distinct artifact identity follows.
 
 - Application source: `422717536fa48dc323aff6e0c15b4c6ee2bfc102`.
 - Execution manifest HEAD: `b9b89343dfac61bc3eed05ce58cba3d3d6c28e7a`.
