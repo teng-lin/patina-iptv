@@ -54,7 +54,7 @@ jobs:
         id: select
         env:
           EVENT: ${{ github.event_name }}
-          TIER: ${{ inputs.tier == 'candidate' && 'release' || inputs.tier || (github.event_name == 'push' && github.ref == 'refs/heads/master' && 'release') }}
+          TIER: ${{ inputs.tier == 'candidate' && 'release' || inputs.tier || (github.event_name == 'push' && github.ref == 'refs/heads/master' && 'release') || (github.event_name == 'schedule' && 'full') || 'pr' }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: python3 tools/ci/validation-plan.py plan >> "$GITHUB_OUTPUT"

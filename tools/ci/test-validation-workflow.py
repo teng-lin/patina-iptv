@@ -82,6 +82,23 @@ class Workflows(unittest.TestCase):
         self.assertNotIn("setup-windows", verify)
         self.assertIn("name: packages-windows", verify)
 
+    def test_event_tier_expression_never_serializes_false_as_a_tier(self):
+        expressions = module('test-release-workflow')
+        workflow = (ROOT / '.github/workflows/validation.yml').read_text()
+        expression = re.search(r'TIER: \$\{\{(.*?)\}\}', workflow)[1]
+        for event, ref, tier, expected in (
+                ('pull_request', 'refs/pull/17/merge', '', 'pr'),
+                ('merge_group', 'refs/heads/gh-readonly-queue/master/synthetic', '', 'pr'),
+                ('push', 'refs/heads/master', '', 'release'),
+                ('push', 'refs/tags/v9.8.7', 'release', 'release'),
+                ('schedule', 'refs/heads/master', '', 'full'),
+                ('workflow_dispatch', 'refs/heads/synthetic', 'candidate', 'release'),
+                ('workflow_dispatch', 'refs/heads/master', 'full', 'full'),
+                ('workflow_dispatch', 'refs/heads/master', 'release', 'release')):
+            context = {'github': {'event_name': event, 'ref': ref}, 'inputs': {'tier': tier}}
+            with self.subTest(event=event, tier=tier):
+                self.assertEqual(expressions.evaluate(expression, context), expected)
+
     def test_master_candidate_owns_shipping_builds_and_release_uses_same_recipe(self):
         text = (ROOT / '.github/workflows/validation.yml').read_text()
         self.assertIn("&& 'validation-master'", text)
