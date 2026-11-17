@@ -31,6 +31,11 @@ fn item_height_for(available: f32, count: usize) -> f32 {
 }
 
 fn item_height(ui: Ui) -> f32 {
+    // Background recorder startup can mount the main window while it has no
+    // surface. Keep the rail's hit targets usable when that window is shown.
+    if window().height.0 <= 0.0 {
+        return ITEM_H;
+    }
     let inset = safe_area();
     let available =
         window().height.0 - crate::panels::header_now().0 - inset.top.0 - inset.bottom.0 - 16.0;
