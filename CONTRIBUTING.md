@@ -154,10 +154,9 @@ pass. Restore the device's accessibility settings afterwards.
 - Open and close a chooser and a modal; verify focus returns to the same
   content item, including after a list reorder.
 - Set Patina's Appearance → Font size to Extra large. Also try Android's
-  largest system font size and record whether it affects the app (currently
-  Patina uses its own text-size preference). Verify settings,
-  backup/restore, organisation, custom groups and guide assignment remain
-  operable, labels do not overlap, and long guide titles ellipsize while
+  largest system font size and record whether it affects the app. Verify
+  settings, backup/restore, organisation, custom groups and guide assignment
+  remain operable, labels do not overlap, and long guide titles ellipsize while
   retaining the full accessible text.
 - For each of `zh`, `zh-Hant`, `ja` and `ko`, select the interface language,
   open the guide and settings, and save a screenshot using synthetic CJK

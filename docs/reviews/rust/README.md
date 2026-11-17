@@ -6,7 +6,8 @@ authorization started implementation in an isolated worktree; see the
 [final portable review](implementation/final-portable-review.md),
 [final native review](implementation/final-native-security-review.md), and
 [Claude](implementation/claude-implementation-review.md)/[agy](implementation/agy-implementation-review.md)
-implementation reviews for current dispositions and validation limits.
+implementation reviews and [final local validation](implementation/final-validation.md)
+for current dispositions and validation limits.
 
 Review baseline: `0e197073a272eceb0631e4d53b08d2823950c416`, 2026-11-16.
 Scope: all fourteen workspace crates except independently owned `iptv-nav`.
