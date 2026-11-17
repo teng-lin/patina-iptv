@@ -345,13 +345,9 @@ pub fn edit_guides(
     id: SourceId,
     edit: iptv_library::guides::Edit,
 ) -> impl std::future::Future<Output = Result<bool, StoreError>> + use<> {
-    owner.services().call(move |store| {
-        let Some(sources) = iptv_library::guides::apply(&store.guide_sources(id)?, &edit) else {
-            return Ok(false);
-        };
-        store.set_guide_sources(id, &sources)?;
-        Ok(true)
-    })
+    owner
+        .services()
+        .call(move |store| store.edit_guide_sources(id, &edit))
 }
 
 pub fn set_activity(owner: &super::Runtime, id: SourceId, activity: Option<Activity>) {

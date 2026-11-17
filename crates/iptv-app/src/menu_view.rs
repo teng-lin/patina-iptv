@@ -453,7 +453,13 @@ fn description(ui: Ui) -> impl IntoElement {
             crate::overlays::Overlay::Description.accessibility_hidden(ui)
         })
         .opacity(move || if shown() { 1.0_f32 } else { 0.0 })
-        .pointer_events(move || if shown() { PointerEvents::Auto } else { PointerEvents::None })
+        .pointer_events(move || {
+            if shown() {
+                PointerEvents::Auto
+            } else {
+                PointerEvents::None
+            }
+        })
         .on_press(move || {
             ui.touched();
             close(ui);
@@ -483,16 +489,46 @@ fn description(ui: Ui) -> impl IntoElement {
                     .text_color(Mark::Plain.secondary()),
                 )
                 .child(
-                    text("A synthetic programme description for testing the guide. Real descriptions come from the EPG.")
-                        .font_family(SANS)
-                        .text_size(move || size.text_px(HEADER_BODY))
-                        .text_color(rgb(LIST_TEXT)),
+                    text(move || {
+                        ui.guide_data();
+                        ui.guide_pages.get();
+                        program()
+                            .and_then(|(channel, programme)| {
+                                crate::header::programme_description(
+                                    &*crate::schedule(),
+                                    channel,
+                                    programme,
+                                )
+                            })
+                            .unwrap_or_default()
+                    })
+                    .font_family(SANS)
+                    .text_size(move || size.text_px(HEADER_BODY))
+                    .text_color(rgb(LIST_TEXT)),
                 )
-                .child(when(move || ui.player_surface == 0 && program().is_some_and(|(ch, p)|
-                    crate::recordings_view::available(ch) && crate::guide::unix_of(&*crate::schedule(), p.end) > crate::time::wall_unix()),
-                    move || crate::ui_kit::button(ui, size, tr("Record"), || true, move || {
-                        if let Some(origin) = ui.description.get_untracked() { crate::recordings_view::programme(ui, origin, false); }
-                    }))),
+                .child(when(
+                    move || {
+                        ui.player_surface == 0
+                            && program().is_some_and(|(ch, p)| {
+                                crate::recordings_view::available(ch)
+                                    && crate::guide::unix_of(&*crate::schedule(), p.end)
+                                        > crate::time::wall_unix()
+                            })
+                    },
+                    move || {
+                        crate::ui_kit::button(
+                            ui,
+                            size,
+                            tr("Record"),
+                            || true,
+                            move || {
+                                if let Some(origin) = ui.description.get_untracked() {
+                                    crate::recordings_view::programme(ui, origin, false);
+                                }
+                            },
+                        )
+                    },
+                )),
         )
 }
 

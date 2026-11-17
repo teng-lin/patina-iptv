@@ -55,6 +55,7 @@ mod guide_sources;
 pub use guide_revisions::GuideRevisions;
 mod history;
 mod inspection;
+pub use inspection::InspectionAccess;
 mod inspection_stage;
 pub use inspection_stage::{INSPECTION_STAGE_BYTES, InspectionStage};
 mod library_preferences;
@@ -130,6 +131,7 @@ pub struct Store {
     fts: bool,
     clock: fn() -> i64,
     key: Option<DatabaseKey>,
+    inspection_access: std::cell::RefCell<Option<inspection::InspectionAccess>>,
 }
 
 impl std::fmt::Debug for Store {
@@ -142,6 +144,25 @@ impl std::fmt::Debug for Store {
 }
 
 impl Store {
+    /// Run a compound read in one WAL snapshot, sharing a caller's transaction.
+    /// Failed reads roll back a snapshot started here; caller ownership is retained.
+    pub fn read_snapshot<T>(&self, read: impl FnOnce(&Self) -> Result<T>) -> Result<T> {
+        let snapshot = self.begin_read_snapshot()?;
+        let result = read(self)?;
+        if let Some(snapshot) = snapshot {
+            snapshot.commit()?;
+        }
+        Ok(result)
+    }
+
+    fn begin_read_snapshot(&self) -> Result<Option<rusqlite::Transaction<'_>>> {
+        self.conn
+            .is_autocommit()
+            .then(|| self.conn.unchecked_transaction())
+            .transpose()
+            .map_err(Into::into)
+    }
+
     /// Opens (creating if needed) a store file and migrates it.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with(path, &OpenOptions::default())
@@ -182,6 +203,7 @@ impl Store {
         migrate::migrate_to(&mut conn, SCHEMA_VERSION, system_now())?;
         let fts_index = search::prepare(&mut conn)?;
         Ok(Self {
+            inspection_access: Default::default(),
             conn,
             fts_index,
             fts: options.prefer_fts && fts_index,
@@ -223,6 +245,7 @@ impl Store {
             ));
         }
         Ok(Self {
+            inspection_access: Default::default(),
             conn,
             fts_index: self.fts_index,
             fts: self.fts,

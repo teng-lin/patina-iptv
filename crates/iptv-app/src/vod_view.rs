@@ -29,7 +29,7 @@ pub fn open(ui: Ui, kind: Kind) {
     ui.vod.update(|s| {
         s.begin(kind);
         s.query.sort = match crate::settings::get().choice(
-            iptv_settings::keys::EnumKey("vod.sort"),
+            iptv_settings::keys::VOD_SORT,
             &iptv_settings::Target::Global,
         ) {
             "year" => Sort::Year,
@@ -729,7 +729,7 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
     if let Some(p) = finished
         && let Some(next) = p.details.next_episode(&p.key)
     {
-        if crate::settings::flag(iptv_settings::keys::BoolKey("vod.autoplay_next_episode")) {
+        if crate::settings::flag(iptv_settings::keys::VOD_AUTOPLAY_NEXT_EPISODE) {
             play_key(ui, p.details.clone(), next.key.clone(), false);
         } else {
             ui.vod.update(|s| {

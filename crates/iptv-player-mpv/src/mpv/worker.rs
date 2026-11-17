@@ -35,6 +35,22 @@ const MIN_BRIDGED: Duration = Duration::from_secs(5);
 /// ffmpeg's options for opening a spare entry ([`Bridge::restarted`]).
 const SPARE_OPTIONS: &str = "live_start_index=-2";
 
+/// Identity of one accepted load. Clones identify the same operation; a new
+/// allocation cannot collide with a still-retained command or reply.
+#[derive(Clone, Debug)]
+pub struct LoadId(Arc<()>);
+impl LoadId {
+    pub(super) fn new() -> Self {
+        Self(Arc::new(()))
+    }
+}
+impl PartialEq for LoadId {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for LoadId {}
+
 /// What the main thread asks of mpv.
 pub enum Cmd {
     /// Disable automatic handoff for a test of the app's own retry path.
@@ -44,11 +60,24 @@ pub enum Cmd {
     /// Ends the thread as a bug in it would (a test of the app noticing).
     #[cfg(all(test, target_os = "linux"))]
     Panic,
+    /// A response-only command, after consuming every native event and wakeup.
+    #[cfg(all(test, target_os = "linux"))]
+    QuietReply,
+    /// Test observation of this worker's actual guarded downstream relay.
+    #[cfg(all(test, target_os = "linux"))]
+    WriteTimeouts(Sender<usize>),
+    /// A bounded synthetic pending command; never changes production ordering.
+    #[cfg(all(test, target_os = "linux"))]
+    Hold {
+        entered: Sender<()>,
+        release: Receiver<()>,
+    },
     /// `loadfile <url> replace`, from the default tracks (video and audio
     /// automatic, no subtitles) with `options` set first
     /// ([`super::map::load_options`]); answered by [`Note::Loading`]. A
     /// `live` stream is bridged across connections the server closes.
     Load {
+        load: LoadId,
         public_only: bool,
         url: String,
         live: bool,
@@ -79,8 +108,22 @@ pub enum Cmd {
 
 /// What mpv said, as owned values (in mpv's order).
 pub enum Note {
-    /// The playlist entry a [`Cmd::Load`] made (`None`: refused).
-    Loading(Option<i64>),
+    /// The playlist entry one accepted load made (`None`: refused).
+    Loading {
+        load: LoadId,
+        entry: Option<i64>,
+    },
+    /// Refused before Loading: completes one accepted command exactly once.
+    LoadRejected {
+        load: LoadId,
+        code: &'static str,
+    },
+    /// The hook failed after Loading already completed the command. The handle
+    /// has lost its guard, so this fails only its still-current load/entry.
+    GuardFailed {
+        load: Option<LoadId>,
+        entry: Option<i64>,
+    },
     TransportError(&'static str),
     Started(i64),
     Ended {
@@ -132,6 +175,8 @@ pub struct Worker {
     /// ([`Bridge::guarded`]); a replacement thread inherits it.
     guarded: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    #[cfg(all(test, target_os = "linux"))]
+    drop_entered: Option<Sender<()>>,
     /// Disconnected once the thread has ended, whatever ended it: a panic
     /// or mpv shutting down. `notify` runs once more after that.
     pub notes: Receiver<Note>,
@@ -194,8 +239,15 @@ impl Worker {
             quit,
             guarded,
             thread,
+            #[cfg(all(test, target_os = "linux"))]
+            drop_entered: None,
             notes,
         }
+    }
+
+    #[cfg(all(test, target_os = "linux"))]
+    pub(super) fn observe_drop(&mut self, entered: Sender<()>) {
+        self.drop_entered = Some(entered);
     }
 
     pub fn send(&self, cmd: Cmd) {
@@ -209,6 +261,10 @@ impl Worker {
 impl Drop for Worker {
     fn drop(&mut self) {
         self.quit.store(true, Ordering::Release);
+        #[cfg(all(test, target_os = "linux"))]
+        if let Some(entered) = self.drop_entered.take() {
+            let _ = entered.send(());
+        }
         self.mpv.wakeup();
         if let Some(t) = self.thread.take() {
             let _ = t.join();
@@ -238,7 +294,7 @@ fn run(
         }
         // Waits for an event or a wake-up (`send`, `drop`), then takes
         // whatever else is queued.
-        let mut timeout = -1.0;
+        let mut timeout = if sent { 0.0 } else { -1.0 };
         loop {
             // SAFETY: a live handle; the event is valid until the next wait,
             // and only this thread waits.
@@ -267,10 +323,12 @@ fn run(
                             bridge.guarded = false;
                             guarded.store(false, Ordering::Release);
                             sent |= tx
-                                .send(Note::TransportError(
-                                    "ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED",
-                                ))
+                                .send(Note::GuardFailed {
+                                    load: bridge.load_request.clone(),
+                                    entry: bridge.current,
+                                })
                                 .is_ok();
+                            bridge.retire_transport();
                             continue;
                         }
                         if !bridge.retired(&path) {
@@ -319,16 +377,48 @@ fn execute(mpv: &Mpv, cmd: Cmd, bridge: &mut Bridge) -> Vec<Note> {
         }
         #[cfg(all(test, target_os = "linux"))]
         Cmd::Panic => std::panic::resume_unwind(Box::new("synthetic control thread failure")),
+        #[cfg(all(test, target_os = "linux"))]
+        Cmd::QuietReply => {
+            // Only used with an idle fixture. Consume even a pending command
+            // wakeup, so no unrelated native event can publish this reply.
+            loop {
+                // SAFETY: only the control thread waits on this live handle.
+                if unsafe { (*ffi::mpv_wait_event(mpv.0, 0.0)).event_id } == ffi::MPV_EVENT_NONE {
+                    break;
+                }
+            }
+            vec![Note::Width(12_345)]
+        }
+        #[cfg(all(test, target_os = "linux"))]
+        Cmd::WriteTimeouts(reply) => {
+            let _ = reply.send(
+                bridge
+                    .transport
+                    .as_ref()
+                    .map_or(0, |relay| relay.write_timeouts()),
+            );
+            Vec::new()
+        }
+        #[cfg(all(test, target_os = "linux"))]
+        Cmd::Hold { entered, release } => {
+            entered.send(()).unwrap();
+            release
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("bounded synthetic control release");
+            Vec::new()
+        }
         Cmd::Load {
+            load,
             url,
             live,
             options,
             public_only,
         } => {
             if !bridge.guarded {
-                return vec![Note::TransportError(
-                    "ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED",
-                )];
+                return vec![Note::LoadRejected {
+                    load,
+                    code: "ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED",
+                }];
             }
             // Track choices are options: they would carry over to this file.
             mpv.set("vid", "auto");
@@ -346,15 +436,19 @@ fn execute(mpv: &Mpv, cmd: Cmd, bridge: &mut Bridge) -> Vec<Note> {
                     .get(..8)
                     .is_some_and(|s| s.eq_ignore_ascii_case("https://"))
             {
-                if !mpv.get(c"protocol-list").is_some_and(|protocols| {
+                let has_guard = mpv.get(c"protocol-list").is_some_and(|protocols| {
                     protocols
                         .split(|c: char| !c.is_ascii_alphanumeric() && c != '-')
                         .any(|protocol| protocol == "patina-relay-guard-v1")
-                }) {
+                });
+                #[cfg(all(test, target_os = "linux"))]
+                let has_guard = has_guard && bridge.guard_fault != Some(GuardFault::Marker);
+                if !has_guard {
                     mpv.command(&["stop"]);
-                    return vec![Note::TransportError(
-                        "ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED",
-                    )];
+                    return vec![Note::LoadRejected {
+                        load,
+                        code: "ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED",
+                    }];
                 }
                 let Ok(transport) = iptv_net::playback::PlaybackRelay::start_with_policy(
                     &url,
@@ -362,18 +456,22 @@ fn execute(mpv: &Mpv, cmd: Cmd, bridge: &mut Bridge) -> Vec<Note> {
                     (bridge.policy)(public_only),
                 ) else {
                     mpv.command(&["stop"]);
-                    return vec![Note::Loading(None)];
+                    return vec![Note::Loading { load, entry: None }];
                 };
                 let lavf = options
                     .iter()
                     .find(|(name, _)| *name == "demuxer-lavf-o")
                     .map(|(_, value)| value.as_str())
                     .unwrap_or_default();
-                if !native_guard(mpv, transport.prefix(), lavf) {
+                let configured = native_guard(mpv, transport.prefix(), lavf);
+                #[cfg(all(test, target_os = "linux"))]
+                let configured = configured && bridge.guard_fault != Some(GuardFault::Options);
+                if !configured {
                     mpv.command(&["stop"]);
-                    return vec![Note::TransportError(
-                        "ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED",
-                    )];
+                    return vec![Note::LoadRejected {
+                        load,
+                        code: "ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED",
+                    }];
                 }
                 let local = transport.url().to_owned();
                 bridge.transport = Some(transport);
@@ -386,8 +484,9 @@ fn execute(mpv: &Mpv, cmd: Cmd, bridge: &mut Bridge) -> Vec<Note> {
             // The new entry is the playlist's last (`replace` may keep the
             // stopping one until it ends).
             let id = ok.then(|| last_entry(mpv)).flatten();
+            bridge.load_request = Some(load.clone());
             bridge.load(url, live, id);
-            vec![Note::Loading(id)]
+            vec![Note::Loading { load, entry: id }]
         }
         Cmd::Stop => {
             mpv.command(&["stop"]);
@@ -509,16 +608,28 @@ fn remove_entry(mpv: &Mpv, id: i64) {
     }
 }
 
+/// Test faults can only remove native authority, never grant it.
+#[cfg(all(test, target_os = "linux"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GuardFault {
+    Marker,
+    Options,
+}
+
 /// The spare entry of a live stream (see the module's docs). Off with
 /// `IPTV_RS_LIVE_BRIDGE=0`: every closed connection is then an end the app
 /// reconnects.
 struct Bridge {
+    #[cfg(all(test, target_os = "linux"))]
+    guard_fault: Option<GuardFault>,
     policy: super::Policy,
     guarded: bool,
     enabled: bool,
     headers: Vec<(String, String)>,
     transport: Option<iptv_net::playback::PlaybackRelay>,
     retired_prefixes: std::collections::VecDeque<String>,
+    /// The request that produced current/spare, retained after Loading.
+    load_request: Option<LoadId>,
     /// The live stream's address (`None`: nothing live is loaded).
     url: Option<String>,
     /// The entry that plays it, and its spare.
@@ -555,12 +666,15 @@ impl Bridge {
             log::info!("iptv mpv: live bridging off");
         }
         Bridge {
+            #[cfg(all(test, target_os = "linux"))]
+            guard_fault: None,
             policy: super::default_policy,
             guarded: true,
             enabled: !off,
             headers: Vec::new(),
             transport: None,
             retired_prefixes: std::collections::VecDeque::new(),
+            load_request: None,
             url: None,
             current: None,
             spare: None,
@@ -790,6 +904,7 @@ mod tests {
 
     fn load(url: String, live: bool) -> Cmd {
         Cmd::Load {
+            load: LoadId::new(),
             public_only: true,
             url,
             live,
@@ -822,7 +937,7 @@ mod tests {
     /// observed properties' first values, log lines.)
     fn loaded(notes: &[Note]) -> Option<i64> {
         notes.iter().find_map(|n| match n {
-            Note::Loading(entry) => Some(*entry),
+            Note::Loading { entry, .. } => Some(*entry),
             _ => None,
         })?
     }
@@ -927,6 +1042,7 @@ mod tests {
         let worker = Worker::spawn(mpv.clone(), || {});
         super::super::POLICY.set(previous);
         worker.send(Cmd::Load {
+            load: LoadId::new(),
             public_only: false,
             url: format!("http://{origin_address}/list.m3u8"),
             live: false,
@@ -1048,6 +1164,7 @@ mod tests {
         super::super::POLICY.set(previous);
         for (worker, name) in [(&first, "alpha"), (&second, "beta")] {
             worker.send(Cmd::Load {
+                load: LoadId::new(),
                 public_only: false,
                 url: format!("http://{address}/{name}.wav"),
                 live: true,
@@ -1126,6 +1243,7 @@ mod tests {
         let mut options = options;
         options.push(("pause", "yes".into()));
         worker.send(Cmd::Load {
+            load: LoadId::new(),
             public_only: true,
             url,
             live: false,
@@ -1194,8 +1312,11 @@ mod tests {
         let mpv = mpv();
         let worker = Worker::spawn(mpv.clone(), || {});
         worker.send(load("synthetic\0url".into(), false));
-        let notes = notes_until(&worker, |n| matches!(n, Note::Loading(_)));
-        assert!(matches!(notes.last(), Some(Note::Loading(None))));
+        let notes = notes_until(&worker, |n| matches!(n, Note::Loading { .. }));
+        assert!(matches!(
+            notes.last(),
+            Some(Note::Loading { entry: None, .. })
+        ));
 
         worker.send(load(tone(30.0), true));
         notes_until(&worker, |n| matches!(n, Note::Restarted { .. }));
@@ -1228,6 +1349,73 @@ mod tests {
         wait_until("the spare to go", || {
             mpv.get_i64(c"playlist-count") == Some(1)
         });
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn each_native_guard_refusal_completes_its_request_before_network_io() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        fn fixture_policy(public_only: bool) -> iptv_net::playback::PlaybackPolicy {
+            iptv_net::playback::PlaybackPolicy {
+                public_only,
+                allow_private_fixture: true,
+                ..Default::default()
+            }
+        }
+        for fault in [None, Some(GuardFault::Marker), Some(GuardFault::Options)] {
+            let mpv = mpv();
+            let mut bridge = Bridge::new();
+            bridge.policy = fixture_policy;
+            bridge.guarded = fault.is_some();
+            bridge.guard_fault = fault;
+            let request = LoadId::new();
+            let notes = execute(
+                &mpv,
+                Cmd::Load {
+                    load: request.clone(),
+                    public_only: false,
+                    url: format!("http://{}/synthetic", listener.local_addr().unwrap()),
+                    live: false,
+                    options: super::super::map::load_options(false, false),
+                },
+                &mut bridge,
+            );
+            assert_eq!(notes.len(), 1, "one completion per refused command");
+            assert!(matches!(&notes[0], Note::LoadRejected { load, code }
+                if load == &request && *code == super::super::map::CONTAINER_UNSUPPORTED));
+            assert_eq!(mpv.get_i64(c"playlist-count"), Some(0));
+            assert!(bridge.transport.is_none());
+            assert_eq!(
+                listener.accept().unwrap_err().kind(),
+                std::io::ErrorKind::WouldBlock
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn response_only_commands_notify_without_another_native_event() {
+        let mpv = mpv();
+        let (woke_tx, woke) = channel();
+        let worker = Worker::spawn(mpv, move || {
+            let _ = woke_tx.send(());
+        });
+        worker.send(Cmd::QuietReply);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            woke.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("response-only command must notify without a second command");
+            // Read only after the callback: directly polling replies would
+            // hide the missing UI notification this regression targets.
+            if worker
+                .notes
+                .try_iter()
+                .any(|note| matches!(note, Note::Width(12_345)))
+            {
+                break;
+            }
+        }
     }
 
     /// mpv shutting down ends the thread.

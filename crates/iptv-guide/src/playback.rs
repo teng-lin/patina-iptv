@@ -57,6 +57,16 @@ impl SourceAuthority {
             config,
         }
     }
+    /// Stored source identity captured with this schedule's connection details.
+    pub fn source(&self) -> i64 {
+        self.source
+    }
+
+    /// Changes on source recreation or connection edits, not guide refreshes.
+    pub fn incarnation(&self) -> &str {
+        &self.incarnation
+    }
+
     pub fn resolve(&self, channel: &Channel) -> ResolutionAuthority {
         ResolutionAuthority {
             source: std::sync::Arc::new(self.clone()),
@@ -94,7 +104,7 @@ impl ResolutionAuthority {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 enum Inner {
     M3u {
         user_agent: Option<String>,
@@ -110,6 +120,33 @@ enum Inner {
         /// Updated after a re-authentication so the next link reuses it.
         session: RefCell<Box<StalkerSession>>,
     },
+}
+
+impl std::fmt::Debug for Inner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::M3u { .. } => f
+                .debug_struct("M3u")
+                .field("user_agent", &"[redacted]")
+                .field("referrer", &"[redacted]")
+                .finish(),
+            Self::Xtream {
+                client,
+                extension,
+                server_offset_minutes,
+                catchup,
+            } => f
+                .debug_struct("Xtream")
+                .field("client", client)
+                .field("extension", extension)
+                .field("server_offset_minutes", server_offset_minutes)
+                .field("catchup", catchup)
+                .finish(),
+            Self::Stalker { session } => {
+                f.debug_struct("Stalker").field("session", session).finish()
+            }
+        }
+    }
 }
 
 impl PlaybackContext {
@@ -251,12 +288,26 @@ impl Resolution {
 }
 
 /// A pending Stalker `create_link`.
-#[derive(Debug)]
 pub struct StalkerLink {
     pub session: StalkerSession,
     pub cmd: String,
     /// The channel's own headers, applied over the portal's.
     pub channel_headers: Vec<(String, String)>,
+}
+
+impl std::fmt::Debug for StalkerLink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let headers: Vec<_> = self
+            .channel_headers
+            .iter()
+            .map(|(name, _)| (name, "[redacted]"))
+            .collect();
+        f.debug_struct("StalkerLink")
+            .field("session", &self.session)
+            .field("cmd", &"[redacted]")
+            .field("channel_headers", &headers)
+            .finish()
+    }
 }
 
 impl StalkerLink {
@@ -421,3 +472,54 @@ fn catch_up(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod diagnostic_regression {
+    use super::*;
+    #[test]
+    fn contexts_pending_commands_and_resolutions_redact_secrets() {
+        let context = PlaybackContext {
+            inner: Inner::M3u {
+                user_agent: Some("synthetic-private-marker".into()),
+                referrer: Some("synthetic-private-marker".into()),
+            },
+        };
+        assert!(!format!("{context:?}").contains("synthetic-private-marker"));
+        let client = XtreamClient::new(
+            "http://portal.example.test/synthetic-private-marker",
+            "synthetic-user",
+            "synthetic-password",
+        )
+        .unwrap()
+        .with_user_agent(Some("synthetic-private-marker"));
+        assert!(!format!("{client:?}").contains("synthetic-private-marker"));
+        let xtream = PlaybackContext {
+            inner: Inner::Xtream {
+                client,
+                extension: "ts".into(),
+                server_offset_minutes: None,
+                catchup: CatchupVariant::RestTs,
+            },
+        };
+        assert!(!format!("{xtream:?}").contains("synthetic-private-marker"));
+        let portal = iptv_providers::stalker::StalkerPortal::new(
+            "http://portal.example.test/api",
+            iptv_providers::model::MacAddress::parse("00:1A:79:00:00:42").unwrap(),
+            iptv_providers::stalker::PortalMode::Full,
+        )
+        .unwrap();
+        let link = StalkerLink {
+            session: StalkerSession::new(portal),
+            cmd: "synthetic-private-marker".into(),
+            channel_headers: vec![("X-Key".into(), "synthetic-private-marker".into())],
+        };
+        assert!(!format!("{link:?}").contains("synthetic-private-marker"));
+        assert!(
+            !format!(
+                "{:?}",
+                Resolution::Play(PlaySource::new("synthetic-private-marker"))
+            )
+            .contains("synthetic-private-marker")
+        );
+    }
+}

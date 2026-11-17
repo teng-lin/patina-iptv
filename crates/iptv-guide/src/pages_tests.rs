@@ -123,12 +123,12 @@ fn an_older_day_loads_on_demand_and_then_shows() {
     s.program_at(0, m - 30);
     assert!(!s.ensure_loaded(t));
     assert_eq!(
-        *requests.borrow(),
-        [PageRequest {
-            page: 0,
-            from: NOW - 2 * DAY,
-            to: NOW - DAY
-        }]
+        requests
+            .borrow()
+            .iter()
+            .map(|r| (r.page, r.from, r.to))
+            .collect::<Vec<_>>(),
+        [(0, NOW - 2 * DAY, NOW - DAY)]
     );
     deliver(&s, &requests);
     assert!(s.ensure_loaded(t));
@@ -230,13 +230,15 @@ fn a_page_arriving_after_it_was_dropped_or_for_another_window_is_refused() {
     assert_eq!(s.paged_days(), 0);
     // Another schedule's window (an hour later): not this one's page.
     s.ensure_loaded(NOW - 2 * DAY);
+    let current = requests.borrow()[1];
     let shifted = PageRequest {
         from: r.from + 3600,
         to: r.to + 3600,
-        ..r
+        ..current
     };
     assert!(!s.insert_page(shifted, store_between(shifted.from, shifted.to)));
-    assert!(s.insert_page(r, store_between(r.from, r.to)));
+    assert!(!s.insert_page(r, store_between(r.from, r.to)));
+    assert!(s.insert_page(current, store_between(current.from, current.to)));
 }
 
 #[test]
@@ -309,4 +311,53 @@ fn a_day_back_by_key_or_pan_pages_that_day_in() {
         f.step_time(-iptv_core::guide::moves::DAY, &s);
     }
     assert_eq!(f.window, minute_of(&s, NOW - 7 * DAY));
+}
+
+#[test]
+fn equal_windows_and_rerequests_do_not_accept_another_requests_reply() {
+    let (a, requests_a) = paged(NOW - 7 * DAY);
+    let (b, requests_b) = paged(NOW - 7 * DAY);
+    let time = NOW - 2 * DAY;
+    assert!(!a.ensure_loaded(time));
+    assert!(!b.ensure_loaded(time));
+    let old = requests_a.borrow()[0];
+    assert!(!b.insert_page(old, GuideStore::default()));
+    assert!(b.insert_page(requests_b.borrow()[0], GuideStore::default()));
+    a.evict_pages();
+    assert!(!a.ensure_loaded(time));
+    assert!(!a.insert_page(old, GuideStore::default()));
+    assert!(a.insert_page(requests_a.borrow()[1], GuideStore::default()));
+}
+
+#[test]
+fn failed_pages_do_not_render_retry_or_accept_stale_failure_after_explicit_retry() {
+    let (schedule, requests) = paged(NOW - 7 * DAY);
+    let time = NOW - 2 * DAY;
+    assert!(!schedule.ensure_loaded(time));
+    let first = requests.borrow()[0];
+    assert!(schedule.fail_page(first));
+    for _ in 0..10 {
+        schedule.program_at(0, minute_of(&schedule, time));
+    }
+    assert_eq!(requests.borrow().len(), 1);
+    assert_eq!(schedule.paged_days(), 0);
+    assert!(!schedule.ensure_loaded(time));
+    let second = requests.borrow()[1];
+    assert_ne!(first, second);
+    assert!(!schedule.fail_page(first));
+    assert!(schedule.insert_page(second, store_between(second.from, second.to)));
+    assert!(schedule.ensure_loaded(time));
+}
+
+#[test]
+fn an_unpaged_schedule_needs_no_page_for_full_width_times() {
+    let schedule = EpgSchedule::new(Vec::new(), GuideStore::default(), NOW);
+    for time in [i64::MIN, 0, NOW, i64::MAX] {
+        assert!(schedule.ensure_loaded(time));
+        assert_eq!(schedule.pending_page(time), None);
+    }
+    let held = schedule.held_only(NOW, NOW + 3600);
+    assert!(held.ensure_loaded(NOW));
+    assert!(!held.ensure_loaded(NOW + 7200));
+    assert_eq!(held.pending_page(NOW + 7200), None);
 }

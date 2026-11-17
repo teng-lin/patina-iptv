@@ -140,7 +140,9 @@ impl Store {
         selection: &[ContentId],
         move_members: bool,
     ) -> Result<usize> {
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         ensure_source(&tx, source)?;
         if group_source(&tx, to)? != source
             || from
@@ -200,7 +202,9 @@ impl Store {
         group: CustomGroupId,
         selection: &[ContentId],
     ) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         group_source(&tx, group)?;
         for id in selection {
             tx.execute(
@@ -230,7 +234,9 @@ impl Store {
         id: &ContentId,
         target: MoveTarget,
     ) -> Result<bool> {
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         ensure_source(&tx, source)?;
         let current = scope_channels(&tx, source, scope)?;
         let present: HashSet<String> = current.iter().cloned().collect();
@@ -255,7 +261,9 @@ impl Store {
         scope: &OrderScope,
         order: &[ContentId],
     ) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         ensure_source(&tx, source)?;
         let present = present_ids(&tx, source)?;
         let mut seen = HashSet::new();
@@ -309,7 +317,9 @@ impl Store {
 
     /// Deletes the group and its membership (not the channels).
     pub fn delete_custom_group(&mut self, group: CustomGroupId) -> Result<bool> {
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute(
             "DELETE FROM parental_blocks WHERE kind='group' AND content_id='custom:'||?1 \
             AND source_id IN (SELECT source_id FROM custom_groups WHERE id=?1)",
@@ -322,7 +332,9 @@ impl Store {
 
     /// Moves a custom group to `index` in its source's list.
     pub fn move_custom_group(&mut self, group: CustomGroupId, index: usize) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let source = group_source(&tx, group)?;
         let mut list = ids(
             &tx,
@@ -389,7 +401,9 @@ impl Store {
     /// to their neighbours, as a series of [`Store::move_in_custom_group`]
     /// calls in that order would leave them.
     pub fn reset_custom_group_order(&mut self, group: CustomGroupId) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let source = group_source(&tx, group)?;
         let list = members(&tx, group)?;
         if list.is_empty() {
@@ -561,7 +575,9 @@ impl Store {
         id: &ContentId,
         target: MoveTarget,
     ) -> Result<bool> {
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let source = group_source(&tx, group)?;
         let mut list = members(&tx, group)?;
         let present = present_ids(&tx, source)?;

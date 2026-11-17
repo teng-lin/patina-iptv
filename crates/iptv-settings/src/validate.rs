@@ -65,6 +65,7 @@ fn check_grid(
     max: i64,
     step: i64,
 ) -> Result<(), SettingsError> {
+    validate_grid(min, max, step).map_err(|_| invalid(key, "invalid numeric grid"))?;
     if value < min || value > max {
         return Err(SettingsError::OutOfRange {
             key,
@@ -73,17 +74,47 @@ fn check_grid(
             max,
         });
     }
-    if (value - min) % step != 0 {
+    if (i128::from(value) - i128::from(min)) % i128::from(step) != 0 {
         return Err(SettingsError::OffStep { key, value, step });
     }
     Ok(())
 }
 
-/// Brings a number into `min..=max` and down onto the step grid. Used only
-/// when loading backups (see [`crate::backup`]).
-pub fn clamp_to_grid(value: i64, min: i64, max: i64, step: i64) -> i64 {
-    let v = value.clamp(min, max);
-    min + (v - min) / step * step
+/// A numeric grid must have ordered bounds and a positive step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InvalidGrid;
+impl std::fmt::Display for InvalidGrid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("numeric grid requires min <= max and step > 0")
+    }
+}
+impl std::error::Error for InvalidGrid {}
+
+fn validate_grid(min: i64, max: i64, step: i64) -> Result<(), InvalidGrid> {
+    if min > max || step <= 0 {
+        Err(InvalidGrid)
+    } else {
+        Ok(())
+    }
+}
+
+/// Brings a number into `min..=max` and down onto the step grid.
+/// Returns [`InvalidGrid`] for reversed bounds or a nonpositive step.
+pub fn clamp_to_grid(value: i64, min: i64, max: i64, step: i64) -> Result<i64, InvalidGrid> {
+    clamp_wide_to_grid(i128::from(value), min, max, step)
+}
+
+pub(crate) fn clamp_wide_to_grid(
+    value: i128,
+    min: i64,
+    max: i64,
+    step: i64,
+) -> Result<i64, InvalidGrid> {
+    validate_grid(min, max, step)?;
+    let v = value.clamp(i128::from(min), i128::from(max));
+    let result = i128::from(min) + (v - i128::from(min)) / i128::from(step) * i128::from(step);
+    // The validated grid and clamp keep the result in the original i64 bounds.
+    Ok(result as i64)
 }
 
 fn invalid(key: &'static str, reason: impl Into<String>) -> SettingsError {
@@ -181,4 +212,32 @@ fn check_bindings(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod grid_regressions {
+    use super::*;
+    #[test]
+    fn invalid_and_full_width_grids_never_panic() {
+        for (min, max, step) in [(0, 10, 0), (0, 10, -1), (10, 0, 1), (i64::MIN, i64::MAX, 2)] {
+            let valid = min <= max && step > 0;
+            assert_eq!(clamp_to_grid(i64::MAX, min, max, step).is_ok(), valid);
+            if !valid {
+                assert!(check_grid("synthetic", 5, min, max, step).is_err());
+            }
+        }
+        assert_eq!(
+            clamp_to_grid(i64::MAX, i64::MIN, i64::MAX, 2),
+            Ok(i64::MAX - 1)
+        );
+        assert_eq!(
+            clamp_wide_to_grid(
+                i128::from(i64::MIN) + i128::from(i64::MAX) * 2,
+                i64::MIN,
+                i64::MAX,
+                1
+            ),
+            Ok(i64::MAX - 1)
+        );
+    }
 }

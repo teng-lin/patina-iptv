@@ -637,13 +637,40 @@ pub fn parse_create_link(
         return Ok(url);
     }
     let base = portal.base_url();
-    if url.starts_with('?') {
+    if let Some(reply_query) = url.strip_prefix('?') {
         let original = normalize_cmd(original_cmd);
-        return Ok(if has_http_scheme(&original) {
-            format!("{original}{url}")
+        let original = if has_http_scheme(&original) {
+            original
         } else {
-            format!("{base}{original}{url}")
-        });
+            format!("{base}{original}")
+        };
+        url::Url::parse(&original).map_err(|_| {
+            ProviderError::InvalidBody("create_link has an invalid original URL".into())
+        })?;
+        // Validate separately: serializing Url would normalize signed raw bytes.
+        let (base, fragment) = original
+            .split_once('#')
+            .map_or((original.as_str(), None), |(base, fragment)| {
+                (base, Some(fragment))
+            });
+        let (query, reply_fragment) = reply_query
+            .split_once('#')
+            .map_or((reply_query, None), |(query, fragment)| {
+                (query, Some(fragment))
+            });
+        let separator = if base.ends_with('?') {
+            ""
+        } else if base.contains('?') {
+            "&"
+        } else {
+            "?"
+        };
+        let mut combined = format!("{base}{separator}{query}");
+        if let Some(fragment) = reply_fragment.or(fragment) {
+            combined.push('#');
+            combined.push_str(fragment);
+        }
+        return Ok(combined);
     }
     if url.starts_with('/') {
         return Ok(format!("{base}{url}"));

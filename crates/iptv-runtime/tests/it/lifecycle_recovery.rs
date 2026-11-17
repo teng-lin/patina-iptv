@@ -255,6 +255,8 @@ fn restart_cleans_interrupted_catalogue_work_without_touching_committed_content(
         move |task| queued.borrow_mut().push(task),
         |_| Box::pin(std::future::pending()),
     );
+    let writer = restarted.host_handle().hold_writer().unwrap();
+    assert!(writer.wait_entered(LIMIT));
     iptv_runtime::data::start(&restarted);
     // Drive startup through database admission, then stop the local UI executor.
     let mut startup = tasks.borrow_mut().pop().unwrap();
@@ -264,6 +266,9 @@ fn restart_cleans_interrupted_catalogue_work_without_touching_committed_content(
             .poll(&mut Context::from_waker(Waker::noop()))
             .is_pending()
     );
+    // Keep the first poll pending deterministically, then let native cleanup
+    // finish without polling the local UI executor again.
+    writer.release();
     assert!(restarted.drain_services());
     drop(startup);
     tasks.borrow_mut().clear();

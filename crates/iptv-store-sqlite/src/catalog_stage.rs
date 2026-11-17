@@ -337,7 +337,8 @@ impl Store {
         source: SourceId,
         stage: CatalogStage,
     ) -> Result<CatalogCounts> {
-        self.publish_stage(source, stage, None, None)
+        self.publish_stage(source, stage, None, None, None)
+            .map(|(counts, _)| counts)
     }
 
     /// Publish edited source details, guide sources and catalog in one commit.
@@ -349,7 +350,24 @@ impl Store {
         details: Option<&iptv_providers::model::Source>,
         guides: &[crate::GuideSource],
     ) -> Result<CatalogCounts> {
-        self.publish_stage(source, stage, details, Some(guides))
+        self.publish_stage(source, stage, details, Some(guides), None)
+            .map(|(counts, _)| counts)
+    }
+
+    /// Replan guide identities under the same write reservation as catalog publication.
+    /// `initial` seeds only uninitialized guide state: no configured rows and no
+    /// reserved feed identities. Otherwise current rows and reservations win,
+    /// including a list cleared after earlier edits.
+    pub fn publish_catalog_stage_with_provider_guides(
+        &mut self,
+        source: SourceId,
+        stage: CatalogStage,
+        details: Option<&iptv_providers::model::Source>,
+        urls: &[iptv_providers::SecretUrl],
+        initial: Option<&[crate::GuideSource]>,
+    ) -> Result<(CatalogCounts, Vec<crate::GuideSource>)> {
+        self.publish_stage(source, stage, details, initial, Some(urls))
+            .map(|(counts, guides)| (counts, guides.unwrap_or_default()))
     }
 
     fn publish_stage(
@@ -358,18 +376,25 @@ impl Store {
         stage: CatalogStage,
         details: Option<&iptv_providers::model::Source>,
         guides: Option<&[crate::GuideSource]>,
-    ) -> Result<CatalogCounts> {
+        provider_urls: Option<&[iptv_providers::SecretUrl]>,
+    ) -> Result<(CatalogCounts, Option<Vec<crate::GuideSource>>)> {
         if !stage.ready {
             return Err(invalid("cannot publish an incomplete catalog stage"));
         }
         self.attach_staging_database(&stage.path, "catalog_import")?;
-        let result: Result<CatalogCounts> = (|| {
+        let result: Result<(CatalogCounts, Option<Vec<crate::GuideSource>>)> = (|| {
             let now = self.now();
             let fts = self.fts_index;
             let tx = self
                 .conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)?;
             sources::ensure_source(&tx, source)?;
+            let replanned = provider_urls
+                .map(|urls| {
+                    crate::guide_sources::plan_provider_guides_in(&tx, source, urls, guides, now)
+                })
+                .transpose()?;
+            let guides = replanned.as_deref().or(guides);
             if let Some(details) = details {
                 sources::update_source_in(&tx, source, details, now)?;
             }
@@ -395,8 +420,9 @@ impl Store {
             }
             search::index_source(&tx, fts, source)?;
             sources::record_import_success(&tx, source, &stage.counts, now)?;
+            let published_guides = guides.map(<[crate::GuideSource]>::to_vec);
             tx.commit()?;
-            Ok(stage.counts)
+            Ok((stage.counts, published_guides))
         })();
         let detached = self
             .conn

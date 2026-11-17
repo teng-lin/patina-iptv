@@ -385,10 +385,7 @@ x WHERE x.value=?4))) AND instr(lower(v.name),lower(?5))>0 AND (?6=0 OR (",
     /// with an older incarnation checked by the caller. Errors roll back
     /// through the transaction guard without retaining the read snapshot.
     pub fn vod_read_snapshot<T>(&self, read: impl FnOnce(&Self) -> Result<T>) -> Result<T> {
-        let snapshot = self.conn.unchecked_transaction()?;
-        let result = read(self)?;
-        snapshot.commit()?;
-        Ok(result)
+        self.read_snapshot(read)
     }
     /// [`Store::vod_discovery_around`] that `cancel` stops
     /// ([`Store::vod_cancellable`]).

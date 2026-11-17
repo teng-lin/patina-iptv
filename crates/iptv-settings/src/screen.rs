@@ -591,7 +591,10 @@ impl Screen {
             && let Some((min, max, step)) = grid(&setting.ty)
         {
             *edited |= steps != 0;
-            *value = validate::clamp_to_grid(value.saturating_add(steps * step), min, max, step);
+            let next = i128::from(*value) + i128::from(steps) * i128::from(step);
+            if let Ok(next) = validate::clamp_wide_to_grid(next, min, max, step) {
+                *value = next;
+            }
         }
     }
 

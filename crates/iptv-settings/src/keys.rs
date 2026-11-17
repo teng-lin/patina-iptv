@@ -3,21 +3,24 @@
 //! Add a constant here when a crate starts reading a setting.
 
 /// A key whose value is a [`Value::Bool`](crate::Value::Bool).
+/// ```compile_fail
+/// let forged = iptv_settings::keys::BoolKey("guide.switch_delay");
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BoolKey(pub &'static str);
+pub struct BoolKey(pub(crate) &'static str);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct IntKey(pub &'static str);
+pub struct IntKey(pub(crate) &'static str);
 /// Milliseconds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DurationKey(pub &'static str);
+pub struct DurationKey(pub(crate) &'static str);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EnumKey(pub &'static str);
+pub struct EnumKey(pub(crate) &'static str);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TextKey(pub &'static str);
+pub struct TextKey(pub(crate) &'static str);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ColourKey(pub &'static str);
+pub struct ColourKey(pub(crate) &'static str);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BindingsKey(pub &'static str);
+pub struct BindingsKey(pub(crate) &'static str);
 
 pub const LANGUAGE: TextKey = TextKey("general.language");
 pub const CLOCK: EnumKey = EnumKey("general.clock");
@@ -84,6 +87,8 @@ pub const SEARCH_SHOW_HISTORY: BoolKey = BoolKey("search.show_history");
 
 /// Every typed key with its expected type name, for the schema test.
 pub const ALL: &[(&str, &str)] = &[
+    (LANGUAGE.0, "text"),
+    (CLOCK.0, "enum"),
     (LONG_PRESS.0, "duration"),
     (DIGIT_TIMEOUT.0, "duration"),
     (KEY_OVERRIDES.0, "key_bindings"),
@@ -121,4 +126,189 @@ pub const ALL: &[(&str, &str)] = &[
     (SEARCH_INCLUDE_PAST_WITHOUT_CATCHUP.0, "bool"),
     (SEARCH_STAY.0, "bool"),
     (SEARCH_SHOW_HISTORY.0, "bool"),
+    (PLAYLISTS_INCLUDE_VOD.0, "bool"),
+    (PARENTAL_UNLOCK_WINDOW.0, "enum"),
+    (PARENTAL_LIVE_ENABLED.0, "bool"),
+    (PARENTAL_VOD_ENABLED.0, "bool"),
+    (PARENTAL_REQUIRE_PIN_FOR.0, "enum"),
+    (GUIDE_LIST_BROWSE_MODE.0, "enum"),
+    (GUIDE_SHOW_CHANNEL_NUMBERS.0, "bool"),
+    (PARENTAL_PIN_INPUT.0, "enum"),
+    (GUIDE_VISIBLE_MINUTES.0, "integer"),
+    (VOD_SORT.0, "enum"),
+    (VOD_AUTOPLAY_NEXT_EPISODE.0, "bool"),
+    (GUIDE_SHOW_LOGOS.0, "bool"),
+    (GUIDE_STAY_ON_GUIDE.0, "bool"),
+    (GUIDE_STAY_ON_GUIDE_OVERLAY.0, "bool"),
+    (GUIDE_STAY_ON_LIST.0, "bool"),
 ];
+
+pub const PLAYLISTS_INCLUDE_VOD: BoolKey = BoolKey("playlists.include_vod");
+
+pub const PARENTAL_UNLOCK_WINDOW: EnumKey = EnumKey("parental.unlock_window");
+
+pub const PARENTAL_LIVE_ENABLED: BoolKey = BoolKey("parental.live_enabled");
+
+pub const PARENTAL_VOD_ENABLED: BoolKey = BoolKey("parental.vod_enabled");
+
+pub const PARENTAL_REQUIRE_PIN_FOR: EnumKey = EnumKey("parental.require_pin_for");
+
+pub const GUIDE_LIST_BROWSE_MODE: EnumKey = EnumKey("guide.list_browse_mode");
+
+pub const GUIDE_SHOW_CHANNEL_NUMBERS: BoolKey = BoolKey("guide.show_channel_numbers");
+
+pub const PARENTAL_PIN_INPUT: EnumKey = EnumKey("parental.pin_input");
+
+pub const GUIDE_VISIBLE_MINUTES: IntKey = IntKey("guide.visible_minutes");
+
+pub const VOD_SORT: EnumKey = EnumKey("vod.sort");
+
+pub const VOD_AUTOPLAY_NEXT_EPISODE: BoolKey = BoolKey("vod.autoplay_next_episode");
+
+pub const GUIDE_SHOW_LOGOS: BoolKey = BoolKey("guide.show_logos");
+
+impl BoolKey {
+    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
+        let setting = crate::catalogue::setting(key)
+            .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
+        let found = setting.ty.type_name();
+        if found != "bool" {
+            return Err(crate::SettingsError::TypeMismatch {
+                key,
+                expected: "bool",
+                found,
+            });
+        }
+        Ok(Self(key))
+    }
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl IntKey {
+    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
+        let setting = crate::catalogue::setting(key)
+            .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
+        let found = setting.ty.type_name();
+        if found != "integer" {
+            return Err(crate::SettingsError::TypeMismatch {
+                key,
+                expected: "integer",
+                found,
+            });
+        }
+        Ok(Self(key))
+    }
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl DurationKey {
+    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
+        let setting = crate::catalogue::setting(key)
+            .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
+        let found = setting.ty.type_name();
+        if found != "duration" {
+            return Err(crate::SettingsError::TypeMismatch {
+                key,
+                expected: "duration",
+                found,
+            });
+        }
+        Ok(Self(key))
+    }
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl EnumKey {
+    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
+        let setting = crate::catalogue::setting(key)
+            .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
+        let found = setting.ty.type_name();
+        if found != "enum" {
+            return Err(crate::SettingsError::TypeMismatch {
+                key,
+                expected: "enum",
+                found,
+            });
+        }
+        Ok(Self(key))
+    }
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl TextKey {
+    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
+        let setting = crate::catalogue::setting(key)
+            .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
+        let found = setting.ty.type_name();
+        if found != "text" {
+            return Err(crate::SettingsError::TypeMismatch {
+                key,
+                expected: "text",
+                found,
+            });
+        }
+        Ok(Self(key))
+    }
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl ColourKey {
+    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
+        let setting = crate::catalogue::setting(key)
+            .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
+        let found = setting.ty.type_name();
+        if found != "colour" {
+            return Err(crate::SettingsError::TypeMismatch {
+                key,
+                expected: "colour",
+                found,
+            });
+        }
+        Ok(Self(key))
+    }
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl BindingsKey {
+    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
+        let setting = crate::catalogue::setting(key)
+            .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
+        let found = setting.ty.type_name();
+        if found != "key_bindings" {
+            return Err(crate::SettingsError::TypeMismatch {
+                key,
+                expected: "key_bindings",
+                found,
+            });
+        }
+        Ok(Self(key))
+    }
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+pub const GUIDE_STAY_ON_GUIDE: BoolKey = BoolKey("guide.stay_on_guide");
+
+pub const GUIDE_STAY_ON_GUIDE_OVERLAY: BoolKey = BoolKey("guide.stay_on_guide_overlay");
+
+pub const GUIDE_STAY_ON_LIST: BoolKey = BoolKey("guide.stay_on_list");

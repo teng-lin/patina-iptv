@@ -77,6 +77,15 @@ pub struct Access {
     settings_session: bool,
 }
 impl Access {
+    /// Exact content grants; timed/session-wide access is reported separately.
+    pub fn content_grants(&self) -> impl Iterator<Item = &Target> {
+        self.granted
+            .iter()
+            .filter(|target| target.kind != ContentKind::Settings)
+    }
+    pub fn all_content_granted(&self, now: u64) -> bool {
+        self.session || self.all_until.is_some_and(|until| now < until)
+    }
     pub fn granted(&self, target: &Target, now: u64) -> bool {
         if target.kind == ContentKind::Settings {
             return self.settings_session

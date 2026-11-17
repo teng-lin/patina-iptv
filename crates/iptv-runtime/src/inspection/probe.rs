@@ -479,30 +479,48 @@ impl ProbeLease {
         Ok(())
     }
 
-    fn current_configuration(&self) -> InspectionResult<()> {
+    fn current_configuration(
+        &self,
+        cancel: &CancelToken,
+        deadline: Instant,
+    ) -> InspectionResult<()> {
         self.check()?;
         let source = self.0.evidence.source;
         let source_incarnation = self.0.source_incarnation.clone();
         let feed = self.0.evidence.feed;
         let incarnation = self.0.evidence.incarnation.clone();
+        let query_cancel = cancel.clone();
         let current = self.0.services.analyze(move |store| {
-            if store.source(source)?.is_none() || !store.source_policy(source)?.enabled {
-                return Ok(false);
-            }
-            Ok(store.source_incarnation(source)? == source_incarnation
-                && match feed {
-                    Some(feed) => {
-                        store.feed_incarnation(source, feed)?.as_ref() == Some(&incarnation)
-                    }
-                    None => true,
-                })
+            store.inspection_read(query_cancel, deadline, |store| {
+                store
+                    .read_snapshot(|store| {
+                        if store.source(source)?.is_none() || !store.source_policy(source)?.enabled
+                        {
+                            return Ok(false);
+                        }
+                        Ok(store.source_incarnation(source)? == source_incarnation
+                            && match feed {
+                                Some(feed) => {
+                                    store.feed_incarnation(source, feed)?.as_ref()
+                                        == Some(&incarnation)
+                                }
+                                None => true,
+                            })
+                    })
+                    .map(Ok)
+            })
         });
-        if !self
-            .0
-            .services
-            .block_on(current)
-            .map_err(|_| InspectionError::Storage)?
-        {
+        let control = InspectionControl {
+            cancel: cancel.clone(),
+            timeout: deadline.saturating_duration_since(Instant::now()),
+        };
+        let valid = self.0.services.block_on(guarded(
+            &self.0.services,
+            &control,
+            deadline,
+            async move { current.await.map_err(|_| InspectionError::Storage)? },
+        ))?;
+        if !valid {
             return Err(InspectionError::StaleEvidence);
         }
         Ok(())
@@ -588,67 +606,69 @@ fn configuration(
     let services = owner.services();
     let net = crate::settings::net_config(&services.settings());
     let read = services.analyze(move |store| {
-        if store.source(request.source)?.is_none() {
-            return Ok(Err(InspectionError::SourceMissing(request.source)));
-        }
-        if !store.source_policy(request.source)?.enabled {
-            return Ok(Err(InspectionError::SourceDisabled(request.source)));
-        }
-        let source_incarnation = store.source_incarnation(request.source)?;
-        let (url, feed, incarnation, time, public_only) = match request.target {
-            ProbeTarget::Configured(feed) => {
-                let Some(config) = store
-                    .guide_sources(request.source)?
-                    .into_iter()
-                    .find(|f| f.feed == feed && f.enabled)
-                else {
-                    return Ok(Err(InspectionError::StaleEvidence));
-                };
-                let Some(incarnation) = store.feed_incarnation(request.source, feed)? else {
-                    return Ok(Err(InspectionError::StaleEvidence));
-                };
-                (
-                    config.url.clone(),
-                    Some(feed),
-                    incarnation,
-                    TimePolicy {
-                        shift_minutes: config.shift_minutes,
-                        ..TimePolicy::UTC
-                    },
-                    config.is_provider(),
-                )
+        store.read_snapshot(|store| {
+            let Some(source) = store.source(request.source)? else {
+                return Ok(Err(InspectionError::SourceMissing(request.source)));
+            };
+            if !store.source_policy(request.source)?.enabled {
+                return Ok(Err(InspectionError::SourceDisabled(request.source)));
             }
-            ProbeTarget::Supplied(url) => {
-                if iptv_providers::content_url::validate_uncredentialed_http(url.expose()).is_err()
-                {
-                    return Ok(Err(InspectionError::AddressPolicy));
+            let source_incarnation = store.source_incarnation(request.source)?;
+            let (url, feed, incarnation, time, public_only) = match request.target {
+                ProbeTarget::Configured(feed) => {
+                    let Some(config) = store
+                        .guide_sources(request.source)?
+                        .into_iter()
+                        .find(|f| f.feed == feed && f.enabled)
+                    else {
+                        return Ok(Err(InspectionError::StaleEvidence));
+                    };
+                    let Some(incarnation) = store.feed_incarnation(request.source, feed)? else {
+                        return Ok(Err(InspectionError::StaleEvidence));
+                    };
+                    (
+                        config.url.clone(),
+                        Some(feed),
+                        incarnation,
+                        TimePolicy {
+                            shift_minutes: config.shift_minutes,
+                            ..TimePolicy::UTC
+                        },
+                        config.is_provider(),
+                    )
                 }
-                let incarnation = hex(&random::<16>().map_err(|_| {
-                    iptv_store_sqlite::StoreError::Unavailable("probe identity unavailable")
-                })?);
-                (url, None, incarnation, TimePolicy::UTC, true)
-            }
-        };
-        let source = store.source(request.source)?.expect("source checked");
-        let user_agent = if feed.is_none() {
-            None
-        } else {
-            match source.source.config {
-                iptv_providers::model::SourceConfig::M3u(c) => c.user_agent,
-                iptv_providers::model::SourceConfig::Xtream(c) => c.user_agent,
-                _ => None,
-            }
-        };
-        Ok(Ok(Configuration {
-            url,
-            feed,
-            incarnation,
-            source_incarnation,
-            time,
-            net,
-            user_agent,
-            public_only,
-        }))
+                ProbeTarget::Supplied(url) => {
+                    if iptv_providers::content_url::validate_uncredentialed_http(url.expose())
+                        .is_err()
+                    {
+                        return Ok(Err(InspectionError::AddressPolicy));
+                    }
+                    let incarnation = hex(&random::<16>().map_err(|_| {
+                        iptv_store_sqlite::StoreError::Unavailable("probe identity unavailable")
+                    })?);
+                    (url, None, incarnation, TimePolicy::UTC, true)
+                }
+            };
+            let user_agent = if feed.is_none() {
+                None
+            } else {
+                match source.source.config {
+                    iptv_providers::model::SourceConfig::M3u(c) => c.user_agent,
+                    iptv_providers::model::SourceConfig::Xtream(c) => c.user_agent,
+                    _ => None,
+                }
+            };
+            Ok(Ok(Configuration {
+                url,
+                feed,
+                incarnation,
+                source_incarnation,
+                time,
+                net,
+                user_agent,
+                public_only,
+            }))
+        })
     });
     async move { read.await.map_err(|_| InspectionError::Storage)? }
 }
@@ -740,6 +760,17 @@ fn admitted_worker<T: Send + 'static, Permit: Send + 'static>(
 }
 
 impl Runtime {
+    /// Number of admitted probe/read workers whose actual blocking work has not exited.
+    #[cfg(feature = "test-support")]
+    pub fn active_inspection_workers(&self) -> usize {
+        self.inspection
+            .workers
+            .state
+            .lock()
+            .expect("probe worker state poisoned")
+            .active
+    }
+
     /// Hold a probe after its encrypted partial stage has been created.
     #[cfg(feature = "test-support")]
     pub fn hold_probe_stage(&self) -> crate::TestGate {
@@ -1006,7 +1037,7 @@ impl Runtime {
         let admission = self.inspection.admit();
         let task = admitted_worker(&services, workers, admission, move || {
             let lease = lease?;
-            lease.current_configuration()?;
+            lease.current_configuration(&worker_control.cancel, deadline)?;
             check(&lease.0.services, &worker_control.cancel, deadline)?;
             if limit == 0 || limit > MAX_PAGE || text.len() > MAX_QUERY_BYTES {
                 return Err(InspectionError::InvalidRequest);
@@ -1087,9 +1118,13 @@ impl Runtime {
                 return Err(InspectionError::InvalidRequest);
             }
             let lease = lease?;
-            lease.current_configuration()?;
+            lease.current_configuration(&worker_control.cancel, deadline)?;
             check(&lease.0.services, &worker_control.cancel, deadline)?;
-            lease.validate_candidate(&candidate)?;
+            lease.validate_candidates_with_control(
+                std::slice::from_ref(&candidate),
+                &worker_control.cancel,
+                deadline,
+            )?;
             let stage = storage(InspectionStage::open(&lease.0.path, &lease.0.key))?;
             let mut hash = Sha256::new();
             // The probe parser already applied this feed's configured shift.

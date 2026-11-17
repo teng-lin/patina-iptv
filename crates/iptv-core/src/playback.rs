@@ -22,13 +22,28 @@ pub use states::{Phase, PlayerState, Retry, RetryPolicy, Waiting};
 /// What the player should open: a URL and the HTTP headers to send with it
 /// (User-Agent, Referer, provider identity). Header names keep their case;
 /// lookups are case-insensitive.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PlaySource {
     /// Embedded content URLs require public destinations at every request hop.
     /// False trusts only the explicitly configured original origin.
     pub public_only: bool,
     pub url: String,
     pub headers: Vec<(String, String)>,
+}
+
+impl std::fmt::Debug for PlaySource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let headers: Vec<_> = self
+            .headers
+            .iter()
+            .map(|(name, _)| (name, "[redacted]"))
+            .collect();
+        f.debug_struct("PlaySource")
+            .field("public_only", &self.public_only)
+            .field("url", &"[redacted]")
+            .field("headers", &headers)
+            .finish()
+    }
 }
 
 impl Default for PlaySource {
@@ -218,6 +233,32 @@ mod publication_tests {
         assert!(
             publication.may_probe_replacement(),
             "a saved local file does not occupy a provider"
+        );
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_regression {
+    use super::*;
+    #[test]
+    fn resolved_source_redacts_url_and_arbitrary_header_values() {
+        let mut source = PlaySource::new(
+            "http://user-synthetic:password-synthetic@media.example.test/path-secret?key=query-secret",
+        );
+        source.set_header("X-Arbitrary-Credential", "header-secret");
+        let debug = format!("{source:?}");
+        for secret in [
+            "user-synthetic",
+            "password-synthetic",
+            "path-secret",
+            "query-secret",
+            "header-secret",
+        ] {
+            assert!(!debug.contains(secret), "{debug}");
+        }
+        assert_eq!(
+            source.header("X-Arbitrary-Credential"),
+            Some("header-secret")
         );
     }
 }

@@ -39,6 +39,8 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
         || ui.wizard.with_untracked(Option::is_some)
         || ui.playing.get_untracked().is_some()
         || ui.player.recorded.with_untracked(Option::is_some)
+        || ui.player.vod.with_untracked(Option::is_some)
+        || !ui.player.resume.get_untracked()
     {
         return false;
     }
@@ -62,6 +64,8 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
         || ui.wizard.with_untracked(Option::is_some)
         || ui.playing.get_untracked().is_some()
         || ui.player.recorded.with_untracked(Option::is_some)
+        || ui.player.vod.with_untracked(Option::is_some)
+        || !ui.player.resume.get_untracked()
     {
         return false;
     }

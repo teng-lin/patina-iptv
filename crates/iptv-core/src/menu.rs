@@ -101,6 +101,9 @@ impl Menu {
     /// Moves to the next focusable row in `step`'s direction; stays at the
     /// ends (no wrap).
     pub fn move_focus(&mut self, step: isize) {
+        if step == 0 {
+            return;
+        }
         let mut at = self.focus as isize;
         loop {
             at += step.signum();
@@ -338,5 +341,30 @@ mod tests {
         assert_eq!(m.focused(), Some(ToggleFavorite), "nothing enabled below");
         assert_eq!(m.tap(0), None, "disabled");
         assert_eq!(m.tap(2), None, "a heading");
+    }
+    #[test]
+    fn zero_movement_is_a_noop_for_nonfocusable_and_ordinary_menus() {
+        for rows in [
+            vec![Row::Heading(Heading::Program)],
+            vec![Row::Action {
+                item: MenuItem::Search,
+                enabled: false,
+            }],
+            vec![Row::Action {
+                item: MenuItem::Search,
+                enabled: true,
+            }],
+        ] {
+            let mut menu = Menu::new(
+                rows,
+                Origin {
+                    channel: 0,
+                    program_start: 0,
+                },
+            );
+            let before = menu.clone();
+            menu.move_focus(0);
+            assert_eq!(menu, before);
+        }
     }
 }

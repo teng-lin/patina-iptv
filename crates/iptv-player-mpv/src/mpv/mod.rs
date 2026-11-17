@@ -139,7 +139,7 @@ pub fn register(components: &Components, policy: Policy) {
     platform::register(components);
 }
 use platform::{ComponentContext, Video};
-use worker::{Cmd, Note, Worker};
+use worker::{Cmd, LoadId, Note, Worker};
 
 #[cfg_attr(test, allow(dead_code))] // GTK's (`test_host` registers nothing)
 pub const NAME: &str = crate::PLAYER_VIEW;
@@ -208,8 +208,11 @@ struct State {
     /// on its way): other files' events (one the viewer left, or a load mpv
     /// dropped for a newer one) are ignored.
     expected: Option<i64>,
-    /// Loads queued and not yet answered ([`Note::Loading`]).
-    loads: u32,
+    /// The current source's accepted load; cleared when stopped or failed.
+    load: Option<LoadId>,
+    /// Only the current request can consume this completion. Superseded
+    /// commands retain their own identities in the worker queue/replies.
+    load_pending: bool,
     /// The playlist entry mpv started last.
     entry: Option<i64>,
     /// The current file started playing (later buffering is a rebuffer).
@@ -328,7 +331,8 @@ impl Inner {
                 reported: (0, 0),
                 shutter: true,
                 expected: None,
-                loads: 0,
+                load: None,
+                load_pending: false,
                 entry: None,
                 playing: false,
                 buffering: false,
@@ -566,6 +570,8 @@ impl Inner {
             st.clues = map::Clues::default();
             st.failed = None;
             st.expected = None;
+            st.load = None;
+            st.load_pending = false;
             st.deferred = false;
             // The load starts from mpv's default tracks.
             st.video_auto = true;
@@ -592,13 +598,16 @@ impl Inner {
             }
             (Some(url), Some(_)) => {
                 let mut st = self.state.borrow_mut();
-                st.loads += 1;
+                let load = LoadId::new();
+                st.load = Some(load.clone());
+                st.load_pending = true;
                 st.state(&mut out, PlayerState::Buffering);
                 let live = st.live;
                 let public_only = st.public_only;
                 drop(st);
                 let options = map::load_options(live, keep_frame);
                 self.send(Cmd::Load {
+                    load,
                     url,
                     live,
                     options,
@@ -851,7 +860,8 @@ impl Inner {
         let playing = {
             let mut st = self.state.borrow_mut();
             st.expected = None;
-            st.loads = 0;
+            st.load = None;
+            st.load_pending = false;
             st.url.is_some()
         };
         if playing {
@@ -860,21 +870,46 @@ impl Inner {
         }
     }
 
+    fn loaded(&self, load: LoadId, entry: Option<i64>, error: &'static str, out: &mut Out) {
+        let mut st = self.state.borrow_mut();
+        if !st.load_pending || st.load.as_ref() != Some(&load) || st.url.is_none() {
+            return; // superseded, stopped, or already completed
+        }
+        st.load_pending = false;
+        log::debug!("iptv mpv: loading entry {entry:?}");
+        st.expected = entry;
+        if entry.is_none() {
+            st.load = None;
+            st.failed = None;
+            drop(st);
+            fail(&self.state, out, error, None);
+            self.video.redraw();
+        }
+    }
+
     fn note(&self, note: Note, out: &mut Out) {
         match note {
             Note::TransportError(code) => self.state.borrow_mut().clues.transport_error(code),
-            Note::Loading(id) => {
+            Note::Loading { load, entry } => self.loaded(load, entry, map::IO_UNSPECIFIED, out),
+            Note::LoadRejected { load, code } => self.loaded(load, None, code, out),
+            Note::GuardFailed { load, entry } => {
                 let mut st = self.state.borrow_mut();
-                st.loads = st.loads.saturating_sub(1);
-                if st.loads > 0 {
-                    return; // a newer load is on its way
+                if load.is_none()
+                    || st.load != load
+                    || st.load_pending
+                    || st.expected != entry
+                    || st.url.is_none()
+                {
+                    return;
                 }
-                log::debug!("iptv mpv: loading entry {id:?}");
-                st.expected = id;
-                if id.is_none() && st.url.is_some() {
-                    drop(st);
-                    fail(&self.state, out, map::IO_UNSPECIFIED, None);
-                }
+                // Loading already consumed this command. Retire its identity
+                // before failing, without touching any later pending command.
+                st.load = None;
+                st.expected = None;
+                st.failed = None;
+                drop(st);
+                fail(&self.state, out, map::CONTAINER_UNSUPPORTED, None);
+                self.video.redraw();
             }
             Note::Started(entry) => {
                 log::debug!("iptv mpv: started entry {entry}");

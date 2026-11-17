@@ -125,7 +125,7 @@ async fn check_m3u_guide(server: TestServer) {
         Some("SyntheticPlayer/1.0")
     );
 
-    let sources = catalog.epg_sources(1);
+    let sources = catalog.epg_sources(1).unwrap();
     assert_eq!(sources.len(), 1, "url-tvg from the header");
     let mut phases = Vec::new();
     let mut on = |p: &Progress| phases.push(p.phase);
@@ -212,7 +212,7 @@ async fn xtream_with_vod_and_its_xmltv_export() {
     );
     let epg = import_epg(
         &net,
-        &catalog.epg_sources(1),
+        &catalog.epg_sources(1).unwrap(),
         &catalog.channels,
         &Overrides::new(),
         NOW,

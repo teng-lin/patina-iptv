@@ -548,10 +548,9 @@ pub(crate) async fn pipeline(
     let target = job.stored.map_or(iptv_settings::Target::Global, |id| {
         iptv_settings::Target::playlist(id.0.to_string())
     });
-    let include_vod = services.settings().bool(
-        iptv_settings::keys::BoolKey("playlists.include_vod"),
-        &target,
-    );
+    let include_vod = services
+        .settings()
+        .bool(iptv_settings::keys::PLAYLISTS_INCLUDE_VOD, &target);
     let mut options = ImportOptions::new(now).with_vod(include_vod, include_vod);
     // A whole catalog import (live, movies and series of an Xtream account)
     // may take long on a slow box; a stalled download still ends at the
@@ -624,7 +623,21 @@ pub(crate) async fn pipeline(
     }
     // The guide sources: the stored source's as the user arranged them (a
     // new source: the guide just typed), with the provider's guides of now.
-    let planned = guides::sync_provider(&planned_guides(services, &job), &catalog.guide_urls());
+    let guide_urls = catalog.guide_urls();
+    let planned = match job.stored {
+        Some(id) => {
+            services.blocking_read(move |store| store.plan_provider_guides(id, &guide_urls))
+        }
+        None => guides::sync_provider(&planned_guides(services, &job), &guide_urls)
+            .map_err(|error| StoreError::InvalidData(error.to_string())),
+    };
+    let planned = match planned {
+        Ok(planned) => planned,
+        Err(error) => {
+            log::warn!("iptv data: guide identity planning failed: {error}");
+            return fail(ImportFailure::new(FailureKind::Storage));
+        }
+    };
     // The user's guide choices: unreadable ones are not "none", which
     // would match and store the guide without them.
     let overrides = match job
@@ -905,17 +918,18 @@ pub(crate) fn save_in(
         Some(id) => (id, false),
         None => (store.add_source(&job.source)?, true),
     };
-    let sources = if added {
-        planned
-    } else {
-        guides::sync_provider(&store.guide_sources(id)?, &guide_urls)
-    };
     let details = job.edit.then_some(&job.source);
-    let written = store.publish_catalog_stage(id, stage, details, &sources);
+    let written = store.publish_catalog_stage_with_provider_guides(
+        id,
+        stage,
+        details,
+        &guide_urls,
+        added.then_some(planned.as_slice()),
+    );
     if written.is_err() && added {
         let _ = store.delete_source(id);
     }
-    let counts = written?;
+    let (counts, sources) = written?;
     log::info!(
         "iptv data: saved {} channels for source {}",
         counts.channels,

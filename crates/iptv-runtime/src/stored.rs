@@ -831,7 +831,7 @@ mod tests {
         let provider = [SecretUrl::new(
             "http://guide.example.test/xmltv.php".to_owned(),
         )];
-        guides::sync_provider(&user.into_iter().collect::<Vec<_>>(), &provider)
+        guides::sync_provider(&user.into_iter().collect::<Vec<_>>(), &provider).unwrap()
     }
 
     fn none() -> Overrides {
@@ -916,7 +916,7 @@ mod tests {
             },
         ];
         for edit in edits {
-            let edited = guides::apply(&sources(true), &edit).unwrap();
+            let edited = guides::apply(&sources(true), &edit).unwrap().unwrap();
             assert_eq!(
                 plan(
                     Trigger::Timer,
@@ -934,6 +934,7 @@ mod tests {
             &sources(true),
             &guides::Edit::Rename(guides::FIRST_USER_FEED, Some("Mine".into())),
         )
+        .unwrap()
         .unwrap();
         assert!(matches!(
             plan(

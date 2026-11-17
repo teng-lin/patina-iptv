@@ -230,16 +230,24 @@ fn result_at(ui: Ui, i: usize) -> Option<(ResultId, Option<ProgrammeHit>)> {
             .state
             .channels()
             .get(i)
-            .map(|h| (ResultId::Channel(h.channel), None)),
+            .map(|h| (ResultId::Channel(h.identity.clone()), None)),
         Tab::Programs => s.state.programmes().get(i).map(|h| {
             let id = ResultId::Programme {
-                channel: h.channel,
+                channel: h.identity.clone(),
                 start: h.start,
             };
             (id, Some(h.clone()))
         }),
     })
     .flatten()
+    .and_then(|(id, mut hit)| {
+        let schedule = crate::schedule();
+        let channel = resolve_result_channel(&crate::runtime(), id.channel(), &*schedule)?;
+        if let Some(hit) = hit.as_mut() {
+            hit.channel = channel;
+        }
+        Some((id, hit))
+    })
 }
 
 fn results(ui: Ui, size: Scale) -> impl IntoElement {
@@ -296,7 +304,11 @@ fn result_row(
     };
     let mark = move || mark(ui, focused_index.get() == Some(at.index()));
     let line1 = move || match item() {
-        Some((ResultId::Channel(c), _)) => {
+        Some((ResultId::Channel(id), _)) => {
+            let schedule = crate::schedule();
+            let Some(c) = crate::runtime().resolve_search_channel(&id, &*schedule) else {
+                return String::new();
+            };
             let star = ui.favorites.with(|f| f.contains(&c));
             format!(
                 "{}   {}{}",
@@ -310,7 +322,13 @@ fn result_row(
         _ => String::new(),
     };
     let line2 = move || match item() {
-        Some((ResultId::Channel(c), _)) if ui.playing.get() == Some(c) => tr("Playing").to_owned(),
+        Some((ResultId::Channel(id), _))
+            if crate::runtime()
+                .resolve_search_channel(&id, &*crate::schedule())
+                .is_some_and(|c| ui.playing.get() == Some(c)) =>
+        {
+            tr("Playing").to_owned()
+        }
         Some((_, Some(h))) => {
             let epoch = guide_epoch();
             format!(

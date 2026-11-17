@@ -53,7 +53,7 @@ const LEGACY_HISTORY_FILE: &str = "search-history.json";
 /// Whether programme search can run on the current guide data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Programmes {
-    /// No EPG behind the schedule (the synthetic guide).
+    /// No readable EPG behind the current schedule.
     Unavailable,
     Building,
     Ready,
@@ -123,14 +123,33 @@ fn to_save(shown: bool, saved: SearchHistory, session: &SearchHistory) -> Vec<St
     all.to_list()
 }
 
-fn outcome(id: ResultId, hit: Option<&ProgrammeHit>) -> Outcome {
+/// Both normal playback and multiview consume the current, visible semantic row.
+fn resolve_result_channel(
+    owner: &crate::runtime::Runtime,
+    identity: &iptv_search::ChannelId,
+    schedule: &dyn Schedule,
+) -> Option<usize> {
+    let channel = owner.resolve_search_channel(identity, schedule)?;
+    (!schedule.channel_hidden(channel)).then_some(channel)
+}
+
+fn outcome(id: &ResultId, hit: Option<&ProgrammeHit>, channel: Option<usize>) -> Outcome {
+    let Some(channel) = channel else {
+        return Outcome::Nothing;
+    };
     match (id, hit) {
-        (ResultId::Channel(c), _) => Outcome::Live(c),
+        (ResultId::Channel(_), _) => Outcome::Live(channel),
         (ResultId::Programme { .. }, None) => Outcome::Nothing,
-        (ResultId::Programme { channel, start }, Some(h)) => match h.airing {
+        (ResultId::Programme { start, .. }, Some(h)) => match h.airing {
             Airing::Live => Outcome::Live(channel),
-            Airing::Ended if h.catchup => Outcome::CatchUp { channel, start },
-            Airing::Ended | Airing::Upcoming => Outcome::Details { channel, start },
+            Airing::Ended if h.catchup => Outcome::CatchUp {
+                channel,
+                start: *start,
+            },
+            Airing::Ended | Airing::Upcoming => Outcome::Details {
+                channel,
+                start: *start,
+            },
         },
     }
 }
@@ -316,6 +335,15 @@ fn prepare(ui: Ui) {
             if !current || ui.search.with_untracked(Option::is_none) {
                 return;
             }
+            let index = match index {
+                Ok(index) => index,
+                Err(error) => {
+                    log::warn!("iptv search: guide titles: {error}");
+                    set_programmes(ui, Programmes::Unavailable);
+                    search_again(ui);
+                    return;
+                }
+            };
             log::info!(
                 "iptv search: indexed {} programmes in {} ms",
                 index.programme_count(),
@@ -352,9 +380,24 @@ fn run_search(ui: Ui, query: &str) {
         limit: LIMIT,
         ..Default::default()
     };
-    let mut programmes = crate::runtime().search_programmes(query, crate::time::wall_unix(), opts);
-    channels.retain(|h| !schedule.channel_hidden(h.channel));
-    programmes.retain(|h| !schedule.channel_hidden(h.channel));
+    let mut programmes =
+        crate::runtime().search_programmes(query, crate::time::wall_unix(), &*schedule, opts);
+    channels.retain_mut(|hit| {
+        let Some(channel) = resolve_result_channel(&crate::runtime(), &hit.identity, &*schedule)
+        else {
+            return false;
+        };
+        hit.channel = channel;
+        true
+    });
+    programmes.retain_mut(|hit| {
+        let Some(channel) = resolve_result_channel(&crate::runtime(), &hit.identity, &*schedule)
+        else {
+            return false;
+        };
+        hit.channel = channel;
+        true
+    });
     ui.search.update(|s| {
         if let Some(s) = s {
             s.state.set_results(query, channels, programmes);
@@ -476,7 +519,7 @@ fn resume(ui: Ui) {
 }
 
 fn choose(ui: Ui, id: ResultId) {
-    if pick::choose(ui, id) {
+    if pick::choose(ui, &id) {
         return;
     }
     let hit = ui.search.with_untracked(|s| {
@@ -486,14 +529,16 @@ fn choose(ui: Ui, id: ResultId) {
                 .iter()
                 .find(|h| {
                     ResultId::Programme {
-                        channel: h.channel,
+                        channel: h.identity.clone(),
                         start: h.start,
                     } == id
                 })
                 .cloned()
         })
     });
-    match outcome(id, hit.as_ref()) {
+    let schedule = crate::schedule();
+    let channel = resolve_result_channel(&crate::runtime(), id.channel(), &*schedule);
+    match outcome(&id, hit.as_ref(), channel) {
         Outcome::Live(channel) => watch(ui, channel, Playback::Live),
         Outcome::CatchUp { channel, start } => {
             let start = guide_minute(start, guide_epoch());
@@ -535,6 +580,7 @@ mod tests {
 
     fn hit(airing: Airing, catchup: bool) -> ProgrammeHit {
         ProgrammeHit {
+            identity: iptv_search::ChannelId::new(None, "synthetic-3"),
             channel: 3,
             start: 1_000,
             end: 2_800,
@@ -545,10 +591,12 @@ mod tests {
         }
     }
 
-    const P: ResultId = ResultId::Programme {
-        channel: 3,
-        start: 1_000,
-    };
+    fn p() -> ResultId {
+        ResultId::Programme {
+            channel: iptv_search::ChannelId::new(None, "synthetic-3"),
+            start: 1_000,
+        }
+    }
 
     #[test]
     fn options_follow_the_search_settings() {
@@ -598,10 +646,20 @@ mod tests {
 
     #[test]
     fn choosing_a_result() {
-        assert_eq!(outcome(ResultId::Channel(7), None), Outcome::Live(7));
-        assert_eq!(outcome(P, Some(&hit(Airing::Live, true))), Outcome::Live(3));
         assert_eq!(
-            outcome(P, Some(&hit(Airing::Ended, true))),
+            outcome(
+                &ResultId::Channel(iptv_search::ChannelId::new(None, "synthetic-7")),
+                None,
+                Some(7)
+            ),
+            Outcome::Live(7)
+        );
+        assert_eq!(
+            outcome(&p(), Some(&hit(Airing::Live, true)), Some(3)),
+            Outcome::Live(3)
+        );
+        assert_eq!(
+            outcome(&p(), Some(&hit(Airing::Ended, true)), Some(3)),
             Outcome::CatchUp {
                 channel: 3,
                 start: 1_000
@@ -611,9 +669,19 @@ mod tests {
             channel: 3,
             start: 1_000,
         };
-        assert_eq!(outcome(P, Some(&hit(Airing::Upcoming, false))), details);
-        assert_eq!(outcome(P, Some(&hit(Airing::Ended, false))), details);
-        assert_eq!(outcome(P, None), Outcome::Nothing);
+        assert_eq!(
+            outcome(&p(), Some(&hit(Airing::Upcoming, false)), Some(3)),
+            details
+        );
+        assert_eq!(
+            outcome(&p(), Some(&hit(Airing::Ended, false)), Some(3)),
+            details
+        );
+        assert_eq!(outcome(&p(), None, Some(3)), Outcome::Nothing);
+        assert_eq!(
+            outcome(&p(), Some(&hit(Airing::Live, true)), None),
+            Outcome::Nothing
+        );
     }
 
     #[test]
@@ -642,6 +710,7 @@ mod tests {
         s.set_results(
             "10",
             vec![iptv_search::ChannelHit {
+                identity: iptv_search::ChannelId::new(None, "synthetic-9"),
                 channel: 9,
                 score: MatchQuality::Exact,
             }],
@@ -649,7 +718,13 @@ mod tests {
         );
         s.apply(SearchAction::Down);
         s.apply(SearchAction::Down);
-        assert_eq!(s.focus(), &Focus::Result(ResultId::Channel(9)));
+        assert_eq!(
+            s.focus(),
+            &Focus::Result(ResultId::Channel(iptv_search::ChannelId::new(
+                None,
+                "synthetic-9"
+            )))
+        );
         assert_eq!(k(&s, Action::Select), Some(SearchAction::Ok));
     }
 

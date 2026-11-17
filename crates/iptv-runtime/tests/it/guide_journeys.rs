@@ -207,9 +207,9 @@ fn cached_startup_pages_descriptions_and_manual_choices_preserve_channel_identit
 
         let schedule = owner.schedule();
         let (done, retry) = futures_channel::oneshot::channel();
-        assert!(!data::pages::ready(&owner, &schedule, 0, now - 3 * DAY, move || { let _ = done.send(()); }));
+        assert!(!data::pages::ready(&owner, &schedule, 0, now - 3 * DAY, move |result| { result.expect("retained guide page loads"); let _ = done.send(()); }));
         tokio::time::timeout(Duration::from_secs(5), retry).await.unwrap().unwrap();
-        assert!(data::pages::ready(&owner, &owner.schedule(), 0, now - 3 * DAY, || panic!("loaded page must not queue another request")));
+        assert!(data::pages::ready(&owner, &owner.schedule(), 0, now - 3 * DAY, |_| panic!("loaded page must not queue another request")));
         data::pages::pin_archive(&owner, Some((0, now - 3 * DAY)));
         data::pages::evict(&owner);
         data::pages::pin_archive(&owner, None);

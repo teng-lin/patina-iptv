@@ -12,8 +12,9 @@ use iptv_epg::strip_tag_prefix;
 use crate::text::{MatchQuality, Query, tokens};
 
 /// One channel result.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChannelHit {
+    pub identity: crate::ChannelId,
     /// Channel index in the schedule.
     pub channel: usize,
     pub score: MatchQuality,
@@ -38,6 +39,7 @@ impl Default for ChannelSearchOptions {
 /// Searchable keys of every channel, by channel index.
 #[derive(Clone, Debug, Default)]
 pub struct ChannelIndex {
+    identities: Vec<crate::ChannelId>,
     /// Per channel, its keys as folded words.
     keys: Vec<Vec<Vec<Box<str>>>>,
 }
@@ -52,19 +54,35 @@ fn key_words(text: &str) -> Vec<Box<str>> {
 impl ChannelIndex {
     /// Indexes the channel names of `schedule`.
     pub fn from_schedule(schedule: &dyn Schedule) -> Self {
-        Self::from_names((0..schedule.channel_count()).map(|c| {
+        let mut index = Self::from_names((0..schedule.channel_count()).map(|c| {
             if schedule.channel_hidden(c) {
                 String::new()
             } else {
                 schedule.channel_name(c)
             }
-        }))
+        }));
+        for channel in 0..schedule.channel_count() {
+            if let Some(key) = schedule.channel_key(channel) {
+                index.set_identity(channel, crate::ChannelId::new(None, key));
+            }
+        }
+        index
     }
 
     /// Indexes names in channel order. A leading country/group tag
     /// (`UK: `, `[DE] `) is also indexed without the tag, so the bare name
-    /// can rank as exact or prefix.
+    /// can rank as exact or prefix. Anonymous row IDs distinguish duplicate
+    /// labels within this index, and are never reused by a rebuilt index.
+    /// Use [`Self::set_identity`] for content-stable focus across refreshes.
     pub fn from_names<S: AsRef<str>>(names: impl IntoIterator<Item = S>) -> Self {
+        let names: Vec<String> = names
+            .into_iter()
+            .map(|name| name.as_ref().to_owned())
+            .collect();
+        let identities = names
+            .iter()
+            .map(|_| crate::ChannelId::anonymous())
+            .collect();
         let keys = names
             .into_iter()
             .map(|name| {
@@ -76,7 +94,14 @@ impl ChannelIndex {
                 keys
             })
             .collect();
-        ChannelIndex { keys }
+        ChannelIndex { keys, identities }
+    }
+
+    /// Associate this indexed row with its owning content identity.
+    pub fn set_identity(&mut self, channel: usize, identity: crate::ChannelId) {
+        if let Some(current) = self.identities.get_mut(channel) {
+            *current = identity;
+        }
     }
 
     /// Adds a searchable key (for example the channel number) to `channel`.
@@ -117,20 +142,26 @@ impl ChannelIndex {
         opts: ChannelSearchOptions,
     ) -> Vec<ChannelHit> {
         let query = Query::parse(query);
-        if query.is_empty() {
+        if query.is_empty() || opts.limit == 0 {
             return Vec::new();
         }
-        let mut hits: Vec<ChannelHit> = (0..self.keys.len())
+        let mut hits: Vec<_> = (0..self.keys.len())
             .filter_map(|channel| {
-                let score = self.match_channel(&query, channel)?;
-                Some(ChannelHit { channel, score })
+                self.match_channel(&query, channel)
+                    .map(|score| (channel, score))
             })
             .collect();
-        let fav = |h: &ChannelHit| opts.favourites_first && favourites.contains(&h.channel);
-        // Stable: equal keys stay in channel order.
-        hits.sort_by(|a, b| fav(b).cmp(&fav(a)).then(b.score.cmp(&a.score)));
+        let fav = |channel: usize| opts.favourites_first && favourites.contains(&channel);
+        // Rank borrowed positions first: only returned hits clone their owned identity.
+        hits.sort_by(|a, b| fav(b.0).cmp(&fav(a.0)).then(b.1.cmp(&a.1)));
         hits.truncate(opts.limit);
-        hits
+        hits.into_iter()
+            .map(|(channel, score)| ChannelHit {
+                channel,
+                identity: self.identities[channel].clone(),
+                score,
+            })
+            .collect()
     }
 }
 
@@ -238,6 +269,7 @@ mod tests {
         assert_eq!(
             hits[0],
             ChannelHit {
+                identity: crate::ChannelId::new(None, SyntheticSchedule.channel_key(41).unwrap()),
                 channel: 41,
                 score: Exact
             }

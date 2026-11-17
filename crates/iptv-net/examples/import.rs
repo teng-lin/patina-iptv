@@ -99,7 +99,9 @@ async fn main() {
         t.elapsed()
     );
 
-    let sources = catalog.epg_sources(1);
+    let sources = catalog
+        .epg_sources(1)
+        .expect("bounded header guide identities fit from 1");
     if sources.is_empty() {
         println!("no EPG source declared");
         return;

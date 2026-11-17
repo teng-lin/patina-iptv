@@ -147,15 +147,32 @@ pub(crate) fn current_version(conn: &Connection) -> Result<u32> {
     if exists.is_none() {
         return Ok(0);
     }
-    let (count, max): (i64, i64) = conn.query_row(
-        "SELECT COUNT(*), COALESCE(MAX(version), 0) FROM schema_migrations",
+    let (count, max, min): (i64, i64, i64) = conn.query_row(
+        "SELECT COUNT(*), COALESCE(MAX(version), 0), COALESCE(MIN(version), 0) FROM schema_migrations",
         [],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )?;
-    if count != max || max < 0 {
+    if count != max || max < 0 || (count > 0 && min != 1) {
         return Err(StoreError::SchemaCorrupt(format!(
             "{count} recorded migrations but highest is {max}"
         )));
+    }
+    let mut names = conn.prepare_cached(
+        "SELECT version,name FROM schema_migrations WHERE version<=?1 ORDER BY version",
+    )?;
+    let rows = names.query_map([SCHEMA_VERSION], |row| {
+        Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (version, name) = row?;
+        if !MIGRATIONS
+            .iter()
+            .any(|migration| migration.version == version && migration.name == name)
+        {
+            return Err(StoreError::SchemaCorrupt(format!(
+                "migration {version} has an unexpected name"
+            )));
+        }
     }
     u32::try_from(max).map_err(|_| StoreError::SchemaCorrupt("version overflow".into()))
 }
@@ -326,6 +343,35 @@ mod tests {
             .unwrap();
         conn.execute("INSERT INTO schema_migrations VALUES (99, 'x', 0)", [])
             .unwrap();
+        assert!(matches!(
+            current_version(&conn),
+            Err(StoreError::SchemaCorrupt(_))
+        ));
+    }
+    #[test]
+    fn replacement_nonpositive_versions_and_wrong_names_are_corrupt() {
+        for version in [0, -1] {
+            let mut conn = Connection::open_in_memory().unwrap();
+            migrate_to(&mut conn, SCHEMA_VERSION, 0).unwrap();
+            conn.execute("DELETE FROM schema_migrations WHERE version=1", [])
+                .unwrap();
+            conn.execute(
+                "INSERT INTO schema_migrations VALUES (?1,'synthetic',0)",
+                [version],
+            )
+            .unwrap();
+            assert!(matches!(
+                current_version(&conn),
+                Err(StoreError::SchemaCorrupt(_))
+            ));
+        }
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate_to(&mut conn, SCHEMA_VERSION, 0).unwrap();
+        conn.execute(
+            "UPDATE schema_migrations SET name='synthetic-wrong' WHERE version=1",
+            [],
+        )
+        .unwrap();
         assert!(matches!(
             current_version(&conn),
             Err(StoreError::SchemaCorrupt(_))

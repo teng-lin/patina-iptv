@@ -23,7 +23,7 @@
 //! use iptv_import::{Decision, RefreshPolicy, matching_fingerprint, plan_startup, store_options};
 //! let stored = store.epg_guide(source)?;                     // Option<StoredGuide>
 //! let mut configs = match &catalog {                         // the playlist's feeds now
-//!     Some(c) => c.epg_sources(1),
+//!     Some(c) => c.epg_sources(1)?,
 //!     None => stored.as_ref().map(StoredGuide::configs).unwrap_or_default(),
 //! };
 //! let opts = store_options(&settings, &at);                  // descriptions, keep_past
@@ -522,6 +522,9 @@ impl Store {
 
     /// What is stored about `source`'s guide; `None` when nothing is.
     pub fn epg_guide(&self, source: SourceId) -> Result<Option<StoredGuide>> {
+        self.read_snapshot(|store| store.epg_guide_inner(source))
+    }
+    fn epg_guide_inner(&self, source: SourceId) -> Result<Option<StoredGuide>> {
         let guide = self
             .conn
             .query_row(
@@ -590,6 +593,9 @@ impl Store {
     /// Reads a window of `source`'s stored guide into a [`GuideStore`]
     /// bound to the playlist channel keys. Empty when nothing is stored.
     pub fn load_epg(&self, source: SourceId, window: &EpgWindow<'_>) -> Result<GuideStore> {
+        self.read_snapshot(|store| store.load_epg_inner(source, window))
+    }
+    fn load_epg_inner(&self, source: SourceId, window: &EpgWindow<'_>) -> Result<GuideStore> {
         let wanted: Option<HashSet<&str>> = window
             .keys
             .map(|keys| keys.iter().map(ChannelKey::as_str).collect());

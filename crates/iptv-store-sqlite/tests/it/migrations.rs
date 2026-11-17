@@ -358,13 +358,28 @@ fn fixture(name: &str) -> String {
 
 /// Writes a file exactly as a build at `v.version` left it.
 fn build_old_file(path: &Path, v: &Version) {
+    // Schema fixtures contain DDL, not ledger rows. Copy the identities a real
+    // build records, rather than synthesizing names ordinary opening rejects.
+    static NAMES: std::sync::OnceLock<Vec<(u32, String)>> = std::sync::OnceLock::new();
+    let names = NAMES.get_or_init(|| {
+        let dir = tempfile::tempdir().unwrap();
+        let fresh = dir.path().join("canonical-migration-ledger.db");
+        drop(Store::open(&fresh).unwrap());
+        let conn = rusqlite::Connection::open(fresh).unwrap();
+        conn.prepare("SELECT version,name FROM schema_migrations ORDER BY version")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    });
     let conn = rusqlite::Connection::open(path).unwrap();
     conn.execute_batch(&fixture(&format!("schema_v{}.sql", v.version)))
         .unwrap();
-    for version in 1..=v.version {
+    for (version, name) in names.iter().take(v.version as usize) {
         conn.execute(
-            "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, 'historical', 0)",
-            [version],
+            "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, 0)",
+            rusqlite::params![version, name],
         )
         .unwrap();
     }

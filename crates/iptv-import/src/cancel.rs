@@ -16,7 +16,7 @@ use crate::error::ImportError;
 #[derive(Default, Debug)]
 struct Inner {
     cancelled: AtomicBool,
-    wakers: Mutex<Vec<Waker>>,
+    wakers: Mutex<Vec<Option<Waker>>>,
 }
 
 /// Shared cancellation flag. Clone it into the UI; call [`CancelToken::cancel`].
@@ -32,7 +32,7 @@ impl CancelToken {
     pub fn cancel(&self) {
         if !self.0.cancelled.swap(true, Ordering::SeqCst) {
             let wakers = std::mem::take(&mut *self.lock());
-            for w in wakers {
+            for w in wakers.into_iter().flatten() {
                 w.wake();
             }
         }
@@ -44,39 +44,74 @@ impl CancelToken {
 
     /// Resolves once [`CancelToken::cancel`] is called.
     pub fn cancelled(&self) -> Cancelled<'_> {
-        Cancelled(self)
+        Cancelled {
+            token: self,
+            registration: None,
+        }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Waker>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Option<Waker>>> {
         self.0.wakers.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
 /// Future returned by [`CancelToken::cancelled`].
 #[derive(Debug)]
-pub struct Cancelled<'a>(&'a CancelToken);
+pub struct Cancelled<'a> {
+    token: &'a CancelToken,
+    registration: Option<usize>,
+}
 
 impl Future for Cancelled<'_> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        let token = self.0;
+        let this = self.get_mut();
+        let token = this.token;
         if token.is_cancelled() {
+            this.unregister();
             return Poll::Ready(());
         }
+        let incoming = cx.waker().clone();
         let mut wakers = token.lock();
-        // Re-check under the lock: `cancel` drains the list after setting the flag.
+        // Cancellation sets the flag before taking this lock and draining it.
         if token.is_cancelled() {
+            drop(wakers);
+            this.unregister();
             return Poll::Ready(());
         }
-        if !wakers.iter().any(|w| w.will_wake(cx.waker())) {
-            // Bounded: one task normally polls with the same waker throughout.
-            if wakers.len() >= 32 {
-                wakers.remove(0);
+        let slot = *this.registration.get_or_insert_with(|| {
+            if let Some(slot) = wakers.iter().position(Option::is_none) {
+                slot
+            } else {
+                wakers.push(None);
+                wakers.len() - 1
             }
-            wakers.push(cx.waker().clone());
-        }
+        });
+        let previous = wakers[slot].replace(incoming);
+        // User-supplied wakers may run code when dropped, too.
+        drop(wakers);
+        drop(previous);
         Poll::Pending
+    }
+}
+
+impl Cancelled<'_> {
+    fn unregister(&mut self) {
+        if let Some(slot) = self.registration.take() {
+            let mut wakers = self.token.lock();
+            let previous = wakers.get_mut(slot).and_then(Option::take);
+            while wakers.last().is_some_and(Option::is_none) {
+                wakers.pop();
+            }
+            drop(wakers);
+            drop(previous);
+        }
+    }
+}
+impl Drop for Cancelled<'_> {
+    fn drop(&mut self) {
+        self.unregister();
     }
 }
 
@@ -108,5 +143,83 @@ pub(crate) fn check(cancel: &CancelToken) -> Result<(), ImportError> {
         Err(ImportError::Cancelled)
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+    use std::task::Wake;
+
+    #[derive(Default)]
+    struct Count(AtomicUsize);
+    impl Wake for Count {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    fn poll(waiter: &mut Cancelled<'_>, count: &Arc<Count>) -> Poll<()> {
+        let waker = Waker::from(count.clone());
+        Pin::new(waiter).poll(&mut Context::from_waker(&waker))
+    }
+
+    #[test]
+    fn every_live_waiter_wakes_even_after_shared_token_churn() {
+        let token = CancelToken::new();
+        let counts: Vec<_> = (0..40).map(|_| Arc::new(Count::default())).collect();
+        let mut waiters: Vec<_> = counts.iter().map(|_| token.cancelled()).collect();
+        for (waiter, count) in waiters.iter_mut().zip(&counts) {
+            assert!(poll(waiter, count).is_pending());
+        }
+        for _ in 0..100 {
+            assert!(poll(&mut token.cancelled(), &Arc::new(Count::default())).is_pending());
+        }
+        token.cancel();
+        for (waiter, count) in waiters.iter_mut().zip(&counts) {
+            assert_eq!(count.0.load(Ordering::SeqCst), 1);
+            assert!(poll(waiter, count).is_ready());
+        }
+    }
+
+    #[test]
+    fn a_repolled_waiter_only_wakes_its_latest_task() {
+        let token = CancelToken::new();
+        let previous = Arc::new(Count::default());
+        let current = Arc::new(Count::default());
+        let mut waiter = token.cancelled();
+        assert!(poll(&mut waiter, &previous).is_pending());
+        assert!(poll(&mut waiter, &current).is_pending());
+        token.cancel();
+        assert_eq!(previous.0.load(Ordering::SeqCst), 0);
+        assert_eq!(current.0.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn dropped_waiters_are_unregistered() {
+        let token = CancelToken::new();
+        let abandoned = Arc::new(Count::default());
+        for _ in 0..100 {
+            assert!(poll(&mut token.cancelled(), &abandoned).is_pending());
+        }
+        token.cancel();
+        assert_eq!(abandoned.0.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn cancellation_racing_registration_always_completes_or_wakes() {
+        for _ in 0..100 {
+            let token = CancelToken::new();
+            let count = Arc::new(Count::default());
+            std::thread::scope(|scope| {
+                let token_ref = &token;
+                let cancellation = scope.spawn(move || token_ref.cancel());
+                let mut waiter = token.cancelled();
+                let first = poll(&mut waiter, &count);
+                cancellation.join().unwrap();
+                assert!(first.is_ready() || count.0.load(Ordering::SeqCst) > 0);
+                assert!(poll(&mut waiter, &count).is_ready());
+            });
+        }
     }
 }

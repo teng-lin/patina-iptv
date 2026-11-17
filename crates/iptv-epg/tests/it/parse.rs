@@ -22,6 +22,43 @@ fn t(s: &str) -> i64 {
     parse_xmltv_time(s, TimePolicy::UTC).unwrap()
 }
 
+#[test]
+fn overflowing_episode_ordinals_survive_parsing_as_absent_components() {
+    let cases = [
+        ("4294967295.0.", (None, Some(1))),
+        ("0.4294967295.", (Some(1), None)),
+        ("4294967294.0.", (Some(u16::MAX), Some(1))),
+        ("4294967295.4294967295.", (None, None)),
+    ];
+    let start = t("20260301120000 +0000");
+    let mut xml = String::from("<tv>");
+    for (index, (ordinal, _)) in cases.iter().enumerate() {
+        let from = format_xmltv_time(start + index as i64 * 3600);
+        let to = format_xmltv_time(start + (index as i64 + 1) * 3600);
+        xml.push_str(&format!(
+            r#"<programme channel="synthetic" start="{from}" stop="{to}"><title>Generated programme {index}</title><episode-num system="xmltv_ns">{ordinal}</episode-num></programme>"#,
+        ));
+    }
+    xml.push_str("</tv>");
+    for chunk in [1, 31, xml.len()] {
+        let parsed = parse_chunked(xml.as_bytes(), chunk, ParseOptions::default());
+        assert_eq!(parsed.stats.programmes, cases.len() as u64);
+        assert_eq!(parsed.programmes.len(), cases.len());
+        let mut builder = SourceBuilder::new(FeedId(1), 0, StoreOptions::default(), start);
+        for (programme, (_, expected)) in parsed.programmes.iter().zip(&cases) {
+            let data = ProgrammeData::from_xmltv(programme);
+            assert_eq!((data.season, data.episode), *expected);
+            builder.push_programme(programme.clone());
+        }
+        let source = builder.finish();
+        let schedule = source.schedule("synthetic").unwrap();
+        assert_eq!(schedule.len(), cases.len());
+        for (programme, (_, expected)) in schedule.iter().zip(&cases) {
+            assert_eq!(programme.season_episode(), *expected);
+        }
+    }
+}
+
 const FULL: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE tv SYSTEM "xmltv.dtd">
 <tv generator-info-name="synthetic">

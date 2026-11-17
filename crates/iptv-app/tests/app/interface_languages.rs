@@ -10,7 +10,10 @@ use crate::personalization::{self, Fixture, step};
 use iptv_core::i18n::{self, Arg, Language};
 use iptv_settings::{Settings, Target, Value, keys};
 use nsh_testing::{DialogAnswer, Headless};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
 use std::time::Duration;
 
 const CHANNELS: &str = "{count, plural, one {# channel} other {# channels}}";
@@ -226,14 +229,31 @@ fn playlists_organisation_and_failures_speak_the_interface_language() {
     step(app.wait_for_within(&format!("text:/^{}/", pattern(&failed)), IMPORT));
     assert!(!app.shows("Refresh failed"));
     // An import that fails: a file that is not a playlist.
-    app.on_pick(|_| crate::support::picked("not a playlist".to_owned()));
+    let picks = Arc::new(AtomicUsize::new(0));
+    let answered = picks.clone();
+    app.on_pick(move |_| {
+        answered.fetch_add(1, Ordering::SeqCst);
+        crate::support::picked("not a playlist".to_owned())
+    });
     step(app.press(&format!(
         "text:{} >> nth=1",
         pattern_free(&de.t("+ Add playlist"))
     )));
     press(app, &de.t("Playlist file"));
     press(app, &de.t("Choose a file…"));
-    shown(app, "synthetic.m3u");
+    // Distinguish answering the platform picker from the asynchronous private
+    // document copy. These helpers receive NSH's raw runner, so scale the two
+    // native-operation deadlines explicitly, just as the app wrapper does.
+    step(app.wait_until(
+        "inline playlist picker answered",
+        crate::isolated::scaled_duration(Duration::from_secs(5)),
+        |_| picks.load(Ordering::SeqCst) > 0,
+    ));
+    step(app.wait_for_within(
+        "text:synthetic.m3u",
+        crate::isolated::scaled_duration(IMPORT),
+    ));
+    assert_eq!(picks.load(Ordering::SeqCst), 1, "one file-picker request");
     press(app, &de.t("Add playlist"));
     // The form comes back with the reason, whichever of these the reader
     // gives for such a file.

@@ -190,7 +190,8 @@ mod tests {
             origin(&l.source),
             "Added by you · http://guide.example.test/e.xml?token=•••"
         );
-        let p = &guides::sync_provider(&[], &[SecretUrl::new("http://p.example.test/x")])[0];
+        let p =
+            &guides::sync_provider(&[], &[SecretUrl::new("http://p.example.test/x")]).unwrap()[0];
         assert_eq!(title(p), "The provider's guide");
         assert_eq!(shift(0), "No time shift");
         assert_eq!(shift(120), "Times +2 h");
@@ -206,7 +207,7 @@ mod tests {
             SecretUrl::new("http://p.example.test/a"),
             SecretUrl::new("http://p.example.test/b"),
         ];
-        let p = guides::sync_provider(&[], &urls);
+        let p = guides::sync_provider(&[], &urls).unwrap();
         assert_eq!(title(&p[1]), "The provider's guide 2");
         assert_eq!(origin(&p[1]), "From the provider · http://p.example.test/b");
         l.source.name = Some("Synthetic Guide".into());
@@ -348,7 +349,7 @@ mod tests {
             SecretUrl::new("http://p.example.test/a"),
             SecretUrl::new("http://p.example.test/b"),
         ];
-        let provider = guides::sync_provider(&[], &urls);
+        let provider = guides::sync_provider(&[], &urls).unwrap();
         assert_eq!(
             in_language("de", || title(&provider[1])),
             "Programm des Anbieters 2"

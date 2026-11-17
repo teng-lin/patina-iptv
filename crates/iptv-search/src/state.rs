@@ -44,14 +44,17 @@ impl Tab {
 }
 
 /// Identity of a result, stable across searches.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ResultId {
-    Channel(usize),
-    Programme { channel: usize, start: UnixTime },
+    Channel(crate::ChannelId),
+    Programme {
+        channel: crate::ChannelId,
+        start: UnixTime,
+    },
 }
 
 impl ResultId {
-    fn channel(self) -> usize {
+    pub fn channel(&self) -> &crate::ChannelId {
         match self {
             ResultId::Channel(c) | ResultId::Programme { channel: c, .. } => c,
         }
@@ -128,7 +131,7 @@ impl SearchState {
             keyboard: true,
             channels: Vec::new(),
             programmes: Vec::new(),
-            remembered: [None; 2],
+            remembered: [None, None],
             history,
         }
     }
@@ -171,27 +174,30 @@ impl SearchState {
 
     fn id_at(&self, tab: Tab, i: usize) -> Option<ResultId> {
         match tab {
-            Tab::Channels => self.channels.get(i).map(|h| ResultId::Channel(h.channel)),
+            Tab::Channels => self
+                .channels
+                .get(i)
+                .map(|h| ResultId::Channel(h.identity.clone())),
             Tab::Programs => self.programmes.get(i).map(|h| ResultId::Programme {
-                channel: h.channel,
+                channel: h.identity.clone(),
                 start: h.start,
             }),
         }
     }
 
-    fn position(&self, tab: Tab, id: ResultId) -> Option<usize> {
-        (0..self.count(tab)).find(|&i| self.id_at(tab, i) == Some(id))
+    fn position(&self, tab: Tab, id: &ResultId) -> Option<usize> {
+        (0..self.count(tab)).find(|&i| self.id_at(tab, i).as_ref() == Some(id))
     }
 
     /// Where focus goes in `tab`: the remembered result if still there, a
     /// result on the same channel, else the first.
     fn landing(&self, tab: Tab) -> Option<ResultId> {
         let first = self.id_at(tab, 0)?;
-        let Some(want) = self.remembered[tab as usize] else {
+        let Some(want) = self.remembered[tab as usize].as_ref() else {
             return Some(first);
         };
         if self.position(tab, want).is_some() {
-            return Some(want);
+            return Some(want.clone());
         }
         (0..self.count(tab))
             .filter_map(|i| self.id_at(tab, i))
@@ -200,7 +206,7 @@ impl SearchState {
     }
 
     fn focus_result(&mut self, id: ResultId) {
-        self.remembered[self.tab as usize] = Some(id);
+        self.remembered[self.tab as usize] = Some(id.clone());
         self.focus = Focus::Result(id);
     }
 
@@ -232,7 +238,7 @@ impl SearchState {
         if self.count(self.tab) == 0 && self.count(self.tab.other()) > 0 {
             self.tab = self.tab.other();
         }
-        match self.focus {
+        match self.focus.clone() {
             Focus::Result(_) | Focus::Tabs if self.phase == Phase::NoResults => {
                 self.focus = Focus::Input
             }
@@ -308,7 +314,7 @@ impl SearchState {
                     ResultId::Channel(_) => Tab::Channels,
                     ResultId::Programme { .. } => Tab::Programs,
                 };
-                if self.phase == Phase::Idle || self.position(tab, id).is_none() {
+                if self.phase == Phase::Idle || self.position(tab, &id).is_none() {
                     return SearchEffect::None;
                 }
                 self.tab = tab;
@@ -339,7 +345,7 @@ impl SearchState {
             self.phase = Phase::Idle;
             self.channels.clear();
             self.programmes.clear();
-            self.remembered = [None; 2];
+            self.remembered = [None, None];
             SearchEffect::None
         } else {
             self.phase = Phase::Typing;
@@ -407,7 +413,7 @@ impl SearchState {
             Focus::Tabs if dir < 0 => self.focus = Focus::Input,
             Focus::Tabs => self.enter_results(),
             Focus::Result(id) => {
-                let i = self.position(self.tab, id).unwrap_or(0);
+                let i = self.position(self.tab, &id).unwrap_or(0);
                 match i.checked_add_signed(dir) {
                     None => self.focus = Focus::Tabs,
                     Some(j) => {

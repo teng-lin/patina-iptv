@@ -29,7 +29,7 @@ fn guide(now: i64) -> String {
     for (id, title) in [("one", "Quiet Harbour"), ("two", "Golden Engine")] {
         xml.push_str(&format!(
             "<channel id=\"{id}\"><display-name>{id}</display-name></channel>\
-             <programme channel=\"{id}\" start=\"{}\" stop=\"{}\"><title>{title}</title></programme>",
+             <programme channel=\"{id}\" start=\"{}\" stop=\"{}\"><title>{title}</title><desc>Generated details for {title}</desc></programme>",
             format_xmltv_time(now - 1800),
             format_xmltv_time(now + 1800)
         ));
@@ -82,6 +82,12 @@ fn the_guide_uses_the_bundled_fonts_and_proportions() {
     step(app.wait_for_within("text:Playlist added", IMPORT));
     step(app.press("text:Watch"));
     step(app.wait_for_within("text:Golden Engine", IMPORT));
+
+    step(app.press_key("m"));
+    step(app.press("text:Details"));
+    step(app.wait_for("id:description-layer >> text:Generated details for Quiet Harbour"));
+    assert!(!app.screen().matches("text:A synthetic programme description for testing the guide. Real descriptions come from the EPG.").unwrap());
+    step(app.back());
 
     let roboto = Some("Roboto, sans-serif".to_owned());
     // Full screen: the full sizes.

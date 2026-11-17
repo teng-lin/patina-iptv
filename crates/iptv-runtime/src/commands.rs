@@ -617,15 +617,29 @@ fn first_programme_native(
 fn guide_page_native(
     services: &Services,
     source: SourceId,
+    incarnation: Option<String>,
     request: iptv_guide::pages::PageRequest,
 ) -> impl std::future::Future<Output = Result<iptv_epg::GuideStore, StoreError>> + use<> {
     services.read(move |store| {
-        let window = iptv_store_sqlite::EpgWindow {
-            from: request.from,
-            to: request.to,
-            ..iptv_store_sqlite::EpgWindow::from(0, 0)
-        };
-        store.load_epg(source, &window)
+        store.read_snapshot(|store| {
+            let Some(incarnation) = incarnation else {
+                return Err(StoreError::Unavailable(
+                    "guide page has no source authority",
+                ));
+            };
+            if store.source(source)?.is_none()
+                || !store.source_policy(source)?.enabled
+                || store.source_incarnation(source)? != incarnation
+            {
+                return Err(StoreError::Unavailable("guide page source changed"));
+            }
+            let window = iptv_store_sqlite::EpgWindow {
+                from: request.from,
+                to: request.to,
+                ..iptv_store_sqlite::EpgWindow::from(0, 0)
+            };
+            store.load_epg(source, &window)
+        })
     })
 }
 
@@ -989,11 +1003,12 @@ pub(crate) fn first_programme(
 pub(crate) fn guide_page(
     owner: &crate::Runtime,
     source: SourceId,
+    incarnation: Option<String>,
     request: iptv_guide::pages::PageRequest,
 ) -> impl std::future::Future<Output = Result<iptv_epg::GuideStore, crate::Error>> + use<> {
     let services = owner.services();
     async move {
-        guide_page_native(&services, source, request)
+        guide_page_native(&services, source, incarnation, request)
             .await
             .map_err(crate::Error::from)
     }

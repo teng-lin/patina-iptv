@@ -11,10 +11,18 @@ use iptv_epg::{ChannelKey, DAY, UnixTime};
 use iptv_guide::{EpgSchedule, combined::CombinedSchedule};
 use iptv_search::ProgrammeIndex;
 
-/// Builds the index of `epg`'s channels (by row) and hands it to `done` on
-/// the UI thread (not at all when the store cannot be read).
-pub fn build(schedule: &dyn Schedule, rows: usize, done: impl FnOnce(ProgrammeIndex) + 'static) {
-    let mut sources: Vec<(crate::runtime::model::SourceId, Vec<ChannelKey>, usize)> = Vec::new();
+/// Builds the index of `epg`'s channels (by row), completing on the UI thread.
+pub fn build(
+    schedule: &dyn Schedule,
+    rows: usize,
+    done: impl FnOnce(Result<ProgrammeIndex, crate::runtime::Error>) + 'static,
+) {
+    let mut sources: Vec<(
+        crate::runtime::model::SourceId,
+        String,
+        Vec<ChannelKey>,
+        usize,
+    )> = Vec::new();
     if let Some(all) = schedule
         .as_any()
         .and_then(|s| s.downcast_ref::<CombinedSchedule>())
@@ -24,7 +32,25 @@ pub fn build(schedule: &dyn Schedule, rows: usize, done: impl FnOnce(ProgrammeIn
             let keys = (0..part.schedule.channel_count())
                 .filter_map(|c| part.schedule.channel(c).map(|c| c.key.clone()))
                 .collect();
-            sources.push((crate::runtime::model::SourceId(part.id), keys, offset));
+            if part.schedule.channel_count() == 0 {
+                continue;
+            }
+            let Some(authority) = part
+                .schedule
+                .source_authority()
+                .filter(|authority| authority.source() == part.id)
+            else {
+                done(Err(crate::runtime::Error::unavailable(
+                    "Search source is unavailable",
+                )));
+                return;
+            };
+            sources.push((
+                crate::runtime::model::SourceId(part.id),
+                authority.incarnation().to_owned(),
+                keys,
+                offset,
+            ));
             offset += part.schedule.channel_count();
         }
     } else if let Some(epg) = schedule
@@ -38,11 +64,30 @@ pub fn build(schedule: &dyn Schedule, rows: usize, done: impl FnOnce(ProgrammeIn
             .shown_source()
             .filter(|_| epg.loaded_from().is_some())
         else {
-            done(ProgrammeIndex::build(epg.store(), &keys));
+            let mut index = ProgrammeIndex::build(epg.store(), &keys);
+            for channel in 0..rows {
+                if let Some(identity) = crate::runtime().search_channel_identity(schedule, channel)
+                {
+                    index.set_identity(channel, identity);
+                }
+            }
+            done(Ok(index));
             return;
         };
-        sources.push((source, keys, 0));
+        let Some(authority) = epg
+            .source_authority()
+            .filter(|authority| authority.source() == source.0)
+        else {
+            done(Err(crate::runtime::Error::unavailable(
+                "Search source is unavailable",
+            )));
+            return;
+        };
+        sources.push((source, authority.incarnation().to_owned(), keys, 0));
     } else {
+        done(Err(crate::runtime::Error::unavailable(
+            "Search guide is unavailable",
+        )));
         return;
     }
     let keep = crate::data::stored::keep_past_days(&crate::settings::get());
@@ -58,9 +103,9 @@ pub fn build(schedule: &dyn Schedule, rows: usize, done: impl FnOnce(ProgrammeIn
                     index.programme_count(),
                     started.elapsed().as_millis()
                 );
-                done(index);
+                done(Ok(index));
             }
-            Err(error) => log::warn!("iptv search: guide titles: {error}"),
+            Err(error) => done(Err(error)),
         }
     });
 }

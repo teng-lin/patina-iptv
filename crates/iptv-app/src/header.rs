@@ -174,17 +174,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
         settled.with(|p| {
             let (_, _, _, ch, p) = (*p)?;
             let schedule = crate::schedule();
-            if let Some(s) = schedule
-                .as_any()
-                .and_then(|s| s.downcast_ref::<iptv_guide::combined::CombinedSchedule>())
-            {
-                s.description(ch, p)
-            } else {
-                schedule
-                    .as_any()
-                    .and_then(|s| s.downcast_ref::<iptv_guide::EpgSchedule>())
-                    .and_then(|s| s.description(ch, p))
-            }
+            programme_description(&*schedule, ch, p)
         })
     });
     let favourite = move || {
@@ -463,5 +453,127 @@ mod tests {
         assert!(!overlay_wanted(false, Some("0")));
         assert!(overlay_wanted(false, Some("1")), "unless asked for");
         assert!(overlay_wanted(true, None), "debug builds show it");
+    }
+}
+
+/// Description lookup shared by the header and selected-programme Details.
+pub(crate) fn programme_description(
+    schedule: &dyn crate::guide::Schedule,
+    channel: usize,
+    programme: Program,
+) -> Option<String> {
+    if let Some(combined) = schedule
+        .as_any()
+        .and_then(|schedule| schedule.downcast_ref::<iptv_guide::combined::CombinedSchedule>())
+    {
+        combined.description(channel, programme)
+    } else {
+        schedule
+            .as_any()
+            .and_then(|schedule| schedule.downcast_ref::<iptv_guide::EpgSchedule>())
+            .and_then(|schedule| schedule.description(channel, programme))
+    }
+}
+
+#[cfg(test)]
+mod description_regressions {
+    use super::programme_description;
+    use iptv_core::guide::Schedule;
+    use iptv_epg::{
+        ChannelKey, EpgRef, FeedId, GuideStore, MatchKind, ProgrammeData, SourceBuilder,
+        StoreOptions,
+    };
+    use iptv_guide::{
+        EpgSchedule, GuideChannel,
+        combined::{CombinedSchedule, SourceSchedule},
+    };
+    use std::rc::Rc;
+
+    fn schedule(now: i64, description: Option<&str>) -> EpgSchedule {
+        let key = ChannelKey::new("synthetic-shared-key");
+        let mut builder = SourceBuilder::new(
+            FeedId(1),
+            0,
+            StoreOptions {
+                store_descriptions: true,
+                ..Default::default()
+            },
+            now,
+        );
+        builder.push_data(
+            "synthetic-epg",
+            &ProgrammeData {
+                start: 1_800_000_000 - 1800,
+                stop: Some(1_800_000_000 + 1800),
+                title: "Synthetic selected programme",
+                desc: description,
+                ..Default::default()
+            },
+        );
+        let mut store = GuideStore::new();
+        store.replace_source(builder.finish());
+        store.set_matches(std::collections::HashMap::from([(
+            key.clone(),
+            vec![EpgRef {
+                source: FeedId(1),
+                epg_id: "synthetic-epg".into(),
+                kind: MatchKind::TvgId,
+            }],
+        )]));
+        EpgSchedule::new(
+            vec![(
+                "Synthetic group".into(),
+                vec![GuideChannel {
+                    key,
+                    name: "Synthetic channel".into(),
+                    number: 1,
+                    catchup_days: 0,
+                }],
+            )],
+            store,
+            now,
+        )
+    }
+    #[test]
+    fn descriptions_follow_selected_source_programme_and_empty_data() {
+        let now = 1_800_000_000;
+        let first = Rc::new(schedule(now, Some("Synthetic amber description")));
+        let second = Rc::new(schedule(now + 3600, Some("Synthetic birch description")));
+        let selected = first.program_at(0, 0);
+        assert_eq!(
+            programme_description(&*first, 0, selected).as_deref(),
+            Some("Synthetic amber description")
+        );
+        let combined = CombinedSchedule::new(
+            vec![
+                SourceSchedule {
+                    id: 1,
+                    name: "Synthetic first".into(),
+                    schedule: first,
+                },
+                SourceSchedule {
+                    id: 2,
+                    name: "Synthetic second".into(),
+                    schedule: second,
+                },
+            ],
+            now,
+        );
+        for (channel, expected) in [
+            (0, "Synthetic amber description"),
+            (1, "Synthetic birch description"),
+        ] {
+            assert_eq!(
+                programme_description(&combined, channel, combined.program_at(channel, 0))
+                    .as_deref(),
+                Some(expected)
+            );
+        }
+        let empty = schedule(now, None);
+        assert_eq!(
+            programme_description(&empty, 0, empty.program_at(0, 0)),
+            None
+        );
+        assert_eq!(programme_description(&empty, 9, selected), None);
     }
 }

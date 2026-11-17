@@ -41,7 +41,9 @@ impl ScheduleRules {
     /// `now` is only used for retention (`opts.past_days_to_keep`).
     pub fn new(opts: StoreOptions, now: UnixTime) -> Self {
         Self {
-            cutoff: opts.past_days_to_keep.map(|d| now - i64::from(d) * DAY),
+            cutoff: opts
+                .past_days_to_keep
+                .map(|d| now.saturating_sub(i64::from(d) * DAY)),
         }
     }
 
@@ -108,8 +110,8 @@ impl ScheduleRules {
                     Settled::Retention
                 }
                 Some(stop)
-                    if u32::try_from(start - base).is_err()
-                        || u32::try_from(stop - start).is_err() =>
+                    if u32::try_from(i128::from(start) - i128::from(base)).is_err()
+                        || u32::try_from(i128::from(stop) - i128::from(start)).is_err() =>
                 {
                     report.dropped_bad_duration += 1;
                     Settled::Overflow

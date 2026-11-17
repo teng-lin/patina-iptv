@@ -23,8 +23,7 @@ use nsh_testing::Screen;
 
 const IMPORT: Duration = Duration::from_secs(30);
 const GONE: Duration = Duration::from_secs(3);
-const DESCRIPTION: &str =
-    "A synthetic programme description for testing the guide. Real descriptions come from the EPG.";
+const DESCRIPTION: &str = "Generated synopsis from the imported guide.";
 
 #[track_caller]
 fn step(r: Result<(), String>) {
@@ -38,7 +37,7 @@ fn guide(now: i64) -> String {
     for (id, title) in [("one", "Quiet Harbour"), ("two", "Golden Engine")] {
         xml.push_str(&format!(
             "<channel id=\"{id}\"><display-name>{id}</display-name></channel>\
-             <programme channel=\"{id}\" start=\"{}\" stop=\"{}\"><title>{title}</title></programme>",
+             <programme channel=\"{id}\" start=\"{}\" stop=\"{}\"><title>{title}</title><desc>{DESCRIPTION}</desc></programme>",
             format_xmltv_time(now - 1800),
             format_xmltv_time(now + 1800)
         ));

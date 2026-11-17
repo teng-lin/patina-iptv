@@ -64,12 +64,21 @@ fn begin(ui: Ui) -> Option<(Screen, u64, InspectionControl)> {
         .with(|token| *token = Some(control.cancel.clone()));
     accepted
 }
-fn finish(ui: Ui, generation: u64, result: model::Result<()>) {
-    update(ui, |s| {
-        if s.finish(generation) {
-            s.error = result.err();
-        }
-    });
+fn accepts(screen: &Screen, generation: u64, cancel: &iptv_import::CancelToken) -> bool {
+    !cancel.is_cancelled() && screen.open && screen.generation == generation
+}
+fn finish(ui: Ui, generation: u64, cancel: &iptv_import::CancelToken, result: model::Result<()>) {
+    update(ui, |s| finish_screen(s, generation, cancel, result));
+}
+fn finish_screen(
+    screen: &mut Screen,
+    generation: u64,
+    cancel: &iptv_import::CancelToken,
+    result: model::Result<()>,
+) {
+    if accepts(screen, generation, cancel) && screen.finish(generation) {
+        screen.error = result.err();
+    }
 }
 fn release(preview: Option<model::Preview>) {
     if let Some(p) = preview {
@@ -117,12 +126,32 @@ pub fn reopen(ui: Ui) {
 
 pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindow) {
     dismiss_inspection_input(ui);
+    if state(ui, |s| s.busy).unwrap_or(false) {
+        cancel(ui);
+    }
+    // Concurrent selections share the current screen lifetime. Closing,
+    // clearing, or starting a new operation cancels every old selection.
+    let cancel = ui.guide_repair_cancel.with(|token| {
+        token
+            .get_or_insert_with(iptv_import::CancelToken::new)
+            .clone()
+    });
+    let inspection = ui.guide_inspect_cancel.with(|token| token.clone());
+    let control = InspectionControl {
+        cancel: cancel.clone(),
+        ..Default::default()
+    };
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
-        let info = match owner
-            .inspect_channel(channel.clone(), InspectionControl::default())
-            .await
+        let result = owner.inspect_channel(channel.clone(), control).await;
+        if cancel.is_cancelled()
+            || inspection
+                .as_ref()
+                .is_some_and(iptv_import::CancelToken::is_cancelled)
         {
+            return;
+        }
+        let info = match result {
             Ok(info) => info,
             Err(_) => {
                 crate::settings_view::notify(tr("Guide changes could not be saved"));
@@ -190,18 +219,19 @@ pub fn history(ui: Ui, source: SourceId, window: TimeWindow) {
     let Some((_, generation, control)) = begin(ui) else {
         return;
     };
+    let cancel = control.cancel.clone();
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
         match owner.recent_guide_repairs(source, 20, control).await {
             Ok(history) => {
                 update(ui, |s| {
-                    if s.generation == generation {
+                    if accepts(s, generation, &cancel) {
                         s.history = history;
                     }
                 });
-                finish(ui, generation, Ok(()));
+                finish(ui, generation, &cancel, Ok(()));
             }
-            Err(error) => finish(ui, generation, Err(error)),
+            Err(error) => finish(ui, generation, &cancel, Err(error)),
         }
     });
 }
@@ -209,24 +239,27 @@ fn preview(ui: Ui) {
     let Some((screen, generation, control)) = begin(ui) else {
         return;
     };
+    let cancel = control.cancel.clone();
     let owner = crate::runtime();
-    release(screen.preview);
+    if let Some(preview) = screen.preview {
+        let _ = owner.release_guide_repair_plan(&preview.id, preview.digest);
+    }
     crate::data::spawn_in_app(async move {
         match owner.preview_guide_repair(screen.request, control).await {
             Ok(preview) => {
-                if state(ui, |s| s.open && s.generation == generation).unwrap_or(false) {
+                if state(ui, |s| accepts(s, generation, &cancel)).unwrap_or(false) {
                     update(ui, |s| {
                         s.preview = Some(preview);
                         s.mapping_offset = 0;
                         s.indirect_offset = 0;
                         s.focus = Row::Apply;
                     });
-                    finish(ui, generation, Ok(()));
+                    finish(ui, generation, &cancel, Ok(()));
                 } else {
                     let _ = owner.release_guide_repair_plan(&preview.id, preview.digest);
                 }
             }
-            Err(error) => finish(ui, generation, Err(error)),
+            Err(error) => finish(ui, generation, &cancel, Err(error)),
         }
     });
 }
@@ -234,8 +267,9 @@ fn apply(ui: Ui) {
     let Some((screen, generation, control)) = begin(ui) else {
         return;
     };
+    let cancel = control.cancel.clone();
     let Some(preview) = screen.preview else {
-        finish(ui, generation, Err(model::Error::PlanMissing));
+        finish(ui, generation, &cancel, Err(model::Error::PlanMissing));
         return;
     };
     let owner = crate::runtime();
@@ -246,17 +280,17 @@ fn apply(ui: Ui) {
         match result {
             Ok(outcome) => {
                 update(ui, |s| {
-                    if s.generation == generation {
+                    if accepts(s, generation, &cancel) {
                         s.outcome = Some(outcome);
                         s.preview = None;
                         s.focus = Row::Status;
                     }
                 });
-                finish(ui, generation, Ok(()));
+                finish(ui, generation, &cancel, Ok(()));
             }
             Err(model::Error::CompletionUnknown { operation }) => {
                 update(ui, |s| {
-                    if s.generation == generation {
+                    if accepts(s, generation, &cancel) {
                         s.uncertain = Some(operation.clone());
                         s.focus = Row::Status;
                     }
@@ -264,20 +298,22 @@ fn apply(ui: Ui) {
                 finish(
                     ui,
                     generation,
+                    &cancel,
                     Err(model::Error::CompletionUnknown { operation }),
                 );
             }
-            Err(error) => finish(ui, generation, Err(error)),
+            Err(error) => finish(ui, generation, &cancel, Err(error)),
         }
         count(ui);
     });
 }
 fn status(ui: Ui, id: Option<String>) {
-    let Some((screen, generation, _)) = begin(ui) else {
+    let Some((screen, generation, control)) = begin(ui) else {
         return;
     };
+    let cancel = control.cancel.clone();
     let Some(id) = id.or_else(|| screen.commit_id()) else {
-        finish(ui, generation, Err(model::Error::CommitMissing));
+        finish(ui, generation, &cancel, Err(model::Error::CommitMissing));
         return;
     };
     let owner = crate::runtime();
@@ -285,7 +321,7 @@ fn status(ui: Ui, id: Option<String>) {
         match owner.guide_repair_operation(id).await {
             Ok(operation) => {
                 update(ui, |s| {
-                    if s.generation == generation {
+                    if accepts(s, generation, &cancel) {
                         s.outcome = Some(model::Outcome {
                             commit: operation.commit.clone(),
                             configuration_committed: true,
@@ -302,9 +338,9 @@ fn status(ui: Ui, id: Option<String>) {
                         s.uncertain = None;
                     }
                 });
-                finish(ui, generation, Ok(()));
+                finish(ui, generation, &cancel, Ok(()));
             }
-            Err(error) => finish(ui, generation, Err(error)),
+            Err(error) => finish(ui, generation, &cancel, Err(error)),
         }
     });
 }
@@ -312,8 +348,9 @@ fn verify(ui: Ui) {
     let Some((screen, generation, control)) = begin(ui) else {
         return;
     };
+    let cancel = control.cancel.clone();
     let Some(id) = screen.commit_id() else {
-        finish(ui, generation, Err(model::Error::CommitMissing));
+        finish(ui, generation, &cancel, Err(model::Error::CommitMissing));
         return;
     };
     let owner = crate::runtime();
@@ -324,13 +361,13 @@ fn verify(ui: Ui) {
         {
             Ok(result) => {
                 update(ui, |s| {
-                    if s.generation == generation {
+                    if accepts(s, generation, &cancel) {
                         s.verification = Some(result);
                     }
                 });
-                finish(ui, generation, Ok(()));
+                finish(ui, generation, &cancel, Ok(()));
             }
-            Err(error) => finish(ui, generation, Err(error)),
+            Err(error) => finish(ui, generation, &cancel, Err(error)),
         }
     });
 }
@@ -338,8 +375,9 @@ fn undo(ui: Ui) {
     let Some((screen, generation, control)) = begin(ui) else {
         return;
     };
+    let cancel = control.cancel.clone();
     let Some(id) = screen.commit_id() else {
-        finish(ui, generation, Err(model::Error::CommitMissing));
+        finish(ui, generation, &cancel, Err(model::Error::CommitMissing));
         return;
     };
     let owner = crate::runtime();
@@ -347,14 +385,14 @@ fn undo(ui: Ui) {
         match owner.undo_guide_repair(id, control).await {
             Ok(outcome) => {
                 update(ui, |s| {
-                    if s.generation == generation {
+                    if accepts(s, generation, &cancel) {
                         s.outcome = Some(outcome);
                         s.verification = None;
                     }
                 });
-                finish(ui, generation, Ok(()));
+                finish(ui, generation, &cancel, Ok(()));
             }
-            Err(error) => finish(ui, generation, Err(error)),
+            Err(error) => finish(ui, generation, &cancel, Err(error)),
         }
     });
 }
@@ -422,6 +460,7 @@ fn activate(ui: Ui, row: Row) {
         Row::MoreIndirect => page(ui, true),
         Row::SelectMore | Row::Back => close(ui),
         Row::Clear => {
+            cancel(ui);
             invalidate(ui);
             update(ui, |s| {
                 let source = s.request.source;
@@ -876,4 +915,43 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .child(rows(ui, size))
         },
     )
+}
+
+#[cfg(test)]
+mod callback_regressions {
+    use super::*;
+    #[test]
+    fn a_cancelled_callback_cannot_finish_a_reopened_screen_at_the_same_generation() {
+        let window = TimeWindow {
+            from: 1_800_000_000,
+            to: 1_800_003_600,
+        };
+        let mut old = Screen::new(SourceId(1), window);
+        let generation = old.begin();
+        let old_control = iptv_import::CancelToken::new();
+        assert!(accepts(&old, generation, &old_control));
+        old_control.cancel();
+        let mut replacement = Screen::new(SourceId(2), window);
+        assert_eq!(
+            replacement.begin(),
+            generation,
+            "generation alone has an ABA collision"
+        );
+        assert!(!accepts(&replacement, generation, &old_control));
+        finish_screen(
+            &mut replacement,
+            generation,
+            &old_control,
+            Err(model::Error::PlanMissing),
+        );
+        assert!(
+            replacement.busy,
+            "old completion must not finish the replacement operation"
+        );
+        assert!(replacement.error.is_none());
+        let new_control = iptv_import::CancelToken::new();
+        assert!(accepts(&replacement, generation, &new_control));
+        replacement.open = false;
+        assert!(!accepts(&replacement, generation, &new_control));
+    }
 }

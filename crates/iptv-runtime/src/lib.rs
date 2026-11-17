@@ -93,7 +93,7 @@ struct TaskHost {
 
 type EventSink = Rc<dyn Fn(RuntimeEvent)>;
 type BrowserObserver = Rc<dyn Fn() -> BrowserState>;
-type PageWaiters = RefCell<Vec<Box<dyn FnOnce()>>>;
+type PageWaiters = RefCell<Vec<data::pages::Waiter>>;
 type Resolves = RefCell<[Option<(u64, CancelToken)>; iptv_core::multiview::MAX_SURFACES]>;
 /// The guide updates asked for by hand that have not ended, each with its work.
 type Updates = Vec<(SourceId, Rc<ImportWork>)>;

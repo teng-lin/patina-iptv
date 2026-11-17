@@ -442,3 +442,96 @@ fn a_window_read_seeks_to_the_programme_reaching_into_it() {
     assert_eq!(read(NOW - 60 * H, NOW - 55 * H), Vec::<String>::new());
     assert_eq!(read(NOW + 4 * H, i64::MAX), Vec::<String>::new());
 }
+
+#[test]
+fn title_iteration_keeps_one_snapshot_across_concurrent_guide_publication() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("synthetic.db");
+    let mut writer = Store::open(&path).unwrap();
+    let source = writer
+        .add_source(&common::xtream_source("Synthetic"))
+        .unwrap();
+    let feeds = [meta(config(1, 9)), meta(config(2, 1))];
+    staged::replace_epg(&mut writer, source, &two_feed_guide("old"), &feeds, 0).unwrap();
+    let reader = writer.open_reader().unwrap();
+    let mut replaced = false;
+    let mut observed = Vec::new();
+    reader
+        .for_each_epg_title(
+            source,
+            &["k1".into(), "k2".into()],
+            i64::MIN,
+            i64::MAX,
+            |_, _, _, title| {
+                observed.push(title.to_owned());
+                if !replaced {
+                    replaced = true;
+                    staged::replace_epg(&mut writer, source, &two_feed_guide("new"), &feeds, 1)
+                        .unwrap();
+                }
+            },
+        )
+        .unwrap();
+    assert!(replaced);
+    assert!(observed.iter().any(|title| title.starts_with("old Y")));
+    assert!(
+        observed.iter().all(|title| title.starts_with("old")),
+        "{observed:?}"
+    );
+}
+
+#[test]
+fn nested_epg_snapshots_share_the_caller_and_recover_after_read_errors() {
+    let (mut store, source, _) = store_with_sources();
+    let feeds = [meta(config(1, 9)), meta(config(2, 1))];
+    staged::replace_epg(&mut store, source, &two_feed_guide("old"), &feeds, 0).unwrap();
+    let keys = [ChannelKey::from("k1"), ChannelKey::from("k2")];
+    store
+        .read_snapshot(|outer| {
+            outer.vod_read_snapshot(|vod| {
+                vod.guide_repair_snapshot(|nested| {
+                    let metadata = nested.epg_guide(source)?.unwrap();
+                    assert_eq!(metadata.feeds.len(), 2);
+                    let guide = nested.load_epg(source, &EpgWindow::from(NOW, 1))?;
+                    assert!(!titles(&guide, "k1", NOW, NOW + H).is_empty());
+                    let mut titles_seen = 0;
+                    nested.for_each_epg_title(source, &keys, NOW, NOW + H, |_, _, _, title| {
+                        assert!(title.starts_with("old"));
+                        titles_seen += 1;
+                    })?;
+                    assert!(titles_seen >= 2);
+                    // A handled nested error must not roll back the outer
+                    // snapshot or leave it unable to continue reading.
+                    let failed: iptv_store_sqlite::Result<()> = nested.read_snapshot(|_| {
+                        Err(iptv_store_sqlite::StoreError::Unavailable(
+                            "synthetic nested read",
+                        ))
+                    });
+                    assert!(failed.is_err());
+                    assert_eq!(nested.epg_guide(source)?.unwrap().feeds.len(), 2);
+                    Ok(())
+                })
+            })
+        })
+        .unwrap();
+    let failed: iptv_store_sqlite::Result<()> = store.read_snapshot(|snapshot| {
+        snapshot.epg_guide(source)?;
+        Err(iptv_store_sqlite::StoreError::Unavailable(
+            "synthetic outer read",
+        ))
+    });
+    assert!(failed.is_err());
+    assert!(store.epg_guide(source).unwrap().is_some());
+    // A subsequent write transaction can start only if both successful and
+    // failed owned read snapshots released their transaction guards.
+    let catalogue = common::catalog(1, 1, common::XT_PASSWORD);
+    common::replace(&mut store, source, &catalogue);
+    store
+        .set_favourite(source, &catalogue.channels[0].id, true)
+        .unwrap();
+    assert!(
+        store
+            .is_favourite(source, &catalogue.channels[0].id)
+            .unwrap()
+    );
+}

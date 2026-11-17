@@ -156,9 +156,12 @@ fn perform(ui: Ui, playlist: SourceId, key: String, effect: Effect) {
         Effect::Close => close(ui),
         Effect::Choose(choice) => {
             log::info!("iptv guide choice: {}", choice_name(&choice));
+            let request = next_request();
             assign::choose(&crate::runtime(), playlist, key, choice, move |applied| {
-                crate::settings_view::notify(applied_words(applied));
-                close(ui);
+                if REQUEST.with(|current| current.get()) == request {
+                    crate::settings_view::notify(applied_words(applied));
+                    close(ui);
+                }
             });
         }
     }

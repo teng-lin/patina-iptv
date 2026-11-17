@@ -28,6 +28,38 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(test)]
+type PlaybackCompletion = (
+    &'static str,
+    tokio::sync::oneshot::Sender<()>,
+    tokio::sync::oneshot::Receiver<()>,
+);
+
+// Captured before service/provider waits, checked again by the accepting writer.
+#[derive(Clone)]
+struct Admission {
+    services: Services,
+    recordings: Arc<State>,
+    source: SourceId,
+    incarnation: String,
+    target: iptv_core::parental::Target,
+    parental: crate::parental::Snapshot,
+}
+impl Admission {
+    fn authorize(&self, store: &iptv_store_sqlite::Store) -> iptv_store_sqlite::Result<()> {
+        if !self.services.is_current()
+            || self.recordings.is_stopping()
+            || store.source_incarnation(self.source)? != self.incarnation
+            || !crate::parental::native_allowed(store, &self.target, &self.parental)?
+        {
+            return Err(iptv_store_sqlite::StoreError::Unavailable(
+                "Recording access changed",
+            ));
+        }
+        Ok(())
+    }
+}
+
 pub(crate) fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -252,6 +284,8 @@ pub(crate) struct State {
     #[cfg(test)]
     preparation_arrivals: Mutex<HashMap<usize, tokio::sync::oneshot::Sender<()>>>,
     media_ops: tokio::sync::Mutex<()>,
+    #[cfg(test)]
+    playback_completion: Mutex<Option<PlaybackCompletion>>,
     playback: Mutex<Option<(JobId, iptv_net::recording_file::RecordingFile)>>,
 }
 impl State {
@@ -521,14 +555,30 @@ impl Runtime {
         self.recordings.lock().jobs.clone()
     }
 
+    async fn recording_admission(&self, request: &Request) -> Result<Admission, Error> {
+        let services = self.services();
+        let source = SourceId(request.source);
+        let incarnation = services
+            .read(move |store| store.source_incarnation(source))
+            .await?;
+        let target = iptv_core::parental::Target::live(request.source, request.channel.as_str());
+        self.parental_check(&target)
+            .await
+            .map_err(|_| Error::unavailable("Unlock this recording with the parental PIN"))?;
+        let parental = self.parental_snapshot();
+        Ok(Admission {
+            services,
+            recordings: self.recordings.clone(),
+            source,
+            incarnation,
+            target,
+            parental,
+        })
+    }
+
     pub async fn schedule_recording(&self, request: Request) -> Result<JobId, Error> {
         request.validate(now()).map_err(Error::unavailable)?;
-        self.parental_check(&iptv_core::parental::Target::live(
-            request.source,
-            request.channel.as_str(),
-        ))
-        .await
-        .map_err(|_| Error::unavailable("Unlock this recording with the parental PIN"))?;
+        let admission = self.recording_admission(&request).await?;
         if self.recordings.is_stopping() || !self.services().is_current() {
             return Err(Error::unavailable(
                 "Restart Patina before scheduling a recording",
@@ -549,27 +599,6 @@ impl Runtime {
         if !self.recordings.lock().ready {
             return Err(Error::unavailable("Recording service unavailable"));
         }
-        let duplicate = request.clone();
-        if let Some(id) = self
-            .services()
-            .read(move |store| {
-                Ok(store
-                    .recording_jobs()?
-                    .into_iter()
-                    .find(|j| {
-                        j.status.active()
-                            && j.source_current
-                            && j.request.source == duplicate.source
-                            && j.request.channel == duplicate.channel
-                            && j.request.start == duplicate.start
-                            && j.request.end == duplicate.end
-                    })
-                    .map(|j| j.id))
-            })
-            .await?
-        {
-            return Ok(id);
-        }
         refresh_accounts(&self.services(), &self.recordings)
             .await
             .map_err(|_| Error::unavailable("Recording sources unavailable"))?;
@@ -585,7 +614,11 @@ impl Runtime {
         let id = JobId((i64::from_ne_bytes(random) & i64::MAX).max(1));
         let id = self
             .services()
-            .call(move |store| store.schedule_recording(id, &request, now()))
+            .call(move |store| {
+                store.schedule_recording_checked(id, &request, now(), |store| {
+                    admission.authorize(store)
+                })
+            })
             .await
             .map_err(|_| {
                 Error::unavailable(
@@ -666,15 +699,14 @@ impl Runtime {
     }
     /// Cancels a future job, or requests that an active recording stop and retain media.
     pub async fn update_recording(&self, id: JobId, request: Request) -> Result<(), Error> {
-        self.parental_check(&iptv_core::parental::Target::live(
-            request.source,
-            request.channel.clone(),
-        ))
-        .await
-        .map_err(|_| Error::unavailable("Parental access is locked"))?;
+        let admission = self.recording_admission(&request).await?;
         if !self
             .services()
-            .call(move |store| store.update_recording(id, &request, now()))
+            .call(move |store| {
+                store.update_recording_checked(id, &request, now(), |store| {
+                    admission.authorize(store)
+                })
+            })
             .await?
         {
             return Err(Error::unavailable(
@@ -755,15 +787,38 @@ impl Runtime {
             .map_err(|_| Error::unavailable("Recordings unavailable"))?;
         Ok(jobs)
     }
+    #[cfg(test)]
+    async fn recording_playback_checkpoint(&self, stage: &'static str) {
+        let held = {
+            let mut completion = self.recordings.playback_completion.lock().unwrap();
+            if completion
+                .as_ref()
+                .is_some_and(|(expected, _, _)| *expected == stage)
+            {
+                completion.take()
+            } else {
+                None
+            }
+        };
+        if let Some((_, arrived, release)) = held {
+            let _ = arrived.send(());
+            let _ = release.await;
+        }
+    }
     pub async fn open_recording(&self, id: JobId) -> Result<PlaySource, Error> {
         let _operation = self.recordings.media_ops.lock().await;
-        let file = self.recording_file(id).await?;
+        let (file, target) = self.recording_file_with_target(id).await?;
         let relay = self
             .services()
             .spawn(async move { iptv_net::recording_file::RecordingFile::start(file) })
             .await
             .map_err(|_| Error::unavailable("Recording unavailable"))?
             .map_err(|_| Error::unavailable("Recording unavailable"))?;
+        #[cfg(test)]
+        self.recording_playback_checkpoint("relay").await;
+        // A filesystem/relay await must not extend the PIN grant or old owner.
+        // Keep the unaccepted relay local so rejection closes its capability.
+        self.require_recording_playback(&target)?;
         let mut source = PlaySource::new(relay.url.clone());
         source.public_only = false;
         *self
@@ -821,28 +876,51 @@ impl Runtime {
             .take();
     }
     pub async fn recording_file(&self, id: JobId) -> Result<PathBuf, Error> {
+        self.recording_file_with_target(id)
+            .await
+            .map(|(file, _)| file)
+    }
+    fn require_recording_playback(
+        &self,
+        target: &iptv_core::parental::Target,
+    ) -> Result<(), Error> {
+        if !self.services().is_current() || !self.parental_allowed(target) {
+            return Err(Error::unavailable(
+                "Unlock this recording with the parental PIN",
+            ));
+        }
+        Ok(())
+    }
+    async fn recording_file_with_target(
+        &self,
+        id: JobId,
+    ) -> Result<(PathBuf, iptv_core::parental::Target), Error> {
         let job = self
             .services()
             .read(move |store| store.recording_job(id))
             .await?
             .ok_or_else(|| Error::unavailable("Recording unavailable"))?;
-        self.parental_check(&iptv_core::parental::Target::live(
-            job.request.source,
-            job.request.channel.as_str(),
-        ))
-        .await
-        .map_err(|_| Error::unavailable("Unlock this recording with the parental PIN"))?;
+        let target =
+            iptv_core::parental::Target::live(job.request.source, job.request.channel.as_str());
+        self.parental_check(&target)
+            .await
+            .map_err(|_| Error::unavailable("Unlock this recording with the parental PIN"))?;
         if !matches!(job.status, Status::Completed | Status::Partial) || job.bytes == 0 {
             return Err(Error::unavailable("This recording has no playable media"));
         }
         let services = self.services();
-        self.services()
+        let file = self
+            .services()
             .spawn_blocking(move || retained_media(&services, id, job.status == Status::Partial))
             .await
             .ok()
             .flatten()
             .map(|(file, _)| file)
-            .ok_or_else(|| Error::unavailable("The recording file is missing"))
+            .ok_or_else(|| Error::unavailable("The recording file is missing"))?;
+        #[cfg(test)]
+        self.recording_playback_checkpoint("file").await;
+        self.require_recording_playback(&target)?;
+        Ok((file, target))
     }
     pub async fn delete_recording(&self, id: JobId) -> Result<(), Error> {
         // Admission and deletion stay mutually exclusive across store/file awaits.
@@ -1237,10 +1315,10 @@ async fn resolve(
         .await
         .map_err(|_| "Channel unavailable")?;
     let source = source.ok_or("Playlist unavailable")?;
-    let channel = channel
-        .filter(|c| !c.blocked)
-        .ok_or("Channel unavailable or blocked")?
-        .channel;
+    // This job was durably admitted (and conditionally claimed) before capture.
+    // A viewing relock cannot revoke accepted recording intent. Source/channel
+    // availability and original incarnation still gate every provider resolution.
+    let channel = channel.ok_or("Channel unavailable")?.channel;
     let mut context = state
         .contexts
         .lock()
@@ -1300,7 +1378,7 @@ async fn resolve(
                     .is_some_and(|source| source.source.config == expected_config)
                 && store
                     .channel(source_id, &expected_channel.id)?
-                    .is_some_and(|current| !current.blocked && current.channel == expected_channel))
+                    .is_some_and(|current| current.channel == expected_channel))
         })
         .await
         .map_err(|_| "Playlist unavailable")?;

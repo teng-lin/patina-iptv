@@ -3,7 +3,7 @@ use crate::{Playback, Ui, ViewMode};
 use iptv_core::browse_playback::{BrowsePlayback, Effect, Policy, Surface, Target};
 use iptv_core::{channel_list::ListPane, guide::Airing};
 use iptv_nav::Context;
-use iptv_settings::keys::{self, BoolKey};
+use iptv_settings::keys;
 use nsh_core::prelude::*;
 use std::time::Duration;
 
@@ -57,9 +57,9 @@ fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
     let s = crate::settings::read(ui);
     let at = &iptv_settings::Target::Global;
     let stay = match surface {
-        Some(Surface::Guide) => "guide.stay_on_guide",
-        Some(Surface::Overlay) => "guide.stay_on_guide_overlay",
-        _ => "guide.stay_on_list",
+        Some(Surface::Guide) => keys::GUIDE_STAY_ON_GUIDE,
+        Some(Surface::Overlay) => keys::GUIDE_STAY_ON_GUIDE_OVERLAY,
+        _ => keys::GUIDE_STAY_ON_LIST,
     };
     Policy {
         autoplay: !crate::desktop::recorder_only_startup()
@@ -71,7 +71,7 @@ fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
         } else {
             s.duration_ms(keys::FULLSCREEN_TIMEOUT, at).max(0) as u64
         },
-        stay: surface == Some(Surface::Player) || s.bool(BoolKey(stay), at),
+        stay: surface == Some(Surface::Player) || s.bool(stay, at),
     }
 }
 fn sync(ui: Ui) {

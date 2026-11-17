@@ -360,3 +360,177 @@ async fn recorded_media_uses_capability_and_ranges_without_disclosing_a_file_pat
     drop(relay);
     std::fs::remove_file(file).unwrap();
 }
+
+async fn recording_socket(
+    url: &str,
+    method: &str,
+    range: Option<&str>,
+) -> std::io::Result<tokio::net::TcpStream> {
+    use tokio::io::AsyncWriteExt;
+    let url = url::Url::parse(url).unwrap();
+    let mut socket = tokio::net::TcpStream::connect((
+        url.host_str().unwrap(),
+        url.port_or_known_default().unwrap(),
+    ))
+    .await?;
+    let range = range.map_or(String::new(), |range| format!("Range: {range}\r\n"));
+    socket
+        .write_all(
+            format!(
+                "{method} {} HTTP/1.1\r\nHost: localhost\r\n{range}Connection: close\r\n\r\n",
+                url.path()
+            )
+            .as_bytes(),
+        )
+        .await?;
+    Ok(socket)
+}
+
+async fn recording_response(
+    url: &str,
+    method: &str,
+    range: Option<&str>,
+) -> std::io::Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+    let mut socket = recording_socket(url, method, range).await?;
+    let mut response = Vec::new();
+    tokio::time::timeout(Duration::from_secs(2), socket.read_to_end(&mut response)).await??;
+    Ok(response)
+}
+
+async fn recording_head(socket: &mut tokio::net::TcpStream) -> Vec<u8> {
+    use tokio::io::AsyncReadExt;
+    tokio::time::timeout(Duration::from_secs(2), async {
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            head.push(socket.read_u8().await.unwrap());
+            assert!(head.len() < 8192);
+        }
+        head
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn recording_head_invalid_ranges_and_unknown_capabilities_have_bounded_responses() {
+    let path = output("head-and-errors");
+    std::fs::write(&path, packet(8)).unwrap();
+    let relay = RecordingFile::start(path.clone()).unwrap();
+    for (url, method, range, status) in [
+        (relay.url.clone(), "HEAD", None, "200 OK"),
+        (
+            relay.url.clone(),
+            "HEAD",
+            Some("bytes=10-19"),
+            "206 Partial Content",
+        ),
+        (
+            relay.url.clone(),
+            "GET",
+            Some("bytes=188-"),
+            "416 Range Not Satisfiable",
+        ),
+        (format!("{}/wrong", relay.url), "GET", None, "404 Not Found"),
+    ] {
+        let response = recording_response(&url, method, range).await.unwrap();
+        assert!(response.starts_with(format!("HTTP/1.1 {status}\r\n").as_bytes()));
+        let body = response
+            .windows(4)
+            .position(|part| part == b"\r\n\r\n")
+            .unwrap()
+            + 4;
+        assert_eq!(response.len(), body, "HEAD and empty errors have no body");
+    }
+    drop(relay);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test]
+async fn four_stalled_recording_clients_expire_and_a_paused_player_can_reopen_a_range() {
+    let path = output("stalled-clients");
+    std::fs::File::create(&path)
+        .unwrap()
+        .set_len(128 * 1024 * 1024)
+        .unwrap();
+    let relay = RecordingFile::start(path.clone()).unwrap();
+    let mut stalled = Vec::new();
+    for _ in 0..4 {
+        let mut socket = recording_socket(&relay.url, "GET", None).await.unwrap();
+        assert!(
+            recording_head(&mut socket)
+                .await
+                .starts_with(b"HTTP/1.1 200 OK\r\n")
+        );
+        stalled.push(socket);
+    }
+    // Let the local send buffers fill before advancing the idle clock. The
+    // sockets remain owned and unread throughout the later successful request.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    match recording_response(&relay.url, "GET", Some("bytes=10-19")).await {
+        Ok(bytes) => assert!(
+            bytes.is_empty(),
+            "all four serving slots should be occupied"
+        ),
+        Err(error) => assert!(matches!(
+            error.kind(),
+            std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::ConnectionAborted
+                | std::io::ErrorKind::BrokenPipe
+        )),
+    }
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(16)).await;
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+    tokio::time::resume();
+    let response = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if let Ok(response) = recording_response(&relay.url, "GET", Some("bytes=10-19")).await
+                && response.starts_with(b"HTTP/1.1 206 Partial Content\r\n")
+            {
+                break response;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("expired clients must release a serving slot");
+    assert!(response.ends_with(&[0; 10]));
+    assert!(
+        String::from_utf8_lossy(&response).contains("Content-Range: bytes 10-19/134217728\r\n")
+    );
+    drop(stalled);
+    drop(relay);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test]
+async fn dropping_recording_transport_cancels_stalled_body_tasks_and_listener() {
+    use tokio::io::AsyncReadExt;
+    let path = output("cancel-stalled-clients");
+    std::fs::File::create(&path)
+        .unwrap()
+        .set_len(128 * 1024 * 1024)
+        .unwrap();
+    let relay = RecordingFile::start(path.clone()).unwrap();
+    let url = url::Url::parse(&relay.url).unwrap();
+    let address = (url.host_str().unwrap().to_owned(), url.port().unwrap());
+    let mut socket = recording_socket(&relay.url, "GET", None).await.unwrap();
+    recording_head(&mut socket).await;
+    drop(relay);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        let mut buffer = [0_u8; 8192];
+        loop {
+            match socket.read(&mut buffer).await {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+    })
+    .await
+    .expect("owner teardown must abort the active response");
+    assert!(tokio::net::TcpStream::connect(address).await.is_err());
+    std::fs::remove_file(path).unwrap();
+}

@@ -94,7 +94,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
     // Rows are numbered by place: the list's length is its widest number.
     let number_w = computed(move || {
         crate::settings::read(ui);
-        if crate::settings::flag(iptv_settings::keys::BoolKey("guide.show_channel_numbers")) {
+        if crate::settings::flag(iptv_settings::keys::GUIDE_SHOW_CHANNEL_NUMBERS) {
             crate::numbers::column_width(
                 ui.list.with(|l| l.len()),
                 size.of(CHANNEL) * crate::settings::font_factor(),

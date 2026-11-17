@@ -37,8 +37,7 @@ pub fn is_open(ui: Ui) -> bool {
 /// Opens the list over (or beside) full-screen video.
 pub fn open(ui: Ui, mode: ListMode) {
     let mode = if mode == ListMode::Overlay
-        && crate::settings::choice(iptv_settings::keys::EnumKey("guide.list_browse_mode"))
-            == "preview"
+        && crate::settings::choice(iptv_settings::keys::GUIDE_LIST_BROWSE_MODE) == "preview"
     {
         ListMode::Preview
     } else {

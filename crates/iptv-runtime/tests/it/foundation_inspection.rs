@@ -64,6 +64,7 @@ impl Fixture {
         let owner = Rc::new(Runtime::new(Ports::new(directory.path().into(), |_| {
             Ok(DatabaseKey::from_bytes(KEY))
         })));
+        owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
         owner.start_services();
         Self {
             _directory: directory,
@@ -498,6 +499,7 @@ fn hidden_content_and_blocked_access_have_different_query_semantics() {
     f.store
         .set_blocked(a, &f.channel(a, 2).content, true)
         .unwrap();
+    protect_live(&f);
     let visible = f.channels(a);
     assert_eq!(visible.items.len(), 2);
     let mut query = Query::source(a);
@@ -772,5 +774,375 @@ fn a_hundred_thousand_channel_analysis_keeps_display_reads_responsive() {
     assert!(
         maximum < Duration::from_millis(50),
         "display reader queued behind analysis: {maximum:?}"
+    );
+}
+
+fn protect_live(fixture: &Fixture) {
+    use iptv_core::parental::Pin;
+    block_on(fixture.owner.parental_refresh()).unwrap();
+    block_on(
+        fixture
+            .owner
+            .parental_change_pin(None, Pin::parse("2468").unwrap()),
+    )
+    .unwrap();
+    fixture
+        .owner
+        .set_setting("parental.live_enabled", iptv_settings::Value::Bool(true))
+        .unwrap();
+    fixture.owner.parental_lock();
+}
+
+#[test]
+fn inspection_filters_modern_and_legacy_blocks_before_limit_and_honors_policy_off() {
+    use iptv_core::parental::{Pin, Target};
+    let mut f = Fixture::new();
+    let source = f.sources[0];
+    let legacy = f.channel(source, 0);
+    let modern = f.channel(source, 2);
+    f.store.set_blocked(source, &legacy.content, true).unwrap();
+    f.store
+        .set_parental_blocked(&Target::live(source.0, modern.content.as_str()), true)
+        .unwrap();
+    // Raw adapters fail closed, even without a runtime access context.
+    let raw = f
+        .store
+        .inspection_channels(&Query::source(source))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        raw.items
+            .iter()
+            .map(|channel| channel.key.content.as_str())
+            .collect::<Vec<_>>(),
+        ["synthetic-01", "synthetic-03"]
+    );
+    assert_eq!(
+        f.store.inspection_channel(&modern).unwrap(),
+        Err(InspectionError::PermissionDenied)
+    );
+    // Runtime protection disabled is explicit authority to include blocked rows.
+    assert_eq!(f.channels(source).items.len(), 4);
+    protect_live(&f);
+    let mut query = Query::source(source);
+    query.limit = 2;
+    let page = block_on(f.owner.query_channels(query, InspectionControl::default())).unwrap();
+    assert_eq!(
+        page.items
+            .iter()
+            .map(|channel| channel.key.content.as_str())
+            .collect::<Vec<_>>(),
+        ["synthetic-01", "synthetic-03"]
+    );
+    assert!(
+        page.next.is_none(),
+        "filtering happens before both limit and lookahead"
+    );
+    for key in [&legacy, &modern] {
+        assert_eq!(
+            block_on(
+                f.owner
+                    .inspect_channel(key.clone(), InspectionControl::default())
+            ),
+            Err(InspectionError::PermissionDenied)
+        );
+        assert_eq!(
+            block_on(f.owner.epg_candidates(
+                key.clone(),
+                Query::source(source),
+                InspectionControl::default()
+            )),
+            Err(InspectionError::PermissionDenied)
+        );
+        assert_eq!(
+            block_on(f.owner.query_programmes(
+                Query::source(source),
+                window(),
+                Some(key.clone()),
+                InspectionControl::default()
+            )),
+            Err(InspectionError::PermissionDenied)
+        );
+    }
+    let programmes = block_on(f.owner.query_programmes(
+        Query::source(source),
+        window(),
+        None,
+        InspectionControl::default(),
+    ))
+    .unwrap();
+    assert!(
+        programmes
+            .items
+            .iter()
+            .all(|programme| programme.channel.content.as_str() == "synthetic-01")
+    );
+    let audit = block_on(f.owner.epg_audit(
+        Query::source(source),
+        window(),
+        InspectionControl::default(),
+    ))
+    .unwrap();
+    assert_eq!(
+        audit
+            .items
+            .iter()
+            .map(|coverage| coverage.channel.key.content.as_str())
+            .collect::<Vec<_>>(),
+        ["synthetic-01", "synthetic-03"]
+    );
+    block_on(f.owner.parental_authorize(
+        Target::live(source.0, legacy.content.as_str()),
+        Pin::parse("2468").unwrap(),
+    ))
+    .unwrap();
+    assert!(
+        block_on(
+            f.owner
+                .inspect_channel(legacy, InspectionControl::default())
+        )
+        .is_ok(),
+        "a valid runtime grant overrides the legacy adapter exclusion"
+    );
+    assert_eq!(f.channels(source).items.len(), 3);
+    block_on(
+        f.owner
+            .parental_authorize(Target::settings(), Pin::parse("2468").unwrap()),
+    )
+    .unwrap();
+    f.owner
+        .set_setting("parental.live_enabled", iptv_settings::Value::Bool(false))
+        .unwrap();
+    assert_eq!(f.channels(source).items.len(), 4);
+}
+
+#[test]
+fn inspection_adult_and_custom_group_access_matches_exact_source_grants() {
+    use iptv_core::parental::{ContentKind, Pin, Target};
+    let mut f = Fixture::new();
+    let source = f.sources[0];
+    f.catalogue.groups[0].adult = true;
+    common::replace(&mut f.store, source, &f.catalogue);
+    install_guide(&mut f.store, source, "A", false);
+    protect_live(&f);
+    assert!(f.channels(source).items.is_empty());
+    let group = Target {
+        source: source.0,
+        kind: ContentKind::Group,
+        id: f.catalogue.groups[0].id.as_str().into(),
+    };
+    block_on(
+        f.owner
+            .parental_authorize(group.clone(), Pin::parse("2468").unwrap()),
+    )
+    .unwrap();
+    assert_eq!(f.channels(source).items.len(), 4);
+    f.owner.parental_lock();
+    assert!(f.channels(source).items.is_empty());
+    // Explicit adult-group allow survives provider metadata and needs no grant.
+    f.store.set_parental_blocked(&group, false).unwrap();
+    block_on(f.owner.parental_refresh()).unwrap();
+    assert_eq!(f.channels(source).items.len(), 4);
+    let custom = f
+        .store
+        .create_custom_group(source, "Synthetic protected collection")
+        .unwrap();
+    for channel in [1, 2] {
+        f.store
+            .add_to_custom_group(custom, &f.catalogue.channels[channel].id)
+            .unwrap();
+    }
+    let target = Target {
+        source: source.0,
+        kind: ContentKind::Group,
+        id: format!("custom:{}", custom.0),
+    };
+    f.store.set_parental_blocked(&target, true).unwrap();
+    f.store
+        .set_blocked(source, &f.catalogue.channels[2].id, true)
+        .unwrap();
+    block_on(f.owner.parental_refresh()).unwrap();
+    assert_eq!(
+        f.channels(source)
+            .items
+            .iter()
+            .map(|channel| channel.key.content.as_str())
+            .collect::<Vec<_>>(),
+        ["synthetic-00", "synthetic-03"]
+    );
+    block_on(
+        f.owner
+            .parental_authorize(target, Pin::parse("2468").unwrap()),
+    )
+    .unwrap();
+    assert!(
+        block_on(
+            f.owner
+                .inspect_channel(f.channel(source, 1), InspectionControl::default())
+        )
+        .is_ok()
+    );
+    assert_eq!(
+        block_on(
+            f.owner
+                .inspect_channel(f.channel(source, 2), InspectionControl::default())
+        ),
+        Err(InspectionError::PermissionDenied),
+        "a parent grant does not override a direct child block"
+    );
+    assert_eq!(f.channels(source).items.len(), 3);
+    // Identical content IDs on another source have independent membership.
+    assert_eq!(f.channels(f.sources[1]).items.len(), 4);
+}
+
+#[test]
+fn inspection_cursors_bind_permissions_but_ignore_unprotected_zapping() {
+    use iptv_core::parental::{Pin, Target};
+    let mut f = Fixture::new();
+    let source = f.sources[0];
+    let key = f.channel(source, 0);
+    let target = Target::live(source.0, key.content.as_str());
+    f.store.set_blocked(source, &key.content, true).unwrap();
+    protect_live(&f);
+    let mut query = Query::source(source);
+    query.limit = 1;
+    let first = block_on(
+        f.owner
+            .query_channels(query.clone(), InspectionControl::default()),
+    )
+    .unwrap();
+    assert_eq!(first.items[0].key.content.as_str(), "synthetic-01");
+    let mut continuation = query.clone();
+    continuation.cursor = first.next.clone();
+    f.owner
+        .parental_content_left(&Target::live(source.0, "synthetic-unrelated"));
+    let second = block_on(
+        f.owner
+            .query_channels(continuation.clone(), InspectionControl::default()),
+    )
+    .unwrap();
+    assert_eq!(second.items[0].key.content.as_str(), "synthetic-02");
+    block_on(
+        f.owner
+            .parental_authorize(target, Pin::parse("2468").unwrap()),
+    )
+    .unwrap();
+    assert_eq!(
+        block_on(
+            f.owner
+                .query_channels(continuation, InspectionControl::default())
+        ),
+        Err(InspectionError::StaleCursor)
+    );
+    let mut unlocked = query.clone();
+    unlocked.cursor = block_on(f.owner.query_channels(query, InspectionControl::default()))
+        .unwrap()
+        .next;
+    f.owner.parental_lock();
+    assert_eq!(
+        block_on(
+            f.owner
+                .query_channels(unlocked, InspectionControl::default())
+        ),
+        Err(InspectionError::StaleCursor)
+    );
+}
+
+#[test]
+fn inspection_final_publication_rechecks_relock_even_for_an_empty_known_channel_window() {
+    use iptv_core::parental::{Pin, Target};
+    let mut f = Fixture::new();
+    let source = f.sources[0];
+    let protected = f.channel(source, 0);
+    let target = Target::live(source.0, protected.content.as_str());
+    f.store
+        .set_blocked(source, &protected.content, true)
+        .unwrap();
+    protect_live(&f);
+    for empty_window in [false, true] {
+        block_on(
+            f.owner
+                .parental_authorize(target.clone(), Pin::parse("2468").unwrap()),
+        )
+        .unwrap();
+        if empty_window {
+            let read = f.owner.query_programmes(
+                Query::source(source),
+                TimeWindow {
+                    from: NOW + 20 * HOUR,
+                    to: NOW + 21 * HOUR,
+                },
+                Some(protected.clone()),
+                InspectionControl::default(),
+            );
+            // Query construction queues its analysis job immediately. A later
+            // query on that same FIFO lane acknowledges completion of the
+            // protected SQL read before its future is polled for publication.
+            block_on(
+                f.owner
+                    .inspect_channel(f.channel(source, 3), InspectionControl::default()),
+            )
+            .unwrap();
+            f.owner.parental_lock();
+            assert_eq!(block_on(read), Err(InspectionError::PermissionDenied));
+        } else {
+            let read = f
+                .owner
+                .inspect_channel(protected.clone(), InspectionControl::default());
+            block_on(
+                f.owner
+                    .inspect_channel(f.channel(source, 3), InspectionControl::default()),
+            )
+            .unwrap();
+            f.owner.parental_lock();
+            assert_eq!(block_on(read), Err(InspectionError::PermissionDenied));
+        }
+    }
+}
+
+#[test]
+fn unprotected_inspection_survives_zapping_but_not_policy_revision_changes() {
+    use iptv_core::parental::{Pin, Target};
+    let mut f = Fixture::new();
+    let source = f.sources[0];
+    f.store
+        .set_blocked(source, &f.catalogue.channels[0].id, true)
+        .unwrap();
+    protect_live(&f);
+    let public = f.channel(source, 3);
+    let read = f
+        .owner
+        .inspect_channel(public.clone(), InspectionControl::default());
+    block_on(
+        f.owner
+            .inspect_channel(public.clone(), InspectionControl::default()),
+    )
+    .unwrap();
+    f.owner
+        .parental_content_left(&Target::live(source.0, "synthetic-unrelated"));
+    assert!(block_on(read).is_ok());
+    let read = f
+        .owner
+        .inspect_channel(public.clone(), InspectionControl::default());
+    block_on(
+        f.owner
+            .inspect_channel(public, InspectionControl::default()),
+    )
+    .unwrap();
+    block_on(
+        f.owner
+            .parental_authorize(Target::settings(), Pin::parse("2468").unwrap()),
+    )
+    .unwrap();
+    f.owner
+        .set_setting("parental.live_enabled", iptv_settings::Value::Bool(false))
+        .unwrap();
+    assert_eq!(block_on(read), Err(InspectionError::PermissionDenied));
+    assert!(
+        block_on(
+            f.owner
+                .inspect_channel(f.channel(source, 0), InspectionControl::default())
+        )
+        .is_ok()
     );
 }

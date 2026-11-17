@@ -108,9 +108,20 @@ impl EpgSourceConfig {
 
     /// The playlist header's `url-tvg`/`x-tvg-url`/`tvg-url` entries, ids
     /// from `first_id`, the first URL with the highest priority.
-    pub fn from_m3u_header(header: &M3uHeader, first_id: u32) -> Vec<Self> {
-        let n = header.epg_urls.len() as i32;
-        header
+    pub fn from_m3u_header(
+        header: &M3uHeader,
+        first_id: u32,
+    ) -> Result<Vec<Self>, iptv_library::guides::GuideFeedError> {
+        use iptv_library::guides::{GuideFeedError, MAX_PROVIDER_GUIDES};
+        let count = header.epg_urls.len();
+        if count > MAX_PROVIDER_GUIDES {
+            return Err(GuideFeedError::TooManyProviderGuides { count });
+        }
+        if count > 0 && first_id.checked_add(count as u32 - 1).is_none() {
+            return Err(GuideFeedError::Exhausted);
+        }
+        let n = count as i32;
+        Ok(header
             .epg_urls
             .iter()
             .enumerate()
@@ -121,7 +132,7 @@ impl EpgSourceConfig {
                 config.content_supplied = true;
                 config
             })
-            .collect()
+            .collect())
     }
 }
 

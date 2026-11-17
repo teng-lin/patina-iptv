@@ -77,7 +77,7 @@ fn header_url_tvg_guide_matches_by_tvg_id() {
         "http://fixture.example.test:8089",
     );
     let catalog = import_m3u_text(text.as_bytes(), &mut NoProgress, &CancelToken::new()).unwrap();
-    let sources = catalog.epg_sources(1);
+    let sources = catalog.epg_sources(1).unwrap();
     assert_eq!(sources.len(), 1);
 
     let guide = synth::gzip(
@@ -638,4 +638,31 @@ fn cancelling_during_a_wait_ends_the_import() {
     assert_eq!(err.err().expect("an error"), ImportError::Cancelled);
     assert_eq!(fetch.requests().len(), 1);
     assert_eq!(*fetch.slept.borrow(), secs(&[2]));
+}
+
+#[test]
+fn header_guide_planning_checks_identity_exhaustion_before_building_configs() {
+    let header = iptv_providers::m3u::M3uHeader {
+        epg_urls: vec![
+            "https://guide.example.test/one.xml".into(),
+            "https://guide.example.test/two.xml".into(),
+        ],
+        ..Default::default()
+    };
+    assert!(matches!(
+        EpgSourceConfig::from_m3u_header(&header, u32::MAX),
+        Err(iptv_library::guides::GuideFeedError::Exhausted)
+    ));
+    let at_end = EpgSourceConfig::from_m3u_header(&header, u32::MAX - 1).unwrap();
+    assert_eq!(
+        at_end.iter().map(|source| source.id.0).collect::<Vec<_>>(),
+        [u32::MAX - 1, u32::MAX]
+    );
+    assert_eq!(
+        at_end
+            .iter()
+            .map(|source| source.priority)
+            .collect::<Vec<_>>(),
+        [2, 1]
+    );
 }

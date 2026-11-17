@@ -22,6 +22,16 @@ impl Store {
         keys: &[ChannelKey],
         from: UnixTime,
         to: UnixTime,
+        f: impl FnMut(usize, UnixTime, UnixTime, &str),
+    ) -> Result<u64> {
+        self.read_snapshot(|store| store.for_each_epg_title_inner(source, keys, from, to, f))
+    }
+    fn for_each_epg_title_inner(
+        &self,
+        source: SourceId,
+        keys: &[ChannelKey],
+        from: UnixTime,
+        to: UnixTime,
         mut f: impl FnMut(usize, UnixTime, UnixTime, &str),
     ) -> Result<u64> {
         let positions: HashMap<&str, usize> = keys

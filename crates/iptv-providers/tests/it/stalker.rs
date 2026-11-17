@@ -947,3 +947,54 @@ fn malformed_optional_commands_and_duplicate_keys_keep_valid_page_rows() {
     assert_eq!(page.items.skipped, 4);
     assert_eq!(page.items.items[0].name, "Synthetic");
 }
+
+#[test]
+fn query_only_replies_preserve_raw_queries_duplicates_and_fragments() {
+    let raw = HttpResponse::ok(r#"{"js":{"cmd":"?key=reply'value"}}"#);
+    assert_eq!(
+        parse_create_link(
+            &raw,
+            &portal(PortalMode::Full),
+            "http://media.example.test/play?sig=a'b#fragment"
+        )
+        .unwrap(),
+        "http://media.example.test/play?sig=a'b&key=reply'value#fragment"
+    );
+
+    let s = authorized(portal(PortalMode::Full));
+    let response = HttpResponse::ok(r#"{"js":{"cmd":"?token=new%2Bvalue&key=reply"}}"#);
+    for (original, expected) in [
+        (
+            "http://media.example.test/play?key=old&sig=a%20b%2fc+z#part",
+            "http://media.example.test/play?key=old&sig=a%20b%2fc+z&token=new%2Bvalue&key=reply#part",
+        ),
+        (
+            "/media/play?key=old#part",
+            "http://portal.example.com/stalker_portal/media/play?key=old&token=new%2Bvalue&key=reply#part",
+        ),
+        (
+            "http://media.example.test/play#part",
+            "http://media.example.test/play?token=new%2Bvalue&key=reply#part",
+        ),
+    ] {
+        assert_eq!(
+            parse_create_link(&response, s.portal(), original).unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn portal_debug_redacts_endpoint_userinfo_without_changing_wire_url() {
+    let portal = StalkerPortal::new(
+        "http://synthetic-user:synthetic-password@portal.example.test/api?key=synthetic-query",
+        MacAddress::parse(MAC).unwrap(),
+        PortalMode::Full,
+    )
+    .unwrap();
+    let shown = format!("{portal:?}");
+    for marker in ["synthetic-user", "synthetic-password", "synthetic-query"] {
+        assert!(!shown.contains(marker), "{shown}");
+    }
+    assert!(portal.endpoint().contains("synthetic-password"));
+}

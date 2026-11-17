@@ -346,6 +346,14 @@ struct Crawled<T> {
 }
 
 impl<T> Crawled<T> {
+    fn push_warning(&mut self, warning: CatalogWarning) {
+        if self.warnings.len() < iptv_providers::model::MAX_STORED_WARNINGS {
+            self.warnings.push(warning);
+        } else {
+            self.dropped += 1;
+        }
+    }
+
     fn into_catalog(self, catalog: &mut Catalog) -> Vec<T> {
         catalog.stats.content_items += self.emitted;
         catalog.stats.skipped += self.skipped;
@@ -393,7 +401,7 @@ async fn crawl<F: Fetch, P: ProgressSink, T: Crawl>(
                 out.skipped += std::mem::take(&mut got.items.skipped);
                 out.dropped += std::mem::take(&mut got.items.warnings_dropped);
                 for w in std::mem::take(&mut got.items.warnings) {
-                    out.warnings.push(CatalogWarning {
+                    out.push_warning(CatalogWarning {
                         step,
                         page: Some(page),
                         location: Some(w.location),
@@ -446,7 +454,7 @@ async fn crawl<F: Fetch, P: ProgressSink, T: Crawl>(
             Err(_) if failures < opts.page_retries => failures += 1,
             Err(e) if rows == 0 => return Err(e),
             Err(e) => {
-                out.warnings.push(CatalogWarning {
+                out.push_warning(CatalogWarning {
                     step,
                     page: Some(page),
                     location: None,
@@ -462,4 +470,164 @@ async fn crawl<F: Fetch, P: ProgressSink, T: Crawl>(
     p.items = out.items.len() as u64;
     ctx.report(p);
     Ok(out)
+}
+
+#[cfg(test)]
+mod warning_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::future::{Future, ready};
+    use std::task::{Context, Poll, Waker};
+
+    struct WarningPages {
+        requests: Cell<usize>,
+    }
+
+    impl WarningPages {
+        fn response(&self, request: HttpRequest) -> HttpResponse {
+            let page = self.requests.get() + 1;
+            self.requests.set(page);
+            let expected_page = format!("p={page}");
+            assert!(
+                request
+                    .url
+                    .split(['?', '&'])
+                    .any(|pair| pair == expected_page)
+            );
+            if page == 4 {
+                return HttpResponse::new(503, b"Synthetic unavailable page".to_vec());
+            }
+            assert!(page <= 3, "crawl continued after the terminal failure");
+            let mut data =
+                vec![serde_json::Value::Null; iptv_providers::model::MAX_STORED_WARNINGS + 2];
+            data.push(serde_json::json!({
+                "id": page,
+                "name": format!("Generated channel {page}"),
+                "cmd": format!("http://media.example.test/channel/{page}"),
+            }));
+            HttpResponse::ok(
+                serde_json::to_vec(&serde_json::json!({
+                    "js": { "data": data, "total_items": 4, "max_page_items": 1 }
+                }))
+                .unwrap(),
+            )
+        }
+    }
+
+    impl Fetch for WarningPages {
+        type Body = crate::MemoryBody;
+
+        fn fetch(
+            &self,
+            request: HttpRequest,
+        ) -> impl Future<Output = Result<HttpResponse, crate::FetchError>> {
+            ready(Ok(self.response(request)))
+        }
+
+        fn fetch_stream(
+            &self,
+            request: HttpRequest,
+        ) -> impl Future<Output = Result<crate::StreamingResponse<Self::Body>, crate::FetchError>>
+        {
+            let response = self.response(request);
+            ready(Ok(crate::StreamingResponse {
+                status: response.status,
+                content_length: Some(response.body.len() as u64),
+                body: crate::MemoryBody::new(&response.body, 83),
+            }))
+        }
+    }
+
+    #[test]
+    fn real_pages_bound_retained_warnings_before_catalog_conversion() {
+        let fetch = WarningPages {
+            requests: Cell::new(0),
+        };
+        let cancel = crate::CancelToken::new();
+        let mut progress = crate::NoProgress;
+        let mut ctx = Ctx::new(&fetch, &mut progress, &cancel);
+        let portal = StalkerPortal::new(
+            "http://portal.example.test/portal.php",
+            iptv_providers::model::MacAddress::parse("00:1A:79:00:00:42").unwrap(),
+            PortalMode::Simple,
+        )
+        .unwrap();
+        let mut session = StalkerSession::new(portal);
+        let mut opts = ImportOptions::new(0);
+        opts.page_retries = 0;
+        let crawled = {
+            let future = crawl::<_, _, Channel>(
+                &mut ctx,
+                &mut session,
+                ContentKind::Live,
+                &opts,
+                opts.stalker_channel_cap,
+                |session, page| session.channels_page("*", page),
+                parse_channel_page,
+            );
+            let mut future = std::pin::pin!(future);
+            // Every fake body and request is immediately ready; no runtime is needed.
+            match future
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+            {
+                Poll::Ready(result) => result.unwrap(),
+                Poll::Pending => panic!("in-memory crawl unexpectedly waited for I/O"),
+            }
+        };
+        let cap = iptv_providers::model::MAX_STORED_WARNINGS;
+        assert_eq!(fetch.requests.get(), 4);
+        assert_eq!(ctx.stats.pages, 3);
+        assert_eq!(crawled.items.len(), 3);
+        assert_eq!(crawled.skipped, 3 * (cap + 2));
+        // This is the crawl's retained vector, before Catalog's separate cap runs.
+        // Each parsed page has cap warnings plus two already dropped by its parser.
+        assert_eq!(crawled.warnings.len(), cap);
+        assert!(
+            crawled
+                .warnings
+                .iter()
+                .all(|warning| warning.page == Some(1))
+        );
+        assert_eq!(crawled.dropped, 2 * cap + 7);
+        let mut catalog = Catalog::new(SourceMeta::Stalker {
+            session: Box::new(session),
+        });
+        let channels = crawled.into_catalog(&mut catalog);
+        assert_eq!(channels.len(), 3);
+        assert_eq!(catalog.warning_count(), 3 * (cap + 2) + 1);
+        assert_eq!(catalog.warnings_dropped, 2 * cap + 7);
+    }
+
+    #[test]
+    fn page_and_terminal_warnings_are_bounded_while_accumulating() {
+        let mut out = Crawled::<Channel> {
+            items: Vec::new(),
+            skipped: 0,
+            warnings: Vec::new(),
+            dropped: 0,
+            emitted: 0,
+        };
+        let cap = iptv_providers::model::MAX_STORED_WARNINGS;
+        for page in 1..=3 {
+            out.dropped += 2; // warnings already omitted by the page parser
+            for _ in 0..cap {
+                out.push_warning(CatalogWarning {
+                    step: Step::Items(ContentKind::Live),
+                    page: Some(page),
+                    location: None,
+                    message: "Synthetic malformed row".into(),
+                });
+            }
+            assert!(out.warnings.len() <= cap);
+        }
+        out.push_warning(CatalogWarning {
+            step: Step::Items(ContentKind::Live),
+            page: Some(4),
+            location: None,
+            message: "Synthetic terminal failure".into(),
+        });
+        assert_eq!(out.warnings.len(), cap);
+        assert_eq!(out.dropped, 2 * cap + 7);
+    }
 }

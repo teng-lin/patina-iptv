@@ -32,7 +32,7 @@ struct ParentPage {
     focus: Row,
     query: String,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Screen {
     pub source: SourceId,
     pub window: TimeWindow,
@@ -182,9 +182,48 @@ impl Screen {
     }
 }
 
+impl std::fmt::Debug for Screen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Screen")
+            .field("source", &self.source)
+            .field("window", &self.window)
+            .field("mode", &self.mode)
+            .field("focus", &self.focus)
+            .field("request", &self.request)
+            .field("busy", &self.busy)
+            .field("link", &"[redacted]")
+            .finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn inspection_link_entry_is_redacted_in_leaf_and_containing_debug() {
+        let mut screen = Screen::new(SourceId(1), TimeWindow { from: 1, to: 2 });
+        screen.mode = Mode::Link;
+        screen.typing = true;
+        screen.link = "http://synthetic-user:synthetic-password@guide.example.test/private-path?token=synthetic-token".into();
+        let shown = format!("{screen:?}");
+        let containing = format!("{:?}", Some(&screen));
+        for secret in [
+            "synthetic-user",
+            "synthetic-password",
+            "private-path",
+            "synthetic-token",
+        ] {
+            assert!(!shown.contains(secret), "{shown}");
+            assert!(!containing.contains(secret), "{containing}");
+        }
+        assert!(shown.contains("Screen"));
+        assert!(shown.contains("Link"));
+        assert!(
+            screen.link.contains("synthetic-token"),
+            "wire input must stay intact"
+        );
+    }
+
     #[test]
     fn late_replies_and_reordering_cannot_move_identity_focus() {
         let mut screen = Screen::new(SourceId(1), TimeWindow { from: 1, to: 2 });

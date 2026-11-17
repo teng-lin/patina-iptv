@@ -546,3 +546,175 @@ fn enabling_a_rule_restores_only_future_jobs_cancelled_by_disabling_it() {
         Status::Scheduled
     );
 }
+
+#[test]
+fn checked_recording_commands_authorize_inside_the_accepting_transaction() {
+    use iptv_core::recording::{Repeat, Rule, RuleId};
+    let (mut store, request) = fixture();
+    let at = request.start - 100;
+    let job = store.schedule_recording(JobId(901), &request, at).unwrap();
+    let rule = Rule {
+        id: RuleId(902),
+        request: Request {
+            start: request.start + 86400,
+            end: request.end + 86400,
+            ..request.clone()
+        },
+        local_start: request.start + 86400,
+        repeat: Repeat::Daily,
+        enabled: true,
+        lead_seconds: 0,
+        trail_seconds: 0,
+    };
+    store
+        .schedule_recording_rule_and_first(&rule, JobId(903), at)
+        .unwrap();
+    store
+        .set_recording_rule_enabled(rule.id, false, at)
+        .unwrap();
+    let deny = |store: &Store| {
+        assert!(
+            !store.conn.is_autocommit(),
+            "authorization must run inside the writer transaction"
+        );
+        assert_eq!(store.recording_job(job)?.unwrap().request.end, request.end);
+        Err(StoreError::Unavailable("Synthetic revoked grant"))
+    };
+    // Even an identical retry must pass authorization before returning its old ID.
+    assert!(
+        store
+            .schedule_recording_checked(JobId(904), &request, at, deny)
+            .is_err()
+    );
+    let edited = Request {
+        end: request.end + 60,
+        ..request.clone()
+    };
+    assert!(
+        store
+            .update_recording_checked(job, &edited, at, deny)
+            .is_err()
+    );
+    let another = Rule {
+        id: RuleId(905),
+        request: edited,
+        ..rule.clone()
+    };
+    assert!(
+        store
+            .schedule_recording_rule_with_first_checked(
+                &another,
+                JobId(906),
+                &another.request,
+                another.request.start,
+                at,
+                deny
+            )
+            .is_err()
+    );
+    assert!(
+        store
+            .set_recording_rule_enabled_checked(rule.id, true, at, deny)
+            .is_err()
+    );
+    assert_eq!(store.recording_jobs().unwrap().len(), 2);
+    assert_eq!(
+        store.recording_job(job).unwrap().unwrap().request.end,
+        request.end
+    );
+    let rules = store.recording_rules().unwrap();
+    assert_eq!(rules.len(), 1);
+    assert!(!rules[0].enabled);
+}
+
+#[test]
+fn raw_recording_admission_stays_closed_while_checked_and_accepted_intent_can_proceed() {
+    use iptv_core::recording::{Repeat, Rule, RuleId};
+    let (mut store, request) = fixture();
+    let at = request.start - 100;
+    let job = store.schedule_recording(JobId(911), &request, at).unwrap();
+    let rule = Rule {
+        id: RuleId(912),
+        request: Request {
+            start: request.start + 86400,
+            end: request.end + 86400,
+            ..request.clone()
+        },
+        local_start: request.start + 86400,
+        repeat: Repeat::Daily,
+        enabled: true,
+        lead_seconds: 0,
+        trail_seconds: 0,
+    };
+    store
+        .schedule_recording_rule_and_first(&rule, JobId(913), at)
+        .unwrap();
+    store
+        .set_recording_rule_enabled(rule.id, false, at)
+        .unwrap();
+    store
+        .set_blocked(
+            crate::SourceId(request.source),
+            &ContentId::from_stored(request.channel.clone()),
+            true,
+        )
+        .unwrap();
+    assert!(store.schedule_recording(JobId(914), &request, at).is_err());
+    let edited = Request {
+        end: request.end + 60,
+        ..request.clone()
+    };
+    assert!(store.update_recording(job, &edited, at).is_err());
+    assert!(store.set_recording_rule_enabled(rule.id, true, at).is_err());
+    let authorize = |store: &Store| {
+        assert!(!store.conn.is_autocommit());
+        Ok(())
+    };
+    assert_eq!(
+        store
+            .schedule_recording_checked(JobId(914), &request, at, authorize)
+            .unwrap(),
+        job
+    );
+    assert!(
+        store
+            .update_recording_checked(job, &edited, at, authorize)
+            .unwrap()
+    );
+    store
+        .set_recording_rule_enabled_checked(rule.id, true, at, authorize)
+        .unwrap();
+    let next = Request {
+        start: rule.request.start + 86400,
+        end: rule.request.end + 86400,
+        ..request.clone()
+    };
+    assert_eq!(
+        store
+            .materialize_recording_rule(rule.id, JobId(915), &next, at)
+            .unwrap(),
+        Some(JobId(915))
+    );
+    // A new source incarnation cannot inherit even a checked re-enable.
+    store
+        .set_recording_rule_enabled(rule.id, false, at)
+        .unwrap();
+    store
+        .conn
+        .execute(
+            "UPDATE guide_revisions SET incarnation='generated-replacement' WHERE source_id=?1",
+            [request.source],
+        )
+        .unwrap();
+    assert!(
+        store
+            .set_recording_rule_enabled_checked(rule.id, true, at, authorize)
+            .is_err()
+    );
+    assert!(
+        store
+            .materialize_recording_rule(rule.id, JobId(916), &next, at)
+            .unwrap()
+            .is_none()
+    );
+}
