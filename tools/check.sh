@@ -18,13 +18,16 @@ fi
 # NSH is a path dependency, so Cargo.lock cannot pin it: nsh.rev does. Fail
 # before compiling against another commit (IPTV_ALLOW_NSH_DRIFT=1 allows it).
 python3 tools/ci/pins.py check-nsh
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools -p test_version.py
+if [ "${IPTV_HELPERS_CHECKED:-false}" != true ]; then
+  PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools -p test_version.py
+fi
 # Only our packages: `--all` would also format path dependencies (the NSH checkout).
 python3 tools/ci/check-plan.py format
 bash tools/ci/check-line-length.sh
 bash tools/ci/lint.sh
 cargo deny --locked check
 python3 tools/ci/check-plan.py run --tier "$tier" --host "$host"
+if [ "${IPTV_HELPERS_CHECKED:-false}" != true ]; then
 IPTV_REAL_CARGO="$(command -v cargo)" python3 tools/ci/test-locked-cargo.py
 python3 tools/ci/test-mpvkit-notices.py
 python3 tools/ci/test-macos-source-notices.py
@@ -62,4 +65,5 @@ python3 tools/ci/test-release-contract.py
 python3 tools/ci/test-repeat-hls-fixtures.py
 python3 tools/ci/test-validation-workflow.py
 python3 tools/ci/test-dependency-candidate.py
+fi
 echo "all checks passed"

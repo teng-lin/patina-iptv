@@ -5,7 +5,7 @@ on:
       package:
         description: Package both ARM ABIs instead of compiling them twice
         type: boolean
-        default: true
+        default: false
   workflow_dispatch:
     inputs:
       package:
@@ -70,21 +70,19 @@ jobs:
           mkdir -p hosts/android/app/build/nsh/assets/notices
           cp -R target/notices/. hosts/android/app/build/nsh/assets/notices/
           cp -R hosts/android/app/build/reports/dependency-license hosts/android/app/build/nsh/assets/notices/gradle
-      - name: Build Android APK and bundle
+      - name: Build on-demand ARM debug APK
         working-directory: hosts/android
-        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug bundleDebug
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
       - name: Verify APK signature
         run: |
           "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify hosts/android/app/build/outputs/apk/debug/app-debug.apk
       - name: Verify ARM64 and ARMv7 native libraries and notices
         run: |
           python3 tools/ci/check-android-artifacts.py \
-            hosts/android/app/build/outputs/apk/debug/app-debug.apk \
-            hosts/android/app/build/outputs/bundle/debug/app-debug.aab
+            hosts/android/app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: android-debug
           path: |
             hosts/android/app/build/outputs/apk/debug/*.apk
-            hosts/android/app/build/outputs/bundle/debug/*.aab
           if-no-files-found: error

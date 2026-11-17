@@ -23,6 +23,7 @@ jobs:
   plan:
     runs-on: ubuntu-24.04
     outputs:
+      candidate: ${{ steps.candidate.outputs.run }}
       matrix: ${{ steps.platforms.outputs.matrix }}
       signing_matrix: ${{ steps.platforms.outputs.signing_matrix }}
     steps:
@@ -39,68 +40,93 @@ jobs:
           PLATFORMS: ${{ inputs.platforms || 'android-desktop' }}
           REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && inputs.rehearsal }}
         run: python3 tools/ci/release-plan.py
+      - name: Select and verify an exact trusted candidate
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CANDIDATE_REUSE: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+        run: python3 tools/ci/release-candidate.py select target/candidate >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.candidate.outputs.run != ''
+        with:
+          name: signing-input-android
+          path: target/candidate/signing-input-android/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.candidate.outputs.run != ''
+        with:
+          name: signing-input-macos
+          path: target/candidate/signing-input-macos/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.candidate.outputs.run != ''
+        with:
+          name: signing-input-windows
+          path: target/candidate/signing-input-windows/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.candidate.outputs.run != ''
+        with:
+          name: packages-linux
+          path: target/candidate/packages-linux/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.candidate.outputs.run != ''
+        with:
+          name: packages-sbom
+          path: target/candidate/packages-sbom/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.candidate.outputs.run != ''
+        with:
+          name: packages-linux-media-sbom
+          path: target/candidate/packages-linux-media-sbom/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.candidate.outputs.run != ''
+        with:
+          name: packages-macos-media-sbom
+          path: target/candidate/packages-macos-media-sbom/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.candidate.outputs.run != ''
+        with:
+          name: packages-windows-media-sbom
+          path: target/candidate/packages-windows-media-sbom/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.candidate.outputs.run != ''
+        with:
+          name: packages-linux-native-sources
+          path: target/candidate/packages-linux-native-sources/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.candidate.outputs.run != ''
+        with:
+          name: packages-macos-native-sources
+          path: target/candidate/packages-macos-native-sources/*
+          if-no-files-found: ignore
+      - name: Preserve candidate evidence with the release
+        if: steps.candidate.outputs.run != ''
+        run: cp target/candidate/manifest.json target/candidate-manifest.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.candidate.outputs.run != ''
+        with:
+          name: packages-candidate-evidence
+          path: target/candidate-manifest.json
+          if-no-files-found: error
   tests:
     # Full validation runs at this exact candidate SHA; never inherit PR mode
     # or accept a green report from an unrelated nightly commit.
+    needs: plan
+    if: needs.plan.outputs.candidate == ''
     uses: ./.github/workflows/validation.yml
     with:
       tier: release
-  windows-package:
-    if: github.event_name == 'push' || inputs.platforms != 'android'
-    needs: [plan, tests]
-    runs-on: windows-2025
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-windows
-        with:
-          cache: 'false'
-      - name: Set release metadata
-        shell: pwsh
-        run: python tools/ci/version.py
-      - name: Install dependency notice generator
-        shell: pwsh
-        run: cargo install cargo-about --version 0.9.3 --features cli --locked
-      - name: Build Windows installer
-        shell: pwsh
-        run: ./tools/package-windows.ps1
-      - name: Check installation, launch and uninstall
-        shell: pwsh
-        run: ./tools/ci/check-windows-package.ps1
-      - name: Describe the bundled Windows media runtime
-        shell: pwsh
-        run: |
-          $output = "target/media-sbom/Patina-${env:VERSION}-windows-media-runtime-sbom.cdx.json"
-          python tools/ci/sbom.py media-runtime target/mpv/components.json $output "$env:VERSION" `
-            --platform windows --manifest tools/mpv-runtime/runtime.json
-          if ($LASTEXITCODE -ne 0) { throw 'Media runtime SBOM failed.' }
-          python tools/ci/build-inventory.py "target/media-sbom/Patina-$env:VERSION-windows-build-environment.json"
-          if ($LASTEXITCODE -ne 0) { throw 'Build inventory failed.' }
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: packages-windows-media-sbom
-          path: target/media-sbom/*
-          if-no-files-found: error
-      # Signed (or not) on a fresh runner that never builds code: windows-sign.
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: signing-input-windows
-          path: dist/Patina-*-windows-x86_64-setup.exe
-          if-no-files-found: error
-  # Authenticode through Azure Trusted Signing (Artifact Signing) when its
-  # credentials exist; otherwise the installer is released as an unsigned
-  # preview and the release notes say so (docs/release.md, "Platform signing").
-  #
-  # A rehearsal signs in `release-rehearsal`, an environment that holds no
-  # secrets and may run from any branch; everything else signs in `release`,
-  # whose protection rules decide which refs may reach the release credentials.
-  # Every `secrets.` expression of the two signing jobs is also forced empty in
-  # a rehearsal, so it is an unsigned preview there
-  # (tools/ci/test-release-workflow.py checks both).
   windows-sign:
-    needs: [windows-package]
+    needs: [plan, tests, package]
+    if: always() && needs.plan.result == 'success' && ((needs.plan.outputs.candidate != '' && needs.package.result == 'skipped' && needs.tests.result == 'skipped') || (needs.package.result == 'success' && needs.tests.result == 'success')) && (github.event_name == 'push' || inputs.platforms != 'android')
     environment:
       name: ${{ github.event_name == 'workflow_dispatch' && inputs.rehearsal && 'release-rehearsal' || 'release' }}
     runs-on: windows-2025
@@ -170,7 +196,7 @@ jobs:
           path: dist/Patina-*-windows-x86_64-setup.exe
           if-no-files-found: error
   verify-windows:
-    if: needs.windows-sign.result == 'success'
+    if: always() && needs.windows-sign.result == 'success'
     needs: windows-sign
     runs-on: windows-2025
     timeout-minutes: 15
@@ -188,165 +214,14 @@ jobs:
         run: ./tools/ci/check-windows-package.ps1
   package:
     needs: [plan, tests]
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-        with:
-          cache: 'false'
-      - name: Install dependency notice generator
-        run: |
-          cargo install cargo-about --version 0.9.3 --features cli --locked
-      - name: Set release metadata
-        shell: bash
-        run: |
-          python3 tools/ci/version.py
-          echo "NSH=$(cd ../nsh && pwd)/target/release/nsh" >> "$GITHUB_ENV"
-      - uses: ./.github/actions/nsh-cli
-        if: matrix.platform != 'android'
-        with:
-          cache: 'false'
-      - uses: ./.github/actions/android
-        if: matrix.platform == 'android'
-        with:
-          cache: ''
-      - name: Build Android native library
-        if: matrix.platform == 'android'
-        env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/target
-        run: bash tools/sync-host.sh --release
-      - name: Linux packages
-        if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get install -y ruby-dev rpm zstd libarchive-tools patchelf file desktop-file-utils \
-            libgirepository1.0-dev librsvg2-dev xvfb x11-utils xauth dbus-x11
-          sudo gem install fpm -v 1.16.0 --no-document
-          bash tools/ci/setup-linux-packaging.sh
-          export PATH="$RUNNER_TEMP/linux-packaging:$PATH"
-          export APPIMAGE_EXTRACT_AND_RUN=1 CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target"
-          bash tools/ci/package-linux.sh
-          bash tools/ci/check-linux-packages.sh
-      # The AppImage's libmpv (with FFmpeg) is the pinned runtime, fetched by
-      # hash from its dependency release, which retains its exact sources
-      # (tools/mpv-runtime-unix). GTK and the host libraries libmpv uses are
-      # Ubuntu's: publish the exact source packages they were built from. A
-      # source that cannot be fetched or does not match its checksum fails the
-      # release.
-      - name: Corresponding source of the system libraries bundled in the AppImage
-        if: matrix.platform == 'linux'
-        run: |
-          bash tools/ci/enable-deb-src.sh
-          python3 tools/ci/native-sources.py linux target/Patina.AppDir \
-            "target/native-sources/Patina-$VERSION-linux-native-sources.tar"
-      - name: Prepare unsigned Android artifacts
-        if: matrix.platform == 'android'
-        run: bash tools/ci/prepare-android.sh
-      # libmpv is the pinned macOS runtime, fetched and verified by hash.
-      - name: Build macOS app without signing credentials
-        if: matrix.platform == 'macos'
-        env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/target
-        run: |
-          bash tools/package-macos.sh
-          bash tools/ci/package-macos.sh
-      # Homebrew libraries the app may still link beside the pinned runtime
-      # (normally none, and then there is no archive): publish the sources
-      # named by the formulae of the installed versions.
-      - name: Corresponding source of Homebrew libraries bundled in the macOS app
-        if: matrix.platform == 'macos'
-        run: |
-          python3 tools/ci/native-sources.py macos target/package/Patina.app \
-            "target/native-sources/Patina-$VERSION-macos-native-sources.tar"
-      - name: Build iOS app without signing credentials
-        if: matrix.platform == 'ios'
-        run: bash tools/ci/prepare-ios.sh
-      - name: Describe the bundled media runtime
-        if: matrix.platform == 'linux' || matrix.platform == 'macos'
-        shell: bash
-        env:
-          PLATFORM: ${{ matrix.platform }}
-        run: |
-          case "$PLATFORM" in
-            linux) inventory=target/Patina.AppDir/usr/bin/notices/mpv-runtime/components.json ;;
-            macos) inventory=target/package/Patina.app/Contents/Resources/notices/mpv-runtime/components.json ;;
-          esac
-          python3 tools/ci/sbom.py media-runtime "$inventory" \
-            "target/media-sbom/Patina-$VERSION-$PLATFORM-media-runtime-sbom.cdx.json" "$VERSION" \
-            --platform "$PLATFORM" --manifest "tools/mpv-runtime-unix/runtime-$PLATFORM.json"
-          python3 tools/ci/build-inventory.py "target/media-sbom/Patina-$VERSION-$PLATFORM-build-environment.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: matrix.platform == 'linux' || matrix.platform == 'macos'
-        with:
-          name: packages-${{ matrix.platform }}-media-sbom
-          path: target/media-sbom/*
-          if-no-files-found: error
-      - name: Preserve prepared signing inputs
-        if: matrix.platform != 'linux'
-        shell: bash
-        run: |
-          case "${{ matrix.platform }}" in
-            android) input=target/android-unsigned ;;
-            macos) input=target/package ;;
-            ios) input=target/ios ;;
-          esac
-          COPYFILE_DISABLE=1 tar -cf target/signing-input.tar "$input"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: matrix.platform != 'linux'
-        with:
-          name: signing-input-${{ matrix.platform }}
-          path: target/signing-input.tar
-          if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: matrix.platform == 'linux'
-        with:
-          name: packages-linux
-          path: dist/*
-          if-no-files-found: error
-      # Released beside the packages; the signing jobs never see these files.
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: matrix.platform == 'linux' || matrix.platform == 'macos'
-        with:
-          name: packages-${{ matrix.platform }}-native-sources
-          path: target/native-sources/Patina-*-native-sources.*
-          # The AppImage always bundles Ubuntu libraries; the macOS app only
-          # the pinned runtime unless it links a Homebrew library.
-          if-no-files-found: ${{ matrix.platform == 'linux' && 'error' || 'ignore' }}
-          # The members are compressed archives already.
-          compression-level: 0
-  sbom:
-    # No signing material and no publication rights: only the dependency graph.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-        with:
-          cache: 'false'
-      - name: Set release metadata
-        run: python3 tools/ci/version.py
-      - name: Write the CycloneDX SBOM for the locked Rust graph
-        run: |
-          cargo install cargo-cyclonedx --version 0.5.10 --locked
-          python3 tools/ci/sbom.py "dist/Patina-$VERSION-sbom.cdx.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: packages-sbom
-          path: dist/*
-          if-no-files-found: error
-  # The environment and the secrets follow the same rule as in windows-sign: a
-  # rehearsal gets `release-rehearsal` and no release credential. Its Android
-  # packages are signed with a key made for the run (tools/ci/sign-android.sh)
-  # and its macOS image is the ad hoc signed preview.
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.candidate == '' && needs.tests.result == 'success'
+    uses: ./.github/workflows/unsigned-candidate.yml
+    with:
+      matrix: ${{ needs.plan.outputs.matrix }}
+      windows: ${{ github.event_name == 'push' || inputs.platforms != 'android' }}
   sign:
     needs: [plan, tests, package]
+    if: always() && needs.plan.result == 'success' && ((needs.plan.outputs.candidate != '' && needs.package.result == 'skipped' && needs.tests.result == 'skipped') || (needs.package.result == 'success' && needs.tests.result == 'success'))
     environment:
       name: ${{ github.event_name == 'workflow_dispatch' && inputs.rehearsal && 'release-rehearsal' || 'release' }}
     strategy:
@@ -453,8 +328,8 @@ jobs:
           path: dist/*
           if-no-files-found: error
   publish:
-    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.rehearsal)
-    needs: [tests, package, sign, windows-package, windows-sign, verify-windows, sbom]
+    if: always() && needs.plan.result == 'success' && needs.sign.result == 'success' && needs.windows-sign.result == 'success' && needs.verify-windows.result == 'success' && (needs.package.result == 'success' || needs.plan.outputs.candidate != '') && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.rehearsal))
+    needs: [plan, tests, package, sign, windows-sign, verify-windows]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -511,7 +386,7 @@ jobs:
         if: always() && github.event_name == 'workflow_dispatch' && inputs.rehearsal
         run: python3 tools/ci/rehearsal.py cleanup "$TAG" "$GITHUB_SHA"
   verify-published:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: always() && needs.publish.result == 'success' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: publish
     runs-on: ubuntu-24.04
     timeout-minutes: 30

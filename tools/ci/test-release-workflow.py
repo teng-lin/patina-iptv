@@ -144,7 +144,8 @@ class Evaluation:
         value = self.contexts.get(text)
         while self.peek()[1] == ".":
             self.take()
-            value = value.get(self.take()[1]) if isinstance(value, dict) else None
+            key = self.take()[1]
+            value = value.get(key) if isinstance(value, dict) else None
         return value
 
     def call(self, name):
@@ -194,6 +195,7 @@ def run(event, ref, rehearsal=None, secrets=True, platforms="android-desktop"):
     return {
         "github": {"event_name": event, "ref": ref, "ref_name": ref.rsplit("/", 1)[-1], "run_id": "1001",
                    "token": "synthetic-token", "repository": "synthetic-owner/synthetic-repo"},
+        "needs": {name: {"result": "success"} for name in ("plan", "tests", "package", "sign", "windows-sign", "verify-windows")},
         "inputs": inputs,
         "secrets": {name: f"SYNTHETIC-{name}" for name in SECRET_NAMES} if secrets else {},
     }
@@ -224,8 +226,7 @@ class Workflow(unittest.TestCase):
         return found
 
     def test_the_file_is_read_as_expected(self):
-        self.assertEqual(set(self.jobs), {"plan", "tests", "windows-package", "windows-sign", "verify-windows", "verify-published", "package",
-                                          "sbom", "sign", "publish"})
+        self.assertEqual(set(self.jobs), {"plan", "tests", "windows-sign", "verify-windows", "verify-published", "package", "sign", "publish"})
         self.assertGreaterEqual(len(SECRET_NAMES), 20)
         for name in ("ANDROID_KEYSTORE_BASE64", "ANDROID_STORE_PASSWORD", "ANDROID_KEY_PASSWORD", "ANDROID_KEY_ALIAS",
                      "MACOS_CERTIFICATE_BASE64", "APPLE_APP_PASSWORD", "AZURE_CLIENT_SECRET", "IOS_PROFILE_BASE64"):
@@ -344,10 +345,41 @@ class Workflow(unittest.TestCase):
         self.assertEqual(render(evaluate(values["PLATFORMS"], run(**TAG_PUSH))), "android-desktop")
         self.assertEqual(render(evaluate(values["PLATFORMS"], run(**{**MANUAL, "platforms": "all"}))), "all")
         # Every packaging and signing job waits for the plan's refusals.
-        for job in ("package", "sign", "windows-package"):
+        for job in ("package", "sign"):
             needs = re.search(r"^    needs: \[(.*)\]$", self.jobs[job], re.M)[1].split(", ")
             self.assertIn("plan", needs, job)
-        self.assertIn("windows-package", re.search(r"^    needs: \[(.*)\]$", self.jobs["windows-sign"], re.M)[1])
+        self.assertIn("package", re.search(r"^    needs: \[(.*)\]$", self.jobs["windows-sign"], re.M)[1])
+
+    def test_candidate_and_fallback_routes_preserve_every_signing_gate(self):
+        def contexts(candidate='', tests='success', package='success', plan='success'):
+            value = run(**TAG_PUSH)
+            value['needs'].update(plan={'result': plan, 'outputs': {'candidate': candidate}},
+                                  tests={'result': tests}, package={'result': package})
+            return value
+        for candidate, tests, package, plan, allowed in (
+                ('', 'success', 'success', 'success', True),
+                ('17', 'skipped', 'skipped', 'success', True),
+                ('', 'skipped', 'skipped', 'success', False),
+                ('17', 'skipped', 'failure', 'success', False),
+                ('17', 'failure', 'skipped', 'success', False),
+                ('17', 'skipped', 'skipped', 'failure', False),
+                ('', 'success', 'failure', 'success', False)):
+            for job in SIGNING_JOBS:
+                condition = re.search(r'^    if: (.*)$', self.jobs[job], re.M)[1]
+                with self.subTest(candidate=candidate, tests=tests, package=package, plan=plan, job=job):
+                    self.assertEqual(truthy(evaluate(condition, contexts(candidate, tests, package, plan))), allowed)
+        condition = re.search(r'^    if: (.*)$', self.jobs['package'], re.M)[1]
+        self.assertTrue(truthy(evaluate(condition, contexts())))
+        self.assertFalse(truthy(evaluate(condition, contexts('17', 'skipped', 'skipped'))))
+        # Publication may proceed after deliberate test/build skips only when
+        # the verified plan and every final-artifact stage passed.
+        condition = re.search(r'^    if: (.*)$', self.jobs['publish'], re.M)[1]
+        value = contexts('17', 'skipped', 'skipped')
+        self.assertTrue(truthy(evaluate(condition, value)))
+        for stage in ('sign', 'windows-sign', 'verify-windows'):
+            value['needs'][stage]['result'] = 'failure'
+            self.assertFalse(truthy(evaluate(condition, value)), stage)
+            value['needs'][stage]['result'] = 'success'
 
     def test_only_a_tag_push_is_made_public_and_a_rehearsal_owns_a_throwaway_tag(self):
         publish = self.jobs["publish"]

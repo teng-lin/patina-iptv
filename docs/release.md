@@ -18,9 +18,11 @@ Desktop Package checks likewise run only for package/build inputs on PRs and
 support manual dispatch. Signed release packaging still runs on tags or manual
 requests.
 
-Android packages builds ARM64 and ARMv7 native libraries and the Gradle host's
-debug APK/AAB, verifies the APK signature, and uploads both as the android-debug artifact.
-It uses a generated debug key and does not receive release secrets.
+Routine PRs compile both ARM targets and build one x86_64 debug APK when emulator
+smoke is selected. `Android packages` can manually build an ARM debug APK for
+investigation; debug AABs are not distribution evidence. Trusted master candidates
+build unsigned release APK/AAB once, checking both ABIs, notices, Gradle unit tests
+and release lint before promotion to isolated signing jobs.
 NSH is checked
 out beside the repository at the commit in `nsh.rev` (from the fork's tv-keys
 branch). That file is the only place the commit is named: both setup actions
@@ -40,6 +42,15 @@ the distribution key, `IPTV_UNSIGNED_RELEASE=1` asks for an unsigned build (as
 `IPTV_DEBUG_SIGNED_RELEASE=1` explicitly asks for a debug-signed one.
 
 Release runs require full candidate validation before shipping package builds.
+Wait for the complete master Validation run, including `seal-candidate`, before
+tagging that same commit. A successful exact-SHA candidate is verified and promoted
+without repeating tests or compilation. If none is retained, the tag runs the full
+validation and unsigned build path. Never promote PR or source-tree-equivalent
+artifacts: the compiled application embeds its commit SHA. Distribution Android
+version codes are stable across these workflows: `1,000,000 + major*1,000,000 +
+minor*1,000 + patch` (minor/patch at most 999; Android maximum 2,100,000,000).
+This starts above historical workflow-run codes; local development retains its
+existing default unless CI stamps distribution metadata.
 Publication waits for package verification and candidate-bound build provenance.
 Tags and manual runs default to platforms=android-desktop: Android ARM64 and ARMv7,
 Linux x86_64 and macOS Apple silicon. Android produces one distribution-signed
@@ -440,18 +451,18 @@ IPTV source and lockfile changes do not invalidate these tool artifacts.
 The shared CLI action uses the same bootstrap profile for desktop and Android
 (no LTO, optimization level 1). Caches restore after the general Rust cache and
 save immediately after successful tool compilation, before app/package checks.
-There are no fallback keys: a changed tool input builds a new artifact. Release
-packaging still disables caches, and signing jobs remain isolated. Cache sharing
+There are no fallback keys: a changed tool input builds a new artifact. Unsigned shipping
+builds disable bulk Cargo dependency caches but reuse exact-key pinned finished
+tools; signing jobs restore no caches and remain isolated. Cache sharing
 is subject to GitHub branch scope; PRs can read a default-branch cache but cannot
-warm caches for unrelated PRs. The default-branch Android workflow warms the
-Linux CLI and Android runtime caches used by subsequent PRs. macOS CLI caches
-are reused within a PR; dispatch Package checks on master to seed a macOS cache
-that other PRs can restore, since desktop packaging has no master push trigger.
+warm caches for unrelated PRs. Default-branch candidate packaging warms the
+Linux CLI and Android runtime caches used by subsequent PRs. Master candidate packaging also seeds
+the macOS CLI cache that subsequent PRs can restore.
 
 Only master writes the bulk Rust dependency caches. PRs restore those caches
 and may save the much smaller finished-tool artifacts. This avoids duplicating
 gigabytes of Rust dependencies per PR and evicting the shared tool caches.
-Dispatching Package checks on master also seeds desktop packaging dependencies.
+Manual Package checks on master can still seed desktop preview packaging dependencies.
 
 After changing this pipeline, compare a cold run with a second run at the same
 NSH pin: the latter must skip both NSH build steps while still building the app,
@@ -582,6 +593,17 @@ creation or upload. Missing provenance or a release-membership predicate fails.
 Rehearsals verify the actual branch ref and remain drafts; they do not prove a
 later tag or signing configuration. Post-publication verification downloads and
 checks the public bytes again. Never bypass a failure by replacing public files.
+
+Unsigned candidate packages and their checked evidence are retained for 30 days
+in Actions. A promoted release publishes `candidate-manifest.json` with checksums
+and final-workflow provenance, retaining the unsigned input/check record after
+the Actions bundle expires.
+Use **Re-run failed jobs** to retry a failed validation, package, signing or
+publication stage while preserving successful immutable artifacts. A retry must
+retain the same source SHA and candidate run attempt; a changed source requires
+new validation. Candidate selection rejects mismatched run attempts. If all jobs
+must be rerun, remove only unpublished Actions artifacts through a deliberate
+maintenance operation first; upload jobs never overwrite retained inputs.
 
 If a build fails before publication, fix the cause and rerun the same candidate
 only while its release is absent or a draft. A public release is immutable. For a

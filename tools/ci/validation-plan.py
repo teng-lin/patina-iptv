@@ -119,7 +119,7 @@ def select(paths, tier="pr", root=ROOT):
         ({"platform": "linux", "os": "ubuntu-24.04"}, common_package or matches(paths, LINUX_PACKAGE)),
         ({"platform": "macos", "os": "macos-15"}, common_package or matches(paths, MACOS_PACKAGE)),
     ) if selected]
-    android_package = full or ci or matches(paths, ANDROID_PACKAGE)
+    android_package_inputs = full or ci or matches(paths, ANDROID_PACKAGE)
     result = {
         "tier": tier,
         "ios": full or ci or matches(paths, IOS),
@@ -127,8 +127,8 @@ def select(paths, tier="pr", root=ROOT):
         "host": host,
         "helpers_full": full or matches(paths, (*HOST_INPUTS, *HELPER_INPUTS)) or any(not documentation(path) for path in paths),
         "windows": full or ci or rust or matches(paths, (*WINDOWS_RESOURCES, "hosts/windows/**", "tools/*windows*.ps1")),
-        "android": full or ci or rust or android_package,
-        "android_package": android_package,
+        "android": full or ci or rust or android_package_inputs,
+        "android_package": False,
         "packages": bool(platforms),
         "package_matrix": {"include": platforms},
         "windows-package": full or ci or matches(paths, WINDOWS_PACKAGE),

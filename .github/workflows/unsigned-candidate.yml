@@ -1,0 +1,211 @@
+name: Unsigned candidate packages
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        type: string
+        required: true
+      windows:
+        type: boolean
+        default: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows-package:
+    if: inputs.windows
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-windows
+        with:
+          cache: 'false'
+      - name: Set release metadata
+        shell: pwsh
+        run: python tools/ci/version.py
+      - uses: ./.github/actions/cargo-tool
+        with:
+          name: cargo-about
+          version: 0.9.3
+          features: cli
+      - name: Build Windows installer
+        shell: pwsh
+        run: ./tools/package-windows.ps1
+      - name: Check installation, launch and uninstall
+        shell: pwsh
+        run: ./tools/ci/check-windows-package.ps1
+      - name: Describe the bundled Windows media runtime
+        shell: pwsh
+        run: |
+          $output = "target/media-sbom/Patina-${env:VERSION}-windows-media-runtime-sbom.cdx.json"
+          python tools/ci/sbom.py media-runtime target/mpv/components.json $output "$env:VERSION" `
+            --platform windows --manifest tools/mpv-runtime/runtime.json
+          if ($LASTEXITCODE -ne 0) { throw 'Media runtime SBOM failed.' }
+          python tools/ci/build-inventory.py "target/media-sbom/Patina-$env:VERSION-windows-build-environment.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Build inventory failed.' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: packages-windows-media-sbom
+          path: target/media-sbom/*
+          if-no-files-found: error
+      # Signed (or not) on a fresh runner that never builds code: windows-sign.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: signing-input-windows
+          path: dist/Patina-*-windows-x86_64-setup.exe
+          if-no-files-found: error
+  package:
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache: 'false'
+      - uses: ./.github/actions/cargo-tool
+        with:
+          name: cargo-about
+          version: 0.9.3
+          features: cli
+      - name: Set release metadata
+        shell: bash
+        run: |
+          python3 tools/ci/version.py
+          echo "NSH=$(cd ../nsh && pwd)/target/release/nsh" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/nsh-cli
+        if: matrix.platform != 'android'
+      - uses: ./.github/actions/android
+        if: matrix.platform == 'android'
+      - name: Build Android native library
+        if: matrix.platform == 'android'
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: bash tools/sync-host.sh --release
+      - name: Linux packages
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get install -y ruby-dev rpm zstd libarchive-tools patchelf file desktop-file-utils \
+            libgirepository1.0-dev librsvg2-dev xvfb x11-utils xauth dbus-x11
+          sudo gem install fpm -v 1.16.0 --no-document
+          bash tools/ci/setup-linux-packaging.sh
+          export PATH="$RUNNER_TEMP/linux-packaging:$PATH"
+          export APPIMAGE_EXTRACT_AND_RUN=1 CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target"
+          bash tools/ci/package-linux.sh
+          bash tools/ci/check-linux-packages.sh
+      # The AppImage's libmpv (with FFmpeg) is the pinned runtime, fetched by
+      # hash from its dependency release, which retains its exact sources
+      # (tools/mpv-runtime-unix). GTK and the host libraries libmpv uses are
+      # Ubuntu's: publish the exact source packages they were built from. A
+      # source that cannot be fetched or does not match its checksum fails the
+      # release.
+      - name: Corresponding source of the system libraries bundled in the AppImage
+        if: matrix.platform == 'linux'
+        run: |
+          bash tools/ci/enable-deb-src.sh
+          python3 tools/ci/native-sources.py linux target/Patina.AppDir \
+            "target/native-sources/Patina-$VERSION-linux-native-sources.tar"
+      - name: Prepare unsigned Android artifacts
+        if: matrix.platform == 'android'
+        run: bash tools/ci/prepare-android.sh
+      # libmpv is the pinned macOS runtime, fetched and verified by hash.
+      - name: Build macOS app without signing credentials
+        if: matrix.platform == 'macos'
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          bash tools/package-macos.sh
+          bash tools/ci/package-macos.sh
+      # Homebrew libraries the app may still link beside the pinned runtime
+      # (normally none, and then there is no archive): publish the sources
+      # named by the formulae of the installed versions.
+      - name: Corresponding source of Homebrew libraries bundled in the macOS app
+        if: matrix.platform == 'macos'
+        run: |
+          python3 tools/ci/native-sources.py macos target/package/Patina.app \
+            "target/native-sources/Patina-$VERSION-macos-native-sources.tar"
+      - name: Build iOS app without signing credentials
+        if: matrix.platform == 'ios'
+        run: bash tools/ci/prepare-ios.sh
+      - name: Describe the bundled media runtime
+        if: matrix.platform == 'linux' || matrix.platform == 'macos'
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          case "$PLATFORM" in
+            linux) inventory=target/Patina.AppDir/usr/bin/notices/mpv-runtime/components.json ;;
+            macos) inventory=target/package/Patina.app/Contents/Resources/notices/mpv-runtime/components.json ;;
+          esac
+          python3 tools/ci/sbom.py media-runtime "$inventory" \
+            "target/media-sbom/Patina-$VERSION-$PLATFORM-media-runtime-sbom.cdx.json" "$VERSION" \
+            --platform "$PLATFORM" --manifest "tools/mpv-runtime-unix/runtime-$PLATFORM.json"
+          python3 tools/ci/build-inventory.py "target/media-sbom/Patina-$VERSION-$PLATFORM-build-environment.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.platform == 'linux' || matrix.platform == 'macos'
+        with:
+          name: packages-${{ matrix.platform }}-media-sbom
+          path: target/media-sbom/*
+          if-no-files-found: error
+      - name: Preserve prepared signing inputs
+        if: matrix.platform != 'linux'
+        shell: bash
+        run: |
+          case "${{ matrix.platform }}" in
+            android) input=target/android-unsigned ;;
+            macos) input=target/package ;;
+            ios) input=target/ios ;;
+          esac
+          COPYFILE_DISABLE=1 tar -cf target/signing-input.tar "$input"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.platform != 'linux'
+        with:
+          name: signing-input-${{ matrix.platform }}
+          path: target/signing-input.tar
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.platform == 'linux'
+        with:
+          name: packages-linux
+          path: dist/*
+          if-no-files-found: error
+      # Released beside the packages; the signing jobs never see these files.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.platform == 'linux' || matrix.platform == 'macos'
+        with:
+          name: packages-${{ matrix.platform }}-native-sources
+          path: target/native-sources/Patina-*-native-sources.*
+          # The AppImage always bundles Ubuntu libraries; the macOS app only
+          # the pinned runtime unless it links a Homebrew library.
+          if-no-files-found: ${{ matrix.platform == 'linux' && 'error' || 'ignore' }}
+          # The members are compressed archives already.
+          compression-level: 0
+  sbom:
+    # No signing material and no publication rights: only the dependency graph.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache: 'false'
+      - name: Set release metadata
+        run: python3 tools/ci/version.py
+      - name: Write the CycloneDX SBOM for the locked Rust graph
+        run: |
+          cargo install cargo-cyclonedx --version 0.5.10 --locked
+          python3 tools/ci/sbom.py "dist/Patina-$VERSION-sbom.cdx.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: packages-sbom
+          path: dist/*
+          if-no-files-found: error

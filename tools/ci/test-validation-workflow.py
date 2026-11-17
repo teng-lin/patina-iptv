@@ -70,7 +70,7 @@ class Workflows(unittest.TestCase):
 
     def test_release_explicitly_requests_candidate_tier_and_publishes_after_artifact_checks(self):
         text = (ROOT / ".github/workflows/release.yml").read_text()
-        tests = text.split("  tests:\n", 1)[1].split("  windows-package:\n", 1)[0]
+        tests = text.split("  tests:\n", 1)[1].split("  windows-sign:\n", 1)[0]
         self.assertIn("uses: ./.github/workflows/validation.yml", tests)
         self.assertIn("tier: release", tests)
         publish = text.split("  publish:\n", 1)[1].split("    runs-on:", 1)[0]
@@ -81,6 +81,28 @@ class Workflows(unittest.TestCase):
         self.assertNotIn("environment:", verify)
         self.assertNotIn("setup-windows", verify)
         self.assertIn("name: packages-windows", verify)
+
+    def test_master_candidate_owns_shipping_builds_and_release_uses_same_recipe(self):
+        text = (ROOT / '.github/workflows/validation.yml').read_text()
+        self.assertIn("&& 'validation-master'", text)
+        self.assertIn("inputs.tier != 'release'", text)
+        candidate = text.split('  candidate:\n', 1)[1].split('  seal-candidate:', 1)[0]
+        self.assertIn('needs: [plan, validation]', candidate)
+        self.assertIn('uses: ./.github/workflows/unsigned-candidate.yml', candidate)
+        self.assertIn('release-candidate.py seal', text)
+        release = (ROOT / '.github/workflows/release.yml').read_text()
+        self.assertIn('release-candidate.py select', release)
+        self.assertIn('uses: ./.github/workflows/unsigned-candidate.yml', release)
+        unsigned = (ROOT / '.github/workflows/unsigned-candidate.yml').read_text()
+        self.assertNotIn('environment:', unsigned)
+        self.assertNotIn('secrets.', unsigned)
+        self.assertIn('check-linux-packages.sh', unsigned)
+        self.assertIn('check-windows-package.ps1', unsigned)
+        self.assertIn('prepare-android.sh', unsigned)
+        self.assertNotIn('bundleDebug', (ROOT / '.github/workflows/android.yml').read_text())
+        smoke = (ROOT / '.github/workflows/android-smoke.yml').read_text()
+        self.assertIn('testDebugUnitTest lintDebug assembleDebug', smoke)
+        self.assertIn('testReleaseUnitTest lintRelease', (ROOT / 'tools/ci/prepare-android.sh').read_text())
 
     def test_large_epg_case_is_not_silently_omitted(self):
         script = (ROOT / "tools/ci/import-stress.sh").read_text()

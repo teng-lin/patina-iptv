@@ -23,8 +23,8 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('validation-pr-{0}', github.event.pull_request.number) || format('validation-run-{0}', github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.event_name == 'pull_request' && format('validation-pr-{0}', github.event.pull_request.number) || (github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.tier != 'release' && 'validation-master') || format('validation-run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.tier != 'release') }}
 jobs:
   plan:
     runs-on: ubuntu-24.04
@@ -54,7 +54,7 @@ jobs:
         id: select
         env:
           EVENT: ${{ github.event_name }}
-          TIER: ${{ inputs.tier }}
+          TIER: ${{ inputs.tier || (github.event_name == 'push' && github.ref == 'refs/heads/master' && 'release') }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: python3 tools/ci/validation-plan.py plan >> "$GITHUB_OUTPUT"
@@ -99,11 +99,13 @@ jobs:
           "$RUNNER_TEMP/helper-linters/bin/pip" install ruff==0.11.13 shellcheck-py==0.10.0.1
           "$RUNNER_TEMP/helper-linters/bin/ruff" check tools/
           git ls-files -z '*.sh' | xargs -0 "$RUNNER_TEMP/helper-linters/bin/shellcheck"
+
   host:
-    needs: plan
+    needs: [plan, helpers]
     if: needs.plan.outputs.host == 'true'
     uses: ./.github/workflows/ci.yml
     with:
+      helpers-checked: true
       tier: ${{ needs.plan.outputs.tier == 'pr' && 'pr' || 'full' }}
   ios:
     needs: plan
@@ -182,3 +184,36 @@ jobs:
       - env:
           RESULT: ${{ needs.validation.result }}
         run: test "$RESULT" = success
+  candidate:
+    needs: [plan, validation]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.tier != 'release'
+    uses: ./.github/workflows/unsigned-candidate.yml
+    with:
+      matrix: '{"include":[{"platform":"android","os":"ubuntu-24.04"},{"platform":"linux","os":"ubuntu-24.04"},{"platform":"macos","os":"macos-15"}]}'
+  seal-candidate:
+    needs: [plan, validation, candidate]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.tier != 'release'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: signing-input-*
+          path: target/candidate
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: packages-*
+          path: target/candidate
+      - name: Bind checks, inputs and unsigned bytes to the candidate commit
+        env:
+          PLAN: ${{ needs.plan.outputs.plan }}
+          NEEDS: ${{ toJSON(needs) }}
+        run: python3 tools/ci/release-candidate.py seal target/candidate
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-candidate
+          path: target/candidate
+          if-no-files-found: error
+          retention-days: 30

@@ -5,7 +5,7 @@ and release-candidate checks. Reusable workflows have no independent PR/push
 subscriptions, so each selected lane runs once. Selection and the aggregate use
 [the same tested plan](../tools/ci/validation-plan.py).
 
-| Validation | PR and master push | Nightly | Release candidate |
+| Validation | PR | Nightly | Master/release candidate |
 |---|---|---|---|
 | Formatting, lint, dependency policy and CI helper tests | Relevant code/build changes; documentation-only changes run tier-contract tests | Full | Full |
 | Linux unit/integration correctness and doctests | Full suite for application/Rust changes | Full | Full |
@@ -15,9 +15,9 @@ subscriptions, so each selected lane runs once. Selection and the aggregate use
 | macOS/Windows | Compile all test targets, native player tests, Windows chrome tests, production app build | Full host suites | Full host suites |
 | Linux GTK PiP/context-loss and correlated first-render journeys | Ordinary host checks; no dependency on coverage | Full | Full |
 | Reader/writer/analysis independence gates | Exact isolated gates on Linux | Exact gates on every host | Exact gates on every host |
-| Android compile | Both ARM ABIs for Rust/dependency changes; packaging replaces duplicate compilation | Packaging compiles both | Shipping package jobs compile both |
+| Android compile | Both ARM ABIs for Rust/dependency/Android changes | Both ARM ABIs | Shipping package jobs compile both |
 | Tablet/TV playback, lifecycle and remote-input smoke | UI/Android/runtime/player/input/network changes | Both forms | Both forms for candidate code |
-| Installers and APK/AAB | Actual packaging/runtime/dependency inputs; desktop platform-specific scripts select that platform | All supported formats | Final shipping artifacts in clean release jobs |
+| Installers and APK/AAB | Desktop installers for actual packaging/runtime/dependency inputs; one x86_64 debug APK for selected emulator smoke | Desktop preview formats; ARM compilation and emulator smoke | Unsigned release ARM APK/AAB and desktop installers, built once and retained |
 | Coverage and floors | Coverage/validation infrastructure changes; manual run available | Full workspace | Full report for this candidate SHA |
 | Fuzz | Affected targets, 30 seconds each; common dependency changes select all | All targets, 300 seconds each | All targets, 30 seconds each and retained corpus |
 | Allocation and large EPG/catalog budgets | Storage/import/EPG and their parser, schedule and model dependencies; small functional regressions stay in Linux tests | Full release-mode fixture, including ignored million-programme EPG case | Full release-mode fixture |
@@ -43,8 +43,9 @@ Fuzz targets run in one job, sharing the pinned tool, sanitizer dependencies
 and full corpus cache. New/shared parser inputs select all targets; unknown
 fuzz target names fail before execution. Only master refreshes reusable caches. Host, coverage and stress lanes retain
 compiled dependencies even when a later assertion or coverage floor fails. PRs
-restore those caches without writing them, and clean release packaging keeps
-its cache opt-out.
+restore those caches without writing them, Unsigned shipping builds use fresh app output directories and no bulk Cargo cache,
+but may restore exact-key pinned NSH tools and the notice generator. Signing jobs
+restore neither build nor tool caches.
 
 ## Required checks and migration
 
@@ -68,13 +69,57 @@ change is effective. This implementation does not modify repository settings.
 
 ## Release artifacts
 
-The release workflow explicitly requests `tier: release`, which runs full
-candidate validation at the exact checked-out commit. It cannot inherit a lean
-PR default or reuse a green nightly from another commit. Full nightly validation
-also builds preview installers; the candidate tier delegates those builds to
-the existing clean shipping-package jobs, avoiding a second throwaway installer
-build before signing. Build/sign job isolation and signing environments remain
-in place.
+Master pushes run the complete `release` validation tier and then call
+[Unsigned candidate packages](../.github/workflows/unsigned-candidate.yml). This
+replaces master's selective preview installer jobs; it does not add another copy
+of packaging. Every candidate has coverage, all native host suites, both emulator
+forms, stress, fuzz, iOS adapter compilation and production credential checks.
+Unsigned builds check ARM APK/AAB contents, installer integrity and startup, native
+sources and SBOMs without release credentials. PRs retain selective desktop
+installer checks, ARM source compilation and a single x86_64 debug APK shared by
+the tablet/TV emulators. ARM debug APK packaging is manual only; no debug AAB is
+built. Gradle unit tests and lint run in the smoke and unsigned-release builds.
+
+The final master job seals a 30-day `release-candidate` artifact: exact source SHA,
+workflow run and attempt, full validation plan and successful aggregate/build
+checks, source and runner locks, NSH/compiler/recipe input hashes, build profile
+and ABI selection, and SHA-256 of every unsigned input, SBOM and source archive.
+Desktop build-environment inventories retain the actual compiler/tool and system
+package versions. This bundle is immutable within the run. When promoted, `candidate-manifest.json`
+is published with the final release, covered by its checksums and provenance,
+so the build/check/digest record survives Actions artifact expiration.
+
+A tag selects only a successful **master push** of the Validation workflow in this
+repository at the **identical commit SHA**. It rechecks manifest identities,
+mandatory artifact groups, file inventory and all digests before uploading the
+same bytes into the release's isolated signing jobs. PR artifacts, another SHA
+(including a squash-equivalent source tree), a failed run or an earlier attempt
+cannot qualify. Full candidate tests and unsigned compilation are skipped only
+after this verification succeeds. Missing/expired evidence runs complete release
+validation and the same unsigned build workflow; malformed evidence fails closed.
+Manual release/rehearsal runs always exercise the full path and requested matrix,
+including optional iOS packaging. Publication still attests the final signed
+bytes under the release workflow/tag/SHA and verifies public bytes afterwards.
+
+PR validation cancels older runs of that PR. Master validation, including unsigned
+candidate packaging, cancels superseded master runs. Called release validation
+has an independent run-specific group and cannot be canceled by a master push.
+The legacy protected status aliases stay intact. Release and master share the
+unsigned package recipe; the release retains signing, final artifact smoke,
+attestation and publication. Failed stages can be rerun without rebuilding passed
+package jobs; never use **Re-run all jobs** when preserving those artifacts.
+
+The helper lane owns Python/shell lint and helper regressions once per validation;
+the host waits for it, then runs Rust checks and Kotlin lint. `tools/check.sh`
+retains all helper and lint checks locally. A docs-only selection still exercises
+the planner and aggregate contract without setting up compilers.
+
+Performance policy uses the PR/merge-group base or master's `before` commit. Tag,
+manual and scheduled runs use the checked-out source commit's first parent, never
+a tag push's previous target. Shallow history is fetched before deciding whether
+the source is a root; an explicit missing base is fetched by SHA or fails closed.
+Only an actual root or a base predating performance policy bootstraps the policy;
+missing explicit objects cannot waive baseline review.
 
 Android's final signed APK/AAB retain native ABI, notices and selected-certificate
 verification. macOS checks the final disk image, and a fresh Windows job without
@@ -134,8 +179,9 @@ check remains a separate hosted setting change. Test a prose-only PR and a faili
 selected lane before removing old required contexts, and keep the previous
 protection configuration available for rollback.
 
-Full nightly and release tiers select every validation lane (shipping packaging
-replaces duplicate Android/desktop package lanes for releases). The release depends
+Full nightly validation selects native, portable and behavior lanes plus desktop
+preview packaging. Master/release candidates replace preview packaging and ARM
+compilation with the checked unsigned shipping artifacts. The release depends
 on the candidate's full validation, never a different nightly SHA. Workflow failures
 remain visible in Actions; maintainers should enable GitHub workflow-failure
 notifications and inspect the full nightly result before release preparation.

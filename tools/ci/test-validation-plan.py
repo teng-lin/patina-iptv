@@ -45,7 +45,7 @@ class Selection(unittest.TestCase):
                      "tools/ci/package.Cargo.lock", "tools/ci/check-package-lock.py"):
             plan = v.select([path])
             self.assertTrue(plan["packages"], path)
-            self.assertTrue(plan["android_package"], path)
+            self.assertFalse(plan["android_package"], path)
             self.assertTrue(plan["windows-package"], path)
         plan = v.select(["tools/ci/verify-macos-dmg.py"])
         self.assertEqual([entry["platform"] for entry in plan["package_matrix"]["include"]], ["macos"])
@@ -75,7 +75,7 @@ class Selection(unittest.TestCase):
     def test_dependency_changes_reach_production_packages_and_all_fuzz_targets(self):
         for path in ("Cargo.lock", "crates/iptv-guide/Cargo.toml", "nsh.rev", "rust-toolchain.toml"):
             plan = v.select([path])
-            for lane in ("host", "windows", "android", "android_package", "packages", "windows-package", "smoke", "stress"):
+            for lane in ("host", "windows", "android", "packages", "windows-package", "smoke", "stress"):
                 self.assertTrue(plan[lane], (path, lane))
             self.assertEqual(plan["fuzz"], v.fuzz_targets([], True))
             self.assertFalse(plan["coverage"])
@@ -115,7 +115,7 @@ class Selection(unittest.TestCase):
             plan = v.select([], tier)
             delegated = ("android", "packages", "windows-package") if tier == "release" else ()
             self.assertTrue(all(plan[lane] for lane in v.LANES if lane not in delegated))
-            self.assertEqual(plan["android_package"], tier != "release")
+            self.assertFalse(plan["android_package"])
             for lane in delegated:
                 self.assertFalse(plan[lane])
             self.assertEqual(plan["tier"], tier)
@@ -126,7 +126,7 @@ class Selection(unittest.TestCase):
         for path in ("tools/ci/native-sources.py", "tools/ci/package-linux.sh", "tools/package-macos.sh"):
             self.assertTrue(v.select([path])["packages"], path)
         self.assertTrue(v.select(["tools/package-windows.ps1"])["windows-package"])
-        self.assertTrue(v.select(["hosts/android/app/build.gradle.kts"])["android_package"])
+        self.assertTrue(v.select(["hosts/android/app/build.gradle.kts"])["android"])
 
     def test_version_stamping_changes_exercise_all_package_consumers(self):
         plan = v.select(["tools/ci/version.py"])
