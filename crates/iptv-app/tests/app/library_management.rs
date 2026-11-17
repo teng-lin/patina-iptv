@@ -36,6 +36,12 @@ fn edit(app: &mut Headless, row: usize, label: &str, index: usize) {
     step(app.wait_for(&format!("text:{label}")));
     step(app.press_key("enter"));
 }
+fn submit_name(app: &mut Headless, field: &str) {
+    step(app.submit(field));
+    // The durable rename commits before the async item reload dismisses this
+    // modal. A row visible underneath it is not yet available for another edit.
+    step(app.wait_for_gone("text:Display name", Duration::from_secs(5)));
+}
 fn channels(path: &std::path::Path, source: iptv_store_sqlite::SourceId) -> Vec<String> {
     crate::isolated::open_database(path)
         .unwrap()
@@ -154,7 +160,7 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     edit(&mut app, 0, "Rename", 1);
     step(app.clear("text:Local C"));
     step(app.type_text("text:Empty restores the provider name", "Renamed C"));
-    step(app.submit("text:Renamed C"));
+    submit_name(&mut app, "text:Renamed C");
     assert_eq!(channels(&path, source)[0], "Renamed C");
     edit(&mut app, 0, "Rename", 1);
     step(app.type_text("text:Renamed C", " unsaved"));
@@ -169,7 +175,7 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     step(app.back());
     edit(&mut app, 0, "Rename", 1);
     step(app.clear("text:Renamed C"));
-    step(app.submit("text:Empty restores the provider name"));
+    submit_name(&mut app, "text:Empty restores the provider name");
     assert_eq!(channels(&path, source)[0], "Local C");
     edit(&mut app, 0, "Use provider name", 2);
     assert_eq!(channels(&path, source)[0], "Local C");
@@ -218,7 +224,7 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     edit(&mut app, 0, "Rename", 1);
     step(app.clear("text:News"));
     step(app.type_text("text:Empty restores the provider name", "Local news"));
-    step(app.submit("text:Local news"));
+    submit_name(&mut app, "text:Local news");
     assert_eq!(
         crate::isolated::open_database(&path)
             .unwrap()
