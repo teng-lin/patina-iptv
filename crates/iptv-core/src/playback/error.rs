@@ -26,8 +26,10 @@ pub enum ErrorKind {
 /// What a failure means for the viewer and for retrying.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cause {
-    /// Retrying cannot help: the stream is gone (404/410), its format is
-    /// not supported, there is none, or the provider refused the account.
+    /// Retrying the same request normally cannot help: its resource is gone
+    /// (404/410), its format is unsupported, or the provider refused the
+    /// account. A played live stream may recover from 404/410 after resolving
+    /// a fresh resource.
     Fatal,
     /// The provider refused the stream for now: an expired token, the
     /// account's connection limit (another device plays), a rate limit
@@ -81,7 +83,8 @@ impl ErrorKind {
         }
     }
 
-    /// Whether an automatic retry can help.
+    /// Whether an automatic retry can help without playback context.
+    /// [`super::Health`] also retries 404/410 for a live stream that played.
     pub fn retryable(&self) -> bool {
         self.cause() != Cause::Fatal
     }

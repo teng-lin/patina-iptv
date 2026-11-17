@@ -12,6 +12,9 @@
 //! policy: a programme that played retries the fast attempts (the app
 //! reopens it where it was), one that never played fails at once (a dead
 //! archive must not loop).
+//!
+//! A played live stream also retries HTTP 404/410: reopening can resolve a
+//! fresh resource after the provider's rolling live window advances.
 
 use super::error::{ErrorKind, Failure};
 use super::states::{Phase, PlayerState, Retry, RetryPolicy, Waiting};
@@ -277,8 +280,13 @@ impl Health {
         self.ready_since = None;
         let since = *self.outage_since.get_or_insert(now);
         let p = self.policy;
-        let retry =
-            kind.retryable() && (self.live || (self.played && self.attempts < p.max_attempts));
+        // A live URL can expire while paused or behind the provider's
+        // rolling window. Reopening it resolves a fresh live resource, so a
+        // 404/410 after playback has started is retryable for live sessions.
+        let expired_live_resource =
+            self.live && self.played && matches!(kind, ErrorKind::Http(404 | 410));
+        let retry = (kind.retryable() || expired_live_resource)
+            && (self.live || (self.played && self.attempts < p.max_attempts));
         if !retry {
             let attempts = self.attempts;
             self.reconnecting_since = None;

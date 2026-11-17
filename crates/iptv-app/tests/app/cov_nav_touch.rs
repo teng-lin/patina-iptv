@@ -552,8 +552,9 @@ fn multiview_by_pointer(app: &mut Headless) {
     gone(app, FIELD);
     step(app.wait_for(&tile("Test Channel Four")));
 
-    // A tile's player buffering: its own label; then a stream the provider
-    // does not have: its message and Try again, which opens it again.
+    // A tile's player buffering: its own label; then an unsupported stream
+    // format: its message and Try again, which opens it again. An HTTP 404
+    // from a live stream now reconnects automatically after playback starts.
     // (Until their players report, the tiles say they are loading.)
     let loading = format!("{TILE} >> text:Loading…");
     step(
@@ -584,8 +585,8 @@ fn multiview_by_pointer(app: &mut Headless) {
         json!({ "state": "ready" }),
     );
     gone(app, &buffering);
-    let missing = format!("{TILE} >> text:The provider doesn't have this stream.");
-    let error = json!({ "code": "ERROR_CODE_IO_BAD_HTTP_STATUS", "http": 404 });
+    let missing = format!("{TILE} >> text:This stream's format isn't supported.");
+    let error = json!({ "code": "ERROR_CODE_PARSING_MANIFEST_MALFORMED" });
     player_event(app, "Test Channel Four", "error", error.clone());
     step(app.wait_for(&missing));
     step(app.press(&format!("{TILE} >> text:Try again")));

@@ -484,7 +484,7 @@ fn buffering_failures_and_new_streams_end_a_reconnect() {
     h.on_state(PlayerState::Ended, 2_000).expect("reconnects");
     assert!(h.reconnecting());
     // Gone: the error stays on screen, with the black shutter.
-    h.on_error(ErrorKind::Http(404), "404".into(), 2_100);
+    h.on_error(ErrorKind::Format, "unsupported format".into(), 2_100);
     assert!(h.failure().is_some());
     assert!(!h.reconnecting());
     assert_eq!(h.indicator(9_000), None, "the failure card, not a pill");
