@@ -121,32 +121,27 @@ pub async fn capture_shared(
 }
 
 fn writer(path: &Path, max_bytes: u64, resume: bool) -> Result<Writer, Failure> {
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true);
-    let existing = if resume {
-        match std::fs::symlink_metadata(path) {
-            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
-                Some(metadata.len() / 188 * 188)
+    use crate::file::{PrivateAccess, open_private_regular};
+    if max_bytes == 0 {
+        return Err(Failure::Limit);
+    }
+    let opened = if resume {
+        match open_private_regular(path, PrivateAccess::Resume) {
+            Ok(opened) => Ok(opened),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                open_private_regular(path, PrivateAccess::Create)
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            _ => return Err(Failure::Storage),
+            Err(error) => Err(error),
         }
     } else {
-        None
+        open_private_regular(path, PrivateAccess::Create)
     };
-    let bytes = existing.unwrap_or(0);
-    if existing.is_none() {
-        options.create_new(true);
-    }
+    let (mut file, metadata) = opened.map_err(|_| Failure::Storage)?;
+    // Metadata belongs to the opened descriptor, never an earlier pathname.
+    let bytes = metadata.len() / 188 * 188;
     if bytes >= max_bytes {
         return Err(Failure::Limit);
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
-    }
-    let mut file = options.open(path).map_err(|_| Failure::Storage)?;
     file.set_len(bytes).map_err(|_| Failure::Storage)?;
     // Windows append-only handles cannot truncate torn packets. One claimed
     // capture owns this spool, so a writable handle plus seek is portable.
@@ -543,5 +538,26 @@ mod tests {
                 Err(Failure::Unsupported)
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod private_spool_regressions {
+    use super::*;
+
+    #[test]
+    fn resume_alignment_and_limits_use_the_opened_recording_length() {
+        let mut random = [0_u8; 16];
+        getrandom::fill(&mut random).unwrap();
+        let path = std::env::temp_dir().join(format!("patina-spool-metadata-{random:x?}"));
+        std::fs::write(&path, vec![0x47; 188 * 2 + 7]).unwrap();
+        let resumed = writer(&path, 188 * 3, true).unwrap();
+        assert_eq!(resumed.bytes, 188 * 2);
+        assert_eq!(resumed.file.metadata().unwrap().len(), 188 * 2);
+        drop(resumed);
+        // Refusing a full recording must leave its bytes untouched.
+        assert!(matches!(writer(&path, 188 * 2, true), Err(Failure::Limit)));
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 188 * 2);
+        std::fs::remove_file(path).unwrap();
     }
 }

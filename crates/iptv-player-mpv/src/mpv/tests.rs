@@ -1254,38 +1254,223 @@ fn notes_of_the_current_file_become_events() {
 fn only_the_newest_load_counts() {
     let _serial = serial();
     let p = Player::new();
+    let first = LoadId::new();
+    let latest = LoadId::new();
     {
         let mut st = p.inner.state.borrow_mut();
         st.url = Some(URL.into());
-        st.loads = 2;
+        st.load_pending = true;
+        st.load = Some(latest.clone());
     }
-    assert!(p.note(Note::Loading(Some(3))).is_empty());
+    assert!(
+        p.note(Note::Loading {
+            load: first.clone(),
+            entry: Some(3)
+        })
+        .is_empty()
+    );
     assert_eq!(
         p.inner.state.borrow().expected,
         None,
         "a newer load is on its way"
     );
-    assert!(p.note(Note::Loading(Some(4))).is_empty());
+    // A duplicate old completion cannot consume the remaining command.
+    assert!(
+        p.note(Note::Loading {
+            load: first.clone(),
+            entry: Some(3)
+        })
+        .is_empty()
+    );
+    assert!(p.inner.state.borrow().load_pending);
+    assert!(
+        p.note(Note::Loading {
+            load: latest,
+            entry: Some(4)
+        })
+        .is_empty()
+    );
+    assert_eq!(p.inner.state.borrow().expected, Some(4));
+    assert!(!p.inner.state.borrow().load_pending);
+    assert!(
+        p.note(Note::LoadRejected {
+            load: first,
+            code: map::CONTAINER_UNSUPPORTED
+        })
+        .is_empty()
+    );
     assert_eq!(p.inner.state.borrow().expected, Some(4));
 
-    // A live stream bridged to its spare: the spare is the current file.
     p.note(Note::Started(4));
     p.note(Note::Bridged(5));
     assert_eq!(p.inner.state.borrow().expected, Some(5));
-    p.note(Note::Bridged(6)); // not playing the expected entry: ignored
+    p.note(Note::Bridged(6));
     assert_eq!(p.inner.state.borrow().expected, Some(5));
 
-    // mpv refused the load.
-    p.inner.state.borrow_mut().loads = 1;
+    let refused = LoadId::new();
+    {
+        let mut st = p.inner.state.borrow_mut();
+        st.load = Some(refused.clone());
+        st.load_pending = true;
+    }
     assert_eq!(
-        p.note(Note::Loading(None)),
+        p.note(Note::Loading {
+            load: refused,
+            entry: None
+        }),
         [("error", json!({ "code": map::IO_UNSPECIFIED }))],
         "already idle"
     );
-    // Nothing to load: no error.
-    p.inner.state.borrow_mut().url = None;
-    p.inner.state.borrow_mut().loads = 1;
-    assert!(p.note(Note::Loading(None)).is_empty());
+    let stopped = LoadId::new();
+    {
+        let mut st = p.inner.state.borrow_mut();
+        st.url = None;
+        st.load = None;
+        st.load_pending = false;
+    }
+    assert!(
+        p.note(Note::Loading {
+            load: stopped,
+            entry: None
+        })
+        .is_empty()
+    );
+    assert!(!p.inner.state.borrow().load_pending);
+}
+
+#[test]
+fn guard_refusals_complete_once_and_a_new_load_can_succeed() {
+    let _serial = serial();
+    let p = Player::new();
+    let first = LoadId::new();
+    let latest = LoadId::new();
+    {
+        let mut st = p.inner.state.borrow_mut();
+        st.url = Some(URL.into());
+        st.load = Some(latest.clone());
+        st.load_pending = true;
+        st.last_state = PlayerState::Buffering;
+    }
+    assert!(
+        p.note(Note::LoadRejected {
+            load: first,
+            code: map::CONTAINER_UNSUPPORTED
+        })
+        .is_empty()
+    );
+    let terminal = p.note(Note::LoadRejected {
+        load: latest.clone(),
+        code: map::CONTAINER_UNSUPPORTED,
+    });
+    assert_eq!(
+        terminal,
+        [
+            ("error", json!({ "code": map::CONTAINER_UNSUPPORTED })),
+            ("state", json!({ "state": "idle" })),
+        ]
+    );
+    assert!(
+        p.note(Note::LoadRejected {
+            load: latest,
+            code: map::CONTAINER_UNSUPPORTED
+        })
+        .is_empty()
+    );
+    assert!(!p.inner.state.borrow().load_pending);
+
+    let next = LoadId::new();
+    {
+        let mut st = p.inner.state.borrow_mut();
+        st.load = Some(next.clone());
+        st.load_pending = true;
+        st.last_state = PlayerState::Buffering;
+    }
+    assert!(
+        p.note(Note::Loading {
+            load: next.clone(),
+            entry: Some(9)
+        })
+        .is_empty()
+    );
+    assert_eq!(p.inner.state.borrow().expected, Some(9));
+    assert!(!p.inner.state.borrow().load_pending);
+    // A late post-Loading guard error terminates once without another decrement.
+    let terminal = p.note(Note::GuardFailed {
+        load: Some(next.clone()),
+        entry: Some(9),
+    });
+    assert_eq!(
+        terminal.iter().filter(|(name, _)| *name == "error").count(),
+        1
+    );
+    assert!(!p.inner.state.borrow().load_pending);
+    assert!(
+        p.note(Note::GuardFailed {
+            load: Some(next),
+            entry: Some(9)
+        })
+        .is_empty()
+    );
+    assert!(
+        p.note(Note::Ended {
+            entry: 9,
+            reason: ffi::MPV_END_FILE_REASON_ERROR,
+            error: -1
+        })
+        .is_empty()
+    );
+}
+
+#[test]
+fn stopped_or_replaced_loads_ignore_late_guard_failures() {
+    let _serial = serial();
+    let p = Player::new();
+    let old = LoadId::new();
+    let current = LoadId::new();
+    {
+        let mut st = p.inner.state.borrow_mut();
+        st.url = Some(URL.into());
+        st.load = Some(current.clone());
+        st.load_pending = true;
+    }
+    assert!(
+        p.note(Note::Loading {
+            load: old.clone(),
+            entry: Some(3)
+        })
+        .is_empty()
+    );
+    assert!(
+        p.note(Note::GuardFailed {
+            load: Some(old),
+            entry: Some(3)
+        })
+        .is_empty()
+    );
+    assert!(p.inner.state.borrow().load_pending);
+    assert_eq!(p.inner.state.borrow().load, Some(current.clone()));
+    // Stopping fences the late completion of the newer accepted load too.
+    {
+        let mut st = p.inner.state.borrow_mut();
+        st.url = None;
+        st.load = None;
+        st.load_pending = false;
+    }
+    assert!(
+        p.note(Note::LoadRejected {
+            load: current.clone(),
+            code: map::CONTAINER_UNSUPPORTED
+        })
+        .is_empty()
+    );
+    assert!(
+        p.note(Note::GuardFailed {
+            load: Some(current),
+            entry: Some(4)
+        })
+        .is_empty()
+    );
+    assert!(!p.inner.state.borrow().load_pending);
 }
 
 /// A failed file is reported once mpv's log was read: with the server's
@@ -1505,4 +1690,210 @@ fn recorded_media_seeks_while_paused_and_reports_duration_without_reopening() {
     player.set("seek", json!({"token":80,"id":4,"ms":1000}));
     player.set("seek", json!({"token":81,"id":3,"ms":1000}));
     assert_eq!(player.inner.state.borrow().seek_id, 3);
+}
+
+/// A paused decoder must be able to seek and resume a retained recording after
+/// its stalled local response has actually expired, with the same player entry.
+#[test]
+fn a_recording_resumes_by_range_after_its_paused_writer_expires() {
+    let _serial = serial();
+    let Some((dir, gpu)) = rig() else { return };
+    let path = dir.path().join("synthetic-pause-recording.ts");
+    // A padded transport stream stays on disk. Moving video fills the tiny
+    // demuxer packet cache; padding fills TCP buffers without large Rust Vecs.
+    let status = std::process::Command::new("ffmpeg")
+        .args([
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=160x90:rate=25",
+            "-t",
+            "60",
+            "-an",
+            "-c:v",
+            "mpeg2video",
+            "-threads",
+            "1",
+            "-b:v",
+            "1M",
+            "-muxrate",
+            "10M",
+            "-g",
+            "12",
+            "-f",
+            "mpegts",
+        ])
+        .arg(&path)
+        .status()
+        .expect("synthetic recording generator");
+    assert!(status.success());
+    assert!(std::fs::metadata(&path).unwrap().len() > 32 * 1024 * 1024);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let relay = {
+        let _entered = runtime.enter();
+        iptv_net::recording_file::RecordingFile::start(path).unwrap()
+    };
+    let mut player = Player::new();
+    let native = player.inner.mpv.as_ref().unwrap();
+    assert!(native.try_set("demuxer-max-bytes", "16KiB"));
+    assert!(native.try_set("demuxer-max-back-bytes", "0"));
+    player.set("paused", json!(true));
+    player.set(
+        "source",
+        json!({"url":relay.url,"token":82,"live":false,"publicOnly":false}),
+    );
+    assert!(player.inner.create_render());
+    player.wait_state(Some(&gpu), "ready");
+    player.wait_prop(c"pause", "yes");
+    player.wait_picture(&gpu, "decoded synthetic test pattern", |pixel| {
+        !black(pixel)
+    });
+    let entry = player.inner.state.borrow().entry;
+    // The scoped observation proves this is the actual 15-second stalled
+    // guarded downstream response, rather than a fully prefetched file.
+    let write_timeouts = |player: &Player| {
+        let (reply, observed) = std::sync::mpsc::channel();
+        player
+            .inner
+            .worker
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .send(worker::Cmd::WriteTimeouts(reply));
+        observed
+            .recv_timeout(Duration::from_secs(2))
+            .expect("guarded relay observation")
+    };
+    let timeouts = write_timeouts(&player);
+    player.wait(
+        Some(&gpu),
+        "paused guarded playback write deadline",
+        |player| write_timeouts(player) > timeouts,
+    );
+    assert_eq!(player.prop(c"pause").as_deref(), Some("yes"));
+    let ranges = relay.range_requests();
+    player.clear();
+    player.set("paused", json!(false));
+    player.set("seek", json!({"token":82,"id":1,"ms":45000}));
+    player.wait(
+        Some(&gpu),
+        "recording range reopen and resumed decoder",
+        |p| {
+            host::tick(&p.inner);
+            relay.range_requests() > ranges
+                && p.events("timeline").iter().any(|event| {
+                    event["seekId"] == 1 && event["ms"].as_u64().is_some_and(|ms| ms >= 44_500)
+                })
+                && p.inner.state.borrow().playing
+        },
+    );
+    player.wait_picture(&gpu, "resumed synthetic test pattern", |pixel| {
+        !black(pixel)
+    });
+    assert_eq!(
+        player.inner.state.borrow().entry,
+        entry,
+        "range reopen keeps the same native playlist entry"
+    );
+    assert!(player.events("error").is_empty());
+    assert_eq!(player.prop(c"pause").as_deref(), Some("no"));
+}
+
+/// A synthetic pending command demonstrates the current UI-thread join. It is
+/// deliberately not evidence that an ordinary libmpv call can deadlock.
+#[test]
+fn dropping_a_render_owner_waits_for_its_pending_control_command_in_a_bounded_child() {
+    let _serial = serial();
+    const CHILD: &str = "IPTV_PENDING_CONTROL_DROP_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "mpv::tests::dropping_a_render_owner_waits_for_its_pending_control_command_in_a_bounded_child", "--nocapture"])
+            .env(CHILD, "1")
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success(), "pending-control child failed: {status}");
+                return;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("pending-control component removal exceeded its child deadline");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    let Some((dir, gpu)) = rig() else { return };
+    let Some(red) = clip(dir.path(), "red", 3.0) else {
+        return;
+    };
+    let server = Server::start(vec![("/held.ts", Answer::Body(red))]);
+    let mut player = Player::new();
+    player.set("paused", json!(true));
+    player.set(
+        "source",
+        json!({"url":server.url("/held.ts"), "token":83, "live":false}),
+    );
+    assert!(player.inner.create_render());
+    player.wait_state(Some(&gpu), "ready");
+    player.wait_picture(&gpu, "pending-control fixture", |pixel| pixel[0] > 100);
+    assert!(!player.inner.render.get().is_null());
+    let native = Arc::downgrade(player.inner.mpv.as_ref().unwrap());
+    let (entered, pending) = std::sync::mpsc::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    let (dropping, join_entered) = std::sync::mpsc::channel();
+    {
+        let mut worker = player.inner.worker.borrow_mut();
+        let worker = worker.as_mut().unwrap();
+        worker.observe_drop(dropping);
+        worker.send(worker::Cmd::Hold {
+            entered,
+            release: held,
+        });
+    }
+    pending.recv_timeout(Duration::from_secs(2)).unwrap();
+    let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let observed_finished = finished.clone();
+    let held_native = native.clone();
+    let releaser = std::thread::spawn(move || {
+        join_entered.recv_timeout(Duration::from_secs(2)).unwrap();
+        // The UI is inside Worker::drop, which still precedes free_render and
+        // the final native owner release. An independent thread bounds the hold.
+        let started = Instant::now();
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(!observed_finished.load(std::sync::atomic::Ordering::SeqCst));
+        let native = held_native
+            .upgrade()
+            .expect("native owner retained during join");
+        assert!(
+            Arc::strong_count(&native) >= 3,
+            "component and pending worker retain native ownership"
+        );
+        drop(native);
+        let held = started.elapsed();
+        release.send(()).unwrap();
+        held
+    });
+    let started = Instant::now();
+    drop(player); // Actual component owner: joins, frees render, destroys mpv.
+    let elapsed = started.elapsed();
+    finished.store(true, std::sync::atomic::Ordering::SeqCst);
+    let held = releaser.join().unwrap();
+    assert!(
+        elapsed >= held,
+        "UI removal must await the pending control command"
+    );
+    assert!(
+        native.upgrade().is_none(),
+        "the final native owner releases after join/render cleanup"
+    );
+    eprintln!(
+        "synthetic pending-control hold={held:?}, component removal={elapsed:?}; production deadlock not established"
+    );
 }

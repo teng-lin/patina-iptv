@@ -82,6 +82,8 @@ pub struct PlaybackRelay {
     closed: Option<oneshot::Receiver<()>>,
     headers: Arc<Mutex<HeaderMap>>,
     error: Arc<Mutex<Option<FetchErrorKind>>>,
+    #[cfg(any(test, feature = "test-support"))]
+    write_timeouts: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 struct Session {
@@ -97,6 +99,8 @@ struct Session {
     client: reqwest::Client,
     public_client: reqwest::Client,
     policy: PlaybackPolicy,
+    #[cfg(any(test, feature = "test-support"))]
+    write_timeouts: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 /// Cookie persistence is restricted to the exact stream origin, not merely
@@ -272,6 +276,8 @@ impl PlaybackRelay {
         let source_url = url.to_owned();
         let url = map_url(&prefix, &root)?;
         let error = Arc::new(Mutex::new(None));
+        #[cfg(any(test, feature = "test-support"))]
+        let write_timeouts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let session = Arc::new(Session {
             prefix,
             proxy: proxy.clone(),
@@ -282,6 +288,8 @@ impl PlaybackRelay {
             public_client,
             policy,
             error: error.clone(),
+            #[cfg(any(test, feature = "test-support"))]
+            write_timeouts: write_timeouts.clone(),
         });
         let prefix = session.prefix.clone();
         let (stop, mut stopped) = oneshot::channel();
@@ -338,6 +346,8 @@ impl PlaybackRelay {
             closed: Some(closed),
             headers: fields,
             error,
+            #[cfg(any(test, feature = "test-support"))]
+            write_timeouts,
         })
     }
 
@@ -351,6 +361,14 @@ impl PlaybackRelay {
         if let Some(closed) = self.closed.take() {
             let _ = closed.await;
         }
+    }
+
+    /// Number of downstream write deadlines reached by this relay owner.
+    /// Request parsing and upstream read deadlines do not contribute.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn write_timeouts(&self) -> usize {
+        self.write_timeouts
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn url(&self) -> &str {
@@ -522,6 +540,7 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
     // This context is minted only while rewriting an EXT-X-KEY attribute.
     if raw_key || !response.status().is_success() {
         return stream_response(
+            session,
             &mut socket,
             response,
             &[],
@@ -562,6 +581,7 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
             // An ASCII slice of a binary container is not a manifest. Inspect
             // only its full-entity prefix, then retain the requested range.
             return stream_response(
+                session,
                 &mut socket,
                 response,
                 &first,
@@ -574,6 +594,7 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
         upstream_length = full_length;
         if !response.status().is_success() {
             return stream_response(
+                session,
                 &mut socket,
                 response,
                 &[],
@@ -651,12 +672,13 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
             "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: {mime}\r\nContent-Length: {}\r\n\r\n",
             body.len()
         );
-        send_bytes(&mut socket, head.as_bytes()).await?;
+        send_bytes(session, &mut socket, head.as_bytes()).await?;
         if method != "HEAD" {
-            send_bytes(&mut socket, &body).await?;
+            send_bytes(session, &mut socket, &body).await?;
         }
     } else {
         return stream_response(
+            session,
             &mut socket,
             response,
             &first,
@@ -723,6 +745,7 @@ fn response_head(response: &reqwest::Response) -> String {
 }
 
 async fn stream_response(
+    session: &Session,
     socket: &mut TcpStream,
     mut response: reqwest::Response,
     first: &[u8],
@@ -734,13 +757,13 @@ async fn stream_response(
         head.push_str(&format!("Content-Length: {length}\r\n"));
     }
     head.push_str("\r\n");
-    send_bytes(socket, head.as_bytes()).await?;
+    send_bytes(session, socket, head.as_bytes()).await?;
     if head_only {
         return socket.shutdown().await;
     }
-    send_bytes(socket, first).await?;
+    send_bytes(session, socket, first).await?;
     while let Some(chunk) = response.chunk().await.map_err(io::Error::other)? {
-        send_bytes(socket, &chunk).await?;
+        send_bytes(session, socket, &chunk).await?;
     }
     socket.shutdown().await
 }
@@ -813,8 +836,17 @@ fn classify(first: &[u8]) -> Manifest {
     }
 }
 
-async fn send_bytes(socket: &mut TcpStream, bytes: &[u8]) -> io::Result<()> {
-    tokio::time::timeout(Duration::from_secs(15), socket.write_all(bytes)).await?
+async fn send_bytes(session: &Session, socket: &mut TcpStream, bytes: &[u8]) -> io::Result<()> {
+    let result = tokio::time::timeout(Duration::from_secs(15), socket.write_all(bytes)).await;
+    #[cfg(any(test, feature = "test-support"))]
+    if result.is_err() {
+        session
+            .write_timeouts
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    let _ = session;
+    result?
 }
 
 /// What the bytes received so far say about a connection.
