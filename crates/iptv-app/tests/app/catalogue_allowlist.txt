@@ -70,7 +70,6 @@ iptv-app/src/fonts.rs	unpacked in {unpacked_ms} ms, registered {ms} ms after ask
 iptv-app/src/fonts.rs	{size}px Roboto
 iptv-app/src/numbers.rs	{size}px Roboto
 # Generated demo data, shown as a provider's would be.
-iptv-app/src/menu_view.rs	A synthetic programme description for testing the guide. Real descriptions come from the EPG.
 iptv-core/src/guide.rs	Channel {}
 iptv-core/src/guide.rs	Group {:02}
 iptv-core/src/guide.rs	Show {}

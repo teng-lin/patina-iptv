@@ -825,6 +825,17 @@ fn discover(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     }
     step(app.wait_for_gone("id:vod-screen", Duration::from_secs(5)));
     assert_eq!(player(&app), surface, "the same player surface plays it");
+    step(app.wait_until(
+        "selected VOD source published",
+        Duration::from_secs(5),
+        |_| {
+            props
+                .lock()
+                .unwrap()
+                .get("source")
+                .is_some_and(|source| source["url"].as_str().is_some())
+        },
+    ));
     let opened = props.lock().unwrap()["source"].clone();
     assert!(
         opened["url"]
