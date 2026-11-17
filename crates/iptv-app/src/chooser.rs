@@ -282,9 +282,7 @@ fn start_sleep(ui: Ui, minutes: u32) {
         ui.sleep.update(|t| fired = t.fire_if_due(now));
         if fired {
             log::info!("iptv sleep timer: stopping playback");
-            crate::multiview::close(ui);
-            ui.playing.set(None);
-            ui.mode.set(crate::settings::browse_mode());
+            crate::player_keys::stop_playback(ui);
         }
     });
 }

@@ -272,7 +272,7 @@ pub fn back(ui: Ui) -> bool {
 fn begin_text(ui: Ui, kind: Text) {
     update(ui, |s| {
         let value = match kind {
-            Text::Filter => s.members.query.clone(),
+            Text::Filter => s.members.query().to_owned(),
             Text::Rename(g) => s
                 .groups
                 .iter()
@@ -375,10 +375,10 @@ fn labels(s: &Open) -> Vec<String> {
                     "Search · {query}",
                     &[(
                         "query",
-                        if s.members.query.is_empty() {
+                        if s.members.query().is_empty() {
                             tr("all channels")
                         } else {
-                            &s.members.query
+                            s.members.query()
                         }
                         .into(),
                     )],
@@ -659,7 +659,7 @@ fn summary(s: &Open) -> String {
             &[
                 ("selected", s.members.selected.len().into()),
                 ("matching", s.members.visible_len().into()),
-                ("total", s.members.rows.len().into()),
+                ("total", s.members.rows().len().into()),
             ],
         ),
         Page::Delete(_) => tr("Delete this group? Channels are kept.").into(),

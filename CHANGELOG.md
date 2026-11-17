@@ -36,6 +36,15 @@ is below 1.0, a minor release may change behaviour.
 
 ### Fixed
 
+- Keep guide pages, search selections and pending playback attached to their
+  original content when playlists refresh, reorder or are replaced; failed
+  guide reads remain retryable.
+- Recheck parental access when recording requests are accepted and media or
+  guide inspection results are returned, including after a concurrent relock.
+- Bound cancelled guide inspection work and idle recording transfers, preserve
+  signed provider links, and reject invalid guide identifiers and time values.
+- Prevent stale picker and guide-repair completions from replacing newer work,
+  and make Stop and sleep timers cancel pending playback and resume actions.
 - Cancelled imports and stale work from a replaced source cannot publish a
   staged catalogue over committed data. Refused private backup storage is
   removed immediately without changing an existing archive.

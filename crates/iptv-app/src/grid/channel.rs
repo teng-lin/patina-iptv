@@ -53,7 +53,7 @@ pub(super) fn cell(
     };
     let show_logo = move || {
         crate::settings::read(ui);
-        crate::settings::flag(iptv_settings::keys::BoolKey("guide.show_logos"))
+        crate::settings::flag(iptv_settings::keys::GUIDE_SHOW_LOGOS)
     };
     let logo = move || {
         ui.guide_data();
@@ -102,8 +102,7 @@ pub(super) fn cell(
             // The place in the list on screen.
             text(move || {
                 crate::settings::read(ui);
-                if crate::settings::flag(iptv_settings::keys::BoolKey("guide.show_channel_numbers"))
-                {
+                if crate::settings::flag(iptv_settings::keys::GUIDE_SHOW_CHANNEL_NUMBERS) {
                     (at.index() + 1).to_string()
                 } else {
                     String::new()

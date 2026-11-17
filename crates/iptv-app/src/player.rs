@@ -189,6 +189,48 @@ fn clock(at: Option<i64>) -> Clock {
     crate::runtime::playback::clock(now, at)
 }
 
+/// Identity and UTC survive a catalogue reorder or a different guide epoch.
+struct PendingArchive {
+    key: String,
+    at: i64,
+    offset: i32,
+    authority: Option<iptv_guide::playback::ResolutionAuthority>,
+}
+impl PendingArchive {
+    fn capture(schedule: &dyn Schedule, channel: usize, start: i32, offset: i32) -> Option<Self> {
+        Some(Self {
+            key: schedule.channel_key(channel)?,
+            at: crate::guide::unix_of(schedule, start),
+            offset,
+            authority: resolution_authority(schedule, channel),
+        })
+    }
+    fn remap(&self, schedule: &dyn Schedule) -> Option<(usize, Playback)> {
+        let channel = schedule.find_channel(&self.key)?;
+        let authority = resolution_authority(schedule, channel);
+        match (&self.authority, &authority) {
+            (Some(before), Some(after))
+                if before.source() == after.source()
+                    && before.incarnation() == after.incarnation()
+                    && before.config() == after.config() => {}
+            (None, None) => {}
+            _ => return None,
+        }
+        let seconds = self.at.checked_sub(schedule.epoch_unix())?;
+        if seconds.rem_euclid(60) != 0 {
+            return None;
+        }
+        let start = i32::try_from(seconds.div_euclid(60)).ok()?;
+        Some((
+            channel,
+            Playback::CatchUp {
+                start,
+                offset: self.offset,
+            },
+        ))
+    }
+}
+
 fn real_schedule(s: &Rc<dyn Schedule>) -> Option<&EpgSchedule> {
     s.as_any()?.downcast_ref::<EpgSchedule>()
 }
@@ -284,6 +326,10 @@ pub fn start_surface(ui: Ui, surface: usize, channel: usize) -> bool {
 
 /// Nothing plays: the player closes.
 pub fn stop(ui: Ui) {
+    ui.player.resume.set(false);
+    ui.player.early.set(None);
+    ui.pending_zap.set(None);
+    ui.browse_playback.set(Default::default());
     crate::on_demand::flush(ui, false);
     crate::runtime().parental_content_closed();
     ui.player.vod.set(None);
@@ -545,29 +591,53 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
         return;
     }
     let schedule = crate::schedule();
-    // An older day's programme: its real times once its day is paged in.
-    if let Playback::CatchUp { start, .. } = playback
-        && !crate::data::pages::ready(
+    // An older day's programme: capture semantic identity and UTC before
+    // waiting. ScheduleReady can synchronously complete this waiter before
+    // the deferred follow_playing effect has remapped the numeric row.
+    if let Playback::CatchUp { start, offset } = playback {
+        let pending = PendingArchive::capture(&*schedule, channel, start, offset);
+        if !crate::data::pages::ready(
             &crate::runtime(),
             &schedule,
             channel,
             crate::guide::unix_of(&*schedule, start),
-            {
-                move || {
-                    if ui
-                        .player
-                        .stream(surface)
-                        .health
-                        .with_untracked(|h| h.session())
-                        == session
-                    {
-                        open(ui, surface, session);
-                    }
+            move |result| {
+                if ui
+                    .player
+                    .stream(surface)
+                    .health
+                    .with_untracked(|h| h.session())
+                    != session
+                    || (surface == 0 && ui.playback.get_untracked() != playback)
+                {
+                    return;
+                }
+                let target = result
+                    .ok()
+                    .and_then(|()| pending.and_then(|pending| pending.remap(&*crate::schedule())));
+                if let Some((channel, playback)) = target {
+                    batch(|| {
+                        if surface == 0 {
+                            ui.playing.set(Some(channel));
+                            ui.playback.set(playback);
+                        } else {
+                            ui.player.stream(surface).channel.set(Some(channel));
+                        }
+                    });
+                    open(ui, surface, session);
+                } else {
+                    fail(
+                        ui,
+                        surface,
+                        session,
+                        ErrorKind::Unavailable,
+                        crate::i18n::tr("Programme guide could not be loaded").into(),
+                    );
                 }
             },
-        )
-    {
-        return;
+        ) {
+            return;
+        }
     }
     let (archive, offset) = match playback {
         Playback::Live => (None, 0),
@@ -1119,4 +1189,71 @@ pub fn source_ready(ui: Ui, refresh: bool) {
     ui.play(channel, Playback::Live);
     ui.mode.set(ViewMode::Fullscreen);
     ui.show_playing();
+}
+
+#[cfg(test)]
+mod pending_archive_regressions {
+    use super::*;
+    use iptv_providers::{
+        SecretUrl,
+        model::{M3uSourceConfig, SourceConfig},
+    };
+
+    fn guide(reversed: bool, epoch: i64, incarnation: &str) -> EpgSchedule {
+        let parsed = iptv_providers::m3u::parse_m3u(concat!(
+            "#EXTM3U\n",
+            "#EXTINF:-1 tvg-id=\"generated-one\" catchup=\"shift\" catchup-days=\"3\",Generated one\n",
+            "https://example.test/one.ts\n",
+            "#EXTINF:-1 tvg-id=\"generated-two\" catchup=\"shift\" catchup-days=\"3\",Generated two\n",
+            "https://example.test/two.ts\n",
+        ));
+        let mut channels = parsed.channels.items;
+        if reversed {
+            channels.reverse();
+        }
+        let authority = iptv_guide::playback::SourceAuthority::new(
+            7,
+            incarnation.into(),
+            SourceConfig::M3u(M3uSourceConfig {
+                location: SecretUrl::new("https://example.test/generated.m3u"),
+                user_agent: None,
+                referrer: None,
+            }),
+        );
+        EpgSchedule::from_catalog(
+            &parsed.groups,
+            &channels,
+            iptv_epg::GuideStore::default(),
+            epoch,
+        )
+        .with_source_authority(Some(std::sync::Arc::new(authority)))
+    }
+
+    #[test]
+    fn pending_catchup_remaps_identity_and_utc_before_replacement_retry() {
+        let before = guide(false, 1_800_000_000, "generated-original");
+        let pending = PendingArchive::capture(&before, 0, -1800, 73).unwrap();
+        // Simulate the successful waiter running synchronously on ScheduleReady,
+        // while the UI still holds old row 0 and minute -1800.
+        let after = guide(true, before.epoch_unix() + 86400, "generated-original");
+        assert_eq!(before.channel_count(), after.channel_count());
+        assert_ne!(before.channel_key(0), after.channel_key(0));
+        let (row, playback) = pending.remap(&after).unwrap();
+        assert_eq!(row, 1);
+        assert_eq!(before.channel_key(0), after.channel_key(row));
+        let Playback::CatchUp { start, offset } = playback else {
+            panic!("catch-up retry");
+        };
+        assert_eq!(start, -1800 - 1440);
+        assert_eq!(offset, 73);
+        assert_eq!(
+            crate::guide::unix_of(&after, start),
+            crate::guide::unix_of(&before, -1800)
+        );
+        // Matching content/numeric source IDs cannot bind to a recreated source.
+        let recreated = guide(true, after.epoch_unix(), "generated-replacement");
+        assert!(pending.remap(&recreated).is_none());
+        let removed = iptv_core::guide::SyntheticSchedule;
+        assert!(pending.remap(&removed).is_none());
+    }
 }

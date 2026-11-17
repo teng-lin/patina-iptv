@@ -269,7 +269,7 @@ fn row_view(
     };
     let note = move || {
         let settings = crate::settings::read(ui);
-        if row().is_some_and(|row| row.key() == Some(iptv_settings::keys::PIP_ON_LEAVE.0)) {
+        if row().is_some_and(|row| row.key() == Some(iptv_settings::keys::PIP_ON_LEAVE.as_str())) {
             let unavailable = ui.pip.with(|pip| {
                 iptv_core::capabilities::pip(pip, true)
                     .reason()

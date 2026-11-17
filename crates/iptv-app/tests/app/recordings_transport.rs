@@ -266,6 +266,17 @@ fn saved_recording_resumes_seeks_paused_and_starts_again_without_changing_surfac
     );
     step(app.press_key("stop"));
     step(app.wait_for_within("text:Generated group", Duration::from_secs(10)));
+    assert!(!iptv_app::player_has_source(0));
+    assert_eq!(
+        app.screen()
+            .layout_nodes()
+            .into_iter()
+            .filter(|node| node.kind == ViewKind::Native)
+            .map(|node| node.id)
+            .collect::<Vec<_>>(),
+        [player],
+        "recording Stop preserves the native surface"
+    );
     let saved = crate::isolated::open_database(&database)
         .unwrap()
         .recording_progress(id)

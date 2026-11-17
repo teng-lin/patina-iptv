@@ -178,11 +178,11 @@ pub fn offer(key: &str) -> Offer {
     }
     if WIRED.contains(&key)
         || COMMANDS.contains(&key)
-        || (key == keys::LONG_PRESS.0 && crate::input::LONG_PRESS)
-        || (key == keys::PIP_ON_LEAVE.0 && android)
+        || (key == keys::LONG_PRESS.as_str() && crate::input::LONG_PRESS)
+        || (key == keys::PIP_ON_LEAVE.as_str() && android)
     {
         Offer::Active
-    } else if key == keys::PIP_ON_LEAVE.0 {
+    } else if key == keys::PIP_ON_LEAVE.as_str() {
         Offer::Hidden
     } else if READ_ONLY.contains(&key) {
         Offer::ReadOnly
@@ -298,7 +298,7 @@ pub fn bind(ui: Ui) {
         let (theme, timeouts) = (theme_of(&s), timeouts_of(&s));
         let mode = s.choice(keys::BROWSE_MODE, &Target::Global);
         let changed = last_mode.replace(Some(mode)) != Some(mode);
-        let span = s.int(keys::IntKey("guide.visible_minutes"), &Target::Global) as i32;
+        let span = s.int(iptv_settings::keys::GUIDE_VISIBLE_MINUTES, &Target::Global) as i32;
         untracked(|| {
             ui.theme.set(theme);
             if ui.focus.with_untracked(|f| f.visible) != span {

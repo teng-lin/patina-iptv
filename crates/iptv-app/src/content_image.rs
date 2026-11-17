@@ -101,6 +101,7 @@ async fn fetch(url: String, wanted: Reply) -> Option<String> {
         return None;
     }
     if let Some(value) = cache().get(&url) {
+        let _ = wanted.send(value.clone());
         return Some(value);
     }
     let value = match client() {
@@ -297,5 +298,51 @@ mod tests {
             }
         });
         server.join().unwrap();
+    }
+    #[test]
+    fn a_queued_cache_hit_replies_to_the_waiting_view() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let url = "http://art.example.test/queued-cache-marker".to_owned();
+            let value = "data:image/png;base64,synthetic".to_owned();
+            let permits = permits().acquire_many(PARALLEL as u32).await.unwrap();
+            let (sender, mut receiver) = oneshot::channel();
+            let mut waiting = std::pin::pin!(fetch(url.clone(), sender));
+            assert!(
+                std::future::poll_fn(|cx| std::task::Poll::Ready(waiting.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
+            cache().insert(url, value.clone());
+            drop(permits);
+            assert_eq!(waiting.await, Some(value.clone()));
+            assert_eq!(receiver.try_recv().unwrap(), Some(value));
+        });
+    }
+
+    #[test]
+    fn a_cancelled_queued_image_does_not_take_the_cached_reply() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let url = "http://art.example.test/cancelled-cache-marker".to_owned();
+            let permits = permits().acquire_many(PARALLEL as u32).await.unwrap();
+            let (sender, receiver) = oneshot::channel();
+            let mut waiting = std::pin::pin!(fetch(url.clone(), sender));
+            assert!(
+                std::future::poll_fn(|cx| std::task::Poll::Ready(waiting.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
+            cache().insert(url, "data:image/png;base64,synthetic".into());
+            drop(receiver);
+            drop(permits);
+            assert_eq!(waiting.await, None);
+        });
     }
 }

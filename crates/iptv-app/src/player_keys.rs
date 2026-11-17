@@ -162,14 +162,7 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
 /// Long Back (or Stop): nothing plays (multiview's tiles neither); back to
 /// the guide.
 pub(crate) fn stop_playback(ui: Ui) {
-    let multiview = nsh_core::prelude::untracked(|| crate::multiview::session(ui));
     crate::multiview::close(ui);
-    if ui.playing.get_untracked().is_none()
-        && !multiview
-        && ui.player.recorded.with_untracked(Option::is_none)
-    {
-        return;
-    }
     log::info!("iptv player: stopped by the viewer");
     ui.playing.set(None);
     crate::player::stop(ui);

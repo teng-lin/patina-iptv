@@ -112,7 +112,7 @@ thread_local! {
 // --- State ---------------------------------------------------------------------
 
 pub fn open(ui: Ui) {
-    if crate::settings::choice(keys::EnumKey("parental.require_pin_for"))
+    if crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
         == "blocked_content_and_settings"
         && !crate::runtime().parental_settings_allowed()
     {
@@ -209,7 +209,7 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
         Effect::None => {}
         Effect::Set { key, value } => {
             if (key.starts_with("parental.")
-                || crate::settings::choice(keys::EnumKey("parental.require_pin_for"))
+                || crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
                     == "blocked_content_and_settings")
                 && (!crate::runtime().parental_has_pin()
                     || !crate::runtime().parental_settings_allowed())
@@ -244,7 +244,7 @@ pub(crate) fn refresh(ui: Ui) {
 /// Runs a command (`settings::COMMANDS`).
 fn run(ui: Ui, key: &'static str) {
     if key != "parental.change_pin"
-        && crate::settings::choice(keys::EnumKey("parental.require_pin_for"))
+        && crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
             == "blocked_content_and_settings"
         && !crate::runtime().parental_settings_allowed()
     {

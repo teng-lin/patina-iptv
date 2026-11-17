@@ -85,7 +85,7 @@ fn choosing_a_channels_guide_data() {
 
     add_sources(&mut t, &srv);
     lists_and_narrows(&mut t);
-    choices(&mut t);
+    choices(&mut t, &_home.data_dir().join("iptv.sqlite"));
     every_source_off(&mut t);
 }
 
@@ -196,7 +196,7 @@ fn lists_and_narrows(t: &mut T) {
     t.wait("text:Alt Bulletin", 15);
 }
 
-fn choices(t: &mut T) {
+fn choices(t: &mut T, database: &std::path::Path) {
     open_three(t);
     t.wait("text:Now: Alt News (Alt Guide, chosen by you)", 2);
     assert!(t.shows("text:alt-news · Alt Guide · in use"));
@@ -226,8 +226,36 @@ fn choices(t: &mut T) {
     // No guide data.
     open_three(t);
     t.wait("text:Now: Guide One (Main Guide, chosen by you)", 2);
+    let held = iptv_app::hold_writer();
+    assert!(held.wait_entered(std::time::Duration::from_secs(5)));
     t.press("text:No guide data");
-    t.wait("text:Guide data changed", 5);
+    t.key("backspace");
+    back_to_one(t);
+    open_three(t);
+    held.release();
+    let result = t.app.wait_until(
+        "old guide choice committed",
+        std::time::Duration::from_secs(10),
+        |_| {
+            crate::isolated::open_database(database).is_ok_and(|store| {
+                store.sources().is_ok_and(|sources| {
+                    sources.first().is_some_and(|source| {
+                        store.epg_overrides(source.id).is_ok_and(|overrides| {
+                            overrides.iter().any(|(_, choice)| {
+                                matches!(choice, iptv_store_sqlite::EpgOverride::Disabled)
+                            })
+                        })
+                    })
+                })
+            })
+        },
+    );
+    t.ok("old guide choice committed", result);
+    assert!(
+        t.shows(TITLE),
+        "old assignment completion cannot close a reopened picker"
+    );
+    t.key("backspace");
     back_to_one(t);
 
     // A tap beside the panel closes it; Back ends typing, then closes.

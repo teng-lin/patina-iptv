@@ -356,7 +356,7 @@ mod tests {
         let provider = [SecretUrl::new(
             "http://panel.example.test/xmltv.php?password=p",
         )];
-        p.guides = guides::sync_provider(&[], &provider);
+        p.guides = guides::sync_provider(&[], &provider).unwrap();
         assert_eq!(guide_line(&p), "Guide: the provider's own");
         p.guides[0].enabled = false;
         p.guides.push(guides::user_source(

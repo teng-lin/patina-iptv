@@ -1093,7 +1093,7 @@ const STRIP: &str = "text:/M or Esc hide/";
 
 /// Advanced controls remain available through the live info card. Menu and
 /// long OK now open the shared bar, so exercise the actual More-controls route.
-fn strip(app: &mut Headless) {
+pub(super) fn strip(app: &mut Headless) {
     if !seen(app, STRIP) {
         for _ in 0..2 {
             step(app.press_key("m"));

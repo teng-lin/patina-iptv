@@ -34,36 +34,128 @@ pub fn picking(ui: Ui) -> bool {
     ui.search.with(|s| s.as_ref().is_some_and(|s| s.pick))
 }
 
-/// The channel a result adds: a channel's own, a programme's channel
-/// (whenever it airs: the tile plays the channel live).
-pub(super) fn channel_of(id: ResultId) -> usize {
-    match id {
-        ResultId::Channel(c) | ResultId::Programme { channel: c, .. } => c,
-    }
-}
-
 /// Chooses result `id` while picking for multiview: its channel becomes a
 /// new tile and the screen closes. `false` when not picking.
-pub(super) fn choose(ui: Ui, id: ResultId) -> bool {
+pub(super) fn choose(ui: Ui, id: &ResultId) -> bool {
     if !untracked(|| picking(ui)) {
         return false;
     }
-    crate::multiview::picked(ui, channel_of(id));
+    let schedule = crate::schedule();
+    let Some(channel) = resolve_result_channel(&crate::runtime(), id.channel(), &*schedule) else {
+        return true;
+    };
+    crate::multiview::picked(ui, channel);
     close(ui);
     true
 }
 
 #[cfg(test)]
-mod tests {
+mod identity_tests {
     use super::*;
+    use iptv_guide::combined::{CombinedSchedule, SourceSchedule};
+    use iptv_guide::playback::SourceAuthority;
+    use iptv_providers::SecretUrl;
+    use iptv_providers::model::{M3uSourceConfig, SourceConfig};
+
+    fn part(source: i64, incarnation: &str, names: &[&str]) -> SourceSchedule {
+        let mut playlist = String::from("#EXTM3U\n");
+        for name in names {
+            playlist.push_str(&format!(
+                "#EXTINF:-1,Generated {name}\nhttps://media.example.test/{name}\n"
+            ));
+        }
+        let catalog = iptv_providers::m3u::parse_m3u(&playlist);
+        let authority = SourceAuthority::new(
+            source,
+            incarnation.into(),
+            SourceConfig::M3u(M3uSourceConfig {
+                location: SecretUrl::new(format!("https://playlist.example.test/{source}")),
+                user_agent: None,
+                referrer: None,
+            }),
+        );
+        SourceSchedule {
+            id: source,
+            name: format!("Generated source {source}"),
+            schedule: Rc::new(
+                EpgSchedule::from_catalog(
+                    &catalog.groups,
+                    &catalog.channels.items,
+                    Default::default(),
+                    1_800_000_000,
+                )
+                .with_source_authority(Some(std::sync::Arc::new(authority))),
+            ),
+        }
+    }
 
     #[test]
-    fn a_result_adds_its_channel() {
-        assert_eq!(channel_of(ResultId::Channel(4)), 4);
+    fn multiview_and_normal_selection_resolve_the_same_incarnation_qualified_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = crate::runtime::Runtime::new(crate::runtime::Ports::new(
+            directory.path().to_path_buf(),
+            |_| panic!("synthetic search identity lookup must not open a database"),
+        ));
+        let before = CombinedSchedule::new(
+            vec![
+                part(1, "generated-original", &["A", "B"]),
+                part(2, "generated-second", &["A"]),
+            ],
+            1_800_000_000,
+        );
+        owner.prepare_search_channels(1, &before);
+        let hit = owner
+            .search_channels("Generated A", &Default::default(), Default::default())
+            .into_iter()
+            .find(|hit| hit.identity.source == Some(1))
+            .unwrap();
+        let channel = ResultId::Channel(hit.identity.clone());
         let programme = ResultId::Programme {
-            channel: 7,
-            start: 1_000,
+            channel: hit.identity,
+            start: 1_800_000_000,
         };
-        assert_eq!(channel_of(programme), 7);
+        let shifted = CombinedSchedule::new(
+            vec![
+                part(2, "generated-second", &["A"]),
+                part(1, "generated-original", &["B", "A"]),
+            ],
+            1_800_000_000,
+        );
+        for id in [&channel, &programme] {
+            assert_eq!(
+                resolve_result_channel(&owner, id.channel(), &shifted),
+                Some(2)
+            );
+        }
+        assert_eq!(
+            outcome(
+                &channel,
+                None,
+                resolve_result_channel(&owner, channel.channel(), &shifted)
+            ),
+            Outcome::Live(2)
+        );
+        let recreated = CombinedSchedule::new(
+            vec![
+                part(2, "generated-second", &["A"]),
+                part(1, "generated-recreated", &["B", "A"]),
+            ],
+            1_800_000_000,
+        );
+        for id in [&channel, &programme] {
+            assert_eq!(
+                resolve_result_channel(&owner, id.channel(), &recreated),
+                None,
+                "neither normal playback nor multiview may adopt a recreated source"
+            );
+        }
+        assert_eq!(
+            outcome(
+                &channel,
+                None,
+                resolve_result_channel(&owner, channel.channel(), &recreated)
+            ),
+            Outcome::Nothing
+        );
     }
 }

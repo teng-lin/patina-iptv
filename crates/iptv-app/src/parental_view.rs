@@ -399,7 +399,7 @@ pub fn remote(ui: Ui, key: RemoteKey) {
                     .parental
                     .with_untracked(|o| o.as_ref().map_or(0, |o| o.dialog.focus));
                 activate(ui, at);
-            } else if crate::settings::choice(iptv_settings::keys::EnumKey("parental.pin_input"))
+            } else if crate::settings::choice(iptv_settings::keys::PARENTAL_PIN_INPUT)
                 == "number_keys"
             {
                 submit(ui);

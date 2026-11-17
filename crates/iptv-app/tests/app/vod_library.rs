@@ -854,6 +854,41 @@ fn discover(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     step(app.back());
     step(app.wait_for_gone("id:vod-screen", Duration::from_secs(5)));
     assert_eq!(player(&app), surface);
+    assert!(
+        iptv_app::player_has_source(0),
+        "browsing preserves active VOD playback"
+    );
+    let seek = props.lock().unwrap()["seek"].clone();
+    app.engine().control().dispatch_event(surface, EventKind::NativeEvent, EventPayload::Native {
+        name: "timeline".into(),
+        data: json!({"token":token,"seekId":seek["id"],"ms":67000,"durationMs":120000,"seekable":true}),
+    });
+    app.settle();
+    if idiom == nsh_core::platform::Idiom::Pad {
+        step(app.press("id:guide-preview"));
+        crate::cov_data_player::strip(&mut app);
+        step(app.press("text:Sleep timer · Off"));
+        step(app.press_key("down"));
+        step(app.press_key("enter"));
+        step(app.fast_forward(Duration::from_secs(15 * 60)));
+    } else {
+        step(app.press_key("stop"));
+    }
+    step(app.wait_until("VOD stopped", Duration::from_secs(10), |_| {
+        !iptv_app::player_has_source(0)
+    }));
+    assert_eq!(
+        player(&app),
+        surface,
+        "Stop/sleep never detaches the persistent player"
+    );
+    step(
+        app.wait_until("final VOD progress saved", Duration::from_secs(10), |_| {
+            crate::isolated::open_database(&path)
+                .and_then(|store| store.vod_progress(&keys[1]))
+                .is_ok_and(|point| point.position_ms == 67_000)
+        }),
+    );
 }
 
 #[derive(Clone, Copy)]

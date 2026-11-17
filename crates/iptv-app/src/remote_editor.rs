@@ -117,7 +117,11 @@ fn same(s: &Editor, b: &KeyBinding) -> bool {
         && (b.press == PressKind::Long) == (s.press == Press::Long)
 }
 fn store(ui: Ui, bindings: Vec<KeyBinding>) {
-    if let Err(e) = settings::set(ui, keys::KEY_OVERRIDES.0, Value::KeyBindings(bindings)) {
+    if let Err(e) = settings::set(
+        ui,
+        keys::KEY_OVERRIDES.as_str(),
+        Value::KeyBindings(bindings),
+    ) {
         log::warn!("iptv remote: {e}");
     }
 }
