@@ -12,7 +12,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
-import com.longbridge.nsh.DevActivity
+import androidx.core.view.WindowCompat
 import com.longbridge.nsh.NshView
 
 /**
@@ -41,13 +41,15 @@ class TvActivity : Activity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         mark("activity created")
-        DevActivity.edgeToEdge(this)
+        edgeToEdge()
         nsh = NshView(this)
         mark("library loaded")
         initializeDataDirectory(filesDir.absolutePath)
         CredentialKey.initialize(this)
         RecordingHost.attach(this)
-        nsh.useStandaloneLimits()
+        // Use large ceilings for Patina's own Rust root. The 4095 MiB
+        // heap ceiling fits 32-bit Android, and zero keeps the default stack.
+        nsh.setLimits(4095, 0, Int.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE)
         pip = PipHost(this)
         backups = BackupHost(this)
         nsh.registerComponent(BackupComponent.NAME) { context ->
@@ -115,7 +117,7 @@ class TvActivity : Activity() {
 
     override fun onConfigurationChanged(config: Configuration) {
         super.onConfigurationChanged(config)
-        DevActivity.systemBars(this)
+        updateSystemBarAppearance(config)
         immersive()
     }
 
@@ -123,6 +125,23 @@ class TvActivity : Activity() {
         super.onWindowFocusChanged(hasFocus)
         // Dialogs and the system's own windows can bring the bars back.
         if (hasFocus) immersive()
+    }
+
+    /** Draw under the system bars so their transient appearance leaves the layout in place. */
+    @Suppress("DEPRECATION")
+    private fun edgeToEdge() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = 0
+        window.navigationBarColor = 0
+        updateSystemBarAppearance(resources.configuration)
+    }
+
+    private fun updateSystemBarAppearance(config: Configuration) {
+        val night = config.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        val light = night != Configuration.UI_MODE_NIGHT_YES
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = light
+        controller.isAppearanceLightNavigationBars = light
     }
 
     /** Hides the status and navigation bars; a swipe shows them briefly. */
