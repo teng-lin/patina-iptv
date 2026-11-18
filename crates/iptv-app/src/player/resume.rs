@@ -121,6 +121,11 @@ pub fn adopt(ui: Ui) -> bool {
         ui.mode.set(crate::settings::browse_mode());
         return true;
     };
+    if crate::schedule().channel_block(channel) != iptv_core::organization::Block::None {
+        super::stop(ui);
+        ui.mode.set(crate::settings::browse_mode());
+        return true;
+    }
     // Preparing the early stream already owns this request, even before a
     // native source is published. Adopting its catalogue identity keeps that
     // health session and its in-flight preparation.

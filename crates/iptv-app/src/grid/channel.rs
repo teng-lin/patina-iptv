@@ -42,10 +42,13 @@ pub(super) fn cell(
     channel: Memo<Option<usize>>,
     (column, size): (fn() -> f32, Scale),
     number_w: Memo<f32>,
+    editing: Memo<Option<bool>>,
 ) -> impl IntoElement {
     let playing = move || channel.get().is_some() && ui.playing.get() == channel.get();
     let colour = move || {
-        if playing() {
+        if editing.get() == Some(false) {
+            rgb(crate::theme::FOCUSED_TEXT)
+        } else if playing() {
             rgb(ui.app.theme.with(|t| t.guide().playing))
         } else {
             rgb(BRIGHT_TEXT)
@@ -62,24 +65,53 @@ pub(super) fn cell(
             .and_then(|ch| crate::schedule().channel_logo(ch))
             .unwrap_or_else(no_logo)
     };
-    let is_selected = move || ui.focus.with(|f| f.channel == at.index());
+    let is_selected = move || {
+        if crate::organization_view::guide_order_open(ui) {
+            editing.get() == Some(true)
+        } else {
+            ui.focus.with(|f| f.channel == at.index())
+        }
+    };
     view()
         .accessible(true)
         .label(move || {
             ui.guide_data();
             channel.get().map(channel_name).unwrap_or_default()
         })
+        .on_long_press(move || {
+            if crate::organization_view::guide_order_open(ui) {
+                return;
+            }
+            if let Some(ch) = channel.get() {
+                crate::menu_view::open_at(ui, ch, ui.focus.with(|f| f.now));
+            }
+        })
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
-            if cfg!(any(target_os = "linux", target_os = "macos"))
+            if !crate::organization_view::guide_order_open(ui)
+                && cfg!(any(target_os = "linux", target_os = "macos"))
                 && let Some(ch) = channel.get()
             {
                 crate::menu_view::open_at(ui, ch, ui.focus.with(|f| f.now));
             }
         })
-        .role(AccessibilityRole::Button)
+        .role(move || {
+            if crate::organization_view::guide_order_open(ui) {
+                AccessibilityRole::Row
+            } else {
+                AccessibilityRole::Button
+            }
+        })
         .accessibility_state(move || AccessibilityState {
             selected: is_selected(),
             ..Default::default()
+        })
+        .rounded(px(CELL_RADIUS))
+        .bg(move || {
+            if editing.get() == Some(false) {
+                rgb(crate::theme::FOCUSED_CELL)
+            } else {
+                crate::tint(0, 0)
+            }
         })
         .w(move || px(column()))
         .px(move || size.px(PAD))
@@ -88,7 +120,7 @@ pub(super) fn cell(
         .gap(move || size.px(GAP))
         .on_press(move || {
             ui.touched();
-            if crate::grid::closed_columns(ui) {
+            if crate::organization_view::guide_order_open(ui) || crate::grid::closed_columns(ui) {
                 return;
             }
             let view = crate::lists::view(ui);

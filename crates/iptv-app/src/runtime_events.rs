@@ -51,7 +51,10 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         }
         RuntimeEvent::BrowsingAll(all) => ui.app.library.all.set(all),
         RuntimeEvent::ShownSource(source) => ui.app.library.shown.set(source),
-        RuntimeEvent::ScheduleReady(schedule) => crate::set_schedule(&ui, schedule),
+        RuntimeEvent::ScheduleReady(schedule) => {
+            crate::set_schedule(&ui, schedule);
+            crate::player::enforce_guide_blocks(ui);
+        }
         RuntimeEvent::OrganizationReady {
             source,
             ticket,
@@ -77,6 +80,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
                 );
                 crate::runtime().set_schedule(replacement);
                 crate::lists::restore(ui, kept);
+                crate::player::enforce_guide_blocks(ui);
                 ui.app.data_version.update(|version| *version += 1);
             }
         }
@@ -89,7 +93,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::FirstRun => crate::wizard_view::open_first_run(ui),
         RuntimeEvent::Notify(message) => crate::settings_view::notify(crate::i18n::tr(message)),
         RuntimeEvent::ResumeFullscreen => {
-            if !crate::desktop::recorder_only_startup() {
+            if !crate::desktop::recorder_only_startup() && ui.playing.get_untracked().is_some() {
                 ui.mode.set(crate::ViewMode::Fullscreen);
                 ui.show_playing();
             }

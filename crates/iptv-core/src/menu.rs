@@ -10,6 +10,7 @@
 //! built). Labels are the shell's own (i18n), not stored here.
 
 use crate::guide::{Airing, Program};
+use crate::lists::ListId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MenuItem {
@@ -33,14 +34,22 @@ pub enum MenuItem {
     HideChannel,
     AssignEpg,
     ChannelOptions,
+    ProtectChannel,
     // Group.
     ManageFavorites,
     ManageBlocked,
     ManageHidden,
     ReorderChannels,
+    SortChannels,
     CopyChannels,
     CreateGroup,
     GroupOptions,
+    SortGroups,
+    ReorderGroups,
+    ManageGroups,
+    HideGroup,
+    ProtectGroup,
+    ManageParentalBlocks,
 }
 
 /// Section headings (never focused).
@@ -75,6 +84,9 @@ pub struct Menu {
     pub rows: Vec<Row>,
     pub focus: usize,
     pub origin: Origin,
+    /// Stable list context when the menu opened.
+    pub list: Option<ListId>,
+    pub group_context: bool,
 }
 
 impl Menu {
@@ -85,6 +97,8 @@ impl Menu {
             rows,
             focus,
             origin,
+            list: None,
+            group_context: false,
         }
     }
 
@@ -186,6 +200,7 @@ pub fn program_menu(
             HideChannel,
             AssignEpg,
             ChannelOptions,
+            ProtectChannel,
         ]
         .map(action),
     );
@@ -197,9 +212,12 @@ pub fn program_menu(
             BlockGroup,
             ManageHidden,
             ReorderChannels,
+            SortChannels,
             CopyChannels,
             CreateGroup,
             GroupOptions,
+            ProtectGroup,
+            ManageParentalBlocks,
         ]
         .map(action),
     );

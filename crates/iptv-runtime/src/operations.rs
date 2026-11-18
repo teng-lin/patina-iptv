@@ -217,12 +217,64 @@ impl Runtime {
         crate::favorites::played(self, key);
     }
 
+    /// Queues sampled live playback time against the original playlist and channel identity.
+    pub fn add_channel_watch_time(&self, source: SourceId, key: String, elapsed_ms: u64) {
+        crate::favorites::watch_time(self, source, key, elapsed_ms);
+    }
+
+    /// Applies new statistics on entering the guide or selecting a different list.
+    pub fn refresh_watch_order(self: &Rc<Self>) {
+        let dirty = std::mem::take(&mut *self.watch_sort_dirty.borrow_mut());
+        if dirty.is_empty() {
+            return;
+        }
+        let owner = self.clone();
+        self.spawn(async move {
+            if !crate::favorites::flush(&owner).await {
+                owner.watch_sort_dirty.borrow_mut().extend(dirty);
+                return;
+            }
+            let sources = owner
+                .services()
+                .call({
+                    let dirty = dirty.clone();
+                    move |store| {
+                        let mut affected = Vec::new();
+                        for source in dirty {
+                            if store.has_watch_sort(source)? {
+                                affected.push(source);
+                            }
+                        }
+                        Ok(affected)
+                    }
+                })
+                .await;
+            match sources {
+                Ok(sources) => {
+                    for source in sources {
+                        crate::data::organization::changed(&owner, source);
+                    }
+                }
+                Err(_) => owner.watch_sort_dirty.borrow_mut().extend(dirty),
+            }
+        });
+    }
+
     pub fn ordered_favorite_keys(&self) -> Vec<String> {
         crate::favorites::ordered_keys(self)
     }
 
     pub fn reorder_favorite(&self, key: &str, index: usize) {
         crate::favorites::reorder(self, key, index);
+    }
+
+    pub async fn save_favorite_order(
+        &self,
+        source: SourceId,
+        original: Vec<String>,
+        order: Vec<String>,
+    ) -> Result<(), crate::Error> {
+        Ok(crate::favorites::save_order(self, source, original, order).await?)
     }
 
     /// Resolves once the favourite and history edits made so far are saved;

@@ -221,7 +221,15 @@ pub fn key(ui: Ui, action: Action) {
         Action::Stop => return crate::player_keys::stop_playback(ui),
         _ => return,
     };
-    apply(ui, |m, failed| m.key(key, failed));
+    apply(ui, |m, failed| {
+        if key == Key::Ok
+            && let Some(iptv_core::multiview::Dialog::Warning { focus, .. }) = m.dialog()
+            && !can_confirm_pick(m, *focus)
+        {
+            return m.key(Key::Back, failed);
+        }
+        m.key(key, failed)
+    });
 }
 
 /// Back (`lib.rs`): closes a dialog, else leaves to the active tile.
@@ -264,10 +272,17 @@ pub fn paused(ui: Ui, surface: usize) -> bool {
     })
 }
 
-/// The channel list (or the search screen picking for multiview) chose
-/// `channel`; `false` when it was not picking for it.
+fn can_confirm_pick(state: &State, index: usize) -> bool {
+    use iptv_core::multiview::{WARNING_CHOICES, WarningChoice};
+    WARNING_CHOICES.get(index) != Some(&WarningChoice::AddAnyway)
+        || state
+            .pending_pick_channel()
+            .is_none_or(|&channel| crate::player::allow_guide_channel(channel))
+}
+
+/// Whether the picker can close after choosing this channel for multiview.
 pub fn picked(ui: Ui, channel: usize) -> bool {
-    if !picking(ui) {
+    if !picking(ui) || !crate::player::allow_guide_channel(channel) {
         return false;
     }
     log::info!("iptv multiview: picked {channel}");

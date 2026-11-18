@@ -58,12 +58,15 @@ pub struct GuideChannel {
 pub struct Organization {
     pub channels: Vec<(String, String, bool)>,
     pub groups: Vec<(String, String, bool)>,
+    pub blocks: iptv_core::organization::Blocks,
 }
 
 #[derive(Clone, Default)]
 struct OrganizationState {
     names: Vec<String>,
     hidden: Vec<bool>,
+    channel_blocks: Vec<iptv_core::organization::Block>,
+    blocked_groups: std::collections::HashSet<String>,
     order: Vec<usize>,
     groups: Vec<(usize, String)>,
     lists: Option<Vec<(String, String, Vec<usize>)>>,
@@ -729,6 +732,9 @@ impl Shape<'_> {
             state
                 .names
                 .push(pref.map_or_else(|| c.name.clone(), |(_, name, _)| (*name).clone()));
+            state
+                .channel_blocks
+                .push(organization.blocks.channel(c.key.as_str()));
             let group_hidden = self
                 .sources
                 .get(i)
@@ -740,6 +746,7 @@ impl Shape<'_> {
                 .hidden
                 .push(pref.is_some_and(|(_, _, hidden)| *hidden) || group_hidden);
         }
+        state.blocked_groups = organization.blocks.groups;
         state.order = self.playlist_order.to_vec();
         if state.order.len() != self.channels.len() {
             state.order = (0..self.channels.len()).collect();
@@ -924,6 +931,23 @@ impl Schedule for EpgSchedule {
             .and_then(|s| s.hidden.get(channel))
             .copied()
             .unwrap_or(false)
+    }
+
+    fn channel_block(&self, channel: usize) -> iptv_core::organization::Block {
+        self.organization
+            .borrow()
+            .as_ref()
+            .and_then(|state| state.channel_blocks.get(channel))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    fn group_blocked(&self, group: usize) -> bool {
+        let key = self.group_key(group);
+        self.organization
+            .borrow()
+            .as_ref()
+            .is_some_and(|state| state.blocked_groups.contains(&key))
     }
 
     fn channel_number(&self, channel: usize) -> u32 {

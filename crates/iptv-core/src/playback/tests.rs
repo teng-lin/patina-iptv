@@ -518,3 +518,16 @@ fn a_player_state_reads_back_from_its_host_name() {
     assert_eq!(PlayerState::parse("unknown"), None);
     assert_eq!(PlayerState::parse("Ready"), None, "names are lower case");
 }
+
+#[test]
+fn watch_time_counts_forward_playback_bounded_by_the_native_heartbeat() {
+    let mut time = super::WatchTime::default();
+    time.sample(1_000, 40_000);
+    time.sample(2_000, 41_000);
+    time.sample(3_000, 41_000); // Playback did not advance.
+    time.sample(4_000, 5_000); // The native live position was reset.
+    time.sample(14_000, 15_000); // A missing heartbeat leaves the gap uncounted.
+    time.sample(15_000, 20_000); // A position jump counts at most the elapsed wall time.
+    assert_eq!(time.take_ms(), 2_000);
+    assert_eq!(time.pending_ms(), 0);
+}

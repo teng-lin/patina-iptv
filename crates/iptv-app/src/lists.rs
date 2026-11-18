@@ -13,10 +13,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use iptv_core::browse::{Columns, Outcome, RailItem, VodAvailability, rail_items};
+use iptv_core::channel_list::ChannelList as PlayerList;
 use iptv_core::guide::{Focus, Move, Pane, Schedule};
-use iptv_core::lists::{
-    ALL, ChannelList, Entry, FAVORITES, ListId, ListView, entry_count, group_of,
-};
+use iptv_core::lists::{ALL, ChannelList, Entry, ListId, ListView, entry_count, group_of};
 use nsh_core::prelude::*;
 
 use crate::Ui;
@@ -91,6 +90,7 @@ pub fn rebuild(ui: Ui, keep: bool) {
         None
     };
     let catalog = crate::schedule();
+    let player = keep_player_list(ui, &*catalog);
     let entry = ui.focus.with(|f| f.group);
     let list = ChannelList::build(
         entry,
@@ -102,6 +102,7 @@ pub fn rebuild(ui: Ui, keep: bool) {
     let view = view(ui);
     let row = key.and_then(|k| row_of_key(&view, &k));
     ui.focus.update(|f| f.restore(row, &view));
+    restore_player_list(ui, player, &view);
 }
 
 fn row_of_key(view: &ListView, key: &str) -> Option<usize> {
@@ -110,7 +111,10 @@ fn row_of_key(view: &ListView, key: &str) -> Option<usize> {
 
 /// The favourites changed: the Favourites list follows if it is shown.
 pub fn favorites_changed(ui: Ui) {
-    if ui.focus.with_untracked(|f| f.group) == FAVORITES {
+    if matches!(
+        Entry::at(ui.focus.with_untracked(|f| f.group)),
+        Entry::Favorites | Entry::Recent
+    ) {
         rebuild(ui, true);
     }
 }
@@ -120,6 +124,7 @@ pub struct Kept {
     list: ListId,
     key: Option<String>,
     focus: Focus,
+    player: Option<KeptPlayerList>,
 }
 
 /// Before a catalog swap (`set_schedule`).
@@ -130,7 +135,10 @@ pub fn keep(ui: Ui) -> Kept {
 /// A window can observe a catalog replacement after the runtime installed it.
 /// Resolve its old row identities against the catalog that built its list.
 pub(super) fn keep_in(ui: Ui, catalog: Rc<dyn Schedule>) -> Kept {
-    keep_list(ui.focus.get_untracked(), ui.list.get_untracked(), catalog)
+    let player = keep_player_list(ui, &*catalog);
+    let mut kept = keep_list(ui.focus.get_untracked(), ui.list.get_untracked(), catalog);
+    kept.player = player;
+    kept
 }
 
 fn keep_list(focus: Focus, list: Rc<ChannelList>, catalog: Rc<dyn Schedule>) -> Kept {
@@ -139,12 +147,14 @@ fn keep_list(focus: Focus, list: Rc<ChannelList>, catalog: Rc<dyn Schedule>) -> 
         list: ListId::of(focus.group, &**view.catalog()),
         key: view.channel_key(focus.channel),
         focus,
+        player: None,
     }
 }
 
 /// After a catalog swap: the same list and channel by identity, at the new
 /// catalog's now, with the same column focused.
-pub fn restore(ui: Ui, kept: Kept) {
+pub fn restore(ui: Ui, mut kept: Kept) {
+    let player = kept.player.take();
     let (mut focus, list) = restored_list(
         kept,
         crate::schedule(),
@@ -156,6 +166,7 @@ pub fn restore(ui: Ui, kept: Kept) {
     batch(|| {
         ui.list.set(list);
         ui.focus.set(focus);
+        restore_player_list(ui, player, &view(ui));
     });
 }
 
@@ -182,6 +193,37 @@ fn restored_list(
     let row = kept.key.and_then(|key| view.find_channel(&key));
     focus.restore(row, &view);
     (focus, list)
+}
+
+struct KeptPlayerList {
+    state: PlayerList,
+    entry: ListId,
+    key: Option<String>,
+}
+
+fn keep_player_list(ui: Ui, catalog: &dyn Schedule) -> Option<KeptPlayerList> {
+    let state = ui.channels.get_untracked()?;
+    let key = ui
+        .list
+        .with_untracked(|list| list.channel(state.row))
+        .and_then(|channel| catalog.channel_key(channel));
+    Some(KeptPlayerList {
+        state,
+        entry: ListId::of(state.entry, catalog),
+        key,
+    })
+}
+
+fn restore_player_list(ui: Ui, kept: Option<KeptPlayerList>, view: &ListView) {
+    if let Some(kept) = kept {
+        let mut state = kept.state;
+        state.entry = kept.entry.find(&**view.catalog());
+        state.row = kept
+            .key
+            .and_then(|key| view.find_channel(&key))
+            .unwrap_or(0);
+        ui.channels.set(Some(state));
+    }
 }
 
 /// The row of catalog `channel`, selecting the channel's own group first
@@ -308,6 +350,14 @@ pub fn tap_entry(ui: Ui, entry: usize) {
     toggle_playlist(entry);
 }
 
+/// Activates a group from the desktop's pointer. Playlist section
+/// headings fold or unfold, as they do on Enter.
+pub fn activate_entry(ui: Ui, entry: usize) {
+    let outcome = step(ui, |f, cols, _| f.tap_entry(entry, cols));
+    follow(ui, outcome);
+    ok(ui);
+}
+
 /// The player's channel list chose groups column `entry`: the guide shows
 /// its list as its own groups column would (focus at the top, now).
 pub fn preview(ui: Ui, entry: usize) {
@@ -411,7 +461,7 @@ pub fn browser_entry_name(entry: usize) -> String {
 #[cfg(test)]
 mod identity_tests {
     use super::*;
-    use iptv_core::lists::{FIRST_GROUP, RECENT};
+    use iptv_core::lists::{FAVORITES, FIRST_GROUP, RECENT};
     use iptv_guide::{EpgSchedule, GuideChannel, Organization};
 
     fn catalog(groups: &[(&str, &[&str])]) -> EpgSchedule {

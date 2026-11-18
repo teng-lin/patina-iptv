@@ -184,31 +184,6 @@ pub fn allow_play(ui: Ui, channel: usize, playback: crate::Playback) -> bool {
     request(ui, target, move || ui.play(channel, playback));
     false
 }
-pub fn block_channel(ui: Ui, channel: usize) {
-    if let Some(target) = live_target(ui, channel) {
-        block(ui, target, true);
-    }
-}
-pub fn group_target(ui: Ui) -> Option<Target> {
-    let group = ui
-        .focus
-        .with_untracked(|f| f.group.checked_sub(iptv_core::lists::FIRST_GROUP))?;
-    let key = crate::schedule().group_key(group);
-    if key.is_empty() || key.starts_with("playlist:") {
-        return None;
-    }
-    let (source, id) = crate::data::combined::owner(&crate::runtime(), &key)?;
-    Some(Target {
-        source: source.0,
-        kind: ContentKind::Group,
-        id,
-    })
-}
-pub fn block_group(ui: Ui) {
-    if let Some(target) = group_target(ui) {
-        block(ui, target, true);
-    }
-}
 pub fn block(ui: Ui, target: Target, blocked: bool) {
     request(ui, Target::settings(), move || {
         if !crate::runtime().parental_has_pin() {

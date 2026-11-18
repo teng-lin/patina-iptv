@@ -109,7 +109,19 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
                 .mx(px(8.0))
                 .on_press(move || {
                     ui.touched();
-                    crate::lists::tap_entry(ui, at.index());
+                    if idiom() == nsh_core::platform::Idiom::Desktop {
+                        crate::lists::activate_entry(ui, at.index());
+                    } else {
+                        crate::lists::tap_entry(ui, at.index());
+                    }
+                })
+                .on_long_press(move || {
+                    ui.touched();
+                    crate::menu_view::open_group_options(ui, at.index());
+                })
+                .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
+                    ui.touched();
+                    crate::menu_view::open_group_options(ui, at.index());
                 })
                 .child(
                     // Re-read on new data: the recycled cell keeps its index.

@@ -16,6 +16,25 @@ use crate::order::move_to;
 use crate::sources::ensure_source;
 use crate::{SourceId, Store, search};
 
+fn favourite_ids(conn: &Connection, source: SourceId) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT channel_id FROM favourites WHERE source_id = ?1 ORDER BY position",
+    )?;
+    Ok(stmt
+        .query_map([source.0], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?)
+}
+
+fn write_favourite_order(conn: &Connection, source: SourceId, keys: &[String]) -> Result<()> {
+    let mut stmt = conn.prepare_cached(
+        "UPDATE favourites SET position = ?3 WHERE source_id = ?1 AND channel_id = ?2",
+    )?;
+    for (position, key) in keys.iter().enumerate() {
+        stmt.execute(params![source.0, key, position as i64])?;
+    }
+    Ok(())
+}
+
 /// A `channel_overlays` row with nothing customised left.
 const EMPTY_OVERLAY: &str = "custom_name IS NULL AND custom_number IS NULL \
     AND hidden = 0 AND blocked = 0 AND epg_mode IS NULL";
@@ -185,6 +204,11 @@ impl Store {
         Ok(())
     }
 
+    /// All saved favourites in order, including channels absent from the latest import.
+    pub fn favourite_keys(&self, source: SourceId) -> Result<Vec<String>> {
+        favourite_ids(&self.conn, source)
+    }
+
     /// Adds to (at the end) or removes from favourites. Idempotent.
     pub fn set_favourite(&mut self, source: SourceId, id: &ContentId, on: bool) -> Result<()> {
         let now = self.now();
@@ -236,27 +260,43 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let mut list: Vec<String> = {
-            let mut stmt = tx.prepare_cached(
-                "SELECT channel_id FROM favourites WHERE source_id = ?1 ORDER BY position",
-            )?;
-            stmt.query_map([source.0], |r| r.get(0))?
-                .collect::<rusqlite::Result<_>>()?
-        };
+        let mut list = favourite_ids(&tx, source)?;
         let present = present_ids(&tx, source)?;
         if !move_to(&mut list, &present, id.as_str(), index) {
             return Ok(false);
         }
-        {
-            let mut stmt = tx.prepare_cached(
-                "UPDATE favourites SET position = ?3 WHERE source_id = ?1 AND channel_id = ?2",
-            )?;
-            for (position, channel) in list.iter().enumerate() {
-                stmt.execute(params![source.0, channel, position as i64])?;
-            }
-        }
+        write_favourite_order(&tx, source, &list)?;
         tx.commit()?;
         Ok(true)
+    }
+
+    /// Commits an order for the favourites in the current catalog.
+    pub fn save_favourite_order(
+        &mut self,
+        source: SourceId,
+        original: &[String],
+        order: &[String],
+    ) -> Result<()> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        ensure_source(&tx, source)?;
+        let list = favourite_ids(&tx, source)?;
+        let present = present_ids(&tx, source)?;
+        let expected = list.iter().filter(|id| present.contains(*id));
+        if !expected.eq(original.iter())
+            || original.len() != order.len()
+            || original.iter().collect::<HashSet<_>>() != order.iter().collect::<HashSet<_>>()
+        {
+            return Err(crate::StoreError::Unavailable(
+                "the favourites list changed during editing",
+            ));
+        }
+        let mut favorites = iptv_core::favorites::Favorites::from_keys(list);
+        favorites.apply_order(order);
+        write_favourite_order(&tx, source, favorites.keys())?;
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn set_hidden(&mut self, source: SourceId, id: &ContentId, hidden: bool) -> Result<()> {

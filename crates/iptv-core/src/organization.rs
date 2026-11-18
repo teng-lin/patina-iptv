@@ -1,5 +1,76 @@
 //! Identity-based organization editor. Imported items are never deleted.
-use std::collections::BTreeSet;
+use crate::reorder::{LeaveChoice, Reorder};
+use std::collections::{BTreeSet, HashSet};
+
+/// An explicit sort choice for a playlist or guide list.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Sort {
+    Provider,
+    Name,
+    NameDescending,
+    LastWatched,
+    OldestWatched,
+    MostWatched,
+    LeastWatched,
+    #[default]
+    Manual,
+}
+
+impl Sort {
+    pub fn uses_watch_history(self) -> bool {
+        matches!(
+            self,
+            Self::LastWatched | Self::OldestWatched | Self::MostWatched | Self::LeastWatched
+        )
+    }
+}
+
+/// Which operation owns the editor's row selection and direction keys.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Mode {
+    #[default]
+    Options,
+    Visibility,
+    Blocking,
+    Reorder,
+}
+
+/// How a channel's playback is blocked by guide preferences.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Block {
+    #[default]
+    None,
+    Channel,
+    Group,
+}
+
+/// Explicit guide blocks and the channels affected by blocked groups.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Blocks {
+    pub channels: HashSet<String>,
+    pub groups: HashSet<String>,
+    pub members: HashSet<String>,
+}
+
+impl Blocks {
+    /// Direct blocks take precedence when a channel has both kinds of block.
+    pub fn channel(&self, id: &str) -> Block {
+        if self.channels.contains(id) {
+            Block::Channel
+        } else if self.members.contains(id) {
+            Block::Group
+        } else {
+            Block::None
+        }
+    }
+}
+
+/// Which type of guide entry is directly blocked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockKind {
+    Channel,
+    Group,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Item {
@@ -22,6 +93,12 @@ pub enum Action {
     ShowSelected,
     HideAll,
     ShowAll,
+    Blocking,
+    Channels,
+    SortChannels,
+    Reorder,
+    SortOptions,
+    Sort(Sort),
 }
 pub const ACTIONS: &[Action] = &[
     Action::Visibility,
@@ -45,6 +122,13 @@ pub struct Editor {
     pub action: Option<Action>,
     pub text: Option<String>,
     pub selected: BTreeSet<String>,
+    pub mode: Mode,
+    pub sort: Sort,
+    pub sort_focus: Option<Sort>,
+    pub reorder: Option<Reorder<Item>>,
+    pub leave_choice: LeaveChoice,
+    actions: Vec<Action>,
+    sorts: &'static [Sort],
 }
 impl Editor {
     pub fn new(items: Vec<Item>, preferred: Option<String>) -> Self {
@@ -57,43 +141,134 @@ impl Editor {
             action: None,
             text: None,
             selected: BTreeSet::new(),
+            mode: Mode::Options,
+            sort: Sort::Manual,
+            sort_focus: None,
+            reorder: None,
+            leave_choice: LeaveChoice::Save,
+            actions: ACTIONS.to_vec(),
+            sorts: SORTS,
         }
     }
+    /// Sets the actions available for rows in this list.
+    pub fn set_actions(&mut self, actions: Vec<Action>) {
+        self.actions = actions;
+    }
+
+    pub fn set_sorts(&mut self, sorts: &'static [Sort]) {
+        self.sorts = sorts;
+    }
+
+    pub fn sorts(&self) -> &'static [Sort] {
+        self.sorts
+    }
+
+    /// Actions offered for the focused row.
+    pub fn actions(&self) -> &[Action] {
+        &self.actions
+    }
+
+    /// Starts an order draft from the currently displayed order.
+    pub fn start_reorder(&mut self, include: impl Fn(&Item) -> bool) {
+        self.mode = Mode::Reorder;
+        self.action = None;
+        self.sort_focus = None;
+        let focused = self.focused();
+        let items = self
+            .items
+            .iter()
+            .filter(|item| include(item))
+            .cloned()
+            .collect();
+        self.reorder = Some(Reorder::new(items, focused));
+        self.leave_choice = LeaveChoice::Save;
+    }
+
+    /// Merges the reordered rows back into the complete list. Any rows
+    /// omitted from the draft keep their slots in the saved order.
+    pub fn order_ids(&self) -> Option<(Vec<String>, Vec<String>)> {
+        let draft = self.reorder.as_ref()?;
+        let original: Vec<_> = self.items.iter().map(|item| item.id.clone()).collect();
+        let included: HashSet<_> = draft.original().iter().map(|item| &item.id).collect();
+        let mut reordered = draft.items().iter();
+        let order = self
+            .items
+            .iter()
+            .map(|item| {
+                if included.contains(&item.id) {
+                    reordered.next().unwrap_or(item).id.clone()
+                } else {
+                    item.id.clone()
+                }
+            })
+            .collect();
+        Some((original, order))
+    }
+
+    /// Items in the order currently shown, including an unsaved order.
+    pub fn rows(&self) -> &[Item] {
+        self.reorder.as_ref().map_or(&self.items, Reorder::items)
+    }
+
+    /// The focused identity's current position in the displayed list.
+    pub fn focus_index(&self) -> Option<usize> {
+        match &self.reorder {
+            Some(order) => order.focus_index(),
+            None => self
+                .items
+                .iter()
+                .position(|i| Some(&i.id) == self.focus.as_ref()),
+        }
+    }
+
+    /// Focuses a row by identity without opening its actions.
+    pub fn focus_item(&mut self, id: String) {
+        if self.items.iter().any(|i| i.id == id) {
+            self.focus = Some(id);
+        }
+    }
+
     pub fn focused(&self) -> Option<&Item> {
         self.items
             .iter()
             .find(|i| Some(&i.id) == self.focus.as_ref())
     }
     pub fn reload(&mut self, items: Vec<Item>) {
-        let at = self
-            .items
-            .iter()
-            .position(|i| Some(&i.id) == self.focus.as_ref())
-            .unwrap_or(0);
-        self.items = items;
+        // An open draft keeps its original identity set for validation at save.
+        if self.reorder.is_some() {
+            return;
+        }
+        let present: HashSet<_> = items.iter().map(|item| item.id.as_str()).collect();
         if self
             .focus
             .as_ref()
-            .is_none_or(|id| !self.items.iter().any(|i| &i.id == id))
+            .is_none_or(|id| !present.contains(id.as_str()))
         {
-            self.focus = self
-                .items
-                .get(at.min(self.items.len().saturating_sub(1)))
-                .map(|i| i.id.clone());
+            let fallback = self.focus.as_ref().and_then(|id| {
+                let at = self.items.iter().position(|item| &item.id == id)?;
+                self.items[at + 1..]
+                    .iter()
+                    .chain(self.items[..at].iter().rev())
+                    .find(|item| present.contains(item.id.as_str()))
+            });
+            self.focus = fallback
+                .or_else(|| items.first())
+                .map(|item| item.id.clone());
             self.action = None;
-            self.text = None; // A draft belongs to the removed identity, never its neighbor.
+            self.text = None;
         }
-        self.selected
-            .retain(|id| self.items.iter().any(|i| &i.id == id));
+        self.selected.retain(|id| present.contains(id.as_str()));
+        self.items = items;
     }
+
     pub fn step(&mut self, by: isize) {
         if self.text.is_some() {
             return;
         }
-        if let Some(a) = self.action {
-            let at = ACTIONS.iter().position(|v| *v == a).unwrap_or(0);
-            self.action =
-                Some(ACTIONS[(at as isize + by).clamp(0, ACTIONS.len() as isize - 1) as usize]);
+        if let Some(sort) = self.sort_focus {
+            self.sort_focus = Some(step_choice(self.sorts, sort, by));
+        } else if let Some(a) = self.action {
+            self.action = Some(step_choice(&self.actions, a, by));
         } else if !self.items.is_empty() {
             let at = self
                 .items
@@ -110,7 +285,7 @@ impl Editor {
     pub fn open_actions(&mut self, id: String) {
         if self.items.iter().any(|i| i.id == id) {
             self.focus = Some(id);
-            self.action = Some(Action::Visibility);
+            self.action = self.actions.first().copied();
         }
     }
     /// True when a sheet was dismissed; false when the caller should close the editor.
@@ -118,7 +293,7 @@ impl Editor {
         if self.text.take().is_some() {
             return true;
         }
-        self.action.take().is_some()
+        self.sort_focus.take().is_some() || self.action.take().is_some()
     }
     pub fn toggle_selection(&mut self) {
         if let Some(id) = self.focus.clone()
@@ -129,6 +304,37 @@ impl Editor {
         self.action = None;
     }
 }
+/// Choices in the guide's sort picker.
+const SORTS: &[Sort] = &[
+    Sort::Provider,
+    Sort::Name,
+    Sort::NameDescending,
+    Sort::LastWatched,
+    Sort::OldestWatched,
+    Sort::MostWatched,
+    Sort::LeastWatched,
+    Sort::Manual,
+];
+pub const GROUP_SORTS: &[Sort] = &[
+    Sort::Provider,
+    Sort::Name,
+    Sort::NameDescending,
+    Sort::Manual,
+];
+
+/// Choices offered when leaving a modified order.
+pub const LEAVE_CHOICES: [LeaveChoice; 3] =
+    [LeaveChoice::Save, LeaveChoice::Discard, LeaveChoice::Stay];
+
+/// Steps among the available choices, clamping at either end.
+pub fn step_choice<T: Copy + Eq>(choices: &[T], current: T, by: isize) -> T {
+    let at = choices
+        .iter()
+        .position(|choice| *choice == current)
+        .unwrap_or(0);
+    choices[(at as isize + by).clamp(0, choices.len() as isize - 1) as usize]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

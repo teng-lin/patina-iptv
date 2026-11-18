@@ -433,6 +433,7 @@ fn organization_filters_lists_but_preserves_playback_and_group_identity() {
             (m.groups[1].id.as_str().into(), "Other label".into(), false),
             (m.groups[0].id.as_str().into(), "Other label".into(), false),
         ],
+        ..Default::default()
     });
     assert_eq!(s.channel_count(), 3);
     assert_eq!(s.find_channel(&key), Some(0));
@@ -461,6 +462,7 @@ fn organization_filters_lists_but_preserves_playback_and_group_identity() {
     let org = super::Organization {
         channels: Vec::new(),
         groups: vec![(m.groups[0].id.as_str().into(), "News".into(), true)],
+        ..Default::default()
     };
     s.set_organization(org);
     assert_eq!(s.group_count(), 1);
@@ -486,6 +488,7 @@ fn returning_and_new_channels_keep_provider_identity_and_fill_missing_preference
             (a.clone(), "Local A".into(), false),
         ],
         groups: Vec::new(),
+        ..Default::default()
     };
     schedule.set_organization(preferences.clone());
     let list = iptv_core::lists::ChannelList::build(iptv_core::lists::ALL, &schedule, &[], &[]);
@@ -583,6 +586,7 @@ fn a_repeated_group_id_keeps_keys_names_and_starts_together() {
             "Sport first".to_owned(),
             false,
         )],
+        ..Default::default()
     });
     assert_eq!(
         (0..s.group_count())
@@ -613,6 +617,7 @@ fn a_prepared_schedule_crosses_threads_and_matches_one_organised_in_place() {
             (id(0), "Alpha".into(), true),
         ],
         groups: vec![(groups[1].id.as_str().to_owned(), "Games".into(), false)],
+        ..Default::default()
     };
     let lists = vec![("mine".to_owned(), "Mine".to_owned(), vec![id(2), id(1)])];
     let in_place = EpgSchedule::from_catalog(&groups, &channels, GuideStore::default(), NOW);

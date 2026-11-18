@@ -10,8 +10,9 @@
 //! of this module are still queued ([`load`]). The synthetic guide keeps
 //! them in memory only.
 
+use std::cell::RefCell;
 use std::collections::{BTreeSet, VecDeque};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
@@ -19,7 +20,7 @@ use iptv_core::favorites::{Favorites, History, KeyIndex, RECENT_LIMIT, Recent, d
 use iptv_core::guide::Schedule;
 use iptv_providers::ContentId;
 use iptv_providers::model::ContentKind;
-use iptv_store_sqlite::{ChannelOrder, ChannelQuery, SourceId, Store, StoreError};
+use iptv_store_sqlite::{SourceId, Store, StoreError};
 
 #[derive(Default)]
 pub(crate) struct State {
@@ -28,6 +29,7 @@ pub(crate) struct State {
     favorites: Favorites,
     recent: Recent,
     history_revision: u64,
+    pending_order: Weak<RefCell<Vec<FavoriteChange>>>,
     /// The catalog on screen, by key.
     index: KeyIndex,
     /// The source has movies or shows.
@@ -121,6 +123,7 @@ pub(crate) fn refresh_vod_availability(
 /// A store write, in the order made.
 pub(crate) enum Write {
     ClearHistory,
+    SaveOrder(Box<dyn FnOnce(bool) + Send>),
     Barrier(futures_channel::oneshot::Sender<bool>),
     Shutdown(mpsc::Sender<bool>),
     MoveFavourite {
@@ -137,6 +140,11 @@ pub(crate) enum Write {
         source: SourceId,
         key: String,
         at: i64,
+    },
+    WatchTime {
+        source: SourceId,
+        key: String,
+        elapsed_ms: u64,
     },
 }
 
@@ -157,6 +165,11 @@ enum PendingWrite {
         source: SourceId,
         key: String,
         at: i64,
+    },
+    WatchTime {
+        source: SourceId,
+        key: String,
+        elapsed_ms: u64,
     },
 }
 
@@ -221,23 +234,15 @@ pub async fn prepare_source(
         } else {
             any_enabled_vod(store).ok()
         };
-        let rows = store.load_channels(
-            id,
-            &ChannelQuery {
-                favourites_only: true,
-                include_hidden: true,
-                order: ChannelOrder::Effective,
-                ..ChannelQuery::default()
-            },
-        )?;
+        let keys = store.favourite_keys(id)?;
         let recent = store.recent(Some(id), Some(ContentKind::Live), RECENT_LIMIT as u32)?;
-        Ok(((has_vod, any_vod), rows, recent))
+        Ok(((has_vod, any_vod), keys, recent))
     })
     .await;
     if !services.is_current() || owner.generation.get() != generation {
         return None;
     }
-    let ((has_vod, any_vod), rows, recent) = match loaded {
+    let ((has_vod, any_vod), keys, recent) = match loaded {
         Ok(loaded) => loaded,
         Err(error) => {
             log::warn!("iptv favourites: store unavailable ({error})");
@@ -258,11 +263,9 @@ pub async fn prepare_source(
                 return;
             }
             state.source = source;
+            state.pending_order = Weak::new();
             state.combined_sources.clear();
-            state.favorites = Favorites::from_keys(
-                rows.into_iter()
-                    .map(|row| row.channel.id.as_str().to_owned()),
-            );
+            state.favorites = Favorites::from_keys(keys);
             state.recent = Recent::from_keys(
                 recent
                     .into_iter()
@@ -294,17 +297,11 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
                     Ok(available) => has_vod |= available,
                     Err(_) => availability_known = false,
                 }
-                let rows = store.load_channels(
-                    source.id,
-                    &ChannelQuery {
-                        favourites_only: true,
-                        include_hidden: true,
-                        ..Default::default()
-                    },
-                )?;
                 favorites.extend(
-                    rows.into_iter()
-                        .map(|row| (source.id, row.channel.id.as_str().to_owned())),
+                    store
+                        .favourite_keys(source.id)?
+                        .into_iter()
+                        .map(|key| (source.id, key)),
                 );
             }
         }
@@ -345,6 +342,7 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
                     .map(|(source, key)| qualified_key(source.0, &key)),
             );
             state.source = None;
+            state.pending_order = Weak::new();
             state.combined_sources = ids.clone();
             state.favorites = Favorites::from_keys(keys);
             if previous != ids && state.history_revision == history_revision {
@@ -460,10 +458,34 @@ pub fn toggle(owner: &super::Runtime, channel: usize) {
     });
 }
 
+enum FavoriteChange {
+    Set { key: String, on: bool },
+    Move { key: String, index: usize },
+}
+
+impl FavoriteChange {
+    fn apply(self, favorites: &mut Favorites) {
+        match self {
+            Self::Set { key, on } => {
+                favorites.set(&key, on);
+            }
+            Self::Move { key, index } => {
+                favorites.move_key(&key, index);
+            }
+        }
+    }
+}
+
 fn set_key(owner: &super::Runtime, key: &str, on: bool) {
     let source = owner.favorites.with(|s| {
         let mut s = s.borrow_mut();
         if s.favorites.set(key, on) {
+            if let Some(changes) = s.pending_order.upgrade() {
+                changes.borrow_mut().push(FavoriteChange::Set {
+                    key: key.to_owned(),
+                    on,
+                });
+            }
             write_owner(&s, key)
         } else {
             None
@@ -482,6 +504,7 @@ pub fn played(owner: &super::Runtime, key: &str) {
         write_owner(&s, key)
     });
     if let Some((source, key)) = source {
+        owner.watch_sort_dirty.borrow_mut().insert(source);
         send(
             owner,
             Write::Watched {
@@ -491,6 +514,18 @@ pub fn played(owner: &super::Runtime, key: &str) {
             },
         );
     }
+}
+
+pub(crate) fn watch_time(owner: &super::Runtime, source: SourceId, key: String, elapsed_ms: u64) {
+    owner.watch_sort_dirty.borrow_mut().insert(source);
+    send(
+        owner,
+        Write::WatchTime {
+            source,
+            key,
+            elapsed_ms,
+        },
+    );
 }
 
 fn send(owner: &super::Runtime, write: Write) {
@@ -518,6 +553,10 @@ fn send(owner: &super::Runtime, write: Write) {
 
 /// Clear in writer order so older queued plays cannot resurrect deleted history.
 pub fn clear_history(owner: &super::Runtime) -> impl std::future::Future<Output = bool> + use<> {
+    owner
+        .watch_sort_dirty
+        .borrow_mut()
+        .extend(owner.shown_sources());
     send(owner, Write::ClearHistory);
     let (tx, rx) = futures_channel::oneshot::channel();
     send(owner, Write::Barrier(tx));
@@ -577,6 +616,11 @@ fn write_all(
             PendingWrite::Favourite { source, key, on } => {
                 store.set_favourite(source, &ContentId::from_stored(key), on)
             }
+            PendingWrite::WatchTime {
+                source,
+                key,
+                elapsed_ms,
+            } => store.add_channel_watch_time(source, &ContentId::from_stored(key), elapsed_ms),
             PendingWrite::Watched { source, key, at } => store.record_watch(
                 source,
                 &ContentId::from_stored(key),
@@ -621,6 +665,7 @@ fn write_all_with(rx: Receiver<Write>, mut persist: impl FnMut(&PendingWrite) ->
                     pending.push_back(PendingWrite::ClearHistory);
                     None
                 }
+                Write::SaveOrder(save) => Some(save),
                 Write::Barrier(done) => Some(Box::new(move |saved| {
                     let _ = done.send(saved);
                 })),
@@ -633,6 +678,18 @@ fn write_all_with(rx: Receiver<Write>, mut persist: impl FnMut(&PendingWrite) ->
                 }
                 Write::Favourite { source, key, on } => {
                     pending.push_back(PendingWrite::Favourite { source, key, on });
+                    None
+                }
+                Write::WatchTime {
+                    source,
+                    key,
+                    elapsed_ms,
+                } => {
+                    pending.push_back(PendingWrite::WatchTime {
+                        source,
+                        key,
+                        elapsed_ms,
+                    });
                     None
                 }
                 Write::Watched { source, key, at } => {
@@ -670,6 +727,12 @@ pub fn reorder(owner: &super::Runtime, key: &str, index: usize) {
     let write = owner.favorites.with(|s| {
         let mut s = s.borrow_mut();
         if s.favorites.move_key(key, index) {
+            if let Some(changes) = s.pending_order.upgrade() {
+                changes.borrow_mut().push(FavoriteChange::Move {
+                    key: key.to_owned(),
+                    index,
+                });
+            }
             move_write(&s, key, index)
         } else {
             None
@@ -680,6 +743,65 @@ pub fn reorder(owner: &super::Runtime, key: &str, index: usize) {
     }
     publish(owner);
     owner.emit(super::RuntimeEvent::FavoriteOrderChanged);
+}
+
+pub(crate) async fn save_order(
+    owner: &super::Runtime,
+    source: SourceId,
+    original: Vec<String>,
+    order: Vec<String>,
+) -> Result<(), StoreError> {
+    let changes = Rc::new(RefCell::new(Vec::new()));
+    let mut updated = owner.favorites.with(|state| {
+        let mut state = state.borrow_mut();
+        if state.source != Some(source) || state.pending_order.upgrade().is_some() {
+            return Err(StoreError::Unavailable(
+                "the favourites list changed during editing",
+            ));
+        }
+        state.pending_order = Rc::downgrade(&changes);
+        Ok(state.favorites.clone())
+    })?;
+    updated.apply_order(&order);
+
+    let (done, result) = futures_channel::oneshot::channel();
+    let services = owner.services();
+    let pending = unsaved(owner);
+    send(
+        owner,
+        Write::SaveOrder(Box::new(move |prior_saved| {
+            let result = if prior_saved {
+                services
+                    .blocking(move |store| store.save_favourite_order(source, &original, &order))
+            } else {
+                Err(StoreError::Unavailable(
+                    "recent favourite edits are not saved",
+                ))
+            };
+            pending.fetch_sub(1, Ordering::AcqRel);
+            let _ = done.send(result);
+        })),
+    );
+    result
+        .await
+        .map_err(|_| StoreError::Unavailable("the favourites order was not saved"))??;
+    let changed = owner.favorites.with(|state| {
+        let mut state = state.borrow_mut();
+        if state.source != Some(source) || !state.pending_order.ptr_eq(&Rc::downgrade(&changes)) {
+            return false;
+        }
+        for change in changes.take() {
+            change.apply(&mut updated);
+        }
+        state.favorites = updated;
+        state.pending_order = Weak::new();
+        true
+    });
+    if changed {
+        publish(owner);
+        owner.emit(super::RuntimeEvent::FavoriteOrderChanged);
+    }
+    Ok(())
 }
 
 /// The store write for a favourite that the list in memory just moved to
@@ -875,6 +997,7 @@ mod writer_tests {
                 return false;
             }
             persisted.push(match write {
+                PendingWrite::WatchTime { .. } => "duration",
                 PendingWrite::ClearHistory => "clear",
                 PendingWrite::Favourite { on, .. } => {
                     assert!(*on);

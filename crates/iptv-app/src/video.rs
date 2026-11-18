@@ -329,6 +329,7 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
         }
         PlayerEvent::Position { ms } => {
             stream.position_ms.set(ms);
+            crate::player::watch_time::observe(ui, surface, ms);
             return;
         }
         PlayerEvent::Timeline {

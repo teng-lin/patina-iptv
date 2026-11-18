@@ -40,6 +40,21 @@ fn latest_snapshot_is_the_fresh_schema() {
 }
 
 #[test]
+fn guide_preferences_survive_reopening_a_v21_store() {
+    use iptv_core::organization::Sort;
+    use iptv_library::OrganizationScope;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("guide-preferences.db");
+    build_old_file(&path, HISTORY.iter().find(|v| v.version == 21).unwrap());
+    let store = Store::open(path).unwrap();
+    let scope = OrganizationScope::GroupChannels(GroupId::from_stored("xt:live-group:1"));
+    assert_eq!(store.guide_sort(SRC, &scope).unwrap(), Sort::Name);
+    assert!(store.guide_channel_blocked(SRC, "xt:live:101").unwrap());
+    assert!(!store.guide_channel_blocked(SRC, "xt:live:102").unwrap());
+}
+
+#[test]
 fn existing_episode_progress_gains_a_resume_identity_when_upgraded() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("generated-v16.sqlite");
@@ -372,6 +387,32 @@ const HISTORY: &[Version] = &[
             "data_v18.sql",
             "data_v19.sql",
             "data_v20.sql",
+        ],
+    },
+    Version {
+        version: 21,
+        data: &[
+            "data_v1.sql",
+            "data_v2.sql",
+            "data_v3.sql",
+            "data_v4.sql",
+            "data_v5.sql",
+            "data_v6.sql",
+            "data_v7.sql",
+            "data_v8.sql",
+            "data_v9.sql",
+            "data_v10.sql",
+            "data_v11.sql",
+            "data_v12.sql",
+            "data_v13.sql",
+            "data_v14.sql",
+            "data_v15.sql",
+            "data_v16.sql",
+            "data_v17.sql",
+            "data_v18.sql",
+            "data_v19.sql",
+            "data_v20.sql",
+            "data_v21.sql",
         ],
     },
 ];

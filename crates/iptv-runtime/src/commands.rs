@@ -134,7 +134,9 @@ fn channel_native(
     services.read(move |store| {
         access.access.policy = crate::parental::policy_settings(&current.settings());
         let target = iptv_core::parental::Target::live(source.0, channel.as_str());
-        if !crate::parental::native_allowed(store, &target, &access)? {
+        if store.guide_channel_blocked(source, channel.as_str())?
+            || !crate::parental::native_allowed(store, &target, &access)?
+        {
             return Ok(None);
         }
         Ok(store
@@ -153,92 +155,78 @@ fn save_search_history_native(
     services.call(move |store| store.set_search_history(&history))
 }
 
-use iptv_core::organization::{Action as Edit, Editor, Item};
+use iptv_core::organization::{Action as Edit, BlockKind, Blocks, Editor, Item, Sort};
 use iptv_guide::Organization;
 use iptv_library::OrganizationScope as Kind;
 use iptv_providers::GroupId;
 use iptv_store_sqlite::{ChannelOrder, OrderScope};
 
-async fn organization_items_native(
-    services: &Services,
+fn organization_rows_in(
+    store: &Store,
     source: SourceId,
-    kind: Kind,
+    kind: &Kind,
     favorites: Vec<String>,
+    sort: Option<Sort>,
 ) -> Result<Vec<Item>, StoreError> {
-    // Edits reload their rows only after the edit's reply: the reader sees it.
-    services
-        .read(move |store| {
-            let org = organization_in(store, source)?;
-            let rows = match kind {
-                Kind::Channels => org.channels,
-                Kind::Groups => org.groups,
-                Kind::Favorites => {
-                    let names: std::collections::HashMap<_, _> = org
-                        .channels
-                        .into_iter()
-                        .map(|(id, name, hidden)| (id, (name, hidden)))
-                        .collect();
-                    favorites
-                        .into_iter()
-                        .filter_map(|id| {
-                            names
-                                .get(&id)
-                                .map(|(name, hidden)| (id.clone(), name.clone(), *hidden))
-                        })
-                        .collect()
-                }
-                Kind::GroupChannels(group) => store
-                    .load_channels(
-                        source,
-                        &ChannelQuery {
-                            scope: ChannelScope::Group(group),
-                            include_hidden: true,
-                            ..Default::default()
-                        },
-                    )?
-                    .into_iter()
-                    .map(|r| (r.channel.id.as_str().to_owned(), r.name, r.hidden))
-                    .collect(),
-                Kind::CustomChannels(group) => store
-                    .load_channels(
-                        source,
-                        &ChannelQuery {
-                            scope: ChannelScope::Custom(group),
-                            include_hidden: true,
-                            ..Default::default()
-                        },
-                    )?
-                    .into_iter()
-                    .map(|r| (r.channel.id.as_str().to_owned(), r.name, r.hidden))
-                    .collect(),
-            };
-            Ok(rows
-                .into_iter()
-                .map(|(id, name, hidden)| Item { id, name, hidden })
-                .collect())
+    if *kind == Kind::Groups {
+        return match sort {
+            Some(sort) => store.guide_groups_with_sort(source, sort),
+            None => store.guide_groups(source),
+        };
+    }
+    let scope = if *kind == Kind::Favorites {
+        &Kind::Channels
+    } else {
+        kind
+    };
+    let rows = match sort {
+        Some(sort) => store.guide_channels_with_sort(source, scope, sort),
+        None => store.ordered_guide_channels(source, scope),
+    }?;
+    if *kind == Kind::Favorites {
+        // The source's favourite writer publishes membership and order optimistically.
+        let mut by_id: std::collections::HashMap<_, _> = rows
+            .into_iter()
+            .map(|row| (row.channel.id.as_str().to_owned(), row))
+            .collect();
+        return Ok(favorites
+            .into_iter()
+            .filter_map(|id| {
+                let row = by_id.remove(&id)?;
+                Some(Item {
+                    id,
+                    name: row.name,
+                    hidden: row.hidden,
+                })
+            })
+            .collect());
+    }
+    Ok(rows
+        .into_iter()
+        .map(|row| Item {
+            id: row.channel.id.as_str().to_owned(),
+            name: row.name,
+            hidden: row.hidden,
         })
-        .await
+        .collect())
 }
 
 pub(crate) fn organization_in(store: &Store, source: SourceId) -> Result<Organization, StoreError> {
     let channels = store
-        .load_channels(
-            source,
-            &ChannelQuery {
-                include_hidden: true,
-                ..Default::default()
-            },
-        )?
+        .ordered_guide_channels(source, &Kind::Channels)?
         .into_iter()
         .map(|r| (r.channel.id.as_str().to_owned(), r.name, r.hidden))
         .collect();
     let groups = store
-        .library_groups(source)?
+        .guide_groups(source)?
         .into_iter()
-        .filter(|r| r.group.kind == iptv_providers::model::ContentKind::Live)
-        .map(|r| (r.group.id.as_str().to_owned(), r.name, r.hidden))
+        .map(|item| (item.id, item.name, item.hidden))
         .collect();
-    Ok(Organization { channels, groups })
+    Ok(Organization {
+        channels,
+        groups,
+        blocks: store.guide_blocks(source)?,
+    })
 }
 fn edit_organization_native(
     services: &Services,
@@ -412,9 +400,13 @@ async fn load_organization_native(
 ) -> Result<OrganizationSnapshot, StoreError> {
     services
         .read(move |store| {
-            Ok(OrganizationSnapshot {
-                organization: organization_in(store, source)?,
-                lists: group_lists_in(store, source)?,
+            store.read_snapshot(|store| {
+                let organization = organization_in(store, source)?;
+                let lists = group_lists_in(store, source, &organization.groups)?;
+                Ok(OrganizationSnapshot {
+                    organization,
+                    lists,
+                })
             })
         })
         .await
@@ -424,48 +416,21 @@ async fn load_organization_native(
 fn group_lists_in(
     store: &Store,
     source: SourceId,
+    groups: &[(String, String, bool)],
 ) -> Result<Vec<(String, String, Vec<String>)>, StoreError> {
-    use iptv_store_sqlite::ChannelScope;
-    let mut lists = Vec::new();
-    for g in store
-        .library_groups(source)?
-        .into_iter()
-        .filter(|g| !g.hidden && g.group.kind == iptv_providers::model::ContentKind::Live)
-    {
-        let rows = store.load_channels(
-            source,
-            &ChannelQuery {
-                scope: ChannelScope::Group(g.group.id.clone()),
-                include_hidden: true,
-                ..Default::default()
-            },
-        )?;
-        lists.push((
-            g.group.id.as_str().to_owned(),
-            g.name,
-            rows.into_iter()
-                .map(|r| r.channel.id.as_str().to_owned())
-                .collect(),
-        ));
-    }
-    for g in store.custom_groups(source)? {
-        let rows = store.load_channels(
-            source,
-            &ChannelQuery {
-                scope: ChannelScope::Custom(g.id),
-                include_hidden: true,
-                ..Default::default()
-            },
-        )?;
-        lists.push((
-            format!("custom:{}", g.id.0),
-            g.name,
-            rows.into_iter()
-                .map(|r| r.channel.id.as_str().to_owned())
-                .collect(),
-        ));
-    }
-    Ok(lists)
+    groups
+        .iter()
+        .filter(|(_, _, hidden)| !hidden)
+        .map(|(id, name, _)| {
+            let scope = Kind::group_channels(id);
+            let channels = store
+                .ordered_guide_channels(source, &scope)?
+                .into_iter()
+                .map(|row| row.channel.id.as_str().to_owned())
+                .collect();
+            Ok((id.clone(), name.clone(), channels))
+        })
+        .collect()
 }
 
 fn startup_library_native(
@@ -832,12 +797,125 @@ pub fn organization_items(
     kind: Kind,
     favorites: Vec<String>,
 ) -> impl Future<Output = Result<Vec<Item>, crate::Error>> + use<> {
-    let services = owner.services();
-    async move {
-        organization_items_native(&services, source, kind, favorites)
-            .await
-            .map_err(crate::Error::from)
-    }
+    let result = owner.services().read(move |store| {
+        store.read_snapshot(|store| organization_rows_in(store, source, &kind, favorites, None))
+    });
+    async move { Ok(result.await?) }
+}
+
+/// Returns the saved guide blocks for the editor.
+pub async fn guide_blocks(
+    owner: &crate::Runtime,
+    source: SourceId,
+) -> Result<Blocks, crate::Error> {
+    Ok(owner
+        .services()
+        .read(move |store| store.guide_blocks(source))
+        .await?)
+}
+
+/// Checks the current store before accessing the channel's stream.
+pub async fn guide_channel_blocked(
+    owner: &crate::Runtime,
+    source: SourceId,
+    id: String,
+) -> Result<bool, crate::Error> {
+    Ok(owner
+        .services()
+        .read(move |store| store.guide_channel_blocked(source, &id))
+        .await?)
+}
+
+/// Writes a guide preference without invoking the parental PIN flow.
+pub fn set_guide_block(
+    owner: &crate::Runtime,
+    source: SourceId,
+    kind: BlockKind,
+    id: String,
+    blocked: bool,
+) -> impl Future<Output = Result<(), crate::Error>> + use<> {
+    let result = owner
+        .services()
+        .call(move |store| store.set_guide_block(source, kind, &id, blocked));
+    async move { Ok(result.await?) }
+}
+
+/// One consistent snapshot of a guide editor's rows and preferences.
+#[derive(Debug)]
+pub struct OrganizationItems {
+    pub rows: Vec<Item>,
+    pub sort: Sort,
+    pub blocks: Blocks,
+}
+
+/// Reads the scope and all its visible and hidden items together.
+pub async fn organization_editor(
+    owner: &crate::Runtime,
+    source: SourceId,
+    scope: Kind,
+    favorites: Vec<String>,
+    draft_sort: Option<Sort>,
+) -> Result<OrganizationItems, crate::Error> {
+    Ok(owner
+        .services()
+        .read(move |store| {
+            store.read_snapshot(|store| {
+                Ok(OrganizationItems {
+                    rows: organization_rows_in(store, source, &scope, favorites, draft_sort)?,
+                    sort: store.guide_sort(source, &scope)?,
+                    blocks: store.guide_blocks(source)?,
+                })
+            })
+        })
+        .await?)
+}
+
+/// Publishes a sort preference on the native writer.
+pub fn set_organization_sort(
+    owner: &crate::Runtime,
+    source: SourceId,
+    scope: Kind,
+    sort: Sort,
+) -> impl Future<Output = Result<(), crate::Error>> + use<> {
+    let result = owner
+        .services()
+        .call(move |store| store.set_guide_sort(source, &scope, sort));
+    async move { Ok(result.await?) }
+}
+
+/// Hides a group without changing its channels’ own visibility.
+pub fn hide_group(
+    owner: &crate::Runtime,
+    source: SourceId,
+    id: String,
+) -> impl Future<Output = Result<(), crate::Error>> + use<> {
+    let result = owner
+        .services()
+        .call(move |store| store.hide_group(source, &GroupId::from_stored(&id), true));
+    async move { Ok(result.await?) }
+}
+
+/// Commits a complete reorder against the list the editor opened.
+pub fn save_organization_order(
+    owner: &crate::Runtime,
+    source: SourceId,
+    scope: Kind,
+    original: Vec<String>,
+    order: Vec<String>,
+    expected_sort: Sort,
+    from_custom: bool,
+) -> impl Future<Output = Result<(), crate::Error>> + use<> {
+    let result = owner.services().call(move |store| {
+        store.save_guide_order_from(
+            source,
+            &scope,
+            &original,
+            &order,
+            Some(expected_sort),
+            from_custom,
+        )
+    });
+    async move { Ok(result.await?) }
 }
 
 pub fn edit_organization(

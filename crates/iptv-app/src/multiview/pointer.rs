@@ -26,7 +26,13 @@ pub fn long_press(ui: Ui, index: usize) {
 /// A tap on item `index` of the open dialog.
 pub fn choose(ui: Ui, index: usize) {
     ui.touched();
-    apply(ui, |m, _| m.choose(index));
+    apply(ui, |m, failed| {
+        if super::can_confirm_pick(m, index) {
+            m.choose(index)
+        } else {
+            m.key(iptv_core::multiview::Key::Back, failed)
+        }
+    });
 }
 
 /// The toolbar's Add screen.

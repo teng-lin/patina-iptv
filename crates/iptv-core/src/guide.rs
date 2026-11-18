@@ -120,6 +120,14 @@ pub trait Schedule {
     fn channel_hidden(&self, _channel: usize) -> bool {
         false
     }
+    /// The channel's direct or inherited playback block.
+    fn channel_block(&self, _channel: usize) -> crate::organization::Block {
+        crate::organization::Block::None
+    }
+    /// Whether this group has a direct guide block.
+    fn group_blocked(&self, _group: usize) -> bool {
+        false
+    }
     /// The programme airing at `minute`; gaps without guide data are filled
     /// with placeholder programmes so navigation always has a cell.
     fn program_at(&self, channel: usize, minute: i32) -> Program;

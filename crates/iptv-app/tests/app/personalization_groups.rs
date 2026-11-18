@@ -90,10 +90,12 @@ fn custom_groups_filter_select_copy_move_rename_delete_and_restore_focus() {
     step(app.wait_for("text:Reorder members"));
     step(app.press("text:Reorder members"));
     step(app.wait_for("id:organization-row-1"));
-    step(app.press("id:organization-row-1"));
-    step(app.wait_for("text:Move to first"));
-    step(app.press("text:Move to first"));
-    step(app.back());
+    step(app.drag(
+        "id:reorder-handle-1",
+        nsh_core::geometry::point(nsh_core::prelude::px(0.0), nsh_core::prelude::px(-52.0)),
+    ));
+    step(app.press("id:organization-screen >> text:Done"));
+    step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
     let s = crate::isolated::open_database(&f.path).unwrap();
     let id = s.custom_groups(f.source).unwrap()[1].id;
     let members = s
@@ -192,4 +194,118 @@ fn a_group_edit_finishes_after_its_editor_is_closed_during_write_contention() {
         Duration::from_secs(10),
     ));
     assert!(!app.shows("id:custom-groups-screen"));
+}
+
+#[test]
+fn guide_group_controls_and_channel_visibility_work_without_a_pin() {
+    let Some(home) = isolated!() else { return };
+    let mut f = start(home, Settings::new(), false);
+    let app = &mut f.app;
+    group(app, "News");
+    let checked = |state| {
+        move |screen: &nsh_testing::Screen| {
+            screen
+                .accessibility_state("id:organization-row-1")
+                .is_ok_and(|row| row.checked == Some(state))
+        }
+    };
+    menu(app, "Manage hidden channels…");
+    step(app.wait_for("text:Show in guide"));
+    step(app.wait_until(
+        "visible channel switch",
+        Duration::from_secs(5),
+        checked(nsh_core::Checked::True),
+    ));
+    step(app.press_key("right"));
+    assert!(checked(nsh_core::Checked::True)(&app.screen()));
+    step(app.press("text:Hide all"));
+    step(app.wait_for("text:Confirm"));
+    step(app.press_key("enter")); // Cancel is the default.
+    step(app.wait_for_gone("text:Confirm", Duration::from_secs(5)));
+    assert!(checked(nsh_core::Checked::True)(&app.screen()));
+    step(app.press("id:organization-row-1"));
+    step(app.wait_until(
+        "hidden channel switch",
+        Duration::from_secs(5),
+        checked(nsh_core::Checked::False),
+    ));
+    step(app.back());
+    step(app.wait_for_gone("text:★ Local B", Duration::from_secs(5)));
+
+    menu(app, "Manage hidden channels…");
+    step(app.wait_until(
+        "hidden channel switch",
+        Duration::from_secs(5),
+        checked(nsh_core::Checked::False),
+    ));
+    step(app.press("id:organization-row-1"));
+    step(app.wait_until(
+        "visible channel switch",
+        Duration::from_secs(5),
+        checked(nsh_core::Checked::True),
+    ));
+    step(app.back());
+    step(app.wait_for("text:★ Local B"));
+
+    menu(app, "Manage blocked channels…");
+    step(app.wait_for("id:organization-row-0 >> text:Unblocked"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:organization-row-0 >> text:Blocked"));
+    assert!(!app.shows("id:parental-screen"));
+    step(app.back());
+    step(app.press_key("enter"));
+    step(app.wait_for("text:Unblock this channel to play it."));
+    menu(app, "Unblock channel");
+    step(app.wait_for("text:Content unblocked"));
+
+    // The desktop's group context can be opened without first entering it.
+    step(app.set_environment("desktop", |env| {
+        env.os = nsh_core::platform::Os::Linux;
+        env.idiom = nsh_core::platform::Idiom::Desktop;
+    }));
+    step(app.set_viewport(nsh_core::Size::new(
+        nsh_core::prelude::px(1280.0),
+        nsh_core::prelude::px(800.0),
+    )));
+    step(app.press_key("tab"));
+    step(app.wait_for("id:guide-groups >> text:News"));
+    step(app.press_key("shift+f10"));
+    step(app.wait_for("id:menu-panel >> text:Group order"));
+    step(app.back());
+    step(app.right_click("id:guide-groups >> text:News"));
+    step(app.wait_for("id:menu-panel >> text:Hide group"));
+    step(app.press("text:Block group"));
+    step(app.wait_for("text:Content blocked"));
+    step(app.press_key("right"));
+    step(app.press_key("enter"));
+    step(app.wait_for("text:Unblock the group to play this channel."));
+    menu(app, "Group options…");
+    step(app.wait_for("text:Unblock group"));
+    step(app.press("text:Unblock group"));
+    step(app.wait_for("text:Content unblocked"));
+
+    menu(app, "Group options…");
+    step(app.press("text:Hide group"));
+    step(app.wait_for_gone("text:★ Local A", Duration::from_secs(5)));
+    menu(app, "Group options…");
+    step(app.press("text:Manage groups"));
+    step(app.wait_for("id:organization-row-0 >> text:Hidden"));
+    step(app.press("id:organization-row-0"));
+    step(app.press("text:Show group"));
+    step(app.wait_for("id:organization-row-0 >> text:Visible"));
+    step(app.back());
+
+    step(app.press_key("tab"));
+    step(app.right_click("id:guide-groups >> text:Sport"));
+    step(app.press("text:Reorder groups"));
+    step(app.wait_for("id:organization-row-1 >> text:Sport"));
+    step(app.press_key("enter"));
+    step(app.press_key("left"));
+    step(app.back());
+    step(app.wait_for("text:Save order"));
+    step(app.press("text:Save order"));
+    step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
+    let store = crate::isolated::open_database(&f.path).unwrap();
+    assert_eq!(store.guide_groups(f.source).unwrap()[0].name, "Sport");
+    assert!(store.parental_credential().unwrap().is_none());
 }

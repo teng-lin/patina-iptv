@@ -236,6 +236,17 @@ pub enum OrganizationScope {
     CustomChannels(CustomGroupId),
 }
 
+impl OrganizationScope {
+    /// Finds the channel list of a provider or custom group by guide identity.
+    pub fn group_channels(id: &str) -> Self {
+        if let Some(id) = id.strip_prefix("custom:").and_then(|id| id.parse().ok()) {
+            Self::CustomChannels(CustomGroupId(id))
+        } else {
+            Self::GroupChannels(GroupId::from_stored(id))
+        }
+    }
+}
+
 /// Source-scoped application query and guide-inspection values.
 pub mod inspection;
 

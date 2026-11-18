@@ -450,6 +450,9 @@ pub fn resume(owner: &Rc<crate::Runtime>) {
                     return;
                 }
                 owner.resume.with(|r| r.set(false));
+                if schedule.channel_block(c) != iptv_core::organization::Block::None {
+                    return;
+                }
                 owner.emit(crate::RuntimeEvent::ResumeChannel(c));
                 owner.emit(crate::RuntimeEvent::ResumeFullscreen);
             }

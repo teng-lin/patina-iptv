@@ -331,6 +331,13 @@ fn library_shortcuts(ui: Ui) -> View {
 fn side(ui: Ui) -> impl IntoElement {
     view()
         .items_end()
+        .opacity(move || {
+            if crate::organization_view::inline_order_open(ui) {
+                0.0_f32
+            } else {
+                1.0
+            }
+        })
         .gap(px(8.0))
         .child(
             text(move || format!("☰  {}", crate::lists::list_name(ui)))
@@ -390,6 +397,7 @@ pub fn header(ui: Ui) -> impl IntoElement {
     });
     view()
         .pt_safe_area()
+        .accessibility_elements_hidden(move || crate::organization_view::guide_order_open(ui))
         .bg(move || ui.surface(ui.app.theme.with(|t| t.background.window)))
         .child(
             view()

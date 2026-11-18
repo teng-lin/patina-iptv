@@ -195,6 +195,8 @@ impl Keymap {
             b(Some(Guide), K::Left, Long, A::ShowGroups),
             b(Some(Guide), K::Back, Long, A::ReturnToPlayer),
             b(Some(Groups), K::Back, Long, A::ReturnToPlayer),
+            b(Some(Groups), K::Ok, Long, A::ShowMenu),
+            b(Some(Context::ChannelList), K::Ok, Long, A::ShowMenu),
             // Ch+/Ch- page the guide's channel list (observed); over video they zap.
             b(Some(Guide), K::ChannelUp, Short, A::PageUp),
             b(Some(Guide), K::ChannelDown, Short, A::PageDown),
@@ -717,10 +719,8 @@ mod tests {
         let k = Keymap::defaults();
         assert!(k.has_long(Guide, RemoteKey::Ok));
         assert!(k.has_long(Guide, RemoteKey::Left));
-        assert!(
-            !k.has_long(Groups, RemoteKey::Ok),
-            "OK is immediate in the group list"
-        );
+        assert!(k.has_long(Groups, RemoteKey::Ok));
+        assert!(k.has_long(Context::ChannelList, RemoteKey::Ok));
         assert!(
             !k.has_long(Guide, RemoteKey::Down),
             "directions scroll on repeat"

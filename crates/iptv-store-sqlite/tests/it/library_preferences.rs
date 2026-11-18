@@ -249,3 +249,259 @@ fn deleting_playlist_forgets_its_collapsed_section_before_source_id_reuse() {
             .contains(&replacement.0)
     );
 }
+
+#[test]
+fn guide_order_is_scoped_and_rejects_a_stale_draft() {
+    use iptv_core::organization::Sort;
+    use iptv_library::OrganizationScope;
+
+    let mut store = Store::open_in_memory().unwrap();
+    let source = store.add_source(&m3u_source("Generated")).unwrap();
+    let cat = live_catalog(8, 2);
+    replace(&mut store, source, &cat);
+    let scope = OrganizationScope::GroupChannels(group(0).id);
+    let groups = |store: &Store| {
+        store
+            .guide_groups(source)
+            .unwrap()
+            .into_iter()
+            .map(|item| item.id)
+            .collect::<Vec<_>>()
+    };
+    let channels = |store: &Store, scope: &OrganizationScope| {
+        store
+            .ordered_guide_channels(source, scope)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.channel.id.as_str().to_owned())
+            .collect::<Vec<_>>()
+    };
+    let original = channels(&store, &scope);
+    let all = channels(&store, &OrganizationScope::Channels);
+    let custom = store.create_custom_group(source, "Alpha").unwrap();
+    store
+        .set_guide_sort(source, &OrganizationScope::Groups, Sort::Name)
+        .unwrap();
+    let names = groups(&store);
+    assert_eq!(names[0], format!("custom:{}", custom.0));
+    let reversed: Vec<_> = names.iter().rev().cloned().collect();
+    store
+        .save_guide_order(source, &OrganizationScope::Groups, &names, &reversed)
+        .unwrap();
+    assert_eq!(groups(&store), reversed);
+
+    store
+        .rename_channel(
+            source,
+            &iptv_providers::ContentId::from_stored(&original[1]),
+            Some("AAA"),
+        )
+        .unwrap();
+    store.set_guide_sort(source, &scope, Sort::Name).unwrap();
+    let sorted = channels(&store, &scope);
+    assert_eq!(sorted[0], original[1]);
+    assert!(
+        store
+            .save_guide_order(source, &scope, &original, &original)
+            .is_err()
+    );
+    assert_eq!(store.guide_sort(source, &scope).unwrap(), Sort::Name);
+    store
+        .save_guide_order(source, &scope, &sorted, &original)
+        .unwrap();
+    replace(&mut store, source, &cat);
+    assert_eq!(store.guide_sort(source, &scope).unwrap(), Sort::Manual);
+    assert_eq!(channels(&store, &scope), original);
+    assert_eq!(channels(&store, &OrganizationScope::Channels), all);
+    assert_eq!(groups(&store), reversed);
+}
+
+#[test]
+fn guide_blocking_is_inherited_across_membership_and_independent_of_parental_locks() {
+    use iptv_core::organization::{Block, BlockKind};
+    use iptv_core::parental::Target;
+
+    let mut store = Store::open_in_memory().unwrap();
+    let source = store.add_source(&m3u_source("Generated one")).unwrap();
+    let another = store.add_source(&m3u_source("Generated two")).unwrap();
+    let cat = live_catalog(4, 2);
+    replace(&mut store, source, &cat);
+    replace(&mut store, another, &cat);
+    let channel = &cat.channels[0];
+    let parent = &channel.groups[0];
+    let id = channel.id.as_str();
+    let custom = store
+        .create_custom_group(source, "Generated custom group")
+        .unwrap();
+    store.add_to_custom_group(custom, &channel.id).unwrap();
+    let custom_key = format!("custom:{}", custom.0);
+    let parental = Target::live(source.0, id);
+    store.set_parental_blocked(&parental, true).unwrap();
+    store
+        .set_guide_block(source, BlockKind::Group, parent.as_str(), true)
+        .unwrap();
+    store
+        .set_guide_block(source, BlockKind::Group, &custom_key, true)
+        .unwrap();
+    store
+        .set_guide_block(source, BlockKind::Channel, id, true)
+        .unwrap();
+    assert_eq!(
+        store.guide_blocks(source).unwrap().channel(id),
+        Block::Channel
+    );
+    store
+        .set_guide_block(source, BlockKind::Channel, id, false)
+        .unwrap();
+    assert_eq!(
+        store.guide_blocks(source).unwrap().channel(id),
+        Block::Group
+    );
+    assert!(store.guide_channel_blocked(source, id).unwrap());
+    assert!(!store.guide_channel_blocked(another, id).unwrap());
+    store
+        .set_guide_block(source, BlockKind::Group, parent.as_str(), false)
+        .unwrap();
+    assert!(store.guide_channel_blocked(source, id).unwrap());
+    store
+        .set_guide_block(source, BlockKind::Group, &custom_key, false)
+        .unwrap();
+    assert!(!store.guide_channel_blocked(source, id).unwrap());
+    assert!(store.parental_target_blocked(&parental).unwrap());
+    assert!(store.parental_credential().unwrap().is_none());
+
+    // Deleting a custom group retires its preferences before SQLite can reuse its id.
+    use iptv_core::organization::Sort;
+    use iptv_library::OrganizationScope;
+    let scope = OrganizationScope::CustomChannels(custom);
+    store
+        .set_guide_block(source, BlockKind::Group, &custom_key, true)
+        .unwrap();
+    store.set_guide_sort(source, &scope, Sort::Name).unwrap();
+    store
+        .hide_group(
+            source,
+            &iptv_providers::GroupId::from_stored(&custom_key),
+            true,
+        )
+        .unwrap();
+    assert!(store.delete_custom_group(custom).unwrap());
+    assert_eq!(
+        store.create_custom_group(source, "Replacement").unwrap(),
+        custom
+    );
+    store.add_to_custom_group(custom, &channel.id).unwrap();
+    assert!(!store.guide_channel_blocked(source, id).unwrap());
+    assert_eq!(store.guide_sort(source, &scope).unwrap(), Sort::Manual);
+    assert!(
+        !store
+            .guide_groups(source)
+            .unwrap()
+            .iter()
+            .find(|item| item.id == custom_key)
+            .unwrap()
+            .hidden
+    );
+}
+
+#[test]
+fn the_guide_orders_channels_by_name_recency_and_accumulated_watch_time() {
+    use iptv_core::organization::Sort;
+    use iptv_library::OrganizationScope;
+    use iptv_providers::model::ContentKind;
+
+    let mut store = Store::open_in_memory().unwrap();
+    let source = store.add_source(&m3u_source("Generated")).unwrap();
+    let catalog = catalog(4, 1, XT_PASSWORD);
+    replace(&mut store, source, &catalog);
+    let channels = &catalog.channels;
+    for (channel, name) in channels.iter().zip(["A", "B", "C", "D"]) {
+        store
+            .rename_channel(source, &channel.id, Some(name))
+            .unwrap();
+    }
+    for (index, watched_at, elapsed_ms) in [(0, 200, 5_000), (1, 200, 25_000), (2, 300, 12_000)] {
+        let key = &channels[index].id;
+        store
+            .record_watch(source, key, ContentKind::Live, watched_at, None)
+            .unwrap();
+        store
+            .add_channel_watch_time(source, key, elapsed_ms)
+            .unwrap();
+    }
+    store
+        .add_channel_watch_time(source, &channels[0].id, 40_000)
+        .unwrap();
+
+    let scope = OrganizationScope::GroupChannels(group(0).id);
+    for (sort, expected) in [
+        (Sort::Name, ["A", "B", "C", "D"]),
+        (Sort::NameDescending, ["D", "C", "B", "A"]),
+        (Sort::LastWatched, ["C", "B", "A", "D"]),
+        (Sort::OldestWatched, ["A", "B", "C", "D"]),
+        (Sort::MostWatched, ["A", "B", "C", "D"]),
+        (Sort::LeastWatched, ["C", "B", "A", "D"]),
+    ] {
+        store.set_guide_sort(source, &scope, sort).unwrap();
+        assert_eq!(store.guide_sort(source, &scope).unwrap(), sort);
+        let names: Vec<_> = store
+            .ordered_guide_channels(source, &scope)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.name)
+            .collect();
+        assert_eq!(names, expected, "{sort:?}");
+    }
+    let original: Vec<_> = store
+        .ordered_guide_channels(source, &scope)
+        .unwrap()
+        .into_iter()
+        .map(|row| row.channel.id.as_str().to_owned())
+        .collect();
+    let mut custom = original.clone();
+    custom.swap(0, 1);
+    // The active playback can change the sorted baseline while editing.
+    store
+        .add_channel_watch_time(source, &channels[2].id, 60_000)
+        .unwrap();
+    store
+        .set_guide_sort(source, &scope, Sort::MostWatched)
+        .unwrap();
+    assert!(
+        store
+            .save_guide_order_from(
+                source,
+                &scope,
+                &original,
+                &custom,
+                Some(Sort::LeastWatched),
+                false
+            )
+            .is_err()
+    );
+    store
+        .set_guide_sort(source, &scope, Sort::LeastWatched)
+        .unwrap();
+    store
+        .save_guide_order_from(
+            source,
+            &scope,
+            &original,
+            &custom,
+            Some(Sort::LeastWatched),
+            false,
+        )
+        .unwrap();
+    assert_eq!(store.guide_sort(source, &scope).unwrap(), Sort::Manual);
+    store
+        .set_guide_sort(source, &scope, Sort::LeastWatched)
+        .unwrap();
+    store.clear_history(Some(source)).unwrap();
+    let names: Vec<_> = store
+        .ordered_guide_channels(source, &scope)
+        .unwrap()
+        .into_iter()
+        .map(|row| row.name)
+        .collect();
+    assert_eq!(names, ["A", "B", "C", "D"]);
+}

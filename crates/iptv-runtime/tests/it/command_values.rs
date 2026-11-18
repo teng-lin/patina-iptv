@@ -5,7 +5,7 @@ use crate::support;
 
 use iptv_core::{
     membership::Member,
-    organization::{Action, Editor, Item},
+    organization::{Action, BlockKind, Blocks, Editor, Item, Sort},
 };
 use iptv_library::{ChannelScope, CustomGroup, CustomGroupId, OrganizationScope, SourceId};
 use iptv_providers::ContentId;
@@ -43,10 +43,17 @@ fn every_public_command_returns_its_declared_application_value() {
     check!(transfer_custom_members(source, None, group, vec![content()], false) => usize);
     check!(delete_custom_group(group) => ());
     check!(hide_channel(source, "generated-channel".into()) => ());
+    check!(hide_group(source, "generated-group".into()) => ());
     check!(remember_combined_channel("generated-channel".into()) => ());
     check!(channel(source, content()) => Option<PlaybackChannel>);
     check!(save_search_history(vec!["Generated".into()]) => ());
     check!(organization_items(source, scope(), Vec::new()) => Vec<Item>);
+    check!(organization_editor(source, scope(), Vec::new(), None) => commands::OrganizationItems);
+    check!(guide_blocks(source) => Blocks);
+    check!(guide_channel_blocked(source, "generated-channel".into()) => bool);
+    check!(set_guide_block(source, BlockKind::Channel, "generated-channel".into(), true) => ());
+    check!(set_organization_sort(source, scope(), Sort::Name) => ());
+    check!(save_organization_order(source, scope(), Vec::new(), Vec::new(), iptv_core::organization::Sort::Manual, false) => ());
     check!(edit_organization(source, scope(), Editor::new(Vec::new(), None), item(), Action::Later) => ());
     check!(favorite_provider_order(source, vec!["generated-channel".into()]) => Vec<String>);
     check!(rename_organization_item(source, scope(), "generated-channel".into(), "Generated".into()) => ());

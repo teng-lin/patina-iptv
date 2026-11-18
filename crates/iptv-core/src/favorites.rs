@@ -85,6 +85,27 @@ impl Favorites {
         true
     }
 
+    /// Replaces the order of these members. Retains any other keys in
+    /// place, including channels a provider has temporarily removed.
+    pub fn apply_order(&mut self, order: &[String]) {
+        use std::collections::HashSet;
+
+        let present: HashSet<_> = self.keys.iter().collect();
+        let mut reordered = order.iter().filter(|key| present.contains(key));
+        let included: HashSet<_> = order.iter().collect();
+        self.keys = self
+            .keys
+            .iter()
+            .map(|key| {
+                if included.contains(key) {
+                    reordered.next().unwrap_or(key).clone()
+                } else {
+                    key.clone()
+                }
+            })
+            .collect();
+    }
+
     /// The favourites as catalog channels: the Favourites list, in order.
     pub fn channels(&self, index: &KeyIndex) -> Vec<usize> {
         index.channels(&self.keys)

@@ -256,6 +256,7 @@ pub struct Ui {
     /// The favourites editor, when open.
     pub editor: Signal<Option<FavoritesEditor>>,
     pub organization: Signal<Option<organization_view::Open>>,
+    organization_generation: Signal<u64>,
     pub custom_groups: Signal<Option<custom_groups::Open>>,
     pub remote_editor: Signal<Option<iptv_nav::remap::Editor>>,
     /// The search screen, while open (also while a result it chose plays).
@@ -361,6 +362,7 @@ impl Ui {
             chooser: signal(None),
             editor: signal(None),
             organization: signal(None),
+            organization_generation: signal(0),
             custom_groups: signal(None),
             remote_editor: signal(None),
             search: signal(None),
@@ -417,6 +419,9 @@ impl Ui {
             // A past programme plays from the archive when the channel has
             // one that reaches it; otherwise OK leaves the guide as it is.
             Airing::Ended if in_archive(channel, program, now) => {
+                if !player::allow_guide_channel(channel) {
+                    return;
+                }
                 self.play(
                     channel,
                     Playback::CatchUp {
@@ -441,6 +446,9 @@ impl Ui {
 
     /// Starts `channel` live or from the archive.
     pub fn play(&self, channel: usize, playback: Playback) {
+        if !player::allow_guide_channel(channel) {
+            return;
+        }
         if self.player_surface == 0
             && self
                 .playing
@@ -823,6 +831,7 @@ fn ready_app() -> impl IntoElement {
     data::start(ui);
     time::start(ui);
     player::bind(ui);
+    player::watch_time::bind(ui);
     data::pages::bind(ui);
     play_bar::bind(ui);
     lists::bind(ui);
@@ -918,10 +927,13 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
             view()
                 .test_id("guide-ui")
                 .flex_1()
-                .accessibility_elements_hidden(move || fullscreen() || ui.any_overlay_open())
+                .accessibility_elements_hidden(move || {
+                    fullscreen()
+                        || (ui.any_overlay_open() && !organization_view::guide_order_accessible(ui))
+                })
                 .opacity(move || if fullscreen() { 0.0_f32 } else { 1.0 })
                 .pointer_events(move || {
-                    if fullscreen() {
+                    if fullscreen() || organization_view::is_open(ui) {
                         PointerEvents::None
                     } else {
                         PointerEvents::Auto

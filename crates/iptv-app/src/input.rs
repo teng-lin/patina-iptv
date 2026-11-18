@@ -88,6 +88,17 @@ pub fn bind(ui: Ui) {
             key_event(ui, &nav, key, phase)
         });
     }
+    if crate::desktop::DESKTOP {
+        on_key("shift+f10", move |_| {
+            if context(&ui) == Context::Groups && ui.focus.with(|f| f.pane == Pane::Groups) {
+                ui.input.set(Input::Keys);
+                let entry = ui.focus.with_untracked(|f| f.group);
+                crate::menu_view::open_group_options(ui, entry);
+            } else {
+                apply(ui, RemoteKey::Menu, Action::ShowMenu, false);
+            }
+        });
+    }
     // Back on a PC keyboard: Escape is the platform's (NSH), Backspace ours
     // (it does not fire while a text field edits).
     on_key("backspace", move |_| {
@@ -422,10 +433,15 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         return;
     }
     match action {
-        // Menu in the groups pane adds a playlist; elsewhere it opens the menu.
         Action::Record => crate::recordings_view::current(ui),
         Action::ShowMenu if ui.focus.with(|f| f.pane) == Pane::Groups => {
-            crate::wizard_view::open_add(ui)
+            let entry = ui.focus.with_untracked(|f| f.group);
+            if (key == RemoteKey::Menu && entry == iptv_core::lists::ALL)
+                || (!crate::menu_view::open_group_options(ui, entry)
+                    && ui.app.library.shown.get_untracked().is_none())
+            {
+                crate::wizard_view::open_add(ui);
+            }
         }
         Action::ShowMenu if ui.focus.with(|f| f.pane) == Pane::Rail => {}
         Action::ShowMenu => crate::menu_view::open(ui),

@@ -303,8 +303,13 @@ impl<T: Clone + Eq> Reorder<T> {
 
     /// Back: leave now when there is nothing to lose, else ask.
     pub fn leave(&mut self) -> Outcome<T> {
+        self.leave_with_changes(false)
+    }
+
+    /// Also confirm when the caller has pending changes outside the row order.
+    pub fn leave_with_changes(&mut self, has_other_changes: bool) -> Outcome<T> {
         match self.phase {
-            Phase::Editing if self.dirty => {
+            Phase::Editing if self.dirty || has_other_changes => {
                 self.phase = Phase::Confirming;
                 Outcome::ConfirmLeave
             }
