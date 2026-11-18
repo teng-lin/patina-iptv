@@ -217,12 +217,12 @@ fn guide_group_controls_and_channel_visibility_work_without_a_pin() {
         checked(nsh_core::Checked::True),
     ));
     step(app.press_key("right"));
-    assert!(checked(nsh_core::Checked::True)(&app.screen()));
+    assert!(checked(nsh_core::Checked::True)(app.screen()));
     step(app.press("text:Hide all"));
     step(app.wait_for("text:Confirm"));
     step(app.press_key("enter")); // Cancel is the default.
     step(app.wait_for_gone("text:Confirm", Duration::from_secs(5)));
-    assert!(checked(nsh_core::Checked::True)(&app.screen()));
+    assert!(checked(nsh_core::Checked::True)(app.screen()));
     step(app.press("id:organization-row-1"));
     step(app.wait_until(
         "hidden channel switch",

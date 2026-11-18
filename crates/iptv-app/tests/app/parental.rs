@@ -173,6 +173,15 @@ fn setup_block_remote_unlock_change_and_recovery() {
     digits(&mut app, "8642");
     continue_entry(&mut app);
     step(app.wait_for_gone("text:Enter parental PIN", Duration::from_secs(20)));
+    step(app.wait_until(
+        "authorized playback opens fullscreen",
+        Duration::from_secs(5),
+        |screen| {
+            screen.layout_nodes().iter().any(|node| {
+                node.kind == nsh_core::ViewKind::Native && node.bounds.size.width.0 > 1900.0
+            })
+        },
+    ));
     // No credential or recovery code is persisted in the public settings JSON.
     let saved = std::fs::read_to_string(fixture.home.data_dir().join("settings.json")).unwrap();
     assert!(!saved.contains(&code));
