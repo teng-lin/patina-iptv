@@ -99,23 +99,6 @@ fn run(ui: Ui) {
             if let Some(channel) = crate::favorites::channel_of(&target.key)
                 && crate::player::allow_guide_channel(channel)
             {
-                if fullscreen
-                    && let Some(lock) = crate::parental_view::live_target(ui, channel)
-                    && !crate::runtime().parental_allowed(&lock)
-                {
-                    // Preserve the requested destination across parental authorization.
-                    crate::parental_view::request(ui, lock.clone(), move || {
-                        if let Some(channel) = crate::favorites::channel_of(&target.key)
-                            && crate::parental_view::live_target(ui, channel) == Some(lock)
-                        {
-                            ui.play(channel, Playback::Live);
-                            if playing_live(ui, channel) {
-                                full(ui);
-                            }
-                        }
-                    });
-                    return;
-                }
                 if !playing_live(ui, channel) {
                     let state = ui.browse_playback.get_untracked();
                     ui.play(channel, Playback::Live);
@@ -132,13 +115,11 @@ fn run(ui: Ui) {
                     {
                         ui.show_playing();
                     }
+                } else if fullscreen {
+                    full(ui);
                 } else if playing_live(ui, channel) {
-                    if fullscreen {
-                        full(ui);
-                    } else {
-                        ui.browse_playback
-                            .update(|state| state.playing(&target.key, ui.now_ms()));
-                    }
+                    ui.browse_playback
+                        .update(|state| state.playing(&target.key, ui.now_ms()));
                 }
             } else if target.surface == Surface::Player {
                 ui.pending_zap.set(None);
