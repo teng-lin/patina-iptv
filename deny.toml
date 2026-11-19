@@ -5,6 +5,7 @@ version = 2
 # NSH font backend before widening font input beyond bundled/system fonts.
 ignore = [
   { id = "RUSTSEC-2026-0192", reason = "Transitive NSH font parser is unmaintained; migration to skrifa tracked for the NSH fork." },
+  { id = "RUSTSEC-2025-0141", reason = "NSH native runners use Syntect and two-face to load bundled syntax definitions through bincode 1.3.3. Remove this maintenance exception when those dependencies drop bincode." },
   # Maintenance notice, not a reported vulnerability; no patched version exists.
   # Used for local-time/DST conversion in recording schedules and by NSH.
   # Revisit by 2026-12-17: migrate these callers and NSH together to jiff.
