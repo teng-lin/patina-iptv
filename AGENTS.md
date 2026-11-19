@@ -14,8 +14,8 @@
   `wasm32-unknown-unknown`.
 - **State lives in the core.** Views render state and send actions; focus is
   restored by content identity, never by list index.
-- **NSH pin.** Use the upstream NSH checkout at `../nsh-patina` and the
-  exact revision in `nsh.rev`. Patina consumes TV input through
+- **NSH pin.** Use the Patina NSH fork (`teng-lin/nsh`, branch `patina`) at
+  `../nsh-patina` and the exact revision in `nsh.rev`. Patina consumes TV input through
   `vendor/nsh-tv` and NSH's public keyboard API.
 - **Minimize test executables.** Each test target costs a separate link. Add
   integration scenarios as modules in an existing harness (`tests/it/` or

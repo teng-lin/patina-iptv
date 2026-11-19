@@ -39,7 +39,7 @@ iptv-settings = { path = "crates/iptv-settings" }
 iptv-epg = { path = "crates/iptv-epg" }
 iptv-guide = { path = "crates/iptv-guide" }
 iptv-search = { path = "crates/iptv-search" }
-# The upstream NSH checkout at the commit in nsh.rev.
+# The Patina NSH fork checkout at the commit in nsh.rev.
 nsh-core = { path = "../nsh-patina/crates/nsh-core" }
 # No editor, highlighting, charts or terminal: an IPTV app shows none
 # (nsh.json "features" keeps them out of the runners too).

@@ -20,7 +20,7 @@ runs:
         $pins >> $env:GITHUB_OUTPUT
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       with:
-        repository: longbridge/nsh
+        repository: teng-lin/nsh
         ref: ${{ steps.pins.outputs.nsh }}
         path: nsh-source
         persist-credentials: false

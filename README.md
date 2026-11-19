@@ -134,11 +134,11 @@ the v0.1.4 exception above remains unverified by the build-provenance command.
 - Rust (the version pinned in `rust-toolchain.toml`) with the
   `wasm32-unknown-unknown` target, and for Android also
   `aarch64-linux-android`, `armv7-linux-androideabi` and `x86_64-linux-android`.
-- The upstream NSH checked out next to this repository at the commit recorded
+- The Patina NSH fork checked out next to this repository at the commit recorded
   in [`nsh.rev`](nsh.rev), and its CLI built:
 
   ```sh
-  git clone https://github.com/longbridge/nsh.git ../nsh-patina
+  git clone https://github.com/teng-lin/nsh.git ../nsh-patina
   git -C ../nsh-patina checkout --detach "$(cat nsh.rev)"
   (cd ../nsh-patina && cargo build --release -p nsh-cli)
   ```
@@ -149,7 +149,7 @@ the v0.1.4 exception above remains unverified by the build-provenance command.
   you develop NSH). After `nsh.rev` changes, fetch and check out the new pin:
 
   ```sh
-  git -C ../nsh-patina fetch https://github.com/longbridge/nsh.git "$(cat nsh.rev)"
+  git -C ../nsh-patina fetch https://github.com/teng-lin/nsh.git "$(cat nsh.rev)"
   git -C ../nsh-patina checkout --detach "$(cat nsh.rev)"
   ```
 

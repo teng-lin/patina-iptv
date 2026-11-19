@@ -1,5 +1,5 @@
 name: Build prerequisites
-description: Check out the pinned upstream NSH alongside this repository
+description: Check out Patina's pinned NSH fork alongside this repository
 inputs:
   cache:
     description: Restore and save bulk Cargo build caches
@@ -23,7 +23,7 @@ runs:
       run: python3 tools/ci/pins.py >> "$GITHUB_OUTPUT"
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       with:
-        repository: longbridge/nsh
+        repository: teng-lin/nsh
         ref: ${{ steps.pins.outputs.nsh }}
         path: nsh-source
         persist-credentials: false

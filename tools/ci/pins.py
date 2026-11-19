@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The two external pins, each recorded in exactly one tracked file.
 
-`nsh.rev` names the upstream NSH commit that must be checked out beside
+`nsh.rev` names the NSH fork commit that must be checked out beside
 this repository: NSH is a path dependency, so Cargo.lock cannot record it.
 `rust-toolchain.toml` names the Rust release. The composite actions,
 tools/check.sh and the Windows build read both here instead of repeating them.
@@ -47,7 +47,7 @@ def check_nsh(checkout, root=ROOT, environment=os.environ):
         found = f"is at {actual}" if actual else "is not a Git checkout"
         message = (
             f"{checkout} {found}, but nsh.rev pins {expected}.\n"
-            f"Fetch the pin:  git -C {checkout} fetch https://github.com/longbridge/nsh.git {expected}\n"
+            f"Fetch the pin:  git -C {checkout} fetch https://github.com/teng-lin/nsh.git {expected}\n"
             f"Check it out:  git -C {checkout} checkout --detach {expected}\n"
             "When developing NSH, set IPTV_ALLOW_NSH_DRIFT=1, and update nsh.rev before committing."
         )
