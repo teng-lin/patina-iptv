@@ -98,15 +98,14 @@ pub fn rebuild(ui: Ui, keep: bool) {
         &crate::favorites::favorite_channels(),
         &crate::favorites::recent_channels(),
     );
-    ui.list.set(Rc::new(list));
-    let view = view(ui);
-    let row = key.and_then(|k| row_of_key(&view, &k));
-    ui.focus.update(|f| f.restore(row, &view));
-    restore_player_list(ui, player, &view);
-}
-
-fn row_of_key(view: &ListView, key: &str) -> Option<usize> {
-    view.list().row_of(crate::favorites::channel_of(key)?)
+    let list = Rc::new(list);
+    let view = ListView::new(catalog, list.clone());
+    let row = key.and_then(|k| view.find_channel(&k));
+    batch(|| {
+        ui.list.set(list);
+        ui.focus.update(|f| f.restore(row, &view));
+        restore_player_list(ui, player, &view);
+    });
 }
 
 /// The favourites changed: the Favourites list follows if it is shown.
@@ -214,6 +213,8 @@ fn keep_player_list(ui: Ui, catalog: &dyn Schedule) -> Option<KeptPlayerList> {
     })
 }
 
+// A missing group falls back to All channels. A missing channel starts at the
+// first row of the restored list, or has no selectable row when it is empty.
 fn restore_player_list(ui: Ui, kept: Option<KeptPlayerList>, view: &ListView) {
     if let Some(kept) = kept {
         let mut state = kept.state;

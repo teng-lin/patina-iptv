@@ -12,6 +12,7 @@ const MAX_SCROLL_STEP: f32 = 22.0;
 #[derive(Clone, Debug, PartialEq)]
 struct Drag {
     from: usize,
+    id: String,
     origin_y: f32,
     y: f32,
     grab_offset: f32,
@@ -60,7 +61,7 @@ impl DragList {
         let position = (y + self.scroll.get_untracked()).max(0.0);
         let pitch = self.pitch();
         let from = (position / pitch).floor() as usize;
-        let mut name = None;
+        let mut grabbed = None;
         self.ui.touched();
         batch(|| {
             update(self.ui, |screen| {
@@ -78,15 +79,17 @@ impl DragList {
                 }
                 order.focus_on(&item);
                 order.toggle_selection();
-                name = Some(item.name);
+                screen.dragging = true;
+                grabbed = Some(item);
             });
-            if let Some(name) = name {
+            if let Some(item) = grabbed {
                 self.active.set(Some(Drag {
                     from,
+                    id: item.id,
                     origin_y: y,
                     y,
                     grab_offset: position - from as f32 * pitch,
-                    name,
+                    name: item.name,
                 }));
             }
         });
@@ -102,39 +105,34 @@ impl DragList {
     }
 
     fn move_row(self) {
-        let Some(to) = self.active.with_untracked(|drag| {
-            let drag = drag.as_ref()?;
+        self.active.with_untracked(|drag| {
+            let Some(drag) = drag else { return };
             let top = drag.y + self.scroll.get_untracked() - drag.grab_offset;
-            Some((top / self.pitch()).round().max(0.0) as usize)
-        }) else {
-            return;
-        };
-        update(self.ui, |screen| {
-            if let Some(order) = screen.editor.reorder.as_mut() {
-                order.move_selected_to(to);
-            }
+            let to = (top / self.pitch()).round().max(0.0) as usize;
+            update(self.ui, |screen| {
+                if let Some(order) = screen.editor.reorder.as_mut()
+                    && order.selected().is_some_and(|item| item.id == drag.id)
+                {
+                    order.move_selected_to(to);
+                }
+            });
         });
     }
 
     fn finish(self, cancelled: bool) {
-        let Some(from) = self
-            .active
-            .with_untracked(|drag| drag.as_ref().map(|drag| drag.from))
-        else {
-            return;
-        };
-        batch(|| {
-            update(self.ui, |screen| {
-                if let Some(order) = screen.editor.reorder.as_mut() {
-                    if cancelled {
-                        order.move_selected_to(from);
-                    }
-                    if order.selected().is_some() {
-                        order.toggle_selection();
-                    }
+        let mut drag = None;
+        self.active.update(|active| drag = active.take());
+        let Some(drag) = drag else { return };
+        update(self.ui, |screen| {
+            screen.dragging = false;
+            if let Some(order) = screen.editor.reorder.as_mut()
+                && order.selected().is_some_and(|item| item.id == drag.id)
+            {
+                if cancelled {
+                    order.move_selected_to(drag.from);
                 }
-            });
-            self.active.set(None);
+                order.toggle_selection();
+            }
         });
     }
 

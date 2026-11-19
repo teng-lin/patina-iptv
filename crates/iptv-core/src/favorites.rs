@@ -85,6 +85,16 @@ impl Favorites {
         true
     }
 
+    /// Moves a favourite to its displayed position, retaining absent keys.
+    pub fn move_key_among(
+        &mut self,
+        key: &str,
+        index: usize,
+        present: impl Fn(&str) -> bool,
+    ) -> bool {
+        crate::reorder::move_to_present(&mut self.keys, key, index, |item| present(item))
+    }
+
     /// Replaces the order of these members. Retains any other keys in
     /// place, including channels a provider has temporarily removed.
     pub fn apply_order(&mut self, order: &[String]) {

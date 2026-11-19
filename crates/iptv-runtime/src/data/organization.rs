@@ -85,34 +85,54 @@ pub async fn apply(
     Some(schedule.with_prepared_organization(prepared))
 }
 pub fn changed(owner: &Rc<crate::Runtime>, source: SourceId) {
+    schedule_reload(owner, source, false);
+}
+
+/// A watch sort remains eligible for the next guide entry until installed.
+pub(crate) fn watch_changed(owner: &Rc<crate::Runtime>, source: SourceId) {
+    schedule_reload(owner, source, true);
+}
+
+fn schedule_reload(owner: &Rc<crate::Runtime>, source: SourceId, retry_watch_order: bool) {
     owner
         .organization_revision
         .set(owner.organization_revision.get().wrapping_add(1));
     let ticket = owner.begin_organization_edit(source);
     owner.emit(crate::RuntimeEvent::LibraryChanged);
-    if super::combined::active(owner) {
-        super::combined::organization_changed(owner, source, ticket);
-        return;
-    }
-    if owner.shown.get() != Some(source) {
-        return;
-    }
-    let schedule = owner.schedule();
-    owner.spawn({
-        let owner = owner.clone();
-        async move {
-            if let Some(epg) = schedule
-                .as_any()
-                .and_then(|s| s.downcast_ref::<EpgSchedule>())
-                && let Some(replacement) = apply(&owner, epg, source).await
-            {
-                owner.emit(crate::RuntimeEvent::OrganizationReady {
-                    source,
-                    ticket,
-                    schedule,
-                    replacement: Rc::new(replacement),
-                });
-            }
+    let task = owner.clone();
+    owner.spawn(async move {
+        let installed = if super::combined::active(&task) {
+            super::combined::organization_changed(&task, source, ticket).await
+        } else {
+            replace_single(&task, source, ticket).await
+        };
+        if retry_watch_order && !installed {
+            task.watch_sort_dirty.borrow_mut().insert(source);
         }
     });
+}
+
+async fn replace_single(owner: &Rc<crate::Runtime>, source: SourceId, ticket: u64) -> bool {
+    if owner.shown.get() != Some(source) {
+        return false;
+    }
+    let schedule = owner.schedule();
+    let Some(epg) = schedule
+        .as_any()
+        .and_then(|s| s.downcast_ref::<EpgSchedule>())
+    else {
+        return false;
+    };
+    let Some(replacement) = apply(owner, epg, source).await else {
+        return false;
+    };
+    let replacement = Rc::new(replacement);
+    owner.emit(crate::RuntimeEvent::OrganizationReady {
+        source,
+        ticket,
+        schedule,
+        replacement: replacement.clone(),
+    });
+    let installed: Rc<dyn iptv_core::guide::Schedule> = replacement;
+    Rc::ptr_eq(&owner.schedule(), &installed)
 }

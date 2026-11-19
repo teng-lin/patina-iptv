@@ -337,6 +337,7 @@ fn modal_back_restores_channel_identity_after_reordering_and_recovery_can_cancel
     step(app.back());
     step(app.press("text:Save order"));
     step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
+    step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local C"));
     exposure.shown(app, "guide-ui", true);
     exposure.selected_channel(app, "Local B");
     // Recovery is a different form, with a different number of controls.

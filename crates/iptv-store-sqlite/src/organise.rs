@@ -391,25 +391,44 @@ impl Store {
 
     /// Creates an empty custom group at the end of the source's list.
     pub fn create_custom_group(&mut self, source: SourceId, name: &str) -> Result<CustomGroupId> {
-        ensure_source(&self.conn, source)?;
         let now = self.now();
-        self.conn.execute(
-            "INSERT INTO custom_groups (source_id, name, position, created_at)
-             VALUES (?1, ?2, (SELECT COALESCE(MAX(position) + 1, 0) FROM custom_groups
-                              WHERE source_id = ?1), ?3)",
-            params![source.0, name, now],
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        ensure_source(&tx, source)?;
+        let id: i64 = tx.query_row(
+            "UPDATE custom_group_sequence SET last_id=last_id+1
+             WHERE singleton=1 RETURNING last_id",
+            [],
+            |row| row.get(0),
         )?;
-        Ok(CustomGroupId(self.conn.last_insert_rowid()))
+        tx.execute(
+            "INSERT INTO custom_groups (id, source_id, name, position, created_at)
+             VALUES (?1, ?2, ?3, (SELECT COALESCE(MAX(position) + 1, 0) FROM custom_groups
+                                  WHERE source_id=?2), ?4)",
+            params![id, source.0, name, now],
+        )?;
+        tx.commit()?;
+        Ok(CustomGroupId(id))
     }
 
     pub fn rename_custom_group(&mut self, group: CustomGroupId, name: &str) -> Result<()> {
-        let changed = self.conn.execute(
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let changed = tx.execute(
             "UPDATE custom_groups SET name = ?2 WHERE id = ?1",
             params![group.0, name],
         )?;
         if changed == 0 {
             return Err(StoreError::CustomGroupNotFound(group.0));
         }
+        tx.execute(
+            "UPDATE group_overlays SET custom_name=NULL WHERE group_id='custom:'||?1
+             AND source_id=(SELECT source_id FROM custom_groups WHERE id=?1)",
+            [group.0],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 

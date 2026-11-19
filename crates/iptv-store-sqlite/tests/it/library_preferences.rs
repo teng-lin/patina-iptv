@@ -386,22 +386,92 @@ fn guide_blocking_is_inherited_across_membership_and_independent_of_parental_loc
         )
         .unwrap();
     assert!(store.delete_custom_group(custom).unwrap());
-    assert_eq!(
-        store.create_custom_group(source, "Replacement").unwrap(),
-        custom
-    );
-    store.add_to_custom_group(custom, &channel.id).unwrap();
-    assert!(!store.guide_channel_blocked(source, id).unwrap());
-    assert_eq!(store.guide_sort(source, &scope).unwrap(), Sort::Manual);
+    let replacement = store.create_custom_group(source, "Replacement").unwrap();
+    assert_ne!(replacement, custom);
+    store.add_to_custom_group(replacement, &channel.id).unwrap();
+    let original = vec![id.to_owned()];
     assert!(
-        !store
-            .guide_groups(source)
-            .unwrap()
+        store
+            .save_guide_order(source, &scope, &original, &original)
+            .is_err()
+    );
+    assert!(!store.guide_channel_blocked(source, id).unwrap());
+    assert_eq!(
+        store
+            .guide_sort(source, &OrganizationScope::CustomChannels(replacement))
+            .unwrap(),
+        Sort::Manual
+    );
+    let replacement_key = format!("custom:{}", replacement.0);
+    let groups = store.guide_groups(source).unwrap();
+    assert!(groups.iter().all(|item| item.id != custom_key));
+    assert!(
+        !groups
             .iter()
-            .find(|item| item.id == custom_key)
+            .find(|item| item.id == replacement_key)
             .unwrap()
             .hidden
     );
+}
+
+#[test]
+fn generated_other_blocks_only_channels_without_a_primary_live_group() {
+    use iptv_core::organization::{Block, BlockKind};
+
+    let mut store = Store::open_in_memory().unwrap();
+    let source = store.add_source(&m3u_source("Generated")).unwrap();
+    let mut catalog = live_catalog(3, 1);
+    catalog.channels[0].groups.clear();
+    catalog.channels[1]
+        .groups
+        .insert(0, iptv_providers::GroupId::from_stored("missing-primary"));
+    replace(&mut store, source, &catalog);
+    store
+        .set_guide_block(source, BlockKind::Group, "__other__", true)
+        .unwrap();
+    let blocks = store.guide_blocks(source).unwrap();
+    for (channel, expected) in catalog.channels.iter().zip([true, true, false]) {
+        let id = channel.id.as_str();
+        assert_eq!(blocks.channel(id) == Block::Group, expected);
+        assert_eq!(store.guide_channel_blocked(source, id).unwrap(), expected);
+    }
+}
+
+#[test]
+fn renaming_a_custom_group_clears_its_legacy_name_and_keeps_its_visibility() {
+    use iptv_providers::GroupId;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("synthetic.sqlite");
+    let mut store = Store::open(&path).unwrap();
+    let source = store.add_source(&m3u_source("Generated")).unwrap();
+    let group = store
+        .create_custom_group(source, "Generated group")
+        .unwrap();
+    let key = format!("custom:{}", group.0);
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO group_overlays(source_id,group_id,custom_name,hidden) VALUES (?1,?2,?3,1)",
+            rusqlite::params![source.0, key, "Generated legacy label"],
+        )
+        .unwrap();
+
+    store
+        .rename_group(
+            source,
+            &GroupId::from_stored(&key),
+            Some("Generated new label"),
+        )
+        .unwrap();
+    let row = store
+        .guide_groups(source)
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == key)
+        .unwrap();
+    assert_eq!(row.name, "Generated new label");
+    assert!(row.hidden);
 }
 
 #[test]
@@ -493,6 +563,13 @@ fn the_guide_orders_channels_by_name_recency_and_accumulated_watch_time() {
         )
         .unwrap();
     assert_eq!(store.guide_sort(source, &scope).unwrap(), Sort::Manual);
+    let saved: Vec<_> = store
+        .ordered_guide_channels(source, &scope)
+        .unwrap()
+        .into_iter()
+        .map(|row| row.channel.id.as_str().to_owned())
+        .collect();
+    assert_eq!(saved, custom);
     store
         .set_guide_sort(source, &scope, Sort::LeastWatched)
         .unwrap();

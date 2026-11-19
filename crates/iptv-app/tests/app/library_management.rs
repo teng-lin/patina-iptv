@@ -198,9 +198,13 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     assert_eq!(channels(&path, source).len(), 3);
     edit(&mut app, 0, "Select / deselect for bulk visibility", 10);
     edit(&mut app, 0, "Hide all", 13);
+    step(app.wait_for("text:Confirm"));
+    step(app.press("text:Confirm"));
     assert!(channels(&path, source).is_empty());
     assert!(app.screen().matches("id:organization-row-2").unwrap());
     edit(&mut app, 0, "Show all", 14);
+    step(app.wait_for("text:Confirm"));
+    step(app.press("text:Confirm"));
     assert_eq!(channels(&path, source).len(), 3);
     step(app.back());
     step(app.wait_for_gone("id:organization-screen", Duration::from_secs(2)));
@@ -248,6 +252,8 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     edit(&mut app, 1, "Move to first", 10);
     edit(&mut app, 0, "Restore provider order", 12);
     edit(&mut app, 0, "Hide all", 16);
+    step(app.wait_for("text:Confirm"));
+    step(app.press("text:Confirm"));
     assert!(
         crate::isolated::open_database(&path)
             .unwrap()
@@ -257,6 +263,8 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
             .all(|g| g.hidden)
     );
     edit(&mut app, 0, "Show all", 17);
+    step(app.wait_for("text:Confirm"));
+    step(app.press("text:Confirm"));
     step(app.press("id:organization-screen >> text:Close"));
     // Back to actions, refresh interval and startup setting are persisted.
     for _ in 0..3 {

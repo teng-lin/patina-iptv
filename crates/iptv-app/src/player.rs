@@ -325,6 +325,13 @@ pub fn allow_guide_channel(channel: usize) -> bool {
 /// Applies newly published guide blocks to live and catch-up sessions.
 pub fn enforce_guide_blocks(ui: Ui) {
     let schedule = crate::schedule();
+    if let Some(early) = resume::source(ui)
+        && early_guide_blocked(&early)
+    {
+        stop_surface(ui, 0);
+        ui.mode.set(crate::settings::browse_mode());
+    }
+    let mut stopped = false;
     for surface in 0..SURFACES {
         let channel = ui
             .player
@@ -336,8 +343,30 @@ pub fn enforce_guide_blocks(ui: Ui) {
             schedule.channel_block(channel) != iptv_core::organization::Block::None
         }) {
             stop_surface(ui, surface);
+            stopped = true;
         }
     }
+    if stopped {
+        crate::multiview::follow(ui);
+    }
+}
+
+fn early_guide_blocked(early: &resume::Early) -> bool {
+    let owner = crate::runtime();
+    let schedule = crate::schedule();
+    let key = if crate::data::combined::active(&owner) {
+        iptv_guide::combined::qualified_key(early.source_id, &early.key)
+    } else if owner
+        .shown_source()
+        .is_some_and(|source| source.0 == early.source_id)
+    {
+        early.key.clone()
+    } else {
+        return false;
+    };
+    schedule.find_channel(&key).is_some_and(|channel| {
+        schedule.channel_block(channel) != iptv_core::organization::Block::None
+    })
 }
 
 /// Surface `surface` (not 0) plays `channel` live, with a fresh health
@@ -584,14 +613,10 @@ fn open(ui: Ui, surface: usize, session: u64) {
     {
         crate::data::spawn_in_app(async move {
             let owner = crate::runtime();
-            let allowed = owner.parental_check(&target).await.is_ok()
-                && crate::runtime::commands::guide_channel_blocked(
-                    &owner,
-                    iptv_library::SourceId(target.source),
-                    target.id,
-                )
+            let allowed = owner
+                .live_channel_allowed(iptv_library::SourceId(target.source), target.id)
                 .await
-                .is_ok_and(|blocked| !blocked);
+                .unwrap_or(false);
             if ui
                 .player
                 .stream(surface)
@@ -808,10 +833,11 @@ fn source_allowed(ui: Ui, surface: usize) -> bool {
             && crate::parental_view::live_target(ui, channel)
                 .is_none_or(|t| owner.parental_allowed(&t))
     } else if let Some(early) = resume::source(ui) {
-        owner.parental_allowed(&iptv_core::parental::Target::live(
-            early.source_id,
-            early.key,
-        ))
+        !early_guide_blocked(&early)
+            && owner.parental_allowed(&iptv_core::parental::Target::live(
+                early.source_id,
+                early.key,
+            ))
     } else {
         true
     }

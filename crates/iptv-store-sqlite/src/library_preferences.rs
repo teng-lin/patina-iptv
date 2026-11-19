@@ -46,7 +46,16 @@ const BLOCKED_MEMBERS: &str = "SELECT m.channel_id FROM guide_blocks b
      SELECT m.channel_id FROM guide_blocks b
      JOIN custom_groups g ON g.source_id=b.source_id AND 'custom:'||g.id=b.content_id
      JOIN custom_group_members m ON m.group_id=g.id
-     WHERE b.source_id=?1 AND b.kind='group'";
+     WHERE b.source_id=?1 AND b.kind='group'
+     UNION ALL
+     SELECT c.id FROM guide_blocks b
+     JOIN channels c ON c.source_id=b.source_id
+     WHERE b.source_id=?1 AND b.kind='group' AND b.content_id='__other__'
+     AND NOT EXISTS (
+         SELECT 1 FROM groups g
+         WHERE g.source_id=c.source_id AND g.kind='live'
+           AND g.id IN ('__other__', json_extract(c.group_ids, '$[0]'))
+     )";
 
 fn ensure_custom_scope(conn: &rusqlite::Connection, source: SourceId, id: i64) -> Result<()> {
     if crate::organise::group_source(conn, iptv_library::CustomGroupId(id))? != source {

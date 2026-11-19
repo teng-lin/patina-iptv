@@ -40,6 +40,7 @@ pub struct Open {
     placement: Placement,
     custom_from: Option<Sort>,
     bulk_visibility: Option<(Edit, bool)>,
+    dragging: bool,
 }
 async fn items(
     source: SourceId,
@@ -157,6 +158,7 @@ fn open_with(
         placement,
         custom_from: None,
         bulk_visibility: None,
+        dragging: false,
     }));
     data::spawn_in_app(async move {
         let custom = initial == Some(Edit::Sort(Sort::Manual));
@@ -238,31 +240,40 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
     let owner = crate::runtime();
     let save = crate::runtime::commands::set_guide_block(&owner, source, kind, id, blocked);
     data::spawn_in_app(async move {
-        let result = save.await;
-        if result.is_ok() {
-            crate::settings_view::notify(if blocked {
-                tr("Content blocked")
-            } else {
-                tr("Content unblocked")
-            });
-            data::organization::changed(&owner, source);
-        } else {
+        if save.await.is_err() {
             crate::settings_view::notify(tr(
                 "The change could not be saved. Reopen the list and try again.",
             ));
+            if still_open(ui, generation) {
+                update(ui, |state| state.saving = false);
+            }
+            return;
+        }
+        crate::settings_view::notify(if blocked {
+            tr("Content blocked")
+        } else {
+            tr("Content unblocked")
+        });
+        data::organization::changed(&owner, source);
+        if !still_open(ui, generation) || !is_open(ui) {
+            return;
         }
         let blocks = crate::runtime::commands::guide_blocks(&owner, source).await;
         if !still_open(ui, generation) {
             return;
         }
-        update(ui, |state| {
-            if state.source == source {
+        match blocks {
+            Ok(blocks) => update(ui, |state| {
+                state.blocks = blocks;
                 state.saving = false;
-                if let Ok(blocks) = blocks {
-                    state.blocks = blocks;
-                }
+            }),
+            Err(_) => {
+                close(ui);
+                crate::settings_view::notify(tr(
+                    "The list could not be reloaded. Reopen it and try again.",
+                ));
             }
-        });
+        }
     });
 }
 
@@ -413,6 +424,9 @@ fn confirming_order(ui: Ui) -> bool {
 }
 
 fn reorder_key(ui: Ui, key: Key) {
+    if state(ui, |s| s.dragging) == Some(true) {
+        return;
+    }
     if confirming_order(ui) && key == Key::Back {
         resolve_order(ui, LeaveChoice::Stay);
         return;
@@ -524,6 +538,18 @@ fn save_order(ui: Ui) {
 }
 
 fn perform(ui: Ui, edit: Edit) {
+    if matches!(edit, Edit::HideAll | Edit::ShowAll) {
+        update(ui, |s| {
+            if !s.saving {
+                s.bulk_visibility = Some((edit, false));
+            }
+        });
+        return;
+    }
+    apply_edit(ui, edit);
+}
+
+fn apply_edit(ui: Ui, edit: Edit) {
     let generation = ui.organization_generation.get_untracked();
     let Some(s) = state(ui, |s| (!s.saving).then(|| s.clone())).flatten() else {
         return;
@@ -643,6 +669,9 @@ fn perform(ui: Ui, edit: Edit) {
             Edit::First => 0,
             _ => order.len() - 1,
         };
+        if at == to {
+            return;
+        }
         let id = order.remove(at);
         order.insert(to, id);
         let result = crate::runtime::commands::save_organization_order(
@@ -1016,7 +1045,9 @@ fn actions_sheet(ui: Ui, size: Scale) -> impl IntoElement {
     view()
         .accessibility_elements_hidden(move || {
             state(ui, |screen| {
-                screen.editor.text.is_some() || screen.editor.sort_focus.is_some()
+                screen.editor.text.is_some()
+                    || screen.editor.sort_focus.is_some()
+                    || screen.bulk_visibility.is_some()
             })
             .unwrap_or(false)
         })
@@ -1164,7 +1195,7 @@ fn resolve_bulk_visibility(ui: Ui, confirm: bool) {
     let requested = state(ui, |s| s.bulk_visibility).flatten();
     update(ui, |s| s.bulk_visibility = None);
     if let Some((edit, _)) = requested.filter(|_| confirm) {
-        perform(ui, edit);
+        apply_edit(ui, edit);
     }
 }
 
@@ -1299,21 +1330,39 @@ pub(crate) fn guide_order_keys(ui: Ui, source: SourceId, list: &ListId) -> HashM
 
 /// The draft only changes grid rendering. Playback and focus restoration
 /// keep using the ordinary guide list and its stable channel keys.
-pub(crate) fn guide_order(ui: Ui, keys: &HashMap<String, usize>) -> Option<Vec<Option<usize>>> {
+pub(crate) fn guide_order(ui: Ui, keys: &HashMap<String, usize>) -> Option<Vec<usize>> {
     state(ui, |s| {
         if !matches!(s.placement, Placement::Guide { .. }) {
             return None;
         }
         let order = s.editor.reorder.as_ref()?;
-        Some(
-            order
-                .items()
-                .iter()
-                .map(|item| keys.get(&item.id).copied())
-                .collect(),
-        )
+        order
+            .items()
+            .iter()
+            .map(|item| keys.get(&item.id).copied())
+            .collect()
     })
     .flatten()
+}
+
+pub(crate) fn invalidate_changed_guide_order(ui: Ui, keys: &HashMap<String, usize>) {
+    let stale = state(ui, |s| {
+        matches!(s.placement, Placement::Guide { .. })
+            && !s.saving
+            && s.editor.reorder.as_ref().is_some_and(|order| {
+                order.items().len() != keys.len()
+                    || order
+                        .items()
+                        .iter()
+                        .any(|item| !keys.contains_key(&item.id))
+            })
+    }) == Some(true);
+    if stale {
+        close(ui);
+        crate::settings_view::notify(tr(
+            "The list could not be reloaded. Reopen it and try again.",
+        ));
+    }
 }
 
 pub(crate) fn guide_order_open(ui: Ui) -> bool {
@@ -1659,11 +1708,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                             tr("Show all"),
                                             || false,
                                             0xFFFFFF,
-                                            move || {
-                                                update(ui, |s| {
-                                                    s.bulk_visibility = Some((Edit::ShowAll, false))
-                                                })
-                                            },
+                                            move || perform(ui, Edit::ShowAll),
                                         ))
                                         .child(ui_kit::action(
                                             ui,
@@ -1671,11 +1716,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                             tr("Hide all"),
                                             || false,
                                             0xFFFFFF,
-                                            move || {
-                                                update(ui, |s| {
-                                                    s.bulk_visibility = Some((Edit::HideAll, false))
-                                                })
-                                            },
+                                            move || perform(ui, Edit::HideAll),
                                         ))
                                 },
                             ))
@@ -1700,12 +1741,12 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                 move || confirm_order_sheet(ui, size),
                             ))
                             .child(when(
-                                move || state(ui, |s| s.bulk_visibility.is_some()) == Some(true),
-                                move || bulk_visibility_sheet(ui, size),
-                            ))
-                            .child(when(
                                 move || state(ui, |s| s.editor.action.is_some()).unwrap_or(false),
                                 move || actions_sheet(ui, size),
+                            ))
+                            .child(when(
+                                move || state(ui, |s| s.bulk_visibility.is_some()) == Some(true),
+                                move || bulk_visibility_sheet(ui, size),
                             ))
                             .child(when(
                                 move || {

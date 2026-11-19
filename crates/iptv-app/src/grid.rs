@@ -92,6 +92,11 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
                 .map(|(source, list)| organization_view::guide_order_keys(ui, *source, list))
         })
     });
+    effect(move || {
+        if let Some(keys) = order_keys.get() {
+            untracked(|| organization_view::invalidate_changed_guide_order(ui, &keys));
+        }
+    });
     let order = computed(move || {
         order_keys.with(|keys| organization_view::guide_order(ui, keys.as_ref()?))
     });
@@ -132,7 +137,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
         let rows = ui.list.with(|l| !l.is_empty());
         (rows && (0..=BAND).contains(&at)).then(|| at as f32 * pan.scale())
     });
-    scroll_to_focus_on_new_list(ui, rows);
+    scroll_to_focus_on_new_list(ui, rows, order_focus);
     let was_reordering = std::cell::Cell::new(false);
     effect(move || {
         let draft = order_focus.get();
@@ -159,9 +164,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
                             move |at| {
                                 let channel = computed(move || {
                                     order.with(|order| match order {
-                                        Some(channels) => {
-                                            channels.get(at.index()).copied().flatten()
-                                        }
+                                        Some(channels) => channels.get(at.index()).copied(),
                                         None => ui.list.with(|l| l.channel(at.index())),
                                     })
                                 });
@@ -307,11 +310,13 @@ fn hint_lines() -> [&'static str; 4] {
 /// New guide data or a new list shows the focused row (the focus is kept
 /// by identity, but the list keeps its scroll offset across a count
 /// change).
-fn scroll_to_focus_on_new_list(ui: Ui, list: ElementRef) {
+fn scroll_to_focus_on_new_list(ui: Ui, list: ElementRef, order_focus: Memo<Option<(usize, bool)>>) {
     effect(move || {
         ui.guide_data();
         ui.list.with(|_| ());
-        scroll_to_focused_row(ui, list);
+        if order_focus.get_untracked().is_none() {
+            scroll_to_focused_row(ui, list);
+        }
     });
 }
 

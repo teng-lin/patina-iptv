@@ -138,6 +138,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "channel_watch_time",
         sql: include_str!("../migrations/0022_channel_watch_time.sql"),
     },
+    Migration {
+        version: 23,
+        name: "custom_group_sequence",
+        sql: include_str!("../migrations/0023_custom_group_sequence.sql"),
+    },
 ];
 
 /// The schema version this build writes.

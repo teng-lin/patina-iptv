@@ -280,6 +280,16 @@ impl Schedule for ListView {
     fn group_count(&self) -> usize {
         1
     }
+    fn group_blocked(&self, group: usize) -> bool {
+        group == 0
+            && matches!(Entry::at(self.list.entry()), Entry::Group(group) if self.catalog.group_blocked(group))
+    }
+    fn channel_block(&self, row: usize) -> crate::organization::Block {
+        self.channel(row)
+            .map_or(crate::organization::Block::None, |channel| {
+                self.catalog.channel_block(channel)
+            })
+    }
     fn group_start(&self, _group: usize) -> usize {
         0
     }
