@@ -776,8 +776,8 @@ pub fn App() -> impl IntoElement {
         Some(Ok(())) => !minimum_elapsed.get(),
         Some(Err(_)) => false,
     };
-    view()
-        .flex_1()
+    let input = stored(None);
+    input::window(view().flex_1(), input)
         .child(
             view()
                 .flex_1()
@@ -800,7 +800,7 @@ pub fn App() -> impl IntoElement {
                             .child(text(i18n::tr(message)))
                             .child(text(i18n::tr("Close Patina and try opening it again.")))
                             .into_element(),
-                        Some(Ok(())) => ready_app().into_element(),
+                        Some(Ok(())) => ready_app(input).into_element(),
                     })
                 })),
         )
@@ -808,7 +808,7 @@ pub fn App() -> impl IntoElement {
 }
 
 /// Constructed once after recovery; all player surfaces belong to this owner.
-fn ready_app() -> impl IntoElement {
+fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     settings::load();
     startup::mark("settings loaded");
     let ui = Ui::new(SharedUi::new(), player::Player::new());
@@ -825,7 +825,7 @@ fn ready_app() -> impl IntoElement {
     });
     favorites::reset();
     favorites::catalog_changed(ui, &*schedule());
-    input::bind(ui);
+    input.replace(Some(input::bind(ui)));
     #[cfg(feature = "test-support")]
     performance_probe::bind(ui);
     data::start(ui);

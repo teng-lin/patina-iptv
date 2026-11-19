@@ -2,6 +2,7 @@ package com.hantekllc.iptvrs.host
 
 import android.view.KeyEvent
 import androidx.media3.common.C
+import dev.nshtv.RemoteKeys
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
@@ -23,13 +24,25 @@ class HostPolicyTest {
         assertEquals(6, LiveLoadPolicy().getMinimumLoadableRetryCount(C.DATA_TYPE_MEDIA))
     }
 
-    @Test fun searchIsMappedAndOtherKeysKeepTheirOriginalMeaning() {
-        assertEquals(KeyEvent.KEYCODE_F12, RemoteKeys.translate(KeyEvent.KEYCODE_SEARCH))
-        for (key in listOf(KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_DPAD_CENTER,
-            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-            KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_UNKNOWN)) {
-            assertEquals(key, RemoteKeys.translate(key))
-        }
+    @Test
+    fun systemKeysKeepTheirDefaultHandling() {
+        val systemKeys =
+            listOf(
+                KeyEvent.KEYCODE_BACK,
+                KeyEvent.KEYCODE_HOME,
+                KeyEvent.KEYCODE_VOLUME_UP,
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_A,
+                KeyEvent.KEYCODE_UNKNOWN,
+            )
+        val appKeys =
+            listOf(
+                KeyEvent.KEYCODE_SEARCH,
+                KeyEvent.KEYCODE_GUIDE,
+                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            )
+        systemKeys.forEach { assertFalse(RemoteKeys.appOwned(it)) }
+        appKeys.forEach { assertTrue(RemoteKeys.appOwned(it)) }
     }
 
     @Test fun onlyTheProfileBuildIsProfileable() {

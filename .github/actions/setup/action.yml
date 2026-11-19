@@ -1,5 +1,5 @@
 name: Build prerequisites
-description: Check out the pinned NSH fork alongside this repository
+description: Check out the pinned upstream NSH alongside this repository
 inputs:
   cache:
     description: Restore and save bulk Cargo build caches
@@ -23,12 +23,12 @@ runs:
       run: python3 tools/ci/pins.py >> "$GITHUB_OUTPUT"
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       with:
-        repository: teng-lin/nsh
+        repository: longbridge/nsh
         ref: ${{ steps.pins.outputs.nsh }}
         path: nsh-source
         persist-credentials: false
     - shell: bash
-      run: mv nsh-source ../nsh
+      run: mv nsh-source ../nsh-patina
     - shell: bash
       run: |
         if [ "${RUNNER_OS}" = Linux ]; then
@@ -60,7 +60,7 @@ runs:
         save-if: ${{ github.ref == 'refs/heads/master' }}
         workspaces: |
           .
-          ../nsh
+          ../nsh-patina
     - name: Install the checksum-pinned guarded player
       shell: bash
       env:

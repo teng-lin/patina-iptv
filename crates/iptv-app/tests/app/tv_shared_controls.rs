@@ -188,7 +188,7 @@ fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
         "Overlay returns focus to a visible guide row"
     );
     step(app.press_key("f"));
-    step(app.press_key("stop"));
+    step(app.press_remote(nsh_tv::RemoteKey::Stop));
     step(app.wait_until(
         "stop clears preview playback",
         Duration::from_secs(3),

@@ -12,8 +12,10 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.widget.EditText
 import androidx.core.view.WindowCompat
 import com.longbridge.nsh.NshView
+import dev.nshtv.RemoteKeys
 
 /**
  * The Android host: mirrors NSH's AppActivity for a Rust app, and registers
@@ -181,28 +183,10 @@ class TvActivity : Activity() {
         }
     }
 
-    /**
-     * A remote's Search key: NSH has no key for `KEYCODE_SEARCH` (and the
-     * system would start its own search), so it goes on as F12, which no
-     * remote sends; the app binds F12 to its search on Android (`input.rs`).
-     */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        val mapped = RemoteKeys.translate(event.keyCode)
-        if (mapped == event.keyCode) return super.dispatchKeyEvent(event)
-        val search =
-            KeyEvent(
-                event.downTime,
-                event.eventTime,
-                event.action,
-                mapped,
-                event.repeatCount,
-                event.metaState,
-                event.deviceId,
-                event.scanCode,
-                event.flags,
-                event.source,
-            )
-        return super.dispatchKeyEvent(search)
+        val editing = currentFocus is EditText
+        val translated = if (editing) event else RemoteKeys.translate(event)
+        return super.dispatchKeyEvent(translated) || (!editing && RemoteKeys.appOwned(event.keyCode))
     }
 
     @Deprecated("Back is also handled by NshView's OnBackInvokedCallback on API 33+")

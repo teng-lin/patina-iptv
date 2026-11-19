@@ -81,7 +81,7 @@ class Prerequisites(unittest.TestCase):
             script_directory = checkout / "tools/ci"
             script_directory.mkdir(parents=True)
             (script_directory / "nsh-tool-key.py").write_text('print("a" * 64)\n')
-            (temporary / "nsh").mkdir()
+            (temporary / "nsh-patina").mkdir()
             binaries = temporary / "bin"
             binaries.mkdir()
             recorder = ('#!' + sys.executable + '\nimport json,os,sys\nfrom pathlib import Path\n'

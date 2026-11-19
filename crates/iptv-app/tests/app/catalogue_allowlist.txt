@@ -10,6 +10,8 @@
 [untranslated]
 
 [not-shown]
+# Logical key name from the raw keyboard event.
+iptv-app/src/input/keys.rs	Escape
 # Privacy command returns a fixed localized failure at the shell, never this diagnostic.
 iptv-runtime/src/commands.rs	legacy search history could not be removed
 # Redacted Debug type/variant labels; views render typed state with their own wording.

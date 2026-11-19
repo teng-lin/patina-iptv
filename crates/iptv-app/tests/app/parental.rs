@@ -401,7 +401,17 @@ mod hidden_window {
         assert!(!app.window_state("main").unwrap().unwrap().visible);
         assert!(!iptv_app::player_has_source(0));
         writer.execute_batch("ROLLBACK").unwrap();
-        wait(&mut app, "Enter parental PIN");
+        step(crate::isolated::wait_outside(
+            &mut app,
+            "PIN committed while the window is hidden",
+            Duration::from_secs(20),
+            || {
+                crate::isolated::open_database(&path)
+                    .ok()
+                    .and_then(|store| store.parental_credential().ok().flatten())
+                    .is_some()
+            },
+        ));
         assert!(
             code(&app).is_none(),
             "hidden credential results never render their code before fresh verification"
@@ -414,12 +424,16 @@ mod hidden_window {
 
         // Closing during an in-flight verification invalidates its grant.
         reopen(&mut app);
+        wait(&mut app, "Enter parental PIN");
+        assert!(code(&app).is_none());
         let writer = crate::store_latency::hold_writer(&home);
         digits(&mut app, "2468");
         continue_entry(&mut app);
         wait(&mut app, "Checking…");
         step(app.press_window_close("main"));
         writer.execute_batch("ROLLBACK").unwrap();
+        reopen(&mut app);
+        wait(&mut app, "Enter parental PIN");
         step(app.wait_for_gone("text:Checking…", Duration::from_secs(20)));
         assert!(
             code(&app).is_none(),
@@ -427,7 +441,6 @@ mod hidden_window {
         );
         assert!(!iptv_app::player_has_source(0));
 
-        reopen(&mut app);
         digits(&mut app, "2468");
         continue_entry(&mut app);
         wait(&mut app, "Save your recovery code");

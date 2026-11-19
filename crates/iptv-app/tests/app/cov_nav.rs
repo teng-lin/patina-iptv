@@ -761,7 +761,7 @@ fn multiview_keys(app: &mut Headless) {
     step(app.press_key("up"));
     step(app.press_key("backspace"));
     wait_list(app, false);
-    step(app.press_key("stop"));
+    step(app.press_remote(nsh_tv::RemoteKey::Stop));
     gone(app, TILE);
     step(app.wait_for("text:Nothing playing"));
 }

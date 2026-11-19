@@ -6,8 +6,9 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use iptv_nav::{Action, BackGuard, Context, Keymap, Phase, PressDetector, Profile, RemoteKey};
-use nsh_core::keymap::KeyPhase;
+use nsh_core::keymap::Keystroke;
 use nsh_core::prelude::*;
+use nsh_core::{KeyCapture, KeyEvent};
 
 use crate::guide::{Move, Pane};
 use crate::{Input, Ui, ViewMode};
@@ -18,11 +19,9 @@ mod number;
 
 use back::act;
 pub(crate) use back::swallow_back;
-use keys::{ANDROID_SEARCH, KEYS};
+use keys::KEYS;
 
-/// Long press needs key releases, which NSH (branch `tv-keys`) reports on
-/// Android only. Elsewhere every key is a plain press and long bindings are
-/// not consulted (a deferred short press would never see its release).
+/// The Android remote profile distinguishes a tap from a held key.
 pub(crate) const LONG_PRESS: bool = cfg!(target_os = "android");
 
 /// Whose keys: a TV remote's on Android, a keyboard's on the desktops
@@ -37,6 +36,73 @@ struct Nav {
     keymap: Keymap,
     detector: PressDetector,
     start: Instant,
+}
+
+#[derive(Clone)]
+pub(crate) struct InputScope {
+    ui: Ui,
+    nav: Rc<RefCell<Nav>>,
+    owner: Owner,
+}
+
+impl InputScope {
+    fn key(&self, key: RemoteKey, phase: Phase) {
+        self.owner.run(|| key_event(self.ui, &self.nav, key, phase));
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RemoteFocus(ElementRef);
+
+fn focus_remote_root() {
+    if LONG_PRESS && let Some(focus) = use_context::<RemoteFocus>() {
+        focus.0.focus();
+    }
+}
+
+/// Give remote focus back to the app when native editing ends.
+pub(crate) fn dismiss_keyboard() {
+    nsh_core::element::dismiss_keyboard();
+    focus_remote_root();
+}
+
+/// Listen on the window's root so a remote works before native focus exists.
+pub(crate) fn window<V: Interactive>(view: V, input: Stored<Option<InputScope>>) -> V {
+    let view = if LONG_PRESS {
+        // Android returns focus to the native container after dismissing the
+        // keyboard. A mounted app view keeps the raw listener in its key path.
+        let focus = element_ref();
+        provide_context(RemoteFocus(focus));
+        view.focusable(true).element_ref(&focus)
+    } else {
+        view
+    };
+    let capture = if LONG_PRESS {
+        KeyCapture::keys(
+            KEYS.iter()
+                .map(|(name, _)| *name)
+                .filter(|name| !name.contains('+'))
+                .map(|name| Keystroke::parse_with(name, false).expect("TV keyboard binding")),
+        )
+    } else {
+        KeyCapture::None
+    };
+    view.capture_keys(capture)
+        .on_key_down(move |event: &KeyEvent| {
+            if let Some((input, key)) = input.get().zip(keys::remote(event)) {
+                let phase = if event.repeat {
+                    Phase::Repeat
+                } else {
+                    Phase::Down
+                };
+                input.key(key, phase);
+            }
+        })
+        .on_key_up(move |event: &KeyEvent| {
+            if let Some((input, key)) = input.get().zip(keys::remote(event)) {
+                input.key(key, Phase::Up);
+            }
+        })
 }
 
 /// The surface that owns input now.
@@ -59,34 +125,31 @@ pub fn context(ui: &Ui) -> Context {
     }
 }
 
-pub fn bind(ui: Ui) {
+pub(crate) fn bind(ui: Ui) -> InputScope {
+    focus_remote_root();
     number::bind(ui);
-    let nav = Rc::new(RefCell::new(Nav {
-        keymap: crate::remote_editor::keymap(),
-        detector: PressDetector::default(),
-        start: Instant::now(),
-    }));
+    let input = InputScope {
+        ui,
+        nav: Rc::new(RefCell::new(Nav {
+            keymap: crate::remote_editor::keymap(),
+            detector: PressDetector::default(),
+            start: Instant::now(),
+        })),
+        owner: Owner::current(),
+    };
     let repeat = KeyOptions {
         repeat: true,
         ..Default::default()
     };
-    let digits = (0..=9u8).map(|d| (d, RemoteKey::Digit(d)));
-    let mut bindings: Vec<(String, RemoteKey)> =
-        KEYS.iter().map(|(n, k)| ((*n).to_owned(), *k)).collect();
-    bindings.extend(digits.map(|(d, k)| (d.to_string(), k)));
-    if cfg!(target_os = "android") {
-        bindings.push((ANDROID_SEARCH.to_owned(), RemoteKey::Search));
-    }
-    for (name, key) in bindings {
-        let nav = nav.clone();
-        on_key_event(&name, repeat, move |e: &KeyCommand| {
-            let phase = match e.phase {
-                KeyPhase::Press => Phase::Down,
-                KeyPhase::Repeat => Phase::Repeat,
-                KeyPhase::Release => Phase::Up,
-            };
-            key_event(ui, &nav, key, phase)
-        });
+    let digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        .into_iter()
+        .enumerate()
+        .map(|(digit, name)| (name, RemoteKey::Digit(digit as u8)));
+    for (name, key) in KEYS.iter().copied().chain(digits) {
+        if !LONG_PRESS || name.contains('+') {
+            let nav = input.nav.clone();
+            on_key_with(name, repeat, move |_| key_event(ui, &nav, key, Phase::Down));
+        }
     }
     if crate::desktop::DESKTOP {
         on_key("shift+f10", move |_| {
@@ -125,6 +188,7 @@ pub fn bind(ui: Ui) {
         on_key("o", move |_| ui.toggle(ViewMode::Overlay));
         on_key("f", move |_| ui.toggle(ViewMode::Fullscreen));
     }
+    input
 }
 
 fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {

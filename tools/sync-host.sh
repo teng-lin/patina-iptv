@@ -8,7 +8,7 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 source "$root/tools/ci/locked-build-env.sh"
 app="$root/crates/iptv-app"
-nsh=${NSH:-$root/../nsh/target/release/nsh}
+nsh=${NSH:-$root/../nsh-patina/target/release/nsh}
 out="$root/hosts/android/app/build/nsh"
 export JAVA_HOME=${JAVA_HOME:-/usr/lib/jvm/default}
 # The Android SDK and NDK locations, and the NDK compiler for C dependencies.

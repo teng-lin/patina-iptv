@@ -16,6 +16,7 @@ members = [
     "crates/iptv-player-mpv",
     "crates/iptv-library",
     "crates/iptv-runtime",
+    "vendor/nsh-tv",
 ]
 # nsh generates its own Cargo workspaces under the app crate.
 exclude = ["crates/iptv-app/.nsh"]
@@ -38,18 +39,18 @@ iptv-settings = { path = "crates/iptv-settings" }
 iptv-epg = { path = "crates/iptv-epg" }
 iptv-guide = { path = "crates/iptv-guide" }
 iptv-search = { path = "crates/iptv-search" }
-# The NSH fork checkout (branch tv-keys, at the commit in nsh.rev); upstream PR planned.
-nsh-core = { path = "../nsh/crates/nsh-core" }
+# The upstream NSH checkout at the commit in nsh.rev.
+nsh-core = { path = "../nsh-patina/crates/nsh-core" }
 # No editor, highlighting, charts or terminal: an IPTV app shows none
 # (nsh.json "features" keeps them out of the runners too).
-nsh-base = { path = "../nsh/crates/nsh-base", default-features = false }
-nsh-platform-windows = { path = "../nsh/crates/nsh-platform-windows", default-features = false }
-nsh-platform-linux = { path = "../nsh/crates/nsh-platform-linux", default-features = false }
+nsh-base = { path = "../nsh-patina/crates/nsh-base", default-features = false }
+nsh-platform-windows = { path = "../nsh-patina/crates/nsh-platform-windows", default-features = false }
+nsh-platform-linux = { path = "../nsh-patina/crates/nsh-platform-linux", default-features = false }
 # Headless tests of the app (no QuickJS).
-nsh-engine = { path = "../nsh/crates/nsh-engine", default-features = false }
-nsh-testing = { path = "../nsh/crates/nsh-testing", default-features = false }
-nsh-platform-macos = { path = "../nsh/crates/nsh-platform-macos", default-features = false }
-nsh-platform-ios = { path = "../nsh/crates/nsh-platform-ios", default-features = false }
+nsh-engine = { path = "../nsh-patina/crates/nsh-engine", default-features = false }
+nsh-testing = { path = "../nsh-patina/crates/nsh-testing", default-features = false }
+nsh-platform-macos = { path = "../nsh-patina/crates/nsh-platform-macos", default-features = false }
+nsh-platform-ios = { path = "../nsh-patina/crates/nsh-platform-ios", default-features = false }
 env_logger = "0.11"
 log = "0.4"
 serde_json = "1"

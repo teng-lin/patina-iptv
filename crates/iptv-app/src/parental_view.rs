@@ -1,6 +1,7 @@
 //! Parental modal: the core owns PIN entry and transitions; the runtime owns
 //! credentials and access. Callbacks run only after the authoritative gate.
 use crate::i18n::{tr, trf};
+use crate::input::dismiss_keyboard;
 use crate::{Ui, scale::Scale, tint, ui_kit};
 use iptv_core::parental::{ContentKind, Dialog, Phase, Submission, Target};
 use iptv_nav::{Action, RemoteKey};

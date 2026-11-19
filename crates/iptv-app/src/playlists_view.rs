@@ -14,6 +14,7 @@
 //! wizard's sheet (`wizard_view::entry`). Wording is iptv-rs's own.
 
 use crate::i18n::{tr, trf};
+use crate::input::dismiss_keyboard;
 
 use iptv_library::details;
 mod details_card;

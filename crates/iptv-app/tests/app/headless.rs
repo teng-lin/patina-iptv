@@ -5,9 +5,10 @@
 //! simulated time (`run_for`, `wait`, `fast_forward`) remain unscaled to preserve
 //! deterministic test advancement and playback timing.
 
-use nsh_core::TextEngine;
+use nsh_core::{EventKind, EventPayload, KeyEvent, ROOT_ID, TextEngine};
 use nsh_engine::EngineConfig;
 use nsh_testing::Screen;
+use nsh_tv::RemoteKey;
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
@@ -35,6 +36,52 @@ impl Headless {
     pub fn press_key(&mut self, key: &str) -> Result<(), String> {
         self.ready_for_input()?;
         self.0.press_key(key)
+    }
+
+    /// Deliver a hardware-only remote key through the mounted raw listener.
+    /// NSH's simulated keyboard accepts named keystrokes only.
+    pub fn press_remote(&mut self, key: RemoteKey) -> Result<(), String> {
+        self.press_remote_in(key, None)
+    }
+
+    /// Route a remote event to the app root or a specific auxiliary root.
+    pub fn press_remote_in(&mut self, key: RemoteKey, test_id: Option<&str>) -> Result<(), String> {
+        self.ready_for_input()?;
+        let mut event = KeyEvent::default();
+        if let Some(transported) = nsh_tv::transport::TABLE
+            .iter()
+            .find(|entry| entry.key == key)
+        {
+            event.code = transported.dom_code.into();
+        } else {
+            event.key = match key {
+                RemoteKey::Back => "GoBack",
+                RemoteKey::Menu => "ContextMenu",
+                RemoteKey::Stop => "MediaStop",
+                _ => return Err(format!("missing raw event for {key:?}")),
+            }
+            .into();
+        }
+        let root = self
+            .0
+            .screen()
+            .layout_nodes()
+            .into_iter()
+            .find(|node| match test_id {
+                Some(id) => node.test_id.as_deref() == Some(id),
+                None => node.id != ROOT_ID && node.parent == ROOT_ID,
+            })
+            .ok_or("missing mounted app root")?;
+        self.0.step(format!("press remote {key:?}"));
+        let control = self.0.engine().control();
+        control.dispatch_event(
+            root.id,
+            EventKind::KeyDown,
+            EventPayload::Key(event.clone()),
+        );
+        control.dispatch_event(root.id, EventKind::KeyUp, EventPayload::Key(event));
+        self.0.settle();
+        self.0.wait(Duration::ZERO)
     }
 
     pub fn back(&mut self) -> Result<(), String> {

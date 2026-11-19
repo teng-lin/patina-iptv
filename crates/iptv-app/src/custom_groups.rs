@@ -1,6 +1,7 @@
 //! Custom groups and filtered bulk membership editing. Provider membership
 //! remains imported data; moves are offered only between custom groups.
 use crate::i18n::{tr, trf};
+use crate::input::dismiss_keyboard;
 
 use crate::runtime::Error;
 use crate::{

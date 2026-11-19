@@ -14,7 +14,7 @@ runs:
       run: |
         key=$(python3 tools/ci/nsh-tool-key.py cli)
         [[ "$key" =~ ^[0-9a-f]{64}$ ]] || exit 1
-        root=$(cd ../nsh && pwd)
+        root=$(cd ../nsh-patina && pwd)
         echo "key=$key" >> "$GITHUB_OUTPUT"
         echo "path=$root/target/release/nsh" >> "$GITHUB_OUTPUT"
     - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -31,7 +31,7 @@ runs:
         CARGO_PROFILE_RELEASE_LTO: 'false'
         CARGO_PROFILE_RELEASE_OPT_LEVEL: '1'
         CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
-      run: cargo build --release --locked --manifest-path ../nsh/Cargo.toml -p nsh-cli
+      run: cargo build --release --locked --manifest-path ../nsh-patina/Cargo.toml -p nsh-cli
     # Save now: a later app failure must not discard a successful tool build.
     - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       if: inputs.cache == 'true' && steps.cli.outputs.cache-hit != 'true'
@@ -41,5 +41,5 @@ runs:
     - name: Select NSH CLI
       shell: bash
       run: |
-        test -x ../nsh/target/release/nsh
-        echo "NSH=$(cd ../nsh && pwd)/target/release/nsh" >> "$GITHUB_ENV"
+        test -x ../nsh-patina/target/release/nsh
+        echo "NSH=$(cd ../nsh-patina && pwd)/target/release/nsh" >> "$GITHUB_ENV"

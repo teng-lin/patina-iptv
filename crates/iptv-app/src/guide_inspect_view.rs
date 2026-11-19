@@ -1,4 +1,5 @@
 //! Existing guide-source workflow's read-only coverage/candidate inspection.
+use crate::input::dismiss_keyboard;
 use crate::runtime::inspection::{InspectionControl, ProbeRequest, ProbeTarget};
 use crate::{
     Ui,

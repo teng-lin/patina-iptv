@@ -12,7 +12,7 @@
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 source "$root/tools/ci/locked-build-env.sh"
-nsh=${NSH:-$root/../nsh/target/release/nsh}
+nsh=${NSH:-$root/../nsh-patina/target/release/nsh}
 out=$(mkdir -p "${1:-$root/target/package}" && cd "${1:-$root/target/package}" && pwd)
 runtime="$root/target/mpv-runtime-macos"
 fetch=(--platform macos --destination "$runtime")

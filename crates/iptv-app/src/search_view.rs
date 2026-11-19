@@ -494,7 +494,7 @@ pub fn close(ui: Ui) {
     save_history(ui);
     crate::runtime().release_programme_index();
     ui.search.set(None);
-    dismiss_keyboard();
+    crate::input::dismiss_keyboard();
 }
 
 /// The screen is shown and takes the remote.
