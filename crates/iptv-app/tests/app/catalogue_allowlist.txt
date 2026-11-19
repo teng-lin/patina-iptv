@@ -248,6 +248,11 @@ iptv-runtime/src/vod.rs	Playlist disabled
 iptv-runtime/src/vod.rs	Referer
 iptv-runtime/src/vod.rs	User-Agent
 
+# Physical keyboard code prefixes used by the Android remote decoder.
+iptv-app/src/input/keys.rs	Digit
+iptv-app/src/input/keys.rs	Key
+iptv-app/src/input/keys.rs	Numpad
+
 # Inline recording action dispatch keys; labels are translated in rows.rs.
 iptv-app/src/recordings_view/rows.rs	Cancel recording
 iptv-app/src/recordings_view/rows.rs	Delete recording
