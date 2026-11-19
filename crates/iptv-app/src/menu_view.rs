@@ -246,7 +246,13 @@ pub fn perform(ui: Ui, item: MenuItem) {
         }
         MenuItem::StartFromBeginning => {
             close(ui);
-            if !crate::player::allow_guide_channel(origin.channel) {
+            let schedule = crate::schedule();
+            let now = ui.focus.with_untracked(|focus| focus.now);
+            let program = origin_programme(&*schedule, origin);
+            if program.start != origin.program_start
+                || !program.can_replay(now, schedule.catchup_days(origin.channel))
+                || !crate::player::allow_guide_channel(origin.channel)
+            {
                 return;
             }
             ui.play(
@@ -494,7 +500,7 @@ fn heading_text(ui: Ui, heading: Heading) -> String {
     };
     match heading {
         Heading::Program => {
-            let p = crate::schedule().program_at(origin.channel, origin.program_start);
+            let p = origin_programme(&*crate::schedule(), origin);
             format!(
                 "{} · {}–{}",
                 title(origin.channel, p),
@@ -652,16 +658,29 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .child(description(ui))
 }
 
+fn origin_programme(
+    schedule: &dyn crate::guide::Schedule,
+    origin: Origin,
+) -> crate::guide::Program {
+    let minute = schedule
+        .listing_start(origin.channel)
+        .map_or(origin.program_start, |start| {
+            origin.program_start.max(start)
+        });
+    schedule.program_at(origin.channel, minute)
+}
+
 /// The description popover: title, time range and text; no actions (those
 /// live in the menu). Back or a tap closes it.
 fn description(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     let shown = move || ui.description.get().is_some();
     let program = move || {
-        ui.description.get().map(|o| {
+        ui.guide_data();
+        ui.description.get().map(|origin| {
             (
-                o.channel,
-                crate::schedule().program_at(o.channel, o.program_start),
+                origin.channel,
+                origin_programme(&*crate::schedule(), origin),
             )
         })
     };
@@ -715,8 +734,6 @@ fn description(ui: Ui) -> impl IntoElement {
                 )
                 .child(
                     text(move || {
-                        ui.guide_data();
-                        ui.app.guide_pages.get();
                         program()
                             .and_then(|(channel, programme)| {
                                 crate::header::programme_description(

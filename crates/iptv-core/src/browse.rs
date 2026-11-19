@@ -2,9 +2,8 @@
 //! groups column and the guide grid ([`Focus`] owns the remote's place in
 //! all three).
 //!
-//! - Left from the guide's floor programme (the oldest replay on a
-//!   catch-up channel, now's programme on one without:
-//!   [`crate::guide::floor`]) shows the groups column and, beside it, the
+//! - Left from the oldest retained listing ([`crate::guide::floor`])
+//!   shows the groups column and, beside it, the
 //!   rail (collapsed to icons); the guide shifts right. Hold Left (Tab on a
 //!   keyboard) shows them from anywhere in the grid ([`Focus::open_groups`]).
 //! - Moving over the groups previews each one: the guide shows that list

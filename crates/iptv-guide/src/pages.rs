@@ -15,11 +15,12 @@
 //! without being read.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_OWNER: AtomicU64 = AtomicU64::new(1);
 
-use iptv_epg::{DAY, GuideStore, UnixTime};
+use iptv_epg::{ChannelKey, DAY, GuideStore, UnixTime};
 
 /// Older days held at once (two for a guide window across a day's edge,
 /// one for the archive playing).
@@ -69,6 +70,7 @@ pub(crate) struct Pages {
     /// `UnixTime::MIN`: everything is in the schedule's own store.
     loaded_from: UnixTime,
     oldest: UnixTime,
+    listing_starts: HashMap<ChannelKey, UnixTime>,
     loader: Option<PageLoader>,
     pages: RefCell<Vec<Page>>,
     clock: Cell<u64>,
@@ -86,6 +88,7 @@ impl Default for Pages {
                 .expect("page owner identity exhausted"),
             loaded_from: UnixTime::MIN,
             oldest: UnixTime::MIN,
+            listing_starts: HashMap::new(),
             loader: None,
             pages: RefCell::new(Vec::new()),
             clock: Cell::new(0),
@@ -96,10 +99,15 @@ impl Default for Pages {
 }
 
 impl Pages {
-    pub(crate) fn new(window: PagedWindow, loader: PageLoader) -> Self {
+    pub(crate) fn new(
+        window: PagedWindow,
+        listing_starts: HashMap<ChannelKey, UnixTime>,
+        loader: PageLoader,
+    ) -> Self {
         Pages {
             loaded_from: window.loaded_from - window.loaded_from.rem_euclid(3600),
             oldest: window.oldest,
+            listing_starts,
             loader: Some(loader),
             ..Pages::default()
         }
@@ -117,6 +125,12 @@ impl Pages {
     /// The oldest time the store keeps (`UnixTime::MIN` without pages).
     pub(crate) fn oldest(&self) -> UnixTime {
         self.oldest
+    }
+
+    pub(crate) fn listing_start(&self, key: &ChannelKey) -> Option<UnixTime> {
+        self.listing_starts
+            .get(key)
+            .map(|&start| start.max(self.oldest))
     }
 
     fn index_of(&self, t: UnixTime) -> u32 {

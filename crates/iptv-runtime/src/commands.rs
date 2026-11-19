@@ -572,13 +572,6 @@ fn clear_guides_native(
     })
 }
 
-fn first_programme_native(
-    services: &Services,
-    source: SourceId,
-) -> impl std::future::Future<Output = Result<Option<iptv_epg::UnixTime>, StoreError>> + use<> {
-    services.read(move |store| store.epg_first_start(source))
-}
-
 fn guide_page_native(
     services: &Services,
     source: SourceId,
@@ -1078,16 +1071,20 @@ pub(crate) fn clear_guides(
     }
 }
 
-pub(crate) fn first_programme(
+pub(crate) fn guide_listing_starts(
     owner: &crate::Runtime,
     source: SourceId,
-) -> impl std::future::Future<Output = Result<Option<iptv_epg::UnixTime>, crate::Error>> + use<> {
-    let services = owner.services();
-    async move {
-        first_programme_native(&services, source)
-            .await
-            .map_err(crate::Error::from)
-    }
+    cutoff: iptv_epg::UnixTime,
+) -> impl std::future::Future<
+    Output = Result<
+        std::collections::HashMap<iptv_epg::ChannelKey, iptv_epg::UnixTime>,
+        crate::Error,
+    >,
+> + use<> {
+    let starts = owner
+        .services()
+        .read(move |store| store.epg_listing_starts(source, cutoff));
+    async move { Ok(starts.await?) }
 }
 
 pub(crate) fn guide_page(

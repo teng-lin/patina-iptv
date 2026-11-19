@@ -76,6 +76,7 @@ fn paged(oldest: i64) -> (EpgSchedule, Requests) {
             loaded_from,
             oldest,
         },
+        [(ChannelKey::new("a"), FIRST)].into(),
         move |r| seen.borrow_mut().push(r),
     );
     (s, requests)
@@ -269,12 +270,13 @@ fn the_guide_browses_from_the_oldest_day_kept_to_past_its_last_programme() {
         s.browsable(now),
         (minute_of(&s, NOW - 3 * DAY), end + super::PAST_END)
     );
-    // Without guide data: no past (now's default window) and the default
-    // horizon.
+    // A guide without listings has no retained past. Its view still shows
+    // the default padding and horizon.
     let bare = EpgSchedule::new(vec![], GuideStore::new(), NOW);
     let horizon = iptv_core::guide::HORIZON;
     let home = iptv_core::guide::home_window(0);
-    assert_eq!(bare.browsable(0), (home, horizon));
+    assert_eq!(bare.browsable(0), (0, horizon));
+    assert_eq!(iptv_core::guide::view_range(&bare, 0), (home, horizon));
     // Without pages (the whole guide in memory): its first programme.
     let whole = EpgSchedule::new(vec![], store_between(NOW - 2 * DAY, NOW + DAY), NOW);
     let first = whole.browsable(minute_of(&whole, NOW)).0;
@@ -288,6 +290,121 @@ fn the_guide_browses_from_the_oldest_day_kept_to_past_its_last_programme() {
     let (first, last) = s.browsable(late);
     assert_eq!(last, late + iptv_core::guide::VISIBLE);
     assert!(first <= late);
+}
+
+#[test]
+fn retained_coverage_is_per_channel_and_inspectable_before_a_page_is_loaded() {
+    use iptv_core::guide::{Move, Pane, home_window, view_range};
+    use iptv_core::lists::{ChannelList, FIRST_GROUP, ListView};
+
+    let loaded_from = NOW - DAY;
+    // The oldest retained minute is the first moment of a page. P0 began
+    // in the previous page, which is entirely before the retention cutoff.
+    let cutoff = loaded_from - 5 * DAY;
+    let start = cutoff - 10 * 60;
+    let recent_only = ChannelKey::new("recent");
+    let requests = Requests::default();
+    let seen = requests.clone();
+    let schedule = EpgSchedule::new(
+        vec![
+            (
+                "With listings".into(),
+                ["a", "recent"]
+                    .into_iter()
+                    .map(|key| GuideChannel {
+                        key: ChannelKey::new(key),
+                        name: key.into(),
+                        number: 1,
+                        catchup_days: 0,
+                    })
+                    .collect(),
+            ),
+            (
+                "Unmapped".into(),
+                vec![GuideChannel {
+                    key: ChannelKey::new("unmapped"),
+                    name: "Unmapped".into(),
+                    number: 3,
+                    catchup_days: 0,
+                }],
+            ),
+        ],
+        store_between(loaded_from, i64::MAX),
+        NOW,
+    )
+    .with_pages(
+        PagedWindow {
+            loaded_from,
+            oldest: cutoff,
+        },
+        [(ChannelKey::new("a"), start), (recent_only, NOW)].into(),
+        move |request| seen.borrow_mut().push(request),
+    );
+    let floor = schedule.minute(cutoff);
+    let now = schedule.minute(NOW);
+    let mut focus = Focus::at(now);
+    assert_eq!(focus.floor(&schedule), floor);
+    focus.tap(0, floor, &schedule);
+    assert_eq!(schedule.title(0, focus.program(&schedule)), LOADING);
+    assert_eq!(requests.borrow().len(), 1);
+
+    let mut builder = SourceBuilder::new(FeedId(1), 0, StoreOptions::default(), NOW);
+    builder.push_data(
+        "a.test",
+        &ProgrammeData {
+            start,
+            stop: Some(cutoff + 15 * 60),
+            title: "Generated overlap",
+            desc: Some("Generated overlap details"),
+            ..Default::default()
+        },
+    );
+    let mut page = GuideStore::new();
+    page.replace_source(builder.finish());
+    page.set_matches(
+        [(
+            ChannelKey::new("a"),
+            vec![EpgRef {
+                source: FeedId(1),
+                epg_id: "a.test".into(),
+                kind: MatchKind::TvgId,
+            }],
+        )]
+        .into_iter()
+        .collect(),
+    );
+    let request = requests.borrow_mut().pop().unwrap();
+    assert_eq!(request.from, cutoff);
+    assert!(schedule.insert_page(request, page));
+    let listing = focus.program(&schedule);
+    assert_eq!(listing.start, schedule.minute(start));
+    assert_eq!(schedule.title(0, listing), "Generated overlap");
+    assert_eq!(
+        schedule.description(0, listing).as_deref(),
+        Some("Generated overlap details")
+    );
+    assert!(requests.borrow().is_empty(), "no request before retention");
+    focus.apply(Move::Left, &schedule);
+    assert_eq!(focus.pane, Pane::Groups);
+
+    focus = Focus::at(now);
+    focus.apply(Move::Down, &schedule);
+    assert_eq!(focus.floor(&schedule), now, "recent-only row");
+    focus.apply(Move::Left, &schedule);
+    assert_eq!(focus.pane, Pane::Groups);
+
+    let schedule = Rc::new(schedule);
+    let list = ChannelList::build(FIRST_GROUP + 1, &*schedule, &[], &[]);
+    let view = ListView::new(schedule, Rc::new(list));
+    let mut focus = Focus::at(now);
+    assert_eq!(focus.floor(&view), now);
+    assert_eq!(view_range(&view, now).0, home_window(now));
+    focus.apply(Move::Left, &view);
+    assert_eq!(focus.pane, Pane::Groups);
+    assert!(
+        requests.borrow().is_empty(),
+        "unmapped row requests no page"
+    );
 }
 
 #[test]
@@ -310,7 +427,8 @@ fn a_day_back_by_key_or_pan_pages_that_day_in() {
     for _ in 0..10 {
         f.step_time(-iptv_core::guide::moves::DAY, &s);
     }
-    assert_eq!(f.window, minute_of(&s, NOW - 7 * DAY));
+    assert_eq!(f.cursor, minute_of(&s, FIRST));
+    assert!(f.window <= f.cursor && f.cursor < f.window + iptv_core::guide::VISIBLE);
 }
 
 #[test]

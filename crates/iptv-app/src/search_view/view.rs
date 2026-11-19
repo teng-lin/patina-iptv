@@ -47,6 +47,7 @@ fn screen(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     let idle = computed(move || state(ui, |s| s.state.phase() == Phase::Idle).unwrap_or(true));
     ui_kit::screen(ui, size)
+        .style_when(move || compact_header(size), move |s| s.px(size.px(16.0)))
         .test_id("search-screen")
         .accessibility_elements_hidden(move || {
             crate::overlays::Overlay::Search.accessibility_covered(ui)
@@ -62,7 +63,23 @@ fn screen(ui: Ui) -> impl IntoElement {
 }
 
 fn hint(ui: Ui) -> &'static str {
-    let idle = state(ui, |s| s.state.phase() == Phase::Idle).unwrap_or(true);
+    let Some((phase, editing)) = state(ui, |s| {
+        (
+            s.state.phase(),
+            s.state.keyboard_visible() && *s.state.focus() == Focus::Input,
+        )
+    }) else {
+        return "";
+    };
+    if matches!(phase, Phase::NoResults | Phase::Typing) {
+        return match (editing, ui.keys_shown()) {
+            (true, _) => tr("Edit the query or choose Clear"),
+            (false, true) if crate::desktop::DESKTOP => tr("Enter edit query   Esc close"),
+            (false, true) => tr("OK edit query   Back close"),
+            (false, false) => tr("Tap the search field to edit, or choose Clear"),
+        };
+    }
+    let idle = phase == Phase::Idle;
     // Search and add: a result goes to multiview.
     let add = pick::picking(ui);
     match (ui.keys_shown(), idle) {
@@ -83,6 +100,10 @@ fn button(ui: Ui, size: Scale, label: &'static str, act: fn(Ui)) -> impl IntoEle
     ui_kit::button(ui, size, move || tr(label), || false, move || act(ui))
 }
 
+fn compact_header(size: Scale) -> bool {
+    window().width < size.px(620.0 * crate::settings::font_factor())
+}
+
 fn header(ui: Ui, size: Scale) -> impl IntoElement {
     let field = element_ref();
     let want_keyboard = computed(move || {
@@ -97,27 +118,48 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
         move || apply(ui, SearchAction::KeyboardHidden),
     );
     let field_focused = move || state(ui, |s| *s.state.focus() == Focus::Input).unwrap_or(false);
+    let compact = move || compact_header(size);
+    // Change the field's grid position without remounting the native editor.
     view()
-        .flex_row()
+        .grid()
+        .grid_template_columns(move || {
+            if compact() {
+                "minmax(0, 1fr) auto"
+            } else {
+                "auto minmax(0, 1fr) auto"
+            }
+        })
         .items_center()
         .gap(move || size.px(12.0))
-        .child(ui_kit::title(size, move || {
-            if pick::picking(ui) {
-                tr("Search and add")
-            } else {
-                tr("Search")
-            }
-        }))
+        .child(
+            ui_kit::title(size, move || {
+                if pick::picking(ui) {
+                    tr("Search and add")
+                } else {
+                    tr("Search")
+                }
+            })
+            .row_start(1)
+            .col_start(1)
+            .min_w(px(0.0)),
+        )
         .child(
             ui_kit::field(size, input())
                 .element_ref(&field)
-                .flex_1()
+                .row_start(move || if compact() { 2_i16 } else { 1 })
+                .col_start(move || if compact() { 1_i16 } else { 2 })
+                .col_end(move || if compact() { -1_i16 } else { 3 })
+                .min_w(px(0.0))
+                .label(move || tr("Channel, number or programme"))
                 .value(move || state(ui, |s| s.state.query().to_owned()).unwrap_or_default())
                 .placeholder(move || tr("Channel, number or programme"))
                 .auto_focus(want_keyboard.get_untracked())
                 .auto_capitalize(AutoCapitalize::None)
                 .auto_correct(false)
                 .return_key_type(ReturnKeyType::Search)
+                // Search decides when to leave the field. Native submit must
+                // keep focus when Return has nothing to select yet.
+                .submit_behavior(SubmitBehavior::Submit)
                 .test_id("search-field")
                 .bg(move || ui_kit::field_fill(ui, field_focused()))
                 .border(move || size.px(2.0))
@@ -142,10 +184,17 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
                     }
                 }),
         )
-        .child(button(ui, size, "Clear", |ui| {
-            apply(ui, SearchAction::Clear)
-        }))
-        .child(button(ui, size, "Close", close))
+        .child(
+            view()
+                .row_start(1)
+                .col_start(move || if compact() { 2_i16 } else { 3 })
+                .flex_row()
+                .gap(move || size.px(8.0))
+                .child(button(ui, size, "Clear", |ui| {
+                    apply(ui, SearchAction::Clear)
+                }))
+                .child(button(ui, size, "Close", close)),
+        )
 }
 
 fn history(ui: Ui, size: Scale) -> impl IntoElement {
@@ -261,15 +310,24 @@ fn results(ui: Ui, size: Scale) -> impl IntoElement {
             view()
                 .flex_row()
                 .items_center()
+                .style_when(move || compact_header(size), |s| s.flex_col().items_start())
                 .gap(move || size.px(8.0))
-                .child(tab_button(ui, Tab::Channels, size))
-                .child(tab_button(ui, Tab::Programs, size))
                 .child(
-                    ui_kit::caption(size, move || status(ui))
-                        .flex_1()
-                        .px(move || size.px(12.0))
-                        .number_of_lines(1),
-                ),
+                    view()
+                        .flex_row()
+                        .flex_wrap()
+                        .gap(move || size.px(8.0))
+                        .child(tab_button(ui, Tab::Channels, size))
+                        .child(tab_button(ui, Tab::Programs, size)),
+                )
+                .child(when(
+                    move || !status(ui).is_empty(),
+                    move || {
+                        ui_kit::caption(size, move || status(ui))
+                            .style_when(move || !compact_header(size), |s| s.flex_1())
+                            .number_of_lines(move || if compact_header(size) { 2_u32 } else { 1 })
+                    },
+                )),
         )
         .child(
             virtual_list(count, move |at| result_row(ui, at, focused_index, size))
@@ -291,7 +349,8 @@ fn result_row(
         Some((_, Some(_))) => CONDENSED,
         _ => SANS,
     };
-    let mark = move || mark(ui, focused_index.get() == Some(at.index()));
+    let focused = move || focused_index.get() == Some(at.index());
+    let mark = move || mark(ui, focused());
     let line1 = move || match item() {
         Some((ResultId::Channel(id), _)) => {
             let schedule = crate::schedule();
@@ -334,6 +393,15 @@ fn result_row(
         _ => String::new(),
     };
     list_rows::row(size, ROW_TWO, mark)
+        .test_id("search-result")
+        .role(AccessibilityRole::Button)
+        .accessible(true)
+        .label(line1)
+        .hint(line2)
+        .accessibility_state(move || AccessibilityState {
+            selected: focused(),
+            ..Default::default()
+        })
         .flex_row()
         .items_center()
         .justify_start()
@@ -347,6 +415,7 @@ fn result_row(
         .child(
             view()
                 .flex_1()
+                .accessibility_elements_hidden(true)
                 .child(
                     list_rows::name(size, line1)
                         .font_family(family)
@@ -355,11 +424,13 @@ fn result_row(
                 .child(list_rows::second(size, line2, SANS).text_color(move || mark().secondary())),
         )
         .child(
-            list_rows::small(size, marker, CAPTION).text_color(move || match item() {
-                Some((_, Some(h))) if h.airing == Airing::Live && mark() != Mark::Focused => {
-                    rgb(ui.app.theme.with(|t| t.accent.light))
-                }
-                _ => mark().secondary(),
-            }),
+            list_rows::small(size, marker, CAPTION)
+                .accessibility_elements_hidden(true)
+                .text_color(move || match item() {
+                    Some((_, Some(h))) if h.airing == Airing::Live && mark() != Mark::Focused => {
+                        rgb(ui.app.theme.with(|t| t.accent.light))
+                    }
+                    _ => mark().secondary(),
+                }),
         )
 }

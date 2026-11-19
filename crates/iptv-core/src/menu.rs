@@ -154,9 +154,9 @@ impl Menu {
 /// `catchup_days`: the channel's archive window, 0 = none).
 pub fn program_actions(program: Program, catchup_days: u8, now: i32) -> Vec<MenuItem> {
     use MenuItem::*;
-    let in_archive = catchup_days > 0 && program.start >= now - i32::from(catchup_days) * 24 * 60;
+    let in_archive = program.can_replay(now, catchup_days);
     let mut items = match program.airing(now) {
-        Airing::Live if catchup_days > 0 => vec![StartFromBeginning, ExternalPlayer, Record],
+        Airing::Live if in_archive => vec![StartFromBeginning, ExternalPlayer, Record],
         Airing::Live => vec![ExternalPlayer, Record],
         Airing::Ended if in_archive => vec![StartFromBeginning, ExternalPlayer],
         Airing::Ended => vec![],

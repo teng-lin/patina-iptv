@@ -400,9 +400,30 @@ fn the_first_programme_stored_bounds_the_guide() {
     staged::replace_epg(&mut store, a, &two_feed_guide("a"), &feeds, 0).unwrap();
     assert_eq!(store.epg_first_start(a).unwrap(), Some(NOW - 3 * H));
     assert_eq!(store.epg_first_start(b).unwrap(), None, "per source");
+
+    let cutoff = NOW - H / 2;
+    let starts = store.epg_listing_starts(a, cutoff).unwrap();
+    // The prior X listing ends before the cutoff. The one spanning it stays,
+    // and multiple playlist keys for the same EPG channel keep their binding.
+    for key in ["k1", "k3"] {
+        assert_eq!(starts[&ChannelKey::from(key)], NOW - H);
+    }
+    assert!(!starts.contains_key(&ChannelKey::from("k4")));
+    assert!(store.epg_listing_starts(b, cutoff).unwrap().is_empty());
+    assert!(
+        store
+            .epg_listing_starts(a, NOW + 12 * H)
+            .unwrap()
+            .is_empty()
+    );
+
     // Pruned days go: the first programme left is now's.
     store.prune_epg(NOW).unwrap();
     assert_eq!(store.epg_first_start(a).unwrap(), Some(NOW));
+    assert_eq!(
+        store.epg_listing_starts(a, cutoff).unwrap()[&ChannelKey::from("k1")],
+        NOW
+    );
 }
 
 #[test]

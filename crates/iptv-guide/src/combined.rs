@@ -378,6 +378,12 @@ impl Schedule for CombinedSchedule {
             .reduce(|(a, b), (c, d)| (a.min(c), b.max(d)))
             .unwrap_or((now, now + iptv_core::guide::HORIZON))
     }
+    fn listing_start(&self, channel: usize) -> Option<i32> {
+        let (source, local) = self.channel_source(channel)?;
+        let start = source.schedule.listing_start(local)?;
+        Some(start - self.offset(&source.schedule))
+    }
+
     fn as_any(&self) -> Option<&dyn std::any::Any> {
         Some(self)
     }

@@ -287,19 +287,19 @@ fn hint_card(ui: Ui) -> impl IntoElement {
 fn hint_lines() -> [&'static str; 4] {
     match crate::input::PROFILE {
         iptv_nav::Profile::Remote => [
-            tr("◀  ·  replays (catch-up), then groups"),
+            tr("◀  ·  earlier programmes, then groups"),
             tr("◀ in the groups  ·  search"),
             tr("Hold ◀  ·  groups      Search  ·  search"),
             tr("Hold OK  ·  menu"),
         ],
         iptv_nav::Profile::Keyboard if cfg!(target_os = "macos") => [
-            tr("◀  ·  replays (catch-up), then groups"),
+            tr("◀  ·  earlier programmes, then groups"),
             tr("Tab  ·  groups      / or ⌘F  ·  search"),
             tr("Home  ·  now      Shift ◀ ▶  ·  hours      ⌘ ◀ ▶  ·  days"),
             tr("◀ in the groups  ·  search      m  ·  menu"),
         ],
         iptv_nav::Profile::Keyboard => [
-            tr("◀  ·  replays (catch-up), then groups"),
+            tr("◀  ·  earlier programmes, then groups"),
             tr("Tab  ·  groups      / or Ctrl+F  ·  search"),
             tr("Home  ·  now      Shift ◀ ▶  ·  hours      Ctrl ◀ ▶  ·  days"),
             tr("◀ in the groups  ·  search      m  ·  menu"),

@@ -9,8 +9,7 @@
 //! fast enough it flings on and slows down ([`FLING_GAIN`], [`FRICTION`]),
 //! about as far as a native list's fling. The view stays within what the
 //! guide can show ([`crate::guide::view_range`]): back as far as the
-//! list's catch-up goes in the stored guide (only now's half hour without
-//! catch-up), on to a little past the last programme. Keys move the focus model's window
+//! retained listings go, on to a little past the last programme. Keys move the focus model's window
 //! ([`crate::guide::Focus`]); the view follows it while nothing pans, and a
 //! settled pan hands its window back ([`Timeline::window`]).
 //!

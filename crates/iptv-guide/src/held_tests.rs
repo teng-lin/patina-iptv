@@ -71,6 +71,7 @@ fn first_screen() -> (EpgSchedule, Rc<RefCell<Vec<PageRequest>>>) {
             loaded_from: NOW - DAY,
             oldest: NOW - 2 * DAY,
         },
+        [(ChannelKey::new("a"), FIRST)].into(),
         move |r| seen.borrow_mut().push(r),
     )
     .held_only(FROM, TO);

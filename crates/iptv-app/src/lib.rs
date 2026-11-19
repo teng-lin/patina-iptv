@@ -323,7 +323,7 @@ impl Ui {
     pub(crate) fn new(app: SharedUi, player: player::Player) -> Self {
         let recordings = signal(iptv_core::recording::Screen::default());
         let recordings_open = computed(move || recordings.with(|s| s.open));
-        Self {
+        let ui = Self {
             app,
             focus: signal(Focus::default()),
             browse_playback: signal(Default::default()),
@@ -387,7 +387,9 @@ impl Ui {
             channel_picker: signal(None),
             pip: signal(Default::default()),
             back_guard: signal(iptv_nav::BackGuard::default()),
-        }
+        };
+        player_panels::bind_auto_hide(ui);
+        ui
     }
 }
 
@@ -399,8 +401,8 @@ impl Ui {
     }
 
     /// OK or a tap on the focused programme: a live one plays (OK on the
-    /// channel already playing goes full screen); ended and upcoming ones
-    /// only show their details (no catch-up or reminders yet).
+    /// channel already playing goes full screen). An available replay plays
+    /// from the archive. Other listings open their details.
     pub fn watch(&self) {
         let view = lists::view(*self);
         let (row, program, now) = self.focus.with(|f| (f.channel, f.program(&view), f.now));
@@ -417,8 +419,7 @@ impl Ui {
                     browse_playback::select(*self);
                 }
             }
-            // A past programme plays from the archive when the channel has
-            // one that reaches it; otherwise OK leaves the guide as it is.
+            // Replay an ended listing only within the channel's archive.
             Airing::Ended if in_archive(channel, program, now) => {
                 if !player::allow_guide_channel(channel) {
                     return;
@@ -433,15 +434,16 @@ impl Ui {
                 self.mode.set(ViewMode::Fullscreen);
                 self.show_playing();
             }
-            Airing::Upcoming => {
+            Airing::Upcoming | Airing::Ended => {
                 let origin = Origin {
                     channel,
                     program_start: program.start,
                 };
-                recordings_view::remember(*self, origin);
+                if program.airing(now) == Airing::Upcoming {
+                    recordings_view::remember(*self, origin);
+                }
                 self.description.set(Some(origin));
             }
-            Airing::Ended => {}
         }
     }
 
@@ -544,27 +546,10 @@ impl Ui {
         });
     }
 
-    /// Changes the panels and (re)schedules their auto-hide.
+    /// Changes the panels at the current point in the app's clock.
     pub fn update_panels(&self, f: impl FnOnce(&mut Panels, u64)) {
         let now = self.now_ms();
         self.panels.update(|p| f(p, now));
-        if let Some(at) = self.panels.with(|p| p.hide_at_ms()) {
-            let ui = *self;
-            let _task = set_timeout(Duration::from_millis(at.saturating_sub(now)), move || {
-                let now = ui.now_ms();
-                // Later input moved the deadline: this tick is a no-op then.
-                if ui
-                    .panels
-                    .with(|p| p.hide_at_ms().is_some_and(|at| now >= at))
-                {
-                    let at = ui.panels.with(|p| p.hide_at_ms());
-                    log::info!("iptv panels auto-hide now={now} at={at:?}");
-                    ui.panels.update(|p| {
-                        p.tick(now);
-                    });
-                }
-            });
-        }
     }
 
     pub(crate) fn toggle(&self, mode: ViewMode) {
@@ -684,8 +669,7 @@ pub fn set_schedule(ui: &Ui, schedule: Rc<dyn Schedule>) {
 /// Whether `program` on `channel` is inside the channel's catch-up window
 /// at guide minute `now`.
 pub fn in_archive(channel: usize, program: Program, now: i32) -> bool {
-    let days = i32::from(schedule().catchup_days(channel));
-    days > 0 && program.end <= now && program.start >= now - days * 24 * 60
+    program.end <= now && program.can_replay(now, schedule().catchup_days(channel))
 }
 
 /// `0xRRGGBB` with alpha, as an NSH colour.

@@ -22,7 +22,7 @@ const COLUMNS: &str = "p.start, p.stop, p.title, p.sub_title, p.category, p.icon
 
 /// The seek: the last programme of channel `{ch}` starting at or before
 /// `?2` on (`?2` itself when none does).
-fn seek(ch: &str) -> String {
+pub(crate) fn seek(ch: &str) -> String {
     format!(
         "p.start >= COALESCE((SELECT MAX(q.start) FROM epg_programmes q
                               WHERE q.channel_id = {ch} AND q.start <= ?2), ?2)"

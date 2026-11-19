@@ -44,8 +44,8 @@ pub(super) fn ruler(
             .font_family(SANS)
             .text_size(move || size.text_px(RULER))
     };
-    let shift = move |label: fn() -> &'static str, minutes: i32| {
-        button(label).on_press(move || {
+    let shift = move |glyph: fn() -> &'static str, name: fn() -> &'static str, minutes: i32| {
+        button(glyph).label(name).on_press(move || {
             ui.touched();
             let view = crate::lists::view(ui);
             ui.focus.update(|f| f.shift_window(minutes, &view));
@@ -113,7 +113,12 @@ pub(super) fn ruler(
                         .child(now_button)
                         .children(
                             (!crate::IOS)
-                                .then(|| [shift(|| "‹", -STEP), shift(|| "›", STEP)])
+                                .then(|| {
+                                    [
+                                        shift(|| "‹", || tr("Go back 30 minutes"), -STEP),
+                                        shift(|| "›", || tr("Go forward 30 minutes"), STEP),
+                                    ]
+                                })
                                 .into_iter()
                                 .flatten(),
                         ),

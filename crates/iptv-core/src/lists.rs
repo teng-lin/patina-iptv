@@ -131,18 +131,16 @@ pub fn scan_group_of(catalog: &(impl Schedule + ?Sized), channel: usize) -> Opti
 pub struct ChannelList {
     entry: usize,
     channels: Vec<usize>,
-    /// The longest archive window of its channels, in days (how far back
-    /// the guide can be panned: `guide::floor::view_range`).
-    archive_days: u8,
+    first_listing: Option<i32>,
 }
 
 impl ChannelList {
-    /// `channels` without catch-up ([`ChannelList::build`] reads theirs).
+    /// Creates a list in the given order.
     pub fn new(entry: usize, channels: Vec<usize>) -> Self {
         ChannelList {
             entry,
             channels,
-            archive_days: 0,
+            first_listing: None,
         }
     }
 
@@ -166,15 +164,14 @@ impl ChannelList {
             .into_iter()
             .filter(|&c| !catalog.channel_hidden(c))
             .collect();
-        let archive_days = channels
+        let first_listing = channels
             .iter()
-            .map(|&c| catalog.catchup_days(c))
-            .max()
-            .unwrap_or(0);
+            .filter_map(|&channel| catalog.listing_start(channel))
+            .min();
         ChannelList {
             entry,
             channels,
-            archive_days,
+            first_listing,
         }
     }
 
@@ -271,7 +268,15 @@ impl Schedule for ListView {
         self.catalog.follows_wall_clock()
     }
     fn browsable(&self, now: i32) -> (i32, i32) {
-        self.catalog.browsable(now)
+        let (start, end) = self.catalog.browsable(now);
+        let first = self
+            .list
+            .first_listing
+            .map_or(now, |first| first.max(start).min(now));
+        (first, end)
+    }
+    fn listing_start(&self, row: usize) -> Option<i32> {
+        self.catalog.listing_start(self.channel(row)?)
     }
     fn channel_count(&self) -> usize {
         self.list.len()
@@ -307,9 +312,6 @@ impl Schedule for ListView {
     fn catchup_days(&self, row: usize) -> u8 {
         self.channel(row)
             .map_or(0, |c| self.catalog.catchup_days(c))
-    }
-    fn max_catchup_days(&self) -> u8 {
-        self.list.archive_days
     }
     fn channel_name(&self, row: usize) -> String {
         self.channel(row)
