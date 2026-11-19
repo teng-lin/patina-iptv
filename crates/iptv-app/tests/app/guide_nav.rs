@@ -99,9 +99,8 @@ fn the_timeline_pans_by_touch_and_left_reaches_retained_listings() {
         "at now: no Now button"
     );
 
-    // A tap with a small wobble still plays (it is no drag).
-    step(app.drag("text:Other 0", Point::new(px(4.0), px(3.0))));
-    step(app.wait_for("text:▶"));
+    step(app.press_key("down"));
+    assert!(focused(&app, "Other 0"));
 
     // Dragging the programmes right shows earlier ones: three drags and
     // the final fling go several hours back, within retained listings.
@@ -160,10 +159,9 @@ fn the_timeline_pans_by_touch_and_left_reaches_retained_listings() {
             .unwrap()
     );
     step(app.back());
-    let opens = iptv_app::player_opens(0);
     step(app.press_key("enter"));
     step(app.wait_for("id:description-layer >> text:Generated details for Show -32"));
-    assert_eq!(iptv_app::player_opens(0), opens);
+    assert_eq!(iptv_app::player_opens(0), 0);
     step(app.back());
 
     // Day steps reach the oldest retained page. Instead of trying to
@@ -187,26 +185,24 @@ fn the_timeline_pans_by_touch_and_left_reaches_retained_listings() {
     step(app.press_key("left"));
     step(app.wait_for("text:Other -1"));
     assert!(focused(&app, "Other -1"));
-    let opens = iptv_app::player_opens(0);
     step(app.press_key("enter"));
     step(app.wait_for("id:description-layer >> text:Generated details for Other -1"));
-    assert_eq!(iptv_app::player_opens(0), opens);
+    assert_eq!(iptv_app::player_opens(0), 0);
     step(app.back());
     step(app.press_key("shift+left"));
     step(app.wait_for("text:Other -3"));
     assert!(focused(&app, "Other -3"));
 
     let old_unmapped_cell = "id:guide-ui >> role:cell[No information] >> nth=0";
-    let opens = iptv_app::player_opens(0);
     step(app.press(old_unmapped_cell));
-    assert_eq!(iptv_app::player_opens(0), opens);
+    assert_eq!(iptv_app::player_opens(0), 0);
     step(app.right_click(old_unmapped_cell));
     assert!(
         !app.screen()
             .matches("id:menu-panel >> text:Details")
             .unwrap()
     );
-    assert_eq!(iptv_app::player_opens(0), opens);
+    assert_eq!(iptv_app::player_opens(0), 0);
 
     // A row without a retained guide listing stays at now. Left can
     // immediately open Groups even with other channels' listings on screen.
@@ -251,6 +247,12 @@ fn the_timeline_pans_by_touch_and_left_reaches_retained_listings() {
     }
     step(app.wait_for("text:Show -8"));
     assert!(focused(&app, "Show -8"));
+
+    // Start playback after the zero-open checks so a simulated stream retry
+    // cannot change their count.
+    step(app.press_key("home"));
+    step(app.drag("text:Other 0", Point::new(px(4.0), px(3.0))));
+    step(app.wait_for("text:▶"));
 }
 
 #[track_caller]
