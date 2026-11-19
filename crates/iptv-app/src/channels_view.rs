@@ -113,8 +113,9 @@ fn update(ui: Ui, f: impl FnOnce(&mut ChannelList, &Rows, usize) -> Outcome) {
         Outcome::Stay => {}
         Outcome::Close => close(ui),
         Outcome::Play(channel) if crate::multiview::picking(ui) => {
-            crate::multiview::picked(ui, channel);
-            close(ui);
+            if crate::multiview::picked(ui, channel) {
+                close(ui);
+            }
         }
         Outcome::Play(channel) => {
             log::info!("iptv channel list: play {channel}");
@@ -148,6 +149,16 @@ pub fn key(ui: Ui, action: Action) {
             Outcome::Stay
         }),
         Action::Select => update(ui, |c, l, _| c.select(playing, l)),
+        Action::ShowMenu if !crate::multiview::picking(ui) => {
+            if let Some(list) = ui.channels.get_untracked() {
+                match list.pane {
+                    ListPane::Groups => {
+                        crate::menu_view::open_group_options(ui, list.entry);
+                    }
+                    ListPane::Channels => open_channel_menu(ui, list.row),
+                }
+            }
+        }
         Action::Back => update(ui, |c, _, _| c.back()),
         // Picking for multiview: nothing plays here.
         Action::ChannelUp | Action::ChannelDown | Action::PlayPause
@@ -166,6 +177,15 @@ pub fn key(ui: Ui, action: Action) {
     }
 }
 
+fn open_channel_menu(ui: Ui, row: usize) {
+    if !crate::multiview::picking(ui)
+        && let Some(channel) = ui.list.with_untracked(|list| list.channel(row))
+    {
+        let minute = ui.focus.with_untracked(|focus| focus.now);
+        crate::menu_view::open_for(ui, channel, minute);
+    }
+}
+
 /// What an empty list says.
 fn empty_text(ui: Ui) -> String {
     match ui.list.with(|l| (l.is_empty(), l.entry())) {
@@ -179,13 +199,6 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     // The list belongs to full-screen playback and to the data it indexes.
     effect(move || {
         if ui.mode.get() != ViewMode::Fullscreen && untracked(|| is_open(ui)) {
-            untracked(|| close(ui));
-        }
-    });
-    let shown = std::cell::Cell::new(None);
-    effect(move || {
-        let version = ui.app.data_version.get();
-        if shown.replace(Some(version)).is_some_and(|v| v != version) && untracked(|| is_open(ui)) {
             untracked(|| close(ui));
         }
     });
@@ -335,6 +348,18 @@ fn entry_row(
             ui.touched();
             update(ui, |c, l, _| c.tap_entry(at.index(), l));
         })
+        .on_long_press(move || {
+            ui.touched();
+            if !crate::multiview::picking(ui) {
+                crate::menu_view::open_group_options(ui, at.index());
+            }
+        })
+        .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
+            ui.touched();
+            if !crate::multiview::picking(ui) {
+                crate::menu_view::open_group_options(ui, at.index());
+            }
+        })
         .child(
             list_rows::name(size, move || {
                 ui.app.data_version.get();
@@ -400,6 +425,14 @@ fn channel_row(
             ui.touched();
             let playing = playing(ui);
             update(ui, |c, l, _| c.tap_row(at.index(), playing, l));
+        })
+        .on_long_press(move || {
+            ui.touched();
+            open_channel_menu(ui, at.index());
+        })
+        .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
+            ui.touched();
+            open_channel_menu(ui, at.index());
         })
         .child(
             list_rows::name(size, move || entry().map_or(String::new(), |e| e.0))

@@ -12,21 +12,7 @@ pub(crate) fn move_to(
     item: &str,
     index: usize,
 ) -> bool {
-    let Some(from) = list.iter().position(|x| x == item) else {
-        return false;
-    };
-    let moved = list.remove(from);
-    let anchor = list
-        .iter()
-        .enumerate()
-        .filter(|(_, x)| present.contains(*x))
-        .nth(index)
-        .map(|(i, _)| i);
-    match anchor {
-        Some(at) => list.insert(at, moved),
-        None => list.push(moved),
-    }
-    true
+    iptv_core::reorder::move_to_present(list, item, index, |key| present.contains(key))
 }
 
 #[cfg(test)]

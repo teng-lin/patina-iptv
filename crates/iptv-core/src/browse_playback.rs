@@ -89,8 +89,6 @@ impl BrowsePlayback {
             self.pending = None;
             if fullscreen {
                 self.fullscreen_at = None;
-            } else {
-                self.arm_fullscreen(now);
             }
             return self
                 .target
@@ -152,6 +150,8 @@ mod tests {
                 ..
             })
         ));
+        assert_eq!(b.deadline(), None);
+        b.playing("a", 500);
         b.activity(2400);
         assert_eq!(b.tick(2500), None);
         assert_eq!(b.tick(4400), Some(Effect::Fullscreen));

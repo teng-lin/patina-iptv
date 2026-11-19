@@ -2,6 +2,7 @@
 //! durable retry accounting run only on the store worker, never the UI thread.
 use crate::Runtime;
 use iptv_core::parental::{Access, ContentKind, Pin, Policy, Target, UnlockWindow};
+use iptv_library::SourceId;
 use iptv_store_sqlite::parental::ParentalCredential;
 use std::{
     collections::BTreeSet,
@@ -234,6 +235,14 @@ impl Runtime {
     /// Update authorization for a bounded set of content identities. The full
     /// catalogue snapshot is reserved for boot, catalogue changes and management.
     pub(crate) async fn parental_refresh_targets(&self, targets: Vec<Target>) -> Result<(), Error> {
+        self.refresh_targets(targets, None).await.map(|_| ())
+    }
+
+    async fn refresh_targets(
+        &self,
+        targets: Vec<Target>,
+        guide_channel: Option<Target>,
+    ) -> Result<bool, Error> {
         let services = self.services();
         let result = services
             .read(move |store| {
@@ -251,7 +260,17 @@ impl Runtime {
                             .collect::<iptv_store_sqlite::Result<Vec<_>>>()?;
                         entries.push((target, parents, blocked));
                     }
-                    Ok((store.parental_credential()?.is_some(), entries))
+                    let guide_blocked = match guide_channel {
+                        Some(channel) => {
+                            store.guide_channel_blocked(SourceId(channel.source), &channel.id)?
+                        }
+                        None => false,
+                    };
+                    Ok((
+                        store.parental_credential()?.is_some(),
+                        entries,
+                        guide_blocked,
+                    ))
                 })
             })
             .await
@@ -294,7 +313,7 @@ impl Runtime {
             state.policy_revision.fetch_add(1, Ordering::SeqCst);
         }
         apply_policy(&mut state, policy(self));
-        Ok(())
+        Ok(result.2)
     }
     pub(crate) fn parental_policy_changed(&self) {
         apply_policy(&mut self.parental.borrow_mut(), policy(self));
@@ -339,6 +358,19 @@ impl Runtime {
             Err(Error::Locked)
         }
     }
+    /// Checks durable guide blocks and parental access in one read for playback.
+    pub async fn live_channel_allowed(
+        &self,
+        source: SourceId,
+        channel: String,
+    ) -> Result<bool, Error> {
+        let target = Target::live(source.0, channel);
+        let blocked = self
+            .refresh_targets(vec![target.clone()], Some(target.clone()))
+            .await?;
+        Ok(!blocked && self.parental_allowed(&target))
+    }
+
     pub async fn parental_authorize(&self, target: Target, pin: Pin) -> Result<(), Error> {
         self.parental_refresh_targets(vec![target.clone()]).await?;
         let services = self.services();

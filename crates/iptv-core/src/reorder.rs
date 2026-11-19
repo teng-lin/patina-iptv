@@ -23,6 +23,27 @@
 //!
 //! Items must be unique: identity is `==`.
 
+/// Moves an item to an index among present entries, retaining absent keys.
+pub fn move_to_present<T: PartialEq<Q>, Q: ?Sized>(
+    items: &mut Vec<T>,
+    key: &Q,
+    index: usize,
+    present: impl Fn(&T) -> bool,
+) -> bool {
+    let Some(from) = items.iter().position(|item| item == key) else {
+        return false;
+    };
+    let moved = items.remove(from);
+    let anchor = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| present(item))
+        .nth(index)
+        .map_or(items.len(), |(at, _)| at);
+    items.insert(anchor, moved);
+    true
+}
+
 /// A remote key, as reorder mode sees it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
@@ -303,8 +324,13 @@ impl<T: Clone + Eq> Reorder<T> {
 
     /// Back: leave now when there is nothing to lose, else ask.
     pub fn leave(&mut self) -> Outcome<T> {
+        self.leave_with_changes(false)
+    }
+
+    /// Also confirm when the caller has pending changes outside the row order.
+    pub fn leave_with_changes(&mut self, has_other_changes: bool) -> Outcome<T> {
         match self.phase {
-            Phase::Editing if self.dirty => {
+            Phase::Editing if self.dirty || has_other_changes => {
                 self.phase = Phase::Confirming;
                 Outcome::ConfirmLeave
             }

@@ -44,8 +44,9 @@ pub(super) fn choose(ui: Ui, id: &ResultId) -> bool {
     let Some(channel) = resolve_result_channel(&crate::runtime(), id.channel(), &*schedule) else {
         return true;
     };
-    crate::multiview::picked(ui, channel);
-    close(ui);
+    if crate::multiview::picked(ui, channel) {
+        close(ui);
+    }
     true
 }
 

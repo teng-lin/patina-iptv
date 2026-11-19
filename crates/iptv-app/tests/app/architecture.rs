@@ -29,7 +29,6 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("lib.rs", "RUNTIME"),              // The shell's single application handle.
     ("lib.rs", "ROOT_STARTED"), // Guard: the handle is asked for on the application thread only.
     ("lists.rs", "HINT_SHOWN"), // Visible navigation hint revision.
-    ("organization_view.rs", "OPEN_GENERATION"), // Discard stale dialog replies.
     ("platform_data.rs", "ANDROID_FILES"), // Android files directory handle.
     ("platform_data.rs", "TEST_DIRECTORY"), // Test-only explicit isolated storage handle.
     ("platform_data.rs", "HOST_STOP"), // The root owner's weak handle for off-thread host callbacks.

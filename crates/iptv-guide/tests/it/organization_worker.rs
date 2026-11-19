@@ -31,6 +31,7 @@ fn organization_of_a_hundred_thousand_channels_is_prepared_on_a_worker() {
                 .map(|id| (format!("generated-{id}"), format!("Renamed {id}"), false))
                 .collect(),
             groups: Vec::new(),
+            ..Default::default()
         };
         input.prepare(organization, Vec::new())
     })

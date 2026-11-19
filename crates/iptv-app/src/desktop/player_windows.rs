@@ -102,7 +102,6 @@ fn follow_lists(local: Ui) {
                 let kept = crate::lists::keep_in(local, previous);
                 crate::lists::restore(local, kept);
                 // These open presentations also contain catalogue row indices.
-                local.channels.set(None);
                 local.menu.set(None);
                 local.description.set(None);
                 local.chooser.set(None);
@@ -452,6 +451,7 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
                     .child(crate::channels_view::layer(local))
                     .child(crate::search_view::layer(local))
                     .child(crate::menu_view::layer(local))
+                    .child(crate::organization_view::layer(local))
                     .child(crate::chooser::layer(local))
                     .child(crate::play_bar::layer(local))
             },

@@ -445,11 +445,12 @@ fn act(ui: Ui, index: usize) {
         Page::Detail(g) => match index {
             0 => show_members(ui, ChannelScope::Custom(g)),
             1 => begin_text(ui, Text::Rename(g)),
-            2 => crate::organization_view::open(
+            2 => crate::organization_view::open_mode(
                 ui,
                 s.source,
                 crate::organization_view::Kind::CustomChannels(g),
                 None,
+                iptv_core::organization::Mode::Reorder,
             ),
             3 => update(ui, |s| {
                 s.page = Page::Delete(g);

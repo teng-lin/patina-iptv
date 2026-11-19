@@ -53,7 +53,7 @@ pub fn bind(ui: Ui) {
             crate::player::stop(ui);
             close_window.hide();
         } else {
-            quit();
+            quit(ui);
         }
     });
     if recorder_only_startup() {
@@ -187,8 +187,9 @@ thread_local! {
 }
 
 /// Explicit quit preserves future recording intent but stops the native host.
-pub(crate) fn quit() {
+pub(crate) fn quit(ui: Ui) {
     if crate::runtime().shutdown_recording_host() {
+        crate::player::watch_time::flush(ui);
         with_window(WindowRef::close);
     } else {
         crate::settings_view::notify(tr(

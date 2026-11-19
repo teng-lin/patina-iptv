@@ -14,6 +14,7 @@
 //! with the ruler's times and the now line, by one animated offset.
 
 use crate::i18n::tr;
+use crate::organization_view;
 
 mod cell;
 mod channel;
@@ -83,7 +84,34 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
     let size = Scale::new();
     let pan = Pan::new(ui, width);
     let now = computed(move || ui.focus.with(|f| f.now));
+    let order_scope = computed(move || organization_view::guide_order_scope(ui));
+    let order_keys = computed(move || {
+        order_scope.with(|scope| {
+            scope
+                .as_ref()
+                .map(|(source, list)| organization_view::guide_order_keys(ui, *source, list))
+        })
+    });
+    effect(move || {
+        if let Some(keys) = order_keys.get() {
+            untracked(|| organization_view::invalidate_changed_guide_order(ui, &keys));
+        }
+    });
+    let order = computed(move || {
+        order_keys.with(|keys| organization_view::guide_order(ui, keys.as_ref()?))
+    });
+    let order_focus = computed(move || organization_view::guide_order_focus(ui));
+    let count = computed(move || {
+        order.with(|order| {
+            order
+                .as_ref()
+                .map_or_else(|| ui.list.with(|l| l.len()), Vec::len)
+        })
+    });
     let focused = computed(move || {
+        if order.with(Option::is_some) {
+            return None;
+        }
         ui.guide_data();
         let view = crate::lists::view(ui);
         ui.focus
@@ -109,7 +137,17 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
         let rows = ui.list.with(|l| !l.is_empty());
         (rows && (0..=BAND).contains(&at)).then(|| at as f32 * pan.scale())
     });
-    scroll_to_focus_on_new_list(ui, rows);
+    scroll_to_focus_on_new_list(ui, rows, order_focus);
+    let was_reordering = std::cell::Cell::new(false);
+    effect(move || {
+        let draft = order_focus.get();
+        let was_reordering = was_reordering.replace(draft.is_some());
+        if let Some((row, _)) = draft {
+            rows.scroll_to_index(row as u32, percentage(0.5), px(0.0), false);
+        } else if was_reordering {
+            scroll_to_focused_row(ui, rows);
+        }
+    });
     view()
         .flex_1()
         .bg(move || ui.surface(ui.app.theme.with(|t| t.background.window)))
@@ -122,13 +160,35 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
                     .overflow_hidden()
                     .child(
                         virtual_list(
-                            move || ui.list.with(|l| l.len()),
-                            move |at| row(ui, at, (column, pan, size), focused, number_w),
+                            move || count.get(),
+                            move |at| {
+                                let channel = computed(move || {
+                                    order.with(|order| match order {
+                                        Some(channels) => channels.get(at.index()).copied(),
+                                        None => ui.list.with(|l| l.channel(at.index())),
+                                    })
+                                });
+                                let editing = computed(move || {
+                                    order_focus.get().and_then(|(row, selected)| {
+                                        (row == at.index()).then_some(selected)
+                                    })
+                                });
+                                row(
+                                    ui,
+                                    at,
+                                    (column, pan, size),
+                                    focused,
+                                    number_w,
+                                    (channel, editing),
+                                )
+                            },
                         )
                         .estimated_item_size(move || px(size.whole(ROW_H)))
                         .element_ref(&rows)
                         .on_viewable_items_change(move |v: &ViewableItems| {
-                            ui.visible_rows.set(v.viewable)
+                            if !organization_view::guide_order_open(ui) {
+                                ui.visible_rows.set(v.viewable);
+                            }
                         })
                         .flex_1(),
                     )
@@ -250,18 +310,24 @@ fn hint_lines() -> [&'static str; 4] {
 /// New guide data or a new list shows the focused row (the focus is kept
 /// by identity, but the list keeps its scroll offset across a count
 /// change).
-fn scroll_to_focus_on_new_list(ui: Ui, list: ElementRef) {
+fn scroll_to_focus_on_new_list(ui: Ui, list: ElementRef, order_focus: Memo<Option<(usize, bool)>>) {
     effect(move || {
         ui.guide_data();
         ui.list.with(|_| ());
-        let row = ui.focus.with_untracked(|f| f.channel);
-        list.scroll_to_index(
-            row.saturating_sub(2) as u32,
-            percentage(0.0),
-            px(0.0),
-            false,
-        );
+        if order_focus.get_untracked().is_none() {
+            scroll_to_focused_row(ui, list);
+        }
     });
+}
+
+fn scroll_to_focused_row(ui: Ui, list: ElementRef) {
+    let row = ui.focus.with_untracked(|f| f.channel);
+    list.scroll_to_index(
+        row.saturating_sub(2) as u32,
+        percentage(0.0),
+        px(0.0),
+        false,
+    );
 }
 
 /// The column's width, the panned timeline and the size scale.
@@ -285,9 +351,8 @@ fn row(
     (column, pan, size): Geometry,
     focused: Memo<Option<(usize, i32)>>,
     number_w: Memo<f32>,
+    (channel, editing): (Memo<Option<usize>>, Memo<Option<bool>>),
 ) -> impl IntoElement {
-    // The catalog channel behind this row of the list on screen.
-    let channel = computed(move || ui.list.with(|l| l.channel(at.index())));
     let programs = computed(move || {
         ui.guide_data();
         let base = pan.band().base;
@@ -309,6 +374,9 @@ fn row(
     // the focus without the cells' dimming running again).
     let now = computed(move || ui.focus.with(|f| f.now));
     let selected = computed(move || {
+        if organization_view::guide_order_open(ui) {
+            return None;
+        }
         ui.guide_data();
         let view = crate::lists::view(ui);
         ui.focus
@@ -324,24 +392,38 @@ fn row(
         .test_id("guide-row")
         .h(move || px(size.whole(ROW_H)))
         .flex_row()
-        .child(channel::cell(ui, at, channel, (column, size), number_w))
+        .child(channel::cell(
+            ui,
+            at,
+            channel,
+            (column, size),
+            number_w,
+            editing,
+        ))
         .child(
-            view().flex_1().overflow_hidden().child(
-                view()
-                    .absolute()
-                    .inset_0()
-                    .bind_translate_x(&pan.offset())
-                    .children((0..17).map(cell))
-                    .child(when(
-                        move || pan.minutes() > iptv_core::timeline::BAND,
-                        move || {
-                            view()
-                                .absolute()
-                                .inset_0()
-                                .pointer_events(PointerEvents::BoxNone)
-                                .children((17..MAX_CELLS).map(cell))
-                        },
-                    )),
-            ),
+            view()
+                .flex_1()
+                .overflow_hidden()
+                .accessibility_elements_hidden(move || organization_view::guide_order_open(ui))
+                .child(
+                    view()
+                        .absolute()
+                        .inset_0()
+                        .bind_translate_x(&pan.offset())
+                        .children((0..17).map(cell))
+                        .child(when(
+                            move || pan.minutes() > iptv_core::timeline::BAND,
+                            move || {
+                                view()
+                                    .absolute()
+                                    .inset_0()
+                                    .pointer_events(PointerEvents::BoxNone)
+                                    .children((17..MAX_CELLS).map(cell))
+                            },
+                        )),
+                ),
         )
+        .child(organization_view::order_outline(ui, move || {
+            editing.get() == Some(true)
+        }))
 }

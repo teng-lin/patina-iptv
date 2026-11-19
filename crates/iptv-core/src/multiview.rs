@@ -405,6 +405,11 @@ impl<C: Clone + PartialEq> Multiview<C> {
         Outcome::Stay
     }
 
+    /// The selected channel awaiting confirmation of a connection-limit warning.
+    pub fn pending_pick_channel(&self) -> Option<&C> {
+        self.pending_pick.as_ref().map(|(_, channel)| channel)
+    }
+
     /// The channel list closed without a choice.
     pub fn cancel_pick(&mut self) {
         self.pick = None;

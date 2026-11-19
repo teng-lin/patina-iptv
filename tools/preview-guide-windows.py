@@ -74,9 +74,10 @@ def main():
     threading.Thread(target=server.serve_forever,daemon=True).start()
     with tempfile.TemporaryDirectory(prefix='guide-windows-',dir=temporary) as home:
         env.update(HOME=home, LOCALAPPDATA=home)
-        subprocess.run([str(binary),'seed'],env=env,check=True)
         if args.walkthrough:
             env['PATINA_GUIDE_WINDOW_WALKTHROUGH']='1'
+        subprocess.run([str(binary),'seed'],env=env,check=True)
+        if args.walkthrough:
             keys = json.loads((Path(home) / 'demo-channel-keys.json').read_text())
             env['PATINA_GUIDE_SECOND_KEY'] = keys[1]
             env['PATINA_GUIDE_THIRD_KEY'] = keys[2]

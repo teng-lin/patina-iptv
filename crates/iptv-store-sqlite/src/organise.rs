@@ -7,6 +7,8 @@
 
 use std::collections::HashSet;
 
+use iptv_core::organization::Sort;
+use iptv_library::OrganizationScope;
 use iptv_providers::ContentId;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -97,7 +99,7 @@ fn write_order(
     Ok(())
 }
 
-fn group_source(conn: &Connection, group: CustomGroupId) -> Result<SourceId> {
+pub(crate) fn group_source(conn: &Connection, group: CustomGroupId) -> Result<SourceId> {
     conn.query_row(
         "SELECT source_id FROM custom_groups WHERE id = ?1",
         [group.0],
@@ -282,6 +284,102 @@ impl Store {
         Ok(())
     }
 
+    /// Saves a draft and activates manual sorting in one transaction.
+    /// A changed list rejects the draft so another edit or a refresh is not overwritten.
+    pub fn save_guide_order(
+        &mut self,
+        source: SourceId,
+        scope: &OrganizationScope,
+        original: &[String],
+        order: &[String],
+    ) -> Result<()> {
+        self.save_guide_order_from(source, scope, original, order, None, false)
+    }
+
+    /// Commits against saved manual positions when the sort chooser opened the editor.
+    pub fn save_guide_order_from(
+        &mut self,
+        source: SourceId,
+        scope: &OrganizationScope,
+        original: &[String],
+        order: &[String],
+        expected_sort: Option<Sort>,
+        from_custom: bool,
+    ) -> Result<()> {
+        let tx = Transaction::new_unchecked(&self.conn, rusqlite::TransactionBehavior::Immediate)?;
+        ensure_source(&tx, source)?;
+        let saved_sort = self.guide_sort(source, scope)?;
+        if expected_sort.is_some_and(|sort| sort != saved_sort) {
+            return Err(StoreError::Unavailable(
+                "the guide sort changed during editing",
+            ));
+        }
+        let baseline = if from_custom {
+            Sort::Manual
+        } else {
+            saved_sort
+        };
+        let current: Vec<_> = if *scope == OrganizationScope::Groups {
+            self.guide_groups_with_sort(source, baseline)?
+                .into_iter()
+                .map(|item| item.id)
+                .collect()
+        } else {
+            self.guide_channels_with_sort(source, scope, baseline)?
+                .into_iter()
+                .map(|row| row.channel.id.as_str().to_owned())
+                .collect()
+        };
+        let expected: HashSet<_> = original.iter().collect();
+        // Recorded playback can change the sort order while the draft is open.
+        let same_baseline = if baseline.uses_watch_history() {
+            current.iter().collect::<HashSet<_>>() == expected
+        } else {
+            current == original
+        };
+        if !same_baseline
+            || order.len() != original.len()
+            || order.iter().collect::<HashSet<_>>() != expected
+        {
+            return Err(StoreError::Unavailable(
+                "the guide list changed during editing",
+            ));
+        }
+        match scope {
+            OrganizationScope::Groups => self.write_guide_group_order(source, order)?,
+            OrganizationScope::CustomChannels(group) => {
+                let mut list = order.to_vec();
+                list.extend(
+                    members(&tx, *group)?
+                        .into_iter()
+                        .filter(|id| !expected.contains(id)),
+                );
+                write_members(&tx, *group, &list)?;
+            }
+            OrganizationScope::Channels | OrganizationScope::GroupChannels(_) => {
+                let scope = match scope {
+                    OrganizationScope::GroupChannels(group) => OrderScope::Group(group.clone()),
+                    _ => OrderScope::All,
+                };
+                let mut list = order.to_vec();
+                list.extend(
+                    stored_order(&tx, source, &scope)?
+                        .into_iter()
+                        .filter(|id| !expected.contains(id)),
+                );
+                write_order(&tx, source, &scope, &list)?;
+            }
+            OrganizationScope::Favorites => {
+                return Err(StoreError::Unavailable(
+                    "favourites use their ordered writer",
+                ));
+            }
+        }
+        self.set_guide_sort(source, scope, Sort::Manual)?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Back to provider order for that list.
     pub fn reset_manual_order(&mut self, source: SourceId, scope: &OrderScope) -> Result<()> {
         self.conn.execute(
@@ -293,25 +391,44 @@ impl Store {
 
     /// Creates an empty custom group at the end of the source's list.
     pub fn create_custom_group(&mut self, source: SourceId, name: &str) -> Result<CustomGroupId> {
-        ensure_source(&self.conn, source)?;
         let now = self.now();
-        self.conn.execute(
-            "INSERT INTO custom_groups (source_id, name, position, created_at)
-             VALUES (?1, ?2, (SELECT COALESCE(MAX(position) + 1, 0) FROM custom_groups
-                              WHERE source_id = ?1), ?3)",
-            params![source.0, name, now],
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        ensure_source(&tx, source)?;
+        let id: i64 = tx.query_row(
+            "UPDATE custom_group_sequence SET last_id=last_id+1
+             WHERE singleton=1 RETURNING last_id",
+            [],
+            |row| row.get(0),
         )?;
-        Ok(CustomGroupId(self.conn.last_insert_rowid()))
+        tx.execute(
+            "INSERT INTO custom_groups (id, source_id, name, position, created_at)
+             VALUES (?1, ?2, ?3, (SELECT COALESCE(MAX(position) + 1, 0) FROM custom_groups
+                                  WHERE source_id=?2), ?4)",
+            params![id, source.0, name, now],
+        )?;
+        tx.commit()?;
+        Ok(CustomGroupId(id))
     }
 
     pub fn rename_custom_group(&mut self, group: CustomGroupId, name: &str) -> Result<()> {
-        let changed = self.conn.execute(
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let changed = tx.execute(
             "UPDATE custom_groups SET name = ?2 WHERE id = ?1",
             params![group.0, name],
         )?;
         if changed == 0 {
             return Err(StoreError::CustomGroupNotFound(group.0));
         }
+        tx.execute(
+            "UPDATE group_overlays SET custom_name=NULL WHERE group_id='custom:'||?1
+             AND source_id=(SELECT source_id FROM custom_groups WHERE id=?1)",
+            [group.0],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -323,6 +440,21 @@ impl Store {
         tx.execute(
             "DELETE FROM parental_blocks WHERE kind='group' AND content_id='custom:'||?1 \
             AND source_id IN (SELECT source_id FROM custom_groups WHERE id=?1)",
+            [group.0],
+        )?;
+        tx.execute(
+            "DELETE FROM guide_blocks WHERE kind='group' AND content_id='custom:'||?1
+             AND source_id IN (SELECT source_id FROM custom_groups WHERE id=?1)",
+            [group.0],
+        )?;
+        tx.execute(
+            "DELETE FROM guide_sort WHERE scope='custom:'||?1
+             AND source_id IN (SELECT source_id FROM custom_groups WHERE id=?1)",
+            [group.0],
+        )?;
+        tx.execute(
+            "DELETE FROM group_overlays WHERE group_id='custom:'||?1
+             AND source_id IN (SELECT source_id FROM custom_groups WHERE id=?1)",
             [group.0],
         )?;
         let deleted = tx.execute("DELETE FROM custom_groups WHERE id=?1", [group.0])? > 0;

@@ -69,6 +69,30 @@ impl Store {
         Ok(())
     }
 
+    /// Adds observed live playback time for a channel.
+    pub fn add_channel_watch_time(
+        &mut self,
+        source: SourceId,
+        channel: &ContentId,
+        elapsed_ms: u64,
+    ) -> Result<()> {
+        if elapsed_ms == 0 {
+            return Ok(());
+        }
+        ensure_source(&self.conn, source)?;
+        self.conn.execute(
+            "INSERT INTO channel_watch_time(source_id, channel_id, watched_ms)
+             VALUES (?1, ?2, ?3) ON CONFLICT(source_id, channel_id) DO UPDATE
+             SET watched_ms = MIN(watched_ms + excluded.watched_ms, 9223372036854775807)",
+            params![
+                source.0,
+                channel.as_str(),
+                i64::try_from(elapsed_ms).unwrap_or(i64::MAX)
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Most recently watched items, latest first, each item once (its
     /// latest play). Filters by source and kind when given.
     pub fn recent(
@@ -113,9 +137,17 @@ impl Store {
 
     /// Clears one source's history, or everyone's.
     pub fn clear_history(&mut self, source: Option<SourceId>) -> Result<usize> {
-        Ok(self.conn.execute(
+        let tx = self.conn.transaction()?;
+        let source = [source.map(|s| s.0)];
+        let deleted = tx.execute(
             "DELETE FROM watch_history WHERE ?1 IS NULL OR source_id = ?1",
-            [source.map(|s| s.0)],
-        )?)
+            source,
+        )?;
+        tx.execute(
+            "DELETE FROM channel_watch_time WHERE ?1 IS NULL OR source_id = ?1",
+            source,
+        )?;
+        tx.commit()?;
+        Ok(deleted)
     }
 }

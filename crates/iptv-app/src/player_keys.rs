@@ -185,9 +185,16 @@ pub(crate) fn zap(ui: Ui, step: isize) {
     let from_row = playing
         .and_then(|ch| list.row_of(ch))
         .or_else(|| playing.is_none().then(|| ui.focus.with(|f| f.channel)));
-    let to = match from_row.and_then(|row| list.zap(row, step)) {
-        Some(row) => list.channel(row),
-        None => playing.map(|ch| iptv_core::playback::zap_target(&*crate::schedule(), ch, step)),
+    let catalog = crate::schedule();
+    let allowed = |channel| catalog.channel_block(channel) == iptv_core::organization::Block::None;
+    let to = match from_row {
+        Some(row) if !list.is_empty() => (1..=list.len())
+            .filter_map(|offset| list.zap(row, offset as isize * step))
+            .filter_map(|row| list.channel(row))
+            .find(|&channel| allowed(channel)),
+        _ => playing
+            .map(|channel| iptv_core::playback::zap_target(&*catalog, channel, step))
+            .filter(|&channel| allowed(channel)),
     };
     let Some(to) = to else {
         return;

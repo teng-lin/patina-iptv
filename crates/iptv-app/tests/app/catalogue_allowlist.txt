@@ -150,6 +150,8 @@ iptv-app/src/platform_data.rs	Storage path is not UTF-8
 iptv-runtime/src/backup/error.rs	{} (library: {class})
 iptv-runtime/src/credential_store.rs	pending restore cannot be read
 iptv-runtime/src/favorites.rs	recent favourite edits are not saved
+iptv-runtime/src/favorites.rs	the favourites list changed during editing
+iptv-runtime/src/favorites.rs	the favourites order was not saved
 iptv-runtime/src/imports.rs	cannot create document identity
 iptv-runtime/src/imports.rs	cannot create private document directory
 iptv-runtime/src/imports.rs	import superseded

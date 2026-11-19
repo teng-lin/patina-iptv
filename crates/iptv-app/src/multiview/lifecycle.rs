@@ -25,14 +25,16 @@ pub fn follow(ui: Ui) -> bool {
             any = m.retain(|surface, channel| {
                 let key = ui.player.stream(surface).key.get_untracked();
                 match key.and_then(|k| schedule.find_channel(&k)) {
-                    Some(row) => {
+                    Some(row)
+                        if schedule.channel_block(row) == iptv_core::organization::Block::None =>
+                    {
                         if row != *channel {
                             *channel = row;
                             moved.push((surface, row));
                         }
                         true
                     }
-                    None => {
+                    _ => {
                         gone.push(surface);
                         false
                     }

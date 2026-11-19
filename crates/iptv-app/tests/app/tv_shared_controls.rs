@@ -292,8 +292,13 @@ fn sidebar_up_reaches_preview_on_desktop_and_tv_without_reopening_video() {
         )));
         step(app.press("text:/^☰  /"));
         step(app.press("id:guide-groups >> text:Favourites"));
+        if idiom == Idiom::Desktop {
+            step(app.press_key("tab"));
+        }
         step(app.press("id:guide-groups >> text:All channels"));
-        step(app.press_key("right"));
+        if idiom == Idiom::Tv {
+            step(app.press_key("right"));
+        }
         step(app.press_key("down"));
         step(app.press_key("up"));
         // Guide A is focused while B keeps playing. Up must cancel A's pending autoplay.
@@ -305,6 +310,9 @@ fn sidebar_up_reaches_preview_on_desktop_and_tv_without_reopening_video() {
         assert!(!selected(app, "guide-preview"));
         step(app.press("text:/^☰  /"));
         step(app.press("id:guide-groups >> text:Favourites"));
+        if idiom == Idiom::Desktop {
+            step(app.press_key("tab"));
+        }
         let groups_width = width(app, "guide-groups");
         let rail_width = width(app, "navigation-rail");
         step(app.press_key("up"));

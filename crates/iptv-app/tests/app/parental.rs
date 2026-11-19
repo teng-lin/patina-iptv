@@ -35,7 +35,7 @@ fn setup_block_remote_unlock_change_and_recovery() {
     settings.set("guide.autoplay", Value::Bool(false)).unwrap();
     let fixture = personalization::start(home, settings, false);
     let (mut app, path, source) = (fixture.app, fixture.path, fixture.source);
-    personalization::menu(&mut app, "Block channel");
+    personalization::menu(&mut app, "Protect channel with PIN");
     wait(&mut app, "Choose a new PIN");
     // The on-screen keypad works with D-pad/OK alone (2, 4, 6, 8, Continue).
     for key in [
@@ -88,7 +88,7 @@ fn setup_block_remote_unlock_change_and_recovery() {
     // The manager has a footer after its content and Lock now. Saturating
     // Down must reach that actual Cancel control, rather than an invisible
     // keypad index or the destructive Lock now action.
-    personalization::menu(&mut app, "Manage blocked channels…");
+    personalization::menu(&mut app, "Manage PIN-protected content…");
     wait(&mut app, "Blocked content");
     for _ in 0..5 {
         step(app.press_key("down"));
@@ -111,7 +111,7 @@ fn setup_block_remote_unlock_change_and_recovery() {
     );
     // A manager selection completes one authorized operation without asking
     // for the same administrative PIN again after closing the manager.
-    personalization::menu(&mut app, "Manage blocked channels…");
+    personalization::menu(&mut app, "Manage PIN-protected content…");
     // Cancel deliberately retired the previous administrative grant.
     wait(&mut app, "Enter parental PIN");
     digits(&mut app, "2468");
@@ -127,10 +127,10 @@ fn setup_block_remote_unlock_change_and_recovery() {
     step(app.press(&format!("text:{unblock}")));
     step(app.wait_for("text:Content unblocked"));
     assert!(!app.shows("Enter parental PIN"));
-    personalization::menu(&mut app, "Block channel");
+    personalization::menu(&mut app, "Protect channel with PIN");
     step(app.wait_for("text:Content blocked"));
     // Close the settings grant explicitly before trying another viewing action.
-    personalization::menu(&mut app, "Manage blocked channels…");
+    personalization::menu(&mut app, "Manage PIN-protected content…");
     wait(&mut app, "Blocked content");
     step(app.press("text:Lock now"));
     // The default blocked-content-only policy leaves unrelated settings open.
@@ -198,7 +198,7 @@ fn number_key_entry_protects_settings_and_changes_an_existing_pin() {
         .unwrap();
     let fixture = personalization::start(home, settings, false);
     let (mut app, path) = (fixture.app, fixture.path);
-    personalization::menu(&mut app, "Block channel");
+    personalization::menu(&mut app, "Protect channel with PIN");
     wait(&mut app, "Choose a new PIN");
     digits(&mut app, "2468");
     step(app.press_key("enter"));
@@ -214,7 +214,7 @@ fn number_key_entry_protects_settings_and_changes_an_existing_pin() {
         .unwrap()
         .unwrap()
         .salt;
-    personalization::menu(&mut app, "Manage blocked channels…");
+    personalization::menu(&mut app, "Manage PIN-protected content…");
     wait(&mut app, "Blocked content");
     step(app.press("text:Lock now"));
     settings_menu(&mut app);
@@ -389,7 +389,7 @@ mod hidden_window {
                 iptv_app::player_has_source(0)
             }),
         );
-        personalization::menu(&mut app, "Block channel");
+        personalization::menu(&mut app, "Protect channel with PIN");
         wait(&mut app, "Choose a new PIN");
         digits(&mut app, "2468");
         continue_entry(&mut app);
@@ -451,7 +451,7 @@ mod hidden_window {
         reopen(&mut app);
         step(app.back());
         assert!(code(&app).is_none());
-        personalization::menu(&mut app, "Block channel");
+        personalization::menu(&mut app, "Protect channel with PIN");
         wait(&mut app, "Enter parental PIN");
         assert!(
             !iptv_app::player_has_source(0),

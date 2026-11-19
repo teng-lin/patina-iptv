@@ -67,6 +67,7 @@ fn the_group_index_follows_the_organisation_and_agrees_with_the_scan() {
     schedule.set_organization(Organization {
         channels: Vec::new(),
         groups: vec![group(4, false), group(1, true), group(0, false)],
+        ..Default::default()
     });
     agree(&schedule);
     assert_eq!(group_of(&schedule, 7), None, "its group is hidden");

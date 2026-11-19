@@ -335,9 +335,11 @@ pub(super) async fn show(
 }
 pub fn rebuild(owner: &Rc<crate::Runtime>) {
     let task = owner.clone();
-    owner.spawn(async move { rebuild_ready(&task).await });
+    owner.spawn(async move {
+        rebuild_ready(&task).await;
+    });
 }
-async fn rebuild_ready(owner: &Rc<crate::Runtime>) {
+async fn rebuild_ready(owner: &Rc<crate::Runtime>) -> bool {
     let generation = owner.generation.with(Cell::get);
     let revision = owner.rebuild.with(|r| {
         let next = r.get().wrapping_add(1);
@@ -345,10 +347,10 @@ async fn rebuild_ready(owner: &Rc<crate::Runtime>) {
         next
     });
     if !active(owner) {
-        return;
+        return false;
     }
     let Ok(playlists) = library::playlists(owner) else {
-        return;
+        return false;
     };
     let enabled: Vec<_> = playlists
         .iter()
@@ -373,24 +375,26 @@ async fn rebuild_ready(owner: &Rc<crate::Runtime>) {
             .collect()
     });
     let Some(install_favorites) = crate::favorites::prepare_combined(owner).await else {
-        return;
+        return false;
     };
     if !active(owner) {
-        return;
+        return false;
     }
     let collapsed = crate::library::collapsed(owner).await.unwrap_or_default();
     if !active(owner)
         || owner.generation.with(Cell::get) != generation
         || owner.rebuild.with(Cell::get) != revision
     {
-        return;
+        return false;
     }
     install_favorites();
-    owner.emit(crate::RuntimeEvent::ScheduleReady(Rc::new(
+    let replacement: Rc<dyn iptv_core::guide::Schedule> = Rc::new(
         CombinedSchedule::new(sources, owner.epoch.with(Cell::get))
             .with_collapsed_sources(collapsed),
-    )));
+    );
+    owner.emit(crate::RuntimeEvent::ScheduleReady(replacement.clone()));
     pages::replaced(owner);
+    Rc::ptr_eq(&owner.schedule(), &replacement)
 }
 
 pub fn connection_limit(owner: &Rc<crate::Runtime>, source: SourceId) -> Option<u32> {
@@ -398,32 +402,33 @@ pub fn connection_limit(owner: &Rc<crate::Runtime>, source: SourceId) -> Option<
         .limits
         .with(|l| l.borrow().get(&source).copied().flatten())
 }
-pub fn organization_changed(owner: &Rc<crate::Runtime>, source: SourceId, ticket: u64) {
-    let schedule = owner
+pub(crate) async fn organization_changed(
+    owner: &Rc<crate::Runtime>,
+    source: SourceId,
+    ticket: u64,
+) -> bool {
+    let Some(schedule) = owner
         .parts
-        .with(|parts| parts.borrow().get(&source).cloned());
-    owner.spawn({
-        let owner = owner.clone();
-        async move {
-            if let Some(schedule) = schedule {
-                let Some(replacement) = organization::apply(&owner, &schedule, source).await else {
-                    return;
-                };
-                let current = owner.parts.with(|parts| {
-                    parts
-                        .borrow()
-                        .get(&source)
-                        .is_some_and(|s| s.same_catalogue(&schedule))
-                });
-                if current && owner.organization_edit_current(source, ticket) {
-                    owner.parts.with(|parts| {
-                        parts.borrow_mut().insert(source, Rc::new(replacement));
-                    });
-                    rebuild(&owner);
-                }
-            }
-        }
+        .with(|parts| parts.borrow().get(&source).cloned())
+    else {
+        return false;
+    };
+    let Some(replacement) = organization::apply(owner, &schedule, source).await else {
+        return false;
+    };
+    let current = owner.parts.with(|parts| {
+        parts
+            .borrow()
+            .get(&source)
+            .is_some_and(|s| s.same_catalogue(&schedule))
     });
+    if !current || !owner.organization_edit_current(source, ticket) {
+        return false;
+    }
+    owner.parts.with(|parts| {
+        parts.borrow_mut().insert(source, Rc::new(replacement));
+    });
+    rebuild_ready(owner).await
 }
 pub fn resume(owner: &Rc<crate::Runtime>) {
     if !crate::settings::flag(&owner.settings(), iptv_settings::keys::RESUME_LAST_CHANNEL)
@@ -450,6 +455,9 @@ pub fn resume(owner: &Rc<crate::Runtime>) {
                     return;
                 }
                 owner.resume.with(|r| r.set(false));
+                if schedule.channel_block(c) != iptv_core::organization::Block::None {
+                    return;
+                }
                 owner.emit(crate::RuntimeEvent::ResumeChannel(c));
                 owner.emit(crate::RuntimeEvent::ResumeFullscreen);
             }

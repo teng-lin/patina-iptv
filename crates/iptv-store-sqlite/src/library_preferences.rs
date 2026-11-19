@@ -2,6 +2,9 @@
 use crate::error::Result;
 use crate::sources::ensure_source;
 use crate::{SourceId, Store};
+use iptv_core::organization::{BlockKind, Blocks, Item, Sort};
+use iptv_library::{ChannelScope, OrganizationScope};
+use iptv_providers::model::ContentKind;
 use iptv_providers::{GroupId, model::Group};
 use rusqlite::{OptionalExtension, params};
 
@@ -35,6 +38,45 @@ const UPSERT_CHANNEL_HIDDEN: &str = "INSERT INTO channel_overlays(source_id,chan
 const DELETE_EMPTY_CHANNEL_OVERLAYS: &str = "DELETE FROM channel_overlays WHERE source_id=?1 \
      AND hidden=0 AND blocked=0 AND custom_name IS NULL AND custom_number IS NULL \
      AND epg_mode IS NULL";
+
+const BLOCKED_MEMBERS: &str = "SELECT m.channel_id FROM guide_blocks b
+     JOIN channel_groups m ON m.source_id=b.source_id AND m.group_id=b.content_id
+     WHERE b.source_id=?1 AND b.kind='group'
+     UNION ALL
+     SELECT m.channel_id FROM guide_blocks b
+     JOIN custom_groups g ON g.source_id=b.source_id AND 'custom:'||g.id=b.content_id
+     JOIN custom_group_members m ON m.group_id=g.id
+     WHERE b.source_id=?1 AND b.kind='group'
+     UNION ALL
+     SELECT c.id FROM guide_blocks b
+     JOIN channels c ON c.source_id=b.source_id
+     WHERE b.source_id=?1 AND b.kind='group' AND b.content_id='__other__'
+     AND NOT EXISTS (
+         SELECT 1 FROM groups g
+         WHERE g.source_id=c.source_id AND g.kind='live'
+           AND g.id IN ('__other__', json_extract(c.group_ids, '$[0]'))
+     )";
+
+fn ensure_custom_scope(conn: &rusqlite::Connection, source: SourceId, id: i64) -> Result<()> {
+    if crate::organise::group_source(conn, iptv_library::CustomGroupId(id))? != source {
+        return Err(crate::StoreError::CustomGroupNotFound(id));
+    }
+    Ok(())
+}
+
+fn custom_id(key: &str) -> Option<i64> {
+    key.strip_prefix("custom:")?.parse().ok()
+}
+
+fn sort_key(scope: &OrganizationScope) -> String {
+    match scope {
+        OrganizationScope::Groups => "groups".into(),
+        OrganizationScope::Channels => "channels".into(),
+        OrganizationScope::GroupChannels(id) => format!("group:{}", id.as_str()),
+        OrganizationScope::CustomChannels(id) => format!("custom:{}", id.0),
+        OrganizationScope::Favorites => "favorites".into(),
+    }
+}
 
 impl Store {
     pub fn source_policy(&self, id: SourceId) -> Result<SourcePolicy> {
@@ -89,6 +131,282 @@ impl Store {
         rows.sort_by_key(|(position, index, _)| (*position, *index));
         Ok(rows.into_iter().map(|(_, _, row)| row).collect())
     }
+    /// The guide's provider and custom groups, including hidden groups in edit mode.
+    pub fn guide_groups(&self, source: SourceId) -> Result<Vec<Item>> {
+        let sort = self.guide_sort(source, &OrganizationScope::Groups)?;
+        self.guide_groups_with_sort(source, sort)
+    }
+
+    pub fn guide_groups_with_sort(&self, source: SourceId, sort: Sort) -> Result<Vec<Item>> {
+        let provider = self
+            .groups(source, Some(ContentKind::Live))?
+            .into_iter()
+            .map(|group| (group.id.as_str().to_owned(), group.name));
+        let custom = self
+            .custom_groups(source)?
+            .into_iter()
+            .map(|group| (format!("custom:{}", group.id.0), group.name));
+        let mut stmt = self.conn.prepare_cached(SELECT_GROUP_OVERLAY)?;
+        let mut rows = Vec::new();
+        for (id, name) in provider.chain(custom) {
+            let pref: Option<(Option<String>, bool, Option<i64>)> = stmt
+                .query_row(params![source.0, id], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
+                .optional()?;
+            let (custom_name, hidden, position) = pref.unwrap_or_default();
+            rows.push((
+                Item {
+                    id,
+                    name: custom_name.unwrap_or(name),
+                    hidden,
+                },
+                position,
+            ));
+        }
+        match sort {
+            Sort::Manual => rows.sort_by_key(|(_, position)| position.unwrap_or(i64::MAX)),
+            Sort::Name => rows.sort_by_cached_key(|(item, _)| item.name.to_lowercase()),
+            Sort::NameDescending => {
+                rows.sort_by_cached_key(|(item, _)| std::cmp::Reverse(item.name.to_lowercase()))
+            }
+            _ => {}
+        }
+        Ok(rows.into_iter().map(|(item, _)| item).collect())
+    }
+
+    /// Reads guide blocks apart from the parental settings and credential.
+    pub fn guide_blocks(&self, source: SourceId) -> Result<Blocks> {
+        let mut blocks = Blocks::default();
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT kind,content_id FROM guide_blocks WHERE source_id=?1")?;
+        let rows = stmt.query_map([source.0], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (kind, id) = row?;
+            if kind == "group" {
+                blocks.groups.insert(id);
+            } else {
+                blocks.channels.insert(id);
+            }
+        }
+        if !blocks.groups.is_empty() {
+            let mut stmt = self.conn.prepare_cached(BLOCKED_MEMBERS)?;
+            blocks.members = stmt
+                .query_map([source.0], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+        }
+        Ok(blocks)
+    }
+
+    /// Checks durable guide blocks before opening a live or catch-up stream.
+    pub fn guide_channel_blocked(&self, source: SourceId, id: &str) -> Result<bool> {
+        let sql = format!(
+            "SELECT EXISTS(
+                SELECT 1 FROM guide_blocks WHERE source_id=?1 AND kind='channel' AND content_id=?2
+                UNION ALL SELECT 1 FROM ({BLOCKED_MEMBERS}) AS members WHERE members.channel_id=?2
+             )"
+        );
+        Ok(self
+            .conn
+            .prepare_cached(&sql)?
+            .query_row(params![source.0, id], |row| row.get(0))?)
+    }
+
+    /// Sets a direct guide block without changing parental protection.
+    pub fn set_guide_block(
+        &mut self,
+        source: SourceId,
+        kind: BlockKind,
+        id: &str,
+        blocked: bool,
+    ) -> Result<()> {
+        ensure_source(&self.conn, source)?;
+        if kind == BlockKind::Group
+            && let Some(group) = custom_id(id)
+        {
+            ensure_custom_scope(&self.conn, source, group)?;
+        }
+        let kind = match kind {
+            BlockKind::Channel => "channel",
+            BlockKind::Group => "group",
+        };
+        let sql = if blocked {
+            "INSERT OR IGNORE INTO guide_blocks(source_id,kind,content_id) VALUES(?1,?2,?3)"
+        } else {
+            "DELETE FROM guide_blocks WHERE source_id=?1 AND kind=?2 AND content_id=?3"
+        };
+        self.conn.execute(sql, params![source.0, kind, id])?;
+        Ok(())
+    }
+
+    /// Sort preference for this scope. Databases with legacy manual positions use them.
+    pub fn guide_sort(&self, source: SourceId, scope: &OrganizationScope) -> Result<Sort> {
+        let value: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT sort FROM guide_sort WHERE source_id=?1 AND scope=?2",
+                params![source.0, sort_key(scope)],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(match value.as_deref() {
+            Some("provider") => Sort::Provider,
+            Some("name") => Sort::Name,
+            Some("name_desc") => Sort::NameDescending,
+            Some("last_watched") => Sort::LastWatched,
+            Some("oldest_watched") => Sort::OldestWatched,
+            Some("most_watched") => Sort::MostWatched,
+            Some("least_watched") => Sort::LeastWatched,
+            _ => Sort::Manual,
+        })
+    }
+
+    /// Whether any guide list for this playlist sorts by viewing history.
+    pub fn has_watch_sort(&self, source: SourceId) -> Result<bool> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM guide_sort WHERE source_id=?1
+                            AND sort IN ('last_watched','oldest_watched','most_watched','least_watched'))",
+            [source.0],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Changes the sort policy while retaining saved manual positions.
+    pub fn set_guide_sort(
+        &self,
+        source: SourceId,
+        scope: &OrganizationScope,
+        sort: Sort,
+    ) -> Result<()> {
+        ensure_source(&self.conn, source)?;
+        if *scope == OrganizationScope::Favorites && sort != Sort::Manual {
+            return Err(crate::StoreError::Unavailable(
+                "favourites support manual ordering",
+            ));
+        }
+        if sort.uses_watch_history() && *scope == OrganizationScope::Groups {
+            return Err(crate::StoreError::Unavailable(
+                "expected a channel list with watch history",
+            ));
+        }
+        if let OrganizationScope::CustomChannels(group) = scope {
+            ensure_custom_scope(&self.conn, source, group.0)?;
+        }
+        let key = sort_key(scope);
+        let value = match sort {
+            Sort::Provider => "provider",
+            Sort::Name => "name",
+            Sort::NameDescending => "name_desc",
+            Sort::LastWatched => "last_watched",
+            Sort::OldestWatched => "oldest_watched",
+            Sort::MostWatched => "most_watched",
+            Sort::LeastWatched => "least_watched",
+            Sort::Manual => {
+                self.conn.execute(
+                    "DELETE FROM guide_sort WHERE source_id=?1 AND scope=?2",
+                    params![source.0, key],
+                )?;
+                return Ok(());
+            }
+        };
+        self.conn.execute(
+            "INSERT INTO guide_sort(source_id,scope,sort) VALUES(?1,?2,?3)
+             ON CONFLICT(source_id,scope) DO UPDATE SET sort=excluded.sort",
+            params![source.0, key, value],
+        )?;
+        Ok(())
+    }
+
+    /// Loads the same channel order for the guide and its organization editor.
+    pub fn ordered_guide_channels(
+        &self,
+        source: SourceId,
+        scope: &OrganizationScope,
+    ) -> Result<Vec<crate::ChannelRow>> {
+        self.guide_channels_with_sort(source, scope, self.guide_sort(source, scope)?)
+    }
+
+    pub fn guide_channels_with_sort(
+        &self,
+        source: SourceId,
+        scope: &OrganizationScope,
+        sort: Sort,
+    ) -> Result<Vec<crate::ChannelRow>> {
+        let channel_scope = match scope {
+            OrganizationScope::Channels | OrganizationScope::Favorites => ChannelScope::All,
+            OrganizationScope::GroupChannels(id) => ChannelScope::Group(id.clone()),
+            OrganizationScope::CustomChannels(id) => ChannelScope::Custom(*id),
+            OrganizationScope::Groups => {
+                return Err(crate::StoreError::Unavailable("expected channel list"));
+            }
+        };
+        let order = if sort == Sort::Manual {
+            crate::ChannelOrder::Effective
+        } else {
+            crate::ChannelOrder::Provider
+        };
+        let mut rows = self.load_channels(
+            source,
+            &crate::ChannelQuery {
+                scope: channel_scope,
+                include_hidden: true,
+                favourites_only: *scope == OrganizationScope::Favorites,
+                order,
+                ..Default::default()
+            },
+        )?;
+        use std::cmp::Reverse;
+        match sort {
+            Sort::Name => rows.sort_by_cached_key(|row| row.name.to_lowercase()),
+            Sort::NameDescending => rows.sort_by_cached_key(|row| Reverse(row.name.to_lowercase())),
+            Sort::LastWatched | Sort::OldestWatched | Sort::MostWatched | Sort::LeastWatched => {
+                let sql = match sort {
+                    Sort::LastWatched | Sort::OldestWatched => {
+                        "SELECT item_id, watched_at, id FROM (
+                             SELECT item_id, watched_at, id,
+                                    ROW_NUMBER() OVER (
+                                        PARTITION BY item_id ORDER BY watched_at DESC, id DESC
+                                    ) AS rank
+                             FROM watch_history WHERE source_id=?1 AND kind='live'
+                         ) WHERE rank=1"
+                    }
+                    _ => {
+                        "SELECT channel_id, watched_ms, 0 FROM channel_watch_time WHERE source_id=?1"
+                    }
+                };
+                let mut stmt = self.conn.prepare_cached(sql)?;
+                let values = stmt
+                    .query_map([source.0], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            (row.get::<_, i64>(1)?, row.get::<_, i64>(2)?),
+                        ))
+                    })?
+                    .collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()?;
+                let value = |row: &crate::ChannelRow| values.get(row.channel.id.as_str()).copied();
+                match sort {
+                    Sort::LastWatched | Sort::MostWatched => {
+                        rows.sort_by_key(|row| Reverse(value(row)))
+                    }
+                    _ => rows.sort_by_key(|row| (value(row).is_none(), value(row))),
+                }
+            }
+            _ => {}
+        }
+        Ok(rows)
+    }
+
+    pub(crate) fn write_guide_group_order(&self, source: SourceId, order: &[String]) -> Result<()> {
+        let mut stmt = self.conn.prepare_cached(UPSERT_GROUP_POSITION)?;
+        for (position, id) in order.iter().enumerate() {
+            stmt.execute(params![source.0, id, position as i64])?;
+        }
+        Ok(())
+    }
+
     pub fn rename_group(
         &mut self,
         source: SourceId,
@@ -97,12 +415,22 @@ impl Store {
     ) -> Result<()> {
         ensure_source(&self.conn, source)?;
         let name = name.map(str::trim).filter(|s| !s.is_empty());
+        if let Some(group) = custom_id(id.as_str()) {
+            ensure_custom_scope(&self.conn, source, group)?;
+            return match name {
+                Some(name) => self.rename_custom_group(iptv_library::CustomGroupId(group), name),
+                None => Ok(()),
+            };
+        }
         self.conn
             .execute(UPSERT_GROUP_NAME, params![source.0, id.as_str(), name])?;
         Ok(())
     }
     pub fn hide_group(&mut self, source: SourceId, id: &GroupId, hidden: bool) -> Result<()> {
         ensure_source(&self.conn, source)?;
+        if let Some(group) = custom_id(id.as_str()) {
+            ensure_custom_scope(&self.conn, source, group)?;
+        }
         self.conn
             .execute(UPSERT_GROUP_HIDDEN, params![source.0, id.as_str(), hidden])?;
         Ok(())
@@ -178,6 +506,13 @@ impl Store {
         {
             let mut stmt = tx.prepare_cached(sql)?;
             for id in ids {
+                if groups && let Some(group) = custom_id(id) {
+                    match ensure_custom_scope(&tx, source, group) {
+                        Ok(()) => {}
+                        Err(crate::StoreError::CustomGroupNotFound(_)) => continue,
+                        Err(error) => return Err(error),
+                    }
+                }
                 stmt.execute(params![source.0, id, hidden])?;
             }
         }

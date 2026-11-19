@@ -96,10 +96,10 @@ fn run(ui: Ui) {
     ui.browse_playback.update(|b| effect = b.tick(ui.now_ms()));
     match effect {
         Some(Effect::Tune { target, fullscreen }) => {
-            if let Some(channel) = crate::favorites::channel_of(&target.key) {
-                if ui.playing.get_untracked() != Some(channel)
-                    || ui.playback.get_untracked() != Playback::Live
-                {
+            if let Some(channel) = crate::favorites::channel_of(&target.key)
+                && crate::player::allow_guide_channel(channel)
+            {
+                if !playing_live(ui, channel) {
                     let state = ui.browse_playback.get_untracked();
                     ui.play(channel, Playback::Live);
                     ui.browse_playback.set(state);
@@ -117,14 +117,30 @@ fn run(ui: Ui) {
                     }
                 } else if fullscreen {
                     full(ui);
+                } else if playing_live(ui, channel) {
+                    ui.browse_playback
+                        .update(|state| state.playing(&target.key, ui.now_ms()));
                 }
+            } else if target.surface == Surface::Player {
+                ui.pending_zap.set(None);
             }
         }
-        Some(Effect::Fullscreen) => full(ui),
+        Some(Effect::Fullscreen) => {
+            if let Some(channel) = current(ui).and_then(|t| crate::favorites::channel_of(&t.key))
+                && playing_live(ui, channel)
+                && crate::schedule().channel_block(channel) == iptv_core::organization::Block::None
+            {
+                full(ui);
+            }
+        }
         None => {}
     }
     arm(ui);
 }
+fn playing_live(ui: Ui, channel: usize) -> bool {
+    ui.playing.get_untracked() == Some(channel) && ui.playback.get_untracked() == Playback::Live
+}
+
 fn full(ui: Ui) {
     if crate::channels_view::is_open(ui) {
         crate::channels_view::close(ui);

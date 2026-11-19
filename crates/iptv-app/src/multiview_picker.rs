@@ -114,8 +114,9 @@ fn choose(ui: Ui, row: usize) {
     let key = state(ui, |p| p.channels().get(row).map(|c| c.key.clone())).flatten();
     if let Some(channel) = key.and_then(|key| crate::schedule().find_channel(&key)) {
         update(ui, |p| p.focus_row(row));
-        crate::multiview::picked(ui, channel);
-        close(ui);
+        if crate::multiview::picked(ui, channel) {
+            close(ui);
+        }
     } else {
         refresh_catalog(ui);
     }

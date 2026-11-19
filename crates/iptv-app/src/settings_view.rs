@@ -252,19 +252,24 @@ fn run(ui: Ui, key: &'static str) {
     }
     match key {
         "history.clear" => {
-            let saved = crate::runtime().clear_watch_history();
+            crate::player::watch_time::reset(ui);
+            let owner = crate::runtime();
+            let saved = owner.clear_watch_history();
             ui.player
                 .history
                 .set(iptv_core::playback::ChannelHistory::default());
             crate::data::spawn_in_app(async move {
-                if !saved.await {
+                if saved.await {
+                    crate::lists::favorites_changed(ui);
+                    owner.refresh_watch_order();
+                } else {
                     notify(tr("Recent channel changes could not be saved; try again"));
                 }
             });
         }
         "search.clear_history" => crate::search_view::clear_history(ui),
         "parental.change_pin" => crate::parental_view::change_pin(ui),
-        "recordings.quit_host" => crate::desktop::quit(),
+        "recordings.quit_host" => crate::desktop::quit(ui),
         "recordings.background_status"
         | "recordings.enable_startup"
         | "recordings.disable_startup"

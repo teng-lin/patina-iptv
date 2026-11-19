@@ -212,13 +212,13 @@ fn playlists_organisation_and_failures_speak_the_interface_language() {
     );
     shown(app, &format!("{} >> nth=0", de.t("Visible")));
     step(app.press("id:organization-row-0"));
-    shown(app, &de.t("Hide item"));
+    shown(app, &de.t("Hide channel"));
     shown(app, &de.t("Move to first"));
     shown(app, &de.t("Use provider name"));
-    press(app, &de.t("Hide item"));
+    press(app, &de.t("Hide channel"));
     shown(app, &de.t("Hidden"));
     step(app.press("id:organization-row-0"));
-    press(app, &de.t("Show item"));
+    press(app, &de.t("Show channel"));
     step(app.back());
     step(app.wait_for_gone("id:organization-screen", Duration::from_secs(3)));
     // A refresh that fails says so, and why, in German.

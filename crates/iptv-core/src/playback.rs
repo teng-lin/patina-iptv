@@ -152,7 +152,9 @@ pub fn group_range(schedule: &dyn Schedule, channel: usize) -> Range<usize> {
 /// Channel up/down from `channel` by `step`, wrapping within its group.
 pub fn zap_target(schedule: &dyn Schedule, channel: usize, step: isize) -> usize {
     let mut channels = schedule.channel_group_channels(channel);
-    channels.retain(|&c| !schedule.channel_hidden(c));
+    channels.retain(|&c| {
+        !schedule.channel_hidden(c) && schedule.channel_block(c) == crate::organization::Block::None
+    });
     if channels.is_empty() {
         return channel;
     }
@@ -163,6 +165,34 @@ pub fn zap_target(schedule: &dyn Schedule, channel: usize, step: isize) -> usize
         None => 0,
     };
     channels[to]
+}
+
+/// Counts from native position samples while the viewer is watching live TV.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WatchTime {
+    last: Option<(u64, u64)>,
+    pending_ms: u64,
+}
+
+impl WatchTime {
+    /// Adds forward playback bounded by elapsed real time.
+    pub fn sample(&mut self, now_ms: u64, position_ms: u64) {
+        if let Some((last_now, last_position)) = self.last.replace((now_ms, position_ms)) {
+            let elapsed = now_ms.saturating_sub(last_now);
+            // A missing heartbeat can span buffering, an inactive host, or a reopen.
+            if elapsed <= 3_000 {
+                self.pending_ms += elapsed.min(position_ms.saturating_sub(last_position));
+            }
+        }
+    }
+
+    pub fn pending_ms(&self) -> u64 {
+        self.pending_ms
+    }
+
+    pub fn take_ms(&mut self) -> u64 {
+        std::mem::take(&mut self.pending_ms)
+    }
 }
 
 #[cfg(test)]

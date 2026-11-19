@@ -251,11 +251,7 @@ impl Focus {
                 self.rail = rail_search(cols.rail);
                 Outcome::Moved
             }
-            (Pane::Groups, Move::Right) if list.channel_count() > 0 => {
-                self.pane = Pane::Guide;
-                Outcome::Committed
-            }
-            (Pane::Groups, Move::Right) => Outcome::None,
+            (Pane::Groups, Move::Right) => self.enter_group(list),
             (Pane::Rail, Move::Up | Move::Down) => {
                 let step = if m == Move::Up { -1 } else { 1 };
                 let to = rail_step(cols.rail, self.rail, step);
@@ -280,13 +276,7 @@ impl Focus {
         match self.pane {
             Pane::Preview => Outcome::ReturnToPlayer,
             Pane::Guide => Outcome::Watch,
-            Pane::Groups if list.channel_count() == 0 => Outcome::None,
-            Pane::Groups => {
-                self.pane = Pane::Guide;
-                self.go_to_top();
-                self.hint = true;
-                Outcome::Committed
-            }
+            Pane::Groups => self.enter_group(list),
             Pane::Rail => match self.rail {
                 RailItem::Tv => {
                     self.pane = Pane::Groups;
@@ -296,6 +286,15 @@ impl Focus {
                 _ => Outcome::None,
             },
         }
+    }
+
+    fn enter_group(&mut self, list: &dyn Schedule) -> Outcome {
+        if list.channel_count() == 0 {
+            return Outcome::None;
+        }
+        self.pane = Pane::Guide;
+        self.hint = self.channel == 0 && self.cursor == self.now;
+        Outcome::Committed
     }
 
     /// Back on the guide screen: one step along the chain.

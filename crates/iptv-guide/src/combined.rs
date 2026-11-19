@@ -280,6 +280,16 @@ impl Schedule for CombinedSchedule {
         self.channel_source(c)
             .is_none_or(|(s, c)| s.schedule.channel_hidden(c))
     }
+    fn channel_block(&self, channel: usize) -> iptv_core::organization::Block {
+        self.channel_source(channel)
+            .map_or_default(|(source, channel)| source.schedule.channel_block(channel))
+    }
+    fn group_blocked(&self, group: usize) -> bool {
+        self.groups.get(group).is_some_and(|&(source, group)| {
+            group.is_some_and(|group| self.sources[source].schedule.group_blocked(group))
+        })
+    }
+
     fn channel_number(&self, c: usize) -> u32 {
         self.channel_source(c)
             .map_or(0, |(s, c)| s.schedule.channel_number(c))

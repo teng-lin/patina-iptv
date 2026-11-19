@@ -211,7 +211,7 @@ fn largest_text_pin_keeps_cancel_visible_and_dpad_has_no_invisible_stop() {
             env.font_scale = 1.3;
         }),
     );
-    personalization::menu(app, "Block channel");
+    personalization::menu(app, "Protect channel with PIN");
     step(app.wait_for("text:Choose a new PIN"));
     exposure.shown(app, "parental-layer", true);
     exposure.shown(app, "guide-ui", false);
@@ -329,15 +329,20 @@ fn modal_back_restores_channel_identity_after_reordering_and_recovery_can_cancel
     step(app.press_key("down"));
     personalization::menu(app, "Reorder channels");
     exposure.shown(app, "guide-ui", false);
-    step(app.press("id:organization-row-2"));
-    step(app.press("text:Move to first"));
+    step(app.wait_for("id:organization-row-1 >> text:Local B"));
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    step(app.press_key("left"));
     step(app.wait_for("id:organization-row-0 >> text:Local C"));
     step(app.back());
+    step(app.press("text:Save order"));
+    step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
+    step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local C"));
     exposure.shown(app, "guide-ui", true);
     exposure.selected_channel(app, "Local B");
     // Recovery is a different form, with a different number of controls.
     // It must reset keypad focus and let D-pad OK activate Cancel.
-    personalization::menu(app, "Block channel");
+    personalization::menu(app, "Protect channel with PIN");
     step(app.wait_for("text:Choose a new PIN"));
     step(app.press("text:Forgot PIN?"));
     assert!(app.screen().matches("label:Recovery code").unwrap());
