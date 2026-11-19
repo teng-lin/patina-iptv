@@ -7,7 +7,9 @@ import com.longbridge.nsh.NshComponent
 import com.longbridge.nsh.NshComponentContext
 
 /** A floating software keyboard can be visible with no insets. */
-internal class ImeVisibilityComponent(context: NshComponentContext) : NshComponent {
+internal class ImeVisibilityComponent(
+    context: NshComponentContext,
+) : NshComponent {
     companion object {
         const val NAME = "tv.ime-visibility"
     }
@@ -37,5 +39,8 @@ internal class ImeVisibilityComponent(context: NshComponentContext) : NshCompone
 
     override fun view(): View = observer
 
-    override fun setProp(name: String, value: Any?) = Unit
+    override fun setProp(
+        name: String,
+        value: Any?,
+    ) = Unit
 }
