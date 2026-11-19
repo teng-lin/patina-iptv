@@ -36,10 +36,21 @@ fn unfocused(app: &Headless, field: NodeId) -> bool {
         .any(|(id, command)| *id == field && matches!(command, Command::Blur))
 }
 
+fn fixture(here: &str) -> Option<personalization::Fixture> {
+    let home = crate::isolated::run_with_env(here, &[("IPTV_TEST_FLOATING_IME", "1")])?;
+    Some(personalization::start(
+        home,
+        iptv_settings::Settings::new(),
+        false,
+    ))
+}
+
 #[test]
 fn search_blurs_only_after_the_floating_keyboard_was_shown_and_hidden() {
-    let Some(home) = isolated!() else { return };
-    let mut fixture = personalization::start(home, iptv_settings::Settings::new(), false);
+    fn here() {}
+    let Some(mut fixture) = fixture(std::any::type_name_of_val(&here)) else {
+        return;
+    };
     let app = &mut fixture.app;
 
     step(app.press_remote(RemoteKey::Search));
@@ -81,8 +92,10 @@ fn search_blurs_only_after_the_floating_keyboard_was_shown_and_hidden() {
 
 #[test]
 fn multiview_picker_blurs_after_the_floating_keyboard_is_hidden() {
-    let Some(home) = isolated!() else { return };
-    let mut fixture = personalization::start(home, iptv_settings::Settings::new(), false);
+    fn here() {}
+    let Some(mut fixture) = fixture(std::any::type_name_of_val(&here)) else {
+        return;
+    };
     let app = &mut fixture.app;
 
     step(app.press("text:★ Local A"));

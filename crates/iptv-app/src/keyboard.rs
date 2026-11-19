@@ -10,8 +10,11 @@ struct ImeVisibility(Signal<Option<bool>>);
 pub(crate) fn bridge() -> impl IntoElement {
     let visibility = signal(None);
     provide_context(ImeVisibility(visibility));
+    // Only the floating IME scenarios simulate the Android host observer.
+    let enabled = cfg!(target_os = "android")
+        || (cfg!(feature = "test-support") && std::env::var_os("IPTV_TEST_FLOATING_IME").is_some());
     when(
-        || cfg!(any(target_os = "android", feature = "test-support")),
+        move || enabled,
         move || {
             native("tv.ime-visibility")
                 .test_id("ime-visibility")
