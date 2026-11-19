@@ -390,3 +390,51 @@ fn numeric_channel_entry_commits_corrected_identity_and_invalid_input_does_not_z
     );
     persistent(app, &lifetime, player);
 }
+
+#[test]
+fn live_player_panels_expire_and_back_dismisses_without_stopping() {
+    let Some(home) = isolated!() else { return };
+    let mut settings = Settings::new();
+    settings
+        .set("guide.stay_on_guide", Value::Bool(false))
+        .unwrap();
+    settings
+        .set("player.controls_panel_timeout", Value::secs(5))
+        .unwrap();
+    settings.set("guide.switch_delay", Value::ms(500)).unwrap();
+    let mut fixture = personalization::start(home, settings, true);
+    let app = &mut fixture.app;
+    step(app.set_environment("TV remote", |env| env.idiom = Idiom::Tv));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:player-banner"));
+    step(app.run_for(Duration::from_millis(3_100)));
+    assert!(!app.screen().matches("id:player-banner").unwrap());
+    let playing = iptv_app::player_opens(0);
+    assert!(iptv_app::player_has_source(0));
+
+    step(app.press_key("enter"));
+    step(app.wait_for("id:player-card"));
+    step(app.run_for(Duration::from_millis(4_500)));
+    assert!(app.screen().matches("id:player-card").unwrap());
+    step(app.run_for(Duration::from_millis(600)));
+    assert!(!app.screen().matches("id:player-card").unwrap());
+    assert_eq!(iptv_app::player_opens(0), playing);
+    assert!(iptv_app::player_has_source(0));
+
+    step(app.press_key("enter"));
+    step(app.wait_for("id:player-card"));
+    step(app.back());
+    assert!(!app.screen().matches("id:player-card").unwrap());
+    assert!(iptv_app::player_has_source(0));
+
+    step(app.press_key("down"));
+    step(app.wait_for("id:player-banner"));
+    step(
+        app.wait_until("the next channel starts", Duration::from_secs(5), |_| {
+            iptv_app::player_opens(0) == playing + 1
+        }),
+    );
+    step(app.run_for(Duration::from_millis(3_100)));
+    assert!(!app.screen().matches("id:player-banner").unwrap());
+    assert!(iptv_app::player_has_source(0));
+}

@@ -18,7 +18,7 @@ use nsh_core::prelude::*;
 
 use super::{CELL_GAP, CELL_H, CELL_INSET, CELL_RADIUS, PAST_DIM, ROW_H, WHITE, pan::Pan};
 use crate::fonts::{CELL_TITLE, CONDENSED};
-use crate::guide::Program;
+use crate::guide::{Program, floor_of};
 use crate::scale::Scale;
 use crate::theme::{
     BRIGHT_TEXT, FOCUSED_CELL, FOCUSED_TEXT, GuideColors, TEXT_SECONDARY_ALPHA, blend, with_alpha,
@@ -153,14 +153,23 @@ pub(super) fn cell(
         Some(p) => focus.selected.get() == Some(p.start),
         None => false,
     };
+    let focus_programme = move |p: Program| {
+        let view = crate::lists::view(ui);
+        let row = at.index();
+        if p.end <= floor_of(&view, row, now.get_untracked()) {
+            return false;
+        }
+        ui.focus.update(|f| f.tap(row, p.start, &view));
+        true
+    };
     let open_actions = move || {
         let Some(p) = program() else {
             return;
         };
         ui.touched();
-        let view = crate::lists::view(ui);
-        ui.focus.update(|f| f.tap(at.index(), p.start, &view));
-        crate::menu_view::open(ui);
+        if focus_programme(p) {
+            crate::menu_view::open(ui);
+        }
     };
     view()
         .test_id("guide-programme")
@@ -191,9 +200,9 @@ pub(super) fn cell(
             if super::closed_columns(ui) {
                 return;
             }
-            let view = crate::lists::view(ui);
-            ui.focus.update(|f| f.tap(at.index(), p.start, &view));
-            ui.watch();
+            if focus_programme(p) {
+                ui.watch();
+            }
         })
         .child(
             text(title_text)

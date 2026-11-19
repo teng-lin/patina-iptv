@@ -52,17 +52,19 @@ pub async fn paged(
     now: UnixTime,
 ) -> EpgSchedule {
     let keep = super::stored::keep_past_days(&owner.settings());
-    let first = crate::commands::first_programme(owner, source)
-        .await
-        .unwrap_or_else(|e| {
-            log::warn!("iptv data: the stored guide's first day: {e}");
-            None
-        });
-    let window = kept_from(window(now, keep), first, now);
+    let window = window(now, keep);
+    let starts = match crate::commands::guide_listing_starts(owner, source, window.oldest).await {
+        Ok(starts) => starts,
+        Err(error) => {
+            log::warn!("iptv data: the stored guide's listing starts: {error}");
+            return schedule;
+        }
+    };
+    let window = kept_from(window, starts.values().copied().min(), now);
     let incarnation = schedule.source_authority().and_then(|authority| {
         (authority.source() == source.0).then(|| authority.incarnation().to_owned())
     });
-    schedule.with_pages(window, loader(owner, source, incarnation))
+    schedule.with_pages(window, starts, loader(owner, source, incarnation))
 }
 
 /// Reads a page on the store's reader and updates the visible schedule.
@@ -265,7 +267,7 @@ mod tests {
                 GuideStore::default(),
                 NOW,
             )
-            .with_pages(window(NOW, 7), move |request| {
+            .with_pages(window(NOW, 7), Default::default(), move |request| {
                 requests.borrow_mut().push(request)
             }),
         )
@@ -502,7 +504,7 @@ mod tests {
                     GuideStore::default(),
                     NOW,
                 )
-                .with_pages(window(NOW, 7), move |request| {
+                .with_pages(window(NOW, 7), Default::default(), move |request| {
                     requests.borrow_mut().push(request)
                 }),
             )
@@ -600,8 +602,11 @@ mod tests {
             let accepted = schedule
                 .source_authority()
                 .map(|authority| authority.incarnation().to_owned());
-            let schedule =
-                Rc::new(schedule.with_pages(window(NOW, 7), loader(&owner, source, accepted)));
+            let schedule = Rc::new(schedule.with_pages(
+                window(NOW, 7),
+                Default::default(),
+                loader(&owner, source, accepted),
+            ));
             install_single(&owner, source, &schedule);
 
             // A prior reader snapshot keeps the old shown schedule installed
@@ -691,7 +696,11 @@ mod tests {
         let source = SourceId(1);
         let lookup = crate::data::stored::description_lookup(&owner, source).unwrap();
         let schedule = EpgSchedule::new(Vec::new(), GuideStore::default(), NOW)
-            .with_pages(window(NOW, 7), loader(&owner, source, None))
+            .with_pages(
+                window(NOW, 7),
+                Default::default(),
+                loader(&owner, source, None),
+            )
             .with_description_lookup(lookup);
         // The owner keeps the schedule on screen and its source's part.
         let schedule = Rc::new(schedule);

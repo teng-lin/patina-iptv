@@ -7,11 +7,12 @@
 //! only one: a replay's card shows its seek bar there. A pointer (desktop
 //! mouse, tablet touch) has the play bar instead (`play_bar.rs`, never on
 //! a TV). State lives in `iptv_core::panels`; keys in `player_keys.rs`;
-//! this only draws them. Panels are views over the video SurfaceView
-//! (never alpha on the video). [`status`] draws the waiting and error
+//! this draws them and schedules their idle deadline. Panels are views over
+//! the video SurfaceView. [`status`] draws the waiting and error
 //! states of `player.rs`.
 
 use crate::i18n::{tr, trf};
+use std::time::Duration;
 
 use iptv_core::panels::{CONTROLS, Control, QUICK_ACTIONS, Shown};
 use iptv_core::player_info::date_time;
@@ -166,6 +167,29 @@ fn shown(ui: Ui) -> Shown {
 /// would take presses through it).
 fn events(hidden: bool, open: PointerEvents) -> PointerEvents {
     if hidden { PointerEvents::None } else { open }
+}
+
+pub(crate) fn bind_auto_hide(ui: Ui) {
+    // A channel change can publish the deadline from a debounce whose
+    // owner is disposed when playback updates the focused target. Bind
+    // to the window so the deadline remains armed through that change.
+    let deadline = computed(move || ui.panels.with(|p| p.hide_at_ms()));
+    effect(move || {
+        if let Some(at) = deadline.get() {
+            drop(spawn(async move {
+                timer_until(ui.app.epoch + Duration::from_millis(at)).await;
+                let now = ui.now_ms();
+                if ui.panels.with_untracked(|p| p.hide_at_ms()) != Some(at) {
+                    return;
+                }
+                ui.panels.update(|p| {
+                    if p.tick(now) {
+                        log::info!("iptv panels auto-hide now={now} at={at}");
+                    }
+                });
+            }));
+        }
+    });
 }
 
 pub fn layer(ui: Ui) -> impl IntoElement {

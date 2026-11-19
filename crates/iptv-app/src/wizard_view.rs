@@ -433,6 +433,15 @@ fn field_row(ui: Ui, size: Scale, field: Field) -> View {
     let value = move || read(ui, |w| w.value(field).to_owned()).unwrap_or_default();
     let error = move || read(ui, |w| w.error(field)).flatten();
     let mark = move || mark(ui, target);
+    let guide = field == Field::EpgUrl;
+    let empty_guide = move || guide && value().is_empty();
+    let value_colour = move || {
+        if value().is_empty() {
+            mark().secondary()
+        } else {
+            mark().text()
+        }
+    };
     let paste = field.accepts_paste().then(|| {
         ui_kit::row_button(
             ui,
@@ -445,7 +454,7 @@ fn field_row(ui: Ui, size: Scale, field: Field) -> View {
     });
     let control = view()
         .flex_1()
-        .h_full()
+        .style_when(move || !guide, |s| s.h_full())
         .role(AccessibilityRole::Button)
         .accessible(true)
         .label(move || {
@@ -480,19 +489,20 @@ fn field_row(ui: Ui, size: Scale, field: Field) -> View {
             view()
                 .flex_1()
                 .child(
-                    ui_kit::label(size, move || {
-                        let v = value();
-                        if v.is_empty() {
-                            words::placeholder(field).to_owned()
-                        } else {
-                            shown_value(field, &v)
-                        }
+                    when(empty_guide, move || {
+                        ui_kit::body(size, move || words::placeholder(field))
+                            .text_color(value_colour)
                     })
-                    .text_color(move || match (mark(), value().is_empty()) {
-                        (Mark::Focused, false) => Mark::Focused.text(),
-                        (Mark::Focused, true) => Mark::Focused.disabled(),
-                        (_, false) => rgb(LIST_TEXT),
-                        (_, true) => tint(WHITE, 0x70),
+                    .otherwise(move || {
+                        ui_kit::label(size, move || {
+                            let v = value();
+                            if v.is_empty() {
+                                words::placeholder(field).to_owned()
+                            } else {
+                                shown_value(field, &v)
+                            }
+                        })
+                        .text_color(value_colour)
                     }),
                 )
                 .child(
@@ -503,6 +513,14 @@ fn field_row(ui: Ui, size: Scale, field: Field) -> View {
                 ),
         );
     list_rows::row(size, ROW, mark)
+        .style_when(
+            move || guide,
+            move |s| {
+                s.h(Length::Auto)
+                    .min_h(list_rows::pitch(size, ROW))
+                    .py(size.px(8.0))
+            },
+        )
         .test_id(match field {
             Field::EpgUrl => "wizard-field-EpgUrl",
             _ => "wizard-field",

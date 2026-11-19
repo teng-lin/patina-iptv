@@ -119,13 +119,15 @@ fn the_guide_opens_on_all_channels() {
 }
 
 #[test]
-fn left_from_the_live_programme_opens_the_groups_and_the_rail() {
+fn left_from_the_earliest_listing_opens_the_groups_and_the_rail() {
     let mut s = Screen::new();
-    // Row 4 is channel 4: even channels have no catch-up here.
+    // Row 4 has no catch-up, but its retained listings are still reachable.
     for _ in 0..4 {
         s.mv(Move::Down);
     }
     assert_eq!(s.channel(), Some(4));
+    let floor = s.focus.floor(&s.view);
+    s.focus.tap(4, floor, &s.view);
     assert_eq!(s.mv(Move::Left), Outcome::Moved);
     assert_eq!(s.focus.pane, Pane::Groups);
     assert!(s.focus.columns_shown());
@@ -139,12 +141,12 @@ fn left_from_the_live_programme_opens_the_groups_and_the_rail() {
 }
 
 #[test]
-fn left_on_a_catch_up_row_walks_its_archive_before_the_groups() {
+fn left_on_a_catch_up_row_walks_past_its_archive_before_the_groups() {
     let mut s = Screen::new();
     s.mv(Move::Down);
     assert_eq!(s.channel(), Some(3), "a day of catch-up");
     let floor = s.focus.floor(&s.view);
-    assert!((-24 * 60..0).contains(&floor), "{floor}");
+    assert!(floor < -24 * 60, "{floor}");
     let mut steps = 0;
     while s.mv(Move::Left) == Outcome::Moved && s.focus.pane == Pane::Guide {
         steps += 1;
@@ -152,9 +154,8 @@ fn left_on_a_catch_up_row_walks_its_archive_before_the_groups() {
     assert!(steps > 0);
     assert_eq!(s.focus.pane, Pane::Groups);
     let oldest = s.focus.program(&s.view);
-    assert!(oldest.start >= floor, "from the oldest replay");
-    let before = s.view.program_at(s.focus.channel, oldest.start - 1);
-    assert!(before.start < floor);
+    assert!(oldest.start <= floor && floor < oldest.end);
+    assert!(!oldest.can_replay(s.focus.now, s.view.catchup_days(s.focus.channel)));
 }
 
 #[test]
@@ -208,7 +209,7 @@ fn right_from_the_groups_returns_to_the_same_row() {
     for _ in 0..4 {
         s.mv(Move::Down);
     }
-    s.mv(Move::Left);
+    s.focus.open_groups();
     assert_eq!(s.mv(Move::Right), Outcome::Committed);
     assert_eq!((s.focus.pane, s.focus.channel), (Pane::Guide, 4));
     assert!(!s.focus.hint);

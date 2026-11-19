@@ -144,3 +144,76 @@ fn an_old_history_file_moves_into_the_store() {
     step(app.wait_for("text:synthetic legacy query"));
     assert!(!legacy.exists());
 }
+
+#[test]
+fn keyboard_search_keeps_the_editor_and_reaches_named_results_at_narrow_width() {
+    use crate::personalization::{self, step};
+    use iptv_settings::Settings;
+    use nsh_core::platform::Idiom;
+
+    let Some(home) = isolated!() else { return };
+    let mut fixture = personalization::start(home, Settings::new(), false);
+    let app = &mut fixture.app;
+    step(app.set_environment("desktop layout", |env| env.idiom = Idiom::Desktop));
+    step(app.wait_for("role:button[/^Go back 30 minutes$/]"));
+    step(app.wait_for("role:button[/^Go forward 30 minutes$/]"));
+    step(app.press_key("mod+f"));
+    step(app.wait_for("id:search-field"));
+
+    // Native Return on an empty query must leave the same field editable.
+    step(app.press_key("enter"));
+    for key in ["l", "o", "c", "a", "l"] {
+        step(app.press_key(key));
+    }
+    step(app.wait_for("id:search-screen >> role:button[/Local A/]"));
+    let field = |app: &Headless| {
+        app.screen()
+            .layout_nodes()
+            .into_iter()
+            .find(|node| node.test_id.as_deref() == Some("search-field"))
+            .unwrap()
+    };
+    let wide = field(app);
+    step(app.set_viewport(Size::new(px(320.0), px(540.0))));
+    let narrow = field(app);
+    assert_eq!(wide.id, narrow.id, "resizing keeps the native editor");
+    assert!(narrow.bounds.origin.y > wide.bounds.origin.y);
+    assert!(narrow.bounds.size.width > px(220.0));
+    step(app.wait_for("role:button[/^Clear$/]"));
+    step(app.wait_for("role:button[/^Close$/]"));
+
+    step(app.press_key("space"));
+    step(app.press_key("z"));
+    step(app.wait_for("text:Nothing found for “local z”"));
+    let status = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| {
+            node.text
+                .as_ref()
+                .is_some_and(|t| t.text.text == "Nothing found for “local z”")
+        })
+        .unwrap();
+    assert!(
+        status.bounds.size.width > px(120.0),
+        "status has room below the tabs"
+    );
+    step(app.wait_for("text:Edit the query or choose Clear"));
+    step(app.press_key("enter"));
+    step(app.wait_for("text:Enter edit query   Esc close"));
+    step(app.press_key("enter"));
+    step(app.press_key("backspace"));
+    step(app.wait_for("id:search-screen >> role:button[/Local A/]"));
+
+    // Result selection via Return exposes the state on the named action.
+    step(app.press_key("enter"));
+    let first = "id:search-screen >> role:button[/Local A/]";
+    assert!(app.screen().accessibility_state(first).unwrap().selected);
+    step(app.press_key("down"));
+    let second = "id:search-screen >> role:button[/Local B/]";
+    assert!(app.screen().accessibility_state(second).unwrap().selected);
+    assert!(!app.screen().accessibility_state(first).unwrap().selected);
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("id:search-screen", RESULTS));
+}

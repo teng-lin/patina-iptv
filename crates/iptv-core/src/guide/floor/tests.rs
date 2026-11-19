@@ -1,4 +1,4 @@
-use super::super::moves::{DAY as DAY_STEP, HOUR};
+use super::super::moves::{DAY, HOUR};
 use super::super::{Move, Pane, Program, SyntheticSchedule, home_window};
 use super::*;
 use crate::timeline::Timeline;
@@ -45,11 +45,11 @@ impl Schedule for Archive {
     }
 }
 
-/// Rows 0 and 1 replay a day, row 2 has no catch-up; a week is stored.
+/// Rows 0 and 1 replay a day, row 2 has no catch-up; two days are stored.
 fn mixed() -> Archive {
     Archive {
         days: vec![1, 1, 0],
-        first: 7 * DAY,
+        first: 2 * DAY,
     }
 }
 
@@ -61,73 +61,74 @@ fn on(channel: usize) -> Focus {
 }
 
 #[test]
-fn a_catch_up_row_walks_back_to_its_archive_start_then_opens_the_groups() {
+fn left_inspects_retained_listings_with_or_without_catch_up() {
     let s = mixed();
-    let mut f = on(0);
-    let mut steps = 0;
-    while f.pane == Pane::Guide {
-        let before = f.program(&s);
-        f.apply(Move::Left, &s);
-        if f.pane == Pane::Guide {
-            assert_eq!(f.program(&s).end, before.start, "one programme back");
-            let start = f.program(&s).start;
-            assert!(f.window <= start && start < f.window + VISIBLE);
-        }
-        steps += 1;
-        assert!(steps < 200);
-    }
-    // The last programme reached was the oldest starting in the archive.
-    let oldest = f.program(&s);
-    assert_eq!(f.floor(&s), -DAY);
-    assert!(oldest.start >= -DAY, "{oldest:?}");
-    assert!(S.program_at(0, oldest.start - 1).start < -DAY, "{oldest:?}");
-    assert!(steps > 10, "a day of programmes: {steps}");
-}
-
-#[test]
-fn a_row_without_catch_up_opens_the_groups_from_the_programme_on_air() {
-    let s = mixed();
-    let mut f = on(2);
-    let live = f.program(&s);
-    f.apply(Move::Left, &s);
-    assert_eq!(f.pane, Pane::Groups, "Left at now");
-    // From a later programme Left walks back to now's first.
-    let mut f = on(2);
-    for _ in 0..3 {
-        f.apply(Move::Right, &s);
-    }
-    for _ in 0..3 {
+    for channel in [0, 2] {
+        let mut f = on(channel);
+        let live = f.program(&s);
         f.apply(Move::Left, &s);
         assert_eq!(f.pane, Pane::Guide);
+        assert_eq!(f.program(&s).end, live.start);
+        assert_eq!(
+            f.program(&s).can_replay(f.now, s.catchup_days(channel)),
+            channel == 0
+        );
+
+        let floor = f.floor(&s);
+        assert_eq!(floor, -2 * DAY);
+        let mut steps = 0;
+        while f.pane == Pane::Guide {
+            let before = f.program(&s);
+            f.apply(Move::Left, &s);
+            if f.pane == Pane::Guide {
+                assert_eq!(f.program(&s).end, before.start);
+                assert!(f.window <= f.cursor && f.cursor < f.window + VISIBLE);
+            }
+            steps += 1;
+            assert!(steps < 200);
+        }
+        let oldest = f.program(&s);
+        assert_eq!(f.cursor, floor);
+        assert!(oldest.start <= floor && floor < oldest.end);
+        assert!(!oldest.can_replay(f.now, s.catchup_days(channel)));
     }
-    assert_eq!(f.program(&s), live);
-    f.apply(Move::Left, &s);
-    assert_eq!(f.pane, Pane::Groups);
-    // Earlier programmes by the action never pass now either.
-    let mut f = on(2);
-    f.enter_past(&s);
-    assert_eq!((f.pane, f.program(&s)), (Pane::Guide, live));
 }
 
 #[test]
-fn the_stored_guide_bounds_a_longer_archive() {
-    // Seven days of archive, two of guide kept.
+fn no_retained_past_leaves_left_available_to_open_groups() {
     let s = Archive {
-        days: vec![7],
-        first: 2 * DAY,
+        days: vec![0],
+        first: 0,
     };
     let mut f = on(0);
-    assert_eq!(f.floor(&s), -2 * DAY);
-    assert_eq!(view_range(&s, 0).0, -2 * DAY);
-    while f.pane == Pane::Guide {
-        f.apply(Move::Left, &s);
-    }
-    let start = f.program(&s).start;
-    assert!(start >= -2 * DAY && S.program_at(0, start - 1).start < -2 * DAY);
+    let live = f.program(&s);
+    f.enter_past(&s);
+    assert_eq!((f.pane, f.program(&s)), (Pane::Guide, live));
+    f.apply(Move::Left, &s);
+    assert_eq!(f.pane, Pane::Groups);
+    assert_eq!(view_range(&s, 0).0, home_window(0));
 }
 
 #[test]
-fn rows_keep_the_time_column_but_not_before_their_floor() {
+fn the_retained_floor_keeps_an_overlapping_listing_reachable() {
+    let listing = S.program_at(0, -DAY);
+    let floor = listing.start + 1;
+    let s = Archive {
+        days: vec![0],
+        first: -floor,
+    };
+    let mut f = on(0);
+    while f.cursor > floor {
+        f.enter_past(&s);
+    }
+    assert_eq!((f.cursor, f.program(&s)), (floor, listing));
+    assert_eq!(f.window, floor);
+    f.apply(Move::Left, &s);
+    assert_eq!(f.pane, Pane::Groups);
+}
+
+#[test]
+fn rows_keep_the_time_column_across_archive_capabilities() {
     let s = mixed();
     let mut f = on(0);
     for _ in 0..5 {
@@ -135,79 +136,53 @@ fn rows_keep_the_time_column_but_not_before_their_floor() {
     }
     let cursor = f.cursor;
     assert!(cursor < 0);
-    // Catch-up to catch-up: the same time column.
     f.apply(Move::Down, &s);
     assert_eq!((f.channel, f.cursor), (1, cursor));
-    // Into a row without catch-up: its programme on air.
     f.apply(Move::Down, &s);
-    assert_eq!((f.channel, f.cursor), (2, 0));
-    assert_eq!(f.program(&s).airing(0), super::super::Airing::Live);
-    let start = f.program(&s).start;
-    assert!(f.window <= start.max(0) && 0 < f.window + VISIBLE);
+    assert_eq!((f.channel, f.cursor), (2, cursor));
+    assert_eq!(f.program(&s).airing(0), super::super::Airing::Ended);
 }
 
 #[test]
-fn hour_and_day_steps_stop_at_the_floor() {
+fn hour_and_day_steps_stop_at_the_retained_floor() {
     let s = mixed();
-    // No catch-up: nothing before now's programme.
     let mut f = on(2);
     f.step_time(-HOUR, &s);
-    f.step_time(-DAY_STEP, &s);
-    assert_eq!((f.cursor, f.window), (0, home_window(0)));
-    // Catch-up: back to the oldest replay, and on to the guide's end.
-    let mut f = on(0);
+    assert_eq!(f.cursor, -HOUR);
     for _ in 0..5 {
-        f.step_time(-DAY_STEP, &s);
+        f.step_time(-DAY, &s);
     }
-    let start = f.program(&s).start;
-    assert!(start >= -DAY && S.program_at(0, start - 1).start < -DAY);
-    assert!(f.window <= f.cursor && f.cursor < f.window + VISIBLE);
+    assert_eq!((f.cursor, f.window), (-2 * DAY, -2 * DAY));
     for _ in 0..5 {
-        f.step_time(DAY_STEP, &s);
+        f.step_time(DAY, &s);
     }
     let (_, end) = view_range(&s, 0);
     assert_eq!(f.window, end - VISIBLE);
 }
 
 #[test]
-fn a_tap_on_a_past_programme_without_replay_focuses_now() {
+fn a_tap_focuses_a_retained_listing_without_replay() {
     let s = mixed();
     let mut f = on(0);
     f.tap(2, -90, &s);
-    assert_eq!((f.channel, f.cursor), (2, 0));
-    f.tap(1, -90, &s);
-    assert_eq!((f.channel, f.cursor), (1, -90), "a replay is focused");
+    assert_eq!((f.channel, f.cursor), (2, -90));
+    assert!(!f.program(&s).can_replay(f.now, s.catchup_days(2)));
 }
 
 #[test]
-fn the_view_reaches_back_only_for_catch_up_lists() {
-    let none = Archive {
+fn panning_reaches_retained_listings_on_lists_without_catch_up() {
+    let s = Archive {
         days: vec![0, 0],
-        first: 7 * DAY,
+        first: 2 * DAY,
     };
-    let (first, end) = view_range(&none, 0);
-    assert_eq!((first, end), (home_window(0), super::super::HORIZON));
-    assert_eq!(view_range(&mixed(), 0).0, -DAY);
-    // Pans and their settled windows stay inside.
-    for (s, lo) in [(&none, home_window(0)), (&mixed(), -DAY)] {
-        let mut t = Timeline::new(home_window(0), view_range(s, 0));
-        t.press();
-        t.drag(1.0e6, 0.0, 8.0);
-        assert_eq!(t.view(), lo as f32);
-        let mut f = on(0);
-        f.pan_to(-10 * DAY, s);
-        assert_eq!(f.window, lo);
-    }
-    // A pan of a catch-up list leaves a row without one on now's programme.
-    let mut f = on(2);
-    f.pan_to(-DAY, &mixed());
-    assert_eq!((f.window, f.cursor), (-DAY, 0));
-}
-
-#[test]
-fn a_synthetic_guide_has_catch_up_rows_and_rows_without() {
-    // Even channels replay three days, odd ones none.
-    assert_eq!(floor_of(&S, 1, 0), 0);
-    assert_eq!(floor_of(&S, 0, 0), -3 * DAY);
-    assert_eq!(view_range(&S, 0).0, -3 * DAY);
+    let (first, end) = view_range(&s, 0);
+    assert_eq!((first, end), (-2 * DAY, super::super::HORIZON));
+    let mut timeline = Timeline::new(home_window(0), (first, end));
+    timeline.press();
+    timeline.drag(1.0e6, 0.0, 8.0);
+    assert_eq!(timeline.view(), first as f32);
+    let mut f = on(0);
+    f.pan_to(-10 * DAY, &s);
+    assert_eq!(f.window, first);
+    assert!(f.cursor >= first && f.cursor < first + VISIBLE);
 }

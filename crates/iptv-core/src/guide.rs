@@ -31,8 +31,7 @@ pub const STEP: i32 = 30;
 /// How far before "now" the guide can show (the window's lower bound).
 pub const PAST: i32 = 30;
 /// How far back the synthetic guide has data (and a schedule's default
-/// [`Schedule::browsable`] reaches). The view and the keys go back only as
-/// far as catch-up does ([`floor`]).
+/// [`Schedule::browsable`] reaches).
 pub const HISTORY: i32 = 7 * 24 * 60;
 
 /// Where a programme sits relative to now.
@@ -53,6 +52,12 @@ impl Program {
         } else {
             Airing::Upcoming
         }
+    }
+
+    /// Whether the channel's archive reaches the start of this programme.
+    pub fn can_replay(&self, now: i32, archive_days: u8) -> bool {
+        let window = i32::from(archive_days) * 24 * 60;
+        window > 0 && self.start <= now && self.start >= now.saturating_sub(window)
     }
 
     /// Played fraction of a live programme at `now` (0 otherwise).
@@ -135,13 +140,6 @@ pub trait Schedule {
     fn programs_between(&self, channel: usize, from: i32, minutes: i32) -> Vec<Program>;
     /// The channel's archive window in days (0: no catch-up).
     fn catchup_days(&self, channel: usize) -> u8;
-    /// The longest archive window of any channel ([`floor::view_range`]).
-    fn max_catchup_days(&self) -> u8 {
-        (0..self.channel_count())
-            .map(|c| self.catchup_days(c))
-            .max()
-            .unwrap_or(0)
-    }
     fn channel_name(&self, channel: usize) -> String;
     /// The provider's channel number when it has one, else the 1-based
     /// position. (The guide numbers rows by their place in the list it
@@ -217,10 +215,16 @@ pub trait Schedule {
     }
     /// The guide minutes that can be browsed at `now`, `[first, end)`: by
     /// default [`HISTORY`] back and [`HORIZON`] ahead; a stored guide from
-    /// the oldest day its store keeps to a little past its last programme.
-    /// At least [`VISIBLE`] minutes around now.
+    /// the oldest retained data to a little past its last programme. Supply
+    /// `now` as the first minute when there are no retained past listings.
     fn browsable(&self, now: i32) -> (i32, i32) {
         (now - HISTORY, now + HORIZON)
+    }
+    /// The first retained guide minute for this channel. A fixture can use
+    /// the default schedule extent at its epoch; a sparse guide reports
+    /// `None` for a row without listings.
+    fn listing_start(&self, _channel: usize) -> Option<i32> {
+        Some(self.browsable(0).0)
     }
     /// The concrete schedule, for features that need more than this trait
     /// (programme search reads the EPG store; playback resolves streams).
@@ -283,9 +287,6 @@ impl Schedule for SyntheticSchedule {
     }
     fn catchup_days(&self, channel: usize) -> u8 {
         catchup_days(channel)
-    }
-    fn max_catchup_days(&self) -> u8 {
-        catchup_days(0)
     }
     fn channel_name(&self, channel: usize) -> String {
         format!("Channel {}", channel + 1)
@@ -509,8 +510,7 @@ impl Focus {
     pub fn apply(&mut self, m: Move, s: &dyn Schedule) {
         match (self.pane, m) {
             (Pane::Rail | Pane::Groups | Pane::Preview, _) => return,
-            // Rows keep the time column, but not before a row's floor: on a
-            // row without catch-up the focus is on now's programme at least.
+            // Rows keep the time column within retained guide coverage.
             (Pane::Guide, Move::Up) => {
                 self.channel = self.channel.saturating_sub(1);
                 self.lift_to_floor(s);
@@ -519,9 +519,7 @@ impl Focus {
                 self.channel = (self.channel + 1).min(s.channel_count().saturating_sub(1));
                 self.lift_to_floor(s);
             }
-            // Left steps to the previous programme down to the row's floor
-            // (the oldest replay, or now's programme without catch-up);
-            // there it shows the groups.
+            // Left shows the groups after the earliest retained listing.
             (Pane::Guide, Move::Left) => match self.previous(s) {
                 Some(p) => self.cursor = p.start.max(self.floor(s)),
                 None => self.pane = Pane::Groups,
@@ -579,8 +577,7 @@ impl Focus {
     }
 
     /// A tap on the programme of `channel` airing at `minute`: it gets the
-    /// focus where it is (the window does not move, the cell is on screen);
-    /// a past one without a replay leaves it on the programme on air.
+    /// focus where it is (the window stays on the visible cell).
     pub fn tap(&mut self, channel: usize, minute: i32, s: &dyn Schedule) {
         self.pane = Pane::Guide;
         self.channel = channel.min(s.channel_count().saturating_sub(1));
@@ -691,22 +688,6 @@ mod tests {
     }
 
     #[test]
-    fn left_from_the_current_programme_moves_to_groups_and_back() {
-        let mut f = Focus {
-            channel: 9,
-            ..Focus::default()
-        };
-        f.apply(Move::Right, &S);
-        f.apply(Move::Left, &S);
-        assert_eq!(f.pane, Pane::Guide);
-        f.apply(Move::Left, &S);
-        assert_eq!(f.pane, Pane::Groups);
-        // The grid ignores directions while the columns have the focus.
-        f.apply(Move::Down, &S);
-        assert_eq!((f.pane, f.channel), (Pane::Groups, 9));
-    }
-
-    #[test]
     fn the_window_follows_the_cursor_within_the_horizon() {
         let mut f = Focus::default();
         for _ in 0..500 {
@@ -758,9 +739,9 @@ mod tests {
         f.shift_window(-10 * STEP, &S);
         assert_eq!(f.window, 60 - 10 * STEP);
         assert!(f.cursor >= f.window && f.cursor < f.window + VISIBLE);
-        // The archive of the synthetic catch-up channels: three days.
+        // Both directions stop at the synthetic guide's bounds.
         f.shift_window(-HISTORY * 2, &S);
-        assert_eq!(f.window, -3 * 24 * 60);
+        assert_eq!(f.window, -HISTORY);
         f.shift_window(HISTORY + HORIZON, &S);
         assert_eq!(f.window, HORIZON - VISIBLE);
     }
@@ -794,8 +775,7 @@ mod tests {
     }
 
     #[test]
-    fn right_then_left_into_the_groups_keeps_the_past_shown() {
-        // The device sequence: Channel 15, Right x3, Left x4 (the last opens the groups).
+    fn right_and_left_back_to_live_keeps_the_past_shown() {
         for channel in [15, 1, 3, 77] {
             let mut f = Focus {
                 channel,
@@ -804,7 +784,7 @@ mod tests {
             for _ in 0..3 {
                 f.apply(Move::Right, &S);
             }
-            for _ in 0..4 {
+            for _ in 0..3 {
                 f.apply(Move::Left, &S);
             }
             assert_eq!(f.window, -PAST, "channel {channel}: {f:?}");
@@ -859,33 +839,6 @@ mod tests {
             (0, -PAST, Airing::Live)
         );
         assert!(!f.return_to_now(&S), "already at now");
-    }
-
-    #[test]
-    fn the_past_reaches_the_archive_and_never_without_catchup() {
-        // Odd: no catch-up. Earlier programmes stop at now's.
-        let mut f = Focus {
-            channel: 1,
-            ..Focus::default()
-        };
-        assert_eq!(catchup_days(1), 0);
-        let live = f.program(&S);
-        for _ in 0..20 {
-            f.enter_past(&S);
-        }
-        assert_eq!(f.program(&S), live);
-        // Even: three days back, no further.
-        f.channel = 2;
-        for _ in 0..2000 {
-            f.enter_past(&S);
-        }
-        let start = f.program(&S).start;
-        assert!(
-            (-3 * 24 * 60..-3 * 24 * 60 + 120).contains(&start),
-            "three days back: {:?}",
-            f.program(&S)
-        );
-        assert!(f.window >= -3 * 24 * 60);
     }
 
     /// A small schedule with real-data time: the synthetic programmes, a
@@ -1012,7 +965,7 @@ mod tests {
     fn bounds_move_with_now() {
         let mut f = Focus::at(10 * 60);
         f.shift_window(-HISTORY * 2, &S);
-        assert_eq!(f.window, 10 * 60 - 3 * 24 * 60);
+        assert_eq!(f.window, 10 * 60 - HISTORY);
         f.shift_window(HISTORY * 3, &S);
         assert_eq!(f.window, 10 * 60 + HORIZON - VISIBLE);
         f.tap(0, i32::MAX, &S);

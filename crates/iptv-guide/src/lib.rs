@@ -208,14 +208,16 @@ impl EpgSchedule {
 
     /// `store` holds the guide from `window.loaded_from` on; earlier days
     /// are read in when first needed: `loader` reads one off the UI thread
-    /// and hands it to [`Self::insert_page`].
+    /// and hands it to [`Self::insert_page`]. `listing_starts` records each
+    /// channel's first retained listing even when its day is still unloaded.
     pub fn with_pages(
         mut self,
         window: PagedWindow,
+        listing_starts: std::collections::HashMap<ChannelKey, UnixTime>,
         loader: impl Fn(PageRequest) + 'static,
     ) -> Self {
         let loader: PageLoader = Box::new(loader);
-        self.pages = std::rc::Rc::new(Pages::new(window, loader));
+        self.pages = std::rc::Rc::new(Pages::new(window, listing_starts, loader));
         self
     }
 
@@ -537,14 +539,20 @@ impl EpgSchedule {
     }
 
     /// A time inside `program` (its first second, or its middle if short).
-    /// One reaching into the window held with the schedule is read there
-    /// (it is held whole), not from the older day it started in.
+    /// Read an overlapping programme from the retained part of its slot.
+    /// If it reaches the held window, that window already contains it whole.
     fn probe(&self, program: Program) -> UnixTime {
         let (a, b) = (self.unix(program.start), self.unix(program.end));
         let t = (a + 59).min((a + b) / 2).max(a);
         let held_from = self.held.map_or(UnixTime::MIN, |(from, _)| from);
         let from = self.pages.loaded_from().max(held_from);
-        if b > from { t.max(from) } else { t }
+        if b > from {
+            t.max(from)
+        } else if b > self.pages.oldest() {
+            t.max(self.pages.oldest())
+        } else {
+            t
+        }
     }
 
     /// The placeholder slot around `t` for a channel with no programme then
@@ -822,19 +830,31 @@ impl Schedule for EpgSchedule {
     /// From the earliest programme stored (the oldest day kept: pages'
     /// [`pages::PagedWindow::oldest`], else the first programme in memory)
     /// to [`PAST_END`] past the last one; without guide data, from now's
-    /// default window to the default horizon. Nothing before the stored
-    /// data can be browsed, as nothing after it.
+    /// current minute to the default horizon. The viewport includes its
+    /// default padding around now.
     fn browsable(&self, now: i32) -> (i32, i32) {
-        let home = iptv_core::guide::home_window(now);
         let first = match self.pages.oldest() {
-            UnixTime::MIN => self.data_start.map_or(home, |t| self.minute(t)),
+            UnixTime::MIN => self.data_start.map_or(now, |t| self.minute(t)),
             oldest => self.minute(oldest),
         };
         let end = self.data_end.map_or(now + iptv_core::guide::HORIZON, |t| {
             self.minute(t) + PAST_END
         });
         let end = end.max(now + iptv_core::guide::VISIBLE);
-        (first.min(home), end)
+        (first.min(now), end)
+    }
+
+    fn listing_start(&self, channel: usize) -> Option<i32> {
+        let key = self.key(channel)?;
+        let start = if self.loaded_from().is_some() {
+            self.pages.listing_start(key)
+        } else {
+            self.store
+                .schedule(key)
+                .and_then(|schedule| schedule.get(0))
+                .map(|programme| programme.start())
+        };
+        start.map(|start| self.minute(start))
     }
 
     fn channel_count(&self) -> usize {

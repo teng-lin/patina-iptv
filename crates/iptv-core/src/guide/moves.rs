@@ -101,7 +101,7 @@ mod tests {
         for _ in 0..20 {
             f.step_time(-DAY, &S);
         }
-        assert_eq!(f.window, lo, "the oldest replay's day");
+        assert_eq!(f.window, lo, "the oldest retained day");
         assert!(f.cursor >= lo && f.cursor < lo + VISIBLE);
         for _ in 0..20 {
             f.step_time(DAY, &S);
@@ -151,9 +151,8 @@ mod tests {
 
     #[test]
     fn left_walks_back_from_a_later_programme_to_the_live_one() {
-        // TiviMate's model: Right steps later, Left walks back through every
-        // programme to the live one and, on a channel without catch-up
-        // (odd ones), only there opens the groups.
+        // Right steps later. Left walks through each programme in reverse,
+        // including those before now even without catch-up.
         for channel in [1, 3, 15, 77] {
             let mut f = Focus {
                 channel,
@@ -173,7 +172,8 @@ mod tests {
             }
             assert_eq!(f.program(&S), live);
             f.apply(Move::Left, &S);
-            assert_eq!(f.pane, Pane::Groups, "Left on the live programme");
+            assert_eq!(f.pane, Pane::Guide);
+            assert_eq!(f.program(&S).end, live.start);
         }
     }
 

@@ -421,6 +421,15 @@ fn first_run_large_text_exposes_source_choices_and_scrolls_focused_fields() {
         Duration::from_secs(3),
         |screen| inside(screen, "wizard-field-EpgUrl", "wizard-fields-scroll"),
     ));
+    let guidance = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .filter_map(|node| node.text)
+        .find(|text| text.text.text == "Optional: an XMLTV link (the provider's guide otherwise)")
+        .expect("guide fallback is displayed in the form");
+    assert_eq!(guidance.text.max_lines, 0, "the fallback can wrap");
+    assert!(!guidance.text.no_wrap);
     step(app.press_key("down"));
     assert!(inside(app.screen(), "wizard-submit", "wizard-form"));
     assert!(app.screen().matches("role:button[/Add playlist/]").unwrap());

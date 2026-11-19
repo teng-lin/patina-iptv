@@ -9,7 +9,7 @@
 //! flings on, one step per display frame. Taps stay taps. The view follows
 //! the focus model's window while nothing pans (keys, ‹ ›, Now), and a pan
 //! that came to rest hands its window back to it. Its bounds are the
-//! guide's view ([`view_range`]: as far back as the list's catch-up goes).
+//! guide's view ([`view_range`]: as far back as retained listings go).
 //!
 //! Units: NSH's pan reports the finger's movement and speed in dp (the
 //! Android view divides its pixels by the density, 1.5 on a 1920 × 1200
