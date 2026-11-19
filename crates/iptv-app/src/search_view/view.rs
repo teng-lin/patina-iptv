@@ -4,7 +4,6 @@
 //! pill.
 
 use crate::i18n::tr;
-use std::cell::Cell;
 
 use super::*;
 use crate::fonts::{CAPTION, CONDENSED, SANS};
@@ -93,14 +92,10 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
         .unwrap_or(false)
     });
     crate::input::bind_field_focus(field, move || want_keyboard.get());
-    // The platform closed the keyboard (Back on Android hides it first).
-    let was_up = Rc::new(Cell::new(false));
-    effect(move || {
-        let up = keyboard_height() > px(0.0);
-        if was_up.replace(up) && !up {
-            apply(ui, SearchAction::KeyboardHidden);
-        }
-    });
+    crate::keyboard::on_dismissed(
+        move || want_keyboard.get(),
+        move || apply(ui, SearchAction::KeyboardHidden),
+    );
     let field_focused = move || state(ui, |s| *s.state.focus() == Focus::Input).unwrap_or(false);
     view()
         .flex_row()

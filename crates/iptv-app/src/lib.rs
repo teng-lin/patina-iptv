@@ -39,6 +39,7 @@ mod i18n;
 #[cfg(feature = "test-support")]
 pub use i18n::pseudo_fixed_for_test;
 mod input;
+mod keyboard;
 mod list_rows;
 mod lists;
 mod media;
@@ -890,6 +891,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
         // surfaces while their tiles play), UI, full-screen tap catcher.
         // The picture-in-picture window shows only the video (`pip.rs`).
         .child(backup::service_layer())
+        .child(keyboard::bridge())
         .child(panels::backdrop(ui))
         .child(video::layer(ui, 0))
         .children((1..player::SURFACES).map(move |s| {

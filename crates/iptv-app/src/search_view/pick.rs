@@ -57,6 +57,7 @@ mod identity_tests {
     use iptv_guide::playback::SourceAuthority;
     use iptv_providers::SecretUrl;
     use iptv_providers::model::{M3uSourceConfig, SourceConfig};
+    use std::rc::Rc;
 
     fn part(source: i64, incarnation: &str, names: &[&str]) -> SourceSchedule {
         let mut playlist = String::from("#EXTM3U\n");
