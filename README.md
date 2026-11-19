@@ -134,20 +134,24 @@ the v0.1.4 exception above remains unverified by the build-provenance command.
 - Rust (the version pinned in `rust-toolchain.toml`) with the
   `wasm32-unknown-unknown` target, and for Android also
   `aarch64-linux-android`, `armv7-linux-androideabi` and `x86_64-linux-android`.
-- The NSH fork checked out next to this repository at the commit recorded
+- The Patina NSH fork checked out next to this repository at the commit recorded
   in [`nsh.rev`](nsh.rev), and its CLI built:
 
   ```sh
-  git clone https://github.com/teng-lin/nsh.git ../nsh
-  git -C ../nsh checkout --detach "$(cat nsh.rev)"
-  (cd ../nsh && cargo build --release -p nsh-cli)
+  git clone https://github.com/teng-lin/nsh.git ../nsh-patina
+  git -C ../nsh-patina checkout --detach "$(cat nsh.rev)"
+  (cd ../nsh-patina && cargo build --release -p nsh-cli)
   ```
 
   NSH is a path dependency, so `Cargo.lock` cannot record its commit;
   `nsh.rev` does. CI checks out the same commit, and `tools/check.sh` fails
-  when `../nsh` is at another one (`IPTV_ALLOW_NSH_DRIFT=1` allows it while
-  you develop the fork). After `nsh.rev` changes, run
-  `git -C ../nsh fetch origin && git -C ../nsh checkout --detach "$(cat nsh.rev)"`.
+  when `../nsh-patina` is at another one (`IPTV_ALLOW_NSH_DRIFT=1` allows it while
+  you develop NSH). After `nsh.rev` changes, fetch and check out the new pin:
+
+  ```sh
+  git -C ../nsh-patina fetch https://github.com/teng-lin/nsh.git "$(cat nsh.rev)"
+  git -C ../nsh-patina checkout --detach "$(cat nsh.rev)"
+  ```
 
 - **Linux:** GTK 4 and libmpv 2 (`mpv` on Arch, `libmpv-dev` on
   Debian/Ubuntu).
@@ -177,7 +181,7 @@ guard is absent. Windows and iPad build scripts fetch the guarded runtime.
 
 ### Windows (x64, experimental)
 
-Windows uses the NSH fork's Win32/Direct2D backend. Install Visual Studio
+Windows uses NSH's Win32/Direct2D backend. Install Visual Studio
 2022 Build Tools with **Desktop development with C++** and a Windows SDK,
 Rust's MSVC toolchain, and Strawberry Perl on `PATH` (for bundled OpenSSL).
 Keep the NSH checkout next to this repository at the `nsh.rev` commit as

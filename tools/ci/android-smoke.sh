@@ -20,7 +20,8 @@
 # and the mock server must serve the fixtures on this machine's port 8089
 # (IPTV_SMOKE_PORT), which the emulator reaches as 10.0.2.2:
 #
-#   tools/make-hls-fixtures.sh && python3 -I tools/make-iptv-fixtures.py --channels 300
+#   tools/make-hls-fixtures.sh --android-smoke
+#   python3 -I tools/make-iptv-fixtures.py --channels 300
 #   python3 tools/mock-server.py 8089 fixtures/hls &
 #
 # The app's data on the device is replaced: it is uninstalled first when an
@@ -448,7 +449,12 @@ fi
 # for that effect, rather than landing on the screen being closed.
 keys KEYCODE_BACK
 expect 'iptv playlists: close' 10
-keys KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT
+# Let each movement settle into its pane before sending the next.
+for _ in 1 2; do
+  mark
+  keys KEYCODE_DPAD_RIGHT
+  expect 'key=right .*action=Some\(MoveRight\)' 10
+done
 pause 1
 shot 09-refreshed
 
@@ -514,6 +520,11 @@ reopen_and_expect_resume
 assert_resume "$changed_identity" "interrupted restore recovery"
 adb shell "run-as $pkg test ! -d files.restore-previous" || fail "restore-previous was not cleaned up"
 shot 12-recovered
+
+step "hardware Search"
+mark
+keys KEYCODE_SEARCH
+expect 'key=search .*action=Some\(OpenSearch\)' 10
 
 step "checks"
 pause 2

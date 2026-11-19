@@ -17,7 +17,10 @@ use std::{
     io::{Read, Write},
     net::TcpListener,
     process::Command,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -64,7 +67,7 @@ fn with_cli_argument(home: &crate::isolated::Home, name: &str) -> bool {
     true
 }
 
-fn app() -> Headless {
+fn app(ready_text: &'static str) -> (Headless, Arc<AtomicBool>) {
     let _ = env_logger::builder()
         .is_test(true)
         .filter_level(log::LevelFilter::Info)
@@ -79,7 +82,20 @@ fn app() -> Headless {
         Os::Linux
     };
     config.environment.idiom = Idiom::Desktop;
-    Headless::start(config).unwrap()
+    let mut app = Headless::start(config).unwrap();
+    // Observe the guide mounts while the recorder's window is hidden.
+    let ready = Arc::new(AtomicBool::new(false));
+    let observed = ready.clone();
+    let mut mounted = nsh_testing::Screen::default();
+    app.observe(move |_, batch| {
+        if !observed.load(Ordering::Acquire) {
+            mounted.apply(batch);
+            if mounted.matches(ready_text).unwrap() {
+                observed.store(true, Ordering::Release);
+            }
+        }
+    });
+    (app, ready)
 }
 
 fn now() -> i64 {
@@ -187,8 +203,12 @@ fn cached_start(home: crate::isolated::Home, combined: bool) {
     store.schedule_recording(job, &request, now()).unwrap();
     drop(store);
     let opens = iptv_app::player_opens(0);
-    let mut app = app();
-    step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
+    let (mut app, ready) = app("text:Generated group");
+    step(
+        app.wait_until("recorder guide mounted", Duration::from_secs(20), |_| {
+            ready.load(Ordering::Acquire)
+        }),
+    );
     step(app.idle(Duration::from_millis(800)).map(|_| ()));
     assert_eq!(
         iptv_app::player_opens(0),
@@ -304,8 +324,12 @@ fn recorder_launch_skips_source_ready_portal_resume() {
     std::fs::write(root.join(format!("last_channel-{}", source.0)), channel).unwrap();
     drop(store);
     let opens = iptv_app::player_opens(0);
-    let mut app = app();
-    step(app.wait_for_within("text:/^Aut/", Duration::from_secs(20)));
+    let (mut app, ready) = app("text:/^Aut/");
+    step(
+        app.wait_until("portal guide mounted", Duration::from_secs(20), |_| {
+            ready.load(Ordering::Acquire)
+        }),
+    );
     step(app.idle(Duration::from_millis(800)).map(|_| ()));
     assert_eq!(
         portal.link_requests(),

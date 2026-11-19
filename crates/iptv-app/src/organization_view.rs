@@ -1,5 +1,6 @@
 //! Channel and provider-group organization, including hidden-item recovery.
 use crate::i18n::{tr, trf};
+use crate::input::dismiss_keyboard;
 use crate::list_rows::{self, Mark, ROW};
 use crate::runtime::{Error, commands::OrganizationItems, model::SourceId};
 use crate::scale::Scale;

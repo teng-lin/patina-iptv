@@ -268,7 +268,8 @@ fn user_agent_refresh_and_keys(t: &mut T) {
     for _ in 0..4 {
         t.key("up");
     }
-    t.key("menu");
+    let menu = t.app.press_remote(nsh_tv::RemoteKey::Menu);
+    t.ok("key menu", menu);
     t.wait("text:▲▼ choose   OK do it   Back close the sheet", 2);
     assert!(t.shows("text:Show this playlist"), "the first playlist's");
     // Show it: the screen closes on its guide.
@@ -484,7 +485,8 @@ fn nothing_switched_on(t: &mut T) {
     t.key("up");
     t.key("up");
     t.key("up");
-    t.key("menu");
+    let menu = t.app.press_remote(nsh_tv::RemoteKey::Menu);
+    t.ok("key menu", menu);
     t.wait("text:Switch on", 2);
     t.key("enter");
     t.wait("text:Switch off", 5);

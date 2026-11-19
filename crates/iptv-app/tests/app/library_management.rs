@@ -348,7 +348,7 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     step(app.press("id:remote-Press"));
     step(app.wait_for("id:remote-Capture"));
     step(app.press("id:remote-Capture"));
-    step(app.press_key("green"));
+    step(app.press_remote(nsh_tv::RemoteKey::Green));
     step(app.wait_for("text:Key: Green"));
     // A quiet headless batch does not acknowledge a queued settings action.
     // Observe the captured key's unsaved state, then its optimistic saved
@@ -362,7 +362,7 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
         && b.key == "green"
         && b.press == iptv_settings::PressKind::Long));
     step(app.press("id:remote-Capture"));
-    step(app.press_key("back")); // Android then delivers its platform Back event.
+    step(app.press_remote(nsh_tv::RemoteKey::Back)); // Android then delivers its platform Back event.
     step(app.back());
     assert!(app.screen().matches("text:Remote bindings").unwrap());
     assert_eq!(read_bindings(&dir), saved);
@@ -428,6 +428,6 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     step(app.wait_for("text:☰  All channels"));
     step(app.press("text:☰  All channels"));
     step(app.press_key("right"));
-    step(app.press_key("red"));
+    step(app.press_remote(nsh_tv::RemoteKey::Red));
     step(app.wait_for("id:search-field"));
 }

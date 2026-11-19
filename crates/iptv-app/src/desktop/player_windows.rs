@@ -358,7 +358,7 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
     });
     let window = nsh_core::element::desktop::current_window();
     follow_lists(local);
-    crate::input::bind(local);
+    let input = stored(Some(crate::input::bind(local)));
     crate::pip::bind(local);
     bind_pip(parent, local, id, window.clone());
     let back_window = window.clone();
@@ -387,8 +387,7 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
     let _show = set_timeout(std::time::Duration::from_millis(250), move || {
         crate::play_bar::pointer_moved(local)
     });
-    view()
-        .flex_1()
+    crate::input::window(view().flex_1(), input)
         .test_id(&format!("auxiliary-player-{}", id.0))
         .bg(rgb(0x000000))
         .on_mouse_enter(move |_: &MouseEvent| {

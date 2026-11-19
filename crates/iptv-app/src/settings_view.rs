@@ -15,6 +15,7 @@
 //! the second Back that leaves (`may_leave`).
 
 use crate::i18n::{tr, trf};
+use crate::input::dismiss_keyboard;
 
 mod editors;
 pub(crate) mod remote_keys;

@@ -264,9 +264,13 @@ fn saved_recording_resumes_seeks_paused_and_starts_again_without_changing_surfac
         "timeline",
         json!({"token":token,"seekId":99,"ms":99000,"durationMs":120000,"seekable":true}),
     );
-    step(app.press_key("stop"));
+    step(app.press_remote(nsh_tv::RemoteKey::Stop));
+    step(
+        app.wait_until("recording source stopped", Duration::from_secs(10), |_| {
+            !iptv_app::player_has_source(0)
+        }),
+    );
     step(app.wait_for_within("text:Generated group", Duration::from_secs(10)));
-    assert!(!iptv_app::player_has_source(0));
     assert_eq!(
         app.screen()
             .layout_nodes()

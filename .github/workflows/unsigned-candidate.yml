@@ -87,7 +87,7 @@ jobs:
         shell: bash
         run: |
           python3 tools/ci/version.py
-          echo "NSH=$(cd ../nsh && pwd)/target/release/nsh" >> "$GITHUB_ENV"
+          echo "NSH=$(cd ../nsh-patina && pwd)/target/release/nsh" >> "$GITHUB_ENV"
       - uses: ./.github/actions/nsh-cli
         if: matrix.platform != 'android'
       - uses: ./.github/actions/android

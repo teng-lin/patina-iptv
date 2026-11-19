@@ -20,6 +20,7 @@
 //! accounts hidden. State: `state.rs`; wording: `words.rs`.
 
 use crate::i18n::{tr, trf};
+use crate::input::dismiss_keyboard;
 
 use iptv_library::epg_sources as state;
 mod words;

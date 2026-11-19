@@ -1,5 +1,5 @@
 name: Build prerequisites
-description: Check out the pinned NSH fork alongside this repository
+description: Check out Patina's pinned NSH fork alongside this repository
 inputs:
   cache:
     description: Restore and save bulk Cargo build caches
@@ -28,7 +28,7 @@ runs:
         path: nsh-source
         persist-credentials: false
     - shell: bash
-      run: mv nsh-source ../nsh
+      run: mv nsh-source ../nsh-patina
     - shell: bash
       run: |
         if [ "${RUNNER_OS}" = Linux ]; then
@@ -60,7 +60,7 @@ runs:
         save-if: ${{ github.ref == 'refs/heads/master' }}
         workspaces: |
           .
-          ../nsh
+          ../nsh-patina
     - name: Install the checksum-pinned guarded player
       shell: bash
       env:

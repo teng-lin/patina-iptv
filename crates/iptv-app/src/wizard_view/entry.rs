@@ -6,6 +6,7 @@
 //! [`text_sheet`].
 
 use crate::i18n::tr;
+use crate::input::dismiss_keyboard;
 
 use std::rc::Rc;
 

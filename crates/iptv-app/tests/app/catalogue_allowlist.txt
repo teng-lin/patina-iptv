@@ -10,6 +10,8 @@
 [untranslated]
 
 [not-shown]
+# Logical key name from the raw keyboard event.
+iptv-app/src/input/keys.rs	Escape
 # Privacy command returns a fixed localized failure at the shell, never this diagnostic.
 iptv-runtime/src/commands.rs	legacy search history could not be removed
 # Redacted Debug type/variant labels; views render typed state with their own wording.
@@ -245,6 +247,11 @@ iptv-runtime/src/vod.rs	Playlist changed
 iptv-runtime/src/vod.rs	Playlist disabled
 iptv-runtime/src/vod.rs	Referer
 iptv-runtime/src/vod.rs	User-Agent
+
+# Physical keyboard code prefixes used by the Android remote decoder.
+iptv-app/src/input/keys.rs	Digit
+iptv-app/src/input/keys.rs	Key
+iptv-app/src/input/keys.rs	Numpad
 
 # Inline recording action dispatch keys; labels are translated in rows.rs.
 iptv-app/src/recordings_view/rows.rs	Cancel recording

@@ -15,7 +15,7 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 LANES = ("host", "windows", "android", "packages", "windows-package", "coverage", "fuzz", "smoke", "stress", "ios", "credentials")
-BUILD = ("Cargo.toml", "Cargo.lock", "crates/**/Cargo.toml", "rust-toolchain.toml", "nsh.rev", ".cargo/**")
+BUILD = ("Cargo.toml", "Cargo.lock", "crates/**/Cargo.toml", "rust-toolchain.toml", "nsh.rev", ".cargo/**", "vendor/nsh-tv/**")
 CI = (".github/workflows/**", ".github/actions/**", "tools/ci/validation-plan.py", "tools/ci/check-plan.py",
       "tools/ci/pins.py", "tools/ci/locked-build-env.sh", "tools/ci/locked-cargo.py", "tools/check.sh",
       "tools/ci/build-inventory.py", "tools/ci/build-provenance.py", "tools/ci/release-plan.py", "tools/ci/signing-config.py",

@@ -102,7 +102,7 @@ class ToolIdentityTests(unittest.TestCase):
         self.assertNotEqual(before, module.identity("cli"))
 
     def test_compiler_probe_uses_the_build_directory(self):
-        for kind, directory in (("cli", "."), ("android", "../nsh")):
+        for kind, directory in (("cli", "."), ("android", "../nsh-patina")):
             module.identity(kind)
             self.command_mock.assert_any_call(["rustc", "-vV"], cwd=directory, text=True)
 
@@ -150,7 +150,7 @@ class IdentityStepTests(unittest.TestCase):
                         executable.chmod(0o755)
                         workspace = Path(directory) / "app"
                         workspace.mkdir()
-                        nsh = Path(directory) / "nsh"
+                        nsh = Path(directory) / "nsh-patina"
                         nsh.mkdir()
                         output = Path(directory) / "output"
                         env = dict(os.environ, PATH=directory + os.pathsep + os.environ["PATH"], GITHUB_OUTPUT=str(output))

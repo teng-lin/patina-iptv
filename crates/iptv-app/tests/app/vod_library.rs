@@ -887,7 +887,7 @@ fn discover(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
         step(app.press_key("enter"));
         step(app.fast_forward(Duration::from_secs(15 * 60)));
     } else {
-        step(app.press_key("stop"));
+        step(app.press_remote(nsh_tv::RemoteKey::Stop));
     }
     step(app.wait_until("VOD stopped", Duration::from_secs(10), |_| {
         !iptv_app::player_has_source(0)

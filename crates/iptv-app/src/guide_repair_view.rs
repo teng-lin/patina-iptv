@@ -114,7 +114,7 @@ fn dismiss_inspection_input(ui: Ui) {
             s.typing = false;
         }
     });
-    dismiss_keyboard();
+    crate::input::dismiss_keyboard();
 }
 pub fn reopen(ui: Ui) {
     dismiss_inspection_input(ui);

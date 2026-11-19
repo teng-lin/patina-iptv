@@ -23,11 +23,10 @@ smoke is selected. `Android packages` can manually build an ARM debug APK for
 investigation; debug AABs are not distribution evidence. Trusted master candidates
 build unsigned release APK/AAB once, checking both ABIs, notices, Gradle unit tests
 and release lint before promotion to isolated signing jobs.
-NSH is checked
-out beside the repository at the commit in `nsh.rev` (from the fork's tv-keys
-branch). That file is the only place the commit is named: both setup actions
-read it through `tools/ci/pins.py`, and `tools/check.sh` refuses a `../nsh`
-checkout at any other commit. Update `nsh.rev` when adopting fork changes.
+The upstream NSH checkout at `../nsh-patina` uses the commit in `nsh.rev`.
+GitHub Actions and the Windows build read the pin through `tools/ci/pins.py`.
+`tools/check.sh` checks the local checkout against it. Update `nsh.rev` when
+adopting upstream changes.
 
 Local Android builds: `tools/sync-host.sh` first (it builds the Rust library
 and copies it and the app's assets into the Gradle host; Gradle does not run

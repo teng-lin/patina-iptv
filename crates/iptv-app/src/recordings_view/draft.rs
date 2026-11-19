@@ -1,5 +1,6 @@
 //! Custom scheduling and exact field entry. Editing state stays in core.
 use super::*;
+use crate::input::dismiss_keyboard;
 use crate::wizard_view::entry::{self, Sheet};
 use iptv_core::recording::{Entry, EntryField};
 use std::rc::Rc;

@@ -262,7 +262,10 @@ mod hidden_window {
     use nsh_core::element::Root;
     use nsh_core::prelude::*;
     use nsh_engine::EngineConfig;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    };
     static REOPEN: AtomicBool = AtomicBool::new(false);
 
     #[component]
@@ -295,8 +298,8 @@ mod hidden_window {
         }
         assert!(!REOPEN.load(Ordering::SeqCst));
     }
-    fn code(app: &Headless) -> Option<String> {
-        app.screen()
+    fn code(screen: &nsh_testing::Screen) -> Option<String> {
+        screen
             .texts()
             .into_iter()
             .find(|text| text.len() == 32 && text.bytes().all(|b| b.is_ascii_hexdigit()))
@@ -381,6 +384,11 @@ mod hidden_window {
         };
         config.environment.idiom = nsh_core::platform::Idiom::Desktop;
         let mut app = Headless::start(config).unwrap();
+        // Headless excludes hidden windows from its visible screen. Observe
+        // mounted content separately to check that the notice itself is gated.
+        let mounts = Arc::new(Mutex::new(nsh_testing::Screen::default()));
+        let observed = mounts.clone();
+        app.observe(move |_, batch| observed.lock().unwrap().apply(batch));
         step(app.wait_for("text:Local A"));
         step(app.press_key("home"));
         step(app.press_key("enter"));
@@ -401,9 +409,30 @@ mod hidden_window {
         assert!(!app.window_state("main").unwrap().unwrap().visible);
         assert!(!iptv_app::player_has_source(0));
         writer.execute_batch("ROLLBACK").unwrap();
-        wait(&mut app, "Enter parental PIN");
+        step(crate::isolated::wait_outside(
+            &mut app,
+            "PIN committed while the window is hidden",
+            Duration::from_secs(20),
+            || {
+                crate::isolated::open_database(&path)
+                    .ok()
+                    .and_then(|store| store.parental_credential().ok().flatten())
+                    .is_some()
+            },
+        ));
+        step(app.wait_until(
+            "PIN entry mounted while hidden",
+            Duration::from_secs(20),
+            |_| {
+                mounts
+                    .lock()
+                    .unwrap()
+                    .matches("text:Enter parental PIN")
+                    .unwrap()
+            },
+        ));
         assert!(
-            code(&app).is_none(),
+            code(&mounts.lock().unwrap()).is_none(),
             "hidden credential results never render their code before fresh verification"
         );
         assert!(!app.window_state("main").unwrap().unwrap().visible);
@@ -414,27 +443,42 @@ mod hidden_window {
 
         // Closing during an in-flight verification invalidates its grant.
         reopen(&mut app);
+        wait(&mut app, "Enter parental PIN");
+        assert!(code(app.screen()).is_none());
         let writer = crate::store_latency::hold_writer(&home);
         digits(&mut app, "2468");
         continue_entry(&mut app);
         wait(&mut app, "Checking…");
         step(app.press_window_close("main"));
         writer.execute_batch("ROLLBACK").unwrap();
+        reopen(&mut app);
+        wait(&mut app, "Enter parental PIN");
         step(app.wait_for_gone("text:Checking…", Duration::from_secs(20)));
         assert!(
-            code(&app).is_none(),
+            code(app.screen()).is_none(),
             "a stale verify cannot redisplay the held credential"
         );
         assert!(!iptv_app::player_has_source(0));
 
-        reopen(&mut app);
         digits(&mut app, "2468");
         continue_entry(&mut app);
         wait(&mut app, "Save your recovery code");
-        let saved = code(&app).expect("fresh PIN verification reveals the committed result");
+        let saved =
+            code(app.screen()).expect("fresh PIN verification reveals the committed result");
         step(app.press_window_close("main"));
+        step(app.wait_until(
+            "PIN entry mounted after hiding",
+            Duration::from_secs(20),
+            |_| {
+                mounts
+                    .lock()
+                    .unwrap()
+                    .matches("text:Enter parental PIN")
+                    .unwrap()
+            },
+        ));
         assert!(
-            code(&app).is_none(),
+            code(&mounts.lock().unwrap()).is_none(),
             "hiding an already visible notice gates it again"
         );
         reopen(&mut app);
@@ -442,7 +486,7 @@ mod hidden_window {
         continue_entry(&mut app);
         wait(&mut app, "Save your recovery code");
         assert_eq!(
-            code(&app).as_deref(),
+            code(app.screen()).as_deref(),
             Some(saved.as_str()),
             "re-authentication preserves, rather than rotates or loses, the code"
         );
@@ -450,7 +494,7 @@ mod hidden_window {
         step(app.press_window_close("main"));
         reopen(&mut app);
         step(app.back());
-        assert!(code(&app).is_none());
+        assert!(code(app.screen()).is_none());
         personalization::menu(&mut app, "Protect channel with PIN");
         wait(&mut app, "Enter parental PIN");
         assert!(

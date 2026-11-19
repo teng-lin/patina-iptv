@@ -828,11 +828,11 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
 
     // --- Catch-up ---------------------------------------------------------
     // Stop (long Back): nothing plays, the guide.
-    step(app.press_key("stop"));
+    step(app.press_remote(nsh_tv::RemoteKey::Stop));
     step(app.wait_for("text:☰  All channels"));
     assert!(!iptv_app::player_has_source(0), "stopped");
     let before = opens();
-    step(app.press_key("stop"));
+    step(app.press_remote(nsh_tv::RemoteKey::Stop));
     assert_eq!(opens(), before, "nothing to stop");
     // Two days back: older programmes than the guide holds (the last day)
     // are paged in from the store; one there replays; back at now they are
@@ -845,7 +845,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for("text:CATCH-UP"));
     let older_archive = wait_archive_source(&mut app, &props, &before_archive, false);
     state(&mut app, "ready");
-    step(app.press_key("stop"));
+    step(app.press_remote(nsh_tv::RemoteKey::Stop));
     step(app.wait_for("text:☰  All channels"));
     // Two programmes back on channel one, OK replays it.
     step(app.press_key("home"));
@@ -1111,7 +1111,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for("label:Picture in picture"));
     step(app.press("label:Picture in picture"));
     step(app.wait_for("text:Playing in picture-in-picture"));
-    step(app.press_key("stop"));
+    step(app.press_remote(nsh_tv::RemoteKey::Stop));
     step(app.wait_for_gone("text:Playing in picture-in-picture", Duration::from_secs(1)));
     assert!(!iptv_app::player_has_source(0));
 }

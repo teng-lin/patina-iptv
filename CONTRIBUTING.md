@@ -13,18 +13,18 @@ You need:
 
 - Rust, the version pinned in `rust-toolchain.toml` (rustup installs it
   automatically), with the `wasm32-unknown-unknown` target.
-- The NSH fork checked out **next to** this repository, at the exact commit
+- The upstream NSH checked out **next to** this repository, at the exact commit
   recorded in [`nsh.rev`](nsh.rev):
 
   ```sh
-  git clone https://github.com/teng-lin/nsh.git ../nsh
-  git -C ../nsh checkout --detach "$(cat nsh.rev)"
-  (cd ../nsh && cargo build --release -p nsh-cli)
+  git clone https://github.com/longbridge/nsh.git ../nsh-patina
+  git -C ../nsh-patina checkout --detach "$(cat nsh.rev)"
+  (cd ../nsh-patina && cargo build --release -p nsh-cli)
   ```
 
   NSH is a path dependency, so `Cargo.lock` cannot pin it. When `nsh.rev`
   changes, fetch and check out the new commit. `tools/check.sh` stops at once
-  if `../nsh` is at another commit.
+  if `../nsh-patina` is at another commit.
 - The platform libraries listed under
   [Build from source](README.md#build-from-source) in the README.
 - `cargo-deny` 0.20.2 for the dependency audit in `tools/check.sh`:
@@ -105,7 +105,7 @@ focus by content identity, never by list index.
 detach or re-parent the player view.
 
 **Keep NSH patches small**, with tests. They go upstream later. Developing the
-fork locally? Set `IPTV_ALLOW_NSH_DRIFT=1`, and update `nsh.rev` in the same
+framework locally? Set `IPTV_ALLOW_NSH_DRIFT=1`, and update `nsh.rev` in the same
 pull request that needs the new commit.
 
 **Pin what CI downloads.** A third-party GitHub Action is pinned to a full

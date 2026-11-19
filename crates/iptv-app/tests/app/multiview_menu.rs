@@ -402,8 +402,8 @@ fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
     step(app.press_key("down"));
     step(app.press_key("enter"));
     step(app.wait_for("id:search-field"));
-    // Nothing typed: one Back closes it.
-    step(app.press_key("backspace"));
+    // The platform Back closes the search while its input has focus.
+    step(app.back());
     step(gone(&mut app, "id:search-field"));
     assert_eq!(tiles(&app), 3);
     assert!(!app.screen().matches(MENU).unwrap());

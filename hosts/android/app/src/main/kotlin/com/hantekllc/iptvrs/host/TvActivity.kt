@@ -12,8 +12,10 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
-import com.longbridge.nsh.DevActivity
+import android.widget.EditText
+import androidx.core.view.WindowCompat
 import com.longbridge.nsh.NshView
+import dev.nshtv.RemoteKeys
 
 /**
  * The Android host: mirrors NSH's AppActivity for a Rust app, and registers
@@ -41,13 +43,15 @@ class TvActivity : Activity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         mark("activity created")
-        DevActivity.edgeToEdge(this)
+        edgeToEdge()
         nsh = NshView(this)
         mark("library loaded")
         initializeDataDirectory(filesDir.absolutePath)
         CredentialKey.initialize(this)
         RecordingHost.attach(this)
-        nsh.useStandaloneLimits()
+        // Use large ceilings for Patina's own Rust root. The 4095 MiB
+        // heap ceiling fits 32-bit Android, and zero keeps the default stack.
+        nsh.setLimits(4095, 0, Int.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE)
         pip = PipHost(this)
         backups = BackupHost(this)
         nsh.registerComponent(BackupComponent.NAME) { context ->
@@ -115,7 +119,7 @@ class TvActivity : Activity() {
 
     override fun onConfigurationChanged(config: Configuration) {
         super.onConfigurationChanged(config)
-        DevActivity.systemBars(this)
+        updateSystemBarAppearance(config)
         immersive()
     }
 
@@ -123,6 +127,23 @@ class TvActivity : Activity() {
         super.onWindowFocusChanged(hasFocus)
         // Dialogs and the system's own windows can bring the bars back.
         if (hasFocus) immersive()
+    }
+
+    /** Draw under the system bars so their transient appearance leaves the layout in place. */
+    @Suppress("DEPRECATION")
+    private fun edgeToEdge() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = 0
+        window.navigationBarColor = 0
+        updateSystemBarAppearance(resources.configuration)
+    }
+
+    private fun updateSystemBarAppearance(config: Configuration) {
+        val night = config.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        val light = night != Configuration.UI_MODE_NIGHT_YES
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = light
+        controller.isAppearanceLightNavigationBars = light
     }
 
     /** Hides the status and navigation bars; a swipe shows them briefly. */
@@ -162,28 +183,10 @@ class TvActivity : Activity() {
         }
     }
 
-    /**
-     * A remote's Search key: NSH has no key for `KEYCODE_SEARCH` (and the
-     * system would start its own search), so it goes on as F12, which no
-     * remote sends; the app binds F12 to its search on Android (`input.rs`).
-     */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        val mapped = RemoteKeys.translate(event.keyCode)
-        if (mapped == event.keyCode) return super.dispatchKeyEvent(event)
-        val search =
-            KeyEvent(
-                event.downTime,
-                event.eventTime,
-                event.action,
-                mapped,
-                event.repeatCount,
-                event.metaState,
-                event.deviceId,
-                event.scanCode,
-                event.flags,
-                event.source,
-            )
-        return super.dispatchKeyEvent(search)
+        val editing = currentFocus is EditText
+        val translated = if (editing) event else RemoteKeys.translate(event)
+        return super.dispatchKeyEvent(translated) || (!editing && RemoteKeys.appOwned(event.keyCode))
     }
 
     @Deprecated("Back is also handled by NshView's OnBackInvokedCallback on API 33+")

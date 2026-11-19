@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The two external pins, each recorded in exactly one tracked file.
 
-`nsh.rev` names the commit of the NSH fork that must be checked out beside
+`nsh.rev` names the NSH fork commit that must be checked out beside
 this repository: NSH is a path dependency, so Cargo.lock cannot record it.
 `rust-toolchain.toml` names the Rust release. The composite actions,
 tools/check.sh and the Windows build read both here instead of repeating them.
@@ -9,7 +9,7 @@ tools/check.sh and the Windows build read both here instead of repeating them.
 Usage:
   pins.py                  print `nsh=<commit>` and `toolchain=<channel>`
                            (the format of $GITHUB_OUTPUT)
-  pins.py check-nsh [DIR]  fail unless the checkout in DIR (default ../nsh)
+  pins.py check-nsh [DIR]  fail unless the checkout in DIR (default ../nsh-patina)
                            is at the pinned commit; IPTV_ALLOW_NSH_DRIFT=1
                            turns a difference into a warning
 """
@@ -47,8 +47,9 @@ def check_nsh(checkout, root=ROOT, environment=os.environ):
         found = f"is at {actual}" if actual else "is not a Git checkout"
         message = (
             f"{checkout} {found}, but nsh.rev pins {expected}.\n"
-            f"Check out the pinned commit:  git -C {checkout} fetch origin && git -C {checkout} checkout --detach {expected}\n"
-            "When developing the fork, set IPTV_ALLOW_NSH_DRIFT=1, and update nsh.rev before committing."
+            f"Fetch the pin:  git -C {checkout} fetch https://github.com/teng-lin/nsh.git {expected}\n"
+            f"Check it out:  git -C {checkout} checkout --detach {expected}\n"
+            "When developing NSH, set IPTV_ALLOW_NSH_DRIFT=1, and update nsh.rev before committing."
         )
         if environment.get("IPTV_ALLOW_NSH_DRIFT") == "1":
             print(f"warning: IPTV_ALLOW_NSH_DRIFT=1: {checkout} {found}; nsh.rev pins {expected}", file=sys.stderr)
@@ -62,7 +63,7 @@ def check_nsh(checkout, root=ROOT, environment=os.environ):
         message = (
             f"{checkout} is at {expected} but has uncommitted changes:\n"
             f"{status_result.stdout.strip()}\n"
-            "When developing the fork, set IPTV_ALLOW_NSH_DRIFT=1, and update nsh.rev before committing."
+            "When developing NSH, set IPTV_ALLOW_NSH_DRIFT=1, and update nsh.rev before committing."
         )
         if environment.get("IPTV_ALLOW_NSH_DRIFT") == "1":
             print(f"warning: IPTV_ALLOW_NSH_DRIFT=1: {checkout} has uncommitted changes", file=sys.stderr)
@@ -78,7 +79,7 @@ def main(arguments):
         print(f"toolchain={toolchain()}")
         return
     if arguments[0] == "check-nsh" and len(arguments) <= 2:
-        problem = check_nsh(Path(arguments[1]) if len(arguments) == 2 else ROOT.parent / "nsh")
+        problem = check_nsh(Path(arguments[1]) if len(arguments) == 2 else ROOT.parent / "nsh-patina")
         if problem:
             raise SystemExit(problem)
         return

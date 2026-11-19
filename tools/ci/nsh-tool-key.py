@@ -14,10 +14,10 @@ def identity(kind):
     action = "nsh-cli" if kind == "cli" else "android"
     inputs = {
         "nsh": subprocess.check_output(
-            ["git", "-C", "../nsh", "rev-parse", "HEAD"], text=True
+            ["git", "-C", "../nsh-patina", "rev-parse", "HEAD"], text=True
         ).strip(),
         "rustc": subprocess.check_output(
-            ["rustc", "-vV"], cwd="../nsh" if kind == "android" else ".", text=True
+            ["rustc", "-vV"], cwd="../nsh-patina" if kind == "android" else ".", text=True
         ),
         "recipe": Path(f".github/actions/{action}/action.yml").read_text(),
         "key_recipe": Path(__file__).read_text(),

@@ -27,7 +27,7 @@ runs:
     - shell: pwsh
       run: |
         $source = (Resolve-Path -LiteralPath ./nsh-source).Path
-        $destination = Join-Path (Split-Path $env:GITHUB_WORKSPACE -Parent) 'nsh'
+        $destination = Join-Path (Split-Path $env:GITHUB_WORKSPACE -Parent) 'nsh-patina'
         if (Test-Path -LiteralPath $destination) { throw 'NSH destination already exists.' }
         Move-Item -LiteralPath $source -Destination $destination
         'C:\Strawberry\perl\bin' >> $env:GITHUB_PATH
@@ -49,7 +49,7 @@ runs:
         save-if: ${{ github.ref == 'refs/heads/master' }}
         workspaces: |
           .
-          ../nsh
+          ../nsh-patina
     - name: Install the checksum-pinned guarded player
       shell: pwsh
       env:

@@ -362,7 +362,7 @@ fn choosers(app: &mut Headless) {
     step(app.wait_for("text:✓  Off"));
     // Back as the remote's key is the platform's (a short Back): the
     // chooser stays; the platform's Back closes it.
-    step(app.press_key("back"));
+    step(app.press_remote(nsh_tv::RemoteKey::Back));
     step(app.wait(Duration::from_millis(100)));
     assert!(app.shows("✓  Off"));
     step(app.back());

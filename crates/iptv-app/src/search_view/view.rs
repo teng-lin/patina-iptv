@@ -92,13 +92,7 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
         })
         .unwrap_or(false)
     });
-    effect(move || {
-        if want_keyboard.get() {
-            field.focus();
-        } else {
-            field.blur();
-        }
-    });
+    crate::input::bind_field_focus(field, move || want_keyboard.get());
     // The platform closed the keyboard (Back on Android hides it first).
     let was_up = Rc::new(Cell::new(false));
     effect(move || {

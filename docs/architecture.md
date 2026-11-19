@@ -359,9 +359,9 @@ depend on it; the application runtime does not import it.
   that links the app library. That workspace has its own lock,
   `tools/ci/package.Cargo.lock`. Windows is the exception: it ships the app
   crate's own executable, with no generated runner.
-- NSH is a path dependency at `../nsh`, on the fork's `tv-keys` branch. The
-  exact commit is in [`nsh.rev`](../nsh.rev), which CI and `tools/check.sh`
-  enforce. Patches to the fork stay small, carry tests and go upstream later.
+- Upstream NSH is a path dependency at `../nsh-patina`. CI and `tools/check.sh`
+  enforce the exact commit in [`nsh.rev`](../nsh.rev). The vendored `nsh-tv`
+  decoder reads NSH's raw keyboard events; `iptv-nav` owns Patina's actions.
 
 Pure models and state machines belong in the portable crates. Native
 application orchestration belongs in the runtime; adapters own platform I/O.

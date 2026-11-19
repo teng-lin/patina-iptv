@@ -621,19 +621,24 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     app.idle(Duration::from_millis(300)).unwrap();
     assert!(app.window_state("player-window-3").unwrap().is_none());
     // Keyboard close actions dispose their local signals during key dispatch.
-    for (session, key) in [(4, "stop"), (5, "g")] {
+    for session in [4, 5] {
+        let root = format!("auxiliary-player-{session}");
         step(app.right_click("id:guide-ui >> text:Local B"));
         step(app.press("text:Watch in new window"));
         step(app.wait_for(&format!("id:auxiliary-player-{session} >> label:Video")));
         step(app.press(&format!("id:auxiliary-player-{session} >> label:Video")));
         // Unsupported keyboard DVR must not open an invisible input overlay.
-        step(app.press_key("record"));
+        step(app.press_remote_in(nsh_tv::RemoteKey::Record, Some(&root)));
         step(app.press_key("space"));
         app.settle();
         assert_eq!(prop(&props, 1, "paused"), json!(true));
         assert_eq!(prop(&props, 0, "paused"), json!(false));
         step(app.press_key("space"));
-        step(app.press_key(key));
+        if session == 4 {
+            step(app.press_remote_in(nsh_tv::RemoteKey::Stop, Some(&root)));
+        } else {
+            step(app.press_key("g"));
+        }
         app.idle(Duration::from_millis(300)).unwrap();
         assert!(
             app.window_state(&format!("player-window-{session}"))

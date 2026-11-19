@@ -26,8 +26,11 @@ FLOORS = {
 
 # SQLCipher initialization is process-global and exercised through the store's
 # isolated-child tests. Coverage collection includes it; a stable independent
-# percentage is not yet established. A new crate must never inherit this exemption.
-EXEMPTIONS = {"iptv-sqlcipher-init": "process-global FFI initialization; store child-process regressions"}
+# percentage is not yet established. The vendored TV adapter has its own decoder and transport tests.
+EXEMPTIONS = {
+    "iptv-sqlcipher-init": "process-global FFI initialization; store child-process regressions",
+    "nsh-tv": "vendored upstream adapter with decoder and Android transport tests",
+}
 
 
 def validate_inventory(root, floors=FLOORS, exemptions=EXEMPTIONS):
