@@ -19,7 +19,7 @@ mod number;
 
 use back::act;
 pub(crate) use back::swallow_back;
-use keys::KEYS;
+use keys::{DIGITS, KEYS, RawKeys};
 
 /// The Android remote profile distinguishes a tap from a held key.
 pub(crate) const LONG_PRESS: bool = cfg!(target_os = "android");
@@ -35,6 +35,7 @@ pub(crate) const PROFILE: Profile = if LONG_PRESS {
 struct Nav {
     keymap: Keymap,
     detector: PressDetector,
+    raw: RawKeys,
     start: Instant,
 }
 
@@ -46,8 +47,11 @@ pub(crate) struct InputScope {
 }
 
 impl InputScope {
-    fn key(&self, key: RemoteKey, phase: Phase) {
-        self.owner.run(|| key_event(self.ui, &self.nav, key, phase));
+    fn raw_event(&self, event: &KeyEvent, phase: Phase) {
+        let key = self.nav.borrow_mut().raw.key(event, phase, LONG_PRESS);
+        if let Some(key) = key {
+            self.owner.run(|| key_event(self.ui, &self.nav, key, phase));
+        }
     }
 }
 
@@ -82,6 +86,7 @@ pub(crate) fn window<V: Interactive>(view: V, input: Stored<Option<InputScope>>)
             KEYS.iter()
                 .map(|(name, _)| *name)
                 .filter(|name| !name.contains('+'))
+                .chain(DIGITS)
                 .map(|name| Keystroke::parse_with(name, false).expect("TV keyboard binding")),
         )
     } else {
@@ -89,18 +94,18 @@ pub(crate) fn window<V: Interactive>(view: V, input: Stored<Option<InputScope>>)
     };
     view.capture_keys(capture)
         .on_key_down(move |event: &KeyEvent| {
-            if let Some((input, key)) = input.get().zip(keys::remote(event)) {
+            if let Some(input) = input.get() {
                 let phase = if event.repeat {
                     Phase::Repeat
                 } else {
                     Phase::Down
                 };
-                input.key(key, phase);
+                input.raw_event(event, phase);
             }
         })
         .on_key_up(move |event: &KeyEvent| {
-            if let Some((input, key)) = input.get().zip(keys::remote(event)) {
-                input.key(key, Phase::Up);
+            if let Some(input) = input.get() {
+                input.raw_event(event, Phase::Up);
             }
         })
 }
@@ -133,6 +138,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
         nav: Rc::new(RefCell::new(Nav {
             keymap: crate::remote_editor::keymap(),
             detector: PressDetector::default(),
+            raw: RawKeys::default(),
             start: Instant::now(),
         })),
         owner: Owner::current(),
@@ -141,7 +147,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
         repeat: true,
         ..Default::default()
     };
-    let digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+    let digits = DIGITS
         .into_iter()
         .enumerate()
         .map(|(digit, name)| (name, RemoteKey::Digit(digit as u8)));
@@ -558,6 +564,7 @@ pub(crate) fn synthetic_enter(ui: Ui) {
     let nav = Rc::new(RefCell::new(Nav {
         keymap: crate::remote_editor::keymap(),
         detector: PressDetector::default(),
+        raw: RawKeys::default(),
         start: Instant::now(),
     }));
     key_event(ui, &nav, RemoteKey::Ok, Phase::Down);

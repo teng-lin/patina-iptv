@@ -1,7 +1,7 @@
 //! NSH keystroke names and the remote keys they stand for.
 
-use iptv_nav::RemoteKey;
-use nsh_core::KeyEvent;
+use iptv_nav::{Phase, RemoteKey};
+use nsh_core::{KeyEvent, element::SharedString};
 use nsh_tv::RemoteKey as TvKey;
 
 /// Named keyboard bindings, including the keyboard stand-ins for a remote.
@@ -37,20 +37,90 @@ pub(super) const KEYS: &[(&str, RemoteKey)] = &[
     ("mod+f", RemoteKey::Search),
 ];
 
+pub(super) const DIGITS: [&str; 10] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+
+#[derive(Default)]
+pub(super) struct RawKeys {
+    held: Option<(SharedString, RemoteKey)>,
+}
+
+impl RawKeys {
+    pub(super) fn key(
+        &mut self,
+        event: &KeyEvent,
+        phase: Phase,
+        android: bool,
+    ) -> Option<RemoteKey> {
+        if !android {
+            return remote(event, false);
+        }
+        // The logical key and modifiers can change during a press. Resolve
+        // the release against the accepted key before the press timer fires.
+        let id = if event.code.is_empty() {
+            &event.key
+        } else {
+            &event.code
+        };
+        if phase == Phase::Up {
+            return self
+                .held
+                .take_if(|(held, _)| held == id)
+                .map(|(_, key)| key);
+        }
+        if phase == Phase::Repeat
+            && let Some((_, key)) = self.held.as_ref().filter(|(held, _)| held == id)
+        {
+            return Some(*key);
+        }
+        let key = remote(event, true)?;
+        self.held = Some((id.clone(), key));
+        Some(key)
+    }
+}
+
+fn android_keyboard_key(event: &KeyEvent) -> Option<RemoteKey> {
+    let logical = event.key.as_str();
+    let name = match logical {
+        " " => "space",
+        // Match NSH's Android shortcut fallback on layouts without an
+        // ASCII character. Leave transported keys to the TV decoder.
+        key if key == "Unidentified" || (key.chars().count() == 1 && !key.is_ascii()) => {
+            match event.code.as_str() {
+                "Minus" => "-",
+                "Equal" => "=",
+                "BracketLeft" => "[",
+                "BracketRight" => "]",
+                "Slash" => "/",
+                code => code
+                    .strip_prefix("Key")
+                    .or_else(|| code.strip_prefix("Digit"))
+                    .or_else(|| code.strip_prefix("Numpad"))
+                    .filter(|suffix| suffix.len() == 1)?,
+            }
+        }
+        key => key,
+    };
+    DIGITS
+        .iter()
+        .position(|digit| *digit == name)
+        .map(|digit| RemoteKey::Digit(digit as u8))
+        .or_else(|| {
+            KEYS.iter()
+                .find(|(binding, _)| binding.eq_ignore_ascii_case(name))
+                .map(|(_, key)| *key)
+        })
+}
+
 /// Decode hardware remote keys and Android's keyboard stand-ins. Desktop
 /// keyboard shortcuts are handled by the window's named bindings.
-pub(super) fn remote(event: &KeyEvent) -> Option<RemoteKey> {
+fn remote(event: &KeyEvent, android: bool) -> Option<RemoteKey> {
     let key = event.key.as_str();
     if event.modifiers.shift || key == "Escape" {
         return None;
     }
-    if super::LONG_PRESS && !event.modifiers.ctrl && !event.modifiers.alt && !event.modifiers.cmd {
-        let name = if key == " " { "space" } else { key };
-        if let Some((_, key)) = KEYS
-            .iter()
-            .find(|(binding, _)| binding.eq_ignore_ascii_case(name))
-        {
-            return Some(*key);
+    if android && !event.modifiers.ctrl && !event.modifiers.alt && !event.modifiers.cmd {
+        if let Some(key) = android_keyboard_key(event) {
+            return Some(key);
         }
     } else if matches!(
         key,
@@ -107,4 +177,57 @@ pub(super) fn remote(event: &KeyEvent) -> Option<RemoteKey> {
         TvKey::Digit(digit) => RemoteKey::Digit(digit),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iptv_nav::{Press, PressDetector};
+
+    fn event(key: &str, code: &str) -> KeyEvent {
+        let mut event = KeyEvent::default();
+        event.key = key.to_owned().into();
+        event.code = code.to_owned().into();
+        event
+    }
+
+    #[test]
+    fn android_keyboard_falls_back_to_the_physical_key_on_non_ascii_layouts() {
+        assert_eq!(remote(&event("ь", "KeyM"), true), Some(RemoteKey::Menu));
+        assert_eq!(
+            remote(&event("١", "Digit1"), true),
+            Some(RemoteKey::Digit(1))
+        );
+        assert_eq!(remote(&event("x", "KeyM"), true), None);
+        assert_eq!(
+            remote(&event("Unidentified", "F21"), true),
+            Some(RemoteKey::Search)
+        );
+    }
+
+    #[test]
+    fn android_key_up_with_new_modifiers_finishes_the_original_press() {
+        let mut keys = RawKeys::default();
+        let mut detector = PressDetector::new(400);
+        let down = event("ArrowRight", "ArrowRight");
+        let key = keys
+            .key(&down, Phase::Down, true)
+            .expect("Right is accepted");
+        assert_eq!(detector.feed(key, Phase::Down, 0, true), None);
+
+        let mut up = down.clone();
+        up.modifiers.shift = true;
+        assert_eq!(
+            keys.key(&event("Shift", "ShiftLeft"), Phase::Up, true),
+            None
+        );
+        let key = keys
+            .key(&up, Phase::Up, true)
+            .expect("release still matches Right");
+        assert_eq!(
+            detector.feed(key, Phase::Up, 100, true),
+            Some((RemoteKey::Right, Press::Short))
+        );
+        assert_eq!(detector.poll(400), None);
+    }
 }

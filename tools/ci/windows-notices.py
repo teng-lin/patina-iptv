@@ -43,6 +43,10 @@ for name in runtime_notices:
         raise RuntimeError(f"Missing libmpv distribution material: {name}")
 notices = stage / "notices"
 notices.mkdir(parents=True)
+tv = notices / "nsh-tv"
+tv.mkdir()
+for name in ("LICENSE", "README.md"):
+    shutil.copy2(Path("vendor/nsh-tv") / name, tv / name)
 subprocess.run(["cargo", "about", "generate", "--fail", "--locked", "--target", "x86_64-pc-windows-msvc",
                 "--config", "about.toml", "--output-file", str(notices / "THIRD-PARTY.html"), "tools/ci/notices.hbs"], check=True)
 metadata = subprocess.check_output(["cargo", "metadata", "--locked", "--format-version", "1"])
