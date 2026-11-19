@@ -313,13 +313,10 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
     let editing =
         computed(move || state(ui, |p| p.keyboard && p.pane == Pane::Search).unwrap_or(false));
     crate::input::bind_field_focus(field, move || editing.get());
-    let was_up = std::cell::Cell::new(false);
-    effect(move || {
-        let up = keyboard_height() > px(0.0);
-        if was_up.replace(up) && !up {
-            update(ui, ChannelPicker::keyboard_hidden);
-        }
-    });
+    crate::keyboard::on_dismissed(
+        move || editing.get(),
+        move || update(ui, ChannelPicker::keyboard_hidden),
+    );
     view()
         .flex_row()
         .items_center()

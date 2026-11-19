@@ -19,7 +19,6 @@
 //! new tile and the screen closes, Back closes it without one.
 
 use crate::i18n::{tr, trf};
-use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use iptv_core::guide::{Airing, Schedule};
