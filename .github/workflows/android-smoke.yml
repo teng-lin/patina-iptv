@@ -40,7 +40,7 @@ jobs:
           (cd hosts/android && ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug)
       - name: Generate the synthetic fixtures
         run: |
-          bash tools/make-hls-fixtures.sh
+          bash tools/make-hls-fixtures.sh --android-smoke
           python3 -I tools/make-iptv-fixtures.py --channels 300
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -80,10 +80,6 @@ jobs:
       - name: Serve the fixtures
         run: |
           python3 -I tools/ci/test-adb-timeout.py
-          python3 -I tools/ci/test-repeat-hls-fixtures.py
-          # Each encoded channel is 30s. Reuse its segments for an hour so
-          # natural fixture EOF cannot overlap the no-reopen refresh check.
-          python3 -I tools/ci/repeat-hls-fixtures.py fixtures/hls --cycles 120
           mkdir -p target
           nohup python3 tools/mock-server.py 8089 fixtures/hls > target/mock-server.log 2>&1 &
           for _ in $(seq 1 20); do

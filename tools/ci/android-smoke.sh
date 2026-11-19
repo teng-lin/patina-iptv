@@ -20,7 +20,8 @@
 # and the mock server must serve the fixtures on this machine's port 8089
 # (IPTV_SMOKE_PORT), which the emulator reaches as 10.0.2.2:
 #
-#   tools/make-hls-fixtures.sh && python3 -I tools/make-iptv-fixtures.py --channels 300
+#   tools/make-hls-fixtures.sh --android-smoke
+#   python3 -I tools/make-iptv-fixtures.py --channels 300
 #   python3 tools/mock-server.py 8089 fixtures/hls &
 #
 # The app's data on the device is replaced: it is uninstalled first when an
