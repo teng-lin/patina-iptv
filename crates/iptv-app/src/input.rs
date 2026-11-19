@@ -1,7 +1,7 @@
 //! Remote input: NSH keystrokes → `iptv_nav` keys → short/long presses →
 //! context keymap → actions applied to the app state.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -68,6 +68,23 @@ fn focus_remote_root() {
 pub(crate) fn dismiss_keyboard() {
     nsh_core::element::dismiss_keyboard();
     focus_remote_root();
+}
+
+/// Keep a field in sync with the app's editing mode.
+pub(crate) fn bind_field_focus(field: ElementRef, editing: impl Fn() -> bool + 'static) {
+    let was_editing = Cell::new(false);
+    effect(move || {
+        let editing = editing();
+        let leaving = was_editing.replace(editing) && !editing;
+        if editing {
+            field.focus();
+        } else {
+            field.blur();
+            if leaving {
+                focus_remote_root();
+            }
+        }
+    });
 }
 
 /// Listen on the window's root so a remote works before native focus exists.

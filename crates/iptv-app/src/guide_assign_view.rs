@@ -376,13 +376,7 @@ fn channel_detail(ui: Ui, c: &GuideChannel) -> String {
 fn search_field(ui: Ui, size: Scale, focused: Memo<Option<usize>>) -> impl IntoElement {
     let field = element_ref();
     let typing = computed(move || state(ui, Picker::typing).unwrap_or(false));
-    effect(move || {
-        if typing.get() {
-            field.focus();
-        } else {
-            field.blur();
-        }
-    });
+    crate::input::bind_field_focus(field, move || typing.get());
     view().h(move || size.px(ROW_TWO)).justify_center().child(
         ui_kit::field(size, input())
             .element_ref(&field)

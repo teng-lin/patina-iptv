@@ -525,13 +525,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         }
     });
     let field = element_ref();
-    effect(move || {
-        if state(ui, |s| s.typing).unwrap_or(false) {
-            field.focus();
-        } else {
-            field.blur();
-        }
-    });
+    crate::input::bind_field_focus(field, move || state(ui, |s| s.typing).unwrap_or(false));
     when(
         move || is_open(ui),
         move || {

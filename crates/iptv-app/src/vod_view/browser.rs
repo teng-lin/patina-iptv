@@ -695,15 +695,9 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         });
     });
     let field = element_ref();
-    effect(move || {
-        if ui
-            .vod
+    crate::input::bind_field_focus(field, move || {
+        ui.vod
             .with(|s| s.control == Control::Search && s.search_open)
-        {
-            field.focus();
-        } else {
-            field.blur();
-        }
     });
     view().absolute().inset_0().pt_safe_area().pb_safe_area().flex_row()
         .test_id("vod-screen").bg(move || rgb(ui.app.theme.with(|t| t.background.window)))

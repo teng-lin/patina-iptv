@@ -312,13 +312,7 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
     let field = element_ref();
     let editing =
         computed(move || state(ui, |p| p.keyboard && p.pane == Pane::Search).unwrap_or(false));
-    effect(move || {
-        if editing.get() {
-            field.focus();
-        } else {
-            field.blur();
-        }
-    });
+    crate::input::bind_field_focus(field, move || editing.get());
     let was_up = std::cell::Cell::new(false);
     effect(move || {
         let up = keyboard_height() > px(0.0);
