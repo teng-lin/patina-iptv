@@ -57,10 +57,12 @@ class AudioFocusHost(
                 }
                 AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                     state.lostForAWhile()
+                    silence()
                     report(PlayerEvent.Audio(AudioChange.FOCUS_LOSS_TRANSIENT))
                 }
                 AudioManager.AUDIOFOCUS_GAIN -> {
                     if (state.gained()) {
+                        silence()
                         report(PlayerEvent.Audio(AudioChange.FOCUS_GAIN))
                         main.removeCallbacks(decided)
                         main.postDelayed(decided, DECISION_MS)
@@ -100,6 +102,7 @@ class AudioFocusHost(
 
     fun mounted(player: PlayerComponent) {
         players.add(player)
+        player.silence(state.silenced)
     }
 
     /**
@@ -135,6 +138,7 @@ class AudioFocusHost(
             AudioFocusState.Do.NOTHING -> {}
         }
         listen(state.held)
+        silence()
     }
 
     private fun listen(on: Boolean) {
@@ -155,6 +159,16 @@ class AudioFocusHost(
     private fun report(event: PlayerEvent.Audio) {
         Log.i(TAG, "iptv audio: ${event.change.wire}")
         for (p in players.toList()) p.emit(event)
+    }
+
+    /**
+     * Every player is silent while a call holds the focus
+     * ([AudioFocusState.silenced]): a tile chosen meanwhile plays no sound
+     * over it, and the app's pauses stay as they are.
+     */
+    private fun silence() {
+        val on = state.silenced
+        for (p in players.toList()) p.silence(on)
     }
 
     /** The activity is going. */

@@ -38,6 +38,13 @@ internal class AudioFocusState {
         private set
 
     /**
+     * Every player stays silent: a call or a prompt holds the focus. A
+     * tile the viewer chooses meanwhile plays no sound over it; the app's
+     * pauses are left as they are, and the sound returns with the focus.
+     */
+    val silenced: Boolean get() = waiting
+
+    /**
      * `player` plays aloud (a source, set to play, not muted, buffering or
      * ready, the activity started) and has an `open` stream (a source,
      * buffering or ready, the activity started).

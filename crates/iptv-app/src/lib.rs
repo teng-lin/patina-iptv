@@ -487,7 +487,6 @@ impl Ui {
 
     /// Starts `channel` live or from the archive.
     pub fn play(&self, channel: usize, playback: Playback) {
-        crate::interruption::viewer_acted(*self);
         if !player::allow_guide_channel(channel) {
             return;
         }
@@ -509,6 +508,8 @@ impl Ui {
         if self.player_surface != 0 {
             self.pending_zap.set(None);
             if player::start_surface(*self, self.player_surface, channel) {
+                // Accepted: the viewer's playback now (`interruption.rs`).
+                crate::interruption::viewer_acted(*self);
                 self.playback.set(Playback::Live);
                 self.paused.set(false);
             }
@@ -518,6 +519,8 @@ impl Ui {
         {
             return;
         }
+        // Accepted: the viewer's playback now (`interruption.rs`).
+        crate::interruption::viewer_acted(*self);
         crate::on_demand::flush(*self, false);
         self.player.vod.set(None);
         self.player.recorded.set(None);

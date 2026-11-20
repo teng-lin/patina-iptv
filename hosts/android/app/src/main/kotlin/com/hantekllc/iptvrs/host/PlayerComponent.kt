@@ -311,10 +311,32 @@ class PlayerComponent(
      * aloud (also set to play and not muted). [AudioFocusHost] holds the
      * focus by them.
      */
+    /** The app's `muted` prop. */
+    private var mutedByApp = false
+
+    /** Silent while a call holds the audio focus ([AudioFocusHost]). */
+    private var silenced = false
+
+    private fun applyVolume() {
+        player.volume = if (mutedByApp || silenced) 0f else 1f
+    }
+
+    /**
+     * [AudioFocusHost]: a call or a prompt holds the audio focus. The
+     * player stays silent meanwhile, whatever the app plays (a multiview
+     * tile chosen during the call); its pause and the app's state are left
+     * alone, and its sound comes back with the focus.
+     */
+    internal fun silence(on: Boolean) {
+        if (on == silenced) return
+        silenced = on
+        applyVolume()
+    }
+
     private fun reportAudible() {
         val state = player.playbackState
         val open = !away && url != null && (state == Player.STATE_BUFFERING || state == Player.STATE_READY)
-        audio?.player(this, open && player.playWhenReady && player.volume > 0f, open)
+        audio?.player(this, open && player.playWhenReady && !mutedByApp, open)
     }
 
     private val listener =
@@ -505,7 +527,8 @@ class PlayerComponent(
             override fun volume(level: Int) {}
 
             override fun muted(muted: Boolean) {
-                player.volume = if (muted) 0f else 1f
+                mutedByApp = muted
+                applyVolume()
                 reportAudible()
             }
 

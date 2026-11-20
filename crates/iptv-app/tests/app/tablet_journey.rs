@@ -55,6 +55,9 @@ struct Seen {
     inserts: HashMap<NodeId, usize>,
     /// Each stream asked for, in order (a retry of the same is not new).
     sources: Vec<String>,
+    /// Every source set, with its token: the same stream opened again
+    /// counts here.
+    opens: Vec<(String, u64)>,
     props: HashMap<String, Json>,
 }
 
@@ -73,6 +76,17 @@ fn observe(app: &mut Headless) -> Shared {
                 MountItem::ComponentProps { props, .. } => {
                     for (key, value) in props {
                         let value = value.clone().unwrap_or(Json::Null);
+                        // Every source the player is given, the same
+                        // stream again (a new token) included.
+                        if key.as_ref() == "source" && !value.is_null() {
+                            seen.opens.push((
+                                crate::support::upstream_source(&value)["url"]
+                                    .as_str()
+                                    .unwrap_or_default()
+                                    .to_owned(),
+                                value["token"].as_u64().unwrap_or_default(),
+                            ));
+                        }
                         if key.as_ref() == "source"
                             && let Some(url) =
                                 crate::support::upstream_source(&value)["url"].as_str()
@@ -131,6 +145,10 @@ fn persistent(app: &Headless, seen: &Shared, surface: NodeId) {
 
 fn sources(seen: &Shared) -> Vec<String> {
     seen.lock().unwrap().sources.clone()
+}
+
+fn opens(seen: &Shared) -> Vec<(String, u64)> {
+    seen.lock().unwrap().opens.clone()
 }
 
 fn video_width(app: &Headless) -> f32 {
@@ -396,9 +414,15 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     // The visible ‹ returns to the guide, the movie playing on in its
     // preview. (Back to the title's details instead: not yet, see the
     // validation record.)
+    let opened = opens(&seen);
     step(app.press("id:play-bar-back"));
     in_preview(&mut app);
     assert_eq!(sources(&seen), movie, "Back opens nothing");
+    assert_eq!(
+        opens(&seen),
+        opened,
+        "Back opens nothing, not even the same title"
+    );
     persistent(&app, &seen, surface);
 
     // An episode: the shortcut, the show, the episode.
@@ -414,9 +438,15 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     assert!(episode[1].ends_with("/series/generated-user/generated-pass/102.mp4"));
     // The visible ‹ returns to the guide; the show's details open again
     // by touch, the played episode selected.
+    let opened = opens(&seen);
     step(app.press("id:play-bar-back"));
     in_preview(&mut app);
     assert_eq!(sources(&seen), episode, "Back opens nothing");
+    assert_eq!(
+        opens(&seen),
+        opened,
+        "Back opens nothing, not even the same episode"
+    );
     step(app.press("id:open-shows"));
     step(app.press("label:/^Generated Voyage ·/"));
     step(app.wait_for("text:/Generated First/"));
@@ -625,6 +655,29 @@ fn calls_and_unplugged_headphones_pause_by_policy_and_never_restart_a_stop() {
     audio(app, surface, "focusGain");
     assert!(!paused(&seen), "its end resumes");
 
+    // During a call the viewer picks a channel a guard refuses (blocked):
+    // nothing started, so the pause is still the call's.
+    audio(app, surface, "focusLossTransient");
+    assert!(paused(&seen));
+    show_bar(app);
+    step(app.press("id:play-bar-back"));
+    step(app.wait_until("the guide", WAIT, |s| {
+        s.layout_nodes()
+            .iter()
+            .any(|n| n.kind == ViewKind::Native && n.bounds.size.width.0 < LANDSCAPE.0)
+    }));
+    crate::personalization::menu(app, "Manage blocked channels…");
+    step(app.wait_for("id:organization-row-1 >> text:Unblocked"));
+    step(app.press("id:organization-row-1"));
+    step(app.wait_for("id:organization-row-1 >> text:Blocked"));
+    step(app.back());
+    step(app.press("id:guide-ui >> text:/Local B$/"));
+    step(app.wait_for("text:Unblock this channel to play it."));
+    audio(app, surface, "focusGain");
+    assert!(!paused(&seen), "a refused pick leaves the call's pause");
+    step(app.press("id:guide-ui >> text:/Local A$/"));
+    full_screen(app, LANDSCAPE.0);
+
     // Headphones unplugged: paused for good.
     audio(app, surface, "noisy");
     assert!(paused(&seen), "the route going away pauses");
@@ -743,6 +796,24 @@ fn interruptions_pause_and_resume_the_heard_multiview_tile() {
     step(app.wait_for_gone(TILE_MENU, WAIT));
     audio(app, surface, "focusGain");
     assert_eq!(paused_tiles(app), 0, "its end resumes it");
+
+    // During a call the viewer chooses another tile: the app pauses
+    // nothing more (the host keeps every player silent until the focus
+    // returns, `AudioFocusState.silenced`), and the call's end resumes
+    // nothing, the heard tile being the viewer's choice now.
+    audio(app, surface, "focusLossTransient");
+    assert_eq!(paused_tiles(app), 1);
+    step(app.press(&format!("{TILE} >> text:/Local B$/")));
+    assert_eq!(paused_tiles(app), 1, "choosing a tile pauses nothing more");
+    audio(app, surface, "focusGain");
+    assert_eq!(paused_tiles(app), 1, "nor does the call's end resume");
+    // Back to the first tile, played again by its menu.
+    step(app.press(&format!("{TILE} >> text:/Local A$/")));
+    step(app.press(&format!("{TILE} >> text:/Local A$/")));
+    step(app.wait_for(TILE_MENU));
+    step(app.press(&format!("{TILE_MENU} >> text:Play")));
+    step(app.wait_for_gone(TILE_MENU, WAIT));
+    assert_eq!(paused_tiles(app), 0);
 
     // A call pauses it again, then multiview ends: the stream surface 0
     // keeps stays paused full screen, and the pause is still the call's

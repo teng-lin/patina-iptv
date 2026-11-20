@@ -81,6 +81,32 @@ class AudioFocusStateTest {
         assertFalse(s.held)
     }
 
+    @Test fun aTileChosenDuringACallStaysSilentUntilTheFocusReturns() {
+        val s = playing()
+        assertFalse(s.silenced)
+        s.lostForAWhile()
+        assertTrue(s.silenced)
+        // The app paused the heard player; the viewer chooses another tile,
+        // which plays aloud as far as the app is concerned.
+        s.player(main, aloud = false, open = true)
+        assertEquals(Do.NOTHING, s.player(tile, aloud = true, open = true))
+        assertTrue("still the call's: silent", s.silenced)
+        assertTrue(s.held)
+        // The focus comes back: sound again.
+        assertTrue(s.gained())
+        assertFalse(s.silenced)
+        // Another app taking it for good, or every stream closing, ends
+        // the silence too (the app pauses, or nothing plays).
+        s.lostForAWhile()
+        assertTrue(s.silenced)
+        s.lost()
+        assertFalse(s.silenced)
+        val t = playing()
+        t.lostForAWhile()
+        t.removed(main)
+        assertFalse(t.silenced)
+    }
+
     @Test fun anEndedOrFailedStreamHoldsNoFocus() {
         val s = playing()
         // Ended: the player still has its source and is set to play.

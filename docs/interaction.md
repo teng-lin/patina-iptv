@@ -282,6 +282,12 @@ pauses and resumes: it never opens, retunes or restarts a stream.
 In multiview the policy pauses and resumes the heard tile (the active
 one; the others are muted), as the tile's own pause.
 
+| During a call | Playback |
+|---|---|
+| The viewer chooses another multiview tile | Stays silent until the call ends (Android: every player is silenced while the focus is lost for a while); the app pauses nothing more, and the call's end resumes nothing: the heard tile is the viewer's choice |
+| The viewer picks a channel a guard refuses (blocked, locked) | Nothing changes: the pause is still the call's, and its end resumes |
+| Keys and controls that are no playback action (Info, menus, highlights) | Nothing changes |
+
 - **Now (Android):** one audio focus for all the activity's players
   (`AudioFocusHost.kt`, its rules in `AudioFocusState.kt`): held while a
   player plays aloud (a source buffering or ready, set to play, not muted;

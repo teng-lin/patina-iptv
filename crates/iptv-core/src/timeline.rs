@@ -309,13 +309,19 @@ impl Threshold {
         }
     }
 
-    /// Finger `id`'s touches were cancelled: true when that is a drag
-    /// (the followed finger had moved [`CANCEL_MOVE`] and had not yet
-    /// been reported crossing).
-    pub fn cancelled(&mut self, id: u32) -> bool {
-        if !self.from.is_some_and(|(fid, ..)| fid == id) {
+    /// Finger `id`'s touches were cancelled with it at `(x, y)`: true when
+    /// that is a drag (the followed finger had moved [`CANCEL_MOVE`], the
+    /// cancel's own position included, and had not yet been reported
+    /// crossing). A fast drag a scroll view takes over may be cancelled
+    /// before any move reached that far.
+    pub fn cancelled(&mut self, id: u32, x: f32, y: f32) -> bool {
+        let Some((fid, fx, fy)) = self.from else {
+            return false;
+        };
+        if fid != id {
             return false;
         }
+        self.furthest = self.furthest.max((x - fx).hypot(y - fy));
         let drag = !self.crossed && self.furthest >= CANCEL_MOVE;
         *self = Threshold::default();
         drag

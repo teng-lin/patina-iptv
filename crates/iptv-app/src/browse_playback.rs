@@ -142,7 +142,7 @@ pub fn watch_drags<E: Interactive>(list: E, ui: Ui) -> E {
                 // (Android intercepts a drag past its own slop, at the
                 // list's end too): a drag as well. A still finger's cancel
                 // (a dialog, the system) is none.
-                nsh_core::TouchPhase::Cancel => watch.with(|w| w.cancelled(id)),
+                nsh_core::TouchPhase::Cancel => watch.with(|w| w.cancelled(id, x, y)),
                 nsh_core::TouchPhase::End => {
                     watch.with(|w| w.up(id));
                     false
@@ -159,7 +159,8 @@ pub fn activity(ui: Ui) {
     arm(ui);
 }
 pub fn select(ui: Ui) {
-    crate::interruption::viewer_acted(ui);
+    // A choice hands playback to the viewer once it plays (`Ui::play`):
+    // one a guard refuses changes nothing (`interruption.rs`).
     sync(ui);
     ui.browse_playback.update(|b| b.select(ui.now_ms()));
     run(ui);
@@ -278,7 +279,6 @@ pub fn bind(ui: Ui) {
 /// Debounced full-screen/list zapping; repeated zaps start from the pending
 /// channel rather than reopening the currently playing one repeatedly.
 pub fn zap(ui: Ui, channel: usize) {
-    crate::interruption::viewer_acted(ui);
     if ui.mode.get_untracked() != ViewMode::Fullscreen {
         crate::lists::show_channel(ui, channel);
         select(ui);

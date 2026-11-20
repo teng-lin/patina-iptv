@@ -174,7 +174,6 @@ pub(crate) fn stop_playback(ui: Ui) {
 /// within the list on screen (from the playing channel's row, else the
 /// focused one); a channel the list does not have zaps within its group.
 pub(crate) fn zap(ui: Ui, step: isize) {
-    crate::interruption::viewer_acted(ui);
     let list = ui.list.get();
     let playing = if ui.mode.get_untracked() != ViewMode::Fullscreen {
         crate::lists::focused_channel(ui)
@@ -201,6 +200,7 @@ pub(crate) fn zap(ui: Ui, step: isize) {
     let Some(to) = to else {
         return;
     };
+    // Hands playback to the viewer once the channel plays (`Ui::play`).
     crate::browse_playback::zap(ui, to);
 }
 

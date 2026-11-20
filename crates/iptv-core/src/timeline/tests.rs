@@ -38,14 +38,23 @@ fn the_threshold_follows_one_finger_and_a_still_cancel_is_no_drag() {
     t.up(1);
     // Cancelled still: no drag; cancelled after moving: a drag.
     t.down(1, 0.0, 0.0);
-    assert!(!t.cancelled(1));
+    assert!(!t.cancelled(1, 0.0, 1.0));
     t.down(1, 0.0, 0.0);
     assert!(!t.moved(1, 0.0, 6.0));
-    assert!(t.cancelled(1), "a scroll view took it after 6 dp");
+    assert!(t.cancelled(1, 0.0, 6.0), "a scroll view took it after 6 dp");
+    // A fast drag cancelled before any move arrived that far: the
+    // cancel's own position counts.
+    t.down(1, 0.0, 0.0);
+    assert!(!t.moved(1, 0.0, 2.0));
+    assert!(t.cancelled(1, 0.0, 9.0));
+    // Another finger's cancel is not the followed one's.
+    t.down(1, 0.0, 0.0);
+    assert!(!t.cancelled(2, 0.0, 40.0));
+    t.up(1);
     // Already reported crossing: the cancel is not a second drag.
     t.down(1, 0.0, 0.0);
     assert!(t.moved(1, 0.0, 12.0));
-    assert!(!t.cancelled(1));
+    assert!(!t.cancelled(1, 0.0, 12.0));
 }
 
 #[test]
