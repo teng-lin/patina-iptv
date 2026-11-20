@@ -67,6 +67,7 @@ mod pointer;
 mod recorder_startup;
 mod recordings;
 mod recordings_transport;
+mod resume_favorites;
 mod screens_look;
 mod search_history;
 mod stalker_cancel;

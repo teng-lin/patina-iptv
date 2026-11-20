@@ -103,6 +103,26 @@ impl ListId {
     }
 }
 
+/// The groups column entry a channel resumed at startup
+/// (`general.resume_last_channel`) is shown in: Favorites when that
+/// category is offered and the channel is one of the shown playlist's
+/// favorites (`favorites`, catalog channels of this catalog only, so a
+/// channel favorited in another playlist does not count) and listed there.
+/// None keeps the usual place: the list on screen, else the channel's own
+/// group.
+pub fn resume_entry(
+    channel: usize,
+    catalog: &dyn Schedule,
+    favorites: &[usize],
+    favorites_offered: bool,
+) -> Option<usize> {
+    let listed = favorites_offered
+        && channel < catalog.channel_count()
+        && !catalog.channel_hidden(channel)
+        && favorites.contains(&channel);
+    listed.then_some(FAVORITES)
+}
+
 /// The catalog group holding `channel` (channels are stored grouped):
 /// [`Schedule::channel_group`].
 pub fn group_of(catalog: &(impl Schedule + ?Sized), channel: usize) -> Option<usize> {

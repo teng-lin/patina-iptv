@@ -6,6 +6,9 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::ResumeChannel(channel) => {
             if !crate::desktop::recorder_only_startup() && ui.playing.get_untracked().is_none() {
                 ui.play(channel, crate::Playback::Live);
+                if ui.playing.get_untracked() == Some(channel) {
+                    crate::lists::resumed(ui, channel);
+                }
             }
         }
         RuntimeEvent::SchedulePresented(steps) => crate::startup::shown(&steps),
@@ -35,6 +38,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             ui.app.has_vod.set(has_vod);
             ui.app.any_vod.set(any_vod);
             ui.app.list_version.update(|version| *version += 1);
+            crate::lists::resumed_follow(ui);
         }
         RuntimeEvent::FavoriteOrderChanged => {
             crate::lists::favorites_changed(ui);

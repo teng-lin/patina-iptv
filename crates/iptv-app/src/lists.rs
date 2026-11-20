@@ -15,7 +15,9 @@ use std::time::Duration;
 use iptv_core::browse::{Columns, Outcome, RailItem, VodAvailability, rail_items};
 use iptv_core::channel_list::ChannelList as PlayerList;
 use iptv_core::guide::{Focus, Move, Pane, Schedule};
-use iptv_core::lists::{ALL, ChannelList, Entry, ListId, ListView, entry_count, group_of};
+use iptv_core::lists::{
+    ALL, ChannelList, Entry, ListId, ListView, entry_count, group_of, resume_entry,
+};
 use nsh_core::prelude::*;
 
 use crate::Ui;
@@ -248,6 +250,67 @@ pub fn show_channel(ui: Ui, channel: usize) {
     ui.focus.update(|f| f.show_channel(row, &view));
 }
 
+/// The channel resumed at startup (`player::source_ready`,
+/// `resume::adopt`): shown like [`show_channel`], in Favorites when the core
+/// puts it there ([`resume_entry`]), so Back from full screen lands on it.
+pub fn show_resumed(ui: Ui, channel: usize) {
+    into_favorites(ui, channel);
+    show_channel(ui, channel);
+    remember_resumed(ui, channel);
+}
+
+/// The combined playlists' resumed channel: the guide moves to it only when
+/// it goes to Favorites; otherwise the focus stays as it was.
+pub fn resumed(ui: Ui, channel: usize) {
+    if into_favorites(ui, channel).is_some() {
+        show_channel(ui, channel);
+    }
+    remember_resumed(ui, channel);
+}
+
+fn remember_resumed(ui: Ui, channel: usize) {
+    let key = crate::schedule().channel_key(channel);
+    ui.player.resumed.set(key);
+}
+
+/// Favorites became known or changed: while full screen still covers the
+/// guide on the resumed channel, its list follows ([`resume_entry`]), the
+/// focus found again by key. Nothing retunes.
+pub fn resumed_follow(ui: Ui) {
+    let Some(key) = ui.player.resumed.get_untracked() else {
+        return;
+    };
+    let playing = ui.player.main().key.get_untracked();
+    if ui.mode.get_untracked() != crate::ViewMode::Fullscreen || playing.as_deref() != Some(&key) {
+        ui.player.resumed.set(None);
+        return;
+    }
+    let Some(channel) = crate::schedule().find_channel(&key) else {
+        return;
+    };
+    if into_favorites(ui, channel) == Some(true) {
+        show_channel(ui, channel);
+    }
+}
+
+/// Selects Favorites for a resumed `channel` when the core says so: None
+/// when it does not go there, else whether the selection changed.
+fn into_favorites(ui: Ui, channel: usize) -> Option<bool> {
+    let catalog = crate::schedule();
+    let entry = resume_entry(
+        channel,
+        &*catalog,
+        &crate::favorites::favorite_channels(),
+        crate::settings::flag(iptv_settings::keys::SHOW_FAVORITES),
+    )?;
+    if ui.focus.with_untracked(|f| f.group) == entry {
+        return Some(false);
+    }
+    ui.focus.update(|f| f.group = entry);
+    rebuild(ui, false);
+    Some(true)
+}
+
 /// Focuses catalog `channel`'s programme at `minute` where it is (a search
 /// result, a closed menu).
 pub fn tap(ui: Ui, channel: usize, minute: i32) {
@@ -272,6 +335,14 @@ fn step(ui: Ui, f: impl FnOnce(&mut Focus, &Columns, &ListView) -> Outcome) -> O
 
 /// Keep preview focus on a visible, playing surface across stop/layout changes.
 pub fn bind(ui: Ui) {
+    // Leaving full screen shows the guide: the resumed channel's list stays.
+    effect(move || {
+        if ui.mode.get() != crate::ViewMode::Fullscreen
+            && ui.player.resumed.with_untracked(Option::is_some)
+        {
+            ui.player.resumed.set(None);
+        }
+    });
     effect(move || {
         let available = (ui.playing.get().is_some() || crate::on_demand::active(ui))
             && matches!(

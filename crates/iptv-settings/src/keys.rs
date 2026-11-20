@@ -61,6 +61,8 @@ pub const EPG_STORE_DESCRIPTIONS: BoolKey = BoolKey("epg.store_descriptions");
 
 // Startup and leaving.
 pub const RESUME_LAST_CHANNEL: BoolKey = BoolKey("general.resume_last_channel");
+/// Whether the groups column offers the Favorites category.
+pub const SHOW_FAVORITES: BoolKey = BoolKey("channels.show_favorites");
 pub const CONFIRM_EXIT: BoolKey = BoolKey("general.confirm_exit");
 pub const CONFIRM_EXIT_WINDOW: DurationKey = DurationKey("general.confirm_exit_window");
 
@@ -112,6 +114,7 @@ pub const ALL: &[(&str, &str)] = &[
     (EPG_KEEP_PAST.0, "duration"),
     (EPG_STORE_DESCRIPTIONS.0, "bool"),
     (RESUME_LAST_CHANNEL.0, "bool"),
+    (SHOW_FAVORITES.0, "bool"),
     (CONFIRM_EXIT.0, "bool"),
     (CONFIRM_EXIT_WINDOW.0, "duration"),
     (UI_TRANSPARENCY.0, "integer"),

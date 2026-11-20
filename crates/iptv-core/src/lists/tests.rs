@@ -225,3 +225,25 @@ fn zapping_wraps_within_the_list() {
     assert_eq!(fav.zap(1, 1), Some(2));
     assert_eq!(ChannelList::default().zap(0, 1), None);
 }
+
+#[test]
+fn a_resumed_favorite_is_shown_in_favorites() {
+    let catalog = Catalog::small();
+    let favorites = [5, 1];
+    assert_eq!(resume_entry(1, &catalog, &favorites, true), Some(FAVORITES));
+    let list = ChannelList::build(FAVORITES, &catalog, &favorites, &[]);
+    assert_eq!(list.row_of(1), Some(1));
+}
+
+#[test]
+fn a_resumed_channel_keeps_its_usual_list_otherwise() {
+    let catalog = Catalog::small();
+    // Not a favorite of this playlist (another playlist's favorites are
+    // not among this catalog's channels).
+    assert_eq!(resume_entry(3, &catalog, &[5, 1], true), None);
+    assert_eq!(resume_entry(3, &catalog, &[], true), None);
+    // The Favorites category is not offered.
+    assert_eq!(resume_entry(1, &catalog, &[5, 1], false), None);
+    // A channel the catalog does not have.
+    assert_eq!(resume_entry(42, &catalog, &[42], true), None);
+}
