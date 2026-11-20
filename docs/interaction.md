@@ -156,8 +156,10 @@ what the content needs at the current text size, not from the device type.
   wherever the programme would have less than its room beside them. The
   preview keeps its place at the top left and shrinks to leave that row room,
   but never below 64 points tall, which keeps the corner ‹ inside it. A short
-  window grows the header instead. The programme's times wrap onto a second
-  line rather than clip; its title stays on one line and is truncated. The
+  window grows the header instead, up to 55% of its height so the rail and the
+  guide keep room; a window too short for that squeezes the preview. The
+  programme's times wrap onto a second line rather than clip; its title stays
+  on one line and is truncated. The
   guide's rows already take the full width below the header in every class.
 - **Now:** Movies and Shows already show one pane at a time in every class:
   details replace the list, and the poster grid reflows its columns.
