@@ -35,6 +35,9 @@ is below 1.0, a minor release may change behaviour.
   add a playlist, open the playlist's new **Movies and series** switch, retry
   a failed import, or refresh. A movie or series list that fails while live
   channels import is shown as a failure, not as an empty catalogue.
+  In a small window the message and its action take the whole width:
+  the categories make way, and Close and the rail stay beside it, so
+  **Add playlist** can be clicked or tapped at any text size.
 - Catalog schema 24 records movie and series lists that failed to download.
   Downgrading an existing catalog is unsupported; retain a compatible backup
   before upgrading.

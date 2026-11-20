@@ -406,6 +406,14 @@ pub struct Screen {
     /// The playlist the empty screen's action last acted on (`Some(None)`:
     /// adding a playlist).
     offered: Option<Option<i64>>,
+    /// Whether the window is in the compact layout class
+    /// ([`crate::layout::Class::Compact`]); set by the shell through
+    /// [`Screen::set_compact`] and kept across [`Screen::begin`].
+    compact: bool,
+    /// The remote was sent off the empty screen's action because it moved
+    /// to another playlist while a read was pending: the next settling of
+    /// the panes must not put it back on the new action ([`Screen::settle_panes`]).
+    left_action: bool,
 }
 impl Screen {
     pub fn begin(&mut self, kind: Kind) -> u64 {
@@ -425,9 +433,116 @@ impl Screen {
             generation: self.generation.wrapping_add(1),
             library: self.library,
             offered: self.library.action().map(EmptyAction::target),
+            compact: self.compact,
             ..Default::default()
         };
         self.reload()
+    }
+    /// Sets whether the window is compact. A compact window shows one pane
+    /// at a time ([`Screen::one_pane`]).
+    pub fn set_compact(&mut self, compact: bool) {
+        self.compact = compact;
+        self.settle_panes();
+    }
+    /// Whether the empty catalogue takes the window's width: in a compact
+    /// window its message and action are the one pane, the categories give
+    /// way (there is nothing to filter), and the remote moves between the
+    /// rail and the action.
+    pub fn one_pane(&self) -> bool {
+        self.compact && self.empty_state().is_some()
+    }
+    /// Whether the categories column shows.
+    pub fn shows_categories(&self) -> bool {
+        self.categories_open && !self.one_pane()
+    }
+    /// Whether the rail (Close and the destinations) shows: beside the
+    /// categories, and always beside the one-pane empty catalogue, where it
+    /// is the pointer's way out.
+    pub fn shows_navigation(&self) -> bool {
+        self.categories_open || self.one_pane()
+    }
+    /// Opens the categories, or in one pane goes to the empty catalogue's
+    /// action, the only thing there is to choose (the rail when it offers
+    /// none).
+    pub fn open_categories(&mut self) {
+        if self.one_pane() {
+            if self.empty_action().is_some() {
+                self.categories_open = false;
+                self.control = Control::Catalogue;
+            } else {
+                self.focus_rail();
+            }
+        } else {
+            self.categories_open = true;
+            self.control = Control::Category;
+        }
+    }
+    /// The rail in one pane. The categories are marked open, hidden while
+    /// the pane lasts ([`Screen::shows_categories`]), so the rail and the
+    /// focus on it stay on screen when it ends (titles arrived, a wider
+    /// window, smaller text).
+    fn focus_rail(&mut self) {
+        self.categories_open = true;
+        self.control = Control::Navigation;
+    }
+    /// Keeps the remote on something shown and never on an action it did
+    /// not see appear. Once the empty catalogue is the one pane, a remote
+    /// left on the hidden categories moves to where the titles would be
+    /// (the action), or to the rail when there is no action, or when it was
+    /// just sent off another playlist's action: OK never acts on a playlist
+    /// the screen did not show when the remote got there. A remote on an
+    /// action that went away (an import started) goes to the rail too. In
+    /// any window, a remote sent off an action that then reached the
+    /// action's place again (Retry after a failed read) is sent off once
+    /// more when the read shows the new action.
+    fn settle_panes(&mut self) {
+        let on_categories = matches!(
+            self.control,
+            Control::Category | Control::Continue | Control::Source
+        );
+        let on_action = self.control == Control::Catalogue
+            && !self.is_shelf()
+            && self.details.is_none()
+            && self.cards.is_empty();
+        let action = self.empty_action().is_some();
+        if self.one_pane() {
+            if on_categories {
+                if action && !self.left_action {
+                    self.categories_open = false;
+                    self.control = Control::Catalogue;
+                } else {
+                    self.focus_rail();
+                }
+                self.left_action = false;
+            } else if on_action && (!action || self.left_action) {
+                self.focus_rail();
+                self.left_action = false;
+            }
+        } else if on_action && action && self.left_action {
+            self.control = Control::Category;
+            self.categories_open = true;
+            self.left_action = false;
+        }
+    }
+    /// Closes the search field (Back, or its submit key): the remote goes to
+    /// the titles, or stays on Search when the one pane offers nothing to
+    /// focus (an import running).
+    pub fn close_search(&mut self) {
+        self.search_open = false;
+        self.control = if self.one_pane_without_action() {
+            Control::Search
+        } else {
+            Control::Catalogue
+        };
+    }
+    /// Enters the titles from the categories (Right, or OK on a category).
+    pub fn enter_catalogue(&mut self) {
+        self.browse_horizontal(1);
+    }
+    /// Whether the one pane offers no action: the remote's way from the
+    /// rail is then the toolbar (Search, Sort).
+    fn one_pane_without_action(&self) -> bool {
+        self.one_pane() && self.empty_action().is_none()
     }
     /// Sets why the catalogue may be empty. When the empty screen's action
     /// now acts on another playlist than the one it offered, a remote on it
@@ -437,21 +552,36 @@ impl Screen {
     pub fn set_library(&mut self, state: VodState) {
         self.library = state;
         let Some(action) = state.action() else {
+            self.settle_panes();
             return;
         };
         let target = action.target();
         // The empty catalogue only (a load may be running): never a shelf,
         // details or a list with titles.
-        if self.offered.is_some_and(|offered| offered != target)
-            && self.control == Control::Catalogue
+        let moved = self.offered.is_some_and(|offered| offered != target)
             && !self.is_shelf()
             && self.details.is_none()
-            && self.cards.is_empty()
-        {
-            self.control = Control::Category;
-            self.categories_open = true;
+            && self.cards.is_empty();
+        // On Retry after a failed read: its reload puts the remote where the
+        // titles would be, which must not arm the new action unseen.
+        if moved && self.control == Control::Retry {
+            self.left_action = true;
+        }
+        if moved && self.control == Control::Catalogue {
+            if self.one_pane() {
+                // A later failed read's Retry must not arm it either.
+                self.focus_rail();
+                self.left_action = true;
+            } else {
+                // A read is pending: when it publishes an empty catalogue
+                // the remote must not land on this new action unseen.
+                self.control = Control::Category;
+                self.categories_open = true;
+                self.left_action = true;
+            }
         }
         self.offered = Some(target);
+        self.settle_panes();
     }
     /// The catalogue's state while it shows no titles, has loaded and has
     /// no error, and no search or filter narrows it: what its empty screen
@@ -489,6 +619,7 @@ impl Screen {
             open: true,
             shelf: Some(shelf),
             generation: self.generation.wrapping_add(1),
+            compact: self.compact,
             ..Default::default()
         };
         self.reload()
@@ -752,6 +883,7 @@ impl Screen {
         }
         self.busy = false;
         self.has_more = more;
+        self.settle_panes();
         true
     }
     pub fn move_focus(&mut self, delta: isize) {
@@ -767,9 +899,27 @@ impl Screen {
     /// A poster grid's horizontal movement never wraps into another row.
     /// Left at its edge reveals categories; Right enters the posters.
     pub fn browse_horizontal(&mut self, step: isize) {
+        let before = self.control;
+        self.move_horizontal(step);
+        self.entered_from(before);
+    }
+    /// The remote moved onto the action's place on purpose: the action
+    /// there is one it now sees, so the "sent off" mark is spent. A move
+    /// that leaves the focus where it was keeps it.
+    fn entered_from(&mut self, before: Control) {
+        if before != self.control && self.control == Control::Catalogue {
+            self.left_action = false;
+        }
+    }
+    fn move_horizontal(&mut self, step: isize) {
         if self.control == Control::Navigation {
-            if step > 0 {
+            if step > 0 && self.one_pane_without_action() {
+                self.control = Control::Search;
+            } else if step > 0 {
+                // Right from the rail heads for the action on purpose.
+                self.left_action = false;
                 self.control = Control::Category;
+                self.settle_panes();
             }
             return;
         }
@@ -794,12 +944,18 @@ impl Screen {
                 .iter()
                 .position(|c| *c == self.control)
                 .unwrap_or(0);
+            if step < 0 && at == 0 && self.one_pane() {
+                self.focus_rail();
+                return;
+            }
             self.control = controls[at.saturating_add_signed(step).min(controls.len() - 1)];
             return;
         }
         let at = self.focused_index().unwrap_or(0);
         let columns = self.columns.max(1);
-        if step < 0 && at.is_multiple_of(columns) {
+        if step < 0 && self.one_pane() {
+            self.focus_rail();
+        } else if step < 0 && at.is_multiple_of(columns) {
             self.categories_open = true;
             self.control = Control::Category;
         } else if step < 0 || at % columns + 1 < columns {
@@ -814,6 +970,12 @@ impl Screen {
     /// Up/Down on categories previews that category. Returns whether the
     /// shell should fetch the changed query. The category key is source-qualified.
     pub fn browse_vertical(&mut self, step: isize) -> bool {
+        let before = self.control;
+        let changed = self.move_vertical(step);
+        self.entered_from(before);
+        changed
+    }
+    fn move_vertical(&mut self, step: isize) -> bool {
         match self.control {
             Control::Navigation => {
                 let destinations = [
@@ -869,7 +1031,9 @@ impl Screen {
                     self.move_focus(step * columns as isize);
                 }
             }
-            _ if step > 0 => self.control = Control::Catalogue,
+            // Nothing to reach below the toolbar in a one pane without
+            // an action.
+            _ if step > 0 && !self.one_pane_without_action() => self.control = Control::Catalogue,
             _ => {}
         }
         false
@@ -1033,17 +1197,20 @@ impl Screen {
         }
         if !self.is_shelf() && self.details.is_none() {
             if self.search_open {
-                self.search_open = false;
-                self.control = Control::Catalogue;
+                self.close_search();
                 return;
             }
-            if !self.categories_open {
+            if !self.categories_open && !self.one_pane() {
                 self.categories_open = true;
                 self.control = Control::Category;
                 return;
             }
             if self.control != Control::Navigation {
-                self.control = Control::Navigation;
+                if self.one_pane() {
+                    self.focus_rail();
+                } else {
+                    self.control = Control::Navigation;
+                }
                 return;
             }
         }
@@ -2002,6 +2169,327 @@ mod tests {
         shelf.set_library(failed(2));
         assert_eq!(shelf.control, Control::Catalogue);
         assert!(!shelf.categories_open);
+    }
+    #[test]
+    fn a_compact_empty_catalogue_is_one_pane_between_the_rail_and_its_action() {
+        let mut s = Screen::default();
+        s.set_compact(true);
+        s.set_library(VodState::NoEligibleSource);
+        let generation = s.begin(Kind::Movie);
+        // Loading: the categories show as before.
+        assert!(!s.one_pane() && s.shows_categories());
+        s.publish(generation, Vec::new(), false, false);
+        // Loaded and empty: the message and its action take the width,
+        // with the remote on the action and the rail beside it.
+        assert!(s.one_pane());
+        assert!(!s.shows_categories() && s.shows_navigation());
+        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.empty_action(), Some(EmptyAction::AddPlaylist));
+        // Left reaches the rail, Right the action again; the categories
+        // never come back.
+        s.browse_horizontal(-1);
+        assert_eq!(s.control, Control::Navigation);
+        assert!(!s.shows_categories() && s.shows_navigation());
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Catalogue);
+        // Choosing this destination again goes to its action.
+        s.control = Control::Navigation;
+        s.open_categories();
+        assert_eq!(s.control, Control::Catalogue);
+        // Back: the rail, then closed.
+        s.back();
+        assert!(s.open);
+        assert_eq!(s.control, Control::Navigation);
+        assert!(s.shows_navigation());
+        s.back();
+        assert!(!s.open);
+        // Wider again with the remote on the action: the categories one
+        // Left away, as in every wider window; compact again moves a
+        // remote off them.
+        let generation = s.begin(Kind::Series);
+        s.publish(generation, Vec::new(), false, false);
+        s.set_compact(false);
+        assert!(!s.one_pane() && !s.shows_navigation());
+        s.browse_horizontal(-1);
+        assert_eq!(s.control, Control::Category);
+        assert!(s.shows_categories());
+        s.set_compact(true);
+        assert_eq!(s.control, Control::Catalogue);
+        assert!(!s.shows_categories());
+        // Titles: the categories stay a pane of their own.
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, vec![card("a")], false, false);
+        assert!(!s.one_pane() && s.shows_categories());
+        assert_eq!(s.control, Control::Category);
+        // A shelf is never one pane.
+        let generation = s.begin_shelf(Shelf::RecentlyAdded);
+        s.publish(generation, Vec::new(), false, false);
+        assert!(!s.one_pane());
+    }
+    #[test]
+    fn the_rail_stays_on_screen_with_the_remote_when_one_pane_ends() {
+        // Left to the rail, then a wider window or smaller text.
+        let mut s = Screen::default();
+        s.set_compact(true);
+        s.set_library(VodState::NoEligibleSource);
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, Vec::new(), false, false);
+        s.browse_horizontal(-1);
+        s.set_compact(false);
+        assert_eq!(s.control, Control::Navigation);
+        assert!(s.shows_navigation() && s.shows_categories());
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Category);
+        // Back to the rail, then wider.
+        s.set_compact(true);
+        assert_eq!(s.control, Control::Catalogue);
+        s.back();
+        assert_eq!(s.control, Control::Navigation);
+        s.set_compact(false);
+        assert!(s.shows_navigation());
+        // An import running offers no action: the remote waits on the rail,
+        // not on an empty pane. It finishes with titles: the rail stays.
+        let mut s = Screen::default();
+        s.set_compact(true);
+        s.set_library(VodState::Importing);
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, Vec::new(), false, false);
+        assert!(s.one_pane());
+        assert_eq!(s.control, Control::Navigation);
+        assert!(s.shows_navigation() && !s.shows_categories());
+        s.set_library(VodState::Available);
+        let generation = s.reload();
+        assert!(!s.one_pane());
+        assert_eq!(s.control, Control::Navigation);
+        assert!(s.shows_navigation());
+        s.publish(generation, vec![card("a")], false, false);
+        assert_eq!(s.control, Control::Navigation);
+        assert!(s.shows_navigation() && s.shows_categories());
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Category);
+    }
+    #[test]
+    fn a_pending_read_never_lands_the_remote_on_another_playlists_action() {
+        let mut s = Screen::default();
+        s.set_compact(true);
+        s.set_library(VodState::Failed {
+            source: 1,
+            problem: ImportProblem::Network,
+        });
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, Vec::new(), false, false);
+        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.empty_action(), Some(EmptyAction::Retry(1)));
+        // A read is pending when the action moves to playlist 2: the
+        // remote leaves, and the empty page does not put it back on 2's
+        // action.
+        let generation = s.reload();
+        s.set_library(VodState::ImportsDisabled { source: 2 });
+        assert_eq!(s.control, Control::Category);
+        s.publish(generation, Vec::new(), false, false);
+        assert!(s.one_pane());
+        assert_eq!(s.control, Control::Navigation);
+        assert!(s.shows_navigation());
+        // Right from the rail, the action now shown, reaches it.
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.empty_action(), Some(EmptyAction::PlaylistSettings(2)));
+        // Shown: an action that moves again sends it to the rail.
+        s.set_library(VodState::Empty { source: 3 });
+        assert_eq!(s.control, Control::Navigation);
+        assert!(s.shows_navigation() && !s.shows_categories());
+    }
+    #[test]
+    fn a_vanished_action_sends_the_remote_to_the_rail() {
+        let mut s = Screen::default();
+        s.set_compact(true);
+        s.set_library(VodState::Empty { source: 1 });
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, Vec::new(), false, false);
+        assert_eq!(s.control, Control::Catalogue);
+        // Refresh now: the import runs, the action goes.
+        s.set_library(VodState::Importing);
+        assert_eq!(s.empty_action(), None);
+        assert_eq!(s.control, Control::Navigation);
+        assert!(s.shows_navigation());
+        // The same while a read is pending: settled when it arrives.
+        s.control = Control::Catalogue;
+        let generation = s.reload();
+        s.publish(generation, Vec::new(), false, false);
+        assert_eq!(s.control, Control::Navigation);
+    }
+    #[test]
+    fn a_failed_read_and_its_retry_never_arm_another_playlists_action() {
+        for compact in [true, false] {
+            let mut s = Screen::default();
+            s.set_compact(compact);
+            s.set_library(VodState::Failed {
+                source: 1,
+                problem: ImportProblem::Network,
+            });
+            let generation = s.begin(Kind::Movie);
+            s.publish(generation, Vec::new(), false, false);
+            s.browse_horizontal(1);
+            assert_eq!(s.control, Control::Catalogue);
+            // The action moves to playlist 2 during a read, which fails.
+            s.reload();
+            s.set_library(VodState::ImportsDisabled { source: 2 });
+            s.fail("generated failure", Operation::List);
+            assert_eq!(s.control, Control::Retry);
+            // Retry puts the remote where the titles would be; the empty
+            // page then shows playlist 2's action, which it never saw.
+            let generation = s.reload();
+            assert_eq!(s.control, Control::Catalogue);
+            s.publish(generation, Vec::new(), false, false);
+            assert_eq!(s.empty_action(), Some(EmptyAction::PlaylistSettings(2)));
+            assert_ne!(s.control, Control::Catalogue, "compact: {compact}");
+            assert!(s.shows_navigation() || s.shows_categories());
+            // Moving there on purpose reaches it.
+            s.browse_horizontal(1);
+            assert_eq!(s.control, Control::Catalogue);
+        }
+    }
+    #[test]
+    fn the_remote_reaches_the_toolbar_of_a_compact_import() {
+        let mut s = Screen::default();
+        s.set_compact(true);
+        s.set_library(VodState::Importing);
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, Vec::new(), false, false);
+        assert_eq!(s.control, Control::Navigation);
+        // Right: the toolbar, not the rail again.
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Search);
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Sort);
+        // Down has no empty pane to enter.
+        s.browse_vertical(1);
+        assert_eq!(s.control, Control::Sort);
+        // Left from the toolbar's first control: the rail.
+        s.browse_horizontal(-1);
+        s.browse_horizontal(-1);
+        assert_eq!(s.control, Control::Navigation);
+        // With an action, Right reaches the action as before.
+        s.set_library(VodState::NoEligibleSource);
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Catalogue);
+    }
+    #[test]
+    fn a_target_change_on_retry_never_arms_the_new_action() {
+        for compact in [true, false] {
+            let mut s = Screen::default();
+            s.set_compact(compact);
+            s.set_library(VodState::Failed {
+                source: 1,
+                problem: ImportProblem::Network,
+            });
+            let generation = s.begin(Kind::Movie);
+            s.publish(generation, Vec::new(), false, false);
+            s.browse_horizontal(1);
+            // The read fails first; Retry takes the remote.
+            s.reload();
+            s.fail("generated failure", Operation::List);
+            assert_eq!(s.control, Control::Retry);
+            // Then the action moves to playlist 2, and its reload empties.
+            s.set_library(VodState::ImportsDisabled { source: 2 });
+            assert_eq!(s.control, Control::Retry);
+            let generation = s.reload();
+            s.publish(generation, Vec::new(), false, false);
+            assert_eq!(s.empty_action(), Some(EmptyAction::PlaylistSettings(2)));
+            assert_ne!(s.control, Control::Catalogue, "compact: {compact}");
+        }
+    }
+    #[test]
+    fn ok_on_a_category_enters_a_shown_action_for_good() {
+        let mut s = Screen::default();
+        s.set_library(VodState::Failed {
+            source: 1,
+            problem: ImportProblem::Network,
+        });
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, Vec::new(), false, false);
+        s.browse_horizontal(1);
+        // Wide: the action moves to playlist 2, the remote goes to the
+        // categories; OK there enters 2's shown action.
+        s.set_library(VodState::ImportsDisabled { source: 2 });
+        assert_eq!(s.control, Control::Category);
+        s.enter_catalogue();
+        assert_eq!(s.control, Control::Catalogue);
+        // Compact afterwards keeps it there.
+        s.set_compact(true);
+        assert_eq!(s.control, Control::Catalogue);
+    }
+    #[test]
+    fn closing_search_in_a_compact_import_keeps_the_remote_on_search() {
+        let mut s = Screen::default();
+        s.set_compact(true);
+        s.set_library(VodState::Importing);
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, Vec::new(), false, false);
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Search);
+        s.search_open = true;
+        s.back();
+        assert!(s.open && !s.search_open);
+        assert_eq!(s.control, Control::Search);
+        s.search_open = true;
+        s.close_search();
+        assert_eq!(s.control, Control::Search);
+        // With an action, closing search goes where the titles would be.
+        s.set_library(VodState::NoEligibleSource);
+        s.search_open = true;
+        s.close_search();
+        assert_eq!(s.control, Control::Catalogue);
+    }
+    #[test]
+    fn a_compact_move_to_the_rail_survives_a_failed_read_and_retry() {
+        let mut s = Screen::default();
+        s.set_compact(true);
+        s.set_library(VodState::Failed {
+            source: 1,
+            problem: ImportProblem::Network,
+        });
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, Vec::new(), false, false);
+        assert_eq!(s.control, Control::Catalogue);
+        // Loaded and shown: the action moves to playlist 2, the remote to
+        // the rail. The next read fails; Retry, then an empty page.
+        s.set_library(VodState::ImportsDisabled { source: 2 });
+        assert_eq!(s.control, Control::Navigation);
+        s.reload();
+        s.fail("generated failure", Operation::List);
+        let generation = s.reload();
+        assert_eq!(s.control, Control::Catalogue);
+        s.publish(generation, Vec::new(), false, false);
+        assert_ne!(s.control, Control::Catalogue);
+        // Right from the rail selects the shown action.
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.empty_action(), Some(EmptyAction::PlaylistSettings(2)));
+    }
+    #[test]
+    fn a_key_that_leaves_retry_focused_keeps_the_mark() {
+        for compact in [true, false] {
+            let mut s = Screen::default();
+            s.set_compact(compact);
+            s.set_library(VodState::Failed {
+                source: 1,
+                problem: ImportProblem::Network,
+            });
+            let generation = s.begin(Kind::Movie);
+            s.publish(generation, Vec::new(), false, false);
+            s.browse_horizontal(1);
+            s.reload();
+            s.fail("generated failure", Operation::List);
+            s.set_library(VodState::ImportsDisabled { source: 2 });
+            // Up (and Left) on Retry: the focus stays.
+            s.browse_vertical(-1);
+            s.browse_horizontal(-1);
+            assert_eq!(s.control, Control::Retry);
+            let generation = s.reload();
+            s.publish(generation, Vec::new(), false, false);
+            assert_ne!(s.control, Control::Catalogue, "compact: {compact}");
+        }
     }
     #[test]
     fn the_catalogue_keeps_its_toolbar() {

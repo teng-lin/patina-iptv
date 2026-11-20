@@ -192,8 +192,14 @@ what the content needs at the current text size, not from the device type.
   programme's times wrap onto a second line rather than clip; its title stays
   on one line and is truncated. The
   guide's rows already take the full width below the header in every class.
-- **Now:** Movies and Shows already show one pane at a time in every class:
-  details replace the list, and the poster grid reflows its columns.
+- **Now:** in Movies and Shows, details replace the list in every class and
+  the poster grid reflows its columns. In Compact, an empty catalogue (no
+  titles, nothing filtered) is a pane of its own: its message and action take
+  the width beside the rail (Close and the destinations), which stays narrow
+  even with the remote on it, and the categories, which have nothing to
+  filter, give way (`iptv_core::vod::Screen::one_pane`).
+- **Planned:** collapsing the categories beside the posters in Compact; until
+  then they share the width with the poster grid.
 - **Planned:** a list beside its details in Expanded, and collapsing the
   player's panels by class.
 
@@ -294,10 +300,24 @@ below wins, after "some playlist has titles".
 On a remote the action sits where the titles would be: Right from the
 categories, then OK. If the action moves to another playlist while the remote
 is on it, the remote goes back to the categories, so OK never acts on a
-playlist the screen did not show. The "Movies and series" switch keeps no own
-value when it matches the global setting, and a deleted playlist's own value
-goes with it. A search or filter that finds nothing says "No titles found."
-with no action. Continue watching and Recently added keep their own
+playlist the screen did not show. In a Compact window (see
+[Layout classes](#layout-classes)) the message and action take the width and
+the categories give way. A remote or keyboard that was on the categories goes
+to the action, or to the rail when there is no action (an import running) or
+when it was just sent off another playlist's action; Left reaches the rail
+and Right returns. An action that moves to another playlist, or goes away
+(a refresh started), sends it to the rail, and if the window widens or the
+text shrinks the rail stays on screen with the remote on it. Without an
+action, Right from the rail reaches Search and Sort instead, and closing
+Search keeps the remote there. In every window, a remote sent off an action,
+or on Retry when the action moves, stays off the new one through a failed
+read and its Retry, until it moves there itself (Right, or OK on a
+category). The action stays inside a 400×600 window at Medium and Extra
+large text, also with the test pseudolocale
+(`tests/app/vod_empty_compact.rs`). The "Movies and series" switch keeps no
+own value when it matches the global setting, and a deleted playlist's own
+value goes with it. A search or filter that finds nothing says "No titles
+found." with no action. Continue watching and Recently added keep their own
 empty text. Imports are never switched on automatically, and M3U channels
 never appear as movies or series.
 
