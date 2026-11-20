@@ -3,9 +3,11 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use iptv_nav::{Action, BackGuard, Context, Keymap, Phase, PressDetector, Profile, RemoteKey};
+use iptv_nav::{
+    Action, BackGuard, Context, Decision, HeldPresses, Keymap, Phase, Press, Profile, RemoteKey,
+};
 use nsh_core::keymap::Keystroke;
 use nsh_core::prelude::*;
 use nsh_core::{KeyCapture, KeyEvent};
@@ -22,11 +24,33 @@ pub(crate) use back::swallow_back;
 use keys::{DIGITS, KEYS, RawKeys};
 
 /// The Android remote profile distinguishes a tap from a held key.
-pub(crate) const LONG_PRESS: bool = cfg!(target_os = "android");
+const ANDROID_KEYS: bool = cfg!(target_os = "android");
+
+/// Headless scenarios that drive a remote's raw Down/Repeat/Up phases
+/// (`use_remote_key_phases`), set before the app starts.
+#[cfg(feature = "test-support")]
+static REMOTE_PHASES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Test support: take keys as the Android remote does (raw key phases on
+/// the window's root, short and long presses) in this process. Call it
+/// before the app starts.
+#[cfg(feature = "test-support")]
+pub fn use_remote_key_phases() {
+    REMOTE_PHASES.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether keys arrive as a remote's raw phases and tell a tap from a hold.
+pub(crate) fn long_press() -> bool {
+    #[cfg(feature = "test-support")]
+    if REMOTE_PHASES.load(std::sync::atomic::Ordering::Relaxed) {
+        return true;
+    }
+    ANDROID_KEYS
+}
 
 /// Whose keys: a TV remote's on Android, a keyboard's on the desktops
 /// (`iptv_nav::Profile`: one map; the hints name their keys).
-pub(crate) const PROFILE: Profile = if LONG_PRESS {
+pub(crate) const PROFILE: Profile = if ANDROID_KEYS {
     Profile::Remote
 } else {
     Profile::Keyboard
@@ -34,9 +58,18 @@ pub(crate) const PROFILE: Profile = if LONG_PRESS {
 
 struct Nav {
     keymap: Keymap,
-    detector: PressDetector,
+    presses: HeldPresses,
     raw: RawKeys,
-    start: Instant,
+}
+
+impl Nav {
+    fn new() -> Self {
+        Nav {
+            keymap: crate::remote_editor::keymap(),
+            presses: HeldPresses::default(),
+            raw: RawKeys::default(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -48,7 +81,7 @@ pub(crate) struct InputScope {
 
 impl InputScope {
     fn raw_event(&self, event: &KeyEvent, phase: Phase) {
-        let key = self.nav.borrow_mut().raw.key(event, phase, LONG_PRESS);
+        let key = self.nav.borrow_mut().raw.key(event, phase, long_press());
         if let Some(key) = key {
             self.owner.run(|| key_event(self.ui, &self.nav, key, phase));
         }
@@ -59,7 +92,9 @@ impl InputScope {
 struct RemoteFocus(ElementRef);
 
 fn focus_remote_root() {
-    if LONG_PRESS && let Some(focus) = use_context::<RemoteFocus>() {
+    if long_press()
+        && let Some(focus) = use_context::<RemoteFocus>()
+    {
         focus.0.focus();
     }
 }
@@ -89,7 +124,7 @@ pub(crate) fn bind_field_focus(field: ElementRef, editing: impl Fn() -> bool + '
 
 /// Listen on the window's root so a remote works before native focus exists.
 pub(crate) fn window<V: Interactive>(view: V, input: Stored<Option<InputScope>>) -> V {
-    let view = if LONG_PRESS {
+    let view = if long_press() {
         // Android returns focus to the native container after dismissing the
         // keyboard. A mounted app view keeps the raw listener in its key path.
         let focus = element_ref();
@@ -98,7 +133,7 @@ pub(crate) fn window<V: Interactive>(view: V, input: Stored<Option<InputScope>>)
     } else {
         view
     };
-    let capture = if LONG_PRESS {
+    let capture = if long_press() {
         KeyCapture::keys(
             KEYS.iter()
                 .map(|(name, _)| *name)
@@ -152,12 +187,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
     number::bind(ui);
     let input = InputScope {
         ui,
-        nav: Rc::new(RefCell::new(Nav {
-            keymap: crate::remote_editor::keymap(),
-            detector: PressDetector::default(),
-            raw: RawKeys::default(),
-            start: Instant::now(),
-        })),
+        nav: Rc::new(RefCell::new(Nav::new())),
         owner: Owner::current(),
     };
     let repeat = KeyOptions {
@@ -169,7 +199,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
         .enumerate()
         .map(|(digit, name)| (name, RemoteKey::Digit(digit as u8)));
     for (name, key) in KEYS.iter().copied().chain(digits) {
-        if !LONG_PRESS || name.contains('+') {
+        if !long_press() || name.contains('+') {
             let nav = input.nav.clone();
             on_key_with(name, repeat, move |_| key_event(ui, &nav, key, Phase::Down));
         }
@@ -239,43 +269,38 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
         }
         return;
     }
-    let t = Instant::now();
+    // A key going down keeps the panels and the play bar up: a press that
+    // waits to tell short from long must not find them gone on release.
+    if phase != Phase::Up {
+        keep_controls(ui);
+    }
+    let t = std::time::Instant::now();
     let ctx = context(&ui);
-    let (action, deadline) = {
+    let (decision, deadline) = {
         let mut nav = nav.borrow_mut();
         if phase == Phase::Down {
             nav.keymap = crate::remote_editor::keymap();
         }
-        let now = nav.start.elapsed().as_millis() as u64;
+        let now = ui.now_ms();
         // `remote.long_press`, taken up when a key goes down (a new press
         // ends whatever was held).
         let threshold = crate::settings::long_press_ms();
-        if LONG_PRESS && phase == Phase::Down && nav.detector.threshold_ms() != threshold {
-            nav.detector = PressDetector::new(threshold);
+        if long_press() && phase == Phase::Down && nav.presses.threshold_ms() != threshold {
+            nav.presses = HeldPresses::new(threshold);
         }
         // A seek key in a replay has no long press: held, it repeats.
-        let has_long = LONG_PRESS
+        let has_long = long_press()
             && nav.keymap.has_long(ctx, key)
             && (crate::remote_editor::overridden(ctx, key)
                 || !crate::player_keys::seeks(&ui, ctx, key));
-        let action = nav
-            .detector
-            .feed(key, phase, now, has_long)
-            .and_then(|(k, press)| {
-                let action = nav.keymap.resolve(ctx, k, press);
-                let action = if crate::remote_editor::overridden(ctx, k) {
-                    action
-                } else {
-                    crate::player_keys::remap(&ui, ctx, k, action)
-                };
-                action.map(|a| (k, press, a))
-            });
+        let decision = nav.presses.feed(ctx, key, phase, now, has_long);
         let deadline = (phase == Phase::Down)
-            .then(|| nav.detector.long_deadline_ms())
+            .then(|| nav.presses.long_deadline_ms())
             .flatten()
             .map(|at| at.saturating_sub(now));
-        (action, deadline)
+        (decision, deadline)
     };
+    let action = decision.and_then(|d| resolve(ui, &nav.borrow().keymap, d));
     if key == RemoteKey::Back && phase == Phase::Down {
         ui.back_guard.update(BackGuard::pressed);
     }
@@ -291,13 +316,20 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     if let Some(wait_ms) = deadline {
         let nav = nav.clone();
         let _task = set_timeout(Duration::from_millis(wait_ms), move || {
-            let action = {
-                let mut nav = nav.borrow_mut();
-                let now = nav.start.elapsed().as_millis() as u64;
-                nav.detector
-                    .poll(now)
-                    .and_then(|(k, press)| nav.keymap.resolve(ctx, k, press).map(|a| (k, press, a)))
+            // The surface of the moment: a press whose surface changed
+            // while it was held does nothing (`HeldPresses`), nor does one
+            // that a PIN prompt or the remote editor now captures.
+            let captured = crate::parental_view::is_open(ui) || crate::remote_editor::captures(ui);
+            let ctx = context(&ui);
+            let decision = nav.borrow_mut().presses.poll(ctx, ui.now_ms());
+            let Some(decision) = decision else {
+                return;
             };
+            if captured {
+                log::info!("iptv long press by timer dropped: a prompt took the keys");
+                return;
+            }
+            let action = resolve(ui, &nav.borrow().keymap, decision);
             if let Some((key, press, action)) = action {
                 log::info!("iptv long press by timer: {action:?}");
                 act(ui, key, press, action, false);
@@ -321,6 +353,49 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
         ui.mode.get(),
         ui.panels.with(|p| p.shown)
     );
+}
+
+/// The action a press decided on, after the player's remapping; none for
+/// a press dropped because its surface changed during the hold.
+fn resolve(ui: Ui, keymap: &Keymap, decision: Decision) -> Option<(RemoteKey, Press, Action)> {
+    match decision {
+        Decision::Act {
+            key,
+            press,
+            context: ctx,
+        } => {
+            let action = keymap.resolve(ctx, key, press);
+            let action = if crate::remote_editor::overridden(ctx, key) {
+                action
+            } else {
+                crate::player_keys::remap(&ui, ctx, key, action)
+            };
+            action.map(|a| (key, press, a))
+        }
+        Decision::Dropped {
+            key,
+            press,
+            began,
+            now,
+        } => {
+            log::info!(
+                "iptv key={} {press:?} dropped: the surface changed from {began:?} to {now:?} during the hold",
+                key.name()
+            );
+            None
+        }
+    }
+}
+
+/// A key going down counts as use of the panels and the play bar on
+/// screen, as an applied key does (`apply`).
+fn keep_controls(ui: Ui) {
+    if ui.panels.with_untracked(|p| p.shown) != iptv_core::panels::Shown::Hidden {
+        ui.update_panels(|p, now| p.touch(now));
+    }
+    if untracked(|| crate::play_bar::shows(ui)) {
+        crate::play_bar::used(ui);
+    }
 }
 
 fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
@@ -578,11 +653,6 @@ fn page(ui: Ui, dir: isize) {
 /// Synthetic native journey: the same Enter dispatch as the registered key handler.
 #[cfg(feature = "test-support")]
 pub(crate) fn synthetic_enter(ui: Ui) {
-    let nav = Rc::new(RefCell::new(Nav {
-        keymap: crate::remote_editor::keymap(),
-        detector: PressDetector::default(),
-        raw: RawKeys::default(),
-        start: Instant::now(),
-    }));
+    let nav = Rc::new(RefCell::new(Nav::new()));
     key_event(ui, &nav, RemoteKey::Ok, Phase::Down);
 }

@@ -10,10 +10,10 @@ use std::{
 
 #[derive(Default)]
 pub(crate) struct Lifetime {
-    players: Vec<NodeId>,
-    removed: Vec<NodeId>,
-    inserts: HashMap<NodeId, usize>,
-    sources: Vec<String>,
+    pub(crate) players: Vec<NodeId>,
+    pub(crate) removed: Vec<NodeId>,
+    pub(crate) inserts: HashMap<NodeId, usize>,
+    pub(crate) sources: Vec<String>,
 }
 pub(crate) fn selected(app: &crate::Headless, id: &str) -> bool {
     app.screen()
@@ -37,6 +37,43 @@ pub(crate) fn persistent(app: &crate::Headless, lifetime: &Arc<Mutex<Lifetime>>,
     );
 }
 
+/// Records the `tv.player` mounts, moves and sources from now on, for
+/// [`persistent`] (call it before the first batch is applied).
+pub(crate) fn record_players(app: &mut crate::Headless) -> Arc<Mutex<Lifetime>> {
+    let lifetime: Arc<Mutex<Lifetime>> = Arc::default();
+    record_players_into(app, lifetime.clone());
+    lifetime
+}
+
+fn record_players_into(app: &mut crate::Headless, observed: Arc<Mutex<Lifetime>>) {
+    app.observe(move |_, batch| {
+        let mut recorded = observed.lock().unwrap();
+        for item in &batch.items {
+            match item {
+                MountItem::Component { id, name } if name.as_ref() == "tv.player" => {
+                    recorded.players.push(*id)
+                }
+                MountItem::ComponentProps { props, .. } => {
+                    for (key, value) in props {
+                        if key.as_ref() == "source"
+                            && let Some(source) =
+                                value.as_ref().map(crate::support::upstream_source)
+                            && let Some(url) = source["url"].as_str()
+                        {
+                            recorded.sources.push(url.into());
+                        }
+                    }
+                }
+                MountItem::Insert { child, .. } => {
+                    *recorded.inserts.entry(*child).or_default() += 1
+                }
+                MountItem::Remove { id } | MountItem::Delete { id } => recorded.removed.push(*id),
+                _ => {}
+            }
+        }
+    });
+}
+
 fn preview_fixture(
     home: crate::isolated::Home,
 ) -> (personalization::Fixture, Arc<Mutex<Lifetime>>) {
@@ -49,7 +86,7 @@ pub(crate) fn preview_fixture_with(
     adjust: impl FnOnce(&mut Settings),
 ) -> (personalization::Fixture, Arc<Mutex<Lifetime>>) {
     let lifetime: Arc<Mutex<Lifetime>> = Arc::default();
-    let observed = lifetime.clone();
+    let recorder = lifetime.clone();
     let mut settings = Settings::new();
     settings
         .set("guide.stay_on_guide", Value::Bool(true))
@@ -63,34 +100,7 @@ pub(crate) fn preview_fixture_with(
         .unwrap();
     adjust(&mut settings);
     let fixture = personalization::start_with_setup(home, settings, true, move |app| {
-        app.observe(move |_, batch| {
-            let mut recorded = observed.lock().unwrap();
-            for item in &batch.items {
-                match item {
-                    MountItem::Component { id, name } if name.as_ref() == "tv.player" => {
-                        recorded.players.push(*id)
-                    }
-                    MountItem::ComponentProps { props, .. } => {
-                        for (key, value) in props {
-                            if key.as_ref() == "source"
-                                && let Some(source) =
-                                    value.as_ref().map(crate::support::upstream_source)
-                                && let Some(url) = source["url"].as_str()
-                            {
-                                recorded.sources.push(url.into());
-                            }
-                        }
-                    }
-                    MountItem::Insert { child, .. } => {
-                        *recorded.inserts.entry(*child).or_default() += 1
-                    }
-                    MountItem::Remove { id } | MountItem::Delete { id } => {
-                        recorded.removed.push(*id)
-                    }
-                    _ => {}
-                }
-            }
-        });
+        record_players_into(app, recorder);
     });
     (fixture, lifetime)
 }

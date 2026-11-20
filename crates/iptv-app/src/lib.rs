@@ -39,6 +39,9 @@ mod i18n;
 #[cfg(feature = "test-support")]
 pub use i18n::pseudo_fixed_for_test;
 mod input;
+/// Take keys as an Android remote's raw Down/Repeat/Up phases (headless tests).
+#[cfg(feature = "test-support")]
+pub use input::use_remote_key_phases;
 mod keyboard;
 mod list_rows;
 mod lists;
