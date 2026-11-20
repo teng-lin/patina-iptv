@@ -190,6 +190,8 @@ pub(crate) fn playlists_in(store: &Store) -> Result<Vec<Playlist>, StoreError> {
                 name: s.name,
                 kind: s.kind,
                 channels: s.import.counts.channels,
+                movies: s.import.counts.vod,
+                series: s.import.counts.series,
                 updated_at: s.import.last_success_at,
                 failed: s.import.last_error.map(|k| (k, s.import.last_error_at)),
                 guide_failed: guide.as_ref().is_some_and(|g| g.last_error.is_some()),

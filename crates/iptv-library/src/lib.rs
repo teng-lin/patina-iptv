@@ -181,6 +181,9 @@ pub struct Playlist {
     pub kind: SourceKind,
     /// Live channels of the last successful import.
     pub channels: u32,
+    /// Movies and series of the last successful import.
+    pub movies: u32,
+    pub series: u32,
     pub updated_at: Option<i64>,
     /// The last refresh failed (and when); the channels before it remain.
     pub failed: Option<(ImportErrorKind, Option<i64>)>,

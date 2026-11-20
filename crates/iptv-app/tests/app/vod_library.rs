@@ -1583,7 +1583,8 @@ fn movies_and_shows_stay_visible_with_an_empty_catalogue_on_desktop_and_tv() {
         for id in ["open-movies", "open-shows"] {
             step(app.wait_for(&format!("id:{id}")));
             step(app.press(&format!("id:{id}")));
-            step(app.wait_for("text:No titles found. Enable movie and series imports in playlist settings, then refresh your playlist."));
+            step(app.wait_for(M3U_ONLY));
+            step(app.wait_for("id:vod-empty >> label:Add playlist"));
             step(app.press("id:vod-screen >> label:Close"));
             step(app.wait_for_gone("id:vod-screen", Duration::from_secs(2)));
             assert_eq!(player(app), surface);
@@ -1593,7 +1594,8 @@ fn movies_and_shows_stay_visible_with_an_empty_catalogue_on_desktop_and_tv() {
         for label in ["Movies", "Shows"] {
             step(app.wait_for(&format!("id:navigation-rail >> label:{label}")));
             step(app.press(&format!("id:navigation-rail >> label:{label}")));
-            step(app.wait_for("text:No titles found. Enable movie and series imports in playlist settings, then refresh your playlist."));
+            step(app.wait_for(M3U_ONLY));
+            step(app.wait_for("id:vod-empty >> label:Add playlist"));
             step(app.press("id:vod-screen >> label:Close"));
             step(app.wait_for_gone("id:vod-screen", Duration::from_secs(2)));
         }
@@ -1603,4 +1605,251 @@ fn movies_and_shows_stay_visible_with_an_empty_catalogue_on_desktop_and_tv() {
             "discovery never tunes live video"
         );
     }
+    // On the remote, OK where the titles would be adds a playlist.
+    step(app.wait_for("id:open-movies"));
+    step(app.press("id:open-movies"));
+    step(app.wait_for(M3U_ONLY));
+    step(app.press_key("right"));
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("id:vod-screen", Duration::from_secs(2)));
+    step(app.wait_for("text:Xtream Codes login"));
+}
+
+const M3U_ONLY: &str = "text:Movies and shows come from Xtream Codes and Stalker playlists. M3U playlists have live channels only.";
+
+/// What the generated Xtream Codes server answers: every request fails,
+/// or an account with one live channel and (`movies`) one movie.
+#[derive(Clone, Copy, Default)]
+struct Provider {
+    failing: bool,
+    movies: bool,
+}
+
+/// A local Xtream Codes server answering as `provider` says at each
+/// request. Its base URL.
+fn provider_server(provider: Arc<Mutex<Provider>>) -> String {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut first = String::new();
+            let _ = reader.read_line(&mut first);
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                    break;
+                }
+            }
+            let target = first.split(' ').nth(1).unwrap_or("/");
+            let action = target
+                .split(['?', '&'])
+                .find_map(|p| p.strip_prefix("action="))
+                .unwrap_or("");
+            let now = crate::support::now();
+            let answer = *provider.lock().unwrap();
+            let (status, body) = if answer.failing {
+                ("503 Service Unavailable", String::new())
+            } else if target.starts_with("/xmltv.php") {
+                ("200 OK", "<?xml version=\"1.0\"?><tv></tv>".to_owned())
+            } else {
+                let body = match action {
+                    "" | "get_account_info" => format!(
+                        concat!(
+                            r#"{{"user_info":{{"username":"generated-user","password":"generated-pass","auth":1,"#,
+                            r#""status":"Active","exp_date":"{}","is_trial":"0","active_cons":"0","#,
+                            r#""max_connections":"1","allowed_output_formats":["ts"]}},"#,
+                            r#""server_info":{{"url":"127.0.0.1","port":"{port}","server_protocol":"http","#,
+                            r#""timezone":"UTC","timestamp_now":{now}}}}}"#,
+                        ),
+                        now + 30 * 86_400,
+                        port = port,
+                        now = now,
+                    ),
+                    "get_live_categories" => {
+                        r#"[{"category_id":"1","category_name":"Generated group","parent_id":0}]"#
+                            .to_owned()
+                    }
+                    "get_live_streams" => concat!(
+                        r#"[{"num":1,"name":"Generated live","stream_type":"live","#,
+                        r#""stream_id":1,"category_id":"1","tv_archive":0}]"#
+                    )
+                    .to_owned(),
+                    "get_vod_streams" if answer.movies => concat!(
+                        r#"[{"stream_id":10,"name":"Generated Aurora","added":"1700000100","#,
+                        r#""container_extension":"mp4"}]"#
+                    )
+                    .to_owned(),
+                    _ => "[]".to_owned(),
+                };
+                ("200 OK", body)
+            };
+            let _ = write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    format!("http://127.0.0.1:{port}")
+}
+
+/// A stored Xtream Codes playlist of the generated provider at `base`, with
+/// a live channel and no movies or series, not refreshed at startup.
+/// `include_vod` is the global movie and series import. Its store path and
+/// source.
+fn provider_playlist(
+    home: &crate::isolated::Home,
+    base: &str,
+    include_vod: bool,
+) -> (std::path::PathBuf, iptv_library::SourceId) {
+    let root = crate::isolated::data_dir(home.path());
+    std::fs::create_dir_all(&root).unwrap();
+    let mut settings = iptv_settings::Settings::new();
+    for (key, value) in [
+        ("general.resume_last_channel", false),
+        ("guide.autoplay", false),
+        ("playlists.include_vod", include_vod),
+    ] {
+        settings
+            .set(key, iptv_settings::Value::Bool(value))
+            .unwrap();
+    }
+    std::fs::write(root.join("settings.json"), settings.to_json_string()).unwrap();
+    let path = root.join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    let source = store
+        .add_source(&Source {
+            name: "Generated provider".into(),
+            config: SourceConfig::Xtream(XtreamCredentials {
+                server_url: base.to_owned(),
+                username: Secret::new("generated-user"),
+                password: Secret::new("generated-pass"),
+                user_agent: None,
+            }),
+        })
+        .unwrap();
+    let parsed = iptv_providers::m3u::parse_m3u(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"Generated group\",Generated live\nhttps://example.test/live.ts\n",
+    );
+    store
+        .replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
+        .unwrap();
+    store
+        .set_source_policy(
+            source,
+            iptv_store_sqlite::SourcePolicy {
+                refresh_on_start: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    (path, source)
+}
+
+fn open_movies(app: &mut Headless) {
+    step(app.wait_for("id:open-movies"));
+    step(app.press("id:open-movies"));
+    step(app.wait_for("id:vod-screen"));
+}
+
+/// The empty screen's one action: OK where the titles would be (Right from
+/// the categories), or a click.
+fn empty_action(app: &mut Headless, tv: bool, label: &str) {
+    step(app.wait_for(&format!("id:vod-empty >> label:{label}")));
+    assert_eq!(app.screen().count("id:vod-empty-action").unwrap(), 1);
+    if tv {
+        step(app.press_key("right"));
+        step(app.press_key("enter"));
+    } else {
+        step(app.press("id:vod-empty-action"));
+    }
+}
+
+/// A failed import says so and Retry runs it again; an import that found no
+/// movies offers Refresh, which brings the provider's new movie in place.
+fn failed_then_empty(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
+    let provider = Arc::new(Mutex::new(Provider {
+        failing: true,
+        movies: false,
+    }));
+    let base = provider_server(provider.clone());
+    let (path, source) = provider_playlist(&home, &base, true);
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    store
+        .record_import_failure(source, iptv_library::ImportErrorKind::Network)
+        .unwrap();
+    drop(store);
+    let tv = idiom == nsh_core::platform::Idiom::Tv;
+    let mut app = Headless::start(engine(idiom)).unwrap();
+    step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
+    open_movies(&mut app);
+    step(app.wait_for("text:Last refresh failed: no answer from the server"));
+    // The provider answers now, still without movies: Retry imports again.
+    provider.lock().unwrap().failing = false;
+    empty_action(&mut app, tv, "Retry");
+    step(app.wait_for_within(
+        "text:No movies yet. The last refresh found none.",
+        Duration::from_secs(20),
+    ));
+    assert_eq!(
+        app.screen()
+            .count("text:Last refresh failed: no answer from the server")
+            .unwrap(),
+        0
+    );
+    // The provider adds a movie: Refresh brings it into the open screen.
+    provider.lock().unwrap().movies = true;
+    if tv {
+        // The remote is still where the titles would be.
+        step(app.wait_for("id:vod-empty >> label:Refresh now"));
+        step(app.press_key("enter"));
+    } else {
+        empty_action(&mut app, tv, "Refresh now");
+    }
+    step(app.wait_for_within("text:Generated Aurora", Duration::from_secs(20)));
+    assert_eq!(app.screen().count("id:vod-empty").unwrap(), 0);
+}
+
+#[test]
+fn tv_remote_retries_a_failed_import_and_refreshes_an_empty_one() {
+    let Some(home) = isolated!() else { return };
+    failed_then_empty(home, nsh_core::platform::Idiom::Tv);
+}
+
+#[test]
+fn desktop_retries_a_failed_import_and_refreshes_an_empty_one() {
+    let Some(home) = isolated!() else { return };
+    failed_then_empty(home, nsh_core::platform::Idiom::Desktop);
+}
+
+/// With the movie and series import off, the empty screen opens that
+/// playlist's actions at the import switch. Nothing switches it on by
+/// itself; once the viewer does and refreshes, the movie arrives.
+#[test]
+fn an_import_switched_off_opens_that_playlists_import_switch() {
+    let Some(home) = isolated!() else { return };
+    let provider = Arc::new(Mutex::new(Provider {
+        failing: false,
+        movies: true,
+    }));
+    let base = provider_server(provider);
+    provider_playlist(&home, &base, false);
+    let mut app = Headless::start(engine(nsh_core::platform::Idiom::Desktop)).unwrap();
+    step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
+    open_movies(&mut app);
+    step(app.wait_for("text:Movie and series imports are off for this playlist."));
+    empty_action(&mut app, false, "Playlist settings");
+    step(app.wait_for_gone("id:vod-screen", Duration::from_secs(2)));
+    step(app.wait_for("text:Movies and series: No"));
+    step(app.press("text:Movies and series: No"));
+    step(app.wait_for("text:Movies and series: Yes"));
+    step(app.press("text:Refresh now"));
+    step(app.wait_for_within("text:Generated provider", Duration::from_secs(20)));
+    step(app.back());
+    step(app.wait_for_gone("text:Generated provider", Duration::from_secs(5)));
+    open_movies(&mut app);
+    step(app.wait_for_within("text:Generated Aurora", Duration::from_secs(20)));
 }

@@ -15,6 +15,7 @@ use iptv_nav::Action;
 use nsh_base::input;
 use nsh_core::prelude::*;
 mod browser;
+mod empty;
 fn edit<R>(ui: Ui, f: impl FnOnce(&mut iptv_core::vod::Screen) -> R) -> R {
     let mut result = None;
     ui.vod.update(|s| result = Some(f(s)));
@@ -511,6 +512,8 @@ fn activate(ui: Ui) {
         Control::Catalogue => {
             if let Some(key) = ui.vod.with_untracked(|s| s.focused.clone()) {
                 select(ui, key);
+            } else {
+                empty::run(ui);
             }
         }
         Control::Source => cycle_source(ui),

@@ -56,6 +56,18 @@ pub fn open(ui: Ui) {
     }
 }
 
+/// Opens the screen at playlist `id`'s movie and series import (an empty
+/// Movies or Shows screen's "Playlist settings"). Switching it stays the
+/// viewer's choice.
+pub fn open_on_demand(ui: Ui, id: SourceId) {
+    open(ui);
+    ui.playlists.update(|s| {
+        if let Some(s) = s {
+            s.open_actions(id, Act::OnDemand);
+        }
+    });
+}
+
 pub fn close(ui: Ui) {
     if ui.playlists.with_untracked(Option::is_some) {
         ui.playlists.set(None);
@@ -172,6 +184,17 @@ fn perform(ui: Ui, effect: Effect) {
                 Ok(())
             }
             Effect::Policy(id, policy) => data::set_policy(&crate::runtime(), id, policy).await,
+            Effect::ToggleOnDemand(id) => {
+                let on = on_demand(id);
+                if let Err(e) = crate::runtime().set_playlist_setting(
+                    id,
+                    iptv_settings::keys::PLAYLISTS_INCLUDE_VOD.as_str(),
+                    iptv_settings::Value::Bool(!on),
+                ) {
+                    crate::settings_view::notify_setting_error(e);
+                }
+                Ok(())
+            }
             Effect::CustomGroups(id) => {
                 crate::custom_groups::open(ui, id, false);
                 Ok(())
@@ -235,6 +258,7 @@ fn effect_name(effect: &Effect) -> String {
         Effect::Show(id) => format!("show {}", id.0),
         Effect::Refresh(id) => format!("refresh {}", id.0),
         Effect::Policy(id, _) => format!("playlist policy {}", id.0),
+        Effect::ToggleOnDemand(id) => format!("movie and series import of {}", id.0),
         Effect::CustomGroups(id) => format!("custom groups {}", id.0),
         Effect::Organize(id, _) => format!("organize {}", id.0),
         Effect::Rename(id, _) => format!("rename {}", id.0),
@@ -248,6 +272,15 @@ fn effect_name(effect: &Effect) -> String {
         }
         Effect::Close => "close".to_owned(),
     }
+}
+
+/// Whether playlist `id` imports its movies and series (its own setting,
+/// else the global one).
+fn on_demand(id: SourceId) -> bool {
+    crate::settings::get().bool(
+        iptv_settings::keys::PLAYLISTS_INCLUDE_VOD,
+        &iptv_settings::Target::playlist(id.0.to_string()),
+    )
 }
 
 // --- View ----------------------------------------------------------------------
@@ -567,6 +600,13 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
                     "Refresh on startup: {answer}",
                     &[("answer", yes_no(p.policy.refresh_on_start).into())],
                 ),
+                (Act::OnDemand, Some(_)) => {
+                    ui.app.settings.get();
+                    trf(
+                        "Movies and series: {answer}",
+                        &[("answer", yes_no(on_demand(id)).into())],
+                    )
+                }
                 _ => words::act(act, kind, shown, running()).to_owned(),
             }
         };

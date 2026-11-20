@@ -228,7 +228,7 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
     }
 }
 
-fn notify_setting_error(error: crate::settings::SaveError) {
+pub(crate) fn notify_setting_error(error: crate::settings::SaveError) {
     if matches!(error, crate::settings::SaveError::ParentalLocked) {
         notify(tr("Unlock parental controls before changing settings"));
     } else {

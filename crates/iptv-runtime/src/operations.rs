@@ -137,6 +137,17 @@ impl Runtime {
         crate::settings::set(self, key, value)
     }
 
+    /// Stores `value` for `key` as playlist `source`'s own setting.
+    pub fn set_playlist_setting(
+        self: &Rc<Self>,
+        source: SourceId,
+        key: &str,
+        value: iptv_settings::Value,
+    ) -> Result<(), crate::settings::SaveError> {
+        let at = iptv_settings::Target::playlist(source.0.to_string());
+        crate::settings::set_in(self, key, &at, value)
+    }
+
     /// Remembers `key` as the last channel of `source` (a zap never waits
     /// for the disk).
     pub fn save_last_channel(&self, source: Option<SourceId>, key: &str) {

@@ -176,6 +176,16 @@ pub(crate) fn set(
     key: &str,
     value: Value,
 ) -> Result<(), SaveError> {
+    set_in(owner, key, &Target::Global, value)
+}
+
+/// [`set`] at `at`: a playlist's own value overrides the global one there.
+pub(crate) fn set_in(
+    owner: &std::rc::Rc<super::Runtime>,
+    key: &str,
+    at: &Target,
+    value: Value,
+) -> Result<(), SaveError> {
     let protect_all = owner.settings().get("parental.require_pin_for").ok()
         == Some(Value::Enum("blocked_content_and_settings".into()));
     if (key.starts_with("parental.") || protect_all) && !owner.parental_settings_allowed() {
@@ -186,7 +196,7 @@ pub(crate) fn set(
     }
     let services = owner.services();
     let mut next = (*services.settings()).clone();
-    let changes = next.set(key, value).map_err(SaveError::Invalid)?;
+    let changes = next.set_in(key, at, value).map_err(SaveError::Invalid)?;
     let json = next.to_json_string();
     let next = Arc::new(next);
     replace(services.shared_settings(), next.clone());
