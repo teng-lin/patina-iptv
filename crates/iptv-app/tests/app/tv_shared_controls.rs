@@ -557,6 +557,13 @@ fn touch_and_pointer_reach_the_menu_without_a_shortcut() {
     step(app.wait_for("id:channel-list-more"));
     // Down then Enter played the second row; the first row's ⋯ is pressed.
     step(app.wait_for("text:2  Local B  ▶"));
+    // The row's ▶ can show before the player is told to open Local B (a
+    // slow runner): count from that open, not before it.
+    step(
+        app.wait_until("Local B's stream opens", Duration::from_secs(5), |_| {
+            iptv_app::player_opens(0) > opens
+        }),
+    );
     let playing = iptv_app::player_opens(0);
     step(app.press("label:More options for Local A"));
     menu_opens_for(app, "Local A");
