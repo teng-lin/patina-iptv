@@ -336,7 +336,17 @@ below wins, after "some playlist has titles".
 On a remote the action sits where the titles would be: Right from the
 categories, then OK. If the action moves to another playlist while the remote
 is on it, the remote goes back to the categories, so OK never acts on a
-playlist the screen did not show. In a Compact window (see
+playlist the screen did not show. In a Medium or Expanded window with no
+action (an import running, or titles only elsewhere) the remote never rests
+on the empty place: an action that goes away (Refresh now started) sends it
+to the categories, Right from the categories reaches Search and Sort, Down
+from them stays, Left from Search returns to the categories, OK on a
+category stays, and closing Search keeps the remote on it. Search closed
+while its list is still being read keeps the remote on Search until the
+list arrives, then moves it to the titles or the action if there is one. A
+remote sent off the action's place this way stays off a later action, even
+when the window becomes Compact, until it moves there itself. Once an action
+shows, Right and Down reach it as before. In a Compact window (see
 [Layout classes](#layout-classes)) the message and action take the width and
 the categories give way. A remote or keyboard that was on the categories goes
 to the action, or to the rail when there is no action (an import running) or
