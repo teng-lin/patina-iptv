@@ -50,7 +50,7 @@ Windows and Command on macOS.
 | I | Information |
 | G | Back to the guide |
 | Home | The programmes on now |
-| Shift+← and Shift+→, Ctrl+← and Ctrl+→ | An hour, a day through the guide |
+| Shift+← and Shift+→, Mod+← and Mod+→ | An hour, a day through the guide |
 | 0–9 | Channel number |
 | Ctrl+M | Mute or unmute |
 | Ctrl+↑ and Ctrl+↓ (Cmd on macOS) | Volume |
@@ -68,8 +68,9 @@ Windows and Command on macOS.
 - **Now: text fields keep their keys.** While a field edits (search, a
   playlist address, a PIN), letters, digits, Space, /, =, -, [, ], the
   arrows, Home, Backspace, selection and the system's copy, cut and paste
-  go to the field and no shortcut fires. Ctrl+M and Ctrl+↑/↓ still change
-  the focused window's sound. Typing never zaps, closes or pauses anything.
+  go to the field and no shortcut fires; Ctrl+↑/↓ stay with the field too.
+  A Ctrl shortcut the field does not use, such as Ctrl+M, still acts on the
+  focused window's player. Typing never zaps, closes or pauses anything.
 
 ## Full screen
 
@@ -94,11 +95,15 @@ separate player window for that channel, beside the main window's player.
 
 - **Now: one window has the sound.** A new player window opens muted, and
   its title says so ("Music 05 · muted"); the title is the channel's name
-  alone in the window that has the sound. The main player shows its sound in
+  alone in the window that has the sound. A compact window keeps the title
+  "Picture-in-Picture" (window managers' rules match it), so there its Mute
+  control shows the sound. The main player shows its sound in
   its play bar's Mute control. Only an explicit sound control moves the
   sound: a window's Mute or volume, or the main player's Mute, Ctrl+M or
   volume, which takes the sound back from the other windows. Clicking into
-  a window or moving the keyboard focus never moves the sound.
+  a window or moving the keyboard focus never moves the sound. Closing the
+  window that has the sound gives it back to the main player, unless the
+  main player is muted.
 - **Now:** each window shows its own channel and keeps its own pause,
   volume, audio delay and channel list. A window's compact
   picture-in-picture is that window made small and floating; its player and
@@ -128,8 +133,10 @@ recordings keep the app running, as it already did when quitting.
 
 ## Displays and hosts
 
-- **Now:** when a display is removed, displays are arranged again, or a
-  window's saved place is on a display no longer there, a Patina window
+- **Now (macOS, Windows):** when a display is removed, displays are
+  arranged again, a window first shows on a saved place whose display is no
+  longer there, or a window comes back from minimized or full screen, a
+  Patina window
   whose title bar can no longer be grabbed moves onto the nearest remaining
   display, at its size or smaller
   (`iptv_core::playback_windows::reachable`). A window the viewer can

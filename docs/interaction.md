@@ -39,8 +39,9 @@ The app tracks the last input used, not the device type.
 | Pointer | Mouse or trackpad movement or click | Visible controls and hover; no key hints |
 
 - **Now:** all three modes (`iptv_core::layout::InputMode`). Each press records
-  whether a finger or a mouse, trackpad or pen made it; mouse movement over
-  full-screen video counts as Pointer. A remote's Back counts as a key. The
+  whether a finger or a mouse, trackpad or pen made it; on desktop, mouse
+  movement anywhere (and a sideways wheel in the guide) counts as Pointer,
+  without moving focus. A remote's Back counts as a key. The
   main window starts in Touch on phones and tablets (Android and iOS) and in
   Keys on TVs, desktops and terminals; a separate desktop player window
   starts in Pointer. A tablet with a keyboard

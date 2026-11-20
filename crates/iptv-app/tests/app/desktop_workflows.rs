@@ -61,6 +61,7 @@ impl Observed {
             .unwrap_or(Value::Null)
     }
 
+    #[cfg_attr(windows, allow(dead_code))]
     fn title(&self, window: &str) -> String {
         self.titles
             .lock()
@@ -68,6 +69,40 @@ impl Observed {
             .get(window)
             .cloned()
             .unwrap_or_default()
+    }
+}
+
+/// Set to show the main window again, as opening Patina again does.
+static REOPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The app, with a way to bring its hidden main window back.
+#[component]
+fn WindowHarness() -> impl IntoElement {
+    let window = nsh_core::element::desktop::main_window();
+    let _timer = set_interval(Duration::from_millis(10), move || {
+        if REOPEN.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            window.focus();
+        }
+    });
+    <iptv_app::App as nsh_core::element::Component>::element(())
+}
+
+/// Shows the hidden main window again and waits until it is visible.
+#[cfg_attr(windows, allow(dead_code))]
+fn reopen(app: &mut Headless) {
+    REOPEN.store(true, std::sync::atomic::Ordering::SeqCst);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !app
+        .window_state("main")
+        .unwrap()
+        .is_some_and(|window| window.visible)
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the main window came back"
+        );
+        app.settle();
+        std::thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -184,7 +219,7 @@ fn start(
     }
     drop(store);
 
-    let mut config = EngineConfig::new(Root::of::<iptv_app::App>());
+    let mut config = EngineConfig::new(Root::of::<WindowHarness>());
     config.viewport = Size::new(px(1280.0), px(720.0));
     config.environment.os = nsh_core::platform::Os::Linux;
     config.environment.idiom = Idiom::Desktop;
@@ -322,9 +357,9 @@ fn the_wheel_right_click_and_hover_never_tune_and_every_menu_has_a_visible_way_i
     // Right-click on a channel opens its menu without tuning; Back
     // (Escape, as the real-window run checks) closes it.
     step(app.right_click(&format!("id:guide-ui >> text:{}", channel(3))));
-    step(app.wait_for("text:Watch in new window"));
+    step(app.wait_for("id:menu-panel >> text:Add to favourites"));
     step(app.back());
-    step(app.wait_for_gone("text:Watch in new window", Duration::from_secs(3)));
+    menu_closed(app);
     assert_eq!(iptv_app::player_opens(0), opens, "a menu tunes nothing");
 
     // The guide's groups column: right-click and the shown group's ⋯ open
@@ -354,6 +389,18 @@ fn the_wheel_right_click_and_hover_never_tune_and_every_menu_has_a_visible_way_i
     // Keys hide the ⋯: they have Menu and Shift+F10.
     step(app.press_key("down"));
     step(app.wait_for_gone("id:group-more", Duration::from_secs(3)));
+    // Moving the mouse again brings it back, without moving the focus or
+    // tuning anything.
+    let focused = |app: &Headless| {
+        app.screen()
+            .accessibility_state("id:guide-groups >> label:Generated sport")
+            .is_ok_and(|s| s.selected)
+    };
+    let before = focused(app);
+    step(app.hover(&format!("id:guide-ui >> text:{}", channel(24))));
+    step(app.hover(&format!("id:guide-ui >> text:{}", channel(26))));
+    step(app.wait_for("id:guide-groups >> id:group-more"));
+    assert_eq!(focused(app), before, "the mouse moved no focus");
     step(app.press_key("up"));
     assert_eq!(iptv_app::player_opens(0), opens);
 
@@ -369,8 +416,12 @@ fn the_wheel_right_click_and_hover_never_tune_and_every_menu_has_a_visible_way_i
         before,
         "the wheel scrolls recordings"
     );
-    step(app.hover("id:recording-job >> nth=0"));
     let more = "role:button[/^More options for Generated recording/] >> nth=0";
+    // After keys, moving the mouse over the list shows the ⋯ again.
+    step(app.press_key("down"));
+    step(app.wait_for_gone(more, Duration::from_secs(3)));
+    step(app.hover("id:recording-job >> nth=0"));
+    step(app.hover("id:recording-job >> nth=1"));
     step(app.wait_for(more));
     step(app.press(more));
     step(app.wait_for("text:Cancel recording >> nth=0"));
@@ -555,7 +606,7 @@ fn window_full_screen_resizing_and_display_scale_keep_the_stream_and_the_channel
     let row = format!("id:channel-list >> text:{}", shown[shown.len() / 2]);
     step(app.hover(&row));
     step(app.right_click(&row));
-    step(app.wait_for("id:menu-panel >> text:Watch in new window"));
+    step(app.wait_for("id:menu-panel >> text:Add to favourites"));
     step(app.back());
     menu_closed(app);
     assert_eq!(iptv_app::player_opens(0), opens, "the list tunes nothing");
@@ -654,6 +705,8 @@ fn typing_shortcut_characters_in_a_field_edits_it_and_controls_no_player() {
     );
 }
 
+// Player windows ("Watch in new window") exist on Linux and macOS only.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn keys_follow_the_focused_window_and_focus_never_moves_the_sound() {
     let Some(home) = isolated!() else { return };
@@ -749,12 +802,15 @@ fn keys_follow_the_focused_window_and_focus_never_moves_the_sound() {
     assert_eq!(iptv_app::player_opens(0), main_opens);
 }
 
+// Player windows ("Watch in new window") exist on Linux and macOS only.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn closing_the_main_window_during_recordings_ends_every_viewing_window() {
     let Some(home) = isolated!() else { return };
     let mut fixture = start(home, |_| {});
     let app = &mut fixture.app;
     play_then_guide(app, 3);
+    let opens = iptv_app::player_opens(0);
     step(app.right_click(&format!("id:guide-ui >> text:{}", channel(6))));
     step(app.press("id:menu-panel >> text:Watch in new window"));
     step(
@@ -763,6 +819,17 @@ fn closing_the_main_window_during_recordings_ends_every_viewing_window() {
         }),
     );
     assert!(app.window_state("player-window-1").unwrap().is_some());
+    // The main player in its own picture-in-picture window too.
+    step(app.press(&format!("id:guide-ui >> text:{}", channel(3))));
+    assert_eq!(
+        iptv_app::player_opens(0),
+        opens,
+        "the channel already plays"
+    );
+    show_controls(app, "id:app-ui >> label:Picture in picture");
+    step(app.press("id:app-ui >> label:Picture in picture"));
+    app.settle();
+    assert!(app.window_state("pip").unwrap().is_some());
 
     // Scheduled recordings keep the app running in the background: the
     // main window hides, and every viewing window closes with it.
@@ -773,9 +840,58 @@ fn closing_the_main_window_during_recordings_ends_every_viewing_window() {
         app.window_state("player-window-1").unwrap().is_none(),
         "a player window does not outlive the main window"
     );
+    assert!(
+        app.window_state("pip").unwrap().is_none(),
+        "nor does the picture-in-picture window"
+    );
     assert!(!iptv_app::player_has_source(0));
     assert!(
         fixture.seen.player(1).is_none(),
         "the second player is gone with its window"
+    );
+
+    // Opening Patina again plays nothing by itself, and choosing the same
+    // channel plays it again (it no longer counts as playing).
+    reopen(app);
+    app.idle(Duration::from_millis(300)).unwrap();
+    assert!(!iptv_app::player_has_source(0), "reopening plays nothing");
+    assert!(app.window_state("pip").unwrap().is_none());
+    assert!(app.window_state("player-window-1").unwrap().is_none());
+    step(app.wait_for(&format!("id:guide-ui >> text:{}", channel(3))));
+    let before = iptv_app::player_opens(0);
+    step(app.press(&format!("id:guide-ui >> text:{}", channel(3))));
+    step(app.wait_until(
+        "the same channel plays again",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0),
+    ));
+    assert!(iptv_app::player_opens(0) > before);
+    assert!(video_full_screen(app));
+
+    // The same without picture-in-picture: the main player alone, back in
+    // the guide's preview when the window closes.
+    for _ in 0..3 {
+        if !video_full_screen(app) {
+            break;
+        }
+        step(app.back());
+    }
+    assert!(iptv_app::player_has_source(0));
+    step(app.press_window_close("main"));
+    app.idle(Duration::from_millis(300)).unwrap();
+    assert!(!iptv_app::player_has_source(0));
+    reopen(app);
+    app.idle(Duration::from_millis(300)).unwrap();
+    assert!(!iptv_app::player_has_source(0), "reopening plays nothing");
+    let before = iptv_app::player_opens(0);
+    step(app.press(&format!("id:guide-ui >> text:{}", channel(3))));
+    step(app.wait_until(
+        "the same channel plays again",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0),
+    ));
+    assert!(
+        iptv_app::player_opens(0) > before,
+        "a new stream, not a stale one"
     );
 }

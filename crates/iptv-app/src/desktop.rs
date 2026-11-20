@@ -51,11 +51,12 @@ pub fn bind(ui: Ui) {
             // One contract with or without recordings (`docs/desktop.md`,
             // "Closing"): closing the main window ends every viewing
             // window's playback, as quitting does. Only the recorder runs on.
+            // The viewer's Stop, not only the stream's: nothing counts as
+            // playing, so choosing the same channel after reopening plays it.
             crate::parental_view::hidden(ui);
-            crate::multiview::close(ui);
             crate::pip::exit(ui, iptv_core::pip_window::Exit::Close);
             player_windows::close_all(ui);
-            crate::player::stop(ui);
+            crate::player_keys::stop_playback(ui);
             close_window.hide();
         } else {
             quit(ui);
@@ -72,45 +73,69 @@ pub fn bind(ui: Ui) {
 /// window manager or compositor keeps windows on the displays there are.
 const POSITIONS: bool = cfg!(any(target_os = "macos", windows));
 
-/// Keeps `window` reachable when displays go away or are arranged again
-/// (and at launch, for bounds restored from a display no longer there):
+/// Keeps `window` reachable when displays go away or are arranged again,
+/// when it first reports its state (a saved place restored onto a display
+/// no longer there), and when it comes back from minimized or full screen:
 /// it moves onto the nearest remaining display by
-/// [`iptv_core::playback_windows::reachable`]. A window the viewer can
-/// still grab is never moved. Presentation only: nothing plays or stops.
+/// [`iptv_core::playback_windows::reachable`]. The viewer's own moves and
+/// resizes do not run it, and a window the viewer can still grab is never
+/// moved. Presentation only: nothing plays or stops.
 pub(crate) fn keep_reachable(window: WindowRef) {
     if !POSITIONS {
         return;
     }
+    // Changes when the window first reports its state and when it enters
+    // or leaves a plain on-screen window; not when it is dragged.
+    let settled = {
+        let window = window.clone();
+        nsh_core::prelude::computed(move || window.state().map(|s| on_screen(&s)))
+    };
+    effect(move || {
+        let displays = nsh_core::element::desktop::displays();
+        if settled.get() != Some(true) {
+            return;
+        }
+        untracked(|| {
+            let Some(frame) = window.state().and_then(|s| recovery(&s, &displays)) else {
+                return;
+            };
+            log::info!(
+                "iptv window {}: back onto a display at {:?},{:?}",
+                window.id(),
+                frame.x,
+                frame.y
+            );
+            window.set_bounds(frame);
+        });
+    });
+}
+
+/// A plain window on the screen: the only kind Patina moves.
+fn on_screen(state: &nsh_core::desktop::WindowState) -> bool {
+    state.mode == WindowMode::Normal && !state.minimized
+}
+
+/// Where a window in `state` must go to be reachable on `displays`, if
+/// anywhere ([`keep_reachable`]).
+fn recovery(
+    state: &nsh_core::desktop::WindowState,
+    displays: &[nsh_core::desktop::Display],
+) -> Option<nsh_core::desktop::WindowFrame> {
+    if !on_screen(state) {
+        return None;
+    }
     let rect = |b: nsh_core::Bounds<nsh_core::Points>| {
         (b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0)
     };
-    effect(move || {
-        let areas: Vec<_> = nsh_core::element::desktop::displays()
-            .iter()
-            .map(|d| rect(d.visible_bounds))
-            .collect();
-        untracked(|| {
-            let Some(state) = window.state() else { return };
-            if state.mode != WindowMode::Normal || state.minimized {
-                return;
-            }
-            if let Some((x, y, w, h)) =
-                iptv_core::playback_windows::reachable(rect(state.bounds), &areas)
-            {
-                log::info!(
-                    "iptv window {}: back onto a display at {x},{y}",
-                    window.id()
-                );
-                window.set_bounds(nsh_core::desktop::WindowFrame {
-                    x: Some(px(x)),
-                    y: Some(px(y)),
-                    width: Some(px(w)),
-                    height: Some(px(h)),
-                    ..Default::default()
-                });
-            }
-        });
-    });
+    let areas: Vec<_> = displays.iter().map(|d| rect(d.visible_bounds)).collect();
+    let (x, y, w, h) = iptv_core::playback_windows::reachable(rect(state.bounds), &areas)?;
+    Some(nsh_core::desktop::WindowFrame {
+        x: Some(px(x)),
+        y: Some(px(y)),
+        width: Some(px(w)),
+        height: Some(px(h)),
+        ..Default::default()
+    })
 }
 
 /// Runs `f` on the app's window; `None` off desktops.
@@ -231,6 +256,24 @@ pub fn pointer_moved(x: f32, y: f32, now_ms: u64) -> bool {
         })
 }
 
+/// The mouse is at (`x`, `y`): whether it travelled since the last report
+/// (at least [`TRAVEL`] points). The first report only records the place,
+/// so a resting mouse that a window reports when it opens or redraws
+/// never counts as the viewer moving it.
+pub fn pointer_travelled(x: f32, y: f32) -> bool {
+    TRAVELLED.with(|p| {
+        let last = p.replace(Some((x, y)));
+        last.is_some_and(|(px, py)| (px - x).abs() + (py - y).abs() >= TRAVEL)
+    })
+}
+
+/// How far the mouse must move to count as the viewer using it.
+const TRAVEL: f32 = 4.0;
+
+thread_local! {
+    static TRAVELLED: Cell<Option<(f32, f32)>> = const { Cell::new(None) };
+}
+
 /// How often mouse movement restarts the panels' timer at most.
 const POINTER_EVERY_MS: u64 = 250;
 
@@ -247,5 +290,52 @@ pub(crate) fn quit(ui: Ui) {
         crate::settings_view::notify(tr(
             "The recording host is still closing; try quitting again",
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::recovery;
+    use nsh_core::desktop::{Display, DisplayId, WindowMode, WindowPlacement, WindowState};
+    use nsh_core::geometry::{Bounds, point, px, size};
+
+    fn state(x: f32, y: f32, mode: WindowMode, minimized: bool) -> WindowState {
+        let bounds = Bounds::new(point(px(x), px(y)), size(px(960.0), px(540.0)));
+        let mut state = WindowState::new(bounds, WindowPlacement::new(mode, bounds));
+        state.mode = mode;
+        state.minimized = minimized;
+        state
+    }
+
+    fn display(x: f32, y: f32, w: f32, h: f32) -> Display {
+        let area = Bounds::new(point(px(x), px(y)), size(px(w), px(h)));
+        Display::new(DisplayId(1), area, area, true)
+    }
+
+    #[test]
+    fn only_a_plain_window_off_every_display_moves() {
+        let primary = [display(0.0, 0.0, 1920.0, 1040.0)];
+        // Left on a display that went away: back onto the primary.
+        let frame = recovery(&state(-1400.0, -150.0, WindowMode::Normal, false), &primary)
+            .expect("moved back");
+        assert_eq!((frame.x, frame.y), (Some(px(0.0)), Some(px(0.0))));
+        assert_eq!(
+            (frame.width, frame.height),
+            (Some(px(960.0)), Some(px(540.0)))
+        );
+        // Still grabbable: left where the viewer put it.
+        assert!(recovery(&state(100.0, 80.0, WindowMode::Normal, false), &primary).is_none());
+        // Minimized or full screen: the host places it; checked again when
+        // it comes back (`keep_reachable` tracks that change).
+        assert!(recovery(&state(-1400.0, 0.0, WindowMode::Normal, true), &primary).is_none());
+        assert!(
+            recovery(
+                &state(-1400.0, 0.0, WindowMode::FullScreen, false),
+                &primary
+            )
+            .is_none()
+        );
+        // No display reported: never moved.
+        assert!(recovery(&state(-1400.0, 0.0, WindowMode::Normal, false), &[]).is_none());
     }
 }

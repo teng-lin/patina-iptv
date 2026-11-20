@@ -1071,12 +1071,27 @@ fn toggle_panels(ui: Ui) {
     }
 }
 
+/// The pointer is what the viewer uses now: Pointer mode, without the
+/// side effects of a press ([`Ui::touched`]).
+pub(crate) fn pointer_input(ui: Ui) {
+    if ui.input.get_untracked() != Input::Pointer {
+        ui.last_press.set(Input::Pointer);
+        ui.input.set(Input::Pointer);
+    }
+}
+
 /// The mouse moved: over full-screen video with nothing open above the
 /// panels, it shows the play bar (multiview's pointer chrome over its
 /// grid) and keeps it while it moves.
 fn pointer_moved(ui: Ui, e: &MouseEvent) {
     let open = untracked(|| ui.overlay_open(overlays::Overlay::keeps_pointer_from_play_bar));
     let (x, y) = (e.page_position.x.0, e.page_position.y.0);
+    // Anywhere else (the guide, lists, Recordings), a mouse that really
+    // moved after keys switches to Pointer, so the ⋯ controls show: no
+    // focus moves and no playback is scheduled or cancelled.
+    if desktop::pointer_travelled(x, y) {
+        pointer_input(ui);
+    }
     if ui.mode.get_untracked() != ViewMode::Fullscreen
         || open
         || !desktop::pointer_moved(x, y, ui.now_ms())

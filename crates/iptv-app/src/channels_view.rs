@@ -374,7 +374,13 @@ fn entry_row(
                 }
             })
             .text_color(move || mark().text())
-            .mr(move || px(group_more_room(ui, current(), at.index()))),
+            .mr(move || {
+                px(group_more_room(
+                    ui,
+                    current() && !crate::multiview::picking(ui),
+                    at.index(),
+                ))
+            }),
         )
         .child(group_more(
             ui,
@@ -444,9 +450,10 @@ pub(crate) fn group_more(
 
 const GROUP_MORE: f32 = 28.0;
 
-/// The room a group's name leaves at its end for the ⋯ on its row.
-pub(crate) fn group_more_room(ui: Ui, current: bool, entry: usize) -> f32 {
-    if current && !ui.keys_shown() && crate::menu_view::has_group_options(ui, entry) {
+/// The room a group's name leaves at its end for the ⋯ on its row:
+/// `shown` when [`group_more`]'s row and `allowed` conditions hold.
+pub(crate) fn group_more_room(ui: Ui, shown: bool, entry: usize) -> f32 {
+    if shown && !ui.keys_shown() && crate::menu_view::has_group_options(ui, entry) {
         GROUP_MORE + 4.0
     } else {
         0.0

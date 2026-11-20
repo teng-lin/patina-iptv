@@ -49,6 +49,7 @@ pub(super) fn trackball(pan: Pan, grid: impl IntoElement + 'static) -> Scroll {
             // A jump (the offset first set, the scroll recentred) is no
             // wheel: only the steps are.
             if dx != 0.0 && dx.abs() < PAD / 4.0 {
+                crate::pointer_input(pan.ui());
                 pan.wheeled(dx);
             }
         })

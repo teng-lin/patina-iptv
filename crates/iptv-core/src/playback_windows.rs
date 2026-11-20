@@ -166,7 +166,8 @@ pub const GRAB_WIDTH: f32 = 96.0;
 /// change only: the caller moves the window, its player plays on.
 pub fn reachable(window: Rect, areas: &[Rect]) -> Option<Rect> {
     let finite = |r: &Rect| [r.0, r.1, r.2, r.3].into_iter().all(f32::is_finite);
-    if !finite(&window) {
+    // A window with no size (a host's placeholder) is never moved or sized.
+    if !finite(&window) || window.2 <= 0.0 || window.3 <= 0.0 {
         return None;
     }
     let areas: Vec<Rect> = areas
@@ -203,7 +204,11 @@ pub fn reachable(window: Rect, areas: &[Rect]) -> Option<Rect> {
     }
     let (ax, ay, aw, ah) = nearest;
     let (w, h) = (w.min(aw), h.min(ah));
-    Some((x.clamp(ax, ax + aw - w), y.clamp(ay, ay + ah - h), w, h))
+    // `ax + (aw - w)` cannot round below `ax` when `w == aw`, as
+    // `ax + aw - w` can with fractional origins; `max` keeps `clamp`'s
+    // bounds ordered whatever the rounding.
+    let fit = |at: f32, start: f32, room: f32| at.clamp(start, (start + room).max(start));
+    Some((fit(x, ax, aw - w), fit(y, ay, ah - h), w, h))
 }
 
 #[cfg(test)]
@@ -249,6 +254,30 @@ mod tests {
     }
 
     #[test]
+    fn fractional_origins_and_oversized_windows_never_panic() {
+        // Scaled displays report fractional points: a window as wide as
+        // (or wider than) the remaining display, whose origin and width
+        // would round `ax + aw - w` below `ax`.
+        let area = (-3.06, -0.333_333_3, 1514.64, 853.333_3);
+        for window in [
+            (-4000.0, 10.0, 1514.64, 900.0),
+            (-4000.0, 10.0, 3000.5, 2000.25),
+            (853.333_3, -900.0, 1024.0, 853.333_3),
+            (5000.0, 5000.0, 1514.64, 853.333_3),
+        ] {
+            let (x, y, w, h) = reachable(window, &[area]).expect("moved back");
+            assert!(w <= area.2 && h <= area.3, "{window:?} fits");
+            assert!(x >= area.0 && y >= area.1, "{window:?} lands on the area");
+            assert_eq!(reachable((x, y, w, h), &[area]), None, "and stays");
+        }
+        // Mixed-DPI origins on a second display.
+        let right = (1_706.666_7, 0.0, 1024.0, 640.0);
+        let moved = reachable((853.333_3, -700.0, 1024.0, 900.0), &[right]).unwrap();
+        assert_eq!(moved.2, 1024.0);
+        assert!(moved.0 >= right.0);
+    }
+
+    #[test]
     fn the_nearest_display_wins_and_reconnecting_needs_no_move() {
         let right = (1920.0, 0.0, 2560.0, 1400.0);
         // Off the far right: the right display is nearer than the primary.
@@ -259,6 +288,9 @@ mod tests {
             reachable((-1400.0, -150.0, 960.0, 540.0), &[PRIMARY, LEFT]),
             None
         );
+        // A window with no size is never moved or sized to nothing.
+        assert_eq!(reachable((-5000.0, 0.0, 0.0, 360.0), &[PRIMARY]), None);
+        assert_eq!(reachable((-5000.0, 0.0, 640.0, -1.0), &[PRIMARY]), None);
         // Garbage from a host never moves a window.
         assert_eq!(reachable((f32::NAN, 0.0, 640.0, 360.0), &[PRIMARY]), None);
         assert_eq!(
