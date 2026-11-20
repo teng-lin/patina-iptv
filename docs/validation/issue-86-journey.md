@@ -47,8 +47,23 @@ Each Android run used `tools/ci/disposable-avd.py` with a fresh wiped copy
 of the source AVD, recorded `operation.json` with `"result": "passed"`, and
 removed its copy. The smoke's new optional hold (`IPTV_SMOKE_HOLD`) kept the
 app on the same owned emulator for the touch and rotation checks below, and
-its crash and refused-load checks ran after them. Run directories stay under
-`target/android-validation/` and are not committed.
+its crash and refused-load checks ran after them. Paths such as
+`target/android-validation/run-aca2cr_l/smoke/01-first-run.png` are in the
+local run directories, which are not committed; only the screenshots linked
+from `docs/screenshots/issue-86/` are.
+
+Smoke steps are cited by their names in `tools/ci/android-smoke.sh`: "install
+and first start", "add the synthetic playlist", "play a channel in the guide",
+"full screen", "shared TV controls and long OK release" (TV only),
+"multiview with a second player", "background and resume", "back to the
+guide", "refresh during playback", "kill and reopen after a change",
+"recreate the activity", "interrupt then recover a restore" and "hardware
+Search".
+
+"No new stream" below means the app logged no further `player 0 open` line.
+That shows no stream was opened again; it does not show that the native
+player surface survived. Surface and frame continuity on Android were not
+verified here (the screenshots only show video in the preview afterwards).
 
 The Broadway display has no OpenGL, so the desktop real window shows no
 video ("The current backend does not support OpenGL"). Its screenshots show
@@ -64,19 +79,19 @@ here checked it.
 
 | Step | Result | Evidence |
 |---|---|---|
-| Add a source (first run, Add playlist, wizard) | Pass | Smoke steps 1–2, `smoke/01-first-run.png` to `03-playlist-added.png` ("300 channels in 24 groups") |
-| Find TV content in the guide | Pass | Smoke step 3, `04-guide-preview.png` |
-| Choosing plays full screen (remote OK) | Pass | Smoke step 4, `05-fullscreen.png` |
+| Add a source (first run, Add playlist, wizard) | Pass | Smoke "install and first start" and "add the synthetic playlist"; `target/android-validation/run-aca2cr_l/smoke/01-first-run.png` to `03-playlist-added.png` ("300 channels in 24 groups"; run directory, not committed) |
+| Find TV content in the guide | Pass | Smoke "play a channel in the guide"; `smoke/04-guide-preview.png` (run directory, not committed) |
+| Choosing plays full screen (remote OK) | Pass | Smoke "full screen"; `smoke/05-fullscreen.png` (run directory, not committed) |
 | Choosing plays full screen (touch tap on a channel) | Pass | Manual; one `player 0 open` for the tap |
 | Visible Back in full screen (touch) | Pass | [tablet-full-screen-back.png](../screenshots/issue-86/tablet-full-screen-back.png) |
-| Back returns to the same channel, stream continues in the preview | Pass | Tap on ‹ logged `play bar: back`, guide on the chosen channel, no new open |
+| Back returns to the same channel, video shown in the preview | Pass | Tap on ‹ logged `play bar: back`; the guide showed the chosen channel with video in the preview; no new stream. Surface continuity not verified |
 | ⋯ visible for touch in the guide, opens the programme and channel menu | Pass | [tablet-guide-touch.png](../screenshots/issue-86/tablet-guide-touch.png); the menu listed programme and channel actions |
 | Keys hide ⋯ and keep its room; Back stays visible on a tablet | Pass | Manual D-pad after touch: focus highlight shown, ⋯ hidden, title unmoved, ‹ kept |
 | Find movies and series: Movies with an M3U-only library | Pass | [tablet-movies-empty-state.png](../screenshots/issue-86/tablet-movies-empty-state.png): explains M3U has live channels only, offers Add playlist |
 | Close Movies returns to the same channel | Pass | Manual |
-| Rotation to portrait keeps channel, focus and stream | Pass | [tablet-portrait-compact-header.png](../screenshots/issue-86/tablet-portrait-compact-header.png): compact header with the shortcuts on their own row; no `player 0 open` during rotation |
-| Background, resume, kill, recreate, restore: same channel by identity | Pass | Smoke steps 6–12 |
-| Movie and series playback, resume | Not run on Android | The smoke fixture has no Xtream catalogue; see desktop headless |
+| Rotation to portrait keeps channel and focus, opens no stream | Pass | [tablet-portrait-compact-header.png](../screenshots/issue-86/tablet-portrait-compact-header.png): compact header with the shortcuts on their own row, video in the preview; no new stream during rotation. Surface continuity not verified |
+| Background, resume, kill, recreate, restore: same channel by identity | Pass | Smoke "background and resume" through "interrupt then recover a restore" |
+| Movie and series playback, resume | Not run on Android | The smoke fixture is an M3U playlist with no movies or series; only the desktop headless scenarios cover this |
 | Split screen | Not run | |
 | Keyboard and mouse on the tablet | Not run on Android | Headless `pointer::tablet_back_controls`, `tv_shared_controls::a_tablet_shows_the_more_control_before_any_tap` |
 
@@ -84,16 +99,16 @@ here checked it.
 
 | Step | Result | Evidence |
 |---|---|---|
-| Add a source | Pass | Smoke steps 1–2 |
-| Choosing plays full screen (remote OK) | Pass | Smoke step 4 and a manual OK on another channel |
+| Add a source | Pass | Smoke "install and first start" and "add the synthetic playlist" |
+| Choosing plays full screen (remote OK) | Pass | Smoke "full screen" and a manual OK on another channel |
 | Long OK opens the controls without a short-OK action | Pass | Smoke "shared TV controls and long OK release" |
-| Back returns to the guide on the same channel, playing | Pass | Manual: `key=back … ctx=Player action=Some(Back)`, then the guide on the chosen channel |
+| Back returns to the guide on the same channel | Pass | Manual: `key=back … ctx=Player action=Some(Back)`, then the guide on the chosen channel with video in the preview. Surface continuity not verified |
 | No ⋯ and no visible Back with the remote | Pass | [tv-guide-remote.png](../screenshots/issue-86/tv-guide-remote.png): the programme title uses the ⋯'s room |
 | Touch on a TV shows ‹ and ⋯ | Pass | [tv-guide-after-touch.png](../screenshots/issue-86/tv-guide-after-touch.png) |
 | Touch: tap a channel plays full screen; the player's "TV guide" returns to the same channel | Pass | Manual |
 | Movies with an M3U-only library, remote and touch | Pass | Same message and Add playlist; remote Right from the categories focuses the action; Close shows only after touch |
-| Background, resume, kill, recreate, restore | Pass | Smoke steps 6–12 |
-| Movie and series playback | Not run on Android | No Xtream fixture in the smoke |
+| Background, resume, kill, recreate, restore | Pass | Smoke "background and resume" through "interrupt then recover a restore" |
+| Movie and series playback | Not run on Android | The smoke fixture is an M3U playlist with no movies or series |
 
 ### Desktop
 
@@ -107,16 +122,17 @@ here checked it.
 | Resize keeps channel, preview, title and episode on one player, no extra opens | Pass (headless) | `pane_collapse::resizing_the_guide_keeps_the_focused_channel_and_the_playing_preview`, `pane_collapse::resizing_movies_and_shows_keeps_the_title_and_the_episode` |
 | Movies and Shows: play, resume by identity | Pass (headless) | `vod_library::movies_and_series_reach_playback_and_resume_by_identity`, `desktop_clicks_through_continue_watching_and_recently_added` |
 | Empty, failed and disabled imports with their actions | Pass (headless) | `vod_library::desktop_retries_a_failed_import_and_refreshes_an_empty_one`, `an_import_switched_off_opens_that_playlists_import_switch`, `the_empty_state_covers_every_playlist_the_catalogue_reads` |
-| Movies empty state at 400×600 for pointer | **Fail** | [desktop-400x600-movies-empty-squeezed.png](../screenshots/issue-86/desktop-400x600-movies-empty-squeezed.png); bug 1 below |
+| Movies empty state at 400×600 for pointer | **Fail** | [desktop-400x600-movies-empty-squeezed.png](../screenshots/issue-86/desktop-400x600-movies-empty-squeezed.png) (English, Medium text); bug 1 below |
 | Extra large text with the pseudolocale, 1280×720 | Pass | [desktop-1280x720-extra-large-pseudo.png](../screenshots/issue-86/desktop-1280x720-extra-large-pseudo.png): shortcuts and preview visible |
-| Large text and translations keep accessible names | Pass (headless) | `interface_languages::pseudolocalized_labels_keep_their_accessible_name_at_large_text_sizes` |
+| Large text and translations keep accessible names | Pass (headless, Settings only) | `interface_languages::pseudolocalized_labels_keep_their_accessible_name_at_large_text_sizes` walks the Settings screen; it does not cover the journey's guide, player or Movies actions |
 | Video in the real window | Not run | Broadway has no OpenGL |
 
 ## Bugs and observations
 
 1. **Movies and Shows empty state is unusable at 400×600 for pointer and
-   touch.** Repro: desktop window 400×600 (any text size), M3U-only library,
-   click Movies. The categories column keeps its full width; the message
+   touch.** Repro: desktop window 400×600, M3U-only library, click Movies.
+   Seen in English at Medium text (the committed screenshot) and again with
+   Extra large text in the pseudolocale (not committed). The categories column keeps its full width; the message
    column shrinks to about 60 points, wraps a word or a few letters per line,
    clips its title, and puts Add playlist below the window. Keyboard users
    can reach it: Right moves focus to the action and the categories slide
@@ -133,18 +149,22 @@ here checked it.
 4. **Observation:** at 400×600 the compact header's shortcut row scrolls
    sideways without a scroll bar, so Add playlist is reachable but only half
    of a label hints that more follows.
+5. **Observation:** the test pseudolocale (`IPTV_RS_TEST_PSEUDOLOCALE=1`)
+   expands only the app's own strings. Strings translated through
+   `iptv_core::i18n`, such as the guide's "No information", stay in English
+   in the pseudolocale screenshot, so it does not test their length.
 
-No crash, refused player load or stray stream open was seen on either
-emulator.
+No crash or refused player load was seen on either emulator, and no stream
+was opened by a rotation, a Back or closing Movies.
 
 ## Acceptance criteria
 
 | #86 criterion | Status | Evidence |
 |---|---|---|
 | Document the route, activation and pane-collapse contract | Met | [Interaction contract](../interaction.md) |
-| Discoverable destinations and actionable empty, loading and error states | Met, with bug 1 | Emulators show the M3U-only state with Add playlist; headless covers in progress, failed, disabled and empty with their actions |
-| Resize, rotation, split screen and input switching keep identity, position and playback, with no extra opens | Partly | Resize: headless `pane_collapse`. Rotation and touch/key switching: tablet emulator, no extra open. Split screen: not run |
-| Large text and long translations leave primary actions visible or reachable | Partly | Met at 1280×720 and in headless `interface_languages`; bug 1 at 400×600 |
+| Discoverable destinations and actionable empty, loading and error states | Partly (bug 1, observation 3) | Emulators show the M3U-only state with Add playlist; headless covers in progress, failed, disabled and empty with their actions |
+| Resize, rotation, split screen and input switching keep identity, position and playback, with no extra opens | Partly | Resize: headless `pane_collapse`, including the same player node. Rotation and touch/key switching: tablet emulator kept the channel and opened no stream; surface continuity not verified. Split screen: not run |
+| Large text and long translations leave primary actions visible or reachable | Partly | Met at 1280×720 in the real window; headless `interface_languages` covers Settings only; bug 1 at 400×600; observation 5 |
 | A tablet with keyboard and mouse keeps touch controls and no permanent remote hints | Partly | Headless `pointer::tablet_back_controls` and the tablet ⋯ scenarios; on the emulator touch and D-pad alternated correctly. No hardware keyboard and mouse run |
 | Complete journey on fresh TV, tablet and desktop installations, with build, OS, input, viewport and synthetic screenshots | Partly | Fresh emulator installs and the headless and private-window desktop runs above. Not run: physical devices, desktop video in a real window, movie and series playback on Android |
 
@@ -155,4 +175,6 @@ emulator.
 - Android split screen, a hardware keyboard or mouse on the tablet,
   TalkBack, and system font scale above 1.0.
 - Movie and series playback on Android: the smoke fixture is an M3U playlist.
+- Native player surface and frame continuity on Android across rotation and
+  Back.
 - Video in the desktop real window.

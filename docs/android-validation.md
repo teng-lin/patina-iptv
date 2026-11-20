@@ -49,10 +49,13 @@ An uncatchable process/machine termination can leave a copy behind: inspect it a
 its marker manually; never substitute the original profile path into cleanup.
 
 For manual journey checks on the same owned emulator, set `IPTV_SMOKE_HOLD` to
-a number of seconds (and optionally `IPTV_SMOKE_HOLD_FILE` to a path whose
-creation ends the hold early). The smoke waits after its last step, then still
-runs its crash and refused-load checks. Address that emulator only by its
-`emulator-<port>` serial; CI never sets the hold.
+whole seconds from 1 through 900, and optionally `IPTV_SMOKE_HOLD_FILE` to a
+path whose creation ends the hold early (the smoke removes an existing file when
+the hold starts). Both the runner and the smoke refuse another value before any
+device action; the runner adds the hold to the smoke's 1200 s budget. The smoke
+waits after its last step, keeps the logs every 30 s, then still runs its crash
+and refused-load checks. Address that emulator only by its `emulator-<port>`
+serial; CI never sets the hold.
 
 The existing smoke script restores changed device settings in its cleanup trap.
 The disposable runner provides containment if that restoration is interrupted.
