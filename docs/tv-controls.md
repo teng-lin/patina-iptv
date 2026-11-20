@@ -1,35 +1,207 @@
 # TV playback controls
 
 The rules shared with touch and desktop (choosing, returning, layout changes)
-are in the [interaction contract](interaction.md).
+are in the [interaction contract](interaction.md). This page is the remote's
+key table: what each key does on each surface, a tap and a hold. It describes
+the code as it is (`iptv_nav::Keymap::defaults`, `crates/iptv-app/src/input.rs`,
+`player_keys.rs`, `play_bar.rs`); a viewer can rebind keys in Settings → Remote
+(`remote_editor.rs`), which this table does not cover.
 
-Android TV uses the same playback bar as tablet and desktop. Hold OK to open it
-with Play/pause focused. Menu opens or closes the bar. A short OK over unobstructed
-video retains the info card behavior; release after a long OK performs no second
-short action. The live info card's More-controls action retains the advanced strip,
-including sleep timer and audio-delay controls.
+## Taps and holds
 
-Left/Right moves through enabled controls. Live playback skips rewind/fast-forward;
-Down enters the seek timeline during replay or seekable VOD, where Left/Right seeks.
-Up returns to Play/pause. OK activates the focused control. Back closes a chooser,
-then the bar, then returns to the guide. Controls use the same admission checks and
-actions for pointer and remote input. Popup dismissal preserves control identity.
+- **Hold** means the key stays down for `remote.long_press` (400 ms by
+  default). Only an Android remote reports holds; a desktop keyboard has
+  Shift and Menu (`M`) stand-ins instead.
+- A key with a hold action on the current surface waits: released earlier,
+  it is a tap and acts on release; held to the threshold, its hold action
+  acts once, on an auto-repeat or on a timer for remotes that send none. The
+  release after a hold does nothing, and neither do the repeats.
+- A key without a hold action acts at once and again on each repeat, so a
+  held arrow keeps moving.
+- A waiting press belongs to the surface it went down on. If that surface
+  changes before the press is decided (a touch plays a channel, a prompt
+  opens, the guide goes full screen), the press is dropped: neither its tap
+  nor its hold action runs (`iptv_nav::HeldPresses`; the log says "dropped:
+  the surface changed").
+- A key going down keeps the info card and the play bar on screen, as any
+  other key does, so a hold never finds them gone on release.
+- In a replay the seek arrows have no hold: held, they repeat the seek.
+- Long Back's release takes no step back.
 
-In the guide, Up from the first channel row focuses the playing mini-player.
-Down or Back returns to the anchored channel; OK returns the existing playing
-stream to full screen even when the guide focuses a different channel. A list
-refresh restores the guide's content identity. Layout changes retain the persistent
-`tv.player` surface; they do not hide, detach, reparent or open another stream.
+"–" below means the key does nothing there. Keys not listed for a surface
+fall back to the global row: Search opens search, Red toggles the favourite,
+digits enter a channel number, Play/Pause, Play and Pause play and pause,
+Stop stops playback, ⏮ (Previous) is the previous channel and ⏭ (Next) goes
+back to live.
 
-Deterministic checks: core `play_bar`/`browse` tests; nav
-`long_ok_opens_controls_once_even_after_the_context_changes`; app
-`tv_shared_controls`, `tv_player`, `tv_replay`, `accessibility_visibility` and pointer
-regressions. Native TV validation must additionally send actual Down/Repeat/Up
-key phases (including a long OK release), inspect shared bar focus and verify
-no accompanying short action, then exercise guide mini-player/full-screen return.
-Use only disposable `tv36` and generated playlists/streams. Headless layout and
-keymap tests do not establish physical-remote or screen-reader speech behavior.
+## Guide
 
+| Key | Tap | Hold |
+|---|---|---|
+| Up / Down | Move between channels; Up from the first row focuses the mini-player when something plays | Repeats |
+| Left | Earlier programmes, then the groups column, then the rail | The groups column |
+| Right | Later programmes | Repeats |
+| OK | Choose: plays full screen (or keeps the guide with **Keep the guide after choosing**); the playing channel returns to full screen; a past programme with replay replays; any other programme opens its details | The programme and channel menu |
+| Menu | The programme and channel menu; on the groups column, the group's options | – |
+| Back | Hint card, then back to the programmes on air, then groups, then rail, then leave (see [Back](#back)) | Back to the video, when something plays |
+| Ch+ / Ch− and Page Up / Down | A page of channels | – |
+| Record | Records or schedules the focused programme | – |
+| Guide | – (already the guide) | – |
+| Info | – | – |
+
+Moving the focus never tunes a channel unless **Autoplay** (`guide.autoplay`)
+is on; it then tunes the focused live channel after `guide.switch_delay`, and
+moving on before then cancels it.
+
+### Mini-player in the guide
+
+| Key | Tap | Hold |
+|---|---|---|
+| Down | Back to the channel row it was reached from | Repeats |
+| Left / Right | The groups column / the channel rows | Repeats |
+| OK | The playing stream full screen, as it plays (no new stream), even if the guide focuses another channel | Opens the play bar full screen |
+| Menu | The play bar, full screen | – |
+| Back | Back to the channel row it was reached from | – |
+
+## Full-screen live video
+
+| Key | Tap | Hold |
+|---|---|---|
+| OK | The info card with its action cards; over a failed stream, try again | The play bar, Play/pause focused |
+| Menu | The play bar (again: hide it) | – |
+| Up / Down | Channel up / down (`remote.player_up_down` can make them open the channel list) | Repeats |
+| Ch+ / Ch− and Page Up / Down | Channel up / down | – |
+| Left | The channel list over the video | The channel list beside the video |
+| Right | The previous channel (again: back) | The recently watched channels |
+| 0 | Channel number entry | The previous channel |
+| Info | The info card alone | – |
+| Guide | The guide over the video | – |
+| Rewind / Fast-forward | – (nothing to seek live) | – |
+| Record | Starts or stops recording the playing programme | – |
+| Back | Hides the info card or play bar; then back to the guide on the playing channel | Stops playback and returns to the guide |
+
+Channel up and down show the next channel's banner at once and tune after
+`guide.switch_delay`, so quick presses skip channels. Browsing the channel
+list never tunes unless autoplay is on.
+
+### Info card and its action cards
+
+The card captures Left, Right and OK while it shows.
+
+| Key | Tap | Hold |
+|---|---|---|
+| Left / Right | Move between the action cards (Guide, History, Channels, Favourite, Multiview, More controls) | Repeats |
+| OK | Presses the focused action card; with none focused, hides the card | The play bar |
+| Up / Down | Channel up / down, the card following | Repeats |
+| Menu | The play bar | – |
+| Back | Hides the card | Stops playback |
+
+The card hides by itself after `player.controls_panel_timeout`; a key keeps
+it up.
+
+## Replay and seekable video on demand
+
+As full-screen live, except:
+
+| Key | Tap | Hold |
+|---|---|---|
+| Left / Right (`catchup.seek_keys`: Left/Right, the default) | Choose a seek one time-bar step back or on, shown on the card's bar; it starts after a short pause, or at once on OK | Repeats the step, faster (no hold action) |
+| Down / Up (`catchup.seek_keys`: Down/Up) | As Left / Right above, instead of zapping | As above |
+| OK | Starts a chosen seek at once; otherwise play/pause | The play bar |
+| Rewind / Fast-forward | Seek back / on | Repeats |
+| ⏭ (Next) | Back to live (a replay) | – |
+
+A seek and a track choice keep the same player and, for a replay, open the
+archive at the new time; nothing else opens a stream.
+
+## Play bar
+
+The shared bar of tablet and desktop, with remote focus. It captures the
+arrows and OK while it shows, so they never zap or seek behind it.
+
+| Key | Tap | Hold |
+|---|---|---|
+| Left / Right | Move between the enabled controls (live skips Rewind and Fast-forward); on the timeline, seek | Repeats |
+| Down | The timeline (replay or seekable video on demand); elsewhere stays | – |
+| Up | Back to Play/pause | – |
+| OK | Presses the focused control; on the timeline, starts the seek and returns to Play/pause | Focus back on Play/pause; the repeats press nothing |
+| Menu | Hides the bar | – |
+| Back | Closes a chooser the bar opened, then the bar | Stops playback |
+
+The bar hides by itself after three seconds without use; a chooser it
+opened keeps it up. The remote skips unavailable controls; the advanced
+strip names the reason where one applies (for example "Picture in picture ·
+Play a channel first").
+
+## Choosers, menus and dialogs
+
+| Surface | Up / Down | OK | Left / Right | Back or Menu |
+|---|---|---|---|---|
+| Chooser (picture size, tracks, sleep timer, audio delay, history) | Move | Picks and closes; focus returns to the control that opened it | – | Closes; focus returns to that control |
+| Programme and channel menu | Move | Performs the item | – | Closes; focus returns to the programme or channel |
+| Programme details | – | Records the programme | – | Closes |
+| Channel list over the video | Move | Plays the focused channel | Left: the groups; Right: back to the channels | Back: from the groups to the channels, then closes; Menu: the channel's or group's menu (also Hold OK) |
+| PIN prompt | Move between digits and actions | Presses the focused action | – | Back closes; the content it guarded is not played |
+| Settings and other screens | Move | Activates | Move between columns | Back returns to where Settings opened, on the same channel |
+
+Ch+ / Ch− in the channel list zap without closing it.
+
+## Back
+
+Back always dismisses the nearest surface, one step per press
+(`go_back` in `crates/iptv-app/src/lib.rs`):
+
+1. A channel number being typed.
+2. A PIN prompt, then a screen opened over the app (wizard, Movies and
+   Shows, Recordings, Settings and its sub-screens).
+3. A chooser, then a menu or programme details.
+4. Search, the channel list over the video, the multiview picker.
+5. Over video: the info card or the play bar.
+6. Full-screen video: back to where it was chosen (the guide on the playing
+   channel, Recordings for a recording, the multiview grid for a tile). The
+   stream keeps playing in the mini-player or behind the guide.
+7. In the guide over the video, back to the video.
+8. In the guide: the hint card, the programmes on air, the groups column,
+   the rail, then leave (after a confirmation when `general.confirm_exit` is
+   on).
+
+Closing a chooser, menu, PIN prompt or settings screen restores focus by
+content identity (the control, programme or channel), not by row position,
+also after the list was refreshed or reordered.
+
+## Returning to playback
+
+- From the guide, OK on the mini-player, OK on the playing channel, Back in
+  the guide over the video and a hold of Back all return the playing stream
+  to full screen without opening it again.
+- Browsing (moving focus in the guide or the channel list) never retunes
+  unless autoplay is on.
+- Layout changes retain the persistent `tv.player` surface; they do not
+  hide, detach, reparent or open another stream.
+
+## Checks
+
+Deterministic, run by CI:
+
+- `iptv-nav`: `hold` (a waiting press dropped when its surface changes;
+  long OK once through repeats; rapid taps), `press` and `keymap`
+  (`long_ok_opens_controls_once_even_after_the_context_changes`).
+- App scenarios with an Android remote's raw Down/Repeat/Up phases
+  (`use_remote_key_phases`): `tv_remote_journey` (long OK by repeats and by
+  timer, rapid taps, OK held as the info card times out, OK held while a tap
+  plays another channel, the full journey with stream-open counts and one
+  persistent player, extra large text on the play bar).
+- App scenarios with the TV idiom: `tv_shared_controls`, `tv_player`,
+  `tv_replay` (replay seek and track choice by remote on one player),
+  `accessibility_visibility` (covered and inactive controls out of reach,
+  PIN and modals at the largest text, identity after reordering) and the
+  pointer regressions.
+
+Native TV validation sends real key phases on a disposable `tv36` emulator
+with generated playlists and streams; see
+[issue #87 TV journey](validation/issue-87-tv-journey.md). Headless layout and
+keymap tests do not establish physical-remote or screen-reader speech
+behaviour.
 
 ## Android journey evidence
 
@@ -46,4 +218,5 @@ action after the context changed to Controls. The released key produced neither
 skipped disabled live Fast-forward and selected Record. These are native
 input/layout checks; persistent surface identity and stream-open counts are
 asserted by the headless live/replay scenarios. Physical remotes and spoken
-screen-reader output remain unverified.
+screen-reader output remain unverified. The #87 run is recorded in
+[issue #87 TV journey](validation/issue-87-tv-journey.md).

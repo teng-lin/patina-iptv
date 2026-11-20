@@ -10,7 +10,8 @@
 //! held on. The journey: groups, choose a channel (full screen), the
 //! controls, browse another channel without retuning, zap and the
 //! previous channel, back to the guide and its mini-player, all on one
-//! persistent `tv.player` with counted stream opens.
+//! persistent `tv.player` with counted stream opens. At extra large text,
+//! every play bar control the remote focuses stays whole on screen.
 //!
 //! Synthetic data only: the personalization fixture's three local channels.
 
@@ -57,7 +58,10 @@ fn logged(text: &str) -> usize {
 
 /// A TV on Android at 960×540 with remote phases; choosing plays full
 /// screen and browsing never tunes.
-fn tv(home: crate::isolated::Home) -> (Fixture, Arc<Mutex<Lifetime>>, NodeId) {
+fn tv(
+    home: crate::isolated::Home,
+    adjust: impl FnOnce(&mut Settings),
+) -> (Fixture, Arc<Mutex<Lifetime>>, NodeId) {
     iptv_app::use_remote_key_phases();
     log::set_logger(&LOG).expect("this process's only logger");
     log::set_max_level(log::LevelFilter::Info);
@@ -73,6 +77,7 @@ fn tv(home: crate::isolated::Home) -> (Fixture, Arc<Mutex<Lifetime>>, NodeId) {
     settings
         .set("player.controls_panel_timeout", Value::secs(5))
         .unwrap();
+    adjust(&mut settings);
     let lifetime = Arc::new(Mutex::new(None));
     let recorder = lifetime.clone();
     let fixture = personalization::launch(
@@ -171,7 +176,7 @@ fn back_to_guide(app: &mut crate::Headless) {
 #[test]
 fn long_ok_rapid_taps_and_a_surface_change_during_a_hold() {
     let Some(home) = isolated!() else { return };
-    let (mut fixture, lifetime, player) = tv(home);
+    let (mut fixture, lifetime, player) = tv(home, |_| {});
     let app = &mut fixture.app;
 
     // A quick OK on the guide's first channel plays it full screen.
@@ -257,7 +262,7 @@ fn long_ok_rapid_taps_and_a_surface_change_during_a_hold() {
 #[test]
 fn the_remote_journey_browses_without_retuning_and_returns_to_the_guide() {
     let Some(home) = isolated!() else { return };
-    let (mut fixture, lifetime, player) = tv(home);
+    let (mut fixture, lifetime, player) = tv(home, |_| {});
     let app = &mut fixture.app;
 
     // Groups: hold Left in the guide; Right returns to the channels.
@@ -328,5 +333,74 @@ fn the_remote_journey_browses_without_retuning_and_returns_to_the_guide() {
     );
     back_to_guide(app);
     assert_eq!(source(&lifetime).as_deref(), Some("http://example.test/b"));
+    persistent(app, &lifetime, player);
+}
+
+/// The play bar's control ids, in their order on the bar.
+const BAR: [&str; 13] = [
+    "play-bar-mute",
+    "play-bar-rewind",
+    "play-bar-play-pause",
+    "play-bar-forward",
+    "play-bar-record",
+    "play-bar-favourite",
+    "play-bar-tracks",
+    "play-bar-details",
+    "play-bar-picture",
+    "play-bar-channels",
+    "play-bar-multiview",
+    "play-bar-pip",
+    "play-bar-guide",
+];
+
+#[test]
+fn extra_large_text_keeps_every_focused_bar_control_on_screen() {
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, lifetime, player) = tv(home, |settings| {
+        settings
+            .set("appearance.font_size", Value::Enum("extra_large".into()))
+            .unwrap();
+    });
+    let app = &mut fixture.app;
+    step(app.remote_tap(RemoteKey::Ok));
+    plays(app, &lifetime, "http://example.test/a", 1);
+    step(app.remote_tap(RemoteKey::Menu));
+    step(app.wait_for("id:play-bar-layer"));
+    // Left to the first enabled control, then Right through all of them:
+    // exactly one shows focus at a time, whole and inside the screen.
+    for _ in 0..BAR.len() {
+        step(app.remote_tap(RemoteKey::Left));
+    }
+    let mut visited = Vec::new();
+    for _ in 0..BAR.len() {
+        let focused: Vec<_> = BAR.iter().filter(|id| selected(app, id)).collect();
+        assert_eq!(focused.len(), 1, "one focused control: {focused:?}");
+        let id = *focused[0];
+        let nodes = app.screen().layout_nodes();
+        let bounds = nodes
+            .iter()
+            .find(|n| n.test_id.as_deref() == Some(id))
+            .unwrap()
+            .bounds;
+        assert!(
+            bounds.size.width.0 > 0.0
+                && bounds.size.height.0 > 0.0
+                && bounds.origin.x.0 >= -1.0
+                && bounds.origin.y.0 >= -1.0
+                && bounds.origin.x.0 + bounds.size.width.0 <= 961.0
+                && bounds.origin.y.0 + bounds.size.height.0 <= 541.0,
+            "{id} is whole on screen at extra large text: {bounds:?}"
+        );
+        if !visited.contains(&id) {
+            visited.push(id);
+        }
+        step(app.remote_tap(RemoteKey::Right));
+    }
+    assert!(
+        visited.len() >= 6,
+        "the remote reaches the bar's live controls: {visited:?}"
+    );
+    assert!(!visited.contains(&"play-bar-rewind"), "live skips rewind");
+    assert_eq!(iptv_app::player_opens(0), 1);
     persistent(app, &lifetime, player);
 }

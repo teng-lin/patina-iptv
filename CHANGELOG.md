@@ -25,6 +25,14 @@ is below 1.0, a minor release may change behaviour.
   Downgrading an existing catalog is unsupported; retain a compatible backup
   before upgrading.
 
+### Fixed
+
+- TV remote: a press of OK (or another key with a hold action) no longer
+  acts on a different screen when the screen changes while the key is held,
+  for example when a tap plays a channel. Holding a key also keeps the info
+  card and the play bar on screen, so releasing it presses the card it was
+  held on instead of reopening the card.
+
 ## [0.1.5] - 2026-11-17
 
 ### Distribution

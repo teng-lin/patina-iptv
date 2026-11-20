@@ -243,10 +243,12 @@ Unavailable actions say why, using the host's reported capabilities
   `cargo test -p iptv-core` for core state and transition rules, the
   `iptv-core` wasm build and `cargo build -p iptv-app`.
 - Choosing, staying and returning: app scenarios `personalization_overlay`,
-  `tv_shared_controls`, `pip_control`, `cov_nav` and `cov_nav_touch`.
+  `tv_shared_controls`, `pip_control`, `cov_nav` and `cov_nav_touch`; on a
+  remote's raw key phases, `tv_remote_journey`.
 - Native behaviour on Android TV and tablets: the
   [disposable Android validation](android-validation.md) on `tv36` and `tab36`.
   Record emulator and physical-device evidence separately, with the build, OS,
   input and viewport, using synthetic data only.
 - The complete journey on TV, tablet and desktop, with the build, hosts,
-  screenshots and open bugs: [issue #86 journey validation](validation/issue-86-journey.md).
+  screenshots and open bugs: [issue #86 journey validation](validation/issue-86-journey.md);
+  the TV remote journey: [issue #87](validation/issue-87-tv-journey.md).
