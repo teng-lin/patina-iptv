@@ -39,6 +39,7 @@ mod cov_settings_screen;
 mod cov_settings_wizard;
 mod cov_sources;
 mod cov_sources_assign;
+mod desktop_workflows;
 mod foundation_inspection;
 mod foundation_repair;
 mod guide_check_recovery;
