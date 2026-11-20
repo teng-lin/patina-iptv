@@ -494,7 +494,10 @@ impl Screen {
     /// action that went away (an import started) goes to the rail too. In
     /// any window, a remote sent off an action that then reached the
     /// action's place again (Retry after a failed read) is sent off once
-    /// more when the read shows the new action.
+    /// more when the read shows the new action. In a wider window a remote
+    /// on the action's place when the empty screen offers none (an import
+    /// started, or titles only elsewhere) goes to the categories, where OK
+    /// and the arrows still do something.
     fn settle_panes(&mut self) {
         let on_categories = matches!(
             self.control,
@@ -505,6 +508,7 @@ impl Screen {
             && self.details.is_none()
             && self.cards.is_empty();
         let action = self.empty_action().is_some();
+        let empty = self.empty_state().is_some();
         if self.one_pane() {
             if on_categories {
                 if action && !self.left_action {
@@ -518,26 +522,36 @@ impl Screen {
                 self.focus_rail();
                 self.left_action = false;
             }
-        } else if on_action && action && self.left_action {
+        } else if on_action && empty && (!action || self.left_action) {
             self.control = Control::Category;
             self.categories_open = true;
             self.left_action = false;
         }
     }
     /// Closes the search field (Back, or its submit key): the remote goes to
-    /// the titles, or stays on Search when the one pane offers nothing to
-    /// focus (an import running).
+    /// the titles, or stays on Search when the empty screen offers nothing
+    /// to focus (an import running), in any window.
     pub fn close_search(&mut self) {
         self.search_open = false;
-        self.control = if self.one_pane_without_action() {
+        self.control = if self.empty_without_action() {
             Control::Search
         } else {
             Control::Catalogue
         };
     }
-    /// Enters the titles from the categories (Right, or OK on a category).
+    /// Enters the titles from the categories (OK on a category). An empty
+    /// screen without an action has nothing to enter: the remote stays.
     pub fn enter_catalogue(&mut self) {
-        self.browse_horizontal(1);
+        if !self.empty_without_action() {
+            self.browse_horizontal(1);
+        }
+    }
+    /// Whether the empty screen shows without an action (an import running,
+    /// or titles only elsewhere): there is nothing to focus where the titles
+    /// would be, so the remote's ways go to the toolbar (Search, Sort) and
+    /// the categories or the rail instead.
+    fn empty_without_action(&self) -> bool {
+        self.empty_state().is_some() && self.empty_action().is_none()
     }
     /// Whether the one pane offers no action: the remote's way from the
     /// rail is then the toolbar (Search, Sort).
@@ -547,8 +561,9 @@ impl Screen {
     /// Sets why the catalogue may be empty. When the empty screen's action
     /// now acts on another playlist than the one it offered, a remote on it
     /// goes back to the categories: OK never acts on a playlist the screen
-    /// did not show when the remote got there. While nothing is offered (an
-    /// import running) the remote stays.
+    /// did not show when the remote got there. When nothing is offered (an
+    /// import running) a remote on its place goes to the categories, or in
+    /// one pane to the rail ([`Screen::settle_panes`]).
     pub fn set_library(&mut self, state: VodState) {
         self.library = state;
         let Some(action) = state.action() else {
@@ -927,7 +942,10 @@ impl Screen {
             self.control,
             Control::Category | Control::Continue | Control::Source
         ) {
-            if step > 0 {
+            if step > 0 && self.empty_without_action() {
+                // Nothing to focus where the titles would be: the toolbar.
+                self.control = Control::Search;
+            } else if step > 0 {
                 self.categories_open = false;
                 self.control = Control::Catalogue;
             } else {
@@ -946,6 +964,12 @@ impl Screen {
                 .unwrap_or(0);
             if step < 0 && at == 0 && self.one_pane() {
                 self.focus_rail();
+                return;
+            }
+            if step < 0 && at == 0 && self.empty_without_action() {
+                // Down has no empty pane to enter: Left is the way back.
+                self.categories_open = true;
+                self.control = Control::Category;
                 return;
             }
             self.control = controls[at.saturating_add_signed(step).min(controls.len() - 1)];
@@ -1031,9 +1055,9 @@ impl Screen {
                     self.move_focus(step * columns as isize);
                 }
             }
-            // Nothing to reach below the toolbar in a one pane without
+            // Nothing to reach below the toolbar on an empty screen without
             // an action.
-            _ if step > 0 && !self.one_pane_without_action() => self.control = Control::Catalogue,
+            _ if step > 0 && !self.empty_without_action() => self.control = Control::Catalogue,
             _ => {}
         }
         false
@@ -2144,13 +2168,18 @@ mod tests {
         s.browse_horizontal(1);
         assert_eq!(s.control, Control::Catalogue);
         assert_eq!(s.empty_action(), Some(EmptyAction::Retry(1)));
-        // Retrying it: nothing offered meanwhile, the remote stays.
+        // Retrying it: nothing offered meanwhile, the remote goes to the
+        // categories (#146).
         s.set_library(VodState::Importing);
-        assert_eq!(s.control, Control::Catalogue);
-        // The same playlist, now empty: its Refresh keeps the remote.
+        assert_eq!(s.control, Control::Category);
+        // The same playlist, now empty: Right reaches its Refresh.
         s.set_library(VodState::Empty { source: 1 });
+        s.browse_horizontal(1);
         assert_eq!(s.control, Control::Catalogue);
         assert_eq!(s.empty_action(), Some(EmptyAction::Refresh(1)));
+        // Still offered by the same playlist: the remote stays.
+        s.set_library(VodState::Empty { source: 1 });
+        assert_eq!(s.control, Control::Catalogue);
         // Another playlist's failure takes the screen: the remote leaves.
         s.set_library(failed(2));
         assert_eq!(s.control, Control::Category);
@@ -2490,6 +2519,140 @@ mod tests {
             s.publish(generation, Vec::new(), false, false);
             assert_ne!(s.control, Control::Catalogue, "compact: {compact}");
         }
+    }
+    #[test]
+    fn a_wide_refresh_leaves_the_remote_on_a_visible_control() {
+        // #146: Refresh now in a wider window, then the import runs.
+        let mut s = Screen::default();
+        s.set_library(VodState::Empty { source: 1 });
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, Vec::new(), false, false);
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Catalogue);
+        assert!(!s.shows_categories());
+        s.set_library(VodState::Importing);
+        assert_eq!(s.empty_action(), None);
+        assert_eq!(s.control, Control::Category);
+        assert!(s.shows_categories() && s.shows_navigation());
+        // The same when the read showing it arrives later.
+        s.control = Control::Catalogue;
+        s.categories_open = false;
+        let generation = s.reload();
+        assert_eq!(s.control, Control::Catalogue, "loading: left alone");
+        s.publish(generation, Vec::new(), false, false);
+        assert_eq!(s.control, Control::Category);
+        assert!(s.shows_categories());
+        // The import ends empty again: Right reaches the shown action.
+        s.set_library(VodState::Empty { source: 1 });
+        assert_eq!(s.control, Control::Category);
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.empty_action(), Some(EmptyAction::Refresh(1)));
+        // It ends with titles: the remote stays on the categories shown
+        // with them, and Right enters the posters.
+        s.set_library(VodState::Available);
+        assert_eq!(s.control, Control::Category);
+        let generation = s.reload();
+        s.publish(generation, vec![card("a")], false, false);
+        assert_eq!(s.control, Control::Category);
+        assert!(s.shows_categories());
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.focused, Some(card("a").key));
+    }
+    #[test]
+    fn wide_arrows_never_land_on_an_empty_pane_without_an_action() {
+        for state in [VodState::Importing, VodState::Available] {
+            let mut s = Screen::default();
+            s.set_library(state);
+            let generation = s.begin(Kind::Series);
+            s.publish(generation, Vec::new(), false, false);
+            assert_eq!(s.control, Control::Category, "{state:?}");
+            // OK on a category has nothing to enter.
+            s.enter_catalogue();
+            assert_eq!(s.control, Control::Category, "{state:?}");
+            // Right: the toolbar, not the empty pane.
+            s.browse_horizontal(1);
+            assert_eq!(s.control, Control::Search, "{state:?}");
+            s.browse_horizontal(1);
+            assert_eq!(s.control, Control::Sort, "{state:?}");
+            // Down has no empty pane to enter.
+            s.browse_vertical(1);
+            assert_eq!(s.control, Control::Sort, "{state:?}");
+            s.browse_horizontal(-1);
+            s.browse_vertical(1);
+            assert_eq!(s.control, Control::Search, "{state:?}");
+            // Closing Search keeps the remote there.
+            s.search_open = true;
+            s.back();
+            assert!(s.open && !s.search_open);
+            assert_eq!(s.control, Control::Search, "{state:?}");
+            // Left from the toolbar's first control: the categories.
+            s.browse_horizontal(-1);
+            assert_eq!(s.control, Control::Category, "{state:?}");
+            assert!(s.shows_categories());
+            // Once an action shows, Right and Down reach it.
+            s.set_library(VodState::NoEligibleSource);
+            assert_eq!(s.control, Control::Category, "{state:?}");
+            s.browse_horizontal(1);
+            assert_eq!(s.control, Control::Catalogue, "{state:?}");
+            s.control = Control::Search;
+            s.browse_vertical(1);
+            assert_eq!(s.control, Control::Catalogue, "{state:?}");
+            s.control = Control::Search;
+            s.search_open = true;
+            s.close_search();
+            assert_eq!(s.control, Control::Catalogue, "{state:?}");
+            s.control = Control::Category;
+            s.enter_catalogue();
+            assert_eq!(s.control, Control::Catalogue, "{state:?}");
+        }
+        // A search or filter that finds nothing keeps its routes.
+        let mut s = Screen::default();
+        s.set_library(VodState::Importing);
+        let generation = s.begin(Kind::Movie);
+        s.query.text = "generated".into();
+        s.publish(generation, Vec::new(), false, false);
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Catalogue);
+        // Titles: Right enters them, Left from Search stays.
+        let mut s = Screen::default();
+        s.set_library(VodState::Importing);
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, vec![card("a")], false, false);
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Catalogue);
+        s.control = Control::Search;
+        s.browse_horizontal(-1);
+        assert_eq!(s.control, Control::Search);
+        s.browse_vertical(1);
+        assert_eq!(s.control, Control::Catalogue);
+    }
+    #[test]
+    fn a_wide_remote_sent_off_an_action_stays_off_through_an_import() {
+        // The existing guard: the action moves to playlist 2 while a read
+        // is pending; an import then hides it, then 2's action shows.
+        let mut s = Screen::default();
+        s.set_library(VodState::Failed {
+            source: 1,
+            problem: ImportProblem::Network,
+        });
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, Vec::new(), false, false);
+        s.browse_horizontal(1);
+        let generation = s.reload();
+        s.set_library(VodState::ImportsDisabled { source: 2 });
+        assert_eq!(s.control, Control::Category);
+        s.publish(generation, Vec::new(), false, false);
+        assert_eq!(s.control, Control::Category);
+        s.set_library(VodState::Importing);
+        assert_eq!(s.control, Control::Category);
+        s.set_library(VodState::ImportsDisabled { source: 2 });
+        assert_eq!(s.control, Control::Category);
+        // Right reaches it on purpose.
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.empty_action(), Some(EmptyAction::PlaylistSettings(2)));
     }
     #[test]
     fn the_catalogue_keeps_its_toolbar() {

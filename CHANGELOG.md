@@ -66,6 +66,10 @@ is below 1.0, a minor release may change behaviour.
   the prompt does not close it), holding Menu or `M` no longer opens and
   closes the menu or the play bar repeatedly, and a hold on the play bar
   always returns focus to Play/pause.
+- Movies and Shows, TV remote: in a wider window an empty screen without an
+  action (an import running) no longer leaves the remote on nothing. After
+  **Refresh now** it moves to the categories; Right from them reaches Search
+  and Sort, and Right reaches the action again once it shows.
 
 ## [0.1.5] - 2026-11-17
 
