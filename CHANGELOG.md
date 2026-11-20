@@ -50,6 +50,20 @@ is below 1.0, a minor release may change behaviour.
   disconnected Bluetooth headset pause it until you play again. A stopped
   channel never restarts by itself. All players share one audio focus.
 
+### Fixed
+
+- TV remote: a press of OK (or another key with a hold action) no longer
+  acts on a different screen when the screen changes while the key is held,
+  for example when a tap plays a channel. Holding a key also keeps the info
+  card and the play bar on screen until the press is decided, so releasing it
+  presses the card it was held on instead of reopening the card.
+- TV remote: a key held through a PIN prompt no longer acts after the prompt
+  closes, the OK that submits a PIN no longer opens the play bar when held,
+  Back on a PIN prompt closes only the prompt (and a Back held from before
+  the prompt does not close it), holding Menu or `M` no longer opens and
+  closes the menu or the play bar repeatedly, and a hold on the play bar
+  always returns focus to Play/pause.
+
 ## [0.1.5] - 2026-11-17
 
 ### Distribution

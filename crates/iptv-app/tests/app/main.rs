@@ -75,6 +75,7 @@ mod tablet_gestures;
 mod tablet_journey;
 mod tablet_rows;
 mod tv_player;
+mod tv_remote_journey;
 mod tv_replay;
 mod tv_shared_controls;
 mod type_drift;

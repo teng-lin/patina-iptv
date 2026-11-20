@@ -151,6 +151,12 @@ pub fn tapped(ui: Ui) {
     show(ui, PlayBar::tapped);
 }
 
+/// A remote key held over the bar decides tap or hold at `at` (ms): the
+/// bar stays until then.
+pub(crate) fn keep_until(ui: Ui, at: u64) {
+    update(ui, |b, _| b.keep_until(at));
+}
+
 /// A control of the bar (or of multiview's pointer chrome) acted.
 pub(crate) fn used(ui: Ui) {
     update(ui, PlayBar::used);

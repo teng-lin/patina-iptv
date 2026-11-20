@@ -297,6 +297,14 @@ impl Panels {
         pick
     }
 
+    /// A remote key is held and decides tap or hold at `at_ms`: shown
+    /// panels stay at least until then, so the press finds them on release.
+    pub fn keep_until(&mut self, at_ms: u64) {
+        if self.shown != Shown::Hidden {
+            self.hide_at_ms = Some(self.hide_at_ms.map_or(at_ms, |t| t.max(at_ms)));
+        }
+    }
+
     /// Any input while shown: restart the auto-hide timer.
     pub fn touch(&mut self, now_ms: u64) {
         let t = self.timeouts;

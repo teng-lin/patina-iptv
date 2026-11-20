@@ -12,6 +12,14 @@ use nsh_tv::RemoteKey;
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
+/// A raw remote key phase ([`Headless::remote_phase`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyPhase {
+    Down,
+    Repeat,
+    Up,
+}
+
 /// A wrapper around [`nsh_testing::Headless`] that scales scenario wait timeouts.
 pub struct Headless(nsh_testing::Headless, bool);
 
@@ -82,6 +90,59 @@ impl Headless {
         control.dispatch_event(root.id, EventKind::KeyUp, EventPayload::Key(event));
         self.0.settle();
         self.0.wait(Duration::ZERO)
+    }
+
+    /// One raw phase of a remote key as Android reports it: a key down, an
+    /// auto-repeat (a key down marked `repeat`) or a release. The app takes
+    /// them only after `iptv_app::use_remote_key_phases` (before start).
+    /// Neither advances the clock: `run_for` between phases holds the key.
+    pub fn remote_phase(&mut self, key: RemoteKey, phase: KeyPhase) -> Result<(), String> {
+        self.ready_for_input()?;
+        let mut event = KeyEvent::default();
+        let name = match key {
+            RemoteKey::Up => "ArrowUp",
+            RemoteKey::Down => "ArrowDown",
+            RemoteKey::Left => "ArrowLeft",
+            RemoteKey::Right => "ArrowRight",
+            RemoteKey::Ok => "Enter",
+            RemoteKey::Menu => "ContextMenu",
+            RemoteKey::PlayPause => "MediaPlayPause",
+            RemoteKey::Previous => "MediaTrackPrevious",
+            RemoteKey::Back => "GoBack",
+            RemoteKey::Digit(d) => ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"][d as usize],
+            _ => return Err(format!("missing raw phase event for {key:?}")),
+        };
+        event.key = name.into();
+        event.code = match key {
+            RemoteKey::Digit(d) => format!("Digit{d}").into(),
+            _ => name.into(),
+        };
+        event.repeat = phase == KeyPhase::Repeat;
+        let root = self
+            .0
+            .screen()
+            .layout_nodes()
+            .into_iter()
+            .find(|node| node.id != ROOT_ID && node.parent == ROOT_ID)
+            .ok_or("missing mounted app root")?;
+        self.0.step(format!("remote {key:?} {phase:?}"));
+        let kind = if phase == KeyPhase::Up {
+            EventKind::KeyUp
+        } else {
+            EventKind::KeyDown
+        };
+        self.0
+            .engine()
+            .control()
+            .dispatch_event(root.id, kind, EventPayload::Key(event));
+        self.0.settle();
+        self.0.wait(Duration::ZERO)
+    }
+
+    /// A quick tap of a remote key: down and up at the same instant.
+    pub fn remote_tap(&mut self, key: RemoteKey) -> Result<(), String> {
+        self.remote_phase(key, KeyPhase::Down)?;
+        self.remote_phase(key, KeyPhase::Up)
     }
 
     pub fn back(&mut self) -> Result<(), String> {
