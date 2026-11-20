@@ -162,9 +162,9 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
                         })
                     });
                     let editing = computed(move || {
-                        order_focus.get().and_then(|(row, selected)| {
-                            (row == at.index()).then_some(selected)
-                        })
+                        order_focus
+                            .get()
+                            .and_then(|(row, selected)| (row == at.index()).then_some(selected))
                     });
                     row(
                         ui,
@@ -180,9 +180,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
             .element_ref(&rows)
             // Scrolling the channels never tunes: a preview
             // waiting to start stops (`browse_playback`).
-            .on_scroll_drag_start(move |_: &Point<Points>| {
-                crate::browse_playback::dragged(ui)
-            })
+            .on_scroll_drag_start(move |_: &Point<Points>| crate::browse_playback::dragged(ui))
             .on_viewable_items_change(move |v: &ViewableItems| {
                 if !organization_view::guide_order_open(ui) {
                     ui.visible_rows.set(v.viewable);
@@ -228,7 +226,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
         .flex_1()
         .bg(move || ui.surface(ui.app.theme.with(|t| t.background.window)))
         .child(ruler::ruler(ui, size, column, pan, now_x, width))
-        .child(if std::env::var_os("PATINA_TUI").is_some() {
+        .child(if crate::is_tui_mode() {
             // `nsh-platform-tui` does not implement `StickyCells`, which
             // `wheel::trackball` relies on to pin the grid inside its
             // 20,000 pt horizontal scroll buffer.

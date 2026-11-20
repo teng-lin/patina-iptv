@@ -6,6 +6,18 @@
 
 use crate::i18n::tr;
 
+static TUI_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Enables TUI-host layout adjustments (such as bypassing desktop horizontal
+/// `StickyCells` wrappers that `nsh-platform-tui` does not implement).
+pub fn set_tui_mode(enabled: bool) {
+    TUI_MODE.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub(crate) fn is_tui_mode() -> bool {
+    TUI_MODE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub use iptv_core::guide;
 #[cfg(all(
     feature = "test-support",

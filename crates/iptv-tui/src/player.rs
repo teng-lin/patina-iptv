@@ -7,7 +7,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    thread,
+    thread::{self, JoinHandle},
 };
 
 use base64::Engine as _;
@@ -19,6 +19,9 @@ use ratatui_core::{
     layout::Rect,
     style::{Color, Style},
 };
+use tempfile::TempDir;
+
+static NEXT_FRAME_SEQ: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VideoMode {
@@ -34,6 +37,14 @@ pub enum VideoMode {
 
 pub fn is_ssh() -> bool {
     std::env::var_os("SSH_CONNECTION").is_some() || std::env::var_os("SSH_TTY").is_some()
+}
+
+fn is_allowed_stream_url(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    (lower.starts_with("http://") || lower.starts_with("https://"))
+        && !url.contains('\0')
+        && !url.contains('\r')
+        && !url.contains('\n')
 }
 
 impl VideoMode {
@@ -62,7 +73,6 @@ impl VideoMode {
     }
 }
 
-#[derive(Clone)]
 pub struct RgbFrame {
     pub width: usize,
     pub height: usize,
@@ -73,27 +83,43 @@ pub struct RgbFrame {
 /// Shared state between `TuiPlayer` (mounted inside NSH) and the outer terminal
 /// loop so Kitty graphics sequences can be emitted cleanly right after each
 /// Ratatui `terminal.draw(...)` commit.
-#[derive(Default)]
 pub struct KittyOverlay {
-    frame: Mutex<Option<RgbFrame>>,
+    frame: Mutex<Option<Arc<RgbFrame>>>,
     rect: Mutex<Option<Rect>>,
     active: AtomicBool,
     last_sent_seq: AtomicU64,
     active_id: AtomicU64,
     last_rect: Mutex<Option<Rect>>,
+    shm_dir: Option<TempDir>,
 }
 
 impl KittyOverlay {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self::default())
+        // Private 0700 directory in /dev/shm (Linux) when local; falls back to
+        // inline t=d streaming on macOS/BSD or if /dev/shm is unavailable.
+        let shm_dir = if !is_ssh() {
+            tempfile::Builder::new()
+                .prefix("patina-tui-")
+                .tempdir_in("/dev/shm")
+                .ok()
+        } else {
+            None
+        };
+        Arc::new(Self {
+            frame: Mutex::new(None),
+            rect: Mutex::new(None),
+            active: AtomicBool::new(false),
+            last_sent_seq: AtomicU64::new(0),
+            active_id: AtomicU64::new(0),
+            last_rect: Mutex::new(None),
+            shm_dir,
+        })
     }
 
-    fn shm_path(slot: u64) -> PathBuf {
-        PathBuf::from(format!(
-            "/dev/shm/patina-tui-{}-{}.rgb",
-            std::process::id(),
-            slot & 1
-        ))
+    fn shm_path(&self, slot: u64) -> Option<PathBuf> {
+        self.shm_dir
+            .as_ref()
+            .map(|dir| dir.path().join(format!("frame-{}.rgb", slot & 1)))
     }
 
     /// Emits Kitty Graphics APC escape sequence with double-buffered image IDs
@@ -115,7 +141,15 @@ impl KittyOverlay {
         };
         let frame = match self.frame.lock().ok().and_then(|f| f.clone()) {
             Some(f) => f,
-            None => return Ok(()),
+            None => {
+                // Clear any previous channel's frozen image while buffering.
+                let prev_id = self.active_id.swap(0, Ordering::Relaxed);
+                if prev_id != 0 {
+                    write!(out, "\x1b_Ga=d,d=I,i={prev_id},q=2\x1b\\")?;
+                    out.flush()?;
+                }
+                return Ok(());
+            }
         };
         let prev_rect = self.last_rect.lock().ok().and_then(|r| *r);
         let prev_seq = self.last_sent_seq.load(Ordering::Relaxed);
@@ -126,64 +160,63 @@ impl KittyOverlay {
         let prev_id = self.active_id.load(Ordering::Relaxed);
         let next_id = if prev_id == 42 { 43 } else { 42 };
 
-        // Begin synchronized output so the terminal presents the swap atomically.
-        write!(out, "\x1b[?2026h")?;
-
-        if is_ssh() {
+        // Prepare payload completely BEFORE opening DEC synchronized output.
+        enum Payload {
+            Shm(String),
+            ZlibB64(String),
+        }
+        let payload = if let Some(path) = self.shm_path(next_id) {
+            if fs::write(&path, &frame.data).is_err() {
+                return Ok(());
+            }
+            Payload::Shm(
+                base64::engine::general_purpose::STANDARD.encode(path.to_string_lossy().as_bytes()),
+            )
+        } else {
             let mut enc = ZlibEncoder::new(Vec::new(), Compression::fast());
             if enc.write_all(&frame.data).is_err() {
-                let _ = write!(out, "\x1b[?2026l");
                 return Ok(());
             }
             let Ok(compressed) = enc.finish() else {
-                let _ = write!(out, "\x1b[?2026l");
                 return Ok(());
             };
-            let b64 = base64::engine::general_purpose::STANDARD.encode(&compressed);
-            let bytes = b64.as_bytes();
-            write!(out, "\x1b[s\x1b[{};{}H", rect.y + 1, rect.x + 1)?;
-            let mut offset = 0usize;
-            while offset < bytes.len() {
-                let end = (offset + 4096).min(bytes.len());
-                let more = if end < bytes.len() { 1 } else { 0 };
-                let chunk = std::str::from_utf8(&bytes[offset..end]).unwrap_or("");
-                if offset == 0 {
-                    write!(
-                        out,
-                        "\x1b_Ga=T,t=d,f=24,o=z,s={},v={},c={},r={},i={next_id},z=-1,q=2,C=1,m={more};{chunk}\x1b\\",
-                        frame.width, frame.height, rect.width, rect.height,
-                    )?;
-                } else {
-                    write!(out, "\x1b_Gm={more},q=2;{chunk}\x1b\\")?;
-                }
-                offset = end;
-            }
-            write!(out, "\x1b[u")?;
-        } else {
-            let path = Self::shm_path(frame.seq);
-            if fs::write(&path, &frame.data).is_err() {
-                let _ = write!(out, "\x1b[?2026l");
-                return Ok(());
-            }
-            let b64_path = base64::engine::general_purpose::STANDARD
-                .encode(path.to_string_lossy().as_bytes());
-            write!(
-                out,
-                "\x1b[s\x1b[{};{}H\x1b_Ga=T,t=f,f=24,s={},v={},c={},r={},i={next_id},z=-1,q=2,C=1;{b64_path}\x1b\\\x1b[u",
-                rect.y + 1,
-                rect.x + 1,
-                frame.width,
-                frame.height,
-                rect.width,
-                rect.height,
-            )?;
-        }
+            Payload::ZlibB64(base64::engine::general_purpose::STANDARD.encode(&compressed))
+        };
 
-        // Delete the previous image ID only AFTER next_id is transmitted and placed.
+        write!(out, "\x1b[?2026h\x1b7\x1b[{};{}H", rect.y + 1, rect.x + 1)?;
+        match payload {
+            Payload::Shm(b64_path) => {
+                write!(
+                    out,
+                    "\x1b_Ga=T,t=f,f=24,s={},v={},c={},r={},i={next_id},z=-1,q=2,C=1;{b64_path}\x1b\\",
+                    frame.width, frame.height, rect.width, rect.height,
+                )?;
+            }
+            Payload::ZlibB64(b64) => {
+                let bytes = b64.as_bytes();
+                let mut offset = 0usize;
+                while offset < bytes.len() {
+                    let end = (offset + 4096).min(bytes.len());
+                    let more = if end < bytes.len() { 1 } else { 0 };
+                    let chunk = std::str::from_utf8(&bytes[offset..end]).unwrap_or("");
+                    if offset == 0 {
+                        write!(
+                            out,
+                            "\x1b_Ga=T,t=d,f=24,o=z,s={},v={},c={},r={},i={next_id},z=-1,q=2,C=1,m={more};{chunk}\x1b\\",
+                            frame.width, frame.height, rect.width, rect.height,
+                        )?;
+                    } else {
+                        write!(out, "\x1b_Gm={more},q=2;{chunk}\x1b\\")?;
+                    }
+                    offset = end;
+                }
+            }
+        }
+        // Delete previous image ID only AFTER next_id is transmitted and placed.
         if prev_id != 0 {
             write!(out, "\x1b_Ga=d,d=I,i={prev_id},q=2\x1b\\")?;
         }
-        write!(out, "\x1b[?2026l")?;
+        write!(out, "\x1b8\x1b[?2026l")?;
         out.flush()?;
 
         self.active_id.store(next_id, Ordering::Relaxed);
@@ -195,8 +228,6 @@ impl KittyOverlay {
     }
 
     pub fn clear(&self, out: &mut impl Write) -> io::Result<()> {
-        let _ = fs::remove_file(Self::shm_path(0));
-        let _ = fs::remove_file(Self::shm_path(1));
         write!(
             out,
             "\x1b_Ga=d,d=I,i=42,q=2\x1b\\\x1b_Ga=d,d=I,i=43,q=2\x1b\\"
@@ -211,9 +242,10 @@ pub struct TuiPlayer {
     current_url: Option<String>,
     paused: bool,
     muted: bool,
-    frame: Arc<Mutex<Option<RgbFrame>>>,
+    frame: Arc<Mutex<Option<Arc<RgbFrame>>>>,
     stop_flag: Arc<AtomicBool>,
     child: Option<Child>,
+    reader_thread: Option<JoinHandle<()>>,
     last_area: (u16, u16),
     is_fullscreen: bool,
 }
@@ -229,6 +261,7 @@ impl TuiPlayer {
             frame: Arc::new(Mutex::new(None)),
             stop_flag: Arc::new(AtomicBool::new(false)),
             child: None,
+            reader_thread: None,
             last_area: (80, 24),
             is_fullscreen: false,
         }
@@ -240,12 +273,26 @@ impl TuiPlayer {
             let _ = child.kill();
             let _ = child.wait();
         }
+        if let Some(handle) = self.reader_thread.take() {
+            let _ = handle.join();
+        }
         if let Ok(mut f) = self.frame.lock() {
             *f = None;
         }
         self.kitty.active.store(false, Ordering::Relaxed);
         if let Ok(mut f) = self.kitty.frame.lock() {
             *f = None;
+        }
+    }
+
+    fn reap_child(&mut self) {
+        if let Some(child) = self.child.as_mut()
+            && matches!(child.try_wait(), Ok(Some(_)))
+        {
+            self.child = None;
+            if let Some(handle) = self.reader_thread.take() {
+                let _ = handle.join();
+            }
         }
     }
 
@@ -257,6 +304,10 @@ impl TuiPlayer {
         let Some(url) = self.current_url.clone() else {
             return;
         };
+        if !is_allowed_stream_url(&url) {
+            log::warn!("patina-tui: rejected unsupported stream URL scheme");
+            return;
+        }
         match self.mode {
             VideoMode::None => {}
             VideoMode::Popup => {
@@ -270,12 +321,15 @@ impl TuiPlayer {
                 if self.muted {
                     cmd.arg("--mute=yes");
                 }
-                cmd.arg(&url)
+                // `--` prevents option injection from untrusted playlist URLs.
+                cmd.arg("--")
+                    .arg(&url)
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null());
-                if let Ok(child) = cmd.spawn() {
-                    self.child = Some(child);
+                match cmd.spawn() {
+                    Ok(child) => self.child = Some(child),
+                    Err(err) => log::warn!("patina-tui: failed to spawn mpv: {err}"),
                 }
             }
             VideoMode::Kitty | VideoMode::Inline => {
@@ -300,6 +354,8 @@ impl TuiPlayer {
                 cmd.args([
                     "-loglevel",
                     "quiet",
+                    "-protocol_whitelist",
+                    "http,https,tcp,tls,crypto,hls",
                     "-re",
                     "-i",
                     &url,
@@ -315,42 +371,47 @@ impl TuiPlayer {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null());
 
-                if let Ok(mut child) = cmd.spawn() {
-                    if let Some(mut stdout) = child.stdout.take() {
-                        let frame_arc = self.frame.clone();
-                        let kitty_arc = self.kitty.clone();
-                        let is_kitty = self.mode == VideoMode::Kitty;
-                        let stop = Arc::new(AtomicBool::new(false));
-                        self.stop_flag = stop.clone();
-                        if is_kitty {
-                            kitty_arc.active.store(true, Ordering::Relaxed);
-                        }
-                        thread::spawn(move || {
-                            let frame_bytes = w * h * 3;
-                            let mut buf = vec![0u8; frame_bytes];
-                            let mut seq = 1u64;
-                            while !stop.load(Ordering::Relaxed) {
-                                if stdout.read_exact(&mut buf).is_err() {
-                                    break;
-                                }
-                                let frame = RgbFrame {
-                                    width: w,
-                                    height: h,
-                                    data: buf.clone(),
-                                    seq,
-                                };
-                                seq = seq.wrapping_add(1).max(1);
-                                if is_kitty {
-                                    if let Ok(mut guard) = kitty_arc.frame.lock() {
+                match cmd.spawn() {
+                    Ok(mut child) => {
+                        if let Some(mut stdout) = child.stdout.take() {
+                            let frame_arc = self.frame.clone();
+                            let kitty_arc = self.kitty.clone();
+                            let is_kitty = self.mode == VideoMode::Kitty;
+                            let stop = Arc::new(AtomicBool::new(false));
+                            self.stop_flag = stop.clone();
+                            if is_kitty {
+                                kitty_arc.active.store(true, Ordering::Relaxed);
+                            }
+                            self.reader_thread = Some(thread::spawn(move || {
+                                let frame_bytes = w * h * 3;
+                                let mut buf = vec![0u8; frame_bytes];
+                                while !stop.load(Ordering::Relaxed) {
+                                    if stdout.read_exact(&mut buf).is_err() {
+                                        break;
+                                    }
+                                    if stop.load(Ordering::Relaxed) {
+                                        break;
+                                    }
+                                    let seq = NEXT_FRAME_SEQ.fetch_add(1, Ordering::Relaxed);
+                                    let frame = Arc::new(RgbFrame {
+                                        width: w,
+                                        height: h,
+                                        data: buf.clone(),
+                                        seq,
+                                    });
+                                    if is_kitty {
+                                        if let Ok(mut guard) = kitty_arc.frame.lock() {
+                                            *guard = Some(frame);
+                                        }
+                                    } else if let Ok(mut guard) = frame_arc.lock() {
                                         *guard = Some(frame);
                                     }
-                                } else if let Ok(mut guard) = frame_arc.lock() {
-                                    *guard = Some(frame);
                                 }
-                            }
-                        });
+                            }));
+                        }
+                        self.child = Some(child);
                     }
-                    self.child = Some(child);
+                    Err(err) => log::warn!("patina-tui: failed to spawn ffmpeg: {err}"),
                 }
             }
         }
@@ -365,6 +426,7 @@ impl Drop for TuiPlayer {
 
 impl NativeComponent for TuiPlayer {
     fn render(&mut self, area: Rect, buffer: &mut Buffer) {
+        self.reap_child();
         if area.width == 0 || area.height == 0 {
             self.kitty.active.store(false, Ordering::Relaxed);
             return;
@@ -375,9 +437,9 @@ impl NativeComponent for TuiPlayer {
         let mode_changed = is_fullscreen != self.is_fullscreen;
         self.is_fullscreen = is_fullscreen;
 
-        // No preview player in Guide mode: keep the EPG clean and save CPU/SSH bandwidth.
+        // No preview player in Guide mode for terminal video modes; keep popup mpv alive.
         if !is_fullscreen {
-            if mode_changed {
+            if mode_changed && self.mode != VideoMode::Popup {
                 self.stop_playback();
             }
             self.kitty.active.store(false, Ordering::Relaxed);
@@ -386,7 +448,7 @@ impl NativeComponent for TuiPlayer {
 
         let draw_area = area;
         self.last_area = (draw_area.width, draw_area.height);
-        if mode_changed && self.current_url.is_some() {
+        if mode_changed && self.mode != VideoMode::Popup && self.current_url.is_some() {
             self.start_playback();
         }
 
@@ -425,8 +487,8 @@ impl NativeComponent for TuiPlayer {
             for dy in 0..draw_area.height {
                 let y_top =
                     (usize::from(dy) * 2 * frame.height) / (usize::from(draw_area.height) * 2);
-                let y_bot =
-                    ((usize::from(dy) * 2 + 1) * frame.height) / (usize::from(draw_area.height) * 2);
+                let y_bot = ((usize::from(dy) * 2 + 1) * frame.height)
+                    / (usize::from(draw_area.height) * 2);
                 let y_top = y_top.min(frame.height.saturating_sub(1));
                 let y_bot = y_bot.min(frame.height.saturating_sub(1));
                 for dx in 0..draw_area.width {
@@ -459,9 +521,8 @@ impl NativeComponent for TuiPlayer {
             (_, None, _) => "[No stream]",
             (_, Some(_), true) => "[Paused]",
             (VideoMode::Popup, Some(_), false) => "[Playing in mpv]",
-            (VideoMode::Kitty, Some(_), false) => "[Buffering HD...]",
             (VideoMode::Inline, Some(_), false) => "[Buffering...]",
-            (VideoMode::None, Some(_), false) => "[Video off]",
+            (VideoMode::Kitty, Some(_), false) | (VideoMode::None, Some(_), false) => "[Video off]",
         };
         let cy = draw_area.top() + draw_area.height / 2;
         let max_len = usize::from(draw_area.width);
