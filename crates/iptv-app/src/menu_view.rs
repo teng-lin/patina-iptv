@@ -448,6 +448,12 @@ fn open_channel_editor(
     organization_view::open_guide_mode(ui, source, kind, Some(target.id), mode, list);
 }
 
+/// Whether entry `entry` of a groups column has group options (what
+/// [`open_group_options`] would open): its row shows a ⋯ for them.
+pub fn has_group_options(ui: Ui, entry: usize) -> bool {
+    channel_scope(ui, &ListId::of(entry, &*crate::schedule())).is_some()
+}
+
 /// A focused group is actionable even when none of its channels are visible.
 pub fn open_group_options(ui: Ui, entry: usize) -> bool {
     let list = ListId::of(entry, &*crate::schedule());

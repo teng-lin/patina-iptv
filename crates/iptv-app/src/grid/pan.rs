@@ -53,6 +53,11 @@ pub(crate) struct Pan {
 }
 
 impl Pan {
+    /// The window's state this pan belongs to.
+    pub(super) fn ui(&self) -> Ui {
+        self.ui
+    }
+
     pub(crate) fn new(ui: Ui, width: Signal<f32>) -> Pan {
         let (window, now) = ui.focus.with_untracked(|f| (f.window, f.now));
         let bounds = view_range(&crate::lists::view(ui), now);

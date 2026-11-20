@@ -106,6 +106,7 @@ fn closed(ui: Ui, cause: WindowCloseCause) {
 }
 
 fn content(ui: Ui) -> impl IntoElement {
+    super::keep_reachable(nsh_core::element::desktop::current_window());
     view()
         .test_id("primary-pip")
         .flex_1()
