@@ -150,11 +150,15 @@ what the content needs at the current text size, not from the device type.
   scale times the text size). Search's two-row header uses Compact.
 - **Now:** the guide scales from 1.0 to 0.8 with the desktop window
   (`crates/iptv-app/src/scale.rs`).
-- **Now:** the guide's header in Compact puts its shortcuts (the list on
-  screen, Movies, Shows, Add playlist) on a row of their own under the preview
-  and the focused programme (`iptv_core::layout::Shortcuts`); the preview keeps
-  its place at the top left and shrinks to leave that row room. The guide's rows
-  already take the full width below the header in every class.
+- **Now:** the guide's header (`iptv_core::layout::GuideHeader`) puts its
+  shortcuts (the list on screen, Movies, Shows, Add playlist) on a row of their
+  own under the preview and the focused programme in Compact, and in Medium
+  wherever the programme would have less than its room beside them. The
+  preview keeps its place at the top left and shrinks to leave that row room,
+  but never below 64 points tall, which keeps the corner ‹ inside it. A short
+  window grows the header instead. The programme's times wrap onto a second
+  line rather than clip; its title stays on one line and is truncated. The
+  guide's rows already take the full width below the header in every class.
 - **Now:** Movies and Shows already show one pane at a time in every class:
   details replace the list, and the poster grid reflows its columns.
 - **Planned:** a list beside its details in Expanded, and collapsing the

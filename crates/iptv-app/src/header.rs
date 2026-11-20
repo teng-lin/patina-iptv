@@ -14,7 +14,7 @@ use nsh_core::prelude::*;
 
 use crate::fonts::{HEADER_BODY, HEADER_TIMES, HEADER_TITLE, MEDIUM, SANS};
 use crate::guide::{Airing, Pane, Program};
-use crate::panels::{PREVIEW_MARGIN, PREVIEW_RADIUS, SHORTCUTS_GAP, header_now};
+use crate::panels::{PREVIEW_MARGIN, PREVIEW_RADIUS, header_now};
 use crate::scale::Scale;
 use crate::theme::{BRIGHT_TEXT, RADIUS, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, ViewMode, clock, tint};
@@ -224,9 +224,11 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                 ),
         )
         .child(
-            // Times, progress and minutes left; the group at the right.
+            // Times, progress and minutes left; the group at the right. A
+            // narrow header wraps them onto a second line rather than clip.
             view()
                 .flex_row()
+                .flex_wrap()
                 .items_center()
                 .gap(move || size.px(12.0))
                 .child(
@@ -295,16 +297,17 @@ fn library_shortcuts(ui: Ui) -> View {
             (
                 iptv_core::browse::RailItem::Movies,
                 iptv_core::vod::Kind::Movie,
-                tr("Movies"),
+                (|| tr("Movies")) as fn() -> &'static str,
             ),
             (
                 iptv_core::browse::RailItem::Shows,
                 iptv_core::vod::Kind::Series,
-                tr("Shows"),
+                || tr("Shows"),
             ),
         ]
         .into_iter()
         .map(move |(item, kind, label)| {
+            // The label follows a live change of language.
             crate::ui_kit::button(
                 ui,
                 size,
@@ -366,27 +369,32 @@ fn side(ui: Ui) -> impl IntoElement {
         .child(library_shortcuts(ui))
         .child(crate::wizard_view::add_button(ui))
         .child(view().flex_1())
-        .children(debug_overlay().then(|| {
-            text(move || {
-                ui.stats
-                    .with(|s| format!("keys {} · {} µs (max {})", s.keys, s.last_us, s.max_us))
-            })
-            .text_size(px(11.0))
-            .text_color(tint(WHITE, 0x60))
-        }))
+        .children(key_stats(ui))
+}
+
+/// The key stats line, in development only ([`debug_overlay`]).
+fn key_stats(ui: Ui) -> Option<Text> {
+    debug_overlay().then(|| {
+        text(move || {
+            ui.stats
+                .with(|s| format!("keys {} · {} µs (max {})", s.keys, s.last_us, s.max_us))
+        })
+        .text_size(px(11.0))
+        .text_color(tint(WHITE, 0x60))
+    })
 }
 
 /// The same shortcuts in a compact header ([`Shortcuts::Below`]): one row
 /// under the preview and the focused programme, scrolled sideways where the
 /// window is narrower than the row.
-fn shortcuts_row(ui: Ui, size: Scale) -> impl IntoElement {
+fn shortcuts_row(ui: Ui) -> impl IntoElement {
     scroll()
         .horizontal()
         .scrollbar(false)
         .test_id("guide-header-shortcuts")
         .opacity(move || shortcuts_opacity(ui))
-        .mt(move || size.px(SHORTCUTS_GAP))
-        .h(move || px(crate::panels::shortcuts_row_now()))
+        .mt(move || px(crate::panels::guide_header_now().row_gap))
+        .h(move || px(crate::panels::guide_header_now().row))
         .flex_shrink_0()
         .child(
             view()
@@ -395,7 +403,8 @@ fn shortcuts_row(ui: Ui, size: Scale) -> impl IntoElement {
                 .gap(px(8.0))
                 .child(list_button(ui))
                 .child(library_shortcuts(ui))
-                .child(crate::wizard_view::add_button(ui)),
+                .child(crate::wizard_view::add_button(ui))
+                .children(key_stats(ui)),
         )
 }
 
@@ -449,7 +458,7 @@ pub fn header(ui: Ui) -> impl IntoElement {
                         .child(details(ui, program, size))
                         .child(when(move || !below.get(), move || side(ui))),
                 )
-                .child(when(move || below.get(), move || shortcuts_row(ui, size)))
+                .child(when(move || below.get(), move || shortcuts_row(ui)))
                 .child(preview_ring(ui))
                 .child(when(move || corner_back_shown(ui), move || corner_back(ui))),
         )
@@ -470,6 +479,7 @@ fn corner_back_shown(ui: Ui) -> bool {
 fn corner_back(ui: Ui) -> impl IntoElement {
     let groups = move || ui.focus.with(|f| f.layout_pane()) == Pane::Guide;
     view()
+        .test_id("guide-corner-back")
         .absolute()
         // The player's ‹ is 20 and 16 points in from the safe area.
         .left(px(20.0))

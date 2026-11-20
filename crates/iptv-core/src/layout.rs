@@ -76,29 +76,8 @@ impl Class {
     }
 }
 
-/// Where the guide's header puts its shortcuts (the list on screen,
-/// Movies, Shows, Add playlist).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Shortcuts {
-    /// A column at the right, beside the preview and the focused programme.
-    Beside,
-    /// A row of their own under the preview and the focused programme, so
-    /// the programme keeps the width beside the preview: a compact window
-    /// has no room for three columns.
-    Below,
-}
-
-impl Class {
-    /// Where the guide's header puts its shortcuts in a window of this
-    /// class. The preview keeps its place at the top left either way: the
-    /// player under it is only resized, never hidden or moved elsewhere.
-    pub fn guide_shortcuts(self) -> Shortcuts {
-        match self {
-            Class::Compact => Shortcuts::Below,
-            Class::Medium | Class::Expanded => Shortcuts::Beside,
-        }
-    }
-}
+mod guide_header;
+pub use guide_header::*;
 
 #[cfg(test)]
 mod tests {
@@ -154,17 +133,5 @@ mod tests {
         assert_eq!(Class::of(700.0, 0.0), Class::Medium);
         assert_eq!(Class::of(700.0, -1.0), Class::Medium);
         assert_eq!(Class::of(700.0, f32::NAN), Class::Medium);
-    }
-
-    #[test]
-    fn a_compact_guide_header_moves_its_shortcuts_below() {
-        assert_eq!(Class::Compact.guide_shortcuts(), Shortcuts::Below);
-        assert_eq!(Class::Medium.guide_shortcuts(), Shortcuts::Beside);
-        assert_eq!(Class::Expanded.guide_shortcuts(), Shortcuts::Beside);
-        // A narrow desktop window, a phone, a portrait tablet, a TV.
-        assert_eq!(Class::of(400.0, 0.8).guide_shortcuts(), Shortcuts::Below);
-        assert_eq!(Class::of(360.0, 1.0).guide_shortcuts(), Shortcuts::Below);
-        assert_eq!(Class::of(800.0, 1.0).guide_shortcuts(), Shortcuts::Beside);
-        assert_eq!(Class::of(960.0, 0.8).guide_shortcuts(), Shortcuts::Beside);
     }
 }

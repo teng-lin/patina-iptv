@@ -124,6 +124,10 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     step(app.wait_for("text:Idioma"));
     step(app.wait_for("text:☰  Todos los canales"));
     step(app.wait_for("text:TV en directo"));
+    // The guide header's shortcuts, mounted under the settings, follow too.
+    step(app.wait_for("id:open-movies >> text:Películas"));
+    step(app.wait_for("id:open-shows >> text:Series"));
+    step(app.wait_for("text:+ Añadir lista"));
     step(app.wait_for("text:Reproducir el último canal al iniciar"));
     let language_help =
         "Interface language: `system` follows the device, otherwise a language tag.";

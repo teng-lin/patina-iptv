@@ -1282,3 +1282,10 @@ pub fn hold_source_preparation() -> runtime::TestGate {
 pub fn original_player_source(url: &str) -> Option<iptv_core::playback::PlaySource> {
     platform_data::host_handle().and_then(|owner| owner.original_player_source(url))
 }
+
+/// The guide header a desktop window `width` × `height` gets at the default
+/// text size (for tests: the same policy the header and the video follow).
+#[cfg(feature = "test-support")]
+pub fn desktop_guide_header(width: f32, height: f32) -> iptv_core::layout::GuideHeader {
+    iptv_core::layout::GuideHeader::of(width, height, scale::scale_for(width, height, true), 1.0)
+}

@@ -39,8 +39,22 @@ fn resize(app: &mut Headless, (w, h): (f32, f32)) {
     app.settle();
 }
 
-fn compact((w, _): (f32, f32)) -> bool {
-    w < 600.0
+/// The guide's windows: the expanded and compact ones, a medium window too
+/// narrow for three header columns, and short ones where the preview would
+/// otherwise vanish or the corner ‹ land on the shortcuts.
+const GUIDE: [(f32, f32); 3] = [(560.0, 800.0), (480.0, 240.0), (480.0, 320.0)];
+
+fn guide_sizes() -> impl Iterator<Item = (f32, f32)> {
+    sizes().chain(GUIDE).chain([EXPANDED, GUIDE[1], COMPACT[1]])
+}
+
+/// Whether the shortcuts go under the preview, by the app's own policy.
+fn below((w, h): (f32, f32)) -> bool {
+    iptv_app::desktop_guide_header(w, h).shortcuts == iptv_core::layout::Shortcuts::Below
+}
+
+fn by_id(id: &'static str) -> impl Fn(&nsh_testing::LayoutNode) -> bool {
+    move |n| n.test_id.as_deref() == Some(id)
 }
 
 fn player(app: &Headless) -> NodeId {
@@ -74,18 +88,24 @@ fn channel_selected(app: &Headless, name: &str) -> bool {
 /// The video sits exactly under the guide's preview, inside the window and
 /// above the guide's rows.
 #[track_caller]
-fn video_follows_the_preview(app: &Headless, player: NodeId, (w, _): (f32, f32)) {
+fn video_follows_the_preview(app: &Headless, player: NodeId, (w, h): (f32, f32)) {
     let video = bounds(app, |n| n.id == player);
-    let preview = bounds(app, |n| n.test_id.as_deref() == Some("guide-preview"));
+    let preview = bounds(app, by_id("guide-preview"));
     for (v, p) in video.iter().zip(preview) {
         assert!(
             (v - p).abs() < 0.5,
             "video {video:?} under preview {preview:?}"
         );
     }
+    let want = iptv_app::desktop_guide_header(w, h).preview;
+    assert_eq!(
+        (video[2], video[3]),
+        want,
+        "the policy's preview at {w}x{h}"
+    );
     assert!(
-        video[2] > 0.0 && video[3] > 0.0,
-        "the preview shrinks, never goes"
+        video[3] >= iptv_core::layout::PREVIEW_MIN_H,
+        "the preview shrinks, never goes: {video:?}"
     );
     assert!(video[0] + video[2] <= w, "the preview fits the window");
     let rows = bounds(app, |n| n.test_id.as_deref() == Some("guide-timeline"));
@@ -94,6 +114,40 @@ fn video_follows_the_preview(app: &Headless, player: NodeId, (w, _): (f32, f32))
         "the preview stays above the rows"
     );
     assert_eq!(rows[2], w, "the rows keep the window's width");
+}
+
+/// The compact header's parts stay apart and inside the window: the corner
+/// ‹ inside the preview, the shortcuts' row under it, the programme's
+/// minutes left on screen (its times line wraps rather than clip).
+#[track_caller]
+fn header_fits(app: &Headless, (w, h): (f32, f32)) {
+    let preview = bounds(app, by_id("guide-preview"));
+    // A desktop window always shows the ‹ over the preview.
+    {
+        let back = bounds(app, by_id("guide-corner-back"));
+        assert!(
+            back[1] + back[3] <= preview[1] + preview[3] + 0.5,
+            "‹ {back:?} inside the preview {preview:?} at {w}x{h}"
+        );
+    }
+    if below((w, h)) {
+        let row = bounds(app, by_id("guide-header-shortcuts"));
+        assert!(row[1] >= preview[1] + preview[3], "row {row:?} at {w}x{h}");
+        let rows = bounds(app, by_id("guide-timeline"));
+        assert!(
+            row[1] + row[3] <= rows[1] + 0.5,
+            "row {row:?} over the rows"
+        );
+    }
+    let left = bounds(app, |n| {
+        n.text
+            .as_ref()
+            .is_some_and(|t| t.text.text.ends_with(" min left"))
+    });
+    assert!(
+        left[0] + left[2] <= w + 0.5,
+        "minutes left {left:?} at {w}x{h}"
+    );
 }
 
 #[test]
@@ -122,7 +176,7 @@ fn resizing_the_guide_keeps_the_focused_channel_and_the_playing_preview() {
     assert!(channel_selected(app, "Local C"));
     let opens = iptv_app::player_opens(0);
 
-    for size in sizes() {
+    for size in guide_sizes() {
         resize(app, size);
         assert!(channel_selected(app, "Local C"), "focus kept at {size:?}");
         assert!(!channel_selected(app, "Local B"), "one focus at {size:?}");
@@ -130,11 +184,12 @@ fn resizing_the_guide_keeps_the_focused_channel_and_the_playing_preview() {
         assert_eq!(iptv_app::player_opens(0), opens, "no open at {size:?}");
         assert_eq!(
             app.screen().matches("id:guide-header-shortcuts").unwrap(),
-            compact(size),
-            "shortcuts below the preview only when compact, {size:?}"
+            below(size),
+            "shortcuts below the preview by the policy, {size:?}"
         );
         assert!(app.screen().matches("id:open-movies").unwrap());
         video_follows_the_preview(app, player, size);
+        header_fits(app, size);
         persistent(app, &lifetime, player);
     }
 
@@ -149,7 +204,7 @@ fn resizing_the_guide_keeps_the_focused_channel_and_the_playing_preview() {
     step(app.press_key("up"));
     step(app.press_key("up"));
     assert!(selected(app, "guide-preview"), "Up from the top row");
-    for size in sizes() {
+    for size in guide_sizes() {
         resize(app, size);
         assert!(selected(app, "guide-preview"), "preview focus at {size:?}");
     }
