@@ -186,7 +186,7 @@ fn library(home: &crate::isolated::Home) -> Server {
         .unwrap();
     settings.set("guide.autoplay", Value::Bool(false)).unwrap();
     std::fs::write(root.join("settings.json"), settings.to_json_string()).unwrap();
-    let mut store = crate::isolated::open_database(&root.join("iptv.sqlite")).unwrap();
+    let mut store = crate::isolated::open_database(root.join("iptv.sqlite")).unwrap();
     let source = store
         .add_source(&Source {
             name: "Generated on-demand playlist".into(),
