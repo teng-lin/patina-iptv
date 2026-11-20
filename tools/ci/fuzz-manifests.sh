@@ -18,5 +18,7 @@ for target in hls dash; do
     cp -R "fuzz/seeds/$target/." "fuzz/corpus/$target/"
   fi
   # The relay buffers at most 2 MiB of manifest; 64 KiB reaches every branch.
-  cargo-fuzz run "$target" -- -max_total_time="${1:-300}" -max_len=65537 -rss_limit_mb=512
+  # Same memory limits as fuzz-imports.sh: 512 MiB per input, 1 GiB in all.
+  cargo-fuzz run "$target" -- -max_total_time="${1:-300}" -max_len=65537 \
+    -rss_limit_mb=1024 -malloc_limit_mb=512
 done

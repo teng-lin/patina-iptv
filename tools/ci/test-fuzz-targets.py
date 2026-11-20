@@ -81,7 +81,7 @@ class Runner(unittest.TestCase):
         result, calls, corpus = self.run_script("60")
         self.assertEqual(result.returncode, 0, result.stderr)
         prefix = "nightly-synthetic /synthetic/nightly-synthetic/bin/cargo run "
-        self.assertEqual(calls, [prefix + f"{target} -- -max_total_time=60 -max_len=65537 -rss_limit_mb=512"
+        self.assertEqual(calls, [prefix + f"{target} -- -max_total_time=60 -max_len=65537 -rss_limit_mb=1024 -malloc_limit_mb=512"
                                  for target in ("imports", "manifests")])
         self.assertEqual(corpus, ["kept-from-an-earlier-run", "seed-synthetic"])
 
