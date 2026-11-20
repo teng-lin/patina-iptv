@@ -24,11 +24,13 @@ the code as it is (`iptv_nav::Keymap::defaults`, `crates/iptv-app/src/input.rs`,
   decided by the timer.
 - A waiting press belongs to the surface it went down on: the keymap's
   context and what owns input within it (the info card and the control
-  strip share a context but are different surfaces). If that surface
-  changes before the press is decided (a touch plays a channel or opens
-  More controls, a prompt opens, the guide goes full screen), the press is
-  dropped: neither its tap nor its hold action runs
-  (`iptv_nav::HeldPresses`; the log says "dropped: the surface changed").
+  strip share a context but are different surfaces). If the surface at the
+  moment the press is decided differs from the one where it began (a touch
+  played a channel or opened More controls, a prompt opened, the guide went
+  full screen), the press is dropped: neither its tap nor its hold action
+  runs (`iptv_nav::HeldPresses`; the log says "dropped: the surface
+  changed"). A surface that changes and comes back before the decision
+  counts as unchanged, and the press acts there.
   A dropped Back also takes Android's own Back on its release with it.
 - A PIN prompt or the remote editor takes the keys it gets: a press pending
   from before is cut short and stays so until that key is released or
@@ -127,8 +129,9 @@ As full-screen live, except:
 | Rewind / Fast-forward | Seek back / on | Repeats |
 | ⏭ (Next) | Back to live (a replay) | – |
 
-A seek and a track choice keep the same player and, for a replay, open the
-archive at the new time; nothing else opens a stream.
+A seek and a track choice keep the same player. A replay's seek opens the
+archive at the new time; a track choice opens no stream, and nothing else
+does either.
 
 ## Play bar
 

@@ -92,7 +92,7 @@ of these scenarios fails. Keyboard `M` registers without repeats (unit test
 
 | #87 criterion | Status | Evidence |
 |---|---|---|
-| Complete synthetic journey: launch → favourites/groups → preview → full screen → controls → browse without retuning → previous channel → back to the guide | Met (headless and emulator) | `tv_remote_journey` journey scenario; emulator rows above |
+| Complete synthetic journey: launch → favourites/groups → preview → full screen → controls → browse without retuning → previous channel → back to the guide | Partly (headless and emulator) | `tv_remote_journey` journey scenario and the emulator rows above cover launch, the groups column, full screen, controls, browsing without retuning, previous channel and the return to the guide. Not covered: choosing the Favourites group, adding or playing a favourite, and a preview before the first full screen (`guide.autoplay` is off, so OK plays full screen directly) |
 | Down/Repeat/Up phases, long OK release, rapid taps, context changes during a hold | Met headless; partly native | Headless phase scenarios and `iptv-nav` `hold`; emulator long OK (timed and with repeats) and rapid taps. Native context change during a hold not run |
 | Back dismisses the nearest surface; a chooser, PIN prompt or settings visit returns to the right content | Met | [Back](../tv-controls.md#back) order; emulator chooser and Back; headless `tv_shared_controls`, `accessibility_visibility` |
 | Replay/VOD seeking and track selection by remote keep the player and stream | Partly | Replay: headless `tv_replay` (seek: one archive open; track: none). VOD by remote and any Android replay: not run |
