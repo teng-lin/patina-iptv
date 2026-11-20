@@ -176,17 +176,107 @@ pub(crate) fn set(
     key: &str,
     value: Value,
 ) -> Result<(), SaveError> {
+    set_in(owner, key, &Target::Global, value)
+}
+
+/// [`set`] at `at`: a playlist's own value overrides the global one there.
+/// A value equal to what `at` would inherit removes its own value instead,
+/// so later global changes apply to it again.
+pub(crate) fn set_in(
+    owner: &std::rc::Rc<super::Runtime>,
+    key: &str,
+    at: &Target,
+    value: Value,
+) -> Result<(), SaveError> {
     let protect_all = owner.settings().get("parental.require_pin_for").ok()
         == Some(Value::Enum("blocked_content_and_settings".into()));
     if (key.starts_with("parental.") || protect_all) && !owner.parental_settings_allowed() {
         return Err(SaveError::ParentalLocked);
     }
+    apply(owner, key, |next| {
+        if *at != Target::Global {
+            let mut inheriting = next.clone();
+            inheriting.clear_in(key, at)?;
+            if inheriting.get_in(key, at)? == value {
+                return next.clear_in(key, at);
+            }
+        }
+        next.set_in(key, at, value)
+    })
+}
+
+/// Drops the own settings of deleted playlist `source`: a later playlist
+/// given the same id starts from the global ones.
+pub(crate) fn forget_playlist(
+    owner: &std::rc::Rc<super::Runtime>,
+    source: iptv_library::SourceId,
+) -> Result<(), SaveError> {
+    let playlist = source.0.to_string();
+    let mut without = (*owner.settings()).clone();
+    without.remove_playlist(&playlist);
+    if without == *owner.settings() {
+        return Ok(());
+    }
+    apply(owner, "playlist_overrides", |next| {
+        next.remove_playlist(&playlist);
+        Ok(Vec::new())
+    })
+}
+
+/// The own movie and series import switch (`playlists.include_vod`) of
+/// every playlist in `playlists`, or (`None`) of every playlist not in
+/// `kept`, is removed: a deletion whose settings save was lost (the app
+/// stopped first, or the save failed) must not hand it to a new playlist
+/// given the same id. Only this switch: the app sets no other playlist
+/// value, and others may be prepared for a playlist before it is added.
+pub(crate) fn forget_import_switches(
+    owner: &std::rc::Rc<super::Runtime>,
+    playlists: Option<&[iptv_library::SourceId]>,
+    kept: &[iptv_library::SourceId],
+) -> Result<(), SaveError> {
+    let key = iptv_settings::keys::PLAYLISTS_INCLUDE_VOD.as_str();
+    let kept: std::collections::BTreeSet<String> = kept.iter().map(|id| id.0.to_string()).collect();
+    let settings = owner.settings();
+    let targets: Vec<Target> = match playlists {
+        Some(ids) => ids
+            .iter()
+            .map(|id| Target::playlist(id.0.to_string()))
+            .collect::<Vec<_>>(),
+        None => settings
+            .playlists()
+            .into_iter()
+            .filter(|p| !kept.contains(*p))
+            .map(Target::playlist)
+            .collect::<Vec<_>>(),
+    }
+    .into_iter()
+    .filter(|at| settings.stored(key, at).is_some())
+    .collect();
+    if targets.is_empty() {
+        return Ok(());
+    }
+    apply(owner, key, |next| {
+        let mut changes = Vec::new();
+        for at in &targets {
+            changes.extend(next.clear_in(key, at)?);
+        }
+        Ok(changes)
+    })
+}
+
+/// Replaces the settings with what `edit` makes of them, tells the views
+/// and saves in the background.
+fn apply(
+    owner: &std::rc::Rc<super::Runtime>,
+    key: &str,
+    edit: impl FnOnce(&mut Settings) -> Result<Vec<iptv_settings::Change>, SettingsError>,
+) -> Result<(), SaveError> {
     if let Some(error) = owner.settings_read_only.get() {
         return Err(SaveError::Storage(error));
     }
     let services = owner.services();
     let mut next = (*services.settings()).clone();
-    let changes = next.set(key, value).map_err(SaveError::Invalid)?;
+    let changes = edit(&mut next).map_err(SaveError::Invalid)?;
     let json = next.to_json_string();
     let next = Arc::new(next);
     replace(services.shared_settings(), next.clone());

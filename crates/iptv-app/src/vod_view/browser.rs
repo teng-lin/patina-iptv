@@ -662,6 +662,7 @@ fn category_heading(ui: Ui, size: Scale) -> View {
 }
 
 pub(super) fn screen(ui: Ui, size: Scale) -> View {
+    super::empty::bind(ui);
     let preview = computed(move || ui.vod.with(|s| (s.focused.clone(), s.generation)));
     effect(move || {
         let (Some(key), generation) = preview.get() else {
@@ -699,32 +700,99 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         ui.vod
             .with(|s| s.control == Control::Search && s.search_open)
     });
-    view().absolute().inset_0().pt_safe_area().pb_safe_area().flex_row()
-        .test_id("vod-screen").bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
-        .accessibility_elements_hidden(move || crate::overlays::Overlay::Vod.accessibility_covered(ui))
-        .child(when(move || ui.vod.with(|s| s.categories_open), move || navigation(ui, size))).child(categories(ui, size))
-        .child(view().flex_1().min_w(px(0.0)).px(move || size.px(30.0))
-            .child(hero(ui, size))
-            .child(view().flex_row().items_center().gap(move || size.px(10.0))
-                .child(category_heading(ui, size))
-                .child(view().flex_1())
-                .child(ui_kit::caption(size, move || ui.vod.with(|s| {
-                    s.focused_index().map(|at| format!("{} / {}{}", at + 1, s.cards.len(), if s.has_more { "+" } else { "" })).unwrap_or_default()
-                }))))
-            .child(when(move || ui.vod.with(|s| s.search_open || !s.query.text.is_empty()), move || {
-                ui_kit::field(size, input()).element_ref(&field).test_id("vod-search")
-                    .value(move || ui.vod.with(|s| s.query.text.clone())).placeholder(tr("Search movies and series"))
-                    .on_change(move |text: &str| { ui.vod.update(|s| s.query.text = text.into()); reload(ui, false); })
-                    .auto_correct(false).auto_capitalize(AutoCapitalize::None).return_key_type(ReturnKeyType::Search)
-                    .on_submit(move |_: &str| ui.vod.update(|s| { s.control = Control::Catalogue; s.search_open = false; }))
-                    .on_focus(move || ui.vod.update(|s| s.control = Control::Search))
-            }))
-            .child(ui_kit::caption(size, move || status_message(ui)))
-            .child(when(move || ui.vod.with(|s| s.retry.is_some() && !s.busy), move || button(ui, size, Control::Retry, tr("Retry"), move || retry(ui)).test_id("vod-retry")))
-            .child(when(move || ui.vod.with(|s| s.cards.is_empty() && !s.busy && s.error.is_none()), move || {
-                let message = tr("No titles found. Enable movie and series imports in playlist settings, then refresh your playlist.");
-                ui_kit::body(size, message)
-            }))
-            .child(grid(ui, size))
-            .child(when(move || ui.vod.with(|s| s.has_more), move || ui_kit::button(ui, size, tr("Load more"), || false, move || { if !ui.vod.with_untracked(|s| s.busy) { reload(ui, true); } }))))
+    view()
+        .absolute()
+        .inset_0()
+        .pt_safe_area()
+        .pb_safe_area()
+        .flex_row()
+        .test_id("vod-screen")
+        .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
+        .accessibility_elements_hidden(move || {
+            crate::overlays::Overlay::Vod.accessibility_covered(ui)
+        })
+        .child(when(
+            move || ui.vod.with(|s| s.categories_open),
+            move || navigation(ui, size),
+        ))
+        .child(categories(ui, size))
+        .child(
+            view()
+                .flex_1()
+                .min_w(px(0.0))
+                .px(move || size.px(30.0))
+                .child(hero(ui, size))
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap(move || size.px(10.0))
+                        .child(category_heading(ui, size))
+                        .child(view().flex_1())
+                        .child(ui_kit::caption(size, move || {
+                            ui.vod.with(|s| {
+                                s.focused_index()
+                                    .map(|at| {
+                                        format!(
+                                            "{} / {}{}",
+                                            at + 1,
+                                            s.cards.len(),
+                                            if s.has_more { "+" } else { "" }
+                                        )
+                                    })
+                                    .unwrap_or_default()
+                            })
+                        })),
+                )
+                .child(when(
+                    move || ui.vod.with(|s| s.search_open || !s.query.text.is_empty()),
+                    move || {
+                        ui_kit::field(size, input())
+                            .element_ref(&field)
+                            .test_id("vod-search")
+                            .value(move || ui.vod.with(|s| s.query.text.clone()))
+                            .placeholder(tr("Search movies and series"))
+                            .on_change(move |text: &str| {
+                                ui.vod.update(|s| s.query.text = text.into());
+                                reload(ui, false);
+                            })
+                            .auto_correct(false)
+                            .auto_capitalize(AutoCapitalize::None)
+                            .return_key_type(ReturnKeyType::Search)
+                            .on_submit(move |_: &str| {
+                                ui.vod.update(|s| {
+                                    s.control = Control::Catalogue;
+                                    s.search_open = false;
+                                })
+                            })
+                            .on_focus(move || ui.vod.update(|s| s.control = Control::Search))
+                    },
+                ))
+                .child(ui_kit::caption(size, move || status_message(ui)))
+                .child(when(
+                    move || ui.vod.with(|s| s.retry.is_some() && !s.busy),
+                    move || {
+                        button(ui, size, Control::Retry, tr("Retry"), move || retry(ui))
+                            .test_id("vod-retry")
+                    },
+                ))
+                .child(super::empty::screen(ui, size))
+                .child(grid(ui, size))
+                .child(when(
+                    move || ui.vod.with(|s| s.has_more),
+                    move || {
+                        ui_kit::button(
+                            ui,
+                            size,
+                            tr("Load more"),
+                            || false,
+                            move || {
+                                if !ui.vod.with_untracked(|s| s.busy) {
+                                    reload(ui, true);
+                                }
+                            },
+                        )
+                    },
+                )),
+        )
 }

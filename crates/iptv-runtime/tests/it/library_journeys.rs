@@ -60,6 +60,15 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         settings
             .set("epg.update_on_playlist_change", Value::Bool(false))
             .unwrap();
+        // A playlist deleted while its settings could not be saved left its
+        // own value behind; a kept playlist has one too.
+        let gone = iptv_settings::Target::playlist("9");
+        let kept = iptv_settings::Target::playlist(sources[0].0.to_string());
+        for at in [&gone, &kept] {
+            settings
+                .set_in("playlists.include_vod", at, Value::Bool(false))
+                .unwrap();
+        }
         std::fs::write(dir.path().join("settings.json"), settings.to_json_string()).unwrap();
         let owner = Rc::new(Runtime::new(Ports::new(dir.path().into(), move |_| {
             Ok(key.clone())
@@ -83,6 +92,15 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         owner.load_settings();
         data::start(&owner);
         displayed(&owner, &mut events, 8).await;
+        // Startup drops the settings of playlists the store no longer has.
+        assert_eq!(
+            owner.settings().stored("playlists.include_vod", &gone),
+            None
+        );
+        assert_eq!(
+            owner.settings().stored("playlists.include_vod", &kept),
+            Some(&Value::Bool(false))
+        );
         assert!(data::combined::has_multiple_enabled(&owner));
         let keys: Vec<_> = (0..8)
             .map(|i| owner.schedule().channel_key(i).unwrap())
@@ -140,8 +158,30 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         displayed(&owner, &mut events, 4).await;
         assert!(owner.schedule().find_channel(&a).is_none());
         assert!(owner.schedule().find_channel(&b).is_some());
+        // A playlist's own movie and series import: switching back to the
+        // inherited value pins nothing, and deleting it drops its own value,
+        // so a playlist given the same id later starts from the global one.
+        let key = "playlists.include_vod";
+        let at = iptv_settings::Target::playlist(sources[1].0.to_string());
+        owner
+            .set_playlist_setting(sources[1], key, Value::Bool(false))
+            .unwrap();
+        assert_eq!(owner.settings().stored(key, &at), Some(&Value::Bool(false)));
+        owner
+            .set_playlist_setting(sources[1], key, Value::Bool(true))
+            .unwrap();
+        assert_eq!(owner.settings().stored(key, &at), None, "inherits again");
+        owner
+            .set_playlist_setting(sources[1], key, Value::Bool(false))
+            .unwrap();
         data::library::delete(&owner, sources[1]).await.unwrap();
         displayed(&owner, &mut events, 0).await;
+        assert_eq!(owner.settings().stored(key, &at), None);
+        assert!(
+            owner
+                .settings()
+                .bool(iptv_settings::keys::PLAYLISTS_INCLUDE_VOD, &at)
+        );
         assert!(
             data::combined::active(&owner),
             "explicit aggregate mode remains available for adding a source"

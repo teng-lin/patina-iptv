@@ -116,6 +116,9 @@ pub struct Catalog {
     pub warnings: Vec<CatalogWarning>,
     /// Warnings beyond the stored cap.
     pub warnings_dropped: usize,
+    /// Movie or series lists that could not be downloaded while the rest
+    /// of the import went on, with why (first failure of each kind).
+    pub on_demand_failures: Vec<(ContentKind, crate::error::ImportError)>,
     pub stats: ImportStats,
 }
 
@@ -145,6 +148,7 @@ impl Catalog {
             series: Vec::new(),
             warnings: Vec::new(),
             warnings_dropped: 0,
+            on_demand_failures: Vec::new(),
             stats: ImportStats::default(),
         };
         catalog.warn_guide_limit(dropped);

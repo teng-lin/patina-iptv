@@ -48,6 +48,10 @@ pub struct ImportStatus {
     /// is stored: messages could quote portal text or URLs.
     pub last_error: Option<ImportErrorKind>,
     pub last_error_at: Option<i64>,
+    /// The last successful import could not download its movies, or its
+    /// series (kind only); the rest of it was kept.
+    pub movies_error: Option<ImportErrorKind>,
+    pub series_error: Option<ImportErrorKind>,
 }
 
 pub use iptv_library::ImportErrorKind;
@@ -164,12 +168,18 @@ fn import_status(row: &rusqlite::Row<'_>, at: usize) -> rusqlite::Result<ImportS
             .get::<_, Option<String>>(at + 7)?
             .map(|s| ImportErrorKind::from_slug(&s)),
         last_error_at: row.get(at + 8)?,
+        movies_error: row
+            .get::<_, Option<String>>(at + 9)?
+            .map(|s| ImportErrorKind::from_slug(&s)),
+        series_error: row
+            .get::<_, Option<String>>(at + 10)?
+            .map(|s| ImportErrorKind::from_slug(&s)),
     })
 }
 
 const IMPORT_COLUMNS: &str = "i.last_attempt_at, i.last_success_at, i.group_count, \
     i.channel_count, i.vod_count, i.series_count, i.duplicate_count, i.last_error_kind, \
-    i.last_error_at";
+    i.last_error_at, i.movie_error_kind, i.series_error_kind";
 
 pub(crate) fn update_source_in(
     conn: &Connection,
@@ -387,23 +397,61 @@ impl Store {
         )?;
         Ok(())
     }
+
+    /// Records which on-demand lists the last successful import could not
+    /// download (kind only). Movies and series it did download stay.
+    pub fn record_on_demand_errors(
+        &mut self,
+        id: SourceId,
+        movies: Option<ImportErrorKind>,
+        series: Option<ImportErrorKind>,
+    ) -> Result<()> {
+        ensure_source(&self.conn, id)?;
+        self.conn.execute(
+            "UPDATE source_imports SET movie_error_kind = ?2, series_error_kind = ?3
+             WHERE source_id = ?1",
+            params![
+                id.0,
+                movies.map(ImportErrorKind::slug),
+                series.map(ImportErrorKind::slug)
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Whether the catalogue of `id` has movies, and series, as the
+    /// catalogue reads them (an embedded series of a movie list is a series).
+    pub fn on_demand_kinds(&self, id: SourceId) -> Result<(bool, bool)> {
+        crate::vod::on_demand_kinds(&self.conn, id)
+    }
+}
+
+/// The movie and series lists an import could not download (kind only).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct OnDemandErrors {
+    pub movies: Option<ImportErrorKind>,
+    pub series: Option<ImportErrorKind>,
 }
 
 pub(crate) fn record_import_success(
     conn: &Connection,
     id: SourceId,
     counts: &CatalogCounts,
+    on_demand: OnDemandErrors,
     now: i64,
 ) -> Result<()> {
     conn.execute(
         "INSERT INTO source_imports (source_id, last_attempt_at, last_success_at, group_count,
-             channel_count, vod_count, series_count, duplicate_count, last_error_kind, last_error_at)
-         VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL)
+             channel_count, vod_count, series_count, duplicate_count, last_error_kind, last_error_at,
+             movie_error_kind, series_error_kind)
+         VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL, ?8, ?9)
          ON CONFLICT (source_id) DO UPDATE SET last_attempt_at = excluded.last_attempt_at,
              last_success_at = excluded.last_success_at, group_count = excluded.group_count,
              channel_count = excluded.channel_count, vod_count = excluded.vod_count,
              series_count = excluded.series_count, duplicate_count = excluded.duplicate_count,
-             last_error_kind = NULL, last_error_at = NULL",
+             last_error_kind = NULL, last_error_at = NULL,
+             movie_error_kind = excluded.movie_error_kind,
+             series_error_kind = excluded.series_error_kind",
         params![
             id.0,
             now,
@@ -411,7 +459,9 @@ pub(crate) fn record_import_success(
             counts.channels,
             counts.vod,
             counts.series,
-            counts.duplicates
+            counts.duplicates,
+            on_demand.movies.map(ImportErrorKind::slug),
+            on_demand.series.map(ImportErrorKind::slug)
         ],
     )?;
     Ok(())

@@ -20,7 +20,7 @@ use crate::ctx::Ctx;
 use crate::error::{AuthProblem, ImportError, ParseProblem, Step};
 use crate::fetch::Fetch;
 use crate::progress::{Phase, Progress, ProgressSink};
-use crate::xtream::soften;
+use crate::xtream::{soften, soften_items};
 
 pub(crate) async fn import_stalker<F: Fetch, P: ProgressSink>(
     ctx: &mut Ctx<'_, F, P>,
@@ -124,7 +124,7 @@ pub(crate) async fn import_stalker<F: Fetch, P: ProgressSink>(
             let groups = catalog.absorb(Step::Categories(kind), None, import);
             catalog.groups.extend(groups);
         }
-        if let Some(items) = soften(&mut catalog, items)? {
+        if let Some(items) = soften_items(&mut catalog, kind, items)? {
             catalog.vod = items.into_catalog(&mut catalog);
             let referenced: Vec<_> = catalog.vod.iter().flat_map(|v| v.groups.clone()).collect();
             catalog.add_missing_groups(kind, referenced.iter());
@@ -137,7 +137,7 @@ pub(crate) async fn import_stalker<F: Fetch, P: ProgressSink>(
             let groups = catalog.absorb(Step::Categories(kind), None, import);
             catalog.groups.extend(groups);
         }
-        if let Some(items) = soften(&mut catalog, items)? {
+        if let Some(items) = soften_items(&mut catalog, kind, items)? {
             catalog.series = items.into_catalog(&mut catalog);
             let referenced: Vec<_> = catalog
                 .series
