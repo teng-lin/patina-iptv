@@ -2,6 +2,7 @@
 //! layer, the groups column (shown with the rail while either has the
 //! focus) and the geometry of the header (`header.rs`) and its preview.
 
+use iptv_core::layout::{Class, Shortcuts};
 use iptv_core::lists::entry_count;
 use nsh_core::prelude::*;
 
@@ -29,20 +30,47 @@ pub const PREVIEW_SHARE: f32 = 0.32;
 pub const PREVIEW_MARGIN: f32 = 12.0;
 pub const PREVIEW_RADIUS: f32 = 10.0;
 
+/// The shortcuts' row under the preview in a compact header
+/// ([`Shortcuts::Below`]): its height and the gap above it (dp at full
+/// size, scaled with the guide).
+pub const SHORTCUTS_ROW: f32 = 48.0;
+pub const SHORTCUTS_GAP: f32 = 8.0;
+
 /// The header's height and the preview's width and height in a window
-/// `w` × `h`: the preview as tall as the header leaves it, narrowed to its
-/// share of the width.
-pub fn header_size(w: f32, h: f32) -> (f32, f32, f32) {
+/// `w` × `h`: the preview as tall as the header leaves it above `below`
+/// (the shortcuts' row, or 0), narrowed to its share of the width.
+pub fn header_size(w: f32, h: f32, below: f32) -> (f32, f32, f32) {
     let header = (h * HEADER_SHARE).round();
-    let tall = (header - 2.0 * PREVIEW_MARGIN).max(0.0);
+    let tall = (header - 2.0 * PREVIEW_MARGIN - below).max(0.0);
     let width = (tall * 16.0 / 9.0).min(w * PREVIEW_SHARE).round();
     (header, width, (width * 9.0 / 16.0).round())
+}
+
+/// Where the header puts its shortcuts in the window now (reactive): below
+/// the preview in a compact window (`iptv_core::layout`), with the text
+/// factor Search uses (the guide's scale times the viewer's text size).
+pub fn shortcuts_now() -> Shortcuts {
+    let text = crate::scale::now() * crate::settings::font_factor();
+    Class::of(window().width.0, text).guide_shortcuts()
+}
+
+/// The shortcuts' row height now (its buttons' labels follow the text size).
+pub fn shortcuts_row_now() -> f32 {
+    (SHORTCUTS_ROW * crate::scale::now() * crate::settings::font_factor().max(1.0)).round()
+}
+
+/// The height the shortcuts' row takes from the preview now (0 beside it).
+fn below_now() -> f32 {
+    match shortcuts_now() {
+        Shortcuts::Beside => 0.0,
+        Shortcuts::Below => shortcuts_row_now() + (SHORTCUTS_GAP * crate::scale::now()).round(),
+    }
 }
 
 /// [`header_size`] of the window now (reactive).
 pub fn header_now() -> (f32, f32, f32) {
     let w = window();
-    header_size(w.width.0, w.height.0)
+    header_size(w.width.0, w.height.0, below_now())
 }
 
 /// The rectangle the video layer occupies in guide mode (x, y, width,
@@ -152,19 +180,38 @@ mod tests {
     #[test]
     fn header_and_preview_keep_their_shares() {
         // Tablet (1920 × 1200 at 1.5 px/dp), desktop window, TV (1080p at 2).
-        assert_eq!(header_size(1280.0, 800.0), (264.0, 410.0, 231.0));
-        assert_eq!(header_size(1280.0, 720.0), (238.0, 380.0, 214.0));
-        assert_eq!(header_size(960.0, 540.0), (178.0, 274.0, 154.0));
-        assert_eq!(header_size(1920.0, 1080.0), (356.0, 590.0, 332.0));
+        assert_eq!(header_size(1280.0, 800.0, 0.0), (264.0, 410.0, 231.0));
+        assert_eq!(header_size(1280.0, 720.0, 0.0), (238.0, 380.0, 214.0));
+        assert_eq!(header_size(960.0, 540.0, 0.0), (178.0, 274.0, 154.0));
+        assert_eq!(header_size(1920.0, 1080.0, 0.0), (356.0, 590.0, 332.0));
         for (w, h) in [
             (1280.0, 800.0),
             (1280.0, 720.0),
             (960.0, 540.0),
             (760.0, 480.0),
         ] {
-            let (header, pw, ph) = header_size(w, h);
+            let (header, pw, ph) = header_size(w, h, 0.0);
             assert!(ph + 2.0 * PREVIEW_MARGIN <= header + 1.0, "{w}x{h}");
             assert!(pw <= w * PREVIEW_SHARE + 0.5, "{w}x{h}");
+        }
+    }
+
+    #[test]
+    fn a_compact_header_keeps_its_height_and_leaves_the_shortcuts_room() {
+        // Narrow desktop windows (scale 0.8), a phone, a short wide window.
+        for (w, h, scale) in [
+            (400.0, 600.0, 0.8),
+            (480.0, 800.0, 0.8),
+            (320.0, 540.0, 0.8),
+            (360.0, 800.0, 1.0),
+            (560.0, 320.0, 0.8),
+        ] {
+            let below = ((SHORTCUTS_ROW + SHORTCUTS_GAP) * scale).round();
+            let (header, pw, ph) = header_size(w, h, below);
+            assert_eq!(header, header_size(w, h, 0.0).0, "{w}x{h}");
+            assert!(ph + 2.0 * PREVIEW_MARGIN + below <= header + 1.0, "{w}x{h}");
+            assert!(pw <= w * PREVIEW_SHARE + 0.5, "{w}x{h}");
+            assert!(pw > 0.0, "{w}x{h}: the preview shrinks, never goes");
         }
     }
 }
