@@ -92,7 +92,8 @@ In the guide:
 - **Now:** opening a programme's details or menu never starts playback. A
   long press or right-click moves the focus to what it opens the menu for;
   `guide.autoplay` then holds on that channel, after the menu or its details
-  close, until the viewer moves the focus again. A choice still plays.
+  close, until the viewer moves the focus to another channel. A choice still
+  plays.
 
 ### Touch gestures in the guide
 
