@@ -137,7 +137,7 @@ pub fn watch_drags<E: Interactive>(list: E, ui: Ui) -> E {
             // intercepts a drag past its own slop, at the list's end too):
             // a drag as well.
             nsh_core::TouchPhase::Cancel => {
-                if watch.with(|w| std::mem::take(w)).is_down() {
+                if watch.with(std::mem::take).is_down() {
                     dragged(ui);
                 }
             }
