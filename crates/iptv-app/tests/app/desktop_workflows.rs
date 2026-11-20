@@ -48,20 +48,22 @@ struct Observed {
 impl Observed {
     /// Surface `surface`'s player. Linux and macOS name it by its
     /// `popupSurface` routing prop (`video.rs`), which their player windows
-    /// need; Windows has no player windows and sends no such prop, so there
-    /// the surfaces' players are the `tv.player`s in mount order (surface 0,
-    /// the persistent one, first).
+    /// need, and the scenarios require it there.
+    #[cfg(not(windows))]
     fn player(&self, surface: usize) -> Option<NodeId> {
-        let props = self.props.lock().unwrap();
-        if let Some((id, _)) = props
+        self.props
+            .lock()
+            .unwrap()
             .iter()
             .find(|(_, v)| v.get("popupSurface") == Some(&json!(surface)))
-        {
-            return Some(*id);
-        }
-        if props.values().any(|v| v.contains_key("popupSurface")) {
-            return None;
-        }
+            .map(|(id, _)| *id)
+    }
+
+    /// Windows has no player windows and sends no routing prop: the
+    /// surfaces' players are the `tv.player`s in mount order (surface 0,
+    /// the persistent one, first).
+    #[cfg(windows)]
+    fn player(&self, surface: usize) -> Option<NodeId> {
         self.players.lock().unwrap().get(surface).copied()
     }
 
