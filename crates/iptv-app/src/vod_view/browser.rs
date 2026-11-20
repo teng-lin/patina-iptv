@@ -779,12 +779,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
                             .auto_correct(false)
                             .auto_capitalize(AutoCapitalize::None)
                             .return_key_type(ReturnKeyType::Search)
-                            .on_submit(move |_: &str| {
-                                ui.vod.update(|s| {
-                                    s.control = Control::Catalogue;
-                                    s.search_open = false;
-                                })
-                            })
+                            .on_submit(move |_: &str| ui.vod.update(|s| s.close_search()))
                             .on_focus(move || ui.vod.update(|s| s.control = Control::Search))
                     },
                 ))

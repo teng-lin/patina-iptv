@@ -524,6 +524,21 @@ impl Screen {
             self.left_action = false;
         }
     }
+    /// Closes the search field (Back, or its submit key): the remote goes to
+    /// the titles, or stays on Search when the one pane offers nothing to
+    /// focus (an import running).
+    pub fn close_search(&mut self) {
+        self.search_open = false;
+        self.control = if self.one_pane_without_action() {
+            Control::Search
+        } else {
+            Control::Catalogue
+        };
+    }
+    /// Enters the titles from the categories (Right, or OK on a category).
+    pub fn enter_catalogue(&mut self) {
+        self.browse_horizontal(1);
+    }
     /// Whether the one pane offers no action: the remote's way from the
     /// rail is then the toolbar (Search, Sort).
     fn one_pane_without_action(&self) -> bool {
@@ -543,12 +558,16 @@ impl Screen {
         let target = action.target();
         // The empty catalogue only (a load may be running): never a shelf,
         // details or a list with titles.
-        if self.offered.is_some_and(|offered| offered != target)
-            && self.control == Control::Catalogue
+        let moved = self.offered.is_some_and(|offered| offered != target)
             && !self.is_shelf()
             && self.details.is_none()
-            && self.cards.is_empty()
-        {
+            && self.cards.is_empty();
+        // On Retry after a failed read: its reload puts the remote where the
+        // titles would be, which must not arm the new action unseen.
+        if moved && self.control == Control::Retry {
+            self.left_action = true;
+        }
+        if moved && self.control == Control::Catalogue {
             if self.one_pane() {
                 self.focus_rail();
             } else {
@@ -1157,8 +1176,7 @@ impl Screen {
         }
         if !self.is_shelf() && self.details.is_none() {
             if self.search_open {
-                self.search_open = false;
-                self.control = Control::Catalogue;
+                self.close_search();
                 return;
             }
             if !self.categories_open && !self.one_pane() {
@@ -2333,6 +2351,73 @@ mod tests {
         // With an action, Right reaches the action as before.
         s.set_library(VodState::NoEligibleSource);
         s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Catalogue);
+    }
+    #[test]
+    fn a_target_change_on_retry_never_arms_the_new_action() {
+        for compact in [true, false] {
+            let mut s = Screen::default();
+            s.set_compact(compact);
+            s.set_library(VodState::Failed {
+                source: 1,
+                problem: ImportProblem::Network,
+            });
+            let generation = s.begin(Kind::Movie);
+            s.publish(generation, Vec::new(), false, false);
+            s.browse_horizontal(1);
+            // The read fails first; Retry takes the remote.
+            s.reload();
+            s.fail("generated failure", Operation::List);
+            assert_eq!(s.control, Control::Retry);
+            // Then the action moves to playlist 2, and its reload empties.
+            s.set_library(VodState::ImportsDisabled { source: 2 });
+            assert_eq!(s.control, Control::Retry);
+            let generation = s.reload();
+            s.publish(generation, Vec::new(), false, false);
+            assert_eq!(s.empty_action(), Some(EmptyAction::PlaylistSettings(2)));
+            assert_ne!(s.control, Control::Catalogue, "compact: {compact}");
+        }
+    }
+    #[test]
+    fn ok_on_a_category_enters_a_shown_action_for_good() {
+        let mut s = Screen::default();
+        s.set_library(VodState::Failed {
+            source: 1,
+            problem: ImportProblem::Network,
+        });
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, Vec::new(), false, false);
+        s.browse_horizontal(1);
+        // Wide: the action moves to playlist 2, the remote goes to the
+        // categories; OK there enters 2's shown action.
+        s.set_library(VodState::ImportsDisabled { source: 2 });
+        assert_eq!(s.control, Control::Category);
+        s.enter_catalogue();
+        assert_eq!(s.control, Control::Catalogue);
+        // Compact afterwards keeps it there.
+        s.set_compact(true);
+        assert_eq!(s.control, Control::Catalogue);
+    }
+    #[test]
+    fn closing_search_in_a_compact_import_keeps_the_remote_on_search() {
+        let mut s = Screen::default();
+        s.set_compact(true);
+        s.set_library(VodState::Importing);
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, Vec::new(), false, false);
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Search);
+        s.search_open = true;
+        s.back();
+        assert!(s.open && !s.search_open);
+        assert_eq!(s.control, Control::Search);
+        s.search_open = true;
+        s.close_search();
+        assert_eq!(s.control, Control::Search);
+        // With an action, closing search goes where the titles would be.
+        s.set_library(VodState::NoEligibleSource);
+        s.search_open = true;
+        s.close_search();
         assert_eq!(s.control, Control::Catalogue);
     }
     #[test]

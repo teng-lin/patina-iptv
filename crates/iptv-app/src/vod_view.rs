@@ -522,10 +522,7 @@ fn activate(ui: Ui) {
                 .vod
                 .with_untracked(|s| !s.is_shelf() && s.details.is_none()) =>
         {
-            ui.vod.update(|s| {
-                s.categories_open = false;
-                s.control = Control::Catalogue;
-            });
+            ui.vod.update(|s| s.enter_catalogue());
         }
         Control::Category => cycle_category(ui),
         Control::Sort => {

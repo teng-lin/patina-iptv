@@ -234,10 +234,12 @@ when it was just sent off another playlist's action; Left reaches the rail
 and Right returns. An action that moves to another playlist, or goes away
 (a refresh started), sends it to the rail, and if the window widens or the
 text shrinks the rail stays on screen with the remote on it. Without an
-action, Right from the rail reaches Search and Sort instead. In every window,
-a remote sent off an action stays off the new one through a failed read and
-its Retry, until it moves there itself. The action stays inside a 400×600 window at Medium and
-Extra large text, also with the test pseudolocale
+action, Right from the rail reaches Search and Sort instead, and closing
+Search keeps the remote there. In every window, a remote sent off an action,
+or on Retry when the action moves, stays off the new one through a failed
+read and its Retry, until it moves there itself (Right, or OK on a
+category). The action stays inside a 400×600 window at Medium and Extra
+large text, also with the test pseudolocale
 (`tests/app/vod_empty_compact.rs`). The "Movies and series" switch keeps no
 own value when it matches the global setting, and a deleted playlist's own
 value goes with it. A search or filter that finds nothing says "No titles
