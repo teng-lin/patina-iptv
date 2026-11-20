@@ -209,6 +209,16 @@ pub(super) fn run(owner: &Rc<crate::Runtime>, stored: StoredSource, purpose: Pur
                 }
                 owner.imports.with(|r| r.borrow_mut().remove(&id));
                 changed(owner);
+                if result.is_err() {
+                    // The store has this failure's precise kind by now; the
+                    // snapshot must not keep showing an older failure's.
+                    let owner = owner.clone();
+                    owner.clone().spawn(async move {
+                        if let Err(error) = refresh_cache(&owner).await {
+                            log::warn!("iptv library: failure recorded, details stale: {error}");
+                        }
+                    });
+                }
                 Activity::Done(result)
             }
         };
@@ -370,6 +380,11 @@ pub async fn delete(owner: &Rc<crate::Runtime>, id: SourceId) -> Result<(), Stor
         }
     })
     .await;
+    // Source ids can be given again: a later playlist must not inherit
+    // this one's own settings (its movie and series import, for one).
+    if let Err(error) = crate::settings::forget_playlist(owner, id) {
+        log::warn!("iptv data: the deleted playlist's settings stay: {error}");
+    }
     crate::favorites::refresh_vod_availability(owner).await;
     log::info!("iptv data: deleted source {}", id.0);
     owner.emit(crate::RuntimeEvent::ForgetSource(id));

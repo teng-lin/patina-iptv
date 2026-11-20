@@ -1,15 +1,15 @@
 //! Why a Movies or Shows catalogue is empty, and the one thing to do next.
 //!
-//! The shell describes each playlist on screen ([`SourceVod`]: its type,
-//! whether its movie and series import is on, a refresh running now, how
-//! its last import went and the titles it stored); [`VodState::of`] reduces
+//! The shell describes each enabled playlist, the ones the catalogue reads
+//! ([`SourceVod`]: its type, whether its movie and series import is on, a
+//! refresh running now, how its last import went and whether it has titles); [`VodState::of`] reduces
 //! them to one state with at most one action ([`VodState::action`]). Nothing
 //! here switches an import on or invents titles: M3U playlists never carry
 //! movies or series, so they only ever lead to adding another playlist.
 
 use crate::wizard::FailureKind;
 
-/// What one playlist on screen says about its movies (or shows).
+/// What one enabled playlist says about its movies (or shows).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SourceVod {
     pub source: i64,
@@ -20,30 +20,36 @@ pub struct SourceVod {
     pub imports_enabled: bool,
     /// A refresh of it is running now.
     pub importing: bool,
-    /// Its last import failed, by kind (never the provider's text).
+    /// Its last import failed, or could not download the titles of the
+    /// kind shown, by kind (never the provider's text).
     pub failed: Option<ImportProblem>,
-    /// Titles of the kind shown that its last successful import stored.
-    pub titles: u32,
+    /// Its catalogue has titles of the kind shown.
+    pub has_titles: bool,
 }
 
 /// Why an import failed, as far as the empty screen tells it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ImportProblem {
-    /// No answer, a timeout, or the server turned the request down.
+    /// No answer, or a timeout.
     Network,
+    /// The server answered, turning the request down (an HTTP error).
+    Refused,
     /// The provider refused the account or the device.
     Access,
     /// The answer was not a playlist.
     Format,
     /// The import was stopped.
     Stopped,
+    /// Too many playlists were updating at once.
+    Busy,
     Other,
 }
 
 impl From<FailureKind> for ImportProblem {
     fn from(kind: FailureKind) -> Self {
         match kind {
-            FailureKind::Network | FailureKind::Busy => Self::Network,
+            FailureKind::Network => Self::Network,
+            FailureKind::Busy => Self::Busy,
             FailureKind::Auth => Self::Access,
             FailureKind::Parse | FailureKind::Unsupported => Self::Format,
             FailureKind::Cancelled => Self::Stopped,
@@ -91,7 +97,7 @@ impl VodState {
     pub fn of(sources: &[SourceVod]) -> Self {
         let eligible = || sources.iter().filter(|s| s.eligible);
         let enabled = || eligible().filter(|s| s.imports_enabled);
-        if eligible().any(|s| s.titles > 0) {
+        if eligible().any(|s| s.has_titles) {
             return Self::Available;
         }
         if enabled().any(|s| s.importing) {
@@ -120,6 +126,18 @@ impl VodState {
             Self::ImportsDisabled { source } => Some(EmptyAction::PlaylistSettings(source)),
             Self::Failed { source, .. } => Some(EmptyAction::Retry(source)),
             Self::Empty { source } => Some(EmptyAction::Refresh(source)),
+        }
+    }
+}
+
+impl EmptyAction {
+    /// The playlist it acts on (none for adding one).
+    pub fn target(self) -> Option<i64> {
+        match self {
+            Self::AddPlaylist => None,
+            Self::PlaylistSettings(source) | Self::Retry(source) | Self::Refresh(source) => {
+                Some(source)
+            }
         }
     }
 }
@@ -202,7 +220,7 @@ mod tests {
         assert_eq!(state, VodState::Empty { source: 2 });
         assert_eq!(state.action(), Some(EmptyAction::Refresh(2)));
         let mut stocked = xtream(5);
-        stocked.titles = 3;
+        stocked.has_titles = true;
         let mut failed = xtream(6);
         failed.failed = Some(ImportProblem::Network);
         let state = VodState::of(&[failed, stocked]);
@@ -243,9 +261,6 @@ mod tests {
             ImportProblem::from(FailureKind::Cancelled),
             ImportProblem::Stopped
         );
-        assert_eq!(
-            ImportProblem::from(FailureKind::Busy),
-            ImportProblem::Network
-        );
+        assert_eq!(ImportProblem::from(FailureKind::Busy), ImportProblem::Busy);
     }
 }

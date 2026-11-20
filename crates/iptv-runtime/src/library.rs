@@ -175,6 +175,7 @@ pub(crate) fn playlists_in(store: &Store) -> Result<Vec<Playlist>, StoreError> {
         .into_iter()
         .map(|s| {
             let guide = store.epg_guide(s.id)?;
+            let kinds = store.on_demand_kinds(s.id)?;
             let guides = store.guide_sources(s.id)?;
             let config = store.source(s.id)?.map(|stored| stored.source.config);
             let (user_agent, from_file) = match &config {
@@ -190,8 +191,10 @@ pub(crate) fn playlists_in(store: &Store) -> Result<Vec<Playlist>, StoreError> {
                 name: s.name,
                 kind: s.kind,
                 channels: s.import.counts.channels,
-                movies: s.import.counts.vod,
-                series: s.import.counts.series,
+                has_movies: kinds.0,
+                has_series: kinds.1,
+                movies_failed: s.import.movies_error,
+                series_failed: s.import.series_error,
                 updated_at: s.import.last_success_at,
                 failed: s.import.last_error.map(|k| (k, s.import.last_error_at)),
                 guide_failed: guide.as_ref().is_some_and(|g| g.last_error.is_some()),

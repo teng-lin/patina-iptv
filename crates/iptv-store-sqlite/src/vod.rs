@@ -20,6 +20,18 @@ v.source_id,v.id,'series',v.name,v.group_ids,v.poster,v.plot,v.year,v.rating_x10
 FROM series v)"
     };
 }
+/// Whether source `id` has movies, and series, as the catalogue reads them.
+pub(crate) fn on_demand_kinds(
+    conn: &rusqlite::Connection,
+    id: crate::SourceId,
+) -> Result<(bool, bool)> {
+    let mut statement = conn.prepare_cached(concat!(
+        catalogue_items!(),
+        " SELECT EXISTS(SELECT 1 FROM items WHERE source_id=?1 AND kind='movie'),\
+EXISTS(SELECT 1 FROM items WHERE source_id=?1 AND kind='series')"
+    ))?;
+    Ok(statement.query_row([id.0], |r| Ok((r.get(0)?, r.get(1)?)))?)
+}
 /// The columns `raw_card` reads, from `items v`, `sources s`,
 /// `vod_progress w` and the `last_episode!` record `l`. A series whose
 /// episode watched last was finished resumes its next episode from the
@@ -1064,6 +1076,30 @@ mod tests {
             every_page(&store, Shelf::ContinueWatching, 100),
             vec![voyage]
         );
+    }
+    #[test]
+    fn on_demand_kinds_follow_the_catalogue_and_errors_clear_on_success() {
+        let (mut store, [a, b], _, _) = generated_sources();
+        let mut embedded = generated_movie("generated-voyage", "Generated Voyage", Some(1), None);
+        embedded.is_series = true;
+        store
+            .replace_catalog(a, &[], &[], &[embedded], &[])
+            .unwrap();
+        assert_eq!(
+            store.on_demand_kinds(a).unwrap(),
+            (false, true),
+            "an embedded series is a series, not a movie"
+        );
+        assert!(store.on_demand_kinds(b).unwrap().0);
+        use iptv_library::ImportErrorKind;
+        store
+            .record_on_demand_errors(a, Some(ImportErrorKind::HttpStatus), None)
+            .unwrap();
+        let status = store.import_status(a).unwrap();
+        assert_eq!(status.movies_error, Some(ImportErrorKind::HttpStatus));
+        assert_eq!(status.series_error, None);
+        store.replace_catalog(a, &[], &[], &[], &[]).unwrap();
+        assert_eq!(store.import_status(a).unwrap().movies_error, None);
     }
     #[test]
     fn continue_watching_orders_by_progress_and_keeps_sources_apart() {

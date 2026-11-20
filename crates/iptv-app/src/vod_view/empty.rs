@@ -1,6 +1,6 @@
 //! The empty Movies or Shows catalogue: why it is empty and its one action.
-//! The state is the core's ([`VodState`]), worked out from the playlists on
-//! screen; the actions are the ones the playlists screen and the wizard
+//! The state is the core's ([`VodState`]), worked out from every enabled
+//! playlist, the ones the catalogue reads; the actions are the ones the playlists screen and the wizard
 //! already run (refresh a playlist, open its actions, add a playlist).
 use super::*;
 use crate::data::Activity;
@@ -9,40 +9,38 @@ use iptv_core::vod::{EmptyAction, ImportProblem, SourceVod, VodState};
 
 fn problem(kind: ImportErrorKind) -> ImportProblem {
     match kind {
-        ImportErrorKind::Network | ImportErrorKind::Timeout | ImportErrorKind::HttpStatus => {
-            ImportProblem::Network
-        }
+        ImportErrorKind::Network | ImportErrorKind::Timeout => ImportProblem::Network,
+        ImportErrorKind::HttpStatus => ImportProblem::Refused,
         ImportErrorKind::AccountRejected
         | ImportErrorKind::AuthFailed
         | ImportErrorKind::Blocked => ImportProblem::Access,
-        ImportErrorKind::InvalidBody | ImportErrorKind::InvalidConfig => ImportProblem::Format,
+        ImportErrorKind::InvalidBody => ImportProblem::Format,
         ImportErrorKind::Cancelled => ImportProblem::Stopped,
         _ => ImportProblem::Other,
     }
 }
 
-/// The playlists on screen (every enabled one while they are combined),
-/// as the core reads them for `kind`. Tracks what they depend on.
+/// Every enabled playlist, the ones the catalogue reads whichever is on
+/// screen, as the core reads them for `kind`. Tracks what they depend on.
 fn sources(ui: Ui, kind: Kind) -> Vec<SourceVod> {
     ui.app.library.version.get();
-    let all = ui.app.library.all.get();
-    let shown = ui.app.library.shown.get();
     let settings = crate::settings::read(ui);
     let playlists = crate::runtime().playlists().unwrap_or_default();
     ui.app.library.activity.with(|activity| {
         playlists
             .iter()
-            .filter(|p| {
-                if all {
-                    p.policy.enabled
-                } else {
-                    shown == Some(p.id)
-                }
-            })
+            .filter(|p| p.policy.enabled)
             .map(|p| {
                 let target = iptv_settings::Target::playlist(p.id.0.to_string());
                 let session = activity.get(&p.id);
-                let stored = p.failed.map(|(kind, _)| problem(kind));
+                // A whole import that failed, else the titles of this kind
+                // that the last successful one could not download.
+                let (has_titles, list_failed) = if kind == Kind::Series {
+                    (p.has_series, p.series_failed)
+                } else {
+                    (p.has_movies, p.movies_failed)
+                };
+                let stored = p.failed.map(|(kind, _)| kind).or(list_failed).map(problem);
                 SourceVod {
                     source: p.id.0,
                     eligible: p.kind != iptv_providers::model::SourceKind::M3u,
@@ -52,19 +50,14 @@ fn sources(ui: Ui, kind: Kind) -> Vec<SourceVod> {
                         session,
                         Some(Activity::Running(_) | Activity::Checking(_))
                     ),
-                    // The store's kind, once recorded, is the more precise
-                    // one; a success clears it there.
-                    failed: match session {
-                        Some(Activity::Done(Err(f))) => {
-                            stored.or_else(|| Some(ImportProblem::from(f.kind)))
-                        }
-                        _ => stored,
-                    },
-                    titles: if kind == Kind::Series {
-                        p.series
-                    } else {
-                        p.movies
-                    },
+                    // The store's kind is the precise one: the runtime reads
+                    // it again after each failure, and a success clears it.
+                    // A failure it did not record is this session's.
+                    failed: stored.or(match session {
+                        Some(Activity::Done(Err(f))) => Some(ImportProblem::from(f.kind)),
+                        _ => None,
+                    }),
+                    has_titles,
                 }
             })
             .collect()
@@ -87,7 +80,7 @@ pub(super) fn bind(ui: Ui) {
             first.set(false);
             return;
         };
-        ui.vod.update(|s| s.library = state);
+        ui.vod.update(|s| s.set_library(state));
         if untitled && !first.replace(false) {
             reload(ui, false);
         }
@@ -97,6 +90,8 @@ pub(super) fn bind(ui: Ui) {
 fn reason(problem: ImportProblem) -> &'static str {
     match problem {
         ImportProblem::Network => tr("no answer from the server"),
+        ImportProblem::Refused => tr("the server turned the request down"),
+        ImportProblem::Busy => tr("too many playlists are updating; try again shortly"),
         ImportProblem::Access => tr("access was refused"),
         ImportProblem::Format => tr("the answer was not a playlist"),
         ImportProblem::Stopped => tr("it was stopped"),
@@ -123,9 +118,11 @@ fn message(state: Option<VodState>, kind: Kind) -> String {
             &[("reason", reason(problem).into())],
         ),
         VodState::Empty { .. } if kind == Kind::Series => {
-            tr("No shows yet. The last refresh found none.").to_owned()
+            tr("No shows found. Refresh the playlist to look for new ones.").to_owned()
         }
-        VodState::Empty { .. } => tr("No movies yet. The last refresh found none.").to_owned(),
+        VodState::Empty { .. } => {
+            tr("No movies found. Refresh the playlist to look for new ones.").to_owned()
+        }
     }
 }
 

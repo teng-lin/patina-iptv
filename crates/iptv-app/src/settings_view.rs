@@ -229,10 +229,18 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
 }
 
 pub(crate) fn notify_setting_error(error: crate::settings::SaveError) {
-    if matches!(error, crate::settings::SaveError::ParentalLocked) {
-        notify(tr("Unlock parental controls before changing settings"));
-    } else {
-        notify(&error.to_string());
+    use crate::runtime::settings::SaveFailure;
+    match error {
+        crate::settings::SaveError::ParentalLocked => {
+            notify(tr("Unlock parental controls before changing settings"))
+        }
+        crate::settings::SaveError::Storage(_) => {
+            notify(words::save_failure(SaveFailure::NotPublished))
+        }
+        crate::settings::SaveError::Durability(_) => {
+            notify(words::save_failure(SaveFailure::DurabilityUnconfirmed))
+        }
+        crate::settings::SaveError::Invalid(_) => notify(&error.to_string()),
     }
 }
 

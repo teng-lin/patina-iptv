@@ -134,6 +134,14 @@ fn optional_lists_fail_softly() {
             .iter()
             .any(|w| w.step == Step::Items(ContentKind::Movie) && w.message.contains("500"))
     );
+    // Kept by kind: the empty movie list is a failure, not an empty catalogue.
+    assert!(matches!(
+        catalog.on_demand_failures.as_slice(),
+        [(ContentKind::Movie, ImportError::HttpStatus { .. })]
+    ));
+    let fine = fake(XtreamSim::default());
+    let catalog = run_with(&fine, ImportOptions::new(synth::NOW).with_vod(true, true)).unwrap();
+    assert!(catalog.on_demand_failures.is_empty());
 }
 
 #[test]

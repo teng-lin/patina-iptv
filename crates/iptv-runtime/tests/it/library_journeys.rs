@@ -140,8 +140,30 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         displayed(&owner, &mut events, 4).await;
         assert!(owner.schedule().find_channel(&a).is_none());
         assert!(owner.schedule().find_channel(&b).is_some());
+        // A playlist's own movie and series import: switching back to the
+        // inherited value pins nothing, and deleting it drops its own value,
+        // so a playlist given the same id later starts from the global one.
+        let key = "playlists.include_vod";
+        let at = iptv_settings::Target::playlist(sources[1].0.to_string());
+        owner
+            .set_playlist_setting(sources[1], key, Value::Bool(false))
+            .unwrap();
+        assert_eq!(owner.settings().stored(key, &at), Some(&Value::Bool(false)));
+        owner
+            .set_playlist_setting(sources[1], key, Value::Bool(true))
+            .unwrap();
+        assert_eq!(owner.settings().stored(key, &at), None, "inherits again");
+        owner
+            .set_playlist_setting(sources[1], key, Value::Bool(false))
+            .unwrap();
         data::library::delete(&owner, sources[1]).await.unwrap();
         displayed(&owner, &mut events, 0).await;
+        assert_eq!(owner.settings().stored(key, &at), None);
+        assert!(
+            owner
+                .settings()
+                .bool(iptv_settings::keys::PLAYLISTS_INCLUDE_VOD, &at)
+        );
         assert!(
             data::combined::active(&owner),
             "explicit aggregate mode remains available for adding a source"

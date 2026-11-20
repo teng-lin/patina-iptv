@@ -154,6 +154,7 @@ fn perform(ui: Ui, effect: Effect) {
             | Effect::OpenDetails(_)
             | Effect::TryDetails(..)
             | Effect::SetUserAgent(..)
+            | Effect::ToggleOnDemand(_)
     ) && crate::runtime().parental_has_pin()
         && !crate::runtime().parental_settings_allowed()
     {

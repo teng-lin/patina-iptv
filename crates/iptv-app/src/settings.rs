@@ -10,9 +10,10 @@
 //!   undone, so the live settings never stay ahead of what a restart
 //!   reads. Only the UI thread writes.
 //!
-//! Every value is global for now. The store resolves playlist and group
-//! overrides, but nothing sets them yet, so playlist-scoped settings read
-//! their global value.
+//! Values are global, except a playlist's own movie and series import
+//! (`playlists.include_vod`), which its actions on the playlists screen
+//! set (`Runtime::set_playlist_setting`). Other playlist-scoped settings
+//! read their global value; a deleted playlist's own values go with it.
 //!
 //! [`offer`] says what the app does with each setting and command: the
 //! ones it acts on ([`WIRED`], [`COMMANDS`]), what it shows read-only,
