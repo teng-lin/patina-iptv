@@ -40,6 +40,7 @@ root=$PWD
 bash tools/fetch-mpvkit.sh
 export IPTV_RS_MPVKIT="$root/target/mpvkit"
 source tools/ci/locked-build-env.sh
+NSH="$root/../nsh-patina/target/release/nsh"
 (cd crates/iptv-app && "$NSH" package . --target ios-simulator \
   --icon icon-ios.png -o "$root/target/ios-sim")
 tools/check-ios-simulator-entitlements.sh target/ios-sim/Patina.app
@@ -52,8 +53,8 @@ xcrun simctl install "$udid" target/ios-sim/Patina.app
 xcrun simctl launch "$udid" com.hantekllc.iptvrs
 ```
 
-`$NSH` is the NSH CLI, for example `../nsh-patina/target/release/nsh`. Pick
-the device type and runtime from `xcrun simctl list devicetypes` and
+For a run with the synthetic playlist below, export its fixture variables
+before `nsh package`. Pick the device type and runtime from `xcrun simctl list devicetypes` and
 `xcrun simctl list runtimes`. When other runs share the Mac, give the simulator
 and the mock server a name and port of your own.
 
@@ -70,7 +71,8 @@ tools/mock-server.py 8089 fixtures/hls &
 streams are on a private host such as the mock server ("content stream URL
 must name a public HTTP(S) host"). For a fixture run, package with the
 development fixture hook ([security model](security.md)), which only a build
-with debug assertions honors:
+with debug assertions honors. It is compiled in, so export these before
+packaging, then install and launch that package:
 
 ```sh
 export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true \

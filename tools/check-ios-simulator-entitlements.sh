@@ -38,8 +38,9 @@ entitlements = plistlib.loads(bytes(data).rstrip(b"\0"))
 problems = []
 if entitlements.get("application-identifier") != expected:
     problems.append(f"application-identifier is {entitlements.get('application-identifier')!r}, not {expected!r}")
-if expected not in entitlements.get("keychain-access-groups", []):
-    problems.append(f"keychain-access-groups {entitlements.get('keychain-access-groups')!r} lacks {expected!r}")
+groups = entitlements.get("keychain-access-groups")
+if not isinstance(groups, list) or expected not in groups:
+    problems.append(f"keychain-access-groups {groups!r} is not an array holding {expected!r}")
 if problems:
     sys.exit(f"{binary}: " + "; ".join(problems))
 print(f"{binary}: simulator entitlements grant {expected} its Keychain access group")
