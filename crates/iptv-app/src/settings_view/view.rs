@@ -25,8 +25,9 @@ pub(super) fn secondary() -> Rgba {
 
 /// The settings screen and the notice line.
 pub fn layer(ui: Ui) -> impl IntoElement {
-    let notice = signal(None::<String>);
+    let notice = Notice::new();
     NOTICE.with(|n| n.set(Some(notice)));
+    let notice = notice.text;
     let size = Scale::new();
     view()
         .test_id("settings-layer")
