@@ -247,3 +247,52 @@ fn a_resumed_channel_keeps_its_usual_list_otherwise() {
     // A channel the catalog does not have.
     assert_eq!(resume_entry(42, &catalog, &[42], true), None);
 }
+
+#[test]
+fn a_resumed_hidden_channel_keeps_all_channels() {
+    struct Hiding(Catalog);
+    impl Schedule for Hiding {
+        fn channel_count(&self) -> usize {
+            self.0.channel_count()
+        }
+        fn group_count(&self) -> usize {
+            self.0.group_count()
+        }
+        fn group_start(&self, group: usize) -> usize {
+            self.0.group_start(group)
+        }
+        fn program_at(&self, channel: usize, minute: i32) -> Program {
+            self.0.program_at(channel, minute)
+        }
+        fn programs_between(&self, channel: usize, from: i32, minutes: i32) -> Vec<Program> {
+            self.0.programs_between(channel, from, minutes)
+        }
+        fn catchup_days(&self, channel: usize) -> u8 {
+            self.0.catchup_days(channel)
+        }
+        fn channel_name(&self, channel: usize) -> String {
+            self.0.channel_name(channel)
+        }
+        fn channel_number(&self, channel: usize) -> u32 {
+            self.0.channel_number(channel)
+        }
+        fn channel_logo(&self, channel: usize) -> Option<String> {
+            self.0.channel_logo(channel)
+        }
+        fn group_name(&self, group: usize) -> String {
+            self.0.group_name(group)
+        }
+        fn title(&self, channel: usize, program: Program) -> String {
+            self.0.title(channel, program)
+        }
+        fn channel_hidden(&self, channel: usize) -> bool {
+            channel == 1
+        }
+    }
+    let catalog = Hiding(Catalog::small());
+    // Hidden: no list has its row, favourite or not.
+    assert_eq!(resume_entry(1, &catalog, &[1], true), Some(ALL));
+    assert_eq!(resume_entry(1, &catalog, &[], true), Some(ALL));
+    assert_eq!(ChannelList::build(ALL, &catalog, &[1], &[]).row_of(1), None);
+    assert_eq!(resume_entry(5, &catalog, &[5], true), Some(FAVORITES));
+}

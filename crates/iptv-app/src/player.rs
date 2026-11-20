@@ -133,10 +133,6 @@ pub struct Player {
     resume: Signal<bool>,
     /// What surface 0 plays before the guide arrived (`resume.rs`).
     early: Signal<Option<resume::Early>>,
-    /// The key of the channel resumed at startup while full screen still
-    /// covers the guide: its list follows favorites that become known
-    /// later (`lists::resumed_follow`).
-    pub(crate) resumed: Signal<Option<String>>,
     /// The app's owner: retry and stall timers outlive the effect or
     /// handler that armed them.
     owner: Owner,
@@ -152,7 +148,6 @@ impl Player {
             watching: stored(None),
             resume: signal(true),
             early: signal(None),
-            resumed: signal(None),
             owner: Owner::current(),
         }
     }
@@ -171,7 +166,6 @@ impl Player {
             watching: stored(None),
             resume: signal(false),
             early: signal(None),
-            resumed: signal(None),
             owner: self.owner,
         }
     }
@@ -1321,10 +1315,18 @@ pub fn source_ready(ui: Ui, refresh: bool) {
     }
     log::info!("iptv player: resuming the last channel");
     crate::startup::mark("last channel resolved");
-    crate::lists::show_resumed(ui, channel);
-    ui.play(channel, Playback::Live);
-    ui.mode.set(ViewMode::Fullscreen);
-    ui.show_playing();
+    // The guide's list follows only playback the parental lock admitted
+    // (at once, or after its PIN): a cancelled PIN leaves the guide as it
+    // was.
+    crate::parental_view::admitted(ui, channel, move || {
+        ui.play(channel, Playback::Live);
+        if ui.playing.get_untracked() != Some(channel) {
+            return;
+        }
+        crate::lists::show_resumed(ui, channel);
+        ui.mode.set(ViewMode::Fullscreen);
+        ui.show_playing();
+    });
 }
 
 #[cfg(test)]
