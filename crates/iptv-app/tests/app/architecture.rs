@@ -18,6 +18,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("desktop.rs", "WINDOW"),           // Native window handle.
     ("desktop.rs", "POINTER"),          // Pointer position within the window.
     ("desktop.rs", "LAST_MOVE"),        // Pointer gesture clock.
+    ("desktop.rs", "TRAVELLED"),        // Last pointer place, for Keys to Pointer.
     ("fonts.rs", "FITTED"),             // Font measurement cache.
     ("fonts.rs", "FONTS_IN"),           // Font registration flag.
     ("guide_assign_view.rs", "REQUEST"), // Discard stale dialog replies.

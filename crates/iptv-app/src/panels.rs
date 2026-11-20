@@ -137,8 +137,26 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
                     .text_color(move || match mark() {
                         Mark::Current => rgb(ui.app.theme.with(|t| t.accent.light)),
                         m => m.text(),
+                    })
+                    .mr(move || {
+                        px(crate::channels_view::group_more_room(
+                            ui,
+                            current(),
+                            at.index(),
+                        ))
                     }),
                 )
+                .child(crate::channels_view::group_more(
+                    ui,
+                    size,
+                    move || at.index(),
+                    current,
+                    || true,
+                    move || {
+                        ui.guide_data();
+                        crate::lists::browser_entry_name(at.index())
+                    },
+                ))
         },
     )
     .test_id("guide-groups")

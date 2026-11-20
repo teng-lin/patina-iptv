@@ -7,7 +7,21 @@ is below 1.0, a minor release may change behaviour.
 
 ## [Unreleased]
 
+### Added
+
+- Desktop: a visible ⋯ "More options" on recordings rows and on the shown
+  group in the guide's and the channel list's groups columns, so every
+  secondary action has a pointer entry point beside right-click. A second
+  player window's title says when it is muted. The desktop's wheel,
+  shortcut, window and display rules are documented in `docs/desktop.md`.
+
 ### Changed
+
+- Desktop: closing the main window while recordings keep Patina running now
+  also closes every player window and the picture-in-picture window, as
+  quitting does; only the recorder runs on. On macOS and Windows a window
+  left without a reachable title bar after a display is removed moves onto
+  the nearest remaining display.
 
 - Choosing a channel in the guide now watches it full screen in both guide
   layouts. One setting, **Keep the guide after choosing**, now applies to both
