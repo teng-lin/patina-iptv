@@ -184,12 +184,24 @@ fn writer(path: &Path, max_bytes: u64, resume: bool) -> Result<Writer, Failure> 
     })
 }
 
+/// The largest HLS segment accepted.
+const SEGMENT_LIMIT: usize = 32 * 1024 * 1024;
+
 /// Bounded sink used by file capture and live fanout. File owners acknowledge
 /// shutdown separately before finalization.
 pub(crate) trait Sink {
     fn accepts_master_playlist(&self) -> bool {
         true
     }
+    /// Whether an HLS segment is written only once it has fully arrived. A
+    /// file buffers it, so cancellation cannot leave half a segment there;
+    /// live fanout takes its packets as they arrive, so a player's first
+    /// packets never wait for the rest of the live edge's segment.
+    fn buffers_segments(&self) -> bool {
+        true
+    }
+    /// A whole HLS segment (or a TS stream's first packets) passed its checks.
+    fn segment_complete(&mut self) {}
     fn write(&mut self, bytes: &[u8]) -> impl Future<Output = Result<(), Failure>> + Send;
 }
 
@@ -224,6 +236,7 @@ pub(crate) async fn receive(
             return Err(Failure::Unsupported);
         }
         writer.write(&head).await?;
+        writer.segment_complete();
         while let Some(chunk) = response.chunk().await.map_err(|_| Failure::Network)? {
             writer.write(&chunk).await?;
         }
@@ -374,6 +387,58 @@ async fn reload(
     .map_err(|_| Failure::Network)?
 }
 
+/// Takes one HLS segment's packets as they arrive. The body is always read
+/// to its end into a queue bounded by [`SEGMENT_LIMIT`] while `writer` takes
+/// them at its consumers' pace, so a paused player cannot leave the
+/// provider's response open until its read timeout ends the input; between
+/// segments, the next one waits for the consumers as before.
+async fn stream_segment(
+    mut response: reqwest::Response,
+    writer: &mut impl Sink,
+) -> Result<(), Failure> {
+    let queue = std::sync::Mutex::new((std::collections::VecDeque::new(), false));
+    let arrived = tokio::sync::Notify::new();
+    let lock = || {
+        queue
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    };
+    let receive = async {
+        let mut size = 0usize;
+        while let Some(chunk) = response.chunk().await.map_err(|_| Failure::Network)? {
+            if chunk.len() > SEGMENT_LIMIT - size {
+                return Err(Failure::Limit);
+            }
+            size += chunk.len();
+            lock().0.push_back(chunk);
+            arrived.notify_one();
+        }
+        if size < 188 || !size.is_multiple_of(188) {
+            return Err(Failure::Unsupported);
+        }
+        lock().1 = true;
+        arrived.notify_one();
+        Ok(())
+    };
+    let deliver = async {
+        loop {
+            let next = {
+                let mut queue = lock();
+                match queue.0.pop_front() {
+                    None if queue.1 => return Ok(()),
+                    next => next,
+                }
+            };
+            // The sink checks each whole packet's sync byte as it arrives.
+            match next {
+                Some(chunk) => writer.write(&chunk).await?,
+                None => arrived.notified().await,
+            }
+        }
+    };
+    tokio::try_join!(receive, deliver).map(|_| ())
+}
+
 async fn hls(
     client: &reqwest::Client,
     relay: &PlaybackRelay,
@@ -422,26 +487,31 @@ async fn hls(
                 state.next_hls_sequence = None;
                 return Err(Failure::Gap);
             }
-            // Buffer one bounded segment, so cancellation cannot leave half a segment in the file.
             let mut response = get(client, relay, segment).await?;
-            let mut data = Vec::new();
-            while let Some(chunk) = response.chunk().await.map_err(|_| Failure::Network)? {
-                if data.len() + chunk.len() > 32 * 1024 * 1024 {
-                    return Err(Failure::Limit);
+            if writer.buffers_segments() {
+                // Buffer one bounded segment, so cancellation cannot leave half a segment in the file.
+                let mut data = Vec::new();
+                while let Some(chunk) = response.chunk().await.map_err(|_| Failure::Network)? {
+                    if data.len() + chunk.len() > SEGMENT_LIMIT {
+                        return Err(Failure::Limit);
+                    }
+                    data.extend_from_slice(&chunk);
                 }
-                data.extend_from_slice(&chunk);
+                if data.len() < 188
+                    || data.len() % 188 != 0
+                    || !data
+                        .as_chunks::<188>()
+                        .0
+                        .iter()
+                        .all(|packet| packet[0] == 0x47)
+                {
+                    return Err(Failure::Unsupported);
+                }
+                writer.write(&data).await?;
+            } else {
+                stream_segment(response, writer).await?;
             }
-            if data.len() < 188
-                || data.len() % 188 != 0
-                || !data
-                    .as_chunks::<188>()
-                    .0
-                    .iter()
-                    .all(|packet| packet[0] == 0x47)
-            {
-                return Err(Failure::Unsupported);
-            }
-            writer.write(&data).await?;
+            writer.segment_complete();
             last_progress = tokio::time::Instant::now();
             state.next_hls_sequence = sequence.checked_add(1);
             if state.next_hls_sequence.is_none() {
