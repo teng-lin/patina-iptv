@@ -30,7 +30,8 @@ class Selection(unittest.TestCase):
                      "tools/ci/isolated-credentials.py", "crates/iptv-store-sqlite/src/lib.rs"):
             self.assertTrue(v.select([path])["credentials"], path)
         for path in ("tools/fetch-mpvkit.sh", "tools/mpv-runtime-ios/runtime-ios.json",
-                     "crates/iptv-player-mpv/src/mpv/ios.rs", "tools/ci/check-ios.sh"):
+                     "crates/iptv-player-mpv/src/mpv/ios.rs", "tools/ci/check-ios.sh",
+                     "crates/iptv-app/nsh.json", "tools/check-ios-simulator-entitlements.sh"):
             self.assertTrue(v.select([path])["ios"], path)
         self.assertFalse(v.select(["docs/architecture.md"])["ios"])
 

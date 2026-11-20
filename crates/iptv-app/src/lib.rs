@@ -80,6 +80,8 @@ mod search_view;
 mod seek;
 mod settings;
 mod settings_view;
+#[cfg(all(target_os = "ios", target_abi = "sim"))]
+mod simulator_entitlements;
 pub mod startup;
 pub mod time;
 mod transport;

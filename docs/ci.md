@@ -173,8 +173,10 @@ process-global initializer is explicitly exempt while its isolated store tests r
 Linux also builds workspace rustdoc with warnings denied, keeping API links valid.
 
 The iOS lane prepares the checksum-pinned MPVKit frameworks and checks both device
-and simulator Rust targets without signing credentials. It establishes compilation,
-not simulator execution, signing or iPad playback. Linux production credential
+and simulator Rust targets without signing credentials. It builds the simulator
+slice and checks that it carries the Keychain entitlements the simulator needs
+([iOS simulator validation](ios-validation.md#entitlements)). It establishes
+compilation, not simulator execution, signing or iPad playback. Linux production credential
 validation compiles without test-support, checks that the exact ignored broker test
 exists, then runs it inside a fresh D-Bus session and disposable Secret Service home.
 It never inherits the login bus, display or keyring. Package window startup remains

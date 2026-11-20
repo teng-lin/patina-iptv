@@ -70,6 +70,9 @@ is below 1.0, a minor release may change behaviour.
   does on Linux and macOS. Before, only programmes and the groups columns
   opened a menu there. The menu offers nothing new on these platforms:
   Watch in new window stays Linux and macOS only.
+- iOS simulator: the package now carries the Keychain entitlements the
+  simulator reads, so it stores its database key and adding a playlist
+  works without a linker workaround (#136).
 - TV remote: a press of OK (or another key with a hold action) no longer
   acts on a different screen when the screen changes while the key is held,
   for example when a tap plays a channel. Holding a key also keeps the info

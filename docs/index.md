@@ -11,6 +11,7 @@ link to them instead of duplicating release or validation instructions.
 | CI selection and required-check migration | [Validation tiers](ci.md) |
 | Publishing, signing, provenance and recovery | [Release runbook](release.md#release-contract-and-recovery) |
 | Disposable emulator operation and evidence | [Android validation](android-validation.md) |
+| iOS simulator build, entitlements and synthetic run | [iOS simulator validation](ios-validation.md) |
 | Platform capability/support limits | [Capabilities](capabilities.md) |
 | Native framework revision and update policy | [NSH pin](nsh.md) |
 | Encryption, backups and trust boundaries | [Security model](security.md), [vulnerability reporting](../SECURITY.md) |
