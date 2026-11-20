@@ -105,6 +105,8 @@ thread_local! {
     static LAST: Cell<&'static str> = const { Cell::new("general") };
     /// The notice line's text (made with the layer, under the app's owner).
     static NOTICE: Cell<Option<Signal<Option<String>>>> = const { Cell::new(None) };
+    /// Counts the notices shown: only the latest one's timer clears the line.
+    static NOTICE_SHOWN: Cell<u64> = const { Cell::new(0) };
     /// When Back last asked whether to leave.
     static LEAVE_ASKED: Cell<Option<Instant>> = const { Cell::new(None) };
 }
@@ -461,10 +463,16 @@ pub fn notify(text: &str) {
         return;
     };
     notice.set(Some(text.to_owned()));
-    let shown = text.to_owned();
+    // The notice is told apart by when it was shown, not by its text: an
+    // earlier notice with the same words (blocking a channel, then its
+    // group) must not cut this one short when its own time is up.
+    let shown = NOTICE_SHOWN.with(|n| {
+        n.set(n.get().wrapping_add(1));
+        n.get()
+    });
     // The timer runs on its own; its handle is not needed.
     drop(set_timeout(NOTICE_FOR, move || {
-        if notice.with_untracked(|n| n.as_deref() == Some(shown.as_str())) {
+        if NOTICE_SHOWN.with(Cell::get) == shown {
             notice.set(None);
         }
     }));
