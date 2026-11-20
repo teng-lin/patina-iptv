@@ -54,17 +54,17 @@ watching, Recently added, Recordings, Watchlist, Playlists and Settings.
 | Target | Remote | Touch | Mouse and keyboard | Result |
 |---|---|---|---|---|
 | Channel, or programme on air | OK | Tap | Click or Enter | Plays full screen |
-| Channel already playing | OK | Tap | Click or Enter | Returns to full screen |
+| Channel already playing live | OK | Tap | Click or Enter | Returns to full screen |
 | Past programme within the channel's archive | OK | Tap | Click or Enter | Replays from the start |
 | Past programme without replay, or upcoming programme | OK | Tap | Click or Enter | Opens its details |
 
 - **Now:** all four rows (`Ui::watch`). Choosing waits for `guide.switch_delay`
   before tuning so that fast choices skip channels.
 - **Now:** the setting **Keep the guide after choosing** (`guide.stay_on_guide`,
-  off by default) keeps the guide open instead of going full screen, in both
-  layouts. `guide.autoplay` tunes the focused channel while browsing, without a
-  choice.
-- **Now:** selecting a programme to inspect it never starts playback.
+  off by default) keeps the guide open after tuning a live channel, in both
+  layouts. A replay and the channel already playing always go full screen.
+  `guide.autoplay` tunes the focused channel while browsing, without a choice.
+- **Now:** opening a programme's details or menu never starts playback.
 
 "Full screen" means the video fills Patina's screen or window. On desktop it
 never resizes the operating-system window; that is a separate action (double-click
@@ -81,9 +81,13 @@ the playing stream continuing in the preview or behind the guide.
 | Touch | Back gesture where the platform has one, and a visible Back button |
 | Mouse and keyboard | Escape or Backspace, and a visible Back button |
 
-- **Now:** Back, Escape and Backspace follow one order: close a chooser or
-  dialog, then hide the player's panels, then leave full screen for the guide.
-  The play bar shows a Back button except on TVs (`Ui::back_controls`).
+- **Now:** Back, Escape and Backspace follow one order (`go_back` in
+  `crates/iptv-app/src/lib.rs`). The main steps: close a chooser or dialog;
+  on desktop, restore a window from the operating system's full screen; hide
+  the player's panels; then leave full screen. Most playback returns to the
+  guide; a recording returns to Recordings, and a multiview tile to its grid.
+  The play bar shows a Back button except on TVs and terminals
+  (`Ui::back_controls`).
 - **Now:** with `guide.back_returns_to_now` (on by default), Back in a guide
   scrolled away from now first returns to the programmes on air.
 - **Planned:** visible Back and Close follow the input mode rather than the
@@ -95,9 +99,11 @@ the playing stream continuing in the preview or behind the guide.
 Programme and channel menus (favourites, recording, details, replay) need a
 visible entry point for touch and pointer users.
 
-- **Now:** Menu or long OK on a remote; Shift+F10 on a keyboard.
+- **Now:** Menu on a remote, and long OK on Android; M on a keyboard, and
+  Shift+F10 on desktop. Long press and right-click open the same menu on guide
+  programmes and channels, the channel list and recordings.
 - **Planned:** a visible "more" control on the focused or tapped item for touch
-  and pointer, with long press and right-click as shortcuts to the same menu.
+  and pointer, so the menu needs no hidden gesture.
 
 ## Layout classes
 
