@@ -37,15 +37,14 @@ The app tracks the last input used, not the device type.
 | Touch | A touch | Visible controls; no focus highlight or key hints |
 | Pointer | Mouse or trackpad movement or click | Visible controls and hover; no key hints |
 
-- **Now:** Keys and Touch (`Input` in `crates/iptv-app/src/lib.rs`). A mouse
-  click, or mouse movement over full-screen video, counts as Touch. The main
-  window starts in Touch on an iPad and in Keys on every other host; a separate
-  desktop player window starts in Touch.
-- **Now:** the first key after touch moves focus onto a row on screen if the
-  focused channel has scrolled out of view.
-- **Planned:** a separate Pointer mode. A tablet with a keyboard and mouse
-  switches between modes as each is used; touching it again brings back the
-  touch controls.
+- **Now:** all three modes (`iptv_core::layout::InputMode`). Each press records
+  whether a finger or a mouse, trackpad or pen made it; mouse movement over
+  full-screen video counts as Pointer. A remote's Back counts as a key. The
+  main window starts in Touch on an iPad and in Keys on every other host; a
+  separate desktop player window starts in Pointer. A tablet with a keyboard
+  and mouse switches between modes as each is used.
+- **Now:** the first key after touch or a pointer moves focus onto a row on
+  screen if the focused channel has scrolled out of view.
 
 ## Destinations
 
@@ -110,9 +109,11 @@ and focus on a live channel follows the clock to the programme now on air.
 - **Now:** with `guide.back_returns_to_now` (on by default), Back with focus on a
   past or upcoming programme in the guide first returns to the programmes on
   air, after any dialog or hint card closes.
-- **Planned:** visible Back and Close follow the input mode rather than the
-  device type, so a TV with a pointer, or a tablet used by touch after a
-  keyboard, shows them.
+- **Now:** visible Back and Close follow the input mode on hosts with a remote
+  Back key: a TV used by touch or a pointer shows them, and a remote key hides
+  them again. Tablets and desktops always show them, keyboard users included.
+  List editing keeps its host's model (dragging with Save and Cancel, or OK and
+  the arrows) whichever input drives it.
 
 ## Secondary actions
 
@@ -131,7 +132,7 @@ visible entry point for touch and pointer users.
 
 ## Layout classes
 
-**Planned.** One core policy picks the arrangement from the available logical
+One core policy picks the arrangement from the available logical
 window space, the text size and the host's capabilities. Breakpoints come from
 what the content needs at the current text size, not from the device type.
 
@@ -144,9 +145,12 @@ what the content needs at the current text size, not from the device type.
 - Below the space a pane needs, the layout collapses rather than shrinking text
   or touch targets further.
 - Remote focus treatment does not change with window size.
+- **Now:** the class policy (`iptv_core::layout::Class`): Compact below 620
+  points and Expanded from 960, each divided by the text factor (the guide's
+  scale times the text size). Search's two-row header uses Compact.
 - **Now:** the guide scales from 1.0 to 0.8 with the desktop window
-  (`crates/iptv-app/src/scale.rs`), and some screens collapse on their own
-  measure, such as Search's two-row header.
+  (`crates/iptv-app/src/scale.rs`).
+- **Planned:** collapsing the guide, the player and VOD panes by class.
 
 ## What a presentation change keeps
 

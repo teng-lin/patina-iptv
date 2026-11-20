@@ -439,7 +439,7 @@ fn reorder_key(ui: Ui, key: Key) {
         {
             outcome = if key == Key::Back {
                 order.leave_with_changes(
-                    !ui.back_controls() && s.custom_from.is_some_and(|sort| sort != Sort::Manual),
+                    !ui.drag_editing() && s.custom_from.is_some_and(|sort| sort != Sort::Manual),
                 )
             } else {
                 order.key(key)
@@ -1004,7 +1004,7 @@ fn item_row(ui: Ui, size: Scale, at: Position, focus: Memo<Option<usize>>) -> im
         .child(when(visibility, move || visibility_switch(ui, size, shown)))
         .child(ui_kit::detail(size, status).text_color(move || mark().secondary()))
         .child(when(
-            move || reordering(ui) && ui.back_controls(),
+            move || reordering(ui) && ui.drag_editing(),
             move || reorder_drag::handle(size, at.index()),
         ))
         .child(order_outline(ui, grabbed))
@@ -1257,7 +1257,7 @@ fn confirm_order_sheet(ui: Ui, size: Scale) -> impl IntoElement {
 fn reorder_hint(ui: Ui) -> &'static str {
     if !reordering(ui) {
         ""
-    } else if ui.back_controls() && !ui.keys_shown() {
+    } else if ui.drag_editing() && !ui.keys_shown() {
         tr("Drag the handles to reorder.")
     } else {
         let selected = order_selection(ui).is_some();
@@ -1443,7 +1443,7 @@ fn reorder_panel(ui: Ui, size: Scale) -> impl IntoElement {
                 )
                 .child(editor_rows(ui, size))
                 .child(when(
-                    move || saves() && ui.back_controls(),
+                    move || saves() && ui.drag_editing(),
                     move || {
                         view()
                             .flex_row()
@@ -1722,7 +1722,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                 },
                             ))
                             .child(when(
-                                move || reordering(ui) && ui.back_controls(),
+                                move || reordering(ui) && ui.drag_editing(),
                                 move || {
                                     view()
                                         .items_end()

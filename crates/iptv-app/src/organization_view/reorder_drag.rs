@@ -189,7 +189,7 @@ impl DragList {
                 TouchClaim::on_start()
                     .capture()
                     .ask(move |request: &ClaimRequest| {
-                        if !self.ui.back_controls()
+                        if !self.ui.drag_editing()
                             || !reordering(self.ui)
                             || contents_hidden(self.ui)
                         {
