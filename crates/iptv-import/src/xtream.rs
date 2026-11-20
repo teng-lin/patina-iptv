@@ -87,7 +87,7 @@ pub(crate) async fn import_xtream<F: Fetch, P: ProgressSink>(
         if kind == ContentKind::Live {
             result?;
         } else {
-            soften(&mut catalog, result)?;
+            soften_items(&mut catalog, kind, result)?;
         }
         // A staged catalog synthesizes missing groups in SQL. The in-memory
         // compatibility API keeps its existing placeholder-group behaviour.
@@ -234,6 +234,23 @@ async fn stream_list<F: Fetch, P: ProgressSink>(
 }
 
 /// The result of an optional step: non-fatal failures become catalog warnings.
+/// [`soften`] for a movie or series list: its failure is also kept by
+/// kind ([`Catalog::on_demand_failures`]), so an import that kept its live
+/// channels is not taken for one whose provider has no titles.
+pub(crate) fn soften_items<T>(
+    catalog: &mut Catalog,
+    kind: ContentKind,
+    result: Result<T, ImportError>,
+) -> Result<Option<T>, ImportError> {
+    if let Err(e) = &result
+        && !e.is_fatal()
+        && !catalog.on_demand_failures.iter().any(|(k, _)| *k == kind)
+    {
+        catalog.on_demand_failures.push((kind, e.clone()));
+    }
+    soften(catalog, result)
+}
+
 pub(crate) fn soften<T>(
     catalog: &mut Catalog,
     result: Result<T, ImportError>,

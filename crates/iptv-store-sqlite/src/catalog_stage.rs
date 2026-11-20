@@ -43,6 +43,7 @@ pub struct CatalogStage {
     checkpoint: Option<[i64; 4]>,
     ready: bool,
     counts: CatalogCounts,
+    on_demand_errors: sources::OnDemandErrors,
 }
 fn invalid(s: &str) -> StoreError {
     StoreError::InvalidData(s.into())
@@ -130,7 +131,17 @@ impl CatalogStage {
             checkpoint: None,
             ready: false,
             counts: CatalogCounts::default(),
+            on_demand_errors: Default::default(),
         })
+    }
+    /// The movie and series lists this import could not download (kind
+    /// only), recorded with its publication in the same transaction.
+    pub fn set_on_demand_errors(
+        &mut self,
+        movies: Option<crate::ImportErrorKind>,
+        series: Option<crate::ImportErrorKind>,
+    ) {
+        self.on_demand_errors = sources::OnDemandErrors { movies, series };
     }
     fn db(&self) -> &Connection {
         self.conn
@@ -419,7 +430,13 @@ impl Store {
                 tx.execute(&format!("INSERT INTO main.{table}(source_id,{columns}) SELECT ?1,{columns} FROM catalog_import.{table}"),[source.0])?;
             }
             search::index_source(&tx, fts, source)?;
-            sources::record_import_success(&tx, source, &stage.counts, now)?;
+            sources::record_import_success(
+                &tx,
+                source,
+                &stage.counts,
+                stage.on_demand_errors,
+                now,
+            )?;
             let published_guides = guides.map(<[crate::GuideSource]>::to_vec);
             tx.commit()?;
             Ok((stage.counts, published_guides))

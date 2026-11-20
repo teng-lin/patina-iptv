@@ -28,6 +28,9 @@ pub enum Act {
     Enabled,
     RefreshInterval,
     RefreshOnStart,
+    /// Its movie and series import, on or off (not offered for M3U, which
+    /// has none).
+    OnDemand,
     Channels,
     Groups,
     CustomGroups,
@@ -101,6 +104,8 @@ pub enum Effect {
     Add,
     Show(SourceId),
     Policy(SourceId, crate::SourcePolicy),
+    /// Switch the movie and series import of `id` (its own setting).
+    ToggleOnDemand(SourceId),
     Organize(SourceId, bool),
     CustomGroups(SourceId),
     Refresh(SourceId),
@@ -151,6 +156,19 @@ impl Screen {
             notice: None,
             details: None,
         }
+    }
+
+    /// Opens the actions of `id` with `act` focused (from another screen,
+    /// such as an empty Movies screen's playlist settings). Whether it could.
+    pub fn open_actions(&mut self, id: SourceId, act: Act) -> bool {
+        let acts = self.acts(id);
+        if acts.is_empty() {
+            return false;
+        }
+        let focus = if acts.contains(&act) { act } else { acts[0] };
+        self.focus = Item::Playlist(id);
+        self.layer = Layer::Actions { id, focus };
+        true
     }
 
     pub fn focus_all(&mut self) {
@@ -216,9 +234,11 @@ impl Screen {
             Act::Enabled,
             Act::RefreshInterval,
             Act::RefreshOnStart,
-            Act::Channels,
-            Act::Groups,
         ]);
+        if row.kind != SourceKind::M3u {
+            acts.push(Act::OnDemand);
+        }
+        acts.extend([Act::Channels, Act::Groups]);
         // A file has no link to change (adding it again picks a new one).
         if !row.from_file {
             acts.push(Act::Details);
@@ -354,6 +374,7 @@ impl Screen {
                 }
                 Some(Effect::Policy(id, policy))
             }
+            Act::OnDemand => Some(Effect::ToggleOnDemand(id)),
             Act::CustomGroups => Some(Effect::CustomGroups(id)),
             Act::Channels | Act::Groups => Some(Effect::Organize(id, act == Act::Groups)),
             Act::Show => to_list(self, Effect::Show(id)),
@@ -560,6 +581,10 @@ mod tests {
             name: name.to_owned(),
             kind: SourceKind::M3u,
             channels: 10,
+            has_movies: false,
+            has_series: false,
+            movies_failed: None,
+            series_failed: None,
             updated_at: Some(1_800_000_000),
             failed: None,
             guides: Vec::new(),
@@ -843,6 +868,47 @@ mod tests {
             s.commit(),
             Some(Effect::SetUserAgent(A, Some("Other/2".into())))
         );
+    }
+
+    #[test]
+    fn only_playlists_with_movies_and_series_offer_their_import_switch() {
+        let mut rows = rows();
+        rows[1].kind = SourceKind::Xtream;
+        rows[2].kind = SourceKind::Stalker;
+        let mut s = Screen::new(rows, Some(A));
+        assert!(!s.acts(A).contains(&Act::OnDemand), "M3U has none");
+        assert!(s.acts(B).contains(&Act::OnDemand));
+        assert!(s.acts(C).contains(&Act::OnDemand));
+        assert_eq!(s.act(B, Act::OnDemand), Some(Effect::ToggleOnDemand(B)));
+        // Another screen opens the actions at it; the actions stay open.
+        let mut s = Screen::new(s.rows().to_vec(), Some(A));
+        assert!(s.open_actions(C, Act::OnDemand));
+        assert_eq!(s.focus(), Item::Playlist(C));
+        assert_eq!(
+            s.layer(),
+            Layer::Actions {
+                id: C,
+                focus: Act::OnDemand
+            }
+        );
+        assert_eq!(s.key(Key::Ok), Some(Effect::ToggleOnDemand(C)));
+        assert_eq!(
+            s.layer(),
+            Layer::Actions {
+                id: C,
+                focus: Act::OnDemand
+            }
+        );
+        // An act a playlist lacks focuses its first; a gone playlist, nothing.
+        assert!(s.open_actions(A, Act::OnDemand));
+        assert_eq!(
+            s.layer(),
+            Layer::Actions {
+                id: A,
+                focus: Act::Show
+            }
+        );
+        assert!(!s.open_actions(SourceId(9), Act::OnDemand));
     }
 }
 

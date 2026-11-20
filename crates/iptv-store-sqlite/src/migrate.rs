@@ -143,6 +143,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "custom_group_sequence",
         sql: include_str!("../migrations/0023_custom_group_sequence.sql"),
     },
+    Migration {
+        version: 24,
+        name: "on_demand_errors",
+        sql: include_str!("../migrations/0024_on_demand_errors.sql"),
+    },
 ];
 
 /// The schema version this build writes.

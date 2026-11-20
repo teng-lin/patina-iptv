@@ -13,7 +13,7 @@ use iptv_import::{
 };
 use iptv_providers::{
     SecretUrl,
-    model::{Channel, Group, Source},
+    model::{Channel, ContentKind, Group, Source},
 };
 use iptv_store_sqlite::{
     CatalogCounts, CatalogStage, EpgStage, GuideSource, ImportErrorKind, SourceId, Store,
@@ -887,11 +887,23 @@ pub(crate) fn save(
     let guide_urls = catalog.guide_urls();
     let planned = planned.to_vec();
     let publication = publication.clone();
+    // Lists of movies or series that failed while the rest imported: kept
+    // with the import so an empty Movies screen offers Retry, not Refresh.
+    let failed = |kind| {
+        catalog
+            .on_demand_failures
+            .iter()
+            .find(|(k, _)| *k == kind)
+            .map(|(_, e)| stored::error_kind(e))
+    };
+    let on_demand = (failed(ContentKind::Movie), failed(ContentKind::Series));
     let saved = services.blocking(move |store| {
         if !publication.current(store)? {
             return Ok(Err(PublicationError::Superseded));
         }
         crate::parental::require_import(store, &job, &publication.authorization)?;
+        let mut stage = stage;
+        stage.set_on_demand_errors(on_demand.0, on_demand.1);
         let (id, counts, sources) = save_in(store, &job, guide_urls, planned, stage)?;
         let stored = store.source(id)?.ok_or(StoreError::SourceNotFound(id))?;
         if stored.source.config != job.source.config {

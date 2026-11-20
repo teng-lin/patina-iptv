@@ -33,6 +33,11 @@
 //! ([`DiscoveryQuery::around`]), however deep it is. Load more extends the
 //! window downwards and Load previous (or Up on its first title) upwards,
 //! a bounded page at a time; the per-kind catalogue always starts at its top.
+//!
+//! An empty catalogue says why ([`VodState`], set by the shell from the
+//! playlists on screen) and offers one action ([`Screen::empty_action`]).
+mod library;
+pub use library::{EmptyAction, ImportProblem, SourceVod, VodState};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Kind {
     #[default]
@@ -395,6 +400,12 @@ pub struct Screen {
     /// What Retry repeats; set with [`Screen::error`] by [`Screen::fail`].
     pub retry: Option<Operation>,
     pub notice: Option<String>,
+    /// Why the catalogue may be empty; kept across [`Screen::begin`] and
+    /// updated by the shell through [`Screen::set_library`].
+    pub library: VodState,
+    /// The playlist the empty screen's action last acted on (`Some(None)`:
+    /// adding a playlist).
+    offered: Option<Option<i64>>,
 }
 impl Screen {
     pub fn begin(&mut self, kind: Kind) -> u64 {
@@ -412,9 +423,56 @@ impl Screen {
                 ..Default::default()
             },
             generation: self.generation.wrapping_add(1),
+            library: self.library,
+            offered: self.library.action().map(EmptyAction::target),
             ..Default::default()
         };
         self.reload()
+    }
+    /// Sets why the catalogue may be empty. When the empty screen's action
+    /// now acts on another playlist than the one it offered, a remote on it
+    /// goes back to the categories: OK never acts on a playlist the screen
+    /// did not show when the remote got there. While nothing is offered (an
+    /// import running) the remote stays.
+    pub fn set_library(&mut self, state: VodState) {
+        self.library = state;
+        let Some(action) = state.action() else {
+            return;
+        };
+        let target = action.target();
+        // The empty catalogue only (a load may be running): never a shelf,
+        // details or a list with titles.
+        if self.offered.is_some_and(|offered| offered != target)
+            && self.control == Control::Catalogue
+            && !self.is_shelf()
+            && self.details.is_none()
+            && self.cards.is_empty()
+        {
+            self.control = Control::Category;
+            self.categories_open = true;
+        }
+        self.offered = Some(target);
+    }
+    /// The catalogue's state while it shows no titles, has loaded and has
+    /// no error, and no search or filter narrows it: what its empty screen
+    /// says. `None` otherwise (a shelf, details, titles, a narrowed list).
+    pub fn empty_state(&self) -> Option<VodState> {
+        let narrowed = !self.query.text.is_empty()
+            || self.query.category.is_some()
+            || self.query.source.is_some()
+            || self.query.continue_watching;
+        (!self.is_shelf()
+            && self.details.is_none()
+            && self.cards.is_empty()
+            && !self.busy
+            && self.error.is_none()
+            && !narrowed)
+            .then_some(self.library)
+    }
+    /// The one action of the empty catalogue, if it offers one. The
+    /// remote reaches it where the titles would be ([`Control::Catalogue`]).
+    pub fn empty_action(&self) -> Option<EmptyAction> {
+        self.empty_state().and_then(VodState::action)
     }
     /// Opens a cross-source discovery shelf. Its list has no toolbar: the
     /// titles are the only control until an error offers Retry. Opening the
@@ -652,7 +710,7 @@ impl Screen {
                 Control::Sort,
                 Control::Continue,
             ]);
-            if !self.cards.is_empty() {
+            if !self.cards.is_empty() || self.empty_action().is_some() {
                 out.push(Control::Catalogue);
             }
         }
@@ -1864,6 +1922,86 @@ mod tests {
                 "the next step advances normally"
             );
         }
+    }
+    #[test]
+    fn an_empty_unfiltered_catalogue_offers_its_one_action_where_titles_would_be() {
+        let mut s = Screen::default();
+        s.set_library(VodState::Failed {
+            source: 7,
+            problem: ImportProblem::Network,
+        });
+        let generation = s.begin(Kind::Movie);
+        assert_eq!(s.empty_action(), None, "nothing is offered while loading");
+        assert!(
+            matches!(s.library, VodState::Failed { source: 7, .. }),
+            "kept across begin"
+        );
+        s.publish(generation, Vec::new(), false, false);
+        assert_eq!(s.empty_action(), Some(EmptyAction::Retry(7)));
+        assert!(s.controls().contains(&Control::Catalogue));
+        // A search or filter that finds nothing is not the library's state.
+        s.query.text = "generated".into();
+        assert_eq!(s.empty_state(), None);
+        s.query.text.clear();
+        s.query.continue_watching = true;
+        assert_eq!(s.empty_action(), None);
+        s.query.continue_watching = false;
+        // Titles available elsewhere, a running import: no action.
+        for state in [VodState::Available, VodState::Importing] {
+            s.library = state;
+            assert_eq!(s.empty_state(), Some(state));
+            assert_eq!(s.empty_action(), None);
+            assert!(!s.controls().contains(&Control::Catalogue));
+        }
+        // A failed load shows Retry for the load, not the library's action.
+        s.library = VodState::NoEligibleSource;
+        s.fail("generated failure", Operation::List);
+        assert_eq!(s.empty_action(), None);
+        // Shelves keep their own empty text.
+        let mut shelf = Screen::default();
+        shelf.set_library(VodState::NoEligibleSource);
+        let generation = shelf.begin_shelf(Shelf::RecentlyAdded);
+        shelf.publish(generation, Vec::new(), false, false);
+        assert_eq!(shelf.empty_state(), None);
+    }
+    #[test]
+    fn the_remote_leaves_an_action_that_moved_to_another_playlist() {
+        let failed = |source| VodState::Failed {
+            source,
+            problem: ImportProblem::Network,
+        };
+        let mut s = Screen::default();
+        s.set_library(failed(1));
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, Vec::new(), false, false);
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.empty_action(), Some(EmptyAction::Retry(1)));
+        // Retrying it: nothing offered meanwhile, the remote stays.
+        s.set_library(VodState::Importing);
+        assert_eq!(s.control, Control::Catalogue);
+        // The same playlist, now empty: its Refresh keeps the remote.
+        s.set_library(VodState::Empty { source: 1 });
+        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.empty_action(), Some(EmptyAction::Refresh(1)));
+        // Another playlist's failure takes the screen: the remote leaves.
+        s.set_library(failed(2));
+        assert_eq!(s.control, Control::Category);
+        assert!(s.categories_open);
+        s.browse_horizontal(1);
+        assert_eq!(s.empty_action(), Some(EmptyAction::Retry(2)));
+        // A remote elsewhere is not moved.
+        s.control = Control::Search;
+        s.set_library(failed(3));
+        assert_eq!(s.control, Control::Search);
+        // An empty shelf keeps its focus.
+        let mut shelf = Screen::default();
+        let generation = shelf.begin_shelf(Shelf::RecentlyAdded);
+        shelf.publish(generation, Vec::new(), false, false);
+        shelf.set_library(failed(1));
+        shelf.set_library(failed(2));
+        assert_eq!(shelf.control, Control::Catalogue);
+        assert!(!shelf.categories_open);
     }
     #[test]
     fn the_catalogue_keeps_its_toolbar() {

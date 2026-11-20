@@ -181,6 +181,14 @@ pub struct Playlist {
     pub kind: SourceKind,
     /// Live channels of the last successful import.
     pub channels: u32,
+    /// Its catalogue has movies, and series (an embedded series of a movie
+    /// list counts as a series, as the catalogue lists it).
+    pub has_movies: bool,
+    pub has_series: bool,
+    /// The last successful import could not download its movies, or its
+    /// series (kind only); the rest of it was kept.
+    pub movies_failed: Option<ImportErrorKind>,
+    pub series_failed: Option<ImportErrorKind>,
     pub updated_at: Option<i64>,
     /// The last refresh failed (and when); the channels before it remain.
     pub failed: Option<(ImportErrorKind, Option<i64>)>,

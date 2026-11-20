@@ -205,6 +205,17 @@ impl Settings {
         changes
     }
 
+    /// The playlists that have overrides of their own or of their groups.
+    pub fn playlists(&self) -> std::collections::BTreeSet<&str> {
+        self.layers
+            .keys()
+            .filter_map(|t| match t {
+                Target::Playlist(p) | Target::Group(p, _) => Some(p.as_str()),
+                Target::Global => None,
+            })
+            .collect()
+    }
+
     /// Drops a deleted playlist's overrides and its groups' overrides.
     pub fn remove_playlist(&mut self, playlist: &str) {
         self.layers.retain(|t, _| match t {

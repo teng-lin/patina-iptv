@@ -17,6 +17,13 @@ is below 1.0, a minor release may change behaviour.
   setting, choosing a channel now closes the guide in the overlay layout too.
   Turn **Keep the guide after choosing** on to keep the old behaviour.
   Settings files move to version 3.
+- Empty Movies and Shows screens say why they are empty and offer one action:
+  add a playlist, open the playlist's new **Movies and series** switch, retry
+  a failed import, or refresh. A movie or series list that fails while live
+  channels import is shown as a failure, not as an empty catalogue.
+- Catalog schema 24 records movie and series lists that failed to download.
+  Downgrading an existing catalog is unsupported; retain a compatible backup
+  before upgrading.
 
 ## [0.1.5] - 2026-11-17
 

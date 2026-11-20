@@ -295,7 +295,7 @@ fn guide_keys(app: &mut Headless) {
     for _ in 0..2 {
         step(app.press_key("down"));
         step(app.press_key("enter"));
-        step(app.wait_for("text:No titles found. Enable movie and series imports in playlist settings, then refresh your playlist."));
+        step(app.wait_for("text:Movies and shows come from Xtream Codes and Stalker playlists. M3U playlists have live channels only."));
         step(app.back()); // Categories to the library's navigation.
         step(app.back()); // Return to the same rail destination.
         gone(app, "id:vod-screen");

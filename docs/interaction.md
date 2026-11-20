@@ -182,19 +182,31 @@ They issue no playback command of their own.
 
 ## Empty and unavailable states
 
-**Planned.** Movies and Shows explain why they are empty, with one action that
-fixes it:
+**Now.** Movies and Shows explain why they are empty, with one action that
+fixes it. The state comes from every enabled playlist, the same ones the
+catalogue reads whichever playlist is on screen: each one's type, its own
+movie and series import setting, a refresh running now, and its last
+import's result, including a movie or series list that failed while its live
+channels imported. When several playlists apply, the first matching row
+below wins, after "some playlist has titles".
 
 | State | Message says | Action |
 |---|---|---|
-| No source can provide movies or series (M3U only) | This playlist type has no movies or series | Add a playlist |
-| Imports turned off for the source | Movie and series imports are off | Open the playlist's import settings |
-| Import in progress | Titles are being imported | None; the list fills when it finishes |
-| Import failed | Why it failed, by error kind | Retry |
-| Imported, but the catalogue is empty | The provider sent no titles | Refresh |
+| Import in progress | Importing movies and shows… | None; the list fills when it finishes |
+| Import failed (whole import, or its movie or series list) | Last refresh failed, and why by error kind (no provider text) | Retry: runs that playlist's refresh again |
+| Imports turned off for the source | Movie and series imports are off for this playlist | Playlist settings: opens that playlist's actions at its "Movies and series" switch |
+| Imported, but the catalogue is empty | No movies (or shows) found; refresh the playlist to look for new ones | Refresh now |
+| No source can provide movies or series (M3U only, or none) | Movies and shows come from Xtream Codes and Stalker playlists; M3U has live channels only | Add playlist |
 
-Imports are never switched on automatically, and M3U channels never appear as
-movies or series.
+On a remote the action sits where the titles would be: Right from the
+categories, then OK. If the action moves to another playlist while the remote
+is on it, the remote goes back to the categories, so OK never acts on a
+playlist the screen did not show. The "Movies and series" switch keeps no own
+value when it matches the global setting, and a deleted playlist's own value
+goes with it. A search or filter that finds nothing says "No titles found."
+with no action. Continue watching and Recently added keep their own
+empty text. Imports are never switched on automatically, and M3U channels
+never appear as movies or series.
 
 ## Admission and capability
 

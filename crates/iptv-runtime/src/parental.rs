@@ -906,6 +906,7 @@ mod source_tests {
             series: vec![],
             warnings: vec![],
             warnings_dropped: 0,
+            on_demand_failures: vec![],
             stats: Default::default(),
         }
     }
