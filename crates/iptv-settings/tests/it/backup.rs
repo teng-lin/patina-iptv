@@ -276,6 +276,23 @@ fn version_2_folds_the_overlay_stay_choice_into_one() {
         json!({"guide.browse_mode": "overlay", "guide.stay_on_guide": true})
     ));
 
+    // Only booleans count: an invalid old value never replaces a valid
+    // choice, and an invalid shared value does not block a valid old one.
+    assert!(stay(json!({
+        "guide.browse_mode": "overlay",
+        "guide.stay_on_guide": true,
+        "guide.stay_on_guide_overlay": null
+    })));
+    assert!(stay(json!({
+        "guide.stay_on_guide": null,
+        "guide.stay_on_guide_overlay": true
+    })));
+    assert!(!stay(json!({
+        "guide.browse_mode": "overlay",
+        "guide.stay_on_guide": true,
+        "guide.stay_on_guide_overlay": false
+    })));
+
     let (st, report) = load(v2(json!({"guide.stay_on_guide_overlay": false})));
     assert_eq!(report.migrations, [2]);
     assert!(report.unknown.is_empty(), "the old key is gone, not kept");

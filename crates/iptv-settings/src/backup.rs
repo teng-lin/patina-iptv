@@ -82,7 +82,8 @@ pub static MIGRATIONS: &[Migration] = &[
 /// choice made for the layout in use wins; otherwise an explicit choice
 /// for the other layout carries over; otherwise the default (off) applies.
 /// The overlay layout's old default (on) was never written, so it is not
-/// carried over.
+/// carried over. Only a boolean counts as a choice: an invalid old value is
+/// dropped and an invalid shared value is treated as absent.
 fn v2_one_stay_on_guide(doc: &mut Map<String, Json>) {
     let old = "guide.stay_on_guide_overlay";
     let new = "guide.stay_on_guide";
@@ -93,15 +94,16 @@ fn v2_one_stay_on_guide(doc: &mut Map<String, Json>) {
         .and_then(Json::as_str)
         == Some("overlay");
     for_each_layer(doc, &mut |layer| {
-        let Some(overlay_choice) = layer.remove(old) else {
+        let Some(overlay_choice) = layer.remove(old).as_ref().and_then(Json::as_bool) else {
             return;
         };
         let overlay = match layer.get(mode).and_then(Json::as_str) {
             Some(m) => m == "overlay",
             None => global_overlay,
         };
-        if overlay || !layer.contains_key(new) {
-            layer.insert(new.to_owned(), overlay_choice);
+        let shared_choice = layer.get(new).and_then(Json::as_bool);
+        if overlay || shared_choice.is_none() {
+            layer.insert(new.to_owned(), Json::Bool(overlay_choice));
         }
     });
 }
