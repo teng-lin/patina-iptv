@@ -1,0 +1,105 @@
+# Issue #88 tablet journey validation
+
+Evidence for #88: a tablet viewer's journey by touch, through gestures,
+rotation, split-screen widths, large text, the keyboard and interruptions,
+checked against the [interaction contract](../interaction.md). Run on 20
+November 2026.
+
+All data is synthetic: the 300-channel generated playlist and XMLTV from
+`tools/make-iptv-fixtures.py`, generated HLS test streams from
+`tools/make-hls-fixtures.sh`, served by `tools/mock-server.py` on the host
+(port 8093, every request logged: the stream-request counts below), and the
+generated playlists, guides and on-demand catalogue of the headless app
+scenarios. No provider data was used.
+
+**Physical devices: none.** Everything below is the `tab36` emulator or
+headless. No result here stands for a physical Android tablet or an iPad.
+
+## Build
+
+| Item | Value |
+|---|---|
+| Commit validated | `5b8f5f42` (branch `feat/issue-88-tablet-journey`) |
+| Android APK | Debug build, validation ID `com.hantekllc.iptvrs.validation`, x86_64, `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true`, development playlist `http://10.0.2.2:8093/iptv/playlist.m3u`, built with `tools/sync-host.sh` and Gradle `assembleDebug testDebugUnitTest` (the Kotlin player-contract tests passed) |
+| APK SHA-256 | `ccba24f5dfe5e0642041197dcf31c6b9d9ab521fe4d4b351bbdd2ba54fcaa57d` |
+| Rust | 1.99.1 (the pinned toolchain) |
+
+## Hosts
+
+| Host | Profile | OS | Input | Viewport | Text |
+|---|---|---|---|---|---|
+| Android tablet (emulator) | Disposable copy of `tab36` (Pixel Tablet, 2560×1600 at 320 dpi, 1280×800 dp), run `run-wvf0ejp3` on `emulator-5580`, `operation.json` `"result": "passed"` | Android 16 (API 36) Google APIs x86_64, `swiftshader`, no audio | Smoke's remote keys, then `adb shell input` touch taps and swipes, key events, rotation, `wm size`, `font_scale`, and the emulator's own incoming call (`adb emu gsm call`) | 1280×800 dp; portrait 800×1280 dp; 640×800 dp (`wm size 1280x1600`, a half-width split-screen window) | System font scale 1.0 and 2.0 |
+| Headless (Android tablet idiom) | `cargo test -p iptv-app --features test-support --test app`: `tablet_gestures`, `tablet_journey` | Linux, environment `Idiom::Pad`, `Os::Android` | Touch drags and taps, keys, a software keyboard's height, native player events the harness injects | 1280×800, 800×1280, 640×800, 800×640, 400×800, 1280×400 | Font scale 1.0, 1.3 and 2.0 |
+| iPad | — | — | — | — | **Pending: iPad simulator run on macOS (separate host)** |
+
+The emulator's split-screen check resizes the display, not a second app's
+window beside Patina: it shows the layout at that width, not Android's
+split-screen lifecycle. Paths such as `target/android-validation/run-wvf0ejp3/`
+are local run directories, not committed; the screenshots linked from
+`docs/screenshots/issue-88/` are.
+
+"Same SurfaceView" below means `dumpsys SurfaceFlinger --list` showed the
+player's `SurfaceView` (`117c421`) with the same layers before and after
+the step. Stream requests are the mock server's `index.m3u8` requests;
+opens are the app's `iptv player 0 open` log lines.
+
+## Criteria and evidence
+
+The criteria are #88's acceptance criteria. Columns stay open for an iPad
+run to be added beside the Android and headless ones.
+
+| #88 criterion | Headless | Android `tab36` (emulator) | iPad |
+|---|---|---|---|
+| Vertical, horizontal and diagonal drags, flings and cancelled gestures give the documented scroll outcome, with zero unintended channel, play or record activations | Met: `tablet_gestures::tablet_drags_scroll_and_pan_without_playing_or_recording` on a generated 30-channel guide with 180-, 45-, 30- and 15-minute programmes: vertical drags scroll only, horizontal drags pan only, each diagonal follows its larger part, a fling carries on, a system-cancelled drag rests without a fling; drags start on channel names, inside long programmes, on adjacent short ones and on replayable past ones. No channel tuned except the first channel's autoplay preview, no details, menu or recording job; a key-started autoplay preview is cancelled by both a horizontal and a vertical drag; a 5-point wobble stays a tap and plays full screen | Met for vertical, horizontal, both diagonals and a fling (`adb shell input swipe`): 7 opens and 9 stream requests before and after all five, same SurfaceView. [After the fling](../screenshots/issue-88/tablet-guide-after-fling.png): 22 hours ahead, the rows still where the vertical swipe left them. Cancelled gesture: not run on the emulator | Pending |
+| A channel, programme, movie and episode can each be reached and played by visible touch controls alone | Met: `tablet_journey::touch_alone_plays_a_channel_and_a_past_programme_and_returns` (a tap on a channel, the visible ‹ back, the ruler's ‹ to a past programme, a tap replays it) and `touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_large_text` (the Movies and Shows shortcuts, a poster, Play, a show, an episode, the play bar's ‹ and play/pause, Close) | Channel: met (a tap played it full screen, 1 open, 1 stream request; the ‹ returned to the guide). Programme, movie and episode: not run (the smoke fixture is an M3U playlist with no movies or series; no replay was tapped) | Pending |
+| Portrait, landscape and narrow split screen preserve content and progress and keep primary controls reachable at enlarged text | Met: the movie at 37 s of 2 min stays full screen with its progress, and the show's details keep the selected episode, across six presentations at text 1.3 and 2.0, on the same `tv.player` (mounted once, never removed or re-inserted), no stream opened; the play bar's ‹ and play/pause and the details' Close lie inside every window (`tablet_journey`) | Met for live TV full screen: portrait, text 2.0, then 640×800 dp kept the channel playing, same SurfaceView, no open, no stream request; ‹, play/pause and the progress line visible ([portrait at 2.0](../screenshots/issue-88/tablet-portrait-text-2.0-play-bar.png), [half width at 2.0](../screenshots/issue-88/tablet-half-width-text-2.0-play-bar.png)). Observation 2 | Pending |
+| Keyboard appearance and dismissal and touch ↔ keyboard switching leave a usable layout and focus, without triggering player shortcuts while editing | Met: `tablet_journey::a_keyboard_over_search_edits_text_without_reaching_the_player` (the field stays above a 340–420 point keyboard in landscape, portrait and split; typed letters, Space, K and M neither pause, mute nor zap; after dismissal a key and a tap each drive the results) and `keyboard_dismissal` | Met: Search over the playing preview raised the keyboard (`mInputShown=true`) with the field above it; `input text` and Space, K, M, F key events went into the field ([screenshot](../screenshots/issue-88/tablet-search-keyboard.png)); no pause or mute logged, no open; Back hid the keyboard (`mInputShown=false`). Hardware keyboard and mouse: not run | Pending |
+| PiP, Home and return, and interruption and route-change journeys follow the documented host policy, with no duplicate provider stream and no automatic restart of explicitly stopped playback | Met for the policy: `iptv_core::interruption` unit tests; `tablet_journey::calls_and_unplugged_headphones_pause_by_policy_and_never_restart_a_stop` (a call pauses and resumes, unplugged headphones and another app's media pause for good, a viewer's pause during a call is kept, a stop during a call stays stopped, no stream opened by any of it) | Call: met with the emulator's own incoming call: `focusLossTransient -> Pause`, the ringing call took the focus ([screenshot](../screenshots/issue-88/tablet-call-paused.png)), cancelling it gave `focusGain -> Resume`; no open, no stream request. Home and return: met, the stream stopped and the focus was given up on Home, and return opened it once (1 open, 1 stream request: no duplicate). PiP: **fail**, observation 1. Route change and another app's media: not run (no headset or second media app on the emulator). Explicit stop then return: not run (the media Stop key did not reach the app) | Pending |
+| Android's persistent player surface survives layout-only transitions without hide, detach or re-parent; background recovery follows platform lifecycle policy | Met: the `tv.player` node mounted once, never removed or re-inserted, through every presentation (`tablet_journey`, `pane_collapse`) | Met for layout: same SurfaceView through fling, rotation, text 2.0, the width change and the call. Home stops playback and the system destroys the surface's layers; return makes new layers for the same SurfaceView and reopens once, as the lifecycle policy says | Pending |
+| Validated on tab36 and an available physical Android tablet; iPad recorded separately; actual touch and native evidence | `tab36` above (`adb` touch input, real audio focus and a real incoming call) | Physical Android tablet: **not run**, none available to this run | Pending: iPad simulator run on macOS (separate host) |
+
+## Bugs and observations
+
+1. **Picture in picture did not open on `tab36`.** The play bar's
+   picture-in-picture button logged `iptv pip: asked to enter` and then
+   `iptv pip: not entered` (`enterPictureInPictureMode` returned false), and
+   Home did not enter it either, although the task's parameters showed
+   `isAutoPipEnabled=true`. Home stopped playback as the background policy
+   says; nothing played twice. Not investigated here; the emulator image's
+   window manager (desktop windowing on a tablet) is a likely cause.
+2. **At half width and text 2.0 the play bar's last buttons are cut off.**
+   The ‹, play/pause and progress stay reachable, but the bar's row of
+   secondary buttons runs past the window's right edge
+   ([screenshot](../screenshots/issue-88/tablet-half-width-text-2.0-play-bar.png));
+   at that size the times wrap to two lines. #86 marks collapsing the
+   player's panels by class as Planned.
+3. **Fixed in this change:** panning the timeline into a day of listings not
+   yet read scrolled the channel rows back to the focused channel after a
+   touch scroll (found by `tablet_gestures`).
+4. **Observation:** with programmes of 5 minutes, a guide row showed no
+   programmes at all headless (each row mounts 17 cell slots; the cause was
+   not investigated). The gesture scenario uses 15 minutes and longer; not
+   fixed here.
+5. **Observation:** a very fast swipe (1,400 px in 80 ms) flung the timeline
+   about 22 hours; the Now button brings it back.
+6. **Observation:** after the call ended the host gave up the audio focus
+   and requested it again within 10 ms, while the app's resume reached the
+   player; playback resumed and nothing reopened.
+
+No crash or refused player load was seen (the smoke's final checks), and
+no stream was opened by a gesture, a rotation, a width or text change,
+typing, or the call.
+
+## Not run
+
+- Physical Android tablet: none available.
+- iPad: pending, an iPad simulator run on macOS on a separate host; the
+  iPad host's audio session and foreground-only recording are unchanged by
+  this change.
+- On `tab36`: a replayed programme, a movie and an episode (the smoke's M3U
+  fixture has none); a system-cancelled drag; headphone or Bluetooth route
+  changes and another app taking the audio; an explicit stop followed by
+  Home and return; a hardware keyboard and mouse; Android's real
+  split-screen with a second app; TalkBack.
+- Audio output: the emulator runs with `-no-audio`, so focus changes were
+  checked by the system's focus stack and the app's logs, not by sound.

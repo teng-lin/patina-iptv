@@ -164,7 +164,6 @@ impl Pan {
         if self.model.with(|m| m.moving()) {
             return;
         }
-        self.ui.guide_panning.set(false);
         let window = self.model.with(|m| m.window());
         let view = crate::lists::view(self.ui);
         self.ui.focus.update(|f| f.pan_to(window, &view));
@@ -174,7 +173,7 @@ impl Pan {
     /// The platform found a horizontal drag: it pans from here.
     fn grabbed(&self) {
         self.ui.touched();
-        self.ui.guide_panning.set(true);
+        crate::browse_playback::dragged(self.ui);
         self.fling.with(|g| *g += 1);
         self.model.with(Timeline::grab);
         self.show();
@@ -234,8 +233,7 @@ impl Pan {
         if self.model.with(|m| m.dragging()) {
             return;
         }
-        self.ui.guide_panning.set(true);
-        crate::browse_playback::activity(self.ui);
+        crate::browse_playback::dragged(self.ui);
         self.wheeling.with(|w| *w = true);
         self.fling.with(|g| *g += 1);
         if self.model.with(|m| m.wheel(dx, ppm)) {
@@ -259,7 +257,6 @@ impl Pan {
     /// live programme, as Home.
     pub(crate) fn to_now(self) {
         self.ui.touched();
-        self.ui.guide_panning.set(false);
         self.fling.with(|g| *g += 1);
         self.model.with(Timeline::cancel);
         self.ui.focus.update(|f| f.jump_to_now());

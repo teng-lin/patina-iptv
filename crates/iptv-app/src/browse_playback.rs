@@ -29,8 +29,7 @@ fn current(ui: Ui) -> Option<Target> {
         }
         Context::Guide
             if ui.mode.get() != ViewMode::Fullscreen
-                && ui.focus.with(|f| f.pane == crate::guide::Pane::Guide)
-                && !ui.guide_panning.get() =>
+                && ui.focus.with(|f| f.pane == crate::guide::Pane::Guide) =>
         {
             let v = crate::lists::view(ui);
             if ui.focus.with(|f| f.program(&v).airing(f.now)) != Airing::Live {
@@ -101,6 +100,13 @@ fn sync(ui: Ui) {
     let p = policy_for(ui, target.as_ref());
     let now = ui.now_ms();
     ui.browse_playback.update(|b| b.focus(target, p, now));
+}
+/// A touch or mouse drag in the guide or a list crossed the drag
+/// threshold: a preview waiting to start is cancelled; a tap's choice
+/// still plays (`BrowsePlayback::dragged`).
+pub fn dragged(ui: Ui) {
+    ui.browse_playback.update(|b| b.dragged());
+    activity(ui);
 }
 pub fn activity(ui: Ui) {
     ui.browse_playback.update(|b| b.activity(ui.now_ms()));

@@ -17,6 +17,7 @@ pub mod favorites;
 pub mod guide;
 pub mod i18n;
 pub mod import_limits;
+pub mod interruption;
 pub mod layout;
 pub mod lists;
 pub mod live;

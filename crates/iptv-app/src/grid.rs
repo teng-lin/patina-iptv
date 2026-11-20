@@ -185,6 +185,11 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
                         )
                         .estimated_item_size(move || px(size.whole(ROW_H)))
                         .element_ref(&rows)
+                        // Scrolling the channels never tunes: a preview
+                        // waiting to start stops (`browse_playback`).
+                        .on_scroll_drag_start(move |_: &Point<Points>| {
+                            crate::browse_playback::dragged(ui)
+                        })
                         .on_viewable_items_change(move |v: &ViewableItems| {
                             if !organization_view::guide_order_open(ui) {
                                 ui.visible_rows.set(v.viewable);
@@ -307,12 +312,13 @@ fn hint_lines() -> [&'static str; 4] {
     }
 }
 
-/// New guide data or a new list shows the focused row (the focus is kept
+/// A new schedule or a new list shows the focused row (the focus is kept
 /// by identity, but the list keeps its scroll offset across a count
-/// change).
+/// change). A day of listings paged in (a timeline pan reaching it) keeps
+/// the rows where a finger scrolled them (#88).
 fn scroll_to_focus_on_new_list(ui: Ui, list: ElementRef, order_focus: Memo<Option<(usize, bool)>>) {
     effect(move || {
-        ui.guide_data();
+        ui.app.data_version.get();
         ui.list.with(|_| ());
         if order_focus.get_untracked().is_none() {
             scroll_to_focused_row(ui, list);
