@@ -58,6 +58,11 @@ impl<S: Copy + PartialEq + Debug> HeldPresses<S> {
         self.detector.long_deadline_ms()
     }
 
+    /// The key held now, if any (waiting or already decided).
+    pub fn held_key(&self) -> Option<RemoteKey> {
+        self.held.map(|(key, _)| key)
+    }
+
     /// Forgets whatever is held: no tap, hold or timer follows from it
     /// (a prompt took the keys).
     pub fn cancel(&mut self) {
@@ -275,7 +280,9 @@ mod tests {
         let mut h = HeldPresses::new(400);
         assert_eq!(feed(&mut h, &keys, Guide, Ok, Phase::Down, 0), None);
         // A prompt took the keys: its release and the timer do nothing.
+        assert_eq!(h.held_key(), Some(Ok));
         h.cancel();
+        assert_eq!(h.held_key(), None);
         assert_eq!(h.long_deadline_ms(), None);
         assert_eq!(h.poll(Guide, 400), None);
         assert_eq!(feed(&mut h, &keys, Guide, Ok, Phase::Up, 450), None);

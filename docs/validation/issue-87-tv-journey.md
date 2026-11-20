@@ -68,7 +68,8 @@ the app's long-press timer on the engine clock) on a TV idiom:
 | `long_ok_rapid_taps_and_a_surface_change_during_a_hold` | Long OK with 50 ms repeats and without repeats: the bar opens once with Play/pause focused, no card. Three rapid OK taps: card, hidden, card; no stream opens. OK held as the info card's timer runs out: the card stays and the release presses its Guide action. OK held in the guide while a tap plays Local B: the early release does nothing (`Short dropped`); held while a tap plays Local C: no menu by the timer, no controls by a repeat, no card by the release (`Long dropped`). One `tv.player` throughout |
 | `the_remote_journey_browses_without_retuning_and_returns_to_the_guide` | Hold Left: groups; choose Local A (1 open); Menu: bar; channel list over video, browse to Local B for 3 s: no open; zap to B (2), previous channel to A (3), ⏮ to B (4); Back to the guide, browse: no open; Up to the mini-player, OK: B full screen, no open; Back. One `tv.player`, never removed or reparented |
 | `a_press_belongs_to_its_owner_and_a_prompt_takes_its_keys` | OK held on the info card while a tap opens More controls: no Search on release. OK held in the guide while a tap opens a PIN prompt, released under the prompt, prompt cancelled before the threshold: no menu by a late timer. Raw Back on a PIN prompt plus Android's Back: one step. The OK that submits the PIN, held with repeats: no play bar, no card, no menu. Back held on the card while a tap takes its TV guide action: Android's Back after the release is swallowed |
-| `holds_keep_their_card_decide_once_and_menu_does_not_toggle` | Menu held with repeats: the menu opens once and stays. Card timeout 1 s, long press 2 s, no repeats: the card outlives its timeout and a 1.5 s release presses its action. On the play bar, a hold decided by its repeat (no timer) refocuses Play/pause |
+| `holds_keep_their_card_decide_once_and_menu_does_not_toggle` | Menu held with repeats: the menu opens once and stays. Card timeout 1 s, long press 2 s, one repeat at 400 ms: the card outlives its timeout and a 1.5 s release presses its action. On the play bar, a hold decided by its repeat (no timer) refocuses Play/pause; Menu held hides the bar and its repeats do not reopen it |
+| `a_back_or_ok_held_into_a_pin_prompt_stays_cut_short` | Back held in the guide while a tap opens a PIN prompt: its release and Android's Back leave the prompt open; a fresh Back closes it. A Back guard left armed by a dropped Back with no callback does not swallow a fresh Back on a PIN prompt. OK held into a prompt, a repeat under it, the prompt cancelled by touch: later repeats and the release select nothing |
 | `extra_large_text_keeps_every_focused_bar_control_on_screen` | Extra large text at 960×540: exactly one bar control focused at a time, each whole on screen, live skipping Rewind |
 
 Also: `tv_replay` (replay seek by remote opens the archive once; a subtitle
@@ -81,7 +82,11 @@ modals restores channel identity after reordering) and the
 it reverted (the card and strip as one owner, no cancel on capture, no
 consumed key, raw Back acting on a PIN prompt, no swallowed Back, no
 deadline-long card, a repeat-decided hold passed as a repeat, Menu repeats
-acting), at least one of these scenarios fails.
+acting; and in the second review round: no guard clear before a prompt, the
+cut-short key not consumed, its Back release not swallowed, the card
+deadline renewed on Down only, Menu repeats reaching the bar), at least one
+of these scenarios fails. Keyboard `M` registers without repeats (unit test
+`keyboard_menu_fires_once_while_held_and_moves_repeat`).
 
 ## Acceptance criteria
 

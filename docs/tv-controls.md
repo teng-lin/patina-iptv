@@ -17,8 +17,9 @@ the code as it is (`iptv_nav::Keymap::defaults`, `crates/iptv-app/src/input.rs`,
   acts once, on an auto-repeat or on a timer for remotes that send none. The
   release after a hold does nothing, and neither do the repeats.
 - A key without a hold action acts at once and again on each repeat, so a
-  held arrow keeps moving. Menu is the exception: held, it opens its menu
-  once instead of opening and closing it with every repeat.
+  held arrow keeps moving. Menu is the exception, on a remote and as `M`
+  on a keyboard: held, it acts once instead of opening and closing a menu
+  or the play bar with every repeat.
 - A hold decided by an auto-repeat is the hold's one action, exactly as one
   decided by the timer.
 - A waiting press belongs to the surface it went down on: the keymap's
@@ -30,10 +31,12 @@ the code as it is (`iptv_nav::Keymap::defaults`, `crates/iptv-app/src/input.rs`,
   (`iptv_nav::HeldPresses`; the log says "dropped: the surface changed").
   A dropped Back also takes Android's own Back on its release with it.
 - A PIN prompt or the remote editor takes the keys it gets: a press pending
-  from before is forgotten (its release or timer does nothing once the
+  from before is cut short and stays so until that key is released or
+  pressed afresh (its repeats, release or timer do nothing, even after the
   prompt closes), and a key the prompt took does nothing more while held
-  (the OK that submitted a PIN starts no hold on the video). Back on a PIN
-  prompt closes it once, through Android's Back.
+  (the OK that submitted a PIN starts no hold on the video). A Back held
+  from before the prompt does not dismiss it on release. A fresh Back on a
+  PIN prompt closes it once, through Android's Back.
 - A key going down keeps the info card and the play bar on screen until
   the press is decided, even when their own timeout is shorter than the
   hold, so a press never finds them gone on release.
@@ -120,7 +123,7 @@ As full-screen live, except:
 |---|---|---|
 | Left / Right (`catchup.seek_keys`: Left/Right, the default) | Choose a seek one time-bar step back or on, shown on the card's bar; it starts after a short pause, or at once on OK | Repeats the step, faster (no hold action) |
 | Down / Up (`catchup.seek_keys`: Down/Up) | As Left / Right above, instead of zapping | As above |
-| OK | Starts a chosen seek at once; otherwise play/pause | The play bar |
+| OK | Starts a chosen seek at once; otherwise, when arrows seek (`catchup.seek_keys` Left/Right or Down/Up), play/pause; with media keys only (`transport`), the info card | The play bar |
 | Rewind / Fast-forward | Seek back / on | Repeats |
 | ⏭ (Next) | Back to live (a replay) | – |
 

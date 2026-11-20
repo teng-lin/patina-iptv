@@ -34,9 +34,10 @@ is below 1.0, a minor release may change behaviour.
   presses the card it was held on instead of reopening the card.
 - TV remote: a key held through a PIN prompt no longer acts after the prompt
   closes, the OK that submits a PIN no longer opens the play bar when held,
-  Back on a PIN prompt closes only the prompt, holding Menu no longer opens
-  and closes the menu repeatedly, and a hold on the play bar always returns
-  focus to Play/pause.
+  Back on a PIN prompt closes only the prompt (and a Back held from before
+  the prompt does not close it), holding Menu or `M` no longer opens and
+  closes the menu or the play bar repeatedly, and a hold on the play bar
+  always returns focus to Play/pause.
 
 ## [0.1.5] - 2026-11-17
 

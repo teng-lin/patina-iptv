@@ -60,9 +60,10 @@ struct Nav {
     keymap: Keymap,
     presses: HeldPresses<Surface>,
     raw: RawKeys,
-    /// A key whose press a PIN prompt or the remote editor took: its
-    /// repeats and release do nothing until a new key goes down.
-    consumed: Option<RemoteKey>,
+    /// Keys whose press a PIN prompt or the remote editor took or cut
+    /// short: their repeats and release do nothing until that key goes
+    /// down afresh.
+    consumed: Vec<RemoteKey>,
 }
 
 /// What owns input, finer than the keymap's [`Context`]: the info card and
@@ -108,7 +109,7 @@ impl Nav {
             keymap: crate::remote_editor::keymap(),
             presses: HeldPresses::default(),
             raw: RawKeys::default(),
-            consumed: None,
+            consumed: Vec::new(),
         }
     }
 }
@@ -223,6 +224,15 @@ pub fn context(ui: &Ui) -> Context {
     }
 }
 
+/// A named keyboard binding fires again on auto-repeat (a held arrow
+/// keeps moving), except Menu (`M`): held, it opens its menu once.
+fn named_key_options(key: RemoteKey) -> KeyOptions {
+    KeyOptions {
+        repeat: key != RemoteKey::Menu,
+        ..Default::default()
+    }
+}
+
 pub(crate) fn bind(ui: Ui) -> InputScope {
     focus_remote_root();
     number::bind(ui);
@@ -231,10 +241,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
         nav: Rc::new(RefCell::new(Nav::new())),
         owner: Owner::current(),
     };
-    let repeat = KeyOptions {
-        repeat: true,
-        ..Default::default()
-    };
+
     let digits = DIGITS
         .into_iter()
         .enumerate()
@@ -242,7 +249,9 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
     for (name, key) in KEYS.iter().copied().chain(digits) {
         if !long_press() || name.contains('+') {
             let nav = input.nav.clone();
-            on_key_with(name, repeat, move |_| key_event(ui, &nav, key, Phase::Down));
+            on_key_with(name, named_key_options(key), move |_| {
+                key_event(ui, &nav, key, Phase::Down)
+            });
         }
     }
     if crate::desktop::DESKTOP {
@@ -298,22 +307,43 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     if phase != Phase::Up {
         crate::browse_playback::activity(ui);
     }
+    // Menu has no hold: held, its repeats would close and reopen what its
+    // press opened (a menu, the play bar).
+    if key == RemoteKey::Menu && phase == Phase::Repeat {
+        return;
+    }
+    // A fresh Back: whatever an earlier one left armed is gone, before a
+    // prompt below takes the key (its Back must not be swallowed).
+    if key == RemoteKey::Back && phase == Phase::Down {
+        ui.back_guard.update(BackGuard::pressed);
+    }
     let pin = crate::parental_view::is_open(ui);
     if pin || crate::remote_editor::captures(ui) {
         // A prompt or the editor takes the keys: a press pending from
         // before is forgotten (its release or timer must not act once the
         // prompt closes), and a key it takes acts nowhere else while held.
         let mut nav = nav.borrow_mut();
+        // The cut-short key stays consumed until its release or a fresh
+        // press: a later repeat must not start a new hold of it.
+        if let Some(held) = nav.presses.held_key()
+            && !nav.consumed.contains(&held)
+        {
+            nav.consumed.push(held);
+        }
         nav.presses.cancel();
+        if phase == Phase::Up {
+            release_consumed(ui, &mut nav, key);
+            return;
+        }
         if phase == Phase::Down {
+            nav.consumed.retain(|k| *k != key);
             if key == RemoteKey::Back && (!pin || long_press()) {
                 // The platform's Back (`go_back`) closes the PIN prompt or
                 // cancels the editor's capture, once; acting here too
                 // would also step back from what the prompt exposes.
-                nav.consumed = None;
                 return;
             }
-            nav.consumed = Some(key);
+            nav.consumed.push(key);
             drop(nav);
             if pin {
                 crate::parental_view::remote(ui, key);
@@ -326,10 +356,10 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     {
         let mut nav = nav.borrow_mut();
         if phase == Phase::Down {
-            nav.consumed = None;
-        } else if nav.consumed == Some(key) {
+            nav.consumed.retain(|k| *k != key);
+        } else if nav.consumed.contains(&key) {
             if phase == Phase::Up {
-                nav.consumed = None;
+                release_consumed(ui, &mut nav, key);
             }
             return;
         }
@@ -368,11 +398,12 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     };
     // A card or bar on screen outlasts the wait (its own timeout can be
     // shorter than the long press): the release finds what was pressed.
-    if let Some(wait_ms) = deadline {
-        keep_controls_until(ui, ui.now_ms() + wait_ms + 50);
-    }
-    if key == RemoteKey::Back && phase == Phase::Down {
-        ui.back_guard.update(BackGuard::pressed);
+    // Each event of the press renews this (a repeat's touch alone would
+    // pull the deadline back in).
+    if phase != Phase::Up
+        && let Some(at) = nav.borrow().presses.long_deadline_ms()
+    {
+        keep_controls_until(ui, at + 50);
     }
     let action = decision.and_then(|d| resolve(ui, &nav.borrow().keymap, d));
     if let Some((key, press, action)) = action {
@@ -486,6 +517,18 @@ fn keep_controls(ui: Ui) {
     }
     if untracked(|| crate::play_bar::shows(ui)) {
         crate::play_bar::used(ui);
+    }
+}
+
+/// The release of a key a prompt took or cut short: it is no longer
+/// consumed, and a Back that began before the prompt does not let
+/// Android's own Back act on its release either.
+fn release_consumed(ui: Ui, nav: &mut Nav, key: RemoteKey) {
+    if nav.consumed.contains(&key) {
+        nav.consumed.retain(|k| *k != key);
+        if key == RemoteKey::Back {
+            swallow_release(ui);
+        }
     }
 }
 
@@ -760,4 +803,22 @@ fn page(ui: Ui, dir: isize) {
 pub(crate) fn synthetic_enter(ui: Ui) {
     let nav = Rc::new(RefCell::new(Nav::new()));
     key_event(ui, &nav, RemoteKey::Ok, Phase::Down);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keyboard_menu_fires_once_while_held_and_moves_repeat() {
+        assert!(!named_key_options(RemoteKey::Menu).repeat, "M: once");
+        for key in [
+            RemoteKey::Down,
+            RemoteKey::Right,
+            RemoteKey::Ok,
+            RemoteKey::ChannelUp,
+        ] {
+            assert!(named_key_options(key).repeat, "{key:?}");
+        }
+    }
 }
