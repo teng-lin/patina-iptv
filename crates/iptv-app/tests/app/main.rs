@@ -71,6 +71,8 @@ mod recordings_transport;
 mod screens_look;
 mod search_history;
 mod stalker_cancel;
+mod tablet_gestures;
+mod tablet_journey;
 mod tablet_rows;
 mod tv_player;
 mod tv_remote_journey;

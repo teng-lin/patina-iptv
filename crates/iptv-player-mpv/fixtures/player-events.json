@@ -42,5 +42,9 @@
   { "name": "pipAction", "data": { "action": "play" } },
   { "name": "pipAction", "data": { "action": "pause" } },
   { "name": "pipAction", "data": { "action": "next" } },
-  { "name": "pipAction", "data": { "action": "previous" } }
+  { "name": "pipAction", "data": { "action": "previous" } },
+  { "name": "audio", "data": { "change": "focusLoss" } },
+  { "name": "audio", "data": { "change": "focusLossTransient" } },
+  { "name": "audio", "data": { "change": "focusGain" } },
+  { "name": "audio", "data": { "change": "noisy" } }
 ]

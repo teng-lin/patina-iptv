@@ -37,6 +37,9 @@
 //! - picture in picture (surface 0): prop `pip` {auto, enter, window},
 //!   events `pip` {supported, tv, active} and `pipAction` {action}
 //!   (`pip.rs`; Android's host; the desktops' players read `window`).
+//! - event `audio` {change: focusLoss|focusLossTransient|focusGain|noisy}:
+//!   Android's audio focus and route, which pause and resume the main
+//!   player by the core's policy (`interruption.rs`).
 //!
 //! In the background (`lifecycle()` Background) Android's host stops every
 //! player, closing its connections, and reopens it when the app comes back
@@ -286,6 +289,11 @@ fn on_unread(ui: Ui, surface: usize, error: PlayerEventError) {
             log::info!("iptv pip: {action}");
             return;
         }
+        // A later host's change: nothing paused or resumed.
+        PlayerEventError::UnknownAudio(change) => {
+            log::info!("iptv audio: {change}");
+            return;
+        }
         PlayerEventError::UnknownState(name) => (PlayerEventKind::State, name),
         PlayerEventError::NoSize { width, height } => {
             if surface == 0 {
@@ -315,8 +323,10 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
         | PlayerEvent::FirstRender { token } => Some(*token),
         _ => None,
     };
-    if !matches!(&event, PlayerEvent::Pip { .. } | PlayerEvent::PipAction(_))
-        && !stream.accepts_native(token)
+    if !matches!(
+        &event,
+        PlayerEvent::Pip { .. } | PlayerEvent::PipAction(_) | PlayerEvent::Audio(_)
+    ) && !stream.accepts_native(token)
     {
         return;
     }
@@ -352,6 +362,7 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
             active,
         } => return crate::pip::on_state(ui, supported, tv, active),
         PlayerEvent::PipAction(action) => return crate::pip::on_action(ui, action),
+        PlayerEvent::Audio(change) => return crate::interruption::on_change(ui, surface, change),
         PlayerEvent::FirstRender { token } => {
             #[cfg(feature = "test-support")]
             crate::performance_probe::rendered(ui, surface, token);

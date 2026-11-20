@@ -42,6 +42,7 @@ mod input;
 /// Take keys as an Android remote's raw Down/Repeat/Up phases (headless tests).
 #[cfg(feature = "test-support")]
 pub use input::use_remote_key_phases;
+mod interruption;
 mod keyboard;
 mod list_rows;
 mod lists;
@@ -234,7 +235,8 @@ pub struct Ui {
     /// running: the channel key focused then (`browse_playback::hold`).
     pub autoplay_held: Signal<Option<Option<String>>>,
     pub pending_zap: Signal<Option<iptv_core::browse_playback::Target>>,
-    pub guide_panning: Signal<bool>,
+    /// The host's audio interruptions' policy (`interruption.rs`).
+    pub interruptions: Signal<iptv_core::interruption::Interruptions>,
     /// The list the guide shows: catalog channels (`lists.rs`).
     pub list: Signal<Rc<ChannelList>>,
     /// The playing channel (catalog).
@@ -345,7 +347,7 @@ impl Ui {
             browse_playback: signal(Default::default()),
             autoplay_held: signal(None),
             pending_zap: signal(None),
-            guide_panning: signal(false),
+            interruptions: signal(Default::default()),
             list: signal(Rc::new(ChannelList::build(
                 iptv_core::lists::ALL,
                 &*schedule(),
@@ -844,6 +846,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     let ui = Ui::new(SharedUi::new(), player::Player::new());
     settings::bind(ui);
     browse_playback::bind(ui);
+    interruption::bind(ui);
     desktop::bind(ui);
     desktop::menus(ui);
     // Leaving full screen closes the panels.

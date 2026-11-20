@@ -85,6 +85,25 @@ In the guide:
   `guide.autoplay` tunes the focused channel while browsing, without a choice.
 - **Now:** opening a programme's details or menu never starts playback.
 
+### Touch gestures in the guide
+
+- **Now:** a drag decides its direction once it has moved 10 points: mostly
+  vertical scrolls the channels, mostly horizontal pans the timeline (a
+  diagonal goes the way of its larger part, and stays that way), and a
+  drag released while moving flings on and slows down. A gesture the
+  system cancels (a notification shade, a call) stops where it is,
+  without a fling. A drag that started on a channel or a programme, past
+  or upcoming, never chooses it: under the threshold a touch is still a
+  tap (`iptv_core::timeline`).
+- **Now:** crossing the drag threshold, in the guide or the channel list,
+  cancels a preview `guide.autoplay` was waiting to start; it does not
+  come back until the focus moves to another channel. A tap's own choice
+  still plays after its switch delay. Scrolling never tunes, records or
+  opens a menu or details (`BrowsePlayback::dragged`;
+  `tests/app/tablet_gestures.rs`).
+- **Now:** a day of listings that a pan pages in keeps the channels where
+  the finger scrolled them.
+
 "Full screen" means the video fills Patina's screen or window. On desktop it
 never resizes the operating-system window; that is a separate action (double-click
 on the video, or the window's own control).
@@ -197,6 +216,12 @@ They issue no playback command of their own.
   guide channel or the focused preview, the poster browser's focused title and
   a show's selected episode with its details open, on the same player node, with
   no stream opened (`tests/app/pane_collapse.rs`).
+- **Now:** on a tablet, rotating, half and third split-screen windows and
+  system text up to 2.0 keep a playing movie full screen with its progress,
+  and a show's details with the selected episode, on the same player view
+  (never detached or re-parented) with no stream opened; the play bar's
+  Back and play/pause and the details' Close stay inside the window
+  (`tests/app/tablet_journey.rs`).
 - **Now:** on desktop, full-screen playback keeps its player, stream and
   channel through the operating system's full screen, resizing to a narrow
   window, display scale and text size changes, and Back returns to the same
@@ -205,6 +230,48 @@ They issue no playback command of their own.
 - **Now:** the first key after touch can move focus to a visible row (see
   [Input modes](#input-modes)). With `guide.autoplay` on, focus that lands on a
   live programme after a pane closes can tune it.
+
+## Text entry
+
+- **Now:** while a text field has the focus, the keys typed go to it: a
+  letter, a digit or Space that is a player shortcut elsewhere neither
+  pauses, mutes nor zaps. A software keyboard keeps the field above it, in
+  landscape, portrait and split screen, and its dismissal ends the editing
+  ([keyboard dismissal](../crates/iptv-app/tests/app/keyboard_dismissal.rs)).
+  After it, a hardware keyboard's first key and a touch each drive the
+  results as their input mode does (`tests/app/tablet_journey.rs`).
+
+## Interruptions and the background
+
+The host reports what happens to the app's sound and window; one portable
+policy decides what playback does (`iptv_core::interruption`). It only
+pauses and resumes: it never opens, retunes or restarts a stream.
+
+| Host report | Playback |
+|---|---|
+| Another app takes the audio (its own media) | Pauses; the viewer resumes |
+| A call or a prompt takes the audio for a while | Pauses; resumes when it ends, unless the viewer played, paused, stopped or chose something else meanwhile |
+| Headphones unplugged, a Bluetooth headset disconnected | Pauses; never resumes by itself |
+| A notification's sound | Plays on, quieter (the system ducks it) |
+| Home or another app, picture in picture off | Stops and closes the stream; on return it reopens what played, after fresh admission |
+| Home with picture in picture on | Plays on in the window, on the same player and stream |
+| The picture-in-picture window closed | Stops as above |
+
+- **Now (Android):** one audio focus for all the activity's players,
+  held while any means to play aloud (`AudioFocusHost.kt`); the changes
+  reach the app as the player's `audio` event. A stream the viewer stopped
+  stays stopped whatever the focus does, and resuming opens no second
+  provider connection (`tests/app/tablet_journey.rs`). The background
+  stop and return, and picture in picture, as before (`PlayerComponent.kt`,
+  `PipHost.kt`).
+- **Now:** the Recordings screen states what limits a recording in the
+  background, from what the host reports: precise background starts
+  unavailable, a wake that could not be registered, or a device that must
+  stay awake (`iptv_core::capabilities::Recording::notice`).
+- **Planned:** the picture-in-picture action says that closing its window
+  stops playback; iPad's audio session (interruptions and route changes)
+  under the same policy, and its foreground-only capture explained at the
+  recording action.
 
 ## Empty and unavailable states
 
@@ -252,6 +319,9 @@ Unavailable actions say why, using the host's reported capabilities
 - Choosing, staying and returning: app scenarios `personalization_overlay`,
   `tv_shared_controls`, `pip_control`, `cov_nav` and `cov_nav_touch`; on a
   remote's raw key phases, `tv_remote_journey`.
+- Tablet gestures, the touch journey, rotation, split screen, large text,
+  text entry and interruptions: `tablet_gestures` and `tablet_journey`,
+  and the [issue #88 tablet validation](validation/issue-88-tablet-journey.md).
 - Pointer, keyboard and windows on desktops: `desktop_workflows`, and the
   [issue #89 desktop journey](validation/issue-89-desktop-journey.md).
 - Native behaviour on Android TV and tablets: the
