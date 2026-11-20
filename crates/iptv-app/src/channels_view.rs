@@ -287,6 +287,8 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             )
             .estimated_item_size(list_rows::pitch(size, ROW_TWO))
             .element_ref(&rows)
+            // Scrolling never tunes (`browse_playback::dragged`).
+            .on_scroll_drag_start(move |_: &Point<Points>| crate::browse_playback::dragged(ui))
             .flex_1(),
         );
     // Mounted while closed: no view in it may say `PointerEvents::Auto`

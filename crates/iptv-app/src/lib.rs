@@ -228,7 +228,6 @@ pub struct Ui {
     pub focus: Signal<Focus>,
     pub browse_playback: Signal<iptv_core::browse_playback::BrowsePlayback>,
     pub pending_zap: Signal<Option<iptv_core::browse_playback::Target>>,
-    pub guide_panning: Signal<bool>,
     /// The list the guide shows: catalog channels (`lists.rs`).
     pub list: Signal<Rc<ChannelList>>,
     /// The playing channel (catalog).
@@ -338,7 +337,6 @@ impl Ui {
             focus: signal(Focus::default()),
             browse_playback: signal(Default::default()),
             pending_zap: signal(None),
-            guide_panning: signal(false),
             list: signal(Rc::new(ChannelList::build(
                 iptv_core::lists::ALL,
                 &*schedule(),
