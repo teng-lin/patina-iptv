@@ -563,7 +563,7 @@ impl Screen {
     /// goes back to the categories: OK never acts on a playlist the screen
     /// did not show when the remote got there. When nothing is offered (an
     /// import running) a remote on its place goes to the categories, or in
-    /// one pane to the rail ([`Screen::settle_panes`]).
+    /// one pane to the rail.
     pub fn set_library(&mut self, state: VodState) {
         self.library = state;
         let Some(action) = state.action() else {
