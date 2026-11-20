@@ -411,9 +411,14 @@ pub struct Screen {
     /// [`Screen::set_compact`] and kept across [`Screen::begin`].
     compact: bool,
     /// The remote was sent off the empty screen's action because it moved
-    /// to another playlist while a read was pending: the next settling of
-    /// the panes must not put it back on the new action ([`Screen::settle_panes`]).
+    /// to another playlist while a read was pending, or went away: the next
+    /// settling of the panes must not put it back on the new action
+    /// ([`Screen::settle_panes`]).
     left_action: bool,
+    /// Search was closed while a read was pending: the remote waits on
+    /// Search and goes to the titles only if the reply has something to
+    /// focus ([`Screen::close_search`]).
+    search_closed_pending: bool,
 }
 impl Screen {
     pub fn begin(&mut self, kind: Kind) -> u64 {
@@ -525,15 +530,27 @@ impl Screen {
         } else if on_action && empty && (!action || self.left_action) {
             self.control = Control::Category;
             self.categories_open = true;
-            self.left_action = false;
+            // Sent off the action's place: an action shown later (perhaps
+            // another playlist's) is not armed by a move to one pane until
+            // the remote enters it on purpose.
+            self.left_action = true;
         }
     }
     /// Closes the search field (Back, or its submit key): the remote goes to
     /// the titles, or stays on Search when the empty screen offers nothing
-    /// to focus (an import running), in any window.
+    /// to focus (an import running), in any window. While a read is pending
+    /// it waits on Search, and goes to the titles when the reply has titles
+    /// or an action and the remote is still there.
     pub fn close_search(&mut self) {
+        let pending = self.busy && !self.is_shelf() && self.details.is_none();
+        self.close_search_with(pending);
+    }
+    /// [`Screen::close_search`], told whether a read is pending (Back
+    /// cancels it, and the shell reads the list again).
+    fn close_search_with(&mut self, pending: bool) {
         self.search_open = false;
-        self.control = if self.empty_without_action() {
+        self.search_closed_pending = pending;
+        self.control = if pending || self.empty_without_action() {
             Control::Search
         } else {
             Control::Catalogue
@@ -743,6 +760,7 @@ impl Screen {
     /// focused title, a loaded page, the Play button).
     pub fn fail(&mut self, message: impl Into<String>, operation: Operation) {
         self.busy = false;
+        self.search_closed_pending = false;
         self.error = Some(message.into());
         self.retry = Some(operation);
         if self.details.is_none() && self.cards.is_empty() {
@@ -898,6 +916,12 @@ impl Screen {
         }
         self.busy = false;
         self.has_more = more;
+        if std::mem::take(&mut self.search_closed_pending)
+            && self.control == Control::Search
+            && (!self.cards.is_empty() || self.empty_action().is_some())
+        {
+            self.control = Control::Catalogue;
+        }
         self.settle_panes();
         true
     }
@@ -1210,6 +1234,9 @@ impl Screen {
         }
     }
     pub fn back(&mut self) {
+        // A pending catalogue read is cancelled here and read again by the
+        // shell ([`Screen::reload`]).
+        let pending = self.busy && !self.is_shelf() && self.details.is_none();
         self.preview = None;
         self.pending_down = None;
         self.generation = self.generation.wrapping_add(1);
@@ -1221,7 +1248,7 @@ impl Screen {
         }
         if !self.is_shelf() && self.details.is_none() {
             if self.search_open {
-                self.close_search();
+                self.close_search_with(pending);
                 return;
             }
             if !self.categories_open && !self.one_pane() {
@@ -2653,6 +2680,93 @@ mod tests {
         s.browse_horizontal(1);
         assert_eq!(s.control, Control::Catalogue);
         assert_eq!(s.empty_action(), Some(EmptyAction::PlaylistSettings(2)));
+    }
+    #[test]
+    fn an_import_that_displaces_the_remote_keeps_compact_off_an_unseen_action() {
+        // Retry playlist 1 in a wide window; its import hides the action
+        // and moves the remote to the categories. It ends with no titles,
+        // and playlist 2's "Playlist settings" now shows.
+        let mut s = Screen::default();
+        s.set_library(VodState::Failed {
+            source: 1,
+            problem: ImportProblem::Network,
+        });
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, Vec::new(), false, false);
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Catalogue);
+        s.set_library(VodState::Importing);
+        assert_eq!(s.control, Control::Category);
+        s.set_library(VodState::ImportsDisabled { source: 2 });
+        let generation = s.reload();
+        s.publish(generation, Vec::new(), false, false);
+        assert_eq!(s.empty_action(), Some(EmptyAction::PlaylistSettings(2)));
+        assert_eq!(s.control, Control::Category);
+        // Compact: the rail, not playlist 2's action.
+        s.set_compact(true);
+        assert_eq!(s.control, Control::Navigation);
+        // Entering it on purpose arms it, and compact keeps it.
+        s.set_compact(false);
+        assert_eq!(s.control, Control::Navigation);
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Category);
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Catalogue);
+        s.set_compact(true);
+        assert_eq!(s.control, Control::Catalogue);
+    }
+    #[test]
+    fn closing_search_during_a_pending_read_waits_on_search() {
+        for compact in [false, true] {
+            // An import running: the search text cleared, then submitted
+            // before its read replies.
+            let mut s = Screen::default();
+            s.set_compact(compact);
+            s.set_library(VodState::Importing);
+            let generation = s.begin(Kind::Movie);
+            s.query.text = "generated".into();
+            s.publish(generation, Vec::new(), false, false);
+            s.control = Control::Search;
+            s.search_open = true;
+            s.query.text.clear();
+            let generation = s.reload();
+            s.close_search();
+            assert_eq!(s.control, Control::Search, "compact: {compact}");
+            s.publish(generation, Vec::new(), false, false);
+            assert_eq!(s.control, Control::Search, "compact: {compact}");
+            // The same with Back, which reads the list again.
+            s.search_open = true;
+            s.reload();
+            s.back();
+            assert!(s.open && !s.search_open);
+            assert_eq!(s.control, Control::Search, "compact: {compact}");
+            let generation = s.reload();
+            s.publish(generation, Vec::new(), false, false);
+            assert_eq!(s.control, Control::Search, "compact: {compact}");
+            // A reply with titles: the remote goes to them.
+            s.search_open = true;
+            let generation = s.reload();
+            s.close_search();
+            assert_eq!(s.control, Control::Search, "compact: {compact}");
+            s.publish(generation, vec![card("a")], false, false);
+            assert_eq!(s.control, Control::Catalogue, "compact: {compact}");
+            // A reply with an action: the remote goes to it.
+            s.set_library(VodState::NoEligibleSource);
+            s.control = Control::Search;
+            s.search_open = true;
+            let generation = s.reload();
+            s.close_search();
+            s.publish(generation, Vec::new(), false, false);
+            assert_eq!(s.control, Control::Catalogue, "compact: {compact}");
+            // Moved elsewhere meanwhile: the reply leaves it there.
+            s.control = Control::Search;
+            s.search_open = true;
+            let generation = s.reload();
+            s.close_search();
+            s.control = Control::Sort;
+            s.publish(generation, Vec::new(), false, false);
+            assert_eq!(s.control, Control::Sort, "compact: {compact}");
+        }
     }
     #[test]
     fn the_catalogue_keeps_its_toolbar() {
