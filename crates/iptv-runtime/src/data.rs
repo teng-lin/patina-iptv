@@ -79,7 +79,7 @@ pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
                 library::install(&owner, snapshot);
                 // A deletion whose settings save was lost must not hand its
                 // playlist's own settings to a new playlist with its id.
-                if let Err(error) = crate::settings::forget_playlists_except(&owner, &stored) {
+                if let Err(error) = crate::settings::forget_import_switches(&owner, None, &stored) {
                     log::warn!("iptv data: deleted playlists' settings stay: {error}");
                 }
                 (source, combined, any)
@@ -262,9 +262,11 @@ fn start_import_with(
                                 library::track_added_import(&owner, imported.source, &completion);
                                 // A new playlist may have a deleted one's id:
                                 // it starts from the global settings.
-                                if let Err(error) =
-                                    crate::settings::forget_playlist(&owner, imported.source)
-                                {
+                                if let Err(error) = crate::settings::forget_import_switches(
+                                    &owner,
+                                    Some(&[imported.source]),
+                                    &[],
+                                ) {
                                     log::warn!(
                                         "iptv data: an old playlist's settings stay: {error}"
                                     );

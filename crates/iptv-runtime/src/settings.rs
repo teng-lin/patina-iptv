@@ -223,30 +223,44 @@ pub(crate) fn forget_playlist(
     })
 }
 
-/// Drops the own settings of every playlist not in `stored`: ones whose
-/// deletion was not saved to the settings file (the app stopped first, or
-/// the save failed), before their ids can be given to new playlists.
-pub(crate) fn forget_playlists_except(
+/// The own movie and series import switch (`playlists.include_vod`) of
+/// every playlist in `playlists`, or (`None`) of every playlist not in
+/// `kept`, is removed: a deletion whose settings save was lost (the app
+/// stopped first, or the save failed) must not hand it to a new playlist
+/// given the same id. Only this switch: the app sets no other playlist
+/// value, and others may be prepared for a playlist before it is added.
+pub(crate) fn forget_import_switches(
     owner: &std::rc::Rc<super::Runtime>,
-    stored: &[iptv_library::SourceId],
+    playlists: Option<&[iptv_library::SourceId]>,
+    kept: &[iptv_library::SourceId],
 ) -> Result<(), SaveError> {
-    let kept: std::collections::BTreeSet<String> =
-        stored.iter().map(|id| id.0.to_string()).collect();
-    let gone: Vec<String> = owner
-        .settings()
-        .playlists()
-        .into_iter()
-        .filter(|p| !kept.contains(*p))
-        .map(str::to_owned)
-        .collect();
-    if gone.is_empty() {
+    let key = iptv_settings::keys::PLAYLISTS_INCLUDE_VOD.as_str();
+    let kept: std::collections::BTreeSet<String> = kept.iter().map(|id| id.0.to_string()).collect();
+    let settings = owner.settings();
+    let targets: Vec<Target> = match playlists {
+        Some(ids) => ids
+            .iter()
+            .map(|id| Target::playlist(id.0.to_string()))
+            .collect::<Vec<_>>(),
+        None => settings
+            .playlists()
+            .into_iter()
+            .filter(|p| !kept.contains(*p))
+            .map(Target::playlist)
+            .collect::<Vec<_>>(),
+    }
+    .into_iter()
+    .filter(|at| settings.stored(key, at).is_some())
+    .collect();
+    if targets.is_empty() {
         return Ok(());
     }
-    apply(owner, "playlist_overrides", |next| {
-        for playlist in &gone {
-            next.remove_playlist(playlist);
+    apply(owner, key, |next| {
+        let mut changes = Vec::new();
+        for at in &targets {
+            changes.extend(next.clear_in(key, at)?);
         }
-        Ok(Vec::new())
+        Ok(changes)
     })
 }
 
