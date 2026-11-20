@@ -125,10 +125,13 @@ visible entry point for touch and pointer users.
   right-click open the same menu on guide programmes and channels, the channel
   list and recordings. During playback, Menu and long OK open the playback bar
   instead ([TV controls](tv-controls.md)).
-- **Now:** these menus have no visible entry point, so they are the current
-  exception to "shortcuts are optional".
-- **Planned:** a visible "more" control on the focused or tapped item for touch
-  and pointer, so the menu needs no hidden gesture.
+- **Now:** while touch or a pointer drives the app, a visible "More options"
+  control (⋯) opens the same menu: in the guide header, after the focused or
+  tapped programme's title, and at the end of each channel list row. Keys
+  hide it; they have Menu.
+- **Planned:** the same control on recordings rows, which still open their
+  menu only by long press, right-click or Menu: the remaining exception to
+  "shortcuts are optional".
 
 ## Layout classes
 
