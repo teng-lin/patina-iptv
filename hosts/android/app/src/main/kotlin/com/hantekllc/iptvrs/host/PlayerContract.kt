@@ -187,7 +187,6 @@ internal enum class PlayerState(
     }
 }
 
-/** One button of the picture-in-picture window (the `pipAction` event). */
 /** What happened to the audio: `AudioChange` in the Rust contract. */
 internal enum class AudioChange(
     val wire: String,
@@ -198,6 +197,7 @@ internal enum class AudioChange(
     NOISY("noisy"),
 }
 
+/** One button of the picture-in-picture window (the `pipAction` event). */
 internal enum class PipButton(
     val wire: String,
 ) {
