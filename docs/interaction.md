@@ -89,7 +89,10 @@ In the guide:
   off by default) keeps the guide open after tuning a live channel, in both
   layouts. A replay and the channel already playing always go full screen.
   `guide.autoplay` tunes the focused channel while browsing, without a choice.
-- **Now:** opening a programme's details or menu never starts playback.
+- **Now:** opening a programme's details or menu never starts playback. A
+  long press or right-click moves the focus to what it opens the menu for;
+  `guide.autoplay` then holds on that channel, after the menu or its details
+  close, until the viewer moves the focus again. A choice still plays.
 
 ### Touch gestures in the guide
 

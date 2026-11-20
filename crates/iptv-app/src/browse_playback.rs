@@ -88,9 +88,10 @@ fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
         stay: surface == Some(Surface::Player) || s.bool(stay, at),
     }
 }
-/// Holds guide autoplay: the main window closed while recordings run, so
-/// nothing may start playing in the hidden window, nor when it shows again,
-/// until the viewer moves to another channel.
+/// Holds guide autoplay on the focused channel until the viewer moves to
+/// another one: the main window closed while recordings run (nothing may
+/// start playing in the hidden window, nor when it shows again), or a
+/// right-click or long press moved the focus to open a menu (`menu_view`).
 pub fn hold(ui: Ui) {
     let focused = untracked(|| current(ui)).map(|t| t.key);
     ui.autoplay_held.set(Some(focused));
