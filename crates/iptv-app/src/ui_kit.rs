@@ -46,11 +46,7 @@ pub fn round_more(
     bg: impl Fn() -> Rgba + 'static,
     on_press: impl Fn() + 'static,
 ) -> View {
-    let dots = ImageSrc::svg_markup(
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' \
-         fill='currentColor'><circle cx='5' cy='12' r='2'/><circle cx='12' cy='12' r='2'/>\
-         <circle cx='19' cy='12' r='2'/></svg>",
-    );
+    let dots = crate::play_bar::icons::src(crate::play_bar::icons::Icon::More);
     round_icon(side, slop, bg, dots, || tr("More options"), on_press)
 }
 
