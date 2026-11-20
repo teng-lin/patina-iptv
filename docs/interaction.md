@@ -57,7 +57,13 @@ watching, Recently added, Recordings, Watchlist, Playlists and Settings.
 
 - **Now:** Live TV is the start screen. With **Play the last channel on start**
   (`general.resume_last_channel`, on by default) the last channel starts full
-  screen over it. Movies and Shows always appear.
+  screen over it. When that channel is one of the playlist's favourites and
+  the Favourites category is offered (`channels.show_favorites`, not yet
+  editable in Settings), the guide behind it shows Favourites, so Back lands
+  there with the channel focused; otherwise it shows All channels
+  (`iptv_core::lists::resume_entry`). The list is chosen once the channel
+  plays (after its PIN, if it has one); later favourite edits and the
+  viewer's own choices are left alone. Movies and Shows always appear.
   Continue watching and Recently added appear when any enabled playlist has
   movies or series. Watchlist is dimmed until #90 ships.
 - **Planned:** the same destinations in every layout class. A compact window

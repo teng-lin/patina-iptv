@@ -15,7 +15,9 @@ use std::time::Duration;
 use iptv_core::browse::{Columns, Outcome, RailItem, VodAvailability, rail_items};
 use iptv_core::channel_list::ChannelList as PlayerList;
 use iptv_core::guide::{Focus, Move, Pane, Schedule};
-use iptv_core::lists::{ALL, ChannelList, Entry, ListId, ListView, entry_count, group_of};
+use iptv_core::lists::{
+    ALL, ChannelList, Entry, ListId, ListView, entry_count, group_of, resume_entry,
+};
 use nsh_core::prelude::*;
 
 use crate::Ui;
@@ -246,6 +248,47 @@ pub fn show_channel(ui: Ui, channel: usize) {
     let row = listed(ui, channel);
     let view = view(ui);
     ui.focus.update(|f| f.show_channel(row, &view));
+}
+
+/// The channel resumed at startup (`player::source_ready`,
+/// `resume::adopt`), once it plays: shown in the list the core puts it in
+/// ([`resume_entry`]), so Back from full screen lands on it; else where
+/// [`show_channel`] shows any channel. Decided once: later favourite
+/// edits and the viewer's own choices are left alone.
+pub fn show_resumed(ui: Ui, channel: usize) {
+    if !into_resume_list(ui, channel) {
+        show_channel(ui, channel);
+    }
+}
+
+/// The combined playlists' resumed channel, once it plays: as
+/// [`show_resumed`], except that its usual place keeps the focus where it
+/// was.
+pub fn resumed(ui: Ui, channel: usize) {
+    into_resume_list(ui, channel);
+}
+
+/// Selects the list the core puts a resumed `channel` in and focuses the
+/// channel when that list has its row. False when the core leaves the
+/// usual place.
+fn into_resume_list(ui: Ui, channel: usize) -> bool {
+    let catalog = crate::schedule();
+    let Some(entry) = resume_entry(
+        channel,
+        &*catalog,
+        &crate::favorites::favorite_channels(),
+        crate::settings::flag(iptv_settings::keys::SHOW_FAVORITES),
+    ) else {
+        return false;
+    };
+    if ui.focus.with_untracked(|f| f.group) != entry {
+        ui.focus.update(|f| f.group = entry);
+        rebuild(ui, false);
+    }
+    if ui.list.with_untracked(|l| l.row_of(channel)).is_some() {
+        show_channel(ui, channel);
+    }
+    true
 }
 
 /// Focuses catalog `channel`'s programme at `minute` where it is (a search

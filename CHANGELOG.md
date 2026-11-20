@@ -17,12 +17,15 @@ is below 1.0, a minor release may change behaviour.
 
 ### Changed
 
+- When Patina plays the last channel on start and that channel is one of the
+  playlist's favourites, Back from full screen now opens the Favourites list
+  with the channel focused instead of All channels. A channel that is not a
+  favourite of that playlist still returns to All channels.
 - Desktop: closing the main window while recordings keep Patina running now
   also closes every player window and the picture-in-picture window, as
   quitting does; only the recorder runs on. On macOS and Windows a window
   left without a reachable title bar after a display is removed moves onto
   the nearest remaining display.
-
 - Choosing a channel in the guide now watches it full screen in both guide
   layouts. One setting, **Keep the guide after choosing**, now applies to both
   layouts. It replaces the separate setting for the guide drawn over video,
