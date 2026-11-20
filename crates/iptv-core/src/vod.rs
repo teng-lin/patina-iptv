@@ -569,7 +569,9 @@ impl Screen {
         }
         if moved && self.control == Control::Catalogue {
             if self.one_pane() {
+                // A later failed read's Retry must not arm it either.
                 self.focus_rail();
+                self.left_action = true;
             } else {
                 // A read is pending: when it publishes an empty catalogue
                 // the remote must not land on this new action unseen.
@@ -897,11 +899,25 @@ impl Screen {
     /// A poster grid's horizontal movement never wraps into another row.
     /// Left at its edge reveals categories; Right enters the posters.
     pub fn browse_horizontal(&mut self, step: isize) {
-        self.left_action = false;
+        let before = self.control;
+        self.move_horizontal(step);
+        self.entered_from(before);
+    }
+    /// The remote moved onto the action's place on purpose: the action
+    /// there is one it now sees, so the "sent off" mark is spent. A move
+    /// that leaves the focus where it was keeps it.
+    fn entered_from(&mut self, before: Control) {
+        if before != self.control && self.control == Control::Catalogue {
+            self.left_action = false;
+        }
+    }
+    fn move_horizontal(&mut self, step: isize) {
         if self.control == Control::Navigation {
             if step > 0 && self.one_pane_without_action() {
                 self.control = Control::Search;
             } else if step > 0 {
+                // Right from the rail heads for the action on purpose.
+                self.left_action = false;
                 self.control = Control::Category;
                 self.settle_panes();
             }
@@ -954,7 +970,12 @@ impl Screen {
     /// Up/Down on categories previews that category. Returns whether the
     /// shell should fetch the changed query. The category key is source-qualified.
     pub fn browse_vertical(&mut self, step: isize) -> bool {
-        self.left_action = false;
+        let before = self.control;
+        let changed = self.move_vertical(step);
+        self.entered_from(before);
+        changed
+    }
+    fn move_vertical(&mut self, step: isize) -> bool {
         match self.control {
             Control::Navigation => {
                 let destinations = [
@@ -2419,6 +2440,56 @@ mod tests {
         s.search_open = true;
         s.close_search();
         assert_eq!(s.control, Control::Catalogue);
+    }
+    #[test]
+    fn a_compact_move_to_the_rail_survives_a_failed_read_and_retry() {
+        let mut s = Screen::default();
+        s.set_compact(true);
+        s.set_library(VodState::Failed {
+            source: 1,
+            problem: ImportProblem::Network,
+        });
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, Vec::new(), false, false);
+        assert_eq!(s.control, Control::Catalogue);
+        // Loaded and shown: the action moves to playlist 2, the remote to
+        // the rail. The next read fails; Retry, then an empty page.
+        s.set_library(VodState::ImportsDisabled { source: 2 });
+        assert_eq!(s.control, Control::Navigation);
+        s.reload();
+        s.fail("generated failure", Operation::List);
+        let generation = s.reload();
+        assert_eq!(s.control, Control::Catalogue);
+        s.publish(generation, Vec::new(), false, false);
+        assert_ne!(s.control, Control::Catalogue);
+        // Right from the rail selects the shown action.
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.empty_action(), Some(EmptyAction::PlaylistSettings(2)));
+    }
+    #[test]
+    fn a_key_that_leaves_retry_focused_keeps_the_mark() {
+        for compact in [true, false] {
+            let mut s = Screen::default();
+            s.set_compact(compact);
+            s.set_library(VodState::Failed {
+                source: 1,
+                problem: ImportProblem::Network,
+            });
+            let generation = s.begin(Kind::Movie);
+            s.publish(generation, Vec::new(), false, false);
+            s.browse_horizontal(1);
+            s.reload();
+            s.fail("generated failure", Operation::List);
+            s.set_library(VodState::ImportsDisabled { source: 2 });
+            // Up (and Left) on Retry: the focus stays.
+            s.browse_vertical(-1);
+            s.browse_horizontal(-1);
+            assert_eq!(s.control, Control::Retry);
+            let generation = s.reload();
+            s.publish(generation, Vec::new(), false, false);
+            assert_ne!(s.control, Control::Catalogue, "compact: {compact}");
+        }
     }
     #[test]
     fn the_catalogue_keeps_its_toolbar() {
