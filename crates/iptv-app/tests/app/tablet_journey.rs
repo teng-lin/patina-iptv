@@ -7,7 +7,9 @@
 //! details and the selected episode, with the primary controls inside the
 //! window. A software keyboard over search, and switching between touch
 //! and a keyboard, keep a usable layout, and typing in the field never
-//! reaches the player's shortcuts.
+//! reaches the player's shortcuts. Android's audio interruptions (a call,
+//! another app's media, unplugged headphones) pause and resume by the
+//! core's policy and never restart a stream the viewer stopped.
 //!
 //! Synthetic data only: a generated playlist and XMLTV guide picked from
 //! files, and a generated on-demand catalogue on a local mock server.
@@ -554,5 +556,96 @@ fn a_keyboard_over_search_edits_text_without_reaching_the_player() {
     step(app.press("text:/Channels · 3/"));
     reachable(app, "search-field", LANDSCAPE, 0.0, "keyboard down");
     assert_eq!(sources(&seen), playing);
+    assert_eq!(player(app), surface);
+}
+
+// --- Interruptions: the audio focus and route -----------------------------
+
+fn audio(app: &mut Headless, surface: NodeId, change: &str) {
+    app.engine().control().dispatch_event(
+        surface,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "audio".into(),
+            data: json!({ "change": change }),
+        },
+    );
+    app.settle();
+}
+
+fn paused(seen: &Shared) -> bool {
+    seen.lock().unwrap().props.get("paused") == Some(&Json::Bool(true))
+}
+
+#[test]
+fn calls_and_unplugged_headphones_pause_by_policy_and_never_restart_a_stop() {
+    let Some(home) = isolated!() else { return };
+    let mut settings = Settings::new();
+    settings
+        .set("general.resume_last_channel", Value::Bool(false))
+        .unwrap();
+    settings.set("guide.switch_delay", Value::ms(0)).unwrap();
+    let mut fixture = crate::personalization::start_with_setup(home, settings, true, |_| {});
+    let app = &mut fixture.app;
+    step(app.set_environment("Android tablet", |e| {
+        e.idiom = Idiom::Pad;
+        e.os = Os::Android;
+    }));
+    step(app.set_viewport(Size::new(px(LANDSCAPE.0), px(LANDSCAPE.1))));
+    let seen = observe(app);
+    let surface = player(app);
+    step(app.press("id:guide-ui >> text:/Local A$/"));
+    full_screen(app, LANDSCAPE.0);
+    let playing = sources(&seen);
+    assert_eq!(playing.len(), 1);
+    assert!(!paused(&seen));
+
+    // A call: paused, and resumed when it ends.
+    audio(app, surface, "focusLossTransient");
+    assert!(paused(&seen), "a call pauses");
+    audio(app, surface, "focusGain");
+    assert!(!paused(&seen), "its end resumes");
+
+    // Headphones unplugged: paused for good.
+    audio(app, surface, "noisy");
+    assert!(paused(&seen), "the route going away pauses");
+    audio(app, surface, "focusGain");
+    assert!(paused(&seen), "and nothing resumes it");
+    // The viewer resumes by the visible button.
+    show_bar(app);
+    step(app.press("id:play-bar-play-pause"));
+    assert!(!paused(&seen));
+
+    // Another app takes the audio for good: paused, not resumed.
+    audio(app, surface, "focusLoss");
+    assert!(paused(&seen));
+    audio(app, surface, "focusGain");
+    assert!(paused(&seen));
+    step(app.press("id:play-bar-play-pause"));
+    assert!(!paused(&seen));
+
+    // During a call the viewer plays, then pauses again: their pause.
+    audio(app, surface, "focusLossTransient");
+    assert!(paused(&seen));
+    step(app.press("id:play-bar-play-pause"));
+    step(app.press("id:play-bar-play-pause"));
+    assert!(paused(&seen));
+    audio(app, surface, "focusGain");
+    assert!(paused(&seen), "the viewer's pause is kept");
+    step(app.press("id:play-bar-play-pause"));
+    assert!(!paused(&seen));
+    assert_eq!(sources(&seen), playing, "no stream opened by any of it");
+
+    // A call, then the viewer stops: the call's end restarts nothing.
+    audio(app, surface, "focusLossTransient");
+    step(app.press_remote(nsh_tv::RemoteKey::Stop));
+    step(app.wait_until("stopped", WAIT, |_| !iptv_app::player_has_source(0)));
+    audio(app, surface, "focusGain");
+    step(app.wait(Duration::from_secs(1)));
+    assert!(!iptv_app::player_has_source(0), "a stop stays stopped");
+    assert_eq!(sources(&seen), playing, "no stream opened again");
+    // Observed from after the player mounted: never removed or moved since.
+    let seen = seen.lock().unwrap();
+    assert!(!seen.removed.contains(&surface) && !seen.inserts.contains_key(&surface));
     assert_eq!(player(app), surface);
 }

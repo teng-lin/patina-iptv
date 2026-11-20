@@ -24,6 +24,14 @@ is below 1.0, a minor release may change behaviour.
 - Catalog schema 24 records movie and series lists that failed to download.
   Downgrading an existing catalog is unsupported; retain a compatible backup
   before upgrading.
+- Tablets: scrolling the guide's channels or the channel list, or panning its
+  timeline, cancels a preview that **Play the focused channel by itself**
+  was about to start; a channel you tapped still plays. Panning into another day no
+  longer scrolls the channels back to the focused one.
+- Android: a call or a navigation prompt pauses playback and resumes it
+  when it ends; another app's media and unplugged headphones or a
+  disconnected Bluetooth headset pause it until you play again. A stopped
+  channel never restarts by itself. All players share one audio focus.
 
 ## [0.1.5] - 2026-11-17
 

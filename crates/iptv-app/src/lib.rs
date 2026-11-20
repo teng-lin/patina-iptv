@@ -39,6 +39,7 @@ mod i18n;
 #[cfg(feature = "test-support")]
 pub use i18n::pseudo_fixed_for_test;
 mod input;
+mod interruption;
 mod keyboard;
 mod list_rows;
 mod lists;
@@ -835,6 +836,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     let ui = Ui::new(SharedUi::new(), player::Player::new());
     settings::bind(ui);
     browse_playback::bind(ui);
+    interruption::bind(ui);
     desktop::bind(ui);
     desktop::menus(ui);
     // Leaving full screen closes the panels.
