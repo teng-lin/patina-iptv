@@ -241,7 +241,9 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
         )
         .child(
             // Times, progress and minutes left; the group at the right. A
-            // narrow header wraps them onto a second line rather than clip.
+            // narrow header wraps them onto a second line rather than clip,
+            // and a part wider than the column (large text in a Split View
+            // window) wraps within it.
             view()
                 .flex_row()
                 .flex_wrap()
@@ -249,7 +251,8 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                 .gap(move || size.px(12.0))
                 .child(
                     text(move || program.with(|p| p.map(|p| span(p.4)).unwrap_or_default()))
-                        .number_of_lines(1)
+                        .max_w(percentage(1.0))
+                        .number_of_lines(2)
                         .font_family(SANS)
                         .text_size(move || size.text_px(HEADER_TIMES))
                         .text_color(rgb(BRIGHT_TEXT)),
@@ -282,7 +285,8 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                         program
                             .with(|p| p.map(|(_, now, _, _, p)| left(now, p)).unwrap_or_default())
                     })
-                    .number_of_lines(1)
+                    .max_w(percentage(1.0))
+                    .number_of_lines(2)
                     .font_family(SANS)
                     .text_size(move || size.text_px(HEADER_TIMES))
                     .text_color(secondary()),

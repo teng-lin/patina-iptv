@@ -154,6 +154,14 @@ pub fn font_factor() -> f32 {
     }
 }
 
+/// How much larger than the default the text draws (reactive): the app's
+/// own text size times the system's (Android's font scale, iOS Dynamic
+/// Type), which the platform applies to every text. The layout classes
+/// and the guide header measure their room in it.
+pub fn text_factor() -> f32 {
+    font_factor() * nsh_core::prelude::font_scale()
+}
+
 /// What the app does with the setting or command `key`. The long-press
 /// time matters only where keys report their release (Android), and
 /// picture in picture on leaving only on Android.

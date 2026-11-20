@@ -676,7 +676,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
     // a compact window shows the empty catalogue as its one pane.
     let compact = computed(move || {
         use iptv_core::layout::Class;
-        let text = size.of(1.0) * crate::settings::font_factor();
+        let text = size.of(1.0) * crate::settings::text_factor();
         Class::of(window().width.0, text) == Class::Compact
     });
     effect(move || {
