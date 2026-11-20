@@ -36,6 +36,13 @@ if [[ ! "$serial" =~ ^emulator-[0-9]+$ ]]; then
   exit 2
 fi
 apk=${2:-}
+# Optional manual hold (see the end): whole seconds, bounded, checked before any
+# device change. disposable-avd.py adds the same hold to the smoke's budget.
+hold=${IPTV_SMOKE_HOLD:-}
+if [ -n "$hold" ] && { [[ ! "$hold" =~ ^[1-9][0-9]{0,2}$ ]] || [ "$hold" -gt 900 ]; }; then
+  echo 'IPTV_SMOKE_HOLD must be whole seconds from 1 through 900.' >&2
+  exit 2
+fi
 port=${IPTV_SMOKE_PORT:-8089}
 out=${IPTV_SMOKE_OUT:-target/android-smoke}
 adb_guard=$(cd "$(dirname "$0")" && pwd)/android/adb.py
@@ -525,6 +532,28 @@ step "hardware Search"
 mark
 keys KEYCODE_SEARCH
 expect 'key=search .*action=Some\(OpenSearch\)' 10
+
+# Optional manual journey checks on the same owned emulator (never in CI):
+# hold up to IPTV_SMOKE_HOLD seconds, or until IPTV_SMOKE_HOLD_FILE is created
+# (an earlier file is removed first), while an operator drives this serial.
+# Logs are kept every 30 s so logcat cannot wrap past a crash or a refused
+# load before the checks below.
+if [ -n "$hold" ]; then
+  step "hold for manual journey checks"
+  [ -z "${IPTV_SMOKE_HOLD_FILE:-}" ] || rm -f "$IPTV_SMOKE_HOLD_FILE"
+  echo "  holding $serial for up to ${hold}s"
+  start=$SECONDS
+  kept=$SECONDS
+  while [ $((SECONDS - start)) -lt "$hold" ]; do
+    [ -z "${IPTV_SMOKE_HOLD_FILE:-}" ] || [ ! -e "$IPTV_SMOKE_HOLD_FILE" ] || break
+    alive || fail "the app died during the manual checks"
+    if [ $((SECONDS - kept)) -ge 30 ]; then
+      mark
+      kept=$SECONDS
+    fi
+    pause 2
+  done
+fi
 
 step "checks"
 pause 2

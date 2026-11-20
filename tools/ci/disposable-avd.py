@@ -174,6 +174,21 @@ def stop(process):
     process.wait(timeout=10)
 
 
+# Seconds an operator may hold the smoke for manual checks (IPTV_SMOKE_HOLD);
+# the runner adds the hold to the smoke's own budget.
+SMOKE_BUDGET = 1200
+HOLD_LIMIT = 900
+
+
+def smoke_timeout(env):
+    hold = env.get("IPTV_SMOKE_HOLD", "")
+    if not hold:
+        return SMOKE_BUDGET
+    if not re.fullmatch(r"[1-9][0-9]{0,2}", hold) or int(hold) > HOLD_LIMIT:
+        raise ValueError(f"IPTV_SMOKE_HOLD must be whole seconds from 1 through {HOLD_LIMIT}")
+    return SMOKE_BUDGET + int(hold)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path, help="existing source .avd directory; never modified")
@@ -186,6 +201,10 @@ def main():
                         default="swiftshader", help="renderer to record and compare during emulator diagnostics")
     parser.add_argument("--qemu-img", default=shutil.which("qemu-img"), help="SDK qemu-img or a compatible host tool")
     args = parser.parse_args()
+    try:
+        budget = smoke_timeout(os.environ)
+    except ValueError as error:
+        parser.error(str(error))
     if args.port % 2 or not 5554 <= args.port <= 5682:
         parser.error("--port must be an even emulator console port from 5554 through 5682")
     output = plain_path(args.out)
@@ -247,7 +266,7 @@ def main():
             raise RuntimeError("owned emulator boot timed out")
         smoke = subprocess.Popen(["bash", str(ROOT / "tools/ci/android-smoke.sh"), serial, str(apk)],
                                  env=env, start_new_session=True)
-        if smoke.wait(timeout=1200):
+        if smoke.wait(timeout=budget):
             raise RuntimeError("synthetic smoke failed; evidence retained")
         operation["result"] = "passed"
         manifest.write_text(json.dumps(operation, indent=2) + "\n")

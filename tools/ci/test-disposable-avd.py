@@ -29,6 +29,14 @@ class Profiles(unittest.TestCase):
     def assert_original(self):
         self.assertEqual({p.name: p.read_bytes() for p in self.source.iterdir()}, self.before)
 
+    def test_smoke_hold_is_bounded_and_extends_the_budget(self):
+        self.assertEqual(a.smoke_timeout({}), a.SMOKE_BUDGET)
+        self.assertEqual(a.smoke_timeout({"IPTV_SMOKE_HOLD": "480"}), a.SMOKE_BUDGET + 480)
+        self.assertEqual(a.smoke_timeout({"IPTV_SMOKE_HOLD": "900"}), a.SMOKE_BUDGET + 900)
+        for bad in ("0", "901", "-5", "1e3", "99999999999999999999", " 60", "60s"):
+            with self.assertRaises(ValueError, msg=bad):
+                a.smoke_timeout({"IPTV_SMOKE_HOLD": bad})
+
     def test_complete_copy_rewrites_only_copy_and_cleanup_preserves_original(self):
         root, token, name = a.prepare(self.source, self.scratch)
         profile = root / "avd" / (name + ".avd")
