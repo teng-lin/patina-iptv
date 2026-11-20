@@ -149,7 +149,7 @@ pub use iptv_core::layout::InputMode as Input;
 
 /// A pointer went down: a finger, or a mouse, trackpad or pen. Recorded at
 /// the root as the touch starts, before the pressed control hears the press.
-fn pointer_down(ui: Ui, e: &nsh_core::TouchEvent) {
+pub(crate) fn pointer_down(ui: Ui, e: &nsh_core::TouchEvent) {
     if e.phase != nsh_core::TouchPhase::Start {
         return;
     }
@@ -347,7 +347,13 @@ impl Ui {
             ))),
             playing: signal(None),
             // An iPad is touched first: no remote hints until a key is used.
-            last_press: signal(Input::Touch),
+            // Until a press reports its pointer: a finger on phones and
+            // tablets, the mouse on desktops.
+            last_press: signal(if cfg!(any(target_os = "android", target_os = "ios")) {
+                Input::Touch
+            } else {
+                Input::Pointer
+            }),
             input: signal(if cfg!(target_os = "ios") {
                 Input::Touch
             } else {
@@ -512,6 +518,17 @@ impl Ui {
 
     pub fn keys_shown(&self) -> bool {
         self.input.get().key_hints()
+    }
+
+    /// Whether lists are edited by dragging with visible Save and Cancel
+    /// (tablets and desktops) rather than by OK, the arrows and Back asking
+    /// to save (TVs and terminals). A property of the host, not of the last
+    /// input: an editing session keeps one model however it is driven.
+    pub fn drag_editing(&self) -> bool {
+        !matches!(
+            idiom(),
+            nsh_core::platform::Idiom::Tv | nsh_core::platform::Idiom::Terminal
+        )
     }
 
     /// Visible ways back (`iptv_core::layout::InputMode::back_controls`):

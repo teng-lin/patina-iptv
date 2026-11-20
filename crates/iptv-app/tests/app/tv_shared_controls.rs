@@ -459,4 +459,9 @@ fn tv_shows_a_visible_back_once_touch_is_used_and_hides_it_for_keys() {
     // A key returns to the remote's view.
     step(app.press_key("right"));
     step(app.wait_for_gone("id:play-bar-back", Duration::from_secs(2)));
+    // So does the remote's Back, which the platform handles.
+    step(app.press("id:play-bar-mute"));
+    step(app.wait_for("id:play-bar-back"));
+    step(app.press_remote(nsh_tv::RemoteKey::Back));
+    step(app.wait_for_gone("id:play-bar-back", Duration::from_secs(2)));
 }

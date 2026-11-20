@@ -318,6 +318,7 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
     local.playing = parent.player.stream(surface).channel;
     local.mode.set(crate::ViewMode::Fullscreen);
     local.input.set(crate::Input::Pointer);
+    local.last_press.set(crate::Input::Pointer);
     local.paused.set(initial.paused);
     local.focus.set(parent.focus.get_untracked());
     local.list.set(parent.list.get_untracked());
@@ -390,6 +391,8 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
     crate::input::window(view().flex_1(), input)
         .test_id(&format!("auxiliary-player-{}", id.0))
         .bg(rgb(0x000000))
+        // Which pointer presses its controls, as in the main window.
+        .on_touch(move |e: &nsh_core::TouchEvent| crate::pointer_down(local, e))
         .on_mouse_enter(move |_: &MouseEvent| {
             if !crate::pip::in_window(local)
                 && !untracked(|| {
