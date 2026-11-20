@@ -40,12 +40,23 @@ pub enum Response {
 pub struct Interruptions {
     /// The stream (its token) a transient loss paused, to resume on gain.
     paused: Option<u64>,
+    /// The pause state and stream the last response set: seen next, the
+    /// change is the policy's, not the viewer's ([`Self::observed`]).
+    applied: Option<(bool, u64)>,
 }
 
 impl Interruptions {
     /// The host reported `what` while stream `token` is open (0: none) and
     /// `playing` (open and not paused).
     pub fn report(&mut self, what: Interruption, token: u64, playing: bool) -> Option<Response> {
+        let response = self.respond(what, token, playing);
+        if let Some(r) = response {
+            self.applied = Some((r == Response::Pause, token));
+        }
+        response
+    }
+
+    fn respond(&mut self, what: Interruption, token: u64, playing: bool) -> Option<Response> {
         let open = token != 0;
         match what {
             Interruption::FocusLoss | Interruption::Noisy => {
@@ -72,6 +83,15 @@ impl Interruptions {
     /// paused stream is theirs now and the focus coming back leaves it.
     pub fn viewer_acted(&mut self) {
         self.paused = None;
+    }
+
+    /// Playback became `paused` on stream `token` (0: none). Unless that
+    /// is what the last response set, the viewer did it
+    /// ([`Self::viewer_acted`]).
+    pub fn observed(&mut self, paused: bool, token: u64) {
+        if self.applied.take() != Some((paused, token)) {
+            self.viewer_acted();
+        }
     }
 
     /// Whether the focus coming back would resume playback.
@@ -120,7 +140,14 @@ mod tests {
         assert_eq!(i.report(FocusLossTransient, 0, false), None);
         assert_eq!(i.report(FocusGain, 0, false), None);
         assert_eq!(i.report(Noisy, 0, false), None);
+        // The policy's own pause is not the viewer's.
+        let mut i = Interruptions::default();
+        i.report(FocusLossTransient, 7, true);
+        i.observed(true, 7);
+        assert!(i.resumes());
         // The viewer played or paused during the call.
+        i.observed(false, 7);
+        assert!(!i.resumes());
         let mut i = Interruptions::default();
         i.report(FocusLossTransient, 7, true);
         i.viewer_acted();

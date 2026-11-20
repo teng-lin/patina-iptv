@@ -229,6 +229,8 @@ pub struct Ui {
     pub focus: Signal<Focus>,
     pub browse_playback: Signal<iptv_core::browse_playback::BrowsePlayback>,
     pub pending_zap: Signal<Option<iptv_core::browse_playback::Target>>,
+    /// The host's audio interruptions' policy (`interruption.rs`).
+    pub interruptions: Signal<iptv_core::interruption::Interruptions>,
     /// The list the guide shows: catalog channels (`lists.rs`).
     pub list: Signal<Rc<ChannelList>>,
     /// The playing channel (catalog).
@@ -338,6 +340,7 @@ impl Ui {
             focus: signal(Focus::default()),
             browse_playback: signal(Default::default()),
             pending_zap: signal(None),
+            interruptions: signal(Default::default()),
             list: signal(Rc::new(ChannelList::build(
                 iptv_core::lists::ALL,
                 &*schedule(),
