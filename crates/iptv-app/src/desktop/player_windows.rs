@@ -317,7 +317,7 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
     // catalog and settings are shared; overlays and input state are fresh.
     local.playing = parent.player.stream(surface).channel;
     local.mode.set(crate::ViewMode::Fullscreen);
-    local.input.set(crate::Input::Touch);
+    local.input.set(crate::Input::Pointer);
     local.paused.set(initial.paused);
     local.focus.set(parent.focus.get_untracked());
     local.list.set(parent.list.get_untracked());

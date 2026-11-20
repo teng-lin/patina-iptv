@@ -127,12 +127,14 @@ fn tv_reorders_channels_in_the_guide_and_grabs_only_after_ok() {
     step(app.press_key("down"));
     step(app.press_key("right"));
     menu(app, "Reorder channels");
-    step(app.wait_for("text:Press OK to select a row."));
+    // Chosen by a tap, even a TV offers the touch handles: the input
+    // decides, not the device. The remote's first key returns to OK.
+    step(app.wait_for("text:Drag the handles to reorder."));
     step(app.wait_for("id:guide-row"));
     assert!(!app.screen().matches("id:organization-row-0").unwrap());
-    assert!(!app.screen().matches("id:reorder-handle-0").unwrap());
     step(app.press_key("down"));
     assert!(app.shows("Press OK to select a row."));
+    assert!(!app.screen().matches("id:reorder-handle-0").unwrap());
     step(app.press_key("enter"));
     step(app.wait_for("text:Use the arrows to move. Press OK to place."));
     step(app.press_key("up"));
@@ -166,6 +168,9 @@ fn tv_reorders_channels_in_the_guide_and_grabs_only_after_ok() {
     menu(app, "Channel order");
     step(app.wait_for("text:Custom order"));
     step(app.press("text:Custom order"));
+    step(app.wait_for("text:Drag the handles to reorder."));
+    // Back to the remote: moving the focus grabs nothing.
+    step(app.press_key("down"));
     step(app.wait_for("text:Press OK to select a row."));
     // Activating the saved Custom order is itself a change, even with no drag.
     step(app.back());

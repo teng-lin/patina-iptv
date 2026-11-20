@@ -143,12 +143,20 @@ pub fn components(components: &nsh_platform_ios::Components) {
     mpv::register(components, transport::policy);
 }
 
-/// The last kind of input: the focus fill only shows for keys, as in
-/// Android's touch mode.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Input {
-    Keys,
-    Touch,
+/// The last kind of input (`iptv_core::layout`): the focus fill and key
+/// hints only show for keys, as in Android's touch mode.
+pub use iptv_core::layout::InputMode as Input;
+
+/// A pointer went down: a finger, or a mouse, trackpad or pen. Recorded at
+/// the root as the touch starts, before the pressed control hears the press.
+fn pointer_down(ui: Ui, e: &nsh_core::TouchEvent) {
+    if e.phase != nsh_core::TouchPhase::Start {
+        return;
+    }
+    if let Some(p) = e.points.iter().find(|p| p.changed) {
+        let finger = p.pointer_type == PointerType::Touch;
+        ui.last_press.set(Input::of_press(finger));
+    }
 }
 
 /// How the UI sits over the video layer.
@@ -226,6 +234,8 @@ pub struct Ui {
     /// The playing channel (catalog).
     pub playing: Signal<Option<usize>>,
     pub input: Signal<Input>,
+    /// What the last pointer press was made with ([`Ui::touched`] reads it).
+    pub last_press: Signal<Input>,
     pub mode: Signal<ViewMode>,
     pub stats: Signal<Stats>,
     #[cfg(feature = "test-support")]
@@ -337,6 +347,7 @@ impl Ui {
             ))),
             playing: signal(None),
             // An iPad is touched first: no remote hints until a key is used.
+            last_press: signal(Input::Touch),
             input: signal(if cfg!(target_os = "ios") {
                 Input::Touch
             } else {
@@ -491,24 +502,27 @@ impl Ui {
         player::start(self, channel);
     }
 
-    /// A touch on any control.
+    /// A touch or a click on any control: touch or pointer mode, whichever
+    /// made the press.
     pub fn touched(&self) {
         self.pending_zap.set(None);
         browse_playback::activity(*self);
-        self.input.set(Input::Touch);
+        self.input.set(self.last_press.get_untracked());
     }
 
     pub fn keys_shown(&self) -> bool {
-        self.input.get() == Input::Keys
+        self.input.get().key_hints()
     }
 
-    /// Visible ways back for pointer and touch users, including after a
-    /// keyboard is used. TVs and terminals keep their key navigation.
+    /// Visible ways back (`iptv_core::layout::InputMode::back_controls`):
+    /// always on tablets and desktops, including after a keyboard is used;
+    /// on TVs and terminals only once touch or a pointer is used.
     pub fn back_controls(&self) -> bool {
-        !matches!(
+        let remote_back = matches!(
             idiom(),
             nsh_core::platform::Idiom::Tv | nsh_core::platform::Idiom::Terminal
-        )
+        );
+        self.input.get().back_controls(remote_back)
     }
 
     /// A foreground UI surface colour. In guide mode the opaque colours are
@@ -871,6 +885,8 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
         .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
         // A moving mouse over full-screen video shows the player panels.
         .on_mouse_move(move |e: &MouseEvent| pointer_moved(ui, e))
+        // Which pointer presses the controls: touch or pointer mode.
+        .on_touch(move |e: &nsh_core::TouchEvent| pointer_down(ui, e))
         // Layers, bottom to top: opaque backdrop, video (multiview's other
         // surfaces while their tiles play), UI, full-screen tap catcher.
         // The picture-in-picture window shows only the video (`pip.rs`).
@@ -1043,7 +1059,8 @@ fn pointer_moved(ui: Ui, e: &MouseEvent) {
     {
         return;
     }
-    if ui.input.get_untracked() != Input::Touch {
+    if ui.input.get_untracked() != Input::Pointer {
+        ui.last_press.set(Input::Pointer);
         ui.touched();
     }
     play_bar::pointer_moved(ui);
