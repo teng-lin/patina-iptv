@@ -3,11 +3,84 @@
 //! shutdown is acknowledged, independently of UI/capture lease removal.
 use super::*;
 use iptv_core::{i18n::key, live::Identity};
-use iptv_net::live::LiveInput;
+use iptv_net::live::{LiveInput, Validation};
 use iptv_net::recording::Failure;
+use std::time::Instant;
 
-/// Streams remembered as unshareable before the set starts over.
+/// A stream: source, its incarnation, channel. Not the provider URL, which
+/// may carry a token that changes on every resolve.
+type Stream = (i64, String, String);
+/// Streams remembered at most; the oldest is forgotten first.
 const UNSHAREABLE: usize = 256;
+/// Inputs whose first segment is still watched at most.
+const WATCHED: usize = 64;
+/// How long a stream stays on its provider's own transport.
+const UNSHAREABLE_FOR: Duration = Duration::from_secs(30 * 60);
+/// Validation failures that send a stream to its provider's own transport:
+/// one segment over the limit, or two that failed their checks (a single
+/// torn final packet may be a connection cut short).
+const STRIKES: u8 = 2;
+
+/// Streams whose first HLS segment failed validation after a shared input
+/// had offered its first packets (`LiveInput::first_segment`). Such an input
+/// ends; once a stream is pinned, its next preparation plays the provider's
+/// own transport, as one refused before its first packets does at once.
+#[derive(Default)]
+pub(super) struct Unshareable {
+    failures: HashMap<Stream, (u8, Instant)>,
+    watching: Vec<(Stream, Validation)>,
+}
+impl Unshareable {
+    fn watch(&mut self, stream: Stream, validation: Validation) {
+        if self.watching.len() >= WATCHED {
+            self.watching.remove(0);
+        }
+        self.watching.push((stream, validation));
+    }
+    /// Records the watched inputs' outcomes. An input's outcome is set
+    /// before its player sees it end, so the player's retry finds it here.
+    fn settle(&mut self, now: Instant) {
+        for (stream, validation) in std::mem::take(&mut self.watching) {
+            match validation.outcome() {
+                None => self.watching.push((stream, validation)),
+                Some(Ok(())) => {}
+                Some(Err(failure)) => self.fail(stream, failure, now),
+            }
+        }
+    }
+    fn fail(&mut self, stream: Stream, failure: Failure, now: Instant) {
+        let strikes = match failure {
+            Failure::Limit => STRIKES,
+            Failure::Unsupported => 1,
+            _ => return,
+        };
+        if !self.failures.contains_key(&stream) && self.failures.len() >= UNSHAREABLE {
+            let oldest = self
+                .failures
+                .iter()
+                .min_by_key(|(_, (_, at))| *at)
+                .map(|(stream, _)| stream.clone());
+            if let Some(oldest) = oldest {
+                self.failures.remove(&oldest);
+            }
+        }
+        let entry = self.failures.entry(stream).or_insert((0, now));
+        if now.saturating_duration_since(entry.1) >= UNSHAREABLE_FOR {
+            entry.0 = 0;
+        }
+        *entry = (entry.0.saturating_add(strikes), now);
+    }
+    fn pinned(&self, stream: &Stream, now: Instant) -> bool {
+        self.failures.get(stream).is_some_and(|(strikes, at)| {
+            *strikes >= STRIKES && now.saturating_duration_since(*at) < UNSHAREABLE_FOR
+        })
+    }
+    /// The source changed (incarnation or configuration): start afresh.
+    fn forget_source(&mut self, source: i64) {
+        self.failures.retain(|(id, _, _), _| *id != source);
+        self.watching.retain(|((id, _, _), _)| *id != source);
+    }
+}
 pub(super) struct Incoming {
     pub id: u64,
     pub identity: Identity,
@@ -518,6 +591,7 @@ impl Runtime {
                             })
                         {
                             data.provider_limits.remove(&source_id.0);
+                            data.unshareable.forget_source(source_id.0);
                         }
                         data.source_incarnations
                             .insert(source_id.0, incarnation.clone());
@@ -587,8 +661,16 @@ impl Runtime {
                         created = Some(id);
                         let mut incoming = None;
                         let asked = std::time::Instant::now();
-                        let stream = (source_id.0, identity.channel.clone(), source.url.clone());
-                        let shareable = !state.lock().unshareable.contains(&stream);
+                        let stream = (
+                            source_id.0,
+                            identity.incarnation.clone(),
+                            identity.channel.clone(),
+                        );
+                        let shareable = {
+                            let mut data = state.lock();
+                            data.unshareable.settle(asked);
+                            !data.unshareable.pinned(&stream, asked)
+                        };
                         if share
                             && shareable
                             && let Ok(input) = LiveInput::begin_with_cancel(
@@ -624,21 +706,11 @@ impl Runtime {
                                 // The player opens with the first packets; a
                                 // first segment that then fails validation
                                 // ends this input, and the player's retry
-                                // falls back to the provider's own transport.
-                                let validated =
-                                    shared.input.shared().expect("shared probe").first_segment();
-                                let unshareable = state.clone();
-                                work.spawn(async move {
-                                    if let Err(Failure::Unsupported | Failure::Limit) =
-                                        validated.await
-                                    {
-                                        let mut data = unshareable.lock();
-                                        if data.unshareable.len() >= UNSHAREABLE {
-                                            data.unshareable.clear();
-                                        }
-                                        data.unshareable.insert(stream);
-                                    }
-                                });
+                                // may fall back to the provider's own
+                                // transport (`Unshareable`).
+                                let validation =
+                                    shared.input.shared().expect("shared probe").validation();
+                                state.lock().unshareable.watch(stream, validation);
                                 incoming = Some(shared);
                             } else {
                                 shared.input.clone().shutdown().await;
@@ -745,5 +817,58 @@ impl Runtime {
             task.await
                 .map_err(|_| Error::unavailable(key("Channel unavailable")))?
         }
+    }
+}
+
+#[cfg(test)]
+mod unshareable_tests {
+    use super::*;
+    #[test]
+    fn unshareable_streams_need_two_strikes_and_expire() {
+        let stream = |channel: &str| (1, "incarnation".to_owned(), channel.to_owned());
+        let at = Instant::now();
+        let mut set = Unshareable::default();
+        set.fail(stream("a"), Failure::Unsupported, at);
+        assert!(
+            !set.pinned(&stream("a"), at),
+            "one torn segment is not enough"
+        );
+        set.fail(stream("a"), Failure::Unsupported, at);
+        assert!(set.pinned(&stream("a"), at));
+        assert!(
+            !set.pinned(&stream("a"), at + UNSHAREABLE_FOR),
+            "it expires"
+        );
+        set.fail(stream("a"), Failure::Unsupported, at + UNSHAREABLE_FOR);
+        assert!(
+            !set.pinned(&stream("a"), at + UNSHAREABLE_FOR),
+            "an expired stream starts its strikes afresh"
+        );
+        set.fail(stream("b"), Failure::Limit, at);
+        assert!(
+            set.pinned(&stream("b"), at),
+            "one oversized segment pins it"
+        );
+        set.fail(stream("c"), Failure::Network, at);
+        set.fail(stream("c"), Failure::Network, at);
+        assert!(!set.pinned(&stream("c"), at), "network failures never pin");
+        set.forget_source(1);
+        assert!(
+            !set.pinned(&stream("b"), at),
+            "a changed source starts afresh"
+        );
+        for n in 0..=UNSHAREABLE {
+            set.fail(
+                stream(&n.to_string()),
+                Failure::Limit,
+                at + Duration::from_secs(n as u64),
+            );
+        }
+        assert_eq!(set.failures.len(), UNSHAREABLE, "bounded");
+        assert!(
+            !set.pinned(&stream("0"), at),
+            "the oldest is forgotten first"
+        );
+        assert!(set.pinned(&stream("1"), at + Duration::from_secs(1)));
     }
 }

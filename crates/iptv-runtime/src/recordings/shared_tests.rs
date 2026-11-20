@@ -1338,29 +1338,28 @@ async fn resolved_authority_cannot_be_rebound_to_an_edited_account_or_channel() 
     }
 }
 
-/// A live HLS stream whose first segment starts as TS but fails validation
-/// after the player already opened its first packets (it loses sync; a
-/// misaligned or oversized segment fails the same way). That input ends;
-/// the stream is remembered, so the player's retry plays the provider's own
-/// transport, as a stream refused before its first packets does at once.
+/// A live HLS stream whose first segment starts as TS but loses sync after
+/// the player already opened its first packets. Each resolve hands out a
+/// new tokenized URL, as Stalker links and expiring M3U URLs do. The player
+/// retries as soon as its playback ends: the second failure sends the
+/// stream to the provider's own transport, recorded before the player saw
+/// the end, whatever its URL's token.
 #[tokio::test]
 async fn a_first_segment_failing_after_its_first_packets_falls_back_on_retry() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/generated.m3u8", listener.local_addr().unwrap());
-    let release = Arc::new(tokio::sync::Notify::new());
-    let held = release.clone();
     let segments = Arc::new(AtomicUsize::new(0));
     let requested = segments.clone();
     let server = tokio::spawn(async move {
         loop {
             let (mut socket, _) = listener.accept().await.unwrap();
-            let (held, requested) = (held.clone(), requested.clone());
+            let requested = requested.clone();
             tokio::spawn(async move {
                 let mut request = Vec::new();
                 while !request.ends_with(b"\r\n\r\n") {
                     request.push(socket.read_u8().await?);
                 }
-                if request.starts_with(b"GET /generated.m3u8 ") {
+                if request.starts_with(b"GET /generated.m3u8") {
                     let body = b"#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n\
                                  #EXTINF:1,\nsegment.ts\n";
                     let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
@@ -1376,7 +1375,8 @@ async fn a_first_segment_failing_after_its_first_packets_falls_back_on_retry() {
                 socket.write_all(head.as_bytes()).await?;
                 socket.write_all(&body[..2 * 188]).await?;
                 socket.flush().await?;
-                held.notified().await;
+                // The rest, with its lost sync, once the player has joined.
+                tokio::time::sleep(Duration::from_millis(200)).await;
                 socket.write_all(&body[2 * 188..]).await
             });
         }
@@ -1384,22 +1384,45 @@ async fn a_first_segment_failing_after_its_first_packets_falls_back_on_retry() {
     let dir = tempfile::tempdir().unwrap();
     let owner = owner(dir.path());
     let request = seed(&owner, &url).await;
-    let shared = open(&owner, &request).await;
-    assert_ne!(shared.url, url, "the shared input offers its first packets");
-    let playback = player(&shared).await;
-    release.notify_one();
-    wait(|| !owner.recordings.lock().unshareable.is_empty()).await;
-    drop(playback);
-    let fallback = open(&owner, &request).await;
+    refresh_accounts(&owner.services(), &owner.recordings)
+        .await
+        .unwrap();
+    let mut attempt = 0;
+    let mut resolve = || {
+        attempt += 1;
+        let request = request.clone();
+        let (owner, url) = (&owner, url.clone());
+        async move {
+            let mut source = source(owner, &request).await;
+            source.url = format!("{url}?token=generated-{attempt}");
+            assert!(owner.reserve_live_viewing(0, SourceId(request.source), &request.channel));
+            owner
+                .prepare_current_live_source(
+                    0,
+                    SourceId(request.source),
+                    request.channel.clone(),
+                    source,
+                )
+                .await
+                .unwrap()
+        }
+    };
+    for _ in 0..2 {
+        let shared = resolve().await;
+        assert!(
+            !shared.url.contains("token"),
+            "the shared input's own address"
+        );
+        let mut playback = player(&shared).await;
+        let mut rest = Vec::new();
+        let _ = playback.read_to_end(&mut rest).await;
+    }
+    let fallback = resolve().await;
     assert!(
         manifest(&fallback).await.contains("segment.ts"),
-        "the retry plays the provider's own transport"
+        "the third attempt plays the provider's own transport"
     );
-    assert_eq!(
-        segments.load(Ordering::SeqCst),
-        1,
-        "no second shared ingest"
-    );
+    assert_eq!(segments.load(Ordering::SeqCst), 2, "no third shared ingest");
     owner.release_viewing(0);
     assert!(owner.drain_services());
     server.abort();

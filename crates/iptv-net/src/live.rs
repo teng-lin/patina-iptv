@@ -204,6 +204,11 @@ impl LiveInput {
     pub fn first_segment(&self) -> impl Future<Output = Result<(), Failure>> + Send + 'static {
         outcome(self.0.validated.clone())
     }
+    /// [`LiveInput::first_segment`]'s outcome, read without waiting. It is
+    /// set before the input's consumers see it end, and holds no owner.
+    pub fn validation(&self) -> Validation {
+        Validation(self.0.validated.clone())
+    }
     pub fn is_ready(&self) -> bool {
         *self.0.ready.borrow() == Some(Ok(()))
     }
@@ -232,6 +237,16 @@ impl LiveInput {
     }
     pub fn same_input(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+/// A live input's first-segment validation, for reading after it ended.
+#[derive(Clone)]
+pub struct Validation(watch::Receiver<Option<Result<(), Failure>>>);
+impl Validation {
+    /// `None` while the first segment is still arriving.
+    pub fn outcome(&self) -> Option<Result<(), Failure>> {
+        *self.0.borrow()
     }
 }
 
