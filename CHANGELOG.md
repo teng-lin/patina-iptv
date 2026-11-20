@@ -46,6 +46,17 @@ is below 1.0, a minor release may change behaviour.
   when it ends; another app's media and unplugged headphones or a
   disconnected Bluetooth headset pause it until you play again. A stopped
   channel never restarts by itself. All players share one audio focus.
+  Patina no longer takes the audio back from another app until you play
+  again, keeps it through the end of a call, gives it up when playback
+  stops or goes to the background during a call, and holds none for an
+  ended stream. In multiview the heard screen is the one paused and
+  resumed. Anything you do to playback during a call (play, pause, seek,
+  change channel) keeps the call's end from resuming over it.
+- Guide on tablets: a steeper diagonal drag (up to 1.5:1) pans the
+  timeline instead of scrolling the channels; a drag at the top of the
+  list, or one a scroll takes over, cancels a waiting preview too; and a
+  pan from the programme on air no longer cancels a channel you just
+  tapped or restarts a cancelled preview when you pan back.
 
 ## [0.1.5] - 2026-11-17
 

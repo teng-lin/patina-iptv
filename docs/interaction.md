@@ -87,9 +87,11 @@ In the guide:
 
 ### Touch gestures in the guide
 
-- **Now:** a drag decides its direction once it has moved 10 points: mostly
-  vertical scrolls the channels, mostly horizontal pans the timeline (a
-  diagonal goes the way of its larger part, and stays that way), and a
+- **Now:** a drag decides its direction once it has moved 7 points along
+  either axis (`iptv_core::timeline::AXIS`), before a native list's own
+  scroll slop: mostly vertical scrolls the channels, mostly horizontal
+  pans the timeline (a diagonal goes the way of its larger part, 1.5:1
+  included, and stays that way), and a
   drag released while moving flings on and slows down. A gesture the
   system cancels (a notification shade, a call) stops where it is,
   without a fling. A drag that started on a channel or a programme, past
