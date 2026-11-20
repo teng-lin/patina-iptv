@@ -472,3 +472,91 @@ fn tv_shows_a_visible_back_once_touch_is_used_and_hides_it_for_keys() {
     step(app.press_remote(nsh_tv::RemoteKey::Back));
     step(app.wait_for_gone("id:play-bar-back", Duration::from_secs(2)));
 }
+
+/// The programme menu is on screen; Back closes it.
+#[track_caller]
+fn programme_menu_opens(app: &mut crate::Headless) {
+    step(app.wait_for("id:menu-panel >> text:Manage favourites…"));
+    step(app.back());
+    step(app.wait_for_gone("text:Manage favourites…", Duration::from_secs(2)));
+}
+
+#[test]
+fn touch_and_pointer_reach_the_menu_without_a_shortcut() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = personalization::start(home, Settings::new(), true);
+    let app = &mut fixture.app;
+    // A desktop: a mouse to right-click with, a touch screen to long-press.
+    step(app.set_environment("desktop", |env| {
+        env.os = nsh_core::platform::Os::Linux;
+        env.idiom = Idiom::Desktop;
+    }));
+    let opens = iptv_app::player_opens(0);
+    // Keys drive the app: they have Menu, so no ⋯.
+    assert!(!app.screen().matches("id:guide-more").unwrap());
+
+    // A tap (here on the idle preview, which does nothing else) shows the
+    // ⋯ by the focused programme; it opens the Menu key's menu.
+    step(app.press("id:guide-preview"));
+    step(app.wait_for("id:guide-more"));
+    assert!(
+        app.screen()
+            .matches("id:guide-ui >> label:More options")
+            .unwrap()
+    );
+    step(app.press("id:guide-ui >> label:More options"));
+    programme_menu_opens(app);
+    assert_eq!(iptv_app::player_opens(0), opens, "a menu never plays");
+
+    // Long press and right-click are its shortcuts: the same menu, no
+    // playback, on a programme and on a channel.
+    step(app.long_press("id:guide-ui >> label:Local B"));
+    programme_menu_opens(app);
+    step(app.right_click("id:guide-ui >> label:Local B"));
+    programme_menu_opens(app);
+    // The first row's second slot: the hour airing now (the first is the
+    // ended hour before it, which this row cannot replay or focus).
+    let cell = "id:guide-ui >> role:cell[No information] >> nth=1";
+    step(app.right_click(cell));
+    programme_menu_opens(app);
+    step(app.long_press(cell));
+    programme_menu_opens(app);
+    assert_eq!(iptv_app::player_opens(0), opens, "a menu never plays");
+
+    // A key goes back to the remote's view.
+    step(app.press_key("down"));
+    step(app.wait_for_gone("id:guide-more", Duration::from_secs(2)));
+
+    // The player's channel list: a ⋯ per row for touch, the same menu.
+    step(app.press_key("enter"));
+    step(app.wait_for("id:player-banner"));
+    step(app.press_key("m"));
+    step(app.wait_for("text:Channels"));
+    step(app.press("text:Channels"));
+    step(app.wait_for("id:channel-list-more"));
+    // Down then Enter played the second row; the first row's ⋯ is pressed.
+    step(app.wait_for("text:2  Local B  ▶"));
+    let playing = iptv_app::player_opens(0);
+    step(app.press("id:channel-list-more >> nth=0"));
+    programme_menu_opens(app);
+    assert_eq!(iptv_app::player_opens(0), playing, "a menu never zaps");
+    assert!(app.screen().matches("text:2  Local B  ▶").unwrap());
+}
+
+#[test]
+fn a_tv_remote_sees_no_more_control() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = personalization::start(home, Settings::new(), true);
+    let app = &mut fixture.app;
+    step(app.set_environment("TV remote", |env| env.idiom = Idiom::Tv));
+    for key in ["down", "right", "left"] {
+        step(app.press_key(key));
+        assert!(
+            !app.screen().matches("id:guide-more").unwrap(),
+            "the remote has Menu"
+        );
+    }
+    step(app.press_key("m"));
+    programme_menu_opens(app);
+    assert!(!app.screen().matches("id:guide-more").unwrap());
+}

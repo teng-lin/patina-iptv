@@ -34,6 +34,34 @@ pub fn round_back(
          fill='none' stroke='currentColor' stroke-width='2.2' stroke-linecap='round' \
          stroke-linejoin='round'><path d='M15 4.5L7.5 12l7.5 7.5'/></svg>",
     );
+    round_icon(side, slop, bg, chevron, label, on_press)
+}
+
+/// A round ⋯ for pointer and touch: the menu that a remote's Menu key, a
+/// long press or a right-click opens for what it sits beside, so no
+/// action needs a shortcut. Otherwise as [`round_back`].
+pub fn round_more(
+    side: f32,
+    slop: f32,
+    bg: impl Fn() -> Rgba + 'static,
+    on_press: impl Fn() + 'static,
+) -> View {
+    let dots = ImageSrc::svg_markup(
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' \
+         fill='currentColor'><circle cx='5' cy='12' r='2'/><circle cx='12' cy='12' r='2'/>\
+         <circle cx='19' cy='12' r='2'/></svg>",
+    );
+    round_icon(side, slop, bg, dots, || tr("More options"), on_press)
+}
+
+fn round_icon(
+    side: f32,
+    slop: f32,
+    bg: impl Fn() -> Rgba + 'static,
+    icon: ImageSrc,
+    label: impl Fn() -> &'static str + 'static,
+    on_press: impl Fn() + 'static,
+) -> View {
     view()
         .role(AccessibilityRole::Button)
         .size(px(side))
@@ -46,7 +74,7 @@ pub fn round_back(
         .label(move || label().to_owned())
         .on_press(on_press)
         .child(
-            svg(chevron)
+            svg(icon)
                 .size(px((side * 0.55).round()))
                 .text_color(rgb(WHITE)),
         )

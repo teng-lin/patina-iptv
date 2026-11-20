@@ -218,7 +218,11 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                     text(move || if favourite() { "★" } else { "" })
                         .text_size(move || size.text_px(HEADER_TITLE * 0.8))
                         .text_color(move || rgb(ui.app.theme.with(|t| t.accent.light))),
-                ),
+                )
+                .child(when(
+                    move || !ui.keys_shown() && program.with(Option::is_some),
+                    move || more(ui),
+                )),
         )
         .child(
             // Times, progress and minutes left; the group at the right.
@@ -283,6 +287,25 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                 .text_size(move || size.text_px(HEADER_BODY))
                 .text_color(secondary()),
         )
+}
+
+/// The ⋯ at the end of the focused programme's title, for touch and a
+/// pointer: the menu the remote's Menu key opens for it (favourites,
+/// recording, details, replay). Its box fits the title's line, its press
+/// reaches the least touch size around it. Keys hide it: they have Menu.
+const MORE: f32 = 28.0;
+
+fn more(ui: Ui) -> View {
+    crate::ui_kit::round_more(
+        MORE,
+        (crate::ui_kit::TOUCH - MORE) / 2.0,
+        move || tint(WHITE, RESTING_ALPHA),
+        move || {
+            ui.touched();
+            crate::menu_view::open(ui);
+        },
+    )
+    .test_id("guide-more")
 }
 
 fn library_shortcuts(ui: Ui) -> View {

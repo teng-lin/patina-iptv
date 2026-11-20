@@ -436,6 +436,7 @@ fn channel_row(
         })
         .child(
             list_rows::name(size, move || entry().map_or(String::new(), |e| e.0))
+                .mr(move || px(more_room(ui)))
                 .text_color(move || mark().text()),
         )
         .child(
@@ -445,8 +446,41 @@ fn channel_row(
                 move || entry().map_or(String::new(), |e| e.1),
                 CONDENSED,
             )
+            .mr(move || px(more_room(ui)))
             .text_color(move || mark().secondary()),
         )
+        .child(when(
+            move || !ui.keys_shown() && entry().is_some(),
+            move || {
+                view()
+                    .absolute()
+                    .top(px(0.0))
+                    .bottom(px(0.0))
+                    .right(move || size.px(INSET))
+                    .justify_center()
+                    .child(
+                        crate::ui_kit::round_more(
+                            MORE,
+                            (crate::ui_kit::TOUCH - MORE) / 2.0,
+                            crate::play_bar::back_bg(ui),
+                            move || {
+                                ui.touched();
+                                open_channel_menu(ui, at.index());
+                            },
+                        )
+                        .test_id("channel-list-more"),
+                    )
+            },
+        ))
+}
+
+/// A row's ⋯ for touch and a pointer: the menu a long press, a
+/// right-click or the remote's Menu key opens for its channel.
+const MORE: f32 = 32.0;
+
+/// The room the row's text leaves at its end for the ⋯ (none for keys).
+fn more_room(ui: Ui) -> f32 {
+    if ui.keys_shown() { 0.0 } else { MORE + 8.0 }
 }
 
 /// Under the preview: the focused channel and its programme now.
