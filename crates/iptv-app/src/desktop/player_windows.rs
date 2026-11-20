@@ -129,6 +129,7 @@ pub fn close(ui: Ui, id: SessionId) {
         .player_windows
         .with_untracked(|w| w.sessions().iter().find(|s| s.id == id).map(|s| s.surface));
     if let Some(surface) = surface {
+        super::pointer_forget(surface);
         crate::player::stop_surface(ui, surface);
         ui.player_windows.update(|w| w.close(id));
     }
@@ -408,7 +409,9 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
         .bg(rgb(0x000000))
         // Which pointer presses its controls, as in the main window.
         .on_touch(move |e: &nsh_core::TouchEvent| crate::pointer_down(local, e))
-        .on_mouse_enter(move |_: &MouseEvent| {
+        .on_mouse_enter(move |e: &MouseEvent| {
+            let at = e.page_position;
+            super::pointer_entered(surface, at.x.0, at.y.0);
             if !crate::pip::in_window(local)
                 && !untracked(|| {
                     local.overlay_open(crate::overlays::Overlay::keeps_pointer_from_play_bar)

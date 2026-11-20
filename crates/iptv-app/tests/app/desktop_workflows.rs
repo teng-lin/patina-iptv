@@ -895,3 +895,36 @@ fn closing_the_main_window_during_recordings_ends_every_viewing_window() {
         "a new stream, not a stale one"
     );
 }
+
+#[test]
+fn with_autoplay_closing_the_main_window_plays_nothing_until_the_viewer_moves() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start(home, |settings| {
+        settings.set("guide.autoplay", Setting::Bool(true)).unwrap();
+    });
+    let app = &mut fixture.app;
+    play_then_guide(app, 3);
+    // Closed from full screen: the guide comes back under the hidden
+    // window with a live channel focused, which autoplay would tune.
+    step(app.press(&format!("id:guide-ui >> text:{}", channel(3))));
+    assert!(video_full_screen(app));
+    let opens = iptv_app::player_opens(0);
+    step(app.press_window_close("main"));
+    app.idle(Duration::from_millis(2500)).unwrap();
+    assert!(!app.window_state("main").unwrap().unwrap().visible);
+    assert!(!iptv_app::player_has_source(0), "nothing plays hidden");
+    assert_eq!(iptv_app::player_opens(0), opens, "nothing was tuned hidden");
+
+    reopen(app);
+    app.idle(Duration::from_millis(2500)).unwrap();
+    assert!(!iptv_app::player_has_source(0), "nor on showing again");
+    assert_eq!(iptv_app::player_opens(0), opens);
+
+    // Moving to another channel is the viewer's own: autoplay again.
+    step(app.press_key("down"));
+    step(app.wait_until(
+        "autoplay tunes the next channel",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0),
+    ));
+}

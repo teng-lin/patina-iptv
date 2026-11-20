@@ -94,7 +94,7 @@ fault; the headless scenarios raise the limit and play both.
 |---|---|---|---|
 | Setup → search → watch → browse → compact/PiP → return with mouse and keyboard, including a narrow side-by-side window and large text | Partly: real window for search, watch, browse, a second player, compact and return, narrow 488 points; large text headless only | Partly: headless journey scenarios passed natively; the real window started and showed the guide (first frame +621 ms). No real pointer or keyboard input, no screenshots | Not run |
 | Resize, DPI and full-screen transitions keep source, session, browse anchor and progress; presentation opens no stream | Met headless (same player node, source and opens through OS full screen, four sizes, three scales, large text; `pane_collapse` for the guide and Movies and Shows); real window shows no opens except stall retries | Met headless (205 app scenarios passed natively, `desktop_workflows` included) at scale 2; no video in the real window | Not run |
-| Wheel, trackpad and right-click consistent over the guide, channel list, VOD cards and recordings; every secondary action has a visible entry point | Met: real window for the guide, groups and recordings; headless for all four. Horizontal swipes in a real window: Shift + wheel only (Broadway) | Met headless; no real pointer or trackpad input | Not run |
+| Wheel, trackpad and right-click consistent over the guide, channel list, VOD cards and recordings; every secondary action has a visible entry point | Partly: wheel and right-click met (real window for the guide, groups and recordings; headless for all four). Trackpad gestures not run: Broadway sends vertical wheel steps only, so horizontal movement was checked with Shift + wheel and the headless sideways scroll | Partly: headless only; no real pointer or trackpad input | Not run |
 | Typing shortcut characters, editing fields and switching focused windows cannot zap, close or control the wrong player | Met: real window and headless | Met headless; no real keyboard input | Not run |
 | Two players show channel and audio ownership; return, close, stop and main-window close during a recording follow one documented contract | Met: titles in the real window; [closing contract](../desktop.md#closing); main close during recordings headless only | Met headless | Not run |
 | Monitor removal and reconnection leave windows recoverable; host limits have fallbacks | Partly: core policy and [host table](../desktop.md#displays-and-hosts); on Linux the window manager or compositor keeps windows reachable (GTK 4 has no position API). No real multi-monitor run | Partly: `reachable` tests passed; the real window was not moved at launch and stayed where it was put on either display. Display removal and a missing saved display not run | Not run |
@@ -142,6 +142,17 @@ them, the macOS run above predates them.
   "Watch in new window" exists; the others check a menu item every desktop
   has.
 - A groups column keeps no room for a ⋯ that multiview picking hides.
+- Second round: with guide autoplay on, closing the main window from full
+  screen no longer tunes the focused channel in the hidden window, nor on
+  showing again, until the viewer moves to another channel
+  (`with_autoplay_closing_the_main_window_plays_nothing_until_the_viewer_moves`;
+  fails without the hold).
+- Second round: slow mouse movement adds up to the Pointer threshold, and
+  each window keeps its own resting place, seeded when the mouse enters it
+  (`desktop::tests::slow_movement_accumulates_per_window_and_entering_is_no_travel`).
+- Second round: a trackpad swipe's glide pans on but no longer switches Keys
+  back to Pointer. The headless engine sends no glide, so this is not covered
+  by a scenario.
 
 ## Bugs and observations
 

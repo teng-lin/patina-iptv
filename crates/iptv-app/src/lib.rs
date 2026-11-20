@@ -227,6 +227,9 @@ pub struct Ui {
     /// The remote's focus; its `channel` is a row of `list`.
     pub focus: Signal<Focus>,
     pub browse_playback: Signal<iptv_core::browse_playback::BrowsePlayback>,
+    /// Guide autoplay held after the main window closed with recordings
+    /// running: the channel key focused then (`browse_playback::hold`).
+    pub autoplay_held: Signal<Option<Option<String>>>,
     pub pending_zap: Signal<Option<iptv_core::browse_playback::Target>>,
     pub guide_panning: Signal<bool>,
     /// The list the guide shows: catalog channels (`lists.rs`).
@@ -337,6 +340,7 @@ impl Ui {
             app,
             focus: signal(Focus::default()),
             browse_playback: signal(Default::default()),
+            autoplay_held: signal(None),
             pending_zap: signal(None),
             guide_panning: signal(false),
             list: signal(Rc::new(ChannelList::build(
@@ -909,6 +913,9 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
         .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
         // A moving mouse over full-screen video shows the player panels.
         .on_mouse_move(move |e: &MouseEvent| pointer_moved(ui, e))
+        .on_mouse_enter(move |e: &MouseEvent| {
+            desktop::pointer_entered(ui.player_surface, e.page_position.x.0, e.page_position.y.0)
+        })
         // Which pointer presses the controls: touch or pointer mode.
         .on_touch(move |e: &nsh_core::TouchEvent| pointer_down(ui, e))
         // Layers, bottom to top: opaque backdrop, video (multiview's other
@@ -1089,7 +1096,7 @@ fn pointer_moved(ui: Ui, e: &MouseEvent) {
     // Anywhere else (the guide, lists, Recordings), a mouse that really
     // moved after keys switches to Pointer, so the ⋯ controls show: no
     // focus moves and no playback is scheduled or cancelled.
-    if desktop::pointer_travelled(x, y) {
+    if desktop::pointer_travelled(ui.player_surface, x, y) {
         pointer_input(ui);
     }
     if ui.mode.get_untracked() != ViewMode::Fullscreen
