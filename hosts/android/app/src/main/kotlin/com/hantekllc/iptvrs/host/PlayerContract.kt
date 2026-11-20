@@ -187,6 +187,16 @@ internal enum class PlayerState(
     }
 }
 
+/** What happened to the audio: `AudioChange` in the Rust contract. */
+internal enum class AudioChange(
+    val wire: String,
+) {
+    FOCUS_LOSS("focusLoss"),
+    FOCUS_LOSS_TRANSIENT("focusLossTransient"),
+    FOCUS_GAIN("focusGain"),
+    NOISY("noisy"),
+}
+
 /** One button of the picture-in-picture window (the `pipAction` event). */
 internal enum class PipButton(
     val wire: String,
@@ -362,5 +372,12 @@ internal sealed class PlayerEvent(
         constructor(button: PipButton) : this(button.wire)
 
         override fun data(): Map<String, Any?> = mapOf("action" to action)
+    }
+
+    /** The audio focus or route changed ([AudioFocusHost]). */
+    data class Audio(
+        val change: AudioChange,
+    ) : PlayerEvent("audio") {
+        override fun data(): Map<String, Any?> = mapOf("change" to change.wire)
     }
 }

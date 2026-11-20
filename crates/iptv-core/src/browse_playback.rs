@@ -29,11 +29,20 @@ pub enum Effect {
     Fullscreen,
 }
 
+/// A tune waiting for the switch delay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Pending {
+    at: u64,
+    fullscreen: bool,
+    /// The viewer chose it (OK, a tap), rather than autoplay starting it.
+    chosen: bool,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BrowsePlayback {
     target: Option<Target>,
     policy: Policy,
-    pending: Option<(u64, bool)>,
+    pending: Option<Pending>,
     fullscreen_at: Option<u64>,
 }
 impl BrowsePlayback {
@@ -48,15 +57,33 @@ impl BrowsePlayback {
         self.pending = None;
         self.fullscreen_at = None;
         if self.target.is_some() && policy.autoplay {
-            self.pending = Some((now.saturating_add(policy.delay_ms), false));
+            self.pending = Some(Pending {
+                at: now.saturating_add(policy.delay_ms),
+                fullscreen: false,
+                chosen: false,
+            });
         }
     }
     /// Explicit OK still debounces rapid choices. Replacing it never tunes
     /// the earlier channel, and automatic preview never closes the browser.
     pub fn select(&mut self, now: u64) {
         if self.target.is_some() {
-            self.pending = Some((now.saturating_add(self.policy.delay_ms), !self.policy.stay));
+            self.pending = Some(Pending {
+                at: now.saturating_add(self.policy.delay_ms),
+                fullscreen: !self.policy.stay,
+                chosen: true,
+            });
             self.fullscreen_at = None;
+        }
+    }
+    /// A touch or mouse drag crossed the drag threshold (scrolling the
+    /// channels or panning the timeline): a preview autoplay was waiting
+    /// to start is cancelled, and stays cancelled until the focus moves to
+    /// another target. A choice the viewer made (a tap, OK) still plays
+    /// after its switch delay: scrolling never tunes, nor un-chooses.
+    pub fn dragged(&mut self) {
+        if self.pending.is_some_and(|p| !p.chosen) {
+            self.pending = None;
         }
     }
     pub fn activity(&mut self, now: u64) {
@@ -77,13 +104,13 @@ impl BrowsePlayback {
     }
     pub fn deadline(&self) -> Option<u64> {
         self.pending
-            .map(|p| p.0)
+            .map(|p| p.at)
             .into_iter()
             .chain(self.fullscreen_at)
             .min()
     }
     pub fn tick(&mut self, now: u64) -> Option<Effect> {
-        if let Some((at, fullscreen)) = self.pending
+        if let Some(Pending { at, fullscreen, .. }) = self.pending
             && now >= at
         {
             self.pending = None;
@@ -205,5 +232,39 @@ mod tests {
         assert_eq!(b.deadline(), Some(2600));
         b.focus(None, p, 900);
         assert_eq!(b.tick(3000), None);
+    }
+    #[test]
+    fn a_drag_cancels_a_waiting_preview_but_not_a_choice() {
+        let mut b = BrowsePlayback::default();
+        b.focus(target("a"), policy(), 0);
+        b.dragged();
+        assert_eq!(b.tick(10_000), None, "the preview never starts");
+        // The same focus after the drag does not re-arm it.
+        b.focus(target("a"), policy(), 10_000);
+        assert_eq!(b.tick(20_000), None);
+        // Another target is a new focus: autoplay applies again.
+        b.focus(target("b"), policy(), 20_000);
+        assert!(matches!(b.tick(20_500), Some(Effect::Tune { .. })));
+
+        // A tap's choice waits its delay through a drag and plays.
+        let p = Policy {
+            autoplay: false,
+            stay: false,
+            ..policy()
+        };
+        let mut b = BrowsePlayback::default();
+        b.focus(target("a"), p, 0);
+        b.select(0);
+        b.dragged();
+        assert_eq!(
+            b.tick(500),
+            Some(Effect::Tune {
+                target: target("a").unwrap(),
+                fullscreen: true
+            })
+        );
+        // A drag with nothing waiting changes nothing.
+        b.dragged();
+        assert_eq!(b.tick(10_000), None);
     }
 }

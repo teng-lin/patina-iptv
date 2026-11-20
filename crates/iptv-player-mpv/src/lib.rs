@@ -2,7 +2,7 @@
 mod wire;
 
 mod events;
-pub use events::{PipAction, PlayerEvent, PlayerEventError, PlayerEventKind};
+pub use events::{AudioChange, PipAction, PlayerEvent, PlayerEventError, PlayerEventKind};
 mod props;
 pub use props::{
     PipProps, PlayerBindings, PlayerProp, PlayerProps, SeekProps, SourceProps, WireValue,

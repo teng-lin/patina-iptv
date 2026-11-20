@@ -67,7 +67,9 @@ import com.longbridge.nsh.NshComponentContext
  * a load outside the relay, [RelayGuard]; no URLs or messages), `size` {width,
  * height}, `position` {ms} (from where the stream opened; once a second
  * while playing), `tracks` (whenever they change; [PlayerTracks.event])
- * and `format` {fps?, channels?} for what plays. Subtitles of the chosen
+ * and `format` {fps?, channels?} for what plays; `audio` {change} when the
+ * activity's audio focus or route changes ([AudioFocusHost]: this player
+ * only says whether it means to play aloud, and never pauses itself). Subtitles of the chosen
  * text track show in a [SubtitleView] over the picture. Each component has
  * its own player and state (several may play at once: multiview mounts one
  * per tile, two on a TV box by default, and mutes all but the active one;
@@ -105,6 +107,8 @@ class PlayerComponent(
     private val onDestroyed: (PlayerComponent) -> Unit = {},
     /** The activity's picture in picture (props `pip`, `paused`; the video's aspect). */
     private val pip: PipHost? = null,
+    /** The activity's audio focus: whether this player means to play aloud. */
+    private val audio: AudioFocusHost? = null,
 ) : NshComponent {
     companion object {
         const val NAME = "tv.player"
@@ -298,6 +302,15 @@ class PlayerComponent(
         val state = player.playbackState
         surface.keepScreenOn = player.playWhenReady &&
             (state == Player.STATE_BUFFERING || state == Player.STATE_READY)
+        reportAudible()
+    }
+
+    /**
+     * Whether this player means to play aloud: a source, set to play, not
+     * muted, the activity started ([AudioFocusHost] holds the focus then).
+     */
+    private fun reportAudible() {
+        audio?.audible(this, !away && url != null && player.playWhenReady && player.volume > 0f)
     }
 
     private val listener =
@@ -489,6 +502,7 @@ class PlayerComponent(
 
             override fun muted(muted: Boolean) {
                 player.volume = if (muted) 0f else 1f
+                reportAudible()
             }
 
             override fun audioDelay(ms: Long) {
@@ -530,6 +544,7 @@ class PlayerComponent(
         publicOnly = nextPublicOnly
         token = nextToken
         applyHeaders()
+        reportAudible()
         if (!changed) return
         seekId = 0
         triedOtherFormat = false
@@ -566,6 +581,7 @@ class PlayerComponent(
         // A failed or finished stream stays as it is: the app owns its retry.
         if (reopen == Reopen.NONE && active) reopen = Reopen.SAME
         player.stop()
+        reportAudible()
     }
 
     /**
@@ -579,6 +595,7 @@ class PlayerComponent(
         ticker.postDelayed(tick, 1_000)
         val what = reopen
         reopen = Reopen.NONE
+        reportAudible()
         if (url == null) return
         // Rust obtains fresh parental authority and a stream reservation; retained
         // URLs never authorize reopening. Stop clears both url and reopen intent.
@@ -650,6 +667,7 @@ class PlayerComponent(
         player.removeListener(listener)
         player.removeAnalyticsListener(formats)
         surface.keepScreenOn = false
+        audio?.destroyed(this)
         player.release()
         transport.close()
         onDestroyed(this)

@@ -1,6 +1,7 @@
 package com.longbridge.nsh
 
 import androidx.media3.common.Player
+import com.hantekllc.iptvrs.host.AudioChange
 import com.hantekllc.iptvrs.host.PipButton
 import com.hantekllc.iptvrs.host.PlayerEvent
 import com.hantekllc.iptvrs.host.PlayerPip
@@ -290,6 +291,10 @@ class PlayerContractTest {
                 PlayerEvent.PipAction(PipButton.PAUSE),
                 PlayerEvent.PipAction(PipButton.NEXT),
                 PlayerEvent.PipAction(PipButton.PREVIOUS),
+                PlayerEvent.Audio(AudioChange.FOCUS_LOSS),
+                PlayerEvent.Audio(AudioChange.FOCUS_LOSS_TRANSIENT),
+                PlayerEvent.Audio(AudioChange.FOCUS_GAIN),
+                PlayerEvent.Audio(AudioChange.NOISY),
             )
         val fixture = fixture("player-events.json") as List<*>
         assertEquals(fixture.size, events.size)
@@ -308,6 +313,10 @@ class PlayerContractTest {
         assertEquals(
             PipButton.entries.map { it.wire }.toSet(),
             events.filterIsInstance<PlayerEvent.PipAction>().map { it.action }.toSet(),
+        )
+        assertEquals(
+            AudioChange.entries.toSet(),
+            events.filterIsInstance<PlayerEvent.Audio>().map { it.change }.toSet(),
         )
         for (button in PipButton.entries) assertEquals(button, PipButton.of(button.wire))
         assertNull(PipButton.of("unknown"))
