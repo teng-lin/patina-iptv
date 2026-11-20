@@ -17,6 +17,14 @@ is below 1.0, a minor release may change behaviour.
 
 ### Changed
 
+- Back from a movie or an episode playing full screen now returns to its
+  details instead of the guide, on every input (a remote's Back, Escape or
+  Backspace, and the play bar's ‹, now labelled Movies or Shows): a movie
+  on Play or Resume, a series with the played episode and its season
+  selected. The title plays on, on the same player, and nothing is opened
+  again. Back from the details then returns to the list or shelf the title
+  was chosen from (Continue watching and Recently added included), on that
+  title, and from there to the guide as before (#147).
 - When Patina plays the last channel on start and that channel is one of the
   playlist's favourites, Back from full screen now opens the Favourites list
   with the channel focused instead of All channels. A channel that is not a

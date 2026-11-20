@@ -119,7 +119,8 @@ simulator run at `908632e9`, before the follow-up.
     returns to the guide (the title playing on in the preview), not to its
     details. Returning to the details changes the shared Back order for
     every input and 11 existing scenarios that expect the guide; it is
-    tracked in #147 (the contract marks it Planned).
+    tracked in #147 (the contract marks it Planned). *Since #147* it returns
+    to the details, and `tablet_journey` checks that by the ‹.
 
 No crash or refused player load was seen (the smoke's final checks), and
 no stream was opened by a gesture, a rotation, a width or text change,

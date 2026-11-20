@@ -195,7 +195,8 @@ pub fn layer(ui: Ui) -> impl IntoElement {
 
 /// A tablet's way back from full-screen video, where an iPad's players
 /// keep it: a round ‹ top left, with the bar. It leaves at once for the
-/// guide, or multiview's grid from a tile watched full screen (its
+/// guide, a played title's details (Movies or Shows), Recordings, or
+/// multiview's grid from a tile watched full screen (its
 /// accessibility label says which; a remote's Back and an iPad's swipe
 /// from the left edge hide the bar first).
 fn back(ui: Ui) -> impl IntoElement {
@@ -219,6 +220,12 @@ fn back(ui: Ui) -> impl IntoElement {
                         tr("Multiview")
                     } else if ui.player.recorded.with(Option::is_some) {
                         tr("Recordings")
+                    } else if let Some(kind) = crate::vod_view::returns_to(ui) {
+                        if kind == iptv_core::vod::Kind::Movie {
+                            tr("Movies")
+                        } else {
+                            tr("Shows")
+                        }
                     } else {
                         tr("Guide")
                     }

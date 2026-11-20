@@ -25,6 +25,40 @@ fn player(app: &Headless) -> NodeId {
     nodes[0].id
 }
 
+/// Back from a title playing full screen, by the idiom's own input: a
+/// remote's Back (the platform's, as `app.back()` sends it); Backspace on
+/// a desktop keyboard (Escape is the platform's Back, `app.back()`); on a
+/// tablet the play bar's visible ‹ (labelled Movies or Shows), else the
+/// system Back.
+fn back_from_player(app: &mut Headless, idiom: nsh_core::platform::Idiom) {
+    let bar = app.screen().matches("id:play-bar-back").unwrap();
+    match idiom {
+        nsh_core::platform::Idiom::Tv => step(app.back()),
+        nsh_core::platform::Idiom::Desktop => step(app.press_key("backspace")),
+        _ if bar => {
+            let back = app.screen().id("id:play-bar-back").unwrap();
+            let labelled = |label: &str| {
+                let screen = app.screen();
+                (0..screen.count(&format!("label:{label}")).unwrap())
+                    .any(|at| screen.id(&format!("label:{label} >> nth={at}")) == Ok(back))
+            };
+            assert!(
+                labelled("Movies") || labelled("Shows"),
+                "the ‹ reads Movies or Shows"
+            );
+            step(app.press("id:play-bar-back"));
+        }
+        _ => step(app.back()),
+    }
+}
+
+#[track_caller]
+fn is_selected(app: &Headless, selector: &str) -> bool {
+    app.screen()
+        .accessibility_state(selector)
+        .is_ok_and(|state| state.selected)
+}
+
 #[test]
 fn movies_and_series_reach_playback_and_resume_by_identity() {
     let Some(home) = isolated!() else { return };
@@ -860,8 +894,34 @@ fn discover(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
             .get("seek")
             .is_some_and(|seek| seek.to_string().contains("61000"))
     }));
-    // Recently added mixes both playlists' movies and series.
+    // Back returns to the title's details on Resume, over the same
+    // player, opening nothing; Back again to the shelf on that title, and
+    // once more to the guide, the title playing on (#147).
+    let opens = iptv_app::player_opens(0);
+    back_from_player(&mut app, idiom);
+    step(app.wait_for("id:vod-screen"));
+    step(app.wait_for("text:Play from beginning"));
+    assert!(
+        is_selected(&app, "label:Resume"),
+        "the movie's details, on Resume"
+    );
+    assert!(
+        app.shows("Generated beta"),
+        "the playlist it was chosen from"
+    );
+    assert_eq!(player(&app), surface, "the same player surface");
     step(app.back());
+    step(app.wait_for_gone("text:Play from beginning", Duration::from_secs(5)));
+    step(app.wait_for("text:/^Generated Aurora · Film · Generated beta/"));
+    assert!(
+        is_selected(&app, "label:/^Generated Aurora · Film · Generated beta/"),
+        "the shelf, on the title it was opened from"
+    );
+    step(app.back());
+    step(app.wait_for_gone("id:vod-screen", Duration::from_secs(5)));
+    assert_eq!(iptv_app::player_opens(0), opens, "Back opens no stream");
+    assert_eq!(player(&app), surface);
+    // Recently added mixes both playlists' movies and series.
     step(app.press("text:/^☰  /"));
     step(app.press("label:Recently added"));
     step(app.wait_for("text:/^Generated Voyage · TV series · Generated alpha/"));
@@ -1160,10 +1220,26 @@ fn exercise_admission(
         },
     );
     app.settle();
-    step(app.back());
-    step(app.press("text:/^☰  /"));
-    step(app.press("id:open-movies"));
+    // Back returns to the movie's details on Resume, over the same
+    // player, opening nothing; Back again to the movies on that title
+    // (#147).
+    let opens = iptv_app::player_opens(0);
+    back_from_player(&mut app, idiom);
     step(app.wait_for("id:vod-screen"));
+    step(app.wait_for("text:Play from beginning"));
+    assert!(
+        is_selected(&app, "label:Resume"),
+        "the movie's details, on Resume"
+    );
+    assert_eq!(player(&app), surface, "the same player surface");
+    step(app.back());
+    step(app.wait_for_gone("text:Play from beginning", Duration::from_secs(5)));
+    step(app.wait_for("label:/^Generated Aurora ·/"));
+    assert!(
+        is_selected(&app, "label:/^Generated Aurora ·/"),
+        "the movies, on the movie played"
+    );
+    assert_eq!(iptv_app::player_opens(0), opens, "Back opens no stream");
     step(app.press("id:vod-continue"));
     step(app.wait_for("text:/^Generated Aurora/"));
     assert_eq!(app.screen().count("id:vod-title").unwrap(), 1);
@@ -1507,6 +1583,25 @@ fn exercise_admission(
         );
         app.settle();
     }
+    // Back from the episode: the show's details, the played episode
+    // (season 2's first) selected, over the same player, opening nothing
+    // (#147).
+    let opens = iptv_app::player_opens(0);
+    back_from_player(&mut app, idiom);
+    step(app.wait_for("id:vod-screen"));
+    step(app.wait_for("text:/Generated Third/"));
+    assert!(
+        is_selected(&app, "label:/^1 · Generated Third/"),
+        "the played episode selected"
+    );
+    assert!(app.shows("Season 2"));
+    assert_eq!(player(&app), surface, "the same player surface");
+    assert_eq!(iptv_app::player_opens(0), opens, "Back opens no stream");
+    // Back again leaves the details for the shows.
+    step(app.back());
+    step(app.wait_for_gone("text:/Generated Third/", Duration::from_secs(5)));
+    step(app.wait_for("label:/^Generated Voyage ·/"));
+    assert_eq!(iptv_app::player_opens(0), opens);
     drop(app);
     let store = crate::isolated::open_database(&path).unwrap();
     assert!(store.vod_progress(&second_key).unwrap().completed);

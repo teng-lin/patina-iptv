@@ -1,7 +1,7 @@
 //! A tablet viewer's journey by touch alone (#88), run headless on an
 //! Android tablet: visible controls reach and play a channel, a past
 //! programme, a movie and an episode, and their visible Back and Close
-//! return. Rotating, a narrow split-screen window and the largest system
+//! return (from a movie or an episode, to its details). Rotating, a narrow split-screen window and the largest system
 //! text keep what plays (the same `tv.player`, never detached or
 //! re-parented, no stream opened again, the movie's progress), the open
 //! details and the selected episode, with the primary controls inside the
@@ -201,6 +201,18 @@ fn show_bar(app: &mut Headless) {
         step(app.press("id:video"));
     }
     step(app.wait_for("id:play-bar-back"));
+}
+
+/// The bar's visible ‹ is labelled `label` (where it returns to).
+#[track_caller]
+fn back_says(app: &Headless, label: &str) {
+    let screen = app.screen();
+    let back = screen.id("id:play-bar-back").unwrap();
+    let labelled = screen.count(&format!("label:{label}")).unwrap();
+    assert!(
+        (0..labelled).any(|at| screen.id(&format!("label:{label} >> nth={at}")) == Ok(back)),
+        "the ‹ reads {label}"
+    );
 }
 
 /// The video fills the window, with the bar and its visible ‹.
@@ -411,11 +423,34 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     assert_eq!(seen.lock().unwrap().props["paused"], false);
     assert_eq!(sources(&seen), movie);
 
-    // The visible ‹ returns to the guide, the movie playing on in its
-    // preview. (Back to the title's details instead: not yet, see the
-    // validation record.)
+    // The visible ‹ (Movies) returns to the movie's details over the
+    // same player, Resume chosen at its progress (#147); Close then
+    // leaves the details for the movies, and the movies for the guide,
+    // the movie playing on in its preview.
     let opened = opens(&seen);
+    show_bar(&mut app);
+    back_says(&app, "Movies");
     step(app.press("id:play-bar-back"));
+    step(app.wait_for("id:vod-screen"));
+    step(app.wait_for("text:Play from beginning"));
+    assert!(
+        app.screen()
+            .accessibility_state("label:Resume")
+            .is_ok_and(|s| s.selected),
+        "the movie's details, on Resume"
+    );
+    assert_eq!(sources(&seen), movie, "Back opens nothing");
+    persistent(&app, &seen, surface);
+    step(app.press("id:vod-screen >> label:Close"));
+    step(app.wait_for("label:/^Generated Aurora ·/"));
+    assert!(
+        app.screen()
+            .accessibility_state("label:/^Generated Aurora ·/")
+            .is_ok_and(|s| s.selected),
+        "the movies, on the movie"
+    );
+    step(app.press("id:vod-screen >> label:Close"));
+    step(app.wait_for_gone("id:vod-screen", WAIT));
     in_preview(&mut app);
     assert_eq!(sources(&seen), movie, "Back opens nothing");
     assert_eq!(
@@ -436,20 +471,27 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     let episode = sources(&seen);
     assert_eq!(episode.len(), 2, "{episode:?}");
     assert!(episode[1].ends_with("/series/generated-user/generated-pass/102.mp4"));
-    // The visible ‹ returns to the guide; the show's details open again
-    // by touch, the played episode selected.
+    // The visible ‹ (Shows) returns to the show's details, the played
+    // episode selected.
     let opened = opens(&seen);
+    show_bar(&mut app);
+    back_says(&app, "Shows");
     step(app.press("id:play-bar-back"));
-    in_preview(&mut app);
+    step(app.wait_for("id:vod-screen"));
+    step(app.wait_for("text:/Generated First/"));
+    assert!(
+        app.screen()
+            .accessibility_state("label:/^2 · Generated Second/")
+            .is_ok_and(|s| s.selected),
+        "the played episode selected"
+    );
     assert_eq!(sources(&seen), episode, "Back opens nothing");
     assert_eq!(
         opens(&seen),
         opened,
         "Back opens nothing, not even the same episode"
     );
-    step(app.press("id:open-shows"));
-    step(app.press("label:/^Generated Voyage ·/"));
-    step(app.wait_for("text:/Generated First/"));
+    persistent(&app, &seen, surface);
 
     // The show's details, rotated and split at the largest text: the
     // episode stays selected by identity and Close stays reachable.

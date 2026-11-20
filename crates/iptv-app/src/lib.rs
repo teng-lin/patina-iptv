@@ -1227,6 +1227,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 recordings_view::open(ui);
                 true
             }
+            (ViewMode::Fullscreen, _, false) if vod_view::return_from_player(ui) => true,
             _ if ui.player_surface == 0 && desktop::fullscreen() => {
                 desktop::set_fullscreen(false);
                 true
