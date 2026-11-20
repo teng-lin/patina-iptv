@@ -85,39 +85,21 @@ impl GuideHeader {
         // The programme's width if the shortcuts stayed beside it, with the
         // preview as that arrangement draws it.
         let (_, beside) = fit(width, height, 0.0, 0.0, HEADER_MAX_SHARE);
-        let room = width - 2.0 * PREVIEW_MARGIN - beside - 2.0 * COLUMN_GAP * scale;
-        let shortcuts = if Class::of(width, text) == Class::Compact
-            || room < (SHORTCUTS_W + DETAILS_MIN_W) * text
-        {
+        let needed = (SHORTCUTS_W + DETAILS_MIN_W) * text;
+        let room = |preview: f32| width - 2.0 * PREVIEW_MARGIN - preview - 2.0 * COLUMN_GAP * scale;
+        let mut shortcuts = if Class::of(width, text) == Class::Compact || room(beside) < needed {
             Shortcuts::Below
         } else {
             Shortcuts::Beside
         };
-        let (row, row_gap) = match shortcuts {
-            Shortcuts::Beside => (0.0, 0.0),
-            Shortcuts::Below => (
-                (SHORTCUTS_ROW * scale * font.max(1.0)).round(),
-                (SHORTCUTS_GAP * scale).round(),
-            ),
-        };
-        // The programme's column, with the preview at its widest share (so
-        // never narrower than drawn), and the room its title and times take.
-        let side = match shortcuts {
-            Shortcuts::Beside => SHORTCUTS_W * text + COLUMN_GAP * scale,
-            Shortcuts::Below => 0.0,
-        };
-        let column = width
-            - 2.0 * PREVIEW_MARGIN
-            - (width * PREVIEW_SHARE).round()
-            - COLUMN_GAP * scale
-            - side;
-        let details = details_height(column, scale, text);
-        let most = if text >= LARGE_TEXT {
-            LARGE_TEXT_MAX_SHARE
-        } else {
-            HEADER_MAX_SHARE
-        };
-        let (height, w) = fit(width, height, row + row_gap, details, most);
+        let mut arranged = arrange(width, height, scale, font, shortcuts);
+        // A header grown for the programme widens its preview: beside, the
+        // columns must still have their room next to the preview it draws.
+        if shortcuts == Shortcuts::Beside && room((arranged.0).1) < needed {
+            shortcuts = Shortcuts::Below;
+            arranged = arrange(width, height, scale, font, shortcuts);
+        }
+        let ((height, w), (row, row_gap)) = arranged;
         Self {
             height,
             preview: (w, (w * 9.0 / 16.0).round()),
@@ -126,6 +108,43 @@ impl GuideHeader {
             row_gap,
         }
     }
+}
+
+/// The header's height and preview width, and the shortcuts' row and gap,
+/// for the arrangement `shortcuts`.
+fn arrange(
+    width: f32,
+    height: f32,
+    scale: f32,
+    font: f32,
+    shortcuts: Shortcuts,
+) -> ((f32, f32), (f32, f32)) {
+    let text = scale * font;
+    let (row, row_gap) = match shortcuts {
+        Shortcuts::Beside => (0.0, 0.0),
+        Shortcuts::Below => (
+            (SHORTCUTS_ROW * scale * font.max(1.0)).round(),
+            (SHORTCUTS_GAP * scale).round(),
+        ),
+    };
+    // The programme's column, with the preview at its widest share (so
+    // never narrower than drawn), and the room its title and times take.
+    let side = match shortcuts {
+        Shortcuts::Beside => SHORTCUTS_W * text + COLUMN_GAP * scale,
+        Shortcuts::Below => 0.0,
+    };
+    let column =
+        width - 2.0 * PREVIEW_MARGIN - (width * PREVIEW_SHARE).round() - COLUMN_GAP * scale - side;
+    let details = details_height(column, scale, text);
+    let most = if text >= LARGE_TEXT {
+        LARGE_TEXT_MAX_SHARE
+    } else {
+        HEADER_MAX_SHARE
+    };
+    (
+        fit(width, height, row + row_gap, details, most),
+        (row, row_gap),
+    )
 }
 
 /// The height (points) the focused programme's title and times take in a
@@ -331,6 +350,28 @@ mod tests {
             details_height(200.0, 1.0, 1.0),
             27.0 + 6.0 + 21.0 + 12.0 + 21.0
         );
+    }
+
+    #[test]
+    fn beside_keeps_its_room_next_to_the_preview_it_draws() {
+        // A short window whose header grows for the programme widens its
+        // preview: where the columns would then lack their room beside it,
+        // the shortcuts go below.
+        for (w, h, scale, font) in [
+            (577.0, 240.0, 0.8, 1.0),
+            (760.0, 480.0, 0.8, 1.0),
+            (1280.0, 720.0, 0.875, 1.0),
+            (960.0, 300.0, 0.8, 1.15),
+        ] {
+            let g = GuideHeader::of(w, h, scale, font);
+            if g.shortcuts == Shortcuts::Beside {
+                let room = w - 2.0 * PREVIEW_MARGIN - g.preview.0 - 2.0 * COLUMN_GAP * scale;
+                assert!(
+                    room >= (SHORTCUTS_W + DETAILS_MIN_W) * scale * font,
+                    "{w}x{h}: {g:?}"
+                );
+            }
+        }
     }
 
     #[test]
