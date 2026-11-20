@@ -184,6 +184,40 @@ pub(super) fn job_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
                 .child(when(
                     move || job().is_some_and(|j| !j.status.active()),
                     move || control(ui, size, job, Icon::Trash, "Delete recording"),
+                ))
+                // For touch and a pointer: every action of the row (Play
+                // from beginning, Cancel repeating schedule, …) that long
+                // press, right-click and Menu open. Keys hide it.
+                .child(when(
+                    move || !ui.keys_shown() && job().is_some(),
+                    move || {
+                        view()
+                            .size(move || size.px(ui_kit::TOUCH))
+                            .flex_shrink_0()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                ui_kit::round_more(
+                                    || 32.0,
+                                    crate::play_bar::back_bg(ui),
+                                    move || {
+                                        let name =
+                                            job().map(|j| j.request.title).unwrap_or_default();
+                                        crate::i18n::trf(
+                                            "More options for {name}",
+                                            &[("name", name.as_str().into())],
+                                        )
+                                    },
+                                    move || {
+                                        ui.touched();
+                                        if let Some(j) = job() {
+                                            select_job(ui, j.id);
+                                        }
+                                    },
+                                )
+                                .test_id("recording-more"),
+                            )
+                    },
                 )),
         )
 }

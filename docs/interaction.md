@@ -3,7 +3,8 @@
 One set of rules for choosing, watching and returning, whether the viewer uses a
 TV remote, touch, or a mouse and keyboard. Platform follow-ups (#87 TV, #88
 tablet, #89 desktop) build on this contract rather than defining their own.
-[TV controls](tv-controls.md) gives the remote's key table and
+[TV controls](tv-controls.md) gives the remote's key table,
+[desktop viewing](desktop.md) the wheel, keyboard shortcuts and windows, and
 [accessibility](accessibility.md) the assistive-technology journeys.
 
 Each rule is marked **Now** (implemented today) or **Planned** (agreed in #86,
@@ -38,8 +39,9 @@ The app tracks the last input used, not the device type.
 | Pointer | Mouse or trackpad movement or click | Visible controls and hover; no key hints |
 
 - **Now:** all three modes (`iptv_core::layout::InputMode`). Each press records
-  whether a finger or a mouse, trackpad or pen made it; mouse movement over
-  full-screen video counts as Pointer. A remote's Back counts as a key. The
+  whether a finger or a mouse, trackpad or pen made it; on desktop, mouse
+  movement anywhere (and a sideways wheel in the guide) counts as Pointer,
+  without moving focus. A remote's Back counts as a key. The
   main window starts in Touch on phones and tablets (Android and iOS) and in
   Keys on TVs, desktops and terminals; a separate desktop player window
   starts in Pointer. A tablet with a keyboard
@@ -134,10 +136,11 @@ visible entry point for touch and pointer users.
   Keys hide it; they have Menu. Where touch or a pointer is usual, the
   title keeps the ⋯'s room while it is hidden, so switching input moves no
   text; on TVs and terminals the title uses that room until the ⋯ shows.
-- **Planned:** the same control for the remaining exceptions to "shortcuts are
-  optional", which still open their menu only by the shortcuts above:
-  recordings rows, and group options in the guide's groups column and the
-  channel list's groups column.
+- **Now:** the same control for recordings rows (at the end of each row)
+  and for group options in the guide's groups column and the channel
+  list's groups column (on the shown group's row; a click shows another
+  group). Right-click opens the same options there
+  ([desktop viewing](desktop.md#pointer-and-wheel)).
 
 ## Layout classes
 
@@ -200,6 +203,10 @@ They issue no playback command of their own.
   guide channel or the focused preview, the poster browser's focused title and
   a show's selected episode with its details open, on the same player node, with
   no stream opened (`tests/app/pane_collapse.rs`).
+- **Now:** on desktop, full-screen playback keeps its player, stream and
+  channel through the operating system's full screen, resizing to a narrow
+  window, display scale and text size changes, and Back returns to the same
+  channel (`tests/app/desktop_workflows.rs`).
 
 - **Now:** the first key after touch can move focus to a visible row (see
   [Input modes](#input-modes)). With `guide.autoplay` on, focus that lands on a
@@ -264,6 +271,8 @@ Unavailable actions say why, using the host's reported capabilities
   `iptv-core` wasm build and `cargo build -p iptv-app`.
 - Choosing, staying and returning: app scenarios `personalization_overlay`,
   `tv_shared_controls`, `pip_control`, `cov_nav` and `cov_nav_touch`.
+- Pointer, keyboard and windows on desktops: `desktop_workflows`, and the
+  [issue #89 desktop journey](validation/issue-89-desktop-journey.md).
 - Native behaviour on Android TV and tablets: the
   [disposable Android validation](android-validation.md) on `tv36` and `tab36`.
   Record emulator and physical-device evidence separately, with the build, OS,
