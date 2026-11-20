@@ -62,6 +62,9 @@ is below 1.0, a minor release may change behaviour.
 
 ### Fixed
 
+- iPad: a mostly sideways diagonal swipe in the guide, up to about 1.5
+  across for every 1 down, now pans the timeline instead of scrolling the
+  channels. Taps that wobble sideways by less than 10 points still play.
 - TV remote: a press of OK (or another key with a hold action) no longer
   acts on a different screen when the screen changes while the key is held,
   for example when a tap plays a channel. Holding a key also keeps the info

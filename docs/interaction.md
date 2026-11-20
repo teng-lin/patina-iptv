@@ -90,7 +90,8 @@ In the guide:
 - **Now:** a drag decides its direction once it has moved 10 points: mostly
   vertical scrolls the channels, mostly horizontal pans the timeline (a
   diagonal goes the way of its larger part, and stays that way; on an
-  iPad a steep diagonal still scrolls the channels, #149), and a
+  iPad the channel list's own scrolling waits for that decision, so a
+  1.5:1 diagonal pans too: NSH's iOS pan gate, `nsh.rev`), and a
   drag released while moving flings on and slows down. A gesture the
   system cancels (a notification shade, a call) stops where it is,
   without a fling. A drag that started on a channel or a programme, past
