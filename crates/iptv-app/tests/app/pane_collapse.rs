@@ -219,7 +219,7 @@ fn resizing_the_guide_keeps_the_focused_channel_and_the_playing_preview() {
 }
 
 /// A generated movie and show on a local Xtream mock.
-fn library(home: &crate::isolated::Home) -> Server {
+pub(crate) fn library(home: &crate::isolated::Home) -> Server {
     let server = Server::start(&[(
         "/player_api.php",
         r#"{

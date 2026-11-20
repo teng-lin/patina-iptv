@@ -29,8 +29,7 @@ fn current(ui: Ui) -> Option<Target> {
         }
         Context::Guide
             if ui.mode.get() != ViewMode::Fullscreen
-                && ui.focus.with(|f| f.pane == crate::guide::Pane::Guide)
-                && !ui.guide_panning.get() =>
+                && ui.focus.with(|f| f.pane == crate::guide::Pane::Guide) =>
         {
             let v = crate::lists::view(ui);
             if ui.focus.with(|f| f.program(&v).airing(f.now)) != Airing::Live {
@@ -75,11 +74,39 @@ fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
         stay: surface == Some(Surface::Player) || s.bool(stay, at),
     }
 }
+/// Holds guide autoplay: the main window closed while recordings run, so
+/// nothing may start playing in the hidden window, nor when it shows again,
+/// until the viewer moves to another channel.
+pub fn hold(ui: Ui) {
+    let focused = untracked(|| current(ui)).map(|t| t.key);
+    ui.autoplay_held.set(Some(focused));
+    ui.browse_playback.set(Default::default());
+}
+
+/// `policy`, with autoplay off while it is held on `target`; moving to
+/// another target releases the hold.
+fn policy_for(ui: Ui, target: Option<&Target>) -> Policy {
+    let mut p = policy(ui, target.map(|t| t.surface));
+    let key = target.map(|t| t.key.clone());
+    match ui.autoplay_held.get() {
+        Some(held) if held == key || key.is_none() => p.autoplay = false,
+        Some(_) => untracked(|| ui.autoplay_held.set(None)),
+        None => {}
+    }
+    p
+}
 fn sync(ui: Ui) {
     let target = current(ui);
-    let p = policy(ui, target.as_ref().map(|t| t.surface));
+    let p = policy_for(ui, target.as_ref());
     let now = ui.now_ms();
     ui.browse_playback.update(|b| b.focus(target, p, now));
+}
+/// A touch or mouse drag in the guide or a list crossed the drag
+/// threshold: a preview waiting to start is cancelled; a tap's choice
+/// still plays (`BrowsePlayback::dragged`).
+pub fn dragged(ui: Ui) {
+    ui.browse_playback.update(|b| b.dragged());
+    activity(ui);
 }
 pub fn activity(ui: Ui) {
     ui.browse_playback.update(|b| b.activity(ui.now_ms()));
@@ -168,7 +195,7 @@ fn arm(ui: Ui) {
 pub fn bind(ui: Ui) {
     effect(move || {
         let target = current(ui);
-        let p = policy(ui, target.as_ref().map(|t| t.surface));
+        let p = policy_for(ui, target.as_ref());
         let playing = ui
             .playing
             .get()

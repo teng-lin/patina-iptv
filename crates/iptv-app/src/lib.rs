@@ -39,6 +39,7 @@ mod i18n;
 #[cfg(feature = "test-support")]
 pub use i18n::pseudo_fixed_for_test;
 mod input;
+mod interruption;
 mod keyboard;
 mod list_rows;
 mod lists;
@@ -227,8 +228,12 @@ pub struct Ui {
     /// The remote's focus; its `channel` is a row of `list`.
     pub focus: Signal<Focus>,
     pub browse_playback: Signal<iptv_core::browse_playback::BrowsePlayback>,
+    /// Guide autoplay held after the main window closed with recordings
+    /// running: the channel key focused then (`browse_playback::hold`).
+    pub autoplay_held: Signal<Option<Option<String>>>,
     pub pending_zap: Signal<Option<iptv_core::browse_playback::Target>>,
-    pub guide_panning: Signal<bool>,
+    /// The host's audio interruptions' policy (`interruption.rs`).
+    pub interruptions: Signal<iptv_core::interruption::Interruptions>,
     /// The list the guide shows: catalog channels (`lists.rs`).
     pub list: Signal<Rc<ChannelList>>,
     /// The playing channel (catalog).
@@ -337,8 +342,9 @@ impl Ui {
             app,
             focus: signal(Focus::default()),
             browse_playback: signal(Default::default()),
+            autoplay_held: signal(None),
             pending_zap: signal(None),
-            guide_panning: signal(false),
+            interruptions: signal(Default::default()),
             list: signal(Rc::new(ChannelList::build(
                 iptv_core::lists::ALL,
                 &*schedule(),
@@ -837,6 +843,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     let ui = Ui::new(SharedUi::new(), player::Player::new());
     settings::bind(ui);
     browse_playback::bind(ui);
+    interruption::bind(ui);
     desktop::bind(ui);
     desktop::menus(ui);
     // Leaving full screen closes the panels.
@@ -909,6 +916,9 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
         .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
         // A moving mouse over full-screen video shows the player panels.
         .on_mouse_move(move |e: &MouseEvent| pointer_moved(ui, e))
+        .on_mouse_enter(move |e: &MouseEvent| {
+            desktop::pointer_entered(ui.player_surface, e.page_position.x.0, e.page_position.y.0)
+        })
         // Which pointer presses the controls: touch or pointer mode.
         .on_touch(move |e: &nsh_core::TouchEvent| pointer_down(ui, e))
         // Layers, bottom to top: opaque backdrop, video (multiview's other
@@ -1071,12 +1081,27 @@ fn toggle_panels(ui: Ui) {
     }
 }
 
+/// The pointer is what the viewer uses now: Pointer mode, without the
+/// side effects of a press ([`Ui::touched`]).
+pub(crate) fn pointer_input(ui: Ui) {
+    if ui.input.get_untracked() != Input::Pointer {
+        ui.last_press.set(Input::Pointer);
+        ui.input.set(Input::Pointer);
+    }
+}
+
 /// The mouse moved: over full-screen video with nothing open above the
 /// panels, it shows the play bar (multiview's pointer chrome over its
 /// grid) and keeps it while it moves.
 fn pointer_moved(ui: Ui, e: &MouseEvent) {
     let open = untracked(|| ui.overlay_open(overlays::Overlay::keeps_pointer_from_play_bar));
     let (x, y) = (e.page_position.x.0, e.page_position.y.0);
+    // Anywhere else (the guide, lists, Recordings), a mouse that really
+    // moved after keys switches to Pointer, so the ⋯ controls show: no
+    // focus moves and no playback is scheduled or cancelled.
+    if desktop::pointer_travelled(ui.player_surface, x, y) {
+        pointer_input(ui);
+    }
     if ui.mode.get_untracked() != ViewMode::Fullscreen
         || open
         || !desktop::pointer_moved(x, y, ui.now_ms())

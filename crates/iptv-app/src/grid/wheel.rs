@@ -26,6 +26,9 @@ const PAD: f32 = if cfg!(any(target_os = "android", target_os = "ios")) {
 pub(super) fn trackball(pan: Pan, grid: impl IntoElement + 'static) -> Scroll {
     let width = signal(0.0_f32);
     let last = stored(PAD);
+    // A swipe's glide after the fingers lift: it pans on, but it is not the
+    // viewer's input, so it never takes the app out of Keys mode.
+    let coasting = stored(false);
     let handle = element_ref();
     let rest = move || {
         pan.settle_wheel();
@@ -49,11 +52,21 @@ pub(super) fn trackball(pan: Pan, grid: impl IntoElement + 'static) -> Scroll {
             // A jump (the offset first set, the scroll recentred) is no
             // wheel: only the steps are.
             if dx != 0.0 && dx.abs() < PAD / 4.0 {
+                if !coasting.with(|c| *c) {
+                    crate::pointer_input(pan.ui());
+                }
                 pan.wheeled(dx);
             }
         })
-        .on_scroll_end(move |_: &Point<Points>| rest())
-        .on_momentum_end(move |_: &Point<Points>| rest())
+        .on_momentum_start(move |_: &Point<Points>| coasting.with(|c| *c = true))
+        .on_scroll_end(move |_: &Point<Points>| {
+            coasting.with(|c| *c = false);
+            rest()
+        })
+        .on_momentum_end(move |_: &Point<Points>| {
+            coasting.with(|c| *c = false);
+            rest()
+        })
         .child(
             view()
                 .h_full()

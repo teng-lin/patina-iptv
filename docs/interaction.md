@@ -3,7 +3,8 @@
 One set of rules for choosing, watching and returning, whether the viewer uses a
 TV remote, touch, or a mouse and keyboard. Platform follow-ups (#87 TV, #88
 tablet, #89 desktop) build on this contract rather than defining their own.
-[TV controls](tv-controls.md) gives the remote's key table and
+[TV controls](tv-controls.md) gives the remote's key table,
+[desktop viewing](desktop.md) the wheel, keyboard shortcuts and windows, and
 [accessibility](accessibility.md) the assistive-technology journeys.
 
 Each rule is marked **Now** (implemented today) or **Planned** (agreed in #86,
@@ -38,8 +39,9 @@ The app tracks the last input used, not the device type.
 | Pointer | Mouse or trackpad movement or click | Visible controls and hover; no key hints |
 
 - **Now:** all three modes (`iptv_core::layout::InputMode`). Each press records
-  whether a finger or a mouse, trackpad or pen made it; mouse movement over
-  full-screen video counts as Pointer. A remote's Back counts as a key. The
+  whether a finger or a mouse, trackpad or pen made it; on desktop, mouse
+  movement anywhere (and a sideways wheel in the guide) counts as Pointer,
+  without moving focus. A remote's Back counts as a key. The
   main window starts in Touch on phones and tablets (Android and iOS) and in
   Keys on TVs, desktops and terminals; a separate desktop player window
   starts in Pointer. A tablet with a keyboard
@@ -86,6 +88,25 @@ In the guide:
   layouts. A replay and the channel already playing always go full screen.
   `guide.autoplay` tunes the focused channel while browsing, without a choice.
 - **Now:** opening a programme's details or menu never starts playback.
+
+### Touch gestures in the guide
+
+- **Now:** a drag decides its direction once it has moved 10 points: mostly
+  vertical scrolls the channels, mostly horizontal pans the timeline (a
+  diagonal goes the way of its larger part, and stays that way), and a
+  drag released while moving flings on and slows down. A gesture the
+  system cancels (a notification shade, a call) stops where it is,
+  without a fling. A drag that started on a channel or a programme, past
+  or upcoming, never chooses it: under the threshold a touch is still a
+  tap (`iptv_core::timeline`).
+- **Now:** crossing the drag threshold, in the guide or the channel list,
+  cancels a preview `guide.autoplay` was waiting to start; it does not
+  come back until the focus moves to another channel. A tap's own choice
+  still plays after its switch delay. Scrolling never tunes, records or
+  opens a menu or details (`BrowsePlayback::dragged`;
+  `tests/app/tablet_gestures.rs`).
+- **Now:** a day of listings that a pan pages in keeps the channels where
+  the finger scrolled them.
 
 "Full screen" means the video fills Patina's screen or window. On desktop it
 never resizes the operating-system window; that is a separate action (double-click
@@ -138,10 +159,11 @@ visible entry point for touch and pointer users.
   Keys hide it; they have Menu. Where touch or a pointer is usual, the
   title keeps the ⋯'s room while it is hidden, so switching input moves no
   text; on TVs and terminals the title uses that room until the ⋯ shows.
-- **Planned:** the same control for the remaining exceptions to "shortcuts are
-  optional", which still open their menu only by the shortcuts above:
-  recordings rows, and group options in the guide's groups column and the
-  channel list's groups column.
+- **Now:** the same control for recordings rows (at the end of each row)
+  and for group options in the guide's groups column and the channel
+  list's groups column (on the shown group's row; a click shows another
+  group). Right-click opens the same options there
+  ([desktop viewing](desktop.md#pointer-and-wheel)).
 
 ## Layout classes
 
@@ -198,10 +220,62 @@ They issue no playback command of their own.
   guide channel or the focused preview, the poster browser's focused title and
   a show's selected episode with its details open, on the same player node, with
   no stream opened (`tests/app/pane_collapse.rs`).
+- **Now:** on a tablet, rotating, half and third split-screen windows and
+  system text up to 2.0 keep a playing movie full screen with its progress,
+  and a show's details with the selected episode, on the same player view
+  (never detached or re-parented) with no stream opened; the play bar's
+  Back and play/pause and the details' Close stay inside the window
+  (`tests/app/tablet_journey.rs`).
+- **Now:** on desktop, full-screen playback keeps its player, stream and
+  channel through the operating system's full screen, resizing to a narrow
+  window, display scale and text size changes, and Back returns to the same
+  channel (`tests/app/desktop_workflows.rs`).
 
 - **Now:** the first key after touch can move focus to a visible row (see
   [Input modes](#input-modes)). With `guide.autoplay` on, focus that lands on a
   live programme after a pane closes can tune it.
+
+## Text entry
+
+- **Now:** while a text field has the focus, the keys typed go to it: a
+  letter, a digit or Space that is a player shortcut elsewhere neither
+  pauses, mutes nor zaps. A software keyboard keeps the field above it, in
+  landscape, portrait and split screen, and its dismissal ends the editing
+  ([keyboard dismissal](../crates/iptv-app/tests/app/keyboard_dismissal.rs)).
+  After it, a hardware keyboard's first key and a touch each drive the
+  results as their input mode does (`tests/app/tablet_journey.rs`).
+
+## Interruptions and the background
+
+The host reports what happens to the app's sound and window; one portable
+policy decides what playback does (`iptv_core::interruption`). It only
+pauses and resumes: it never opens, retunes or restarts a stream.
+
+| Host report | Playback |
+|---|---|
+| Another app takes the audio (its own media) | Pauses; the viewer resumes |
+| A call or a prompt takes the audio for a while | Pauses; resumes when it ends, unless the viewer played, paused, stopped or chose something else meanwhile |
+| Headphones unplugged, a Bluetooth headset disconnected | Pauses; never resumes by itself |
+| A notification's sound | Plays on, quieter (the system ducks it) |
+| Home or another app, picture in picture off | Stops and closes the stream; on return it reopens what played, after fresh admission |
+| Home with picture in picture on | Plays on in the window, on the same player and stream |
+| The picture-in-picture window closed | Stops as above |
+
+- **Now (Android):** one audio focus for all the activity's players,
+  held while any means to play aloud (`AudioFocusHost.kt`); the changes
+  reach the app as the player's `audio` event. A stream the viewer stopped
+  stays stopped whatever the focus does, and resuming opens no second
+  provider connection (`tests/app/tablet_journey.rs`). The background
+  stop and return, and picture in picture, as before (`PlayerComponent.kt`,
+  `PipHost.kt`).
+- **Now:** the Recordings screen states what limits a recording in the
+  background, from what the host reports: precise background starts
+  unavailable, a wake that could not be registered, or a device that must
+  stay awake (`iptv_core::capabilities::Recording::notice`).
+- **Planned:** the picture-in-picture action says that closing its window
+  stops playback; iPad's audio session (interruptions and route changes)
+  under the same policy, and its foreground-only capture explained at the
+  recording action.
 
 ## Empty and unavailable states
 
@@ -248,6 +322,11 @@ Unavailable actions say why, using the host's reported capabilities
   `iptv-core` wasm build and `cargo build -p iptv-app`.
 - Choosing, staying and returning: app scenarios `personalization_overlay`,
   `tv_shared_controls`, `pip_control`, `cov_nav` and `cov_nav_touch`.
+- Tablet gestures, the touch journey, rotation, split screen, large text,
+  text entry and interruptions: `tablet_gestures` and `tablet_journey`,
+  and the [issue #88 tablet validation](validation/issue-88-tablet-journey.md).
+- Pointer, keyboard and windows on desktops: `desktop_workflows`, and the
+  [issue #89 desktop journey](validation/issue-89-desktop-journey.md).
 - Native behaviour on Android TV and tablets: the
   [disposable Android validation](android-validation.md) on `tv36` and `tab36`.
   Record emulator and physical-device evidence separately, with the build, OS,

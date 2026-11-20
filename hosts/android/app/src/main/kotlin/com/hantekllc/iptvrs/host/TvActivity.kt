@@ -28,6 +28,10 @@ import dev.nshtv.RemoteKeys
  * Picture in picture ([PipHost]) only pauses the activity, so the main
  * player plays on in the window; closing the window stops the activity,
  * which stops it as above.
+ *
+ * One audio focus for all players ([AudioFocusHost]): a call, another
+ * app's media or unplugged headphones reach the app as the players'
+ * `audio` event, and the app's policy pauses or resumes.
  */
 class TvActivity : Activity() {
     private lateinit var nsh: NshView
@@ -38,6 +42,7 @@ class TvActivity : Activity() {
     /** Between onStart and onStop. */
     private var started = false
     private lateinit var pip: PipHost
+    private lateinit var audio: AudioFocusHost
     private lateinit var backups: BackupHost
 
     override fun onCreate(state: Bundle?) {
@@ -53,6 +58,7 @@ class TvActivity : Activity() {
         // heap ceiling fits 32-bit Android, and zero keeps the default stack.
         nsh.setLimits(4095, 0, Int.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE)
         pip = PipHost(this)
+        audio = AudioFocusHost(this)
         backups = BackupHost(this)
         nsh.registerComponent(BackupComponent.NAME) { context ->
             BackupComponent(this, context, backups)
@@ -63,8 +69,9 @@ class TvActivity : Activity() {
             pip.destroyed(p)
         }
         nsh.registerComponent(PlayerComponent.NAME) { context ->
-            PlayerComponent(this, context, gone, pip).also {
+            PlayerComponent(this, context, gone, pip, audio).also {
                 players.add(it)
+                audio.mounted(it)
                 if (!started) it.background()
             }
         }
@@ -198,6 +205,7 @@ class TvActivity : Activity() {
     override fun onDestroy() {
         backups.destroy()
         pip.destroy()
+        audio.destroy()
         nsh.destroy()
         super.onDestroy()
     }

@@ -7,12 +7,25 @@ is below 1.0, a minor release may change behaviour.
 
 ## [Unreleased]
 
+### Added
+
+- Desktop: a visible ⋯ "More options" on recordings rows and on the shown
+  group in the guide's and the channel list's groups columns, so every
+  secondary action has a pointer entry point beside right-click. A second
+  player window's title says when it is muted. The desktop's wheel,
+  shortcut, window and display rules are documented in `docs/desktop.md`.
+
 ### Changed
 
 - When Patina plays the last channel on start and that channel is one of the
   playlist's favourites, Back from full screen now opens the Favourites list
   with the channel focused instead of All channels. A channel that is not a
   favourite of that playlist still returns to All channels.
+- Desktop: closing the main window while recordings keep Patina running now
+  also closes every player window and the picture-in-picture window, as
+  quitting does; only the recorder runs on. On macOS and Windows a window
+  left without a reachable title bar after a display is removed moves onto
+  the nearest remaining display.
 - Choosing a channel in the guide now watches it full screen in both guide
   layouts. One setting, **Keep the guide after choosing**, now applies to both
   layouts. It replaces the separate setting for the guide drawn over video,
@@ -28,6 +41,14 @@ is below 1.0, a minor release may change behaviour.
 - Catalog schema 24 records movie and series lists that failed to download.
   Downgrading an existing catalog is unsupported; retain a compatible backup
   before upgrading.
+- Tablets: scrolling the guide's channels or the channel list, or panning its
+  timeline, cancels a preview that **Play the focused channel by itself**
+  was about to start; a channel you tapped still plays. Panning into another day no
+  longer scrolls the channels back to the focused one.
+- Android: a call or a navigation prompt pauses playback and resumes it
+  when it ends; another app's media and unplugged headphones or a
+  disconnected Bluetooth headset pause it until you play again. A stopped
+  channel never restarts by itself. All players share one audio focus.
 
 ## [0.1.5] - 2026-11-17
 

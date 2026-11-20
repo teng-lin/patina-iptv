@@ -24,6 +24,30 @@ wire_enum! {
         Format = "format",
         Pip = "pip",
         PipAction = "pipAction",
+        Audio = "audio",
+    }
+}
+
+wire_enum! {
+    /// What happened to the host's audio (`iptv_core::interruption`).
+    pub enum AudioChange {
+        FocusLoss = "focusLoss",
+        FocusLossTransient = "focusLossTransient",
+        FocusGain = "focusGain",
+        Noisy = "noisy",
+    }
+}
+
+impl AudioChange {
+    /// The core policy's name for it.
+    pub fn interruption(self) -> iptv_core::interruption::Interruption {
+        use iptv_core::interruption::Interruption;
+        match self {
+            Self::FocusLoss => Interruption::FocusLoss,
+            Self::FocusLossTransient => Interruption::FocusLossTransient,
+            Self::FocusGain => Interruption::FocusGain,
+            Self::Noisy => Interruption::Noisy,
+        }
     }
 }
 
@@ -78,6 +102,8 @@ pub enum PlayerEvent {
     },
     /// `pipAction` {action}.
     PipAction(PipAction),
+    /// `audio` {change}: the audio focus or route changed (Android).
+    Audio(AudioChange),
 }
 
 /// Why an event was not read, with what was in it: the shell still does
@@ -100,6 +126,8 @@ pub enum PlayerEventError {
     /// A `pipAction` that names none of the window's buttons: the name it
     /// gave (`?` when it gave none).
     UnknownAction(String),
+    /// An `audio` that names no change: the name it gave (`?` when none).
+    UnknownAudio(String),
 }
 
 impl fmt::Display for PlayerEventError {
@@ -113,6 +141,7 @@ impl fmt::Display for PlayerEventError {
             Self::NoPosition => f.write_str("`position` has no `ms`"),
             Self::NoRenderToken => f.write_str("`firstRender` has no positive source token"),
             Self::UnknownAction(name) => write!(f, "`pipAction` names no button: {name}"),
+            Self::UnknownAudio(name) => write!(f, "`audio` names no change: {name}"),
         }
     }
 }
@@ -133,6 +162,7 @@ impl PlayerEvent {
             Self::Format { .. } => PlayerEventKind::Format,
             Self::Pip { .. } => PlayerEventKind::Pip,
             Self::PipAction(_) => PlayerEventKind::PipAction,
+            Self::Audio(_) => PlayerEventKind::Audio,
         }
     }
 
@@ -177,6 +207,7 @@ impl PlayerEvent {
                 active,
             } => json!({ "supported": supported, "tv": tv, "active": active }),
             Self::PipAction(action) => json!({ "action": action.wire() }),
+            Self::Audio(change) => json!({ "change": change.wire() }),
         }
     }
 
@@ -260,6 +291,12 @@ impl PlayerEvent {
                 let action = PipAction::from_wire(name)
                     .ok_or_else(|| PlayerEventError::UnknownAction(name.to_owned()))?;
                 Self::PipAction(action)
+            }
+            PlayerEventKind::Audio => {
+                let name = data["change"].as_str().unwrap_or("?");
+                let change = AudioChange::from_wire(name)
+                    .ok_or_else(|| PlayerEventError::UnknownAudio(name.to_owned()))?;
+                Self::Audio(change)
             }
         })
     }
@@ -353,6 +390,10 @@ mod tests {
             PlayerEvent::PipAction(PipAction::Pause),
             PlayerEvent::PipAction(PipAction::Next),
             PlayerEvent::PipAction(PipAction::Previous),
+            PlayerEvent::Audio(AudioChange::FocusLoss),
+            PlayerEvent::Audio(AudioChange::FocusLossTransient),
+            PlayerEvent::Audio(AudioChange::FocusGain),
+            PlayerEvent::Audio(AudioChange::Noisy),
         ]
     }
 
@@ -392,6 +433,10 @@ mod tests {
         for action in PipAction::ALL {
             let event = PlayerEvent::PipAction(*action);
             assert!(expected.contains(&event), "no `{}` action", action.wire());
+        }
+        for change in AudioChange::ALL {
+            let event = PlayerEvent::Audio(*change);
+            assert!(expected.contains(&event), "no `{}` change", change.wire());
         }
     }
 
@@ -498,6 +543,10 @@ mod tests {
             action("rewind")
         );
         assert_eq!(decode("pipAction", json!({})), action("?"));
+        assert_eq!(
+            decode("audio", json!({ "change": "duck" })),
+            Err(PlayerEventError::UnknownAudio("duck".into()))
+        );
         assert_eq!(
             PlayerEventError::UnknownAction("rewind".into()).to_string(),
             "`pipAction` names no button: rewind"
