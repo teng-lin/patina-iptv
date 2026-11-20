@@ -182,7 +182,6 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
         ("guide.fullscreen_timeout", secs(0, 60, 1, 0), GL, ""),
         ("guide.stay_on_list", boolean(false), GL, ""),
         ("guide.stay_on_guide", boolean(false), GL, ""),
-        ("guide.stay_on_guide_overlay", boolean(true), GL, ""),
         ("guide.back_returns_to_now", boolean(true), GL, ""),
         // Logos.
         ("logos.source", choice(&c::LOGO_SOURCE, "playlist"), PL, ""),
@@ -380,10 +379,6 @@ const CONDITIONS: &[(&str, &str)] = &[
     (
         "guide.now_highlight_style",
         "Visible if guide.highlight_now IsTrue",
-    ),
-    (
-        "guide.stay_on_guide_overlay",
-        "Visible if guide.browse_mode EnumIn([\"overlay\"])",
     ),
     ("logos.inexact_match", "Visible if logos.folder NotEmpty"),
     (

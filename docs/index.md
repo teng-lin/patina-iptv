@@ -14,6 +14,7 @@ link to them instead of duplicating release or validation instructions.
 | Platform capability/support limits | [Capabilities](capabilities.md) |
 | Native framework revision and update policy | [NSH pin](nsh.md) |
 | Encryption, backups and trust boundaries | [Security model](security.md), [vulnerability reporting](../SECURITY.md) |
+| Choosing, watching and returning on every input | [Interaction contract](interaction.md) |
 | Remote interaction, accessibility and translations | [TV controls](tv-controls.md), [accessibility](accessibility.md), [localization](localization.md) |
 | Performance and recovery measurements | [Performance journeys](performance-journeys.md), [recovery validation](runtime-recovery-validation.md) |
 

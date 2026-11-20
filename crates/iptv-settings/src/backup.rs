@@ -3,7 +3,7 @@
 //! ```json
 //! {
 //!   "format": "iptv-rs.settings",
-//!   "version": 2,
+//!   "version": 3,
 //!   "global":    { "player.info_panel_timeout": 5000 },
 //!   "playlists": { "<playlist id>": { "channels.group_sort": "name" } },
 //!   "groups":    { "<playlist id>": { "<group id>": { "channels.channel_sort": "manual" } } }
@@ -51,7 +51,7 @@ use crate::value::{KeyBinding, PressKind, Value};
 
 pub const FORMAT: &str = "iptv-rs.settings";
 /// The version [`Settings::to_json`] writes.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 const RESERVED: [&str; 5] = ["format", "version", "global", "playlists", "groups"];
 
@@ -65,11 +65,48 @@ pub struct Migration {
 
 /// Every migration, in order. Steps must be contiguous from version 1 to
 /// [`VERSION`] (checked by the test suite).
-pub static MIGRATIONS: &[Migration] = &[Migration {
-    from: 1,
-    summary: "player.panel_timeout_secs (whole seconds) → player.controls_panel_timeout (ms)",
-    apply: v1_panel_timeout_to_ms,
-}];
+pub static MIGRATIONS: &[Migration] = &[
+    Migration {
+        from: 1,
+        summary: "player.panel_timeout_secs (whole seconds) → player.controls_panel_timeout (ms)",
+        apply: v1_panel_timeout_to_ms,
+    },
+    Migration {
+        from: 2,
+        summary: "guide.stay_on_guide_overlay folds into guide.stay_on_guide (both layouts)",
+        apply: v2_one_stay_on_guide,
+    },
+];
+
+/// One "keep the guide open" choice now covers both guide layouts. The
+/// choice made for the layout in use wins; otherwise an explicit choice
+/// for the other layout carries over; otherwise the default (off) applies.
+/// The overlay layout's old default (on) was never written, so it is not
+/// carried over. Only a boolean counts as a choice: an invalid old value is
+/// dropped and an invalid shared value is treated as absent.
+fn v2_one_stay_on_guide(doc: &mut Map<String, Json>) {
+    let old = "guide.stay_on_guide_overlay";
+    let new = "guide.stay_on_guide";
+    let mode = "guide.browse_mode";
+    let global_overlay = doc
+        .get("global")
+        .and_then(|g| g.get(mode))
+        .and_then(Json::as_str)
+        == Some("overlay");
+    for_each_layer(doc, &mut |layer| {
+        let Some(overlay_choice) = layer.remove(old).as_ref().and_then(Json::as_bool) else {
+            return;
+        };
+        let overlay = match layer.get(mode).and_then(Json::as_str) {
+            Some(m) => m == "overlay",
+            None => global_overlay,
+        };
+        let shared_choice = layer.get(new).and_then(Json::as_bool);
+        if overlay || shared_choice.is_none() {
+            layer.insert(new.to_owned(), Json::Bool(overlay_choice));
+        }
+    });
+}
 
 fn v1_panel_timeout_to_ms(doc: &mut Map<String, Json>) {
     for_each_layer(doc, &mut |layer| {

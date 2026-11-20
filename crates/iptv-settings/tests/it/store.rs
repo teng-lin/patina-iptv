@@ -276,10 +276,21 @@ fn visibility_follows_bool_enum_and_text_conditions() {
     st.set("general.confirm_exit", Value::Bool(false)).unwrap();
     assert_eq!(st.is_visible("general.confirm_exit_window", G), Ok(false));
 
-    assert_eq!(st.is_visible("guide.stay_on_guide_overlay", G), Ok(false));
-    st.set("guide.browse_mode", Value::choice("overlay"))
+    st.set(
+        "recordings.reminder_action",
+        Value::choice("switch_channel"),
+    )
+    .unwrap();
+    assert_eq!(
+        st.is_visible("recordings.reminder_popup_timeout", G),
+        Ok(false)
+    );
+    st.set("recordings.reminder_action", Value::choice("ask"))
         .unwrap();
-    assert_eq!(st.is_visible("guide.stay_on_guide_overlay", G), Ok(true));
+    assert_eq!(
+        st.is_visible("recordings.reminder_popup_timeout", G),
+        Ok(true)
+    );
 
     assert_eq!(st.is_visible("logos.inexact_match", G), Ok(false));
     st.set("logos.folder", Value::text("/storage/logos"))

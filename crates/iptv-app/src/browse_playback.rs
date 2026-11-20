@@ -57,8 +57,9 @@ fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
     let s = crate::settings::read(ui);
     let at = &iptv_settings::Target::Global;
     let stay = match surface {
-        Some(Surface::Guide) => keys::GUIDE_STAY_ON_GUIDE,
-        Some(Surface::Overlay) => keys::GUIDE_STAY_ON_GUIDE_OVERLAY,
+        // One choice for both guide layouts: choosing a channel watches it
+        // full screen unless the viewer keeps the guide open.
+        Some(Surface::Guide | Surface::Overlay) => keys::GUIDE_STAY_ON_GUIDE,
         _ => keys::GUIDE_STAY_ON_LIST,
     };
     Policy {

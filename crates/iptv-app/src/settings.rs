@@ -52,7 +52,6 @@ pub const WIRED: &[&str] = &[
     "guide.switch_delay",
     "guide.fullscreen_timeout",
     "guide.stay_on_guide",
-    "guide.stay_on_guide_overlay",
     "guide.stay_on_list",
     "guide.browse_mode",
     "guide.list_browse_mode",
