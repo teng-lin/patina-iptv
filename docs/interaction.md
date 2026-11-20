@@ -40,8 +40,9 @@ The app tracks the last input used, not the device type.
 - **Now:** all three modes (`iptv_core::layout::InputMode`). Each press records
   whether a finger or a mouse, trackpad or pen made it; mouse movement over
   full-screen video counts as Pointer. A remote's Back counts as a key. The
-  main window starts in Touch on an iPad and in Keys on every other host; a
-  separate desktop player window starts in Pointer. A tablet with a keyboard
+  main window starts in Touch on phones and tablets (Android and iOS) and in
+  Keys on TVs, desktops and terminals; a separate desktop player window
+  starts in Pointer. A tablet with a keyboard
   and mouse switches between modes as each is used.
 - **Now:** the first key after touch or a pointer moves focus onto a row on
   screen if the focused channel has scrolled out of view.
@@ -125,10 +126,18 @@ visible entry point for touch and pointer users.
   right-click open the same menu on guide programmes and channels, the channel
   list and recordings. During playback, Menu and long OK open the playback bar
   instead ([TV controls](tv-controls.md)).
-- **Now:** these menus have no visible entry point, so they are the current
-  exception to "shortcuts are optional".
-- **Planned:** a visible "more" control on the focused or tapped item for touch
-  and pointer, so the menu needs no hidden gesture.
+- **Now:** while touch or a pointer drives the app, a visible "More options"
+  control (⋯) opens the programme and channel menu: in the guide header, after
+  the focused or tapped programme's title, and at the end of each channel list
+  row. The header's ⋯ hides during an inline reorder of channels or groups,
+  and the rows' ⋯ while multiview picks a channel (rows have no menu then).
+  Keys hide it; they have Menu. Where touch or a pointer is usual, the
+  title keeps the ⋯'s room while it is hidden, so switching input moves no
+  text; on TVs and terminals the title uses that room until the ⋯ shows.
+- **Planned:** the same control for the remaining exceptions to "shortcuts are
+  optional", which still open their menu only by the shortcuts above:
+  recordings rows, and group options in the guide's groups column and the
+  channel list's groups column.
 
 ## Layout classes
 

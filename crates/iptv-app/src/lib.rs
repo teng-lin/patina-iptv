@@ -346,7 +346,6 @@ impl Ui {
                 &[],
             ))),
             playing: signal(None),
-            // An iPad is touched first: no remote hints until a key is used.
             // Until a press reports its pointer: a finger on phones and
             // tablets, the mouse on desktops.
             last_press: signal(if cfg!(any(target_os = "android", target_os = "ios")) {
@@ -354,11 +353,19 @@ impl Ui {
             } else {
                 Input::Pointer
             }),
-            input: signal(if cfg!(target_os = "ios") {
-                Input::Touch
-            } else {
-                Input::Keys
-            }),
+            // A phone or tablet is touched first: no remote hints, and its
+            // visible controls show, until a key is used. TVs, desktops and
+            // terminals start with their keys.
+            input: signal(
+                if matches!(
+                    idiom(),
+                    nsh_core::platform::Idiom::Phone | nsh_core::platform::Idiom::Pad
+                ) {
+                    Input::Touch
+                } else {
+                    Input::Keys
+                },
+            ),
             mode: signal(ViewMode::Guide),
             stats: signal(Stats::default()),
             #[cfg(feature = "test-support")]

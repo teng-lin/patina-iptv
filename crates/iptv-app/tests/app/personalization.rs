@@ -70,6 +70,22 @@ pub fn start_with_setup(
     manual: bool,
     setup: impl FnOnce(&mut Headless),
 ) -> Fixture {
+    let mut fixture = launch(home, settings, manual, |_| {}, setup);
+    let app = &mut fixture.app;
+    step(app.press("text:/^☰  /"));
+    step(app.press_key("right"));
+    fixture
+}
+
+/// The app on the host `configure` describes, as it first shows the guide:
+/// no press or key has reached it yet.
+pub fn launch(
+    home: Home,
+    settings: Settings,
+    manual: bool,
+    configure: impl FnOnce(&mut EngineConfig),
+    setup: impl FnOnce(&mut Headless),
+) -> Fixture {
     let dir = crate::isolated::data_dir(home.path());
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("settings.json"), settings.to_json_string()).unwrap();
@@ -111,11 +127,10 @@ pub fn start_with_setup(
     if manual {
         config.clock = nsh_core::time::Clock::manual(SystemTime::now());
     }
+    configure(&mut config);
     let mut app = Headless::start(config).unwrap();
     setup(&mut app);
     step(app.wait_for_within("text:★ Local A", Duration::from_secs(20)));
-    step(app.press("text:/^☰  /"));
-    step(app.press_key("right"));
     Fixture {
         home,
         path,
