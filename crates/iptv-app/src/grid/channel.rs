@@ -87,8 +87,9 @@ pub(super) fn cell(
             }
         })
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
+            // Every desktop: the menu itself leaves out what a platform
+            // lacks (Watch in new window is Linux and macOS only).
             if !crate::organization_view::guide_order_open(ui)
-                && cfg!(any(target_os = "linux", target_os = "macos"))
                 && let Some(ch) = channel.get()
             {
                 crate::menu_view::open_at(ui, ch, ui.focus.with(|f| f.now));

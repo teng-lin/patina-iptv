@@ -162,6 +162,7 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
 /// Long Back (or Stop): nothing plays (multiview's tiles neither); back to
 /// the guide.
 pub(crate) fn stop_playback(ui: Ui) {
+    crate::interruption::viewer_acted(ui);
     crate::multiview::close(ui);
     log::info!("iptv player: stopped by the viewer");
     ui.playing.set(None);
@@ -199,6 +200,7 @@ pub(crate) fn zap(ui: Ui, step: isize) {
     let Some(to) = to else {
         return;
     };
+    // Hands playback to the viewer once the channel plays (`Ui::play`).
     crate::browse_playback::zap(ui, to);
 }
 
