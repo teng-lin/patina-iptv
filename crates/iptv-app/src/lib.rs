@@ -1223,15 +1223,18 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 multiview_picker::key(ui, iptv_nav::Action::Back);
                 true
             }
-            (ViewMode::Fullscreen, _, false) if ui.player.recorded.with(Option::is_some) => {
-                recordings_view::open(ui);
-                true
-            }
-            (ViewMode::Fullscreen, _, false) if vod_view::return_from_player(ui) => true,
+            // The operating system's full screen is restored first; the
+            // next Back leaves the video for where it was chosen.
             _ if ui.player_surface == 0 && desktop::fullscreen() => {
                 desktop::set_fullscreen(false);
                 true
             }
+            (ViewMode::Fullscreen, _, false) if ui.player.recorded.with(Option::is_some) => {
+                recordings_view::open(ui);
+                true
+            }
+            // A movie or an episode: back to its details (#147).
+            (ViewMode::Fullscreen, _, false) if vod_view::return_from_player(ui) => true,
             // A dialog closes, else the active tile goes full screen.
             _ if multiview::is_open(ui) => multiview::back(ui),
             // A tile watched full screen: back to the grid as it was.

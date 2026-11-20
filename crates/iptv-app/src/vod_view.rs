@@ -103,10 +103,16 @@ pub fn back(ui: Ui) -> bool {
     let (closed, refresh) = edit(ui, |s| {
         let pending = s.busy;
         let had_details = s.details.is_some();
-        // A shelf's details reopened from the player: the shelf is read
-        // again around its title (found by identity) for the progress and
-        // order just changed by watching it.
-        let watched = had_details && s.is_shelf() && s.handoff == iptv_core::vod::Handoff::Returned;
+        // Details reopened from the player over a list that watching
+        // changes (a shelf, or the Continue watching category): the list
+        // is read again for the progress and order just changed, its title
+        // kept by identity (a shelf reads the window around it). Another
+        // category's order does not change; its movie card already shows
+        // the progress (`Screen::return_from_player`), and reading it
+        // again from its first page could lose a deep title's focus.
+        let watched = had_details
+            && s.handoff == iptv_core::vod::Handoff::Returned
+            && (s.is_shelf() || s.query.continue_watching);
         s.back();
         if had_details {
             s.control = Control::Catalogue;

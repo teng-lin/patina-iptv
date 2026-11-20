@@ -24,7 +24,11 @@ is below 1.0, a minor release may change behaviour.
   selected. The title plays on, on the same player, and nothing is opened
   again. Back from the details then returns to the list or shelf the title
   was chosen from (Continue watching and Recently added included), on that
-  title, and from there to the guide as before (#147).
+  title, and from there to the guide as before (#147). A Continue watching
+  list or shelf is read again on the way, so a finished title leaves it. On
+  a desktop in the operating system's full screen, the first Back from a
+  movie, an episode or a recording now restores the window, as it does for
+  live TV, and the next one returns to the details or to Recordings.
 - When Patina plays the last channel on start and that channel is one of the
   playlist's favourites, Back from full screen now opens the Favourites list
   with the channel focused instead of All channels. A channel that is not a
