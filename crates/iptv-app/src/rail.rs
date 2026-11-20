@@ -220,4 +220,21 @@ mod tests {
         assert!((short - 16.1).abs() < 0.001);
         assert!(short + ITEM_MARGIN * 2.0 <= 201.0 / 10.0);
     }
+
+    #[test]
+    fn a_short_windows_header_leaves_the_rail_its_items() {
+        // The guide header's minimum grows it in short windows, but never
+        // so far that the rail's eight items lose their height (as
+        // `item_height` measures the room under the header).
+        for (w, h, font) in [
+            (480.0, 180.0, 1.3),
+            (480.0, 240.0, 1.0),
+            (480.0, 300.0, 1.3),
+            (960.0, 200.0, 1.0),
+        ] {
+            let header = iptv_core::layout::GuideHeader::of(w, h, 0.8, font).height;
+            let item = item_height_for((h - header - 16.0).max(0.0), 8);
+            assert!(item > 0.0, "{w}x{h} at {font}: header {header}");
+        }
+    }
 }

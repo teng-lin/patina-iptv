@@ -233,7 +233,7 @@ pub fn back(ui: Ui) -> bool {
 /// The top bar's entry point.
 pub fn add_button(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
-    ui_kit::caption(size, tr("+ Add playlist"))
+    ui_kit::caption(size, || tr("+ Add playlist"))
         .role(AccessibilityRole::Button)
         .px(move || size.px(12.0))
         .py(move || size.px(5.0))

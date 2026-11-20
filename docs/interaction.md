@@ -159,7 +159,21 @@ what the content needs at the current text size, not from the device type.
   scale times the text size). Search's two-row header uses Compact.
 - **Now:** the guide scales from 1.0 to 0.8 with the desktop window
   (`crates/iptv-app/src/scale.rs`).
-- **Planned:** collapsing the guide, the player and VOD panes by class.
+- **Now:** the guide's header (`iptv_core::layout::GuideHeader`) puts its
+  shortcuts (the list on screen, Movies, Shows, Add playlist) on a row of their
+  own under the preview and the focused programme in Compact, and in Medium
+  wherever the programme would have less than its room beside them. The
+  preview keeps its place at the top left and shrinks to leave that row room,
+  but never below 64 points tall, which keeps the corner ‹ inside it. A short
+  window grows the header instead, up to 55% of its height so the rail and the
+  guide keep room; a window too short for that squeezes the preview. The
+  programme's times wrap onto a second line rather than clip; its title stays
+  on one line and is truncated. The
+  guide's rows already take the full width below the header in every class.
+- **Now:** Movies and Shows already show one pane at a time in every class:
+  details replace the list, and the poster grid reflows its columns.
+- **Planned:** a list beside its details in Expanded, and collapsing the
+  player's panels by class.
 
 ## What a presentation change keeps
 
@@ -175,6 +189,11 @@ keep:
 - open details and their focused action.
 
 They issue no playback command of their own.
+
+- **Now:** resizing between expanded and compact windows keeps the focused
+  guide channel or the focused preview, the poster browser's focused title and
+  a show's selected episode with its details open, on the same player node, with
+  no stream opened (`tests/app/pane_collapse.rs`).
 
 - **Now:** the first key after touch can move focus to a visible row (see
   [Input modes](#input-modes)). With `guide.autoplay` on, focus that lands on a

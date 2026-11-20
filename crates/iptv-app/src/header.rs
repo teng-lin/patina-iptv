@@ -18,6 +18,7 @@ use crate::panels::{PREVIEW_MARGIN, PREVIEW_RADIUS, header_now};
 use crate::scale::Scale;
 use crate::theme::{BRIGHT_TEXT, RADIUS, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, ViewMode, clock, tint};
+use iptv_core::layout::Shortcuts;
 
 const WHITE: u32 = 0xFFFFFF;
 /// The progress bar on the times line (at full size: it, the type and the
@@ -193,6 +194,8 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
     };
     view()
         .flex_1()
+        // A compact header gives it less room than its lines want: clip them.
+        .overflow_hidden()
         .gap(move || size.px(6.0))
         .child(
             view()
@@ -237,9 +240,11 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                 )),
         )
         .child(
-            // Times, progress and minutes left; the group at the right.
+            // Times, progress and minutes left; the group at the right. A
+            // narrow header wraps them onto a second line rather than clip.
             view()
                 .flex_row()
+                .flex_wrap()
                 .items_center()
                 .gap(move || size.px(12.0))
                 .child(
@@ -350,16 +355,17 @@ fn library_shortcuts(ui: Ui) -> View {
             (
                 iptv_core::browse::RailItem::Movies,
                 iptv_core::vod::Kind::Movie,
-                tr("Movies"),
+                (|| tr("Movies")) as fn() -> &'static str,
             ),
             (
                 iptv_core::browse::RailItem::Shows,
                 iptv_core::vod::Kind::Series,
-                tr("Shows"),
+                || tr("Shows"),
             ),
         ]
         .into_iter()
         .map(move |(item, kind, label)| {
+            // The label follows a live change of language.
             crate::ui_kit::button(
                 ui,
                 size,
@@ -384,45 +390,80 @@ fn library_shortcuts(ui: Ui) -> View {
     )
 }
 
+/// The list on screen; a tap opens the groups.
+fn list_button(ui: Ui) -> impl IntoElement {
+    text(move || format!("☰  {}", crate::lists::list_name(ui)))
+        .role(AccessibilityRole::Button)
+        .px(px(10.0))
+        .py(px(6.0))
+        .rounded(px(RADIUS))
+        .bg(tint(WHITE, RESTING_ALPHA))
+        .number_of_lines(1)
+        .text_size(px(15.0))
+        .text_color(rgb(WHITE))
+        .on_press(move || {
+            ui.touched();
+            crate::lists::open_groups(ui);
+        })
+}
+
+/// Clear while the inline channel order is open over the header.
+fn shortcuts_opacity(ui: Ui) -> f32 {
+    if crate::organization_view::inline_order_open(ui) {
+        0.0
+    } else {
+        1.0
+    }
+}
+
 /// The list on screen (a tap opens the groups), Add playlist, and in
 /// development the key stats ([`debug_overlay`]).
 fn side(ui: Ui) -> impl IntoElement {
     view()
         .items_end()
-        .opacity(move || {
-            if crate::organization_view::inline_order_open(ui) {
-                0.0_f32
-            } else {
-                1.0
-            }
-        })
+        .opacity(move || shortcuts_opacity(ui))
         .gap(px(8.0))
-        .child(
-            text(move || format!("☰  {}", crate::lists::list_name(ui)))
-                .role(AccessibilityRole::Button)
-                .px(px(10.0))
-                .py(px(6.0))
-                .rounded(px(RADIUS))
-                .bg(tint(WHITE, RESTING_ALPHA))
-                .number_of_lines(1)
-                .text_size(px(15.0))
-                .text_color(rgb(WHITE))
-                .on_press(move || {
-                    ui.touched();
-                    crate::lists::open_groups(ui);
-                }),
-        )
+        .child(list_button(ui))
         .child(library_shortcuts(ui))
         .child(crate::wizard_view::add_button(ui))
         .child(view().flex_1())
-        .children(debug_overlay().then(|| {
-            text(move || {
-                ui.stats
-                    .with(|s| format!("keys {} · {} µs (max {})", s.keys, s.last_us, s.max_us))
-            })
-            .text_size(px(11.0))
-            .text_color(tint(WHITE, 0x60))
-        }))
+        .children(key_stats(ui))
+}
+
+/// The key stats line, in development only ([`debug_overlay`]).
+fn key_stats(ui: Ui) -> Option<Text> {
+    debug_overlay().then(|| {
+        text(move || {
+            ui.stats
+                .with(|s| format!("keys {} · {} µs (max {})", s.keys, s.last_us, s.max_us))
+        })
+        .text_size(px(11.0))
+        .text_color(tint(WHITE, 0x60))
+    })
+}
+
+/// The same shortcuts in a compact header ([`Shortcuts::Below`]): one row
+/// under the preview and the focused programme, scrolled sideways where the
+/// window is narrower than the row.
+fn shortcuts_row(ui: Ui) -> impl IntoElement {
+    scroll()
+        .horizontal()
+        .scrollbar(false)
+        .test_id("guide-header-shortcuts")
+        .opacity(move || shortcuts_opacity(ui))
+        .mt(move || px(crate::panels::guide_header_now().row_gap))
+        .h(move || px(crate::panels::guide_header_now().row))
+        .flex_shrink_0()
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap(px(8.0))
+                .child(list_button(ui))
+                .child(library_shortcuts(ui))
+                .child(crate::wizard_view::add_button(ui))
+                .children(key_stats(ui)),
+        )
 }
 
 /// The key-timing line in the header is for development: debug builds, or
@@ -453,6 +494,10 @@ pub fn header(ui: Ui) -> impl IntoElement {
                 .map(|ch| (version, f.now, f.channel, ch, p))
         })
     });
+    // A compact window moves the shortcuts under the preview and the
+    // programme (`iptv_core::layout`). Only this header's own views change:
+    // the preview keeps its place, and the player under it is resized.
+    let below = computed(move || crate::panels::shortcuts_now() == Shortcuts::Below);
     view()
         .pt_safe_area()
         .accessibility_elements_hidden(move || crate::organization_view::guide_order_open(ui))
@@ -461,11 +506,17 @@ pub fn header(ui: Ui) -> impl IntoElement {
             view()
                 .h(move || px(header_now().0))
                 .p(px(PREVIEW_MARGIN))
-                .flex_row()
-                .gap(move || size.px(24.0))
-                .child(preview(ui, size))
-                .child(details(ui, program, size))
-                .child(side(ui))
+                .child(
+                    view()
+                        .flex_1()
+                        .min_h(px(0.0))
+                        .flex_row()
+                        .gap(move || size.px(24.0))
+                        .child(preview(ui, size))
+                        .child(details(ui, program, size))
+                        .child(when(move || !below.get(), move || side(ui))),
+                )
+                .child(when(move || below.get(), move || shortcuts_row(ui)))
                 .child(preview_ring(ui))
                 .child(when(move || corner_back_shown(ui), move || corner_back(ui))),
         )
@@ -486,6 +537,7 @@ fn corner_back_shown(ui: Ui) -> bool {
 fn corner_back(ui: Ui) -> impl IntoElement {
     let groups = move || ui.focus.with(|f| f.layout_pane()) == Pane::Guide;
     view()
+        .test_id("guide-corner-back")
         .absolute()
         // The player's ‹ is 20 and 16 points in from the safe area.
         .left(px(20.0))

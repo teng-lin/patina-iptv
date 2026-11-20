@@ -9,18 +9,18 @@ use std::{
 };
 
 #[derive(Default)]
-struct Lifetime {
+pub(crate) struct Lifetime {
     players: Vec<NodeId>,
     removed: Vec<NodeId>,
     inserts: HashMap<NodeId, usize>,
     sources: Vec<String>,
 }
-fn selected(app: &crate::Headless, id: &str) -> bool {
+pub(crate) fn selected(app: &crate::Headless, id: &str) -> bool {
     app.screen()
         .accessibility_state(&format!("id:{id}"))
         .is_ok_and(|s| s.selected)
 }
-fn persistent(app: &crate::Headless, lifetime: &Arc<Mutex<Lifetime>>, player: NodeId) {
+pub(crate) fn persistent(app: &crate::Headless, lifetime: &Arc<Mutex<Lifetime>>, player: NodeId) {
     let recorded = lifetime.lock().unwrap();
     assert_eq!(recorded.players, [player]);
     assert!(!recorded.removed.contains(&player), "player never detaches");
@@ -40,6 +40,14 @@ fn persistent(app: &crate::Headless, lifetime: &Arc<Mutex<Lifetime>>, player: No
 fn preview_fixture(
     home: crate::isolated::Home,
 ) -> (personalization::Fixture, Arc<Mutex<Lifetime>>) {
+    preview_fixture_with(home, |_| {})
+}
+
+/// [`preview_fixture`] with its settings adjusted by `adjust`.
+pub(crate) fn preview_fixture_with(
+    home: crate::isolated::Home,
+    adjust: impl FnOnce(&mut Settings),
+) -> (personalization::Fixture, Arc<Mutex<Lifetime>>) {
     let lifetime: Arc<Mutex<Lifetime>> = Arc::default();
     let observed = lifetime.clone();
     let mut settings = Settings::new();
@@ -53,6 +61,7 @@ fn preview_fixture(
     settings
         .set("general.resume_last_channel", Value::Bool(false))
         .unwrap();
+    adjust(&mut settings);
     let fixture = personalization::start_with_setup(home, settings, true, move |app| {
         app.observe(move |_, batch| {
             let mut recorded = observed.lock().unwrap();

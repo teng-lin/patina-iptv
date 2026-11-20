@@ -76,6 +76,9 @@ impl Class {
     }
 }
 
+mod guide_header;
+pub use guide_header::*;
+
 #[cfg(test)]
 mod tests {
     use super::*;
