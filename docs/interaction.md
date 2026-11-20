@@ -231,9 +231,12 @@ playlist the screen did not show. In a Compact window (see
 the categories give way. A remote or keyboard that was on the categories goes
 to the action, or to the rail when there is no action (an import running) or
 when it was just sent off another playlist's action; Left reaches the rail
-and Right returns. An action that moves to another playlist sends it to the
-rail, and if the window widens or the text shrinks the rail stays on screen
-with the remote on it. The action stays inside a 400×600 window at Medium and
+and Right returns. An action that moves to another playlist, or goes away
+(a refresh started), sends it to the rail, and if the window widens or the
+text shrinks the rail stays on screen with the remote on it. Without an
+action, Right from the rail reaches Search and Sort instead. In every window,
+a remote sent off an action stays off the new one through a failed read and
+its Retry, until it moves there itself. The action stays inside a 400×600 window at Medium and
 Extra large text, also with the test pseudolocale
 (`tests/app/vod_empty_compact.rs`). The "Movies and series" switch keeps no
 own value when it matches the global setting, and a deleted playlist's own
