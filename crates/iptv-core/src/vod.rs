@@ -553,8 +553,18 @@ impl Screen {
         self.control = if pending || self.empty_without_action() {
             Control::Search
         } else {
+            // Onto the titles, or an action already on screen: the remote
+            // enters it on purpose.
+            self.left_action = false;
             Control::Catalogue
         };
+    }
+    /// Opens the search field (OK on Search). A wait left by closing it
+    /// during a read ([`Screen::close_search`]) is over: the reply must not
+    /// take the remote off the field.
+    pub fn open_search(&mut self) {
+        self.search_open = true;
+        self.search_closed_pending = false;
     }
     /// Enters the titles from the categories (OK on a category). An empty
     /// screen without an action has nothing to enter: the remote stays.
@@ -661,6 +671,10 @@ impl Screen {
         self.shelf.is_some()
     }
     pub fn reload(&mut self) -> u64 {
+        if self.search_open {
+            // A new search: no earlier close waits on its reply.
+            self.search_closed_pending = false;
+        }
         self.pending_down = None;
         self.preview = None;
         self.generation = self.generation.wrapping_add(1);
@@ -916,9 +930,12 @@ impl Screen {
         }
         self.busy = false;
         self.has_more = more;
+        // Search closed while this read was pending: the titles, or an
+        // action the remote was not sent off ([`Screen::settle_panes`]).
         if std::mem::take(&mut self.search_closed_pending)
+            && !self.search_open
             && self.control == Control::Search
-            && (!self.cards.is_empty() || self.empty_action().is_some())
+            && (!self.cards.is_empty() || (self.empty_action().is_some() && !self.left_action))
         {
             self.control = Control::Catalogue;
         }
@@ -2767,6 +2784,103 @@ mod tests {
             s.publish(generation, Vec::new(), false, false);
             assert_eq!(s.control, Control::Sort, "compact: {compact}");
         }
+    }
+    #[test]
+    fn back_from_search_with_titles_waits_for_the_pending_read() {
+        // Titles shown, a search typed: Back while its read is pending
+        // cancels it (the shell reads again) and waits on Search.
+        let mut s = Screen::default();
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, vec![card("a")], false, false);
+        s.control = Control::Search;
+        s.open_search();
+        s.query.text = "generated".into();
+        s.reload();
+        s.back();
+        assert!(s.open && !s.search_open);
+        assert_eq!(s.control, Control::Search);
+        let generation = s.reload();
+        s.publish(generation, vec![card("b")], false, false);
+        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.focused, Some(card("b").key));
+    }
+    #[test]
+    fn a_new_search_is_never_left_by_an_earlier_close() {
+        // Two ways back into the field: OK on Search, or typing (a read
+        // while it is open).
+        for reopen in [true, false] {
+            let mut s = Screen::default();
+            let generation = s.begin(Kind::Movie);
+            s.publish(generation, vec![card("a")], false, false);
+            s.control = Control::Search;
+            s.open_search();
+            s.query.text = "generated".into();
+            s.reload();
+            s.close_search();
+            assert_eq!(s.control, Control::Search);
+            // Back into the field before the reply; typing reads again.
+            if reopen {
+                s.open_search();
+            } else {
+                s.search_open = true;
+            }
+            s.query.text = "generated more".into();
+            let generation = s.reload();
+            s.publish(generation, vec![card("b")], false, false);
+            assert!(s.search_open);
+            assert_eq!(s.control, Control::Search, "reopen: {reopen}");
+            // Even a stale wait never leaves an open field.
+            s.search_closed_pending = true;
+            let generation = s.reload();
+            s.search_open = true;
+            s.publish(generation, vec![card("b")], false, false);
+            assert_eq!(s.control, Control::Search, "reopen: {reopen}");
+        }
+    }
+    #[test]
+    fn closing_search_onto_a_shown_action_enters_it() {
+        // The remote is sent off playlist 1's action when it moves to
+        // playlist 2, then goes to Search (a pointer) and closes it with
+        // playlist 2's action on screen.
+        let mut s = Screen::default();
+        s.set_library(VodState::Failed {
+            source: 1,
+            problem: ImportProblem::Network,
+        });
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, Vec::new(), false, false);
+        s.browse_horizontal(1);
+        s.set_library(VodState::ImportsDisabled { source: 2 });
+        assert_eq!(s.control, Control::Category);
+        s.control = Control::Search;
+        s.open_search();
+        s.close_search();
+        assert_eq!(s.control, Control::Catalogue);
+        // Entered on purpose: a resize or the next read keeps it there.
+        s.set_compact(true);
+        assert_eq!(s.control, Control::Catalogue);
+        s.set_compact(false);
+        let generation = s.reload();
+        s.publish(generation, Vec::new(), false, false);
+        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.empty_action(), Some(EmptyAction::PlaylistSettings(2)));
+        // Sent off again, then Search closed while a read is pending: the
+        // reply shows the action, and the remote waits on Search rather
+        // than landing there and being sent off.
+        s.set_library(VodState::Empty { source: 3 });
+        assert_eq!(s.control, Control::Category);
+        s.control = Control::Search;
+        s.open_search();
+        let generation = s.reload();
+        s.close_search();
+        s.publish(generation, Vec::new(), false, false);
+        assert_eq!(s.empty_action(), Some(EmptyAction::Refresh(3)));
+        assert_eq!(s.control, Control::Search);
+        // Down from there enters it on purpose.
+        s.browse_vertical(1);
+        assert_eq!(s.control, Control::Catalogue);
+        s.set_compact(true);
+        assert_eq!(s.control, Control::Catalogue);
     }
     #[test]
     fn the_catalogue_keeps_its_toolbar() {
