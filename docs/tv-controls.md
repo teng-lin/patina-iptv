@@ -1,5 +1,8 @@
 # TV playback controls
 
+The rules shared with touch and desktop (choosing, returning, layout changes)
+are in the [interaction contract](interaction.md).
+
 Android TV uses the same playback bar as tablet and desktop. Hold OK to open it
 with Play/pause focused. Menu opens or closes the bar. A short OK over unobstructed
 video retains the info card behavior; release after a long OK performs no second
