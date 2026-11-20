@@ -39,15 +39,16 @@ pub(super) fn activate_navigation(ui: Ui) {
     }
 }
 
+/// Whether the rail widens to show its labels: while the remote is on it,
+/// except beside the one-pane empty catalogue, which keeps the width.
+fn rail_labels(ui: Ui) -> bool {
+    ui.vod
+        .with(|s| s.control == Control::Navigation && !s.one_pane())
+}
+
 fn navigation(ui: Ui, size: Scale) -> View {
     view()
-        .w(move || {
-            size.px(if ui.vod.with(|s| s.control == Control::Navigation) {
-                275.0
-            } else {
-                70.0
-            })
-        })
+        .w(move || size.px(if rail_labels(ui) { 275.0 } else { 70.0 }))
         .h_full()
         .flex_shrink_0()
         .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
@@ -132,7 +133,7 @@ fn navigation(ui: Ui, size: Scale) -> View {
                             }),
                     )
                     .child(when(
-                        move || ui.vod.with(|s| s.control == Control::Navigation),
+                        move || rail_labels(ui),
                         move || {
                             ui_kit::label(size, label)
                                 .number_of_lines(1)

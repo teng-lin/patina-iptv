@@ -141,9 +141,10 @@ here checked it.
    **Fixed by #130** after this run: in Compact the empty catalogue is one
    pane, its message and action beside the narrow rail with the categories
    gone. `vod_empty_compact` checks at 400×600, Medium and Extra large text,
-   that the message keeps most of the width and Add playlist and Close stay
-   inside the window, and that Left, Right and Enter still reach the rail
-   and the action. The real window was not run again.
+   (and Extra large with the test pseudolocale) that the message keeps most
+   of the width and Add playlist and Close stay inside the window, also with
+   the remote on the rail, and that Left, Right and Enter still reach the
+   rail and the action. The real window was not run again.
 2. **Observation, not a bug yet:** with the guide's groups column open at
    400×600 and Extra large text, the rail and groups take most of the width
    and the guide rows show two letters. The contract marks collapsing these
