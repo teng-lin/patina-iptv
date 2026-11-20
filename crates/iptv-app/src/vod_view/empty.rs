@@ -32,36 +32,53 @@ fn sources(ui: Ui, kind: Kind) -> Vec<SourceVod> {
             .filter(|p| p.policy.enabled)
             .map(|p| {
                 let target = iptv_settings::Target::playlist(p.id.0.to_string());
-                let session = activity.get(&p.id);
-                // A whole import that failed, else the titles of this kind
-                // that the last successful one could not download.
-                let (has_titles, list_failed) = if kind == Kind::Series {
-                    (p.has_series, p.series_failed)
-                } else {
-                    (p.has_movies, p.movies_failed)
-                };
-                let stored = p.failed.map(|(kind, _)| kind).or(list_failed).map(problem);
-                SourceVod {
-                    source: p.id.0,
-                    eligible: p.kind != iptv_providers::model::SourceKind::M3u,
-                    imports_enabled: settings
-                        .bool(iptv_settings::keys::PLAYLISTS_INCLUDE_VOD, &target),
-                    importing: matches!(
-                        session,
-                        Some(Activity::Running(_) | Activity::Checking(_))
-                    ),
-                    // The store's kind is the precise one: the runtime reads
-                    // it again after each failure, and a success clears it.
-                    // A failure it did not record is this session's.
-                    failed: stored.or(match session {
-                        Some(Activity::Done(Err(f))) => Some(ImportProblem::from(f.kind)),
-                        _ => None,
-                    }),
-                    has_titles,
-                }
+                let imports = settings.bool(iptv_settings::keys::PLAYLISTS_INCLUDE_VOD, &target);
+                source_vod(p, kind, imports, activity.get(&p.id))
             })
             .collect()
     })
+}
+
+/// What playlist `p` says about its titles of `kind`, its movie and series
+/// import `imports`, and this session's refresh of it.
+fn source_vod(
+    p: &crate::data::Playlist,
+    kind: Kind,
+    imports: bool,
+    activity: Option<&Activity>,
+) -> SourceVod {
+    use iptv_providers::model::SourceKind;
+    // A whole import that failed, else the titles of this kind that the
+    // last successful one could not download. A Stalker movie list also
+    // carries embedded series.
+    let (has_titles, list_failed) = if kind == Kind::Series {
+        let embedded = (p.kind == SourceKind::Stalker)
+            .then_some(p.movies_failed)
+            .flatten();
+        (p.has_series, p.series_failed.or(embedded))
+    } else {
+        (p.has_movies, p.movies_failed)
+    };
+    let stored = p.failed.map(|(kind, _)| kind).or(list_failed);
+    let session = match activity {
+        Some(Activity::Done(Err(f))) => Some(ImportProblem::from(f.kind)),
+        _ => None,
+    };
+    SourceVod {
+        source: p.id.0,
+        eligible: p.kind != SourceKind::M3u,
+        imports_enabled: imports,
+        importing: matches!(activity, Some(Activity::Running(_) | Activity::Checking(_))),
+        // The store's kind is the precise one: the runtime reads it again
+        // after each failure, and records one that never reached the store
+        // (refused before it ran) as `Other`; this session's failure then
+        // tells why.
+        failed: match (stored, session) {
+            (Some(ImportErrorKind::Other) | None, Some(now)) => Some(now),
+            (stored, _) => stored.map(problem),
+        },
+        has_titles,
+    }
 }
 
 /// Keeps the catalogue's [`VodState`] current. When it changes while no
@@ -185,4 +202,76 @@ pub(super) fn screen(ui: Ui, size: Scale) -> impl IntoElement {
                 ))
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iptv_core::wizard::{FailureKind, ImportFailure};
+    use iptv_providers::model::SourceKind;
+
+    fn playlist(kind: SourceKind) -> crate::data::Playlist {
+        crate::data::Playlist {
+            id: SourceId(1),
+            name: "Synthetic".into(),
+            kind,
+            channels: 1,
+            has_movies: false,
+            has_series: false,
+            movies_failed: None,
+            series_failed: None,
+            updated_at: None,
+            failed: None,
+            guides: Vec::new(),
+            guide_failed: false,
+            user_agent: None,
+            from_file: false,
+            policy: Default::default(),
+        }
+    }
+
+    fn failed(kind: FailureKind) -> Activity {
+        Activity::Done(Err(ImportFailure::new(kind)))
+    }
+
+    #[test]
+    fn a_stalker_movie_list_failure_also_leaves_shows_failed() {
+        let mut p = playlist(SourceKind::Stalker);
+        p.movies_failed = Some(ImportErrorKind::HttpStatus);
+        let shows = source_vod(&p, Kind::Series, true, None);
+        assert_eq!(shows.failed, Some(ImportProblem::Refused));
+        // An Xtream movie list carries no series.
+        p.kind = SourceKind::Xtream;
+        assert_eq!(source_vod(&p, Kind::Series, true, None).failed, None);
+        assert_eq!(
+            source_vod(&p, Kind::Movie, true, None).failed,
+            Some(ImportProblem::Refused)
+        );
+    }
+
+    #[test]
+    fn the_precise_stored_kind_wins_unless_the_attempt_never_reached_the_store() {
+        let mut p = playlist(SourceKind::Xtream);
+        p.failed = Some((ImportErrorKind::HttpStatus, None));
+        // The same attempt, told coarsely by the session: the store's kind.
+        let same = failed(FailureKind::Network);
+        assert_eq!(
+            source_vod(&p, Kind::Movie, true, Some(&same)).failed,
+            Some(ImportProblem::Refused)
+        );
+        // A later attempt refused before it ran, recorded as `Other`.
+        p.failed = Some((ImportErrorKind::Other, None));
+        let busy = failed(FailureKind::Busy);
+        assert_eq!(
+            source_vod(&p, Kind::Movie, true, Some(&busy)).failed,
+            Some(ImportProblem::Busy)
+        );
+        // Nothing stored yet: the session's failure.
+        p.failed = None;
+        assert_eq!(
+            source_vod(&p, Kind::Movie, true, Some(&busy)).failed,
+            Some(ImportProblem::Busy)
+        );
+        assert!(source_vod(&p, Kind::Movie, true, Some(&Activity::Running(None))).importing);
+    }
 }

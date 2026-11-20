@@ -75,7 +75,13 @@ pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
         let owner = owner.clone();
         async move {
             let startup = startup.await.map(|(source, combined, any, snapshot)| {
+                let stored: Vec<_> = snapshot.playlists.iter().map(|p| p.id).collect();
                 library::install(&owner, snapshot);
+                // A deletion whose settings save was lost must not hand its
+                // playlist's own settings to a new playlist with its id.
+                if let Err(error) = crate::settings::forget_playlists_except(&owner, &stored) {
+                    log::warn!("iptv data: deleted playlists' settings stay: {error}");
+                }
                 (source, combined, any)
             });
             owner.services().mark(
@@ -254,6 +260,15 @@ fn start_import_with(
                             {
                                 import_source = Some(imported.source);
                                 library::track_added_import(&owner, imported.source, &completion);
+                                // A new playlist may have a deleted one's id:
+                                // it starts from the global settings.
+                                if let Err(error) =
+                                    crate::settings::forget_playlist(&owner, imported.source)
+                                {
+                                    log::warn!(
+                                        "iptv data: an old playlist's settings stay: {error}"
+                                    );
+                                }
                             }
                             if import_source.is_some_and(|source| {
                                 !library::import_is_current(&owner, source, &completion)

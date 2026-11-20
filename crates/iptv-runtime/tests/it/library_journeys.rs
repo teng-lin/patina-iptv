@@ -60,6 +60,15 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         settings
             .set("epg.update_on_playlist_change", Value::Bool(false))
             .unwrap();
+        // A playlist deleted while its settings could not be saved left its
+        // own value behind; a kept playlist has one too.
+        let gone = iptv_settings::Target::playlist("9");
+        let kept = iptv_settings::Target::playlist(sources[0].0.to_string());
+        for at in [&gone, &kept] {
+            settings
+                .set_in("playlists.include_vod", at, Value::Bool(false))
+                .unwrap();
+        }
         std::fs::write(dir.path().join("settings.json"), settings.to_json_string()).unwrap();
         let owner = Rc::new(Runtime::new(Ports::new(dir.path().into(), move |_| {
             Ok(key.clone())
@@ -83,6 +92,15 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         owner.load_settings();
         data::start(&owner);
         displayed(&owner, &mut events, 8).await;
+        // Startup drops the settings of playlists the store no longer has.
+        assert_eq!(
+            owner.settings().stored("playlists.include_vod", &gone),
+            None
+        );
+        assert_eq!(
+            owner.settings().stored("playlists.include_vod", &kept),
+            Some(&Value::Bool(false))
+        );
         assert!(data::combined::has_multiple_enabled(&owner));
         let keys: Vec<_> = (0..8)
             .map(|i| owner.schedule().channel_key(i).unwrap())

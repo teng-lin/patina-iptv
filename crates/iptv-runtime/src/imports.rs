@@ -902,8 +902,9 @@ pub(crate) fn save(
             return Ok(Err(PublicationError::Superseded));
         }
         crate::parental::require_import(store, &job, &publication.authorization)?;
+        let mut stage = stage;
+        stage.set_on_demand_errors(on_demand.0, on_demand.1);
         let (id, counts, sources) = save_in(store, &job, guide_urls, planned, stage)?;
-        store.record_on_demand_errors(id, on_demand.0, on_demand.1)?;
         let stored = store.source(id)?.ok_or(StoreError::SourceNotFound(id))?;
         if stored.source.config != job.source.config {
             return Ok(Err(PublicationError::Superseded));

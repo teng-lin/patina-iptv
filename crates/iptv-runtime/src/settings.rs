@@ -223,6 +223,33 @@ pub(crate) fn forget_playlist(
     })
 }
 
+/// Drops the own settings of every playlist not in `stored`: ones whose
+/// deletion was not saved to the settings file (the app stopped first, or
+/// the save failed), before their ids can be given to new playlists.
+pub(crate) fn forget_playlists_except(
+    owner: &std::rc::Rc<super::Runtime>,
+    stored: &[iptv_library::SourceId],
+) -> Result<(), SaveError> {
+    let kept: std::collections::BTreeSet<String> =
+        stored.iter().map(|id| id.0.to_string()).collect();
+    let gone: Vec<String> = owner
+        .settings()
+        .playlists()
+        .into_iter()
+        .filter(|p| !kept.contains(*p))
+        .map(str::to_owned)
+        .collect();
+    if gone.is_empty() {
+        return Ok(());
+    }
+    apply(owner, "playlist_overrides", |next| {
+        for playlist in &gone {
+            next.remove_playlist(playlist);
+        }
+        Ok(Vec::new())
+    })
+}
+
 /// Replaces the settings with what `edit` makes of them, tells the views
 /// and saves in the background.
 fn apply(

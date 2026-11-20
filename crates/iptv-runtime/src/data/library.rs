@@ -7,6 +7,7 @@
 use std::rc::Rc;
 
 use crate::model::{SourceId, StoreError, StoredSource};
+use iptv_core::wizard::FailureKind;
 use iptv_import::CancelToken;
 use iptv_providers::model::{Source, SourceConfig};
 
@@ -209,11 +210,31 @@ pub(super) fn run(owner: &Rc<crate::Runtime>, stored: StoredSource, purpose: Pur
                 }
                 owner.imports.with(|r| r.borrow_mut().remove(&id));
                 changed(owner);
-                if result.is_err() {
-                    // The store has this failure's precise kind by now; the
-                    // snapshot must not keep showing an older failure's.
+                if let Err(failure) = &result {
+                    // The import records the precise kind of a failed
+                    // download; one refused before it ran (a full queue)
+                    // or one saving it is recorded here, so the store never
+                    // keeps an older failure's kind for this attempt.
+                    let unrecorded =
+                        matches!(failure.kind, FailureKind::Busy | FailureKind::Storage);
                     let owner = owner.clone();
                     owner.clone().spawn(async move {
+                        if unrecorded {
+                            let recorded = owner
+                                .services()
+                                .call(move |store| {
+                                    store.record_import_failure(
+                                        id,
+                                        crate::model::ImportErrorKind::Other,
+                                    )
+                                })
+                                .await;
+                            if let Err(error) = recorded {
+                                log::warn!("iptv library: failure not recorded: {error}");
+                            }
+                        }
+                        // The snapshot must not keep showing an older
+                        // failure's kind.
                         if let Err(error) = refresh_cache(&owner).await {
                             log::warn!("iptv library: failure recorded, details stale: {error}");
                         }

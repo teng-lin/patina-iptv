@@ -440,8 +440,12 @@ impl Screen {
             return;
         };
         let target = action.target();
+        // The empty catalogue only (a load may be running): never a shelf,
+        // details or a list with titles.
         if self.offered.is_some_and(|offered| offered != target)
             && self.control == Control::Catalogue
+            && !self.is_shelf()
+            && self.details.is_none()
             && self.cards.is_empty()
         {
             self.control = Control::Category;
@@ -1990,6 +1994,14 @@ mod tests {
         s.control = Control::Search;
         s.set_library(failed(3));
         assert_eq!(s.control, Control::Search);
+        // An empty shelf keeps its focus.
+        let mut shelf = Screen::default();
+        let generation = shelf.begin_shelf(Shelf::RecentlyAdded);
+        shelf.publish(generation, Vec::new(), false, false);
+        shelf.set_library(failed(1));
+        shelf.set_library(failed(2));
+        assert_eq!(shelf.control, Control::Catalogue);
+        assert!(!shelf.categories_open);
     }
     #[test]
     fn the_catalogue_keeps_its_toolbar() {

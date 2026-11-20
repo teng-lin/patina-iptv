@@ -242,7 +242,7 @@ impl Store {
             series: count(series_n),
             duplicates: count(total - groups_n - channels_n - vod_n - series_n),
         };
-        record_import_success(&tx, source, &counts, now)?;
+        record_import_success(&tx, source, &counts, Default::default(), now)?;
         #[cfg(test)]
         crash_tests::boundary("staged");
         tx.commit()?;

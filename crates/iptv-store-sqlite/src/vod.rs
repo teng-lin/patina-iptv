@@ -25,11 +25,15 @@ pub(crate) fn on_demand_kinds(
     conn: &rusqlite::Connection,
     id: crate::SourceId,
 ) -> Result<(bool, bool)> {
-    let mut statement = conn.prepare_cached(concat!(
-        catalogue_items!(),
-        " SELECT EXISTS(SELECT 1 FROM items WHERE source_id=?1 AND kind='movie'),\
-EXISTS(SELECT 1 FROM items WHERE source_id=?1 AND kind='series')"
-    ))?;
+    // The kind rule of `catalogue_items!` on the base tables, keyed by
+    // source: a movie-list row is a movie unless it is an embedded series;
+    // a series is a series-list row or an embedded one. (The shared CTE
+    // would be materialised across every source.)
+    let mut statement = conn.prepare_cached(
+        "SELECT EXISTS(SELECT 1 FROM vod WHERE source_id=?1 AND is_series=0), \
+EXISTS(SELECT 1 FROM series WHERE source_id=?1) OR \
+EXISTS(SELECT 1 FROM vod WHERE source_id=?1 AND is_series=1)",
+    )?;
     Ok(statement.query_row([id.0], |r| Ok((r.get(0)?, r.get(1)?)))?)
 }
 /// The columns `raw_card` reads, from `items v`, `sources s`,

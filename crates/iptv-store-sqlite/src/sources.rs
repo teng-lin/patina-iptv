@@ -426,22 +426,32 @@ impl Store {
     }
 }
 
+/// The movie and series lists an import could not download (kind only).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct OnDemandErrors {
+    pub movies: Option<ImportErrorKind>,
+    pub series: Option<ImportErrorKind>,
+}
+
 pub(crate) fn record_import_success(
     conn: &Connection,
     id: SourceId,
     counts: &CatalogCounts,
+    on_demand: OnDemandErrors,
     now: i64,
 ) -> Result<()> {
     conn.execute(
         "INSERT INTO source_imports (source_id, last_attempt_at, last_success_at, group_count,
-             channel_count, vod_count, series_count, duplicate_count, last_error_kind, last_error_at)
-         VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL)
+             channel_count, vod_count, series_count, duplicate_count, last_error_kind, last_error_at,
+             movie_error_kind, series_error_kind)
+         VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL, ?8, ?9)
          ON CONFLICT (source_id) DO UPDATE SET last_attempt_at = excluded.last_attempt_at,
              last_success_at = excluded.last_success_at, group_count = excluded.group_count,
              channel_count = excluded.channel_count, vod_count = excluded.vod_count,
              series_count = excluded.series_count, duplicate_count = excluded.duplicate_count,
-             last_error_kind = NULL, last_error_at = NULL, movie_error_kind = NULL,
-             series_error_kind = NULL",
+             last_error_kind = NULL, last_error_at = NULL,
+             movie_error_kind = excluded.movie_error_kind,
+             series_error_kind = excluded.series_error_kind",
         params![
             id.0,
             now,
@@ -449,7 +459,9 @@ pub(crate) fn record_import_success(
             counts.channels,
             counts.vod,
             counts.series,
-            counts.duplicates
+            counts.duplicates,
+            on_demand.movies.map(ImportErrorKind::slug),
+            on_demand.series.map(ImportErrorKind::slug)
         ],
     )?;
     Ok(())
