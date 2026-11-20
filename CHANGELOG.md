@@ -65,6 +65,11 @@ is below 1.0, a minor release may change behaviour.
 
 ### Fixed
 
+- Windows and iPad: right-clicking a channel's name in the guide (on iPad, a
+  mouse's or trackpad's secondary click) now opens the channel's menu, as it
+  does on Linux and macOS. Before, only programmes and the groups columns
+  opened a menu there. The menu offers nothing new on these platforms:
+  Watch in new window stays Linux and macOS only.
 - TV remote: a press of OK (or another key with a hold action) no longer
   acts on a different screen when the screen changes while the key is held,
   for example when a tap plays a channel. Holding a key also keeps the info
