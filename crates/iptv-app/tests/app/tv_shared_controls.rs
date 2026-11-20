@@ -502,13 +502,17 @@ fn touch_and_pointer_reach_the_menu_without_a_shortcut() {
         env.idiom = Idiom::Desktop;
     }));
     let opens = iptv_app::player_opens(0);
-    // Keys drive the app: they have Menu, so no ⋯.
+    // Keys drive the app: they have Menu, so no ⋯; the title keeps its room.
     assert!(!app.screen().matches("id:guide-more").unwrap());
+    let room = width(app, "guide-more-slot");
+    assert!(room > 0.0);
 
     // A tap (here on the idle preview, which does nothing else) shows the
-    // ⋯ by the focused programme, on Local A; it opens the Menu key's menu.
+    // ⋯ by the focused programme, on Local A, in that room; it opens the
+    // Menu key's menu.
     step(app.press("id:guide-preview"));
     step(app.wait_for("id:guide-more"));
+    assert_eq!(width(app, "guide-more-slot"), room, "no text moves");
     step(app.press(GUIDE_MORE));
     menu_opens_for(app, "Local A");
     assert_eq!(iptv_app::player_opens(0), opens, "a menu never plays");
@@ -601,5 +605,28 @@ fn a_tv_remote_sees_no_more_control() {
     }
     step(app.press_key("m"));
     step(app.wait_for("id:menu-panel >> text:Manage favourites…"));
+    assert!(!app.screen().matches("id:guide-more").unwrap());
+}
+
+#[test]
+fn the_header_more_control_waits_for_an_inline_group_reorder() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = personalization::start(home, Settings::new(), true);
+    let app = &mut fixture.app;
+    // A TV reorders inline, in the guide's own columns; touch drives it.
+    step(app.set_environment("TV with touch", |env| {
+        env.os = nsh_core::platform::Os::Android;
+        env.idiom = Idiom::Tv;
+    }));
+    step(app.press("id:guide-preview"));
+    step(app.wait_for("id:guide-more"));
+    // The slot is mounted with the ⋯ only: a TV's title keeps that room.
+    step(app.press_key("tab"));
+    assert!(!app.screen().matches("id:guide-more-slot").unwrap());
+    step(app.long_press("id:guide-groups >> text:Sport"));
+    step(app.press("text:Reorder groups"));
+    step(app.wait_for("id:organization-row-1 >> text:Sport"));
+    // Touch drives the app, but the guide takes no pointer while the order
+    // is unfinished: no ⋯ that could not be pressed.
     assert!(!app.screen().matches("id:guide-more").unwrap());
 }

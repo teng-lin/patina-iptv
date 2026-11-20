@@ -220,14 +220,20 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                         .text_color(move || rgb(ui.app.theme.with(|t| t.accent.light))),
                 )
                 .child(when(
-                    // Not during the guide's inline reorder: the header
-                    // waits under it, and the order is unfinished.
+                    move || more_shown(ui, program) || more_reserved(),
                     move || {
-                        !ui.keys_shown()
-                            && program.with(Option::is_some)
-                            && !crate::organization_view::guide_order_open(ui)
+                        // A slot the ⋯'s width: kept empty for keys where
+                        // touch or a pointer is usual, so the title's room
+                        // does not change when the input does.
+                        view()
+                            .test_id("guide-more-slot")
+                            .flex_shrink_0()
+                            .w(move || px(more_side(size)))
+                            .child(when(
+                                move || more_shown(ui, program),
+                                move || more(ui, size),
+                            ))
                     },
-                    move || more(ui, size),
                 )),
         )
         .child(
@@ -303,7 +309,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
 /// Keys hide it: they have Menu.
 fn more(ui: Ui, size: Scale) -> View {
     crate::ui_kit::round_more(
-        move || size.text_px(HEADER_TITLE).0.round(),
+        move || more_side(size),
         move || tint(WHITE, RESTING_ALPHA),
         || tr("More options").to_owned(),
         move || {
@@ -312,6 +318,29 @@ fn more(ui: Ui, size: Scale) -> View {
         },
     )
     .test_id("guide-more")
+}
+
+fn more_side(size: Scale) -> f32 {
+    size.text_px(HEADER_TITLE).0.round()
+}
+
+/// Whether the header's ⋯ shows: for touch and a pointer, with a
+/// programme to open, and not during an inline reorder of channels or
+/// groups (the guide takes no pointer then, and the order is unfinished).
+fn more_shown(ui: Ui, program: Memo<Focused>) -> bool {
+    !ui.keys_shown()
+        && program.with(Option::is_some)
+        && !crate::organization_view::inline_order_open(ui)
+}
+
+/// Whether the title keeps the ⋯'s room while it is hidden: wherever touch
+/// or a pointer is usual. A TV's or a terminal's remote rarely gives way to
+/// one, so there the title keeps the room and the ⋯ takes it when shown.
+fn more_reserved() -> bool {
+    !matches!(
+        idiom(),
+        nsh_core::platform::Idiom::Tv | nsh_core::platform::Idiom::Terminal
+    )
 }
 
 fn library_shortcuts(ui: Ui) -> View {

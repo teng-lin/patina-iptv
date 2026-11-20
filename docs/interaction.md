@@ -129,12 +129,15 @@ visible entry point for touch and pointer users.
 - **Now:** while touch or a pointer drives the app, a visible "More options"
   control (⋯) opens the programme and channel menu: in the guide header, after
   the focused or tapped programme's title, and at the end of each channel list
-  row (not while multiview picks a channel, where rows have no menu). Keys
-  hide it; they have Menu.
+  row. The header's ⋯ hides during an inline reorder of channels or groups,
+  and the rows' ⋯ while multiview picks a channel (rows have no menu then).
+  Keys hide it; they have Menu. Where touch or a pointer is usual, the
+  title keeps the ⋯'s room while it is hidden, so switching input moves no
+  text; on TVs and terminals the title uses that room until the ⋯ shows.
 - **Planned:** the same control for the remaining exceptions to "shortcuts are
-  optional", which still open their menu only by long press, right-click or
-  Menu: recordings rows, and group options in the guide's groups column and
-  the channel list's groups column.
+  optional", which still open their menu only by the shortcuts above:
+  recordings rows, and group options in the guide's groups column and the
+  channel list's groups column.
 
 ## Layout classes
 
