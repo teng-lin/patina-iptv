@@ -139,7 +139,8 @@ and focus on a live channel follows the clock to the programme now on air.
 - **Planned:** Back from a movie or an episode played full screen returns
   to its details, the played episode selected, over the video on the same
   player. Today it returns to the guide, the title playing on in the
-  preview; Movies or Shows reopen the details with the episode selected.
+  preview; Movies or Shows reopen the details with the episode selected
+  (#147).
 - **Now:** with `guide.back_returns_to_now` (on by default), Back with focus on a
   past or upcoming programme in the guide first returns to the programmes on
   air, after any dialog or hint card closes.
