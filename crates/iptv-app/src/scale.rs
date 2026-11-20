@@ -1,7 +1,8 @@
 //! The guide's scale on desktop: its type and geometry (`fonts.rs`, the
 //! grid, the ruler, the channel column and the header's text) are the
 //! full-screen sizes, shrunk a little in a smaller window. An Android
-//! tablet and an iPad keep the full sizes (the window is the screen); a TV shows them
+//! tablet and an iPad keep the full sizes in every window, an iPad's Split
+//! View and Slide Over ones included (touch needs them); a TV shows them
 //! at [`TV`], as dense as the reference's TV guide (8 rows of ≈ 39 dp
 //! under its header on a 960 × 540 dp screen).
 //!
@@ -27,8 +28,17 @@ pub const MIN: f32 = 0.8;
 pub const MAX: f32 = 1.0;
 /// The scale moves in these steps.
 pub const STEP: f32 = 0.025;
-/// Whether this platform scales the guide with its window.
+/// Whether this build scales the guide with its window (desktops).
 const SCALES: bool = !cfg!(any(target_os = "android", target_os = "ios"));
+
+/// Whether the guide scales with its window: on desktops, not on a tablet,
+/// whose windows (an Android tablet's screen, an iPad's full screen,
+/// Split View, Slide Over or Stage Manager window) are touched and keep the
+/// full sizes. The reported idiom decides too, so a headless tablet lays
+/// out as a tablet does.
+fn scales() -> bool {
+    SCALES && idiom() != Idiom::Pad
+}
 /// The scale on a TV (rows 50 → 40 dp, type 20 → 16).
 pub const TV: f32 = 0.8;
 
@@ -49,7 +59,7 @@ pub fn now() -> f32 {
         return TV;
     }
     let w = window();
-    scale_for(w.width.0, w.height.0, SCALES)
+    scale_for(w.width.0, w.height.0, scales())
 }
 
 /// The scale as a memo: views read it in their bindings, which run again

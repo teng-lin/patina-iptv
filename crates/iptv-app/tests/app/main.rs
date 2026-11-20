@@ -49,6 +49,7 @@ mod guide_pages;
 mod guide_player_windows;
 mod guide_scroll_cost;
 mod interface_languages;
+mod ipad_windows;
 mod keyboard_dismissal;
 mod library_cached_epg;
 mod library_management;

@@ -261,6 +261,9 @@ pub struct Ui {
     pub panels: Signal<Panels>,
     /// The pointer's play bar over full-screen video (`play_bar.rs`).
     pub play_bar: Signal<iptv_core::play_bar::PlayBar>,
+    /// The play bar's laid-out height above the window's bottom (0 until
+    /// it first shows): its rows wrap in a narrow window.
+    pub play_bar_height: Signal<f32>,
     pub paused: Signal<bool>,
     /// A catch-up seek being chosen: the target, in seconds into the
     /// programme, opened once the keys pause (`seek.rs`).
@@ -390,6 +393,7 @@ impl Ui {
             visible_rows: signal(None),
             panels: signal(Panels::default()),
             play_bar: signal(Default::default()),
+            play_bar_height: signal(0.0),
             paused: signal(false),
             seek_target: signal(None),
             menu: signal(None),

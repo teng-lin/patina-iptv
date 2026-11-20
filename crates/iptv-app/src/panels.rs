@@ -28,14 +28,14 @@ pub use iptv_core::layout::PREVIEW_MARGIN;
 pub const PREVIEW_RADIUS: f32 = 10.0;
 
 /// The header in the window now (reactive): the guide's scale and the
-/// viewer's text size decide where the shortcuts go and how tall their row is.
+/// viewer's text size (the app's and the system's) decide where the shortcuts go and how tall their row is.
 pub fn guide_header_now() -> GuideHeader {
     let w = window();
     GuideHeader::of(
         w.width.0,
         w.height.0,
         crate::scale::now(),
-        crate::settings::font_factor(),
+        crate::settings::text_factor(),
     )
 }
 

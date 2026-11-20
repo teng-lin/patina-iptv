@@ -460,7 +460,7 @@ fn footer(ui: Ui, size: Scale) -> impl IntoElement {
     };
     ui_kit::body(size, description)
         .test_id("settings-help")
-        .h(move || px(size.of(FOOTER_H) * (crate::settings::font_factor() * font_scale()).max(1.0)))
+        .h(move || px(size.of(FOOTER_H) * crate::settings::text_factor().max(1.0)))
         .flex_shrink_0()
         .px(move || size.px(4.0))
         .number_of_lines(4)
