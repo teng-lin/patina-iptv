@@ -526,6 +526,21 @@ mark
 keys KEYCODE_SEARCH
 expect 'key=search .*action=Some\(OpenSearch\)' 10
 
+# Optional manual journey checks on the same owned emulator (never in CI):
+# hold up to IPTV_SMOKE_HOLD seconds, or until IPTV_SMOKE_HOLD_FILE exists,
+# while an operator drives this serial; the crash checks below still apply.
+if [ -n "${IPTV_SMOKE_HOLD:-}" ]; then
+  step "hold for manual journey checks"
+  [[ "$IPTV_SMOKE_HOLD" =~ ^[0-9]+$ ]] || fail "IPTV_SMOKE_HOLD must be whole seconds"
+  echo "  holding $serial for up to ${IPTV_SMOKE_HOLD}s"
+  start=$SECONDS
+  while [ $((SECONDS - start)) -lt "$IPTV_SMOKE_HOLD" ]; do
+    [ -z "${IPTV_SMOKE_HOLD_FILE:-}" ] || [ ! -e "$IPTV_SMOKE_HOLD_FILE" ] || break
+    alive || fail "the app died during the manual checks"
+    pause 2
+  done
+fi
+
 step "checks"
 pause 2
 alive || fail "the app is not running"
