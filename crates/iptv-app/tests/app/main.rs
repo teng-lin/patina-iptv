@@ -75,6 +75,7 @@ mod tv_player;
 mod tv_replay;
 mod tv_shared_controls;
 mod type_drift;
+mod vod_empty_compact;
 mod vod_library;
 
 mod store_latency;

@@ -27,10 +27,7 @@ pub(super) fn activate_navigation(ui: Ui) {
                 Kind::Movie
             };
             if ui.vod.with_untracked(|s| s.query.kind == kind) {
-                ui.vod.update(|s| {
-                    s.control = Control::Category;
-                    s.categories_open = true;
-                });
+                ui.vod.update(|s| s.open_categories());
             } else {
                 open(ui, kind);
             }
@@ -194,7 +191,7 @@ fn category_button(
 
 fn categories(ui: Ui, size: Scale) -> impl IntoElement {
     when(
-        move || ui.vod.with(|s| s.categories_open),
+        move || ui.vod.with(|s| s.shows_categories()),
         move || {
             let rows = element_ref();
             effect(move || {
@@ -397,7 +394,15 @@ fn tools(ui: Ui, size: Scale) -> View {
 
 pub(super) fn hero(ui: Ui, size: Scale) -> View {
     view()
-        .h(move || size.px(300.0))
+        // The one-pane empty catalogue has no title to describe: only the
+        // tools' row, so its message and action stay in the window.
+        .h(move || {
+            size.px(if ui.vod.with(|s| s.one_pane()) {
+                32.0 + ui_kit::TOUCH
+            } else {
+                300.0
+            })
+        })
         .flex_shrink_0()
         .pt(move || size.px(30.0))
         .gap(move || size.px(12.0))
@@ -628,7 +633,15 @@ fn grid(ui: Ui, size: Scale) -> impl IntoElement {
         )
 }
 
-fn category_heading(ui: Ui, size: Scale) -> View {
+fn category_heading(ui: Ui, size: Scale) -> impl IntoElement {
+    // The one-pane empty catalogue has nothing to filter.
+    when(
+        move || ui.vod.with(|s| !s.one_pane()),
+        move || category_heading_button(ui, size),
+    )
+}
+
+fn category_heading_button(ui: Ui, size: Scale) -> View {
     category_button(
         ui,
         size,
@@ -651,18 +664,24 @@ fn category_heading(ui: Ui, size: Scale) -> View {
             })
         },
         || false,
-        move || {
-            ui.vod.update(|s| {
-                s.categories_open = true;
-                s.control = Control::Category;
-            })
-        },
+        move || ui.vod.update(|s| s.open_categories()),
     )
     .px(px(0.0))
 }
 
 pub(super) fn screen(ui: Ui, size: Scale) -> View {
     super::empty::bind(ui);
+    // The layout class at the current text size (`iptv_core::layout`):
+    // a compact window shows the empty catalogue as its one pane.
+    let compact = computed(move || {
+        use iptv_core::layout::Class;
+        let text = size.of(1.0) * crate::settings::font_factor();
+        Class::of(window().width.0, text) == Class::Compact
+    });
+    effect(move || {
+        let compact = compact.get();
+        ui.vod.update(|s| s.set_compact(compact));
+    });
     let preview = computed(move || ui.vod.with(|s| (s.focused.clone(), s.generation)));
     effect(move || {
         let (Some(key), generation) = preview.get() else {
@@ -712,7 +731,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
             crate::overlays::Overlay::Vod.accessibility_covered(ui)
         })
         .child(when(
-            move || ui.vod.with(|s| s.categories_open),
+            move || ui.vod.with(|s| s.shows_navigation()),
             move || navigation(ui, size),
         ))
         .child(categories(ui, size))

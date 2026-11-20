@@ -122,7 +122,7 @@ here checked it.
 | Resize keeps channel, preview, title and episode on one player, no extra opens | Pass (headless) | `pane_collapse::resizing_the_guide_keeps_the_focused_channel_and_the_playing_preview`, `pane_collapse::resizing_movies_and_shows_keeps_the_title_and_the_episode` |
 | Movies and Shows: play, resume by identity | Pass (headless) | `vod_library::movies_and_series_reach_playback_and_resume_by_identity`, `desktop_clicks_through_continue_watching_and_recently_added` |
 | Empty, failed and disabled imports with their actions | Pass (headless) | `vod_library::desktop_retries_a_failed_import_and_refreshes_an_empty_one`, `an_import_switched_off_opens_that_playlists_import_switch`, `the_empty_state_covers_every_playlist_the_catalogue_reads` |
-| Movies empty state at 400×600 for pointer | **Fail** | [desktop-400x600-movies-empty-squeezed.png](../screenshots/issue-86/desktop-400x600-movies-empty-squeezed.png) (English, Medium text); bug 1 below |
+| Movies empty state at 400×600 for pointer | **Fail** | [desktop-400x600-movies-empty-squeezed.png](../screenshots/issue-86/desktop-400x600-movies-empty-squeezed.png) (English, Medium text); bug 1 below, fixed since by #130 (headless only) |
 | Extra large text with the pseudolocale, 1280×720 | Pass | [desktop-1280x720-extra-large-pseudo.png](../screenshots/issue-86/desktop-1280x720-extra-large-pseudo.png): shortcuts and preview visible |
 | Large text and translations keep accessible names | Pass (headless, Settings only) | `interface_languages::pseudolocalized_labels_keep_their_accessible_name_at_large_text_sizes` walks the Settings screen; it does not cover the journey's guide, player or Movies actions |
 | Video in the real window | Not run | Broadway has no OpenGL |
@@ -138,6 +138,12 @@ here checked it.
    can reach it: Right moves focus to the action and the categories slide
    away. At 560×800 it fits. This conflicts with "Movies and Shows already
    show one pane at a time in every class" and with the large-text criterion.
+   **Fixed by #130** after this run: in Compact the empty catalogue is one
+   pane, its message and action beside the narrow rail with the categories
+   gone. `vod_empty_compact` checks at 400×600, Medium and Extra large text,
+   that the message keeps most of the width and Add playlist and Close stay
+   inside the window, and that Left, Right and Enter still reach the rail
+   and the action. The real window was not run again.
 2. **Observation, not a bug yet:** with the guide's groups column open at
    400×600 and Extra large text, the rail and groups take most of the width
    and the guide rows show two letters. The contract marks collapsing these
@@ -162,9 +168,9 @@ was opened by a rotation, a Back or closing Movies.
 | #86 criterion | Status | Evidence |
 |---|---|---|
 | Document the route, activation and pane-collapse contract | Met | [Interaction contract](../interaction.md) |
-| Discoverable destinations and actionable empty, loading and error states | Partly (bug 1, observation 3) | Emulators show the M3U-only state with Add playlist; headless covers in progress, failed, disabled and empty with their actions |
+| Discoverable destinations and actionable empty, loading and error states | Partly (bug 1, fixed by #130; observation 3) | Emulators show the M3U-only state with Add playlist; headless covers in progress, failed, disabled and empty with their actions |
 | Resize, rotation, split screen and input switching keep identity, position and playback, with no extra opens | Partly | Resize: headless `pane_collapse`, including the same player node. Rotation and touch/key switching: tablet emulator kept the channel and opened no stream; surface continuity not verified. Split screen: not run |
-| Large text and long translations leave primary actions visible or reachable | Partly | Met at 1280×720 in the real window; headless `interface_languages` covers Settings only; bug 1 at 400×600; observation 5 |
+| Large text and long translations leave primary actions visible or reachable | Partly | Met at 1280×720 in the real window; headless `interface_languages` covers Settings only; bug 1 at 400×600 (fixed by #130, headless `vod_empty_compact`); observation 5 |
 | A tablet with keyboard and mouse keeps touch controls and no permanent remote hints | Partly | Headless `pointer::tablet_back_controls` and the tablet ⋯ scenarios; on the emulator touch and D-pad alternated correctly. No hardware keyboard and mouse run |
 | Complete journey on fresh TV, tablet and desktop installations, with build, OS, input, viewport and synthetic screenshots | Partly | Fresh emulator installs and the headless and private-window desktop runs above. Not run: physical devices, desktop video in a real window, movie and series playback on Android |
 

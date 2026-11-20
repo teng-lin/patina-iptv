@@ -406,6 +406,10 @@ pub struct Screen {
     /// The playlist the empty screen's action last acted on (`Some(None)`:
     /// adding a playlist).
     offered: Option<Option<i64>>,
+    /// Whether the window is in the compact layout class
+    /// ([`crate::layout::Class::Compact`]); set by the shell through
+    /// [`Screen::set_compact`] and kept across [`Screen::begin`].
+    compact: bool,
 }
 impl Screen {
     pub fn begin(&mut self, kind: Kind) -> u64 {
@@ -425,9 +429,57 @@ impl Screen {
             generation: self.generation.wrapping_add(1),
             library: self.library,
             offered: self.library.action().map(EmptyAction::target),
+            compact: self.compact,
             ..Default::default()
         };
         self.reload()
+    }
+    /// Sets whether the window is compact. A compact window shows one pane
+    /// at a time ([`Screen::one_pane`]).
+    pub fn set_compact(&mut self, compact: bool) {
+        self.compact = compact;
+        self.settle_panes();
+    }
+    /// Whether the empty catalogue takes the window's width: in a compact
+    /// window its message and action are the one pane, the categories give
+    /// way (there is nothing to filter), and the remote moves between the
+    /// rail and the action.
+    pub fn one_pane(&self) -> bool {
+        self.compact && self.empty_state().is_some()
+    }
+    /// Whether the categories column shows.
+    pub fn shows_categories(&self) -> bool {
+        self.categories_open && !self.one_pane()
+    }
+    /// Whether the rail (Close and the destinations) shows: beside the
+    /// categories, and always beside the one-pane empty catalogue, where it
+    /// is the pointer's way out.
+    pub fn shows_navigation(&self) -> bool {
+        self.categories_open || self.one_pane()
+    }
+    /// Opens the categories, or in one pane goes to the empty catalogue's
+    /// action, the only thing there is to choose.
+    pub fn open_categories(&mut self) {
+        if self.one_pane() {
+            self.categories_open = false;
+            self.control = Control::Catalogue;
+        } else {
+            self.categories_open = true;
+            self.control = Control::Category;
+        }
+    }
+    /// Once the empty catalogue is the one pane, a remote left on the
+    /// hidden categories moves to where the titles would be (the action).
+    fn settle_panes(&mut self) {
+        if self.one_pane()
+            && matches!(
+                self.control,
+                Control::Category | Control::Continue | Control::Source
+            )
+        {
+            self.categories_open = false;
+            self.control = Control::Catalogue;
+        }
     }
     /// Sets why the catalogue may be empty. When the empty screen's action
     /// now acts on another playlist than the one it offered, a remote on it
@@ -437,6 +489,7 @@ impl Screen {
     pub fn set_library(&mut self, state: VodState) {
         self.library = state;
         let Some(action) = state.action() else {
+            self.settle_panes();
             return;
         };
         let target = action.target();
@@ -448,10 +501,15 @@ impl Screen {
             && self.details.is_none()
             && self.cards.is_empty()
         {
-            self.control = Control::Category;
-            self.categories_open = true;
+            if self.one_pane() {
+                self.control = Control::Navigation;
+            } else {
+                self.control = Control::Category;
+                self.categories_open = true;
+            }
         }
         self.offered = Some(target);
+        self.settle_panes();
     }
     /// The catalogue's state while it shows no titles, has loaded and has
     /// no error, and no search or filter narrows it: what its empty screen
@@ -489,6 +547,7 @@ impl Screen {
             open: true,
             shelf: Some(shelf),
             generation: self.generation.wrapping_add(1),
+            compact: self.compact,
             ..Default::default()
         };
         self.reload()
@@ -752,6 +811,7 @@ impl Screen {
         }
         self.busy = false;
         self.has_more = more;
+        self.settle_panes();
         true
     }
     pub fn move_focus(&mut self, delta: isize) {
@@ -770,6 +830,7 @@ impl Screen {
         if self.control == Control::Navigation {
             if step > 0 {
                 self.control = Control::Category;
+                self.settle_panes();
             }
             return;
         }
@@ -799,7 +860,9 @@ impl Screen {
         }
         let at = self.focused_index().unwrap_or(0);
         let columns = self.columns.max(1);
-        if step < 0 && at.is_multiple_of(columns) {
+        if step < 0 && self.one_pane() {
+            self.control = Control::Navigation;
+        } else if step < 0 && at.is_multiple_of(columns) {
             self.categories_open = true;
             self.control = Control::Category;
         } else if step < 0 || at % columns + 1 < columns {
@@ -1037,7 +1100,7 @@ impl Screen {
                 self.control = Control::Catalogue;
                 return;
             }
-            if !self.categories_open {
+            if !self.categories_open && !self.one_pane() {
                 self.categories_open = true;
                 self.control = Control::Category;
                 return;
@@ -2002,6 +2065,68 @@ mod tests {
         shelf.set_library(failed(2));
         assert_eq!(shelf.control, Control::Catalogue);
         assert!(!shelf.categories_open);
+    }
+    #[test]
+    fn a_compact_empty_catalogue_is_one_pane_between_the_rail_and_its_action() {
+        let mut s = Screen::default();
+        s.set_compact(true);
+        s.set_library(VodState::NoEligibleSource);
+        let generation = s.begin(Kind::Movie);
+        // Loading: the categories show as before.
+        assert!(!s.one_pane() && s.shows_categories());
+        s.publish(generation, Vec::new(), false, false);
+        // Loaded and empty: the message and its action take the width,
+        // with the remote on the action and the rail beside it.
+        assert!(s.one_pane());
+        assert!(!s.shows_categories() && s.shows_navigation());
+        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.empty_action(), Some(EmptyAction::AddPlaylist));
+        // Left reaches the rail, Right the action again; the categories
+        // never come back.
+        s.browse_horizontal(-1);
+        assert_eq!(s.control, Control::Navigation);
+        assert!(!s.shows_categories());
+        s.browse_horizontal(1);
+        assert_eq!(s.control, Control::Catalogue);
+        // Choosing this destination again goes to its action.
+        s.control = Control::Navigation;
+        s.open_categories();
+        assert_eq!(s.control, Control::Catalogue);
+        // Back: the rail, then closed.
+        s.back();
+        assert!(s.open);
+        assert_eq!(s.control, Control::Navigation);
+        s.back();
+        assert!(!s.open);
+        // Wider again: the categories one Left away, as in every wider
+        // window; compact again moves a remote off them.
+        let generation = s.begin(Kind::Series);
+        s.publish(generation, Vec::new(), false, false);
+        s.set_compact(false);
+        assert!(!s.one_pane() && !s.shows_navigation());
+        s.browse_horizontal(-1);
+        assert_eq!(s.control, Control::Category);
+        assert!(s.shows_categories());
+        s.set_compact(true);
+        assert_eq!(s.control, Control::Catalogue);
+        assert!(!s.shows_categories());
+        // An action that moves to another playlist sends the remote to the
+        // rail, not to hidden categories.
+        s.set_library(VodState::Failed {
+            source: 4,
+            problem: ImportProblem::Network,
+        });
+        assert_eq!(s.control, Control::Navigation);
+        assert!(!s.shows_categories());
+        // Titles: the categories stay a pane of their own.
+        let generation = s.begin(Kind::Movie);
+        s.publish(generation, vec![card("a")], false, false);
+        assert!(!s.one_pane() && s.shows_categories());
+        assert_eq!(s.control, Control::Category);
+        // A shelf is never one pane.
+        let generation = s.begin_shelf(Shelf::RecentlyAdded);
+        s.publish(generation, Vec::new(), false, false);
+        assert!(!s.one_pane());
     }
     #[test]
     fn the_catalogue_keeps_its_toolbar() {
