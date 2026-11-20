@@ -1317,10 +1317,18 @@ pub fn source_ready(ui: Ui, refresh: bool) {
     }
     log::info!("iptv player: resuming the last channel");
     crate::startup::mark("last channel resolved");
-    show_channel(ui, channel);
-    ui.play(channel, Playback::Live);
-    ui.mode.set(ViewMode::Fullscreen);
-    ui.show_playing();
+    // The guide's list follows only playback the parental lock admitted
+    // (at once, or after its PIN): a cancelled PIN leaves the guide as it
+    // was.
+    crate::parental_view::admitted(ui, channel, move || {
+        ui.play(channel, Playback::Live);
+        if ui.playing.get_untracked() != Some(channel) {
+            return;
+        }
+        crate::lists::show_resumed(ui, channel);
+        ui.mode.set(ViewMode::Fullscreen);
+        ui.show_playing();
+    });
 }
 
 #[cfg(test)]

@@ -140,7 +140,7 @@ pub fn adopt(ui: Ui) -> bool {
         ui.player.early.set(None);
     });
     crate::favorites::played(&early.key);
-    super::show_channel(ui, channel);
+    crate::lists::show_resumed(ui, channel);
     if !requested {
         // It closed meanwhile (stopped, or failed for good): start it as
         // the guide has it.

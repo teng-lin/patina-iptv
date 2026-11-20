@@ -36,14 +36,20 @@ fn channel(i: usize) -> String {
     format!("Desk {i:02}")
 }
 
-/// Native player props by node, and window titles by window id.
+/// Native player props by node, the players in the order they were
+/// mounted, and window titles by window id.
 #[derive(Clone, Default)]
 struct Observed {
     props: Arc<Mutex<HashMap<NodeId, HashMap<String, Value>>>>,
+    players: Arc<Mutex<Vec<NodeId>>>,
     titles: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl Observed {
+    /// Surface `surface`'s player. Linux and macOS name it by its
+    /// `popupSurface` routing prop (`video.rs`), which their player windows
+    /// need, and the scenarios require it there.
+    #[cfg(not(windows))]
     fn player(&self, surface: usize) -> Option<NodeId> {
         self.props
             .lock()
@@ -51,6 +57,14 @@ impl Observed {
             .iter()
             .find(|(_, v)| v.get("popupSurface") == Some(&json!(surface)))
             .map(|(id, _)| *id)
+    }
+
+    /// Windows has no player windows and sends no routing prop: the
+    /// surfaces' players are the `tv.player`s in mount order (surface 0,
+    /// the persistent one, first).
+    #[cfg(windows)]
+    fn player(&self, surface: usize) -> Option<NodeId> {
+        self.players.lock().unwrap().get(surface).copied()
     }
 
     fn prop(&self, surface: usize, name: &str) -> Value {
@@ -230,16 +244,20 @@ fn start(
     let windows: Arc<Mutex<HashMap<NodeId, String>>> = Arc::default();
     app.observe(move |_, batch| {
         let mut props = observed.props.lock().unwrap();
+        let mut players = observed.players.lock().unwrap();
         let mut windows = windows.lock().unwrap();
         for item in &batch.items {
             match item {
+                MountItem::Component { id, name } if name.as_ref() == "tv.player" => {
+                    players.push(*id);
+                }
                 MountItem::ComponentProps { id, props: changed } => {
                     let entry = props.entry(*id).or_default();
                     for (name, value) in changed {
                         entry.insert(name.to_string(), value.clone().unwrap_or(Value::Null));
                     }
                     // Generated playback: acknowledge each load as a host would.
-                    if entry.contains_key("popupSurface")
+                    if players.contains(id)
                         && changed.iter().any(|(name, value)| {
                             name.as_ref() == "source"
                                 && value.as_ref().is_some_and(|v| !v.is_null())
@@ -257,6 +275,7 @@ fn start(
                 }
                 MountItem::Delete { id } => {
                     props.remove(id);
+                    players.retain(|player| player != id);
                 }
                 MountItem::Command {
                     id,

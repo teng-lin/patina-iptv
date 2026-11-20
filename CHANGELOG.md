@@ -17,12 +17,15 @@ is below 1.0, a minor release may change behaviour.
 
 ### Changed
 
+- When Patina plays the last channel on start and that channel is one of the
+  playlist's favourites, Back from full screen now opens the Favourites list
+  with the channel focused instead of All channels. A channel that is not a
+  favourite of that playlist still returns to All channels.
 - Desktop: closing the main window while recordings keep Patina running now
   also closes every player window and the picture-in-picture window, as
   quitting does; only the recorder runs on. On macOS and Windows a window
   left without a reachable title bar after a display is removed moves onto
   the nearest remaining display.
-
 - Choosing a channel in the guide now watches it full screen in both guide
   layouts. One setting, **Keep the guide after choosing**, now applies to both
   layouts. It replaces the separate setting for the guide drawn over video,
@@ -65,6 +68,11 @@ is below 1.0, a minor release may change behaviour.
 - iPad: a mostly sideways diagonal swipe in the guide, up to about 1.5
   across for every 1 down, now pans the timeline instead of scrolling the
   channels. Taps that wobble sideways by less than 10 points still play.
+- Windows and iPad: right-clicking a channel's name in the guide (on iPad, a
+  mouse's or trackpad's secondary click) now opens the channel's menu, as it
+  does on Linux and macOS. Before, only programmes and the groups columns
+  opened a menu there. The menu offers nothing new on these platforms:
+  Watch in new window stays Linux and macOS only.
 - TV remote: a press of OK (or another key with a hold action) no longer
   acts on a different screen when the screen changes while the key is held,
   for example when a tap plays a channel. Holding a key also keeps the info
