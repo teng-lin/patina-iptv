@@ -86,6 +86,19 @@ pub fn launch(
     configure: impl FnOnce(&mut EngineConfig),
     setup: impl FnOnce(&mut Headless),
 ) -> Fixture {
+    launch_prepared(home, settings, manual, |_, _| {}, configure, setup)
+}
+
+/// [`launch`], with `prepare` changing the stored library (its database
+/// path and the source) before the app starts.
+pub fn launch_prepared(
+    home: Home,
+    settings: Settings,
+    manual: bool,
+    prepare: impl FnOnce(&Path, SourceId),
+    configure: impl FnOnce(&mut EngineConfig),
+    setup: impl FnOnce(&mut Headless),
+) -> Fixture {
     let dir = crate::isolated::data_dir(home.path());
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("settings.json"), settings.to_json_string()).unwrap();
@@ -120,6 +133,7 @@ pub fn launch(
         store.set_favourite(source, &c.id, true).unwrap();
     }
     drop(store);
+    prepare(&path, source);
     let mut config = EngineConfig {
         viewport: Size::new(px(1920.0), px(1080.0)),
         ..EngineConfig::new(Root::of::<iptv_app::App>())

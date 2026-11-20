@@ -503,8 +503,9 @@ fn a_keyboard_over_search_edits_text_without_reaching_the_player() {
     // Play a channel full screen by touch.
     step(app.press("id:guide-ui >> text:/Local A$/"));
     full_screen(app, LANDSCAPE.0);
+    // The video can fill the screen a frame before its source is set.
     let opened = seen.clone();
-    step(app.wait_until("the channel's stream", WAIT, move |_| {
+    step(app.wait_until("the channel plays", WAIT, move |_| {
         !opened.lock().unwrap().sources.is_empty()
     }));
     let playing = sources(&seen);
@@ -607,9 +608,9 @@ fn calls_and_unplugged_headphones_pause_by_policy_and_never_restart_a_stop() {
     let surface = player(app);
     step(app.press("id:guide-ui >> text:/Local A$/"));
     full_screen(app, LANDSCAPE.0);
-    // The stream's source can arrive a moment after full screen.
+    // The video can fill the screen a frame before its source is set.
     let opened = seen.clone();
-    step(app.wait_until("the channel's stream", WAIT, move |_| {
+    step(app.wait_until("the channel plays", WAIT, move |_| {
         !opened.lock().unwrap().sources.is_empty()
     }));
     let playing = sources(&seen);

@@ -178,6 +178,80 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_pauses() {
         opens + 1,
         "the cancelled seek timer does not reopen again"
     );
+
+    // Track selection by the remote on the same bar: the host reports a
+    // subtitle track; Right reaches Tracks, OK opens its chooser, Down and
+    // OK pick the track. The choice goes to the same player as a property:
+    // no stream opens, and focus returns to Tracks.
+    app.engine().control().dispatch_event(
+        player,
+        nsh_core::EventKind::NativeEvent,
+        nsh_core::EventPayload::Native {
+            name: "tracks".into(),
+            data: serde_json::json!({
+                "video": [],
+                "audio": [{ "id": "a1", "language": "eng", "channels": 2 }],
+                "text": [{ "id": "t1", "language": "eng" }],
+                "selected": { "audio": "a1", "text": "off" }
+            }),
+        },
+    );
+    app.settle();
+    for _ in 0..12 {
+        if app
+            .screen()
+            .accessibility_state("id:play-bar-tracks")
+            .is_ok_and(|s| s.selected)
+        {
+            break;
+        }
+        step(app.press_key("right"));
+    }
+    assert!(
+        app.screen()
+            .accessibility_state("id:play-bar-tracks")
+            .unwrap()
+            .selected,
+        "Right reaches Tracks"
+    );
+    step(app.press_key("enter"));
+    step(app.wait_for("id:chooser-layer >> text:/English$/"));
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    step(app.wait_for_gone(
+        "id:chooser-layer >> text:/English$/",
+        Duration::from_secs(2),
+    ));
+    let text_track = lifetime
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find_map(|item| match item {
+            MountItem::ComponentProps { id, props } if *id == player => props
+                .iter()
+                .find(|(name, _)| name.as_ref() == "textTrack")
+                .and_then(|(_, value)| value.clone()),
+            _ => None,
+        });
+    assert_eq!(
+        text_track,
+        Some(serde_json::json!("t1")),
+        "the remote picked t1"
+    );
+    assert!(
+        app.screen()
+            .accessibility_state("id:play-bar-tracks")
+            .unwrap()
+            .selected,
+        "the chooser returns focus to Tracks"
+    );
+    assert_eq!(
+        iptv_app::player_opens(0),
+        opens + 1,
+        "a track choice opens no stream"
+    );
+
     let history = lifetime.lock().unwrap();
     let components: Vec<_> = history
         .iter()

@@ -44,6 +44,10 @@ pub(super) fn act(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: 
 
 /// A Long Back acted: its release must not also go back (`lib.rs`
 /// `bind_back`), unless no release comes in time.
+pub(super) fn swallow_release(ui: Ui) {
+    arm_back_guard(ui);
+}
+
 fn arm_back_guard(ui: Ui) {
     let now = ui.now_ms();
     ui.back_guard.update(|g| g.long_back(now));

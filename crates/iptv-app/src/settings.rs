@@ -181,7 +181,7 @@ pub fn offer(key: &str) -> Offer {
     }
     if WIRED.contains(&key)
         || COMMANDS.contains(&key)
-        || (key == keys::LONG_PRESS.as_str() && crate::input::LONG_PRESS)
+        || (key == keys::LONG_PRESS.as_str() && crate::input::long_press())
         || (key == keys::PIP_ON_LEAVE.as_str() && android)
     {
         Offer::Active
