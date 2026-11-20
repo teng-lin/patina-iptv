@@ -1,0 +1,32 @@
+[workspace]
+
+[package]
+name = "iptv-tui"
+description = "Optional local TUI host for Patina IPTV using nsh-platform-tui (not built or distributed in CI)."
+version = "0.1.5"
+edition = "2024"
+rust-version = "1.99.1"
+publish = false
+license = "AGPL-3.0-only"
+
+[[bin]]
+name = "patina-tui"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+iptv-app = { path = "../iptv-app" }
+iptv-library = { path = "../iptv-library" }
+iptv-player-mpv = { path = "../iptv-player-mpv" }
+iptv-providers = { path = "../iptv-providers" }
+iptv-settings = { path = "../iptv-settings" }
+iptv-store-sqlite = { path = "../iptv-store-sqlite" }
+nsh-core = { path = "../../../nsh-patina/crates/nsh-core" }
+nsh-platform-tui = { path = "../../../nsh-patina/crates/nsh-platform-tui", default-features = false, features = ["run-app"] }
+ratatui-core = { version = "0.1.2", features = ["std", "layout-cache", "underline-color"] }
+ratatui-crossterm = "0.1.2"
+crossterm = "0.29.0"
+base64 = "0.22"
+flate2 = "1"
+env_logger = "0.11"
+log = "0.4"

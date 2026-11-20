@@ -18,8 +18,9 @@ members = [
     "crates/iptv-runtime",
     "vendor/nsh-tv",
 ]
-# nsh generates its own Cargo workspaces under the app crate.
-exclude = ["crates/iptv-app/.nsh"]
+# nsh generates its own Cargo workspaces under the app crate; iptv-tui is an
+# optional local terminal host that is not built or distributed in CI.
+exclude = ["crates/iptv-app/.nsh", "crates/iptv-tui"]
 
 [workspace.package]
 version = "0.1.5"
