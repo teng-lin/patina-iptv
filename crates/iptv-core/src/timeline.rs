@@ -252,6 +252,82 @@ impl Timeline {
     }
 }
 
+/// Whether a finger has crossed the drag threshold ([`SLOP`]) in any
+/// direction, seen from its touches alone: at a list's end a drag scrolls
+/// nothing, and a platform's scroll view may then report no drag of its
+/// own, yet the finger dragged (so a waiting preview stops). It follows
+/// the first finger down only; others are ignored until it lifts.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Threshold {
+    /// The finger followed and where it went down.
+    from: Option<(u32, f32, f32)>,
+    /// How far it has been from there (dp).
+    furthest: f32,
+    crossed: bool,
+}
+
+/// A cancel after the finger moved this far (dp) counts as a drag: a
+/// scroll view around took the finger over (Android intercepts past its
+/// own slop, at a list's end too). A cancel of a still finger (a dialog,
+/// the system) is no drag.
+pub const CANCEL_MOVE: f32 = SLOP / 2.0;
+
+impl Threshold {
+    /// Finger `id` went down at `(x, y)` dp.
+    pub fn down(&mut self, id: u32, x: f32, y: f32) {
+        if self.from.is_none() {
+            *self = Threshold {
+                from: Some((id, x, y)),
+                furthest: 0.0,
+                crossed: false,
+            };
+        }
+    }
+
+    /// Finger `id` is at `(x, y)`: true the first time the followed
+    /// finger is [`SLOP`] or more from where it went down.
+    pub fn moved(&mut self, id: u32, x: f32, y: f32) -> bool {
+        let Some((fid, fx, fy)) = self.from else {
+            return false;
+        };
+        if fid != id {
+            return false;
+        }
+        let distance = (x - fx).hypot(y - fy);
+        self.furthest = self.furthest.max(distance);
+        if self.crossed || distance < SLOP {
+            return false;
+        }
+        self.crossed = true;
+        true
+    }
+
+    /// Finger `id` lifted.
+    pub fn up(&mut self, id: u32) {
+        if self.from.is_some_and(|(fid, ..)| fid == id) {
+            *self = Threshold::default();
+        }
+    }
+
+    /// Finger `id`'s touches were cancelled with it at `(x, y)`: true when
+    /// that is a drag (the followed finger had moved [`CANCEL_MOVE`], the
+    /// cancel's own position included, and had not yet been reported
+    /// crossing). A fast drag a scroll view takes over may be cancelled
+    /// before any move reached that far.
+    pub fn cancelled(&mut self, id: u32, x: f32, y: f32) -> bool {
+        let Some((fid, fx, fy)) = self.from else {
+            return false;
+        };
+        if fid != id {
+            return false;
+        }
+        self.furthest = self.furthest.max((x - fx).hypot(y - fy));
+        let drag = !self.crossed && self.furthest >= CANCEL_MOVE;
+        *self = Threshold::default();
+        drag
+    }
+}
+
 /// The minutes the grid has cells for: [`BAND`] from `base`, around the
 /// view with [`MARGIN`] on either side; the cells slide by the view's
 /// offset in it.

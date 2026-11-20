@@ -38,6 +38,46 @@ struct Pending {
     chosen: bool,
 }
 
+/// A timeline pan's hold on the channel it started from: the pan moves the
+/// guide's focus along the row, off the programme on air, without leaving
+/// the channel, so browse playback keeps its target. It holds while the
+/// focus stays where the pan left it, on the same channel (by identity)
+/// and list; any other move of the focus (keys, a tap, another list, a
+/// zap) ends it, and returning there later does not bring it back.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PanAnchor {
+    /// The channel's identity (its key).
+    pub channel: String,
+    group: usize,
+    row: usize,
+    cursor: i32,
+}
+
+impl PanAnchor {
+    /// A pan starts on `channel`'s programme on air, the focus at `focus`.
+    pub fn new(channel: String, focus: &crate::guide::Focus) -> Self {
+        PanAnchor {
+            channel,
+            group: focus.group,
+            row: focus.channel,
+            cursor: focus.cursor,
+        }
+    }
+
+    /// The pan moved the focus along the row to `focus`.
+    pub fn panned(&mut self, focus: &crate::guide::Focus) {
+        self.cursor = focus.cursor;
+    }
+
+    /// Whether it still holds with the focus at `focus` on `channel`.
+    pub fn holds(&self, channel: &str, focus: &crate::guide::Focus) -> bool {
+        self.channel == channel
+            && self.group == focus.group
+            && self.row == focus.channel
+            && self.cursor == focus.cursor
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BrowsePlayback {
     target: Option<Target>,
@@ -233,6 +273,34 @@ mod tests {
         b.focus(None, p, 900);
         assert_eq!(b.tick(3000), None);
     }
+    #[test]
+    fn a_pan_anchor_holds_only_where_the_pan_left_the_focus() {
+        let mut focus = crate::guide::Focus::at(0);
+        focus.channel = 3;
+        let mut anchor = PanAnchor::new("ch".into(), &focus);
+        assert!(anchor.holds("ch", &focus));
+        // The pan moves the cursor along the row: the anchor follows.
+        focus.cursor += 90;
+        assert!(!anchor.holds("ch", &focus));
+        anchor.panned(&focus);
+        assert!(anchor.holds("ch", &focus));
+        // The clock moving on changes nothing it holds by.
+        focus.now += 5;
+        assert!(anchor.holds("ch", &focus));
+        // Another channel at the same row (another list), another row,
+        // another list, another minute.
+        assert!(!anchor.holds("other", &focus));
+        let mut other = focus;
+        other.channel = 4;
+        assert!(!anchor.holds("ch", &other));
+        let mut other = focus;
+        other.group += 1;
+        assert!(!anchor.holds("ch", &other));
+        let mut other = focus;
+        other.cursor += 30;
+        assert!(!anchor.holds("ch", &other));
+    }
+
     #[test]
     fn a_drag_cancels_a_waiting_preview_but_not_a_choice() {
         let mut b = BrowsePlayback::default();

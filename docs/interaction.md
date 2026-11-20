@@ -95,7 +95,8 @@ In the guide:
 
 - **Now:** a drag decides its direction once it has moved 10 points: mostly
   vertical scrolls the channels, mostly horizontal pans the timeline (a
-  diagonal goes the way of its larger part, and stays that way), and a
+  diagonal goes the way of its larger part, and stays that way; on an
+  iPad a steep diagonal still scrolls the channels, #149), and a
   drag released while moving flings on and slows down. A gesture the
   system cancels (a notification shade, a call) stops where it is,
   without a fling. A drag that started on a channel or a programme, past
@@ -103,10 +104,20 @@ In the guide:
   tap (`iptv_core::timeline`).
 - **Now:** crossing the drag threshold, in the guide or the channel list,
   cancels a preview `guide.autoplay` was waiting to start; it does not
-  come back until the focus moves to another channel. A tap's own choice
-  still plays after its switch delay. Scrolling never tunes, records or
-  opens a menu or details (`BrowsePlayback::dragged`;
+  come back until the focus moves to another channel. The threshold is
+  read from the first finger's own touches, so a drag at the list's end
+  that scrolls nothing counts too, and so does a scroll view taking over a
+  finger that moved; a still finger's cancel does not
+  (`iptv_core::timeline::Threshold`). A tap's
+  own choice still plays after its switch delay. Scrolling never tunes,
+  records or opens a menu or details (`BrowsePlayback::dragged`;
   `tests/app/tablet_gestures.rs`).
+- **Now:** a timeline pan that starts on a channel's programme on air
+  keeps that channel for browse playback while it moves the focus along
+  the row (`iptv_core::browse_playback::PanAnchor`, by the channel's
+  identity): a choice waiting for its switch delay still plays, and
+  panning back to now starts no preview again. Any other move of the
+  focus (keys, a tap, another list, a zap) ends that hold.
 - **Now:** a day of listings that a pan pages in keeps the channels where
   the finger scrolled them.
 
@@ -134,6 +145,11 @@ and focus on a live channel follows the clock to the programme now on air.
   the guide while a channel plays returns to the video. On a remote, long Back
   in the player stops playback. The play bar shows a Back button except on TVs
   and terminals (`Ui::back_controls`).
+- **Planned:** Back from a movie or an episode played full screen returns
+  to its details, the played episode selected, over the video on the same
+  player. Today it returns to the guide, the title playing on in the
+  preview; Movies or Shows reopen the details with the episode selected
+  (#147).
 - **Now:** with `guide.back_returns_to_now` (on by default), Back with focus on a
   past or upcoming programme in the guide first returns to the programmes on
   air, after any dialog or hint card closes.
@@ -262,19 +278,33 @@ pauses and resumes: it never opens, retunes or restarts a stream.
 | Host report | Playback |
 |---|---|
 | Another app takes the audio (its own media) | Pauses; the viewer resumes |
-| A call or a prompt takes the audio for a while | Pauses; resumes when it ends, unless the viewer played, paused, stopped or chose something else meanwhile |
+| A call or a prompt takes the audio for a while | Pauses; resumes when it ends, unless the viewer acted on playback meanwhile (played, paused, sought, zapped, chose, stopped) |
 | Headphones unplugged, a Bluetooth headset disconnected | Pauses; never resumes by itself |
 | A notification's sound | Plays on, quieter (the system ducks it) |
 | Home or another app, picture in picture off | Stops and closes the stream; on return it reopens what played, after fresh admission |
 | Home with picture in picture on | Plays on in the window, on the same player and stream |
 | The picture-in-picture window closed | Stops as above |
 
-- **Now (Android):** one audio focus for all the activity's players,
-  held while any means to play aloud (`AudioFocusHost.kt`); the changes
-  reach the app as the player's `audio` event. A stream the viewer stopped
-  stays stopped whatever the focus does, and resuming opens no second
-  provider connection (`tests/app/tablet_journey.rs`). The background
-  stop and return, and picture in picture, as before (`PlayerComponent.kt`,
+In multiview the policy pauses and resumes the heard tile (the active
+one; the others are muted), as the tile's own pause.
+
+| During a call | Playback |
+|---|---|
+| The viewer chooses another multiview tile | Stays silent until the call ends (Android: every player is silenced while the focus is lost for a while); the app pauses nothing more, and the call's end resumes nothing: the heard tile is the viewer's choice |
+| The viewer picks a channel a guard refuses (blocked, locked) | Nothing changes: the pause is still the call's, and its end resumes |
+| Keys and controls that are no playback action (Info, menus, highlights) | Nothing changes |
+
+- **Now (Android):** one audio focus for all the activity's players
+  (`AudioFocusHost.kt`, its rules in `AudioFocusState.kt`): held while a
+  player plays aloud (a source buffering or ready, set to play, not muted;
+  not an ended or failed one); never taken back from another app until a
+  player plays again; kept through a call while a stream is open, and
+  after the call until the app has decided (2 s at most); given up when
+  every stream is stopped, closed or in the background. The changes reach
+  the app as the player's `audio` event. A stream the viewer stopped stays
+  stopped whatever the focus does, and resuming opens no second provider
+  connection (`tests/app/tablet_journey.rs`). The background stop and
+  return, and picture in picture, as before (`PlayerComponent.kt`,
   `PipHost.kt`).
 - **Now:** the Recordings screen states what limits a recording in the
   background, from what the host reports: precise background starts

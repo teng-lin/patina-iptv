@@ -235,6 +235,10 @@ pub struct Ui {
     /// running: the channel key focused then (`browse_playback::hold`).
     pub autoplay_held: Signal<Option<Option<String>>>,
     pub pending_zap: Signal<Option<iptv_core::browse_playback::Target>>,
+    /// A timeline pan's hold on the channel whose programme on air it
+    /// started from: browse playback keeps that channel while the pan
+    /// moves the focus along the row (`grid/pan.rs`, `browse_playback.rs`).
+    pub pan_anchor: Signal<Option<iptv_core::browse_playback::PanAnchor>>,
     /// The host's audio interruptions' policy (`interruption.rs`).
     pub interruptions: Signal<iptv_core::interruption::Interruptions>,
     /// The list the guide shows: catalog channels (`lists.rs`).
@@ -347,6 +351,7 @@ impl Ui {
             browse_playback: signal(Default::default()),
             autoplay_held: signal(None),
             pending_zap: signal(None),
+            pan_anchor: signal(None),
             interruptions: signal(Default::default()),
             list: signal(Rc::new(ChannelList::build(
                 iptv_core::lists::ALL,
@@ -503,6 +508,8 @@ impl Ui {
         if self.player_surface != 0 {
             self.pending_zap.set(None);
             if player::start_surface(*self, self.player_surface, channel) {
+                // Accepted: the viewer's playback now (`interruption.rs`).
+                crate::interruption::viewer_acted(*self);
                 self.playback.set(Playback::Live);
                 self.paused.set(false);
             }
@@ -512,6 +519,8 @@ impl Ui {
         {
             return;
         }
+        // Accepted: the viewer's playback now (`interruption.rs`).
+        crate::interruption::viewer_acted(*self);
         crate::on_demand::flush(*self, false);
         self.player.vod.set(None);
         self.player.recorded.set(None);

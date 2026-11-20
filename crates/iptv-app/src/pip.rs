@@ -222,13 +222,18 @@ fn entered(ui: Ui) {
 /// The host's `pipAction` event: one of the window's buttons.
 pub fn on_action(ui: Ui, action: PipAction) {
     log::info!("iptv pip: {}", action.wire());
+    // Each accepted action hands playback to the viewer
+    // (`interruption.rs`): `toggle_pause` and `Ui::play` say so themselves.
     match action {
         PipAction::Play => {
             if ui.paused.get_untracked() || ui.player.main().finished.get_untracked() {
                 crate::player::toggle_pause(ui);
             }
         }
-        PipAction::Pause => ui.paused.set(true),
+        PipAction::Pause => {
+            crate::interruption::viewer_acted(ui);
+            ui.paused.set(true);
+        }
         PipAction::Next => crate::player_keys::zap(ui, 1),
         PipAction::Previous => crate::player_keys::zap(ui, -1),
     }

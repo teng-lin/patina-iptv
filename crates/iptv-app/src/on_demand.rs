@@ -19,6 +19,7 @@ pub fn seek_to(ui: Ui, ms: u64) -> bool {
     let mut command = None;
     stream.timeline.update(|t| command = t.seek_to(ms));
     if let Some(command) = command {
+        crate::interruption::viewer_acted(ui);
         if stream.finished.get_untracked() {
             stream.finished.set(false);
             ui.player.vod.update(|playing| {

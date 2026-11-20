@@ -253,7 +253,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             .element_ref(&entries)
             .flex_1(),
         );
-    let channels_column = view()
+    let channels_column = crate::browse_playback::watch_drags(view(), ui)
         .test_id("channel-list")
         .w(move || px(size.whole(LIST_W)))
         .pt_safe_area()
