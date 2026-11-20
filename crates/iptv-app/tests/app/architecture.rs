@@ -42,7 +42,6 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("settings_view.rs", "PAGES"),     // Immutable screen definitions.
     ("settings_view.rs", "LAST"),      // Last selected settings tab.
     ("settings_view.rs", "NOTICE"),    // Toast signal handle.
-    ("settings_view.rs", "NOTICE_SHOWN"), // Toast sequence for its timer.
     ("settings_view.rs", "LEAVE_ASKED"), // Exit confirmation clock.
     ("startup.rs", "MARKED"),          // Startup phase instrumentation.
     ("startup.rs", "FALLBACK"),        // Startup clock instrumentation.

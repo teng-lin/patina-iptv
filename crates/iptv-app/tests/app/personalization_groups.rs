@@ -322,19 +322,20 @@ fn a_repeated_notice_keeps_its_full_time_after_the_earlier_one_expires() {
     step(app.wait_for("id:organization-row-0 >> text:Unblocked"));
     step(app.press_key("enter"));
     step(app.wait_for("text:Content blocked"));
+    // No later than the first notice was shown: it ends by first + SHOWN.
     let first = app.clock().now();
     step(app.run_for(Duration::from_millis(1_000)));
     step(app.press_key("down"));
+    // No earlier than the second notice is shown: it lasts past second + SHOWN.
+    let second = app.clock().now();
     step(app.press_key("enter"));
     step(app.wait_for("id:organization-row-1 >> text:Blocked"));
-    step(app.wait_for("text:Content blocked"));
-    let second = app.clock().now();
-    // Waiting on a manual clock moves it while the store writes: the
-    // second notice must still be well inside the first one's time.
-    assert!(second < first + SHOWN - Duration::from_millis(500));
-    // Just past the first notice's end, the second, with the same words, stays.
-    let past_first = (first + SHOWN + Duration::from_millis(100)).saturating_duration_since(second);
-    step(app.run_for(past_first));
+    // Waiting on a manual clock moves it while the store writes: just past
+    // the first notice's end must still be inside the second one's time.
+    let past_first = first + SHOWN + Duration::from_millis(100);
+    let now = app.clock().now();
+    assert!(now < past_first);
+    step(app.run_for(past_first - now));
     assert!(app.clock().now() < second + SHOWN);
     assert!(app.shows("Content blocked"), "{:?}", app.screen().texts());
     step(app.run_for(SHOWN));
