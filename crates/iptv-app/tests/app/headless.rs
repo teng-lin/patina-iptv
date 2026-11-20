@@ -108,10 +108,15 @@ impl Headless {
             RemoteKey::Menu => "ContextMenu",
             RemoteKey::PlayPause => "MediaPlayPause",
             RemoteKey::Previous => "MediaTrackPrevious",
+            RemoteKey::Back => "GoBack",
+            RemoteKey::Digit(d) => ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"][d as usize],
             _ => return Err(format!("missing raw phase event for {key:?}")),
         };
         event.key = name.into();
-        event.code = name.into();
+        event.code = match key {
+            RemoteKey::Digit(d) => format!("Digit{d}").into(),
+            _ => name.into(),
+        };
         event.repeat = phase == KeyPhase::Repeat;
         let root = self
             .0

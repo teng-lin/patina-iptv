@@ -17,14 +17,26 @@ the code as it is (`iptv_nav::Keymap::defaults`, `crates/iptv-app/src/input.rs`,
   acts once, on an auto-repeat or on a timer for remotes that send none. The
   release after a hold does nothing, and neither do the repeats.
 - A key without a hold action acts at once and again on each repeat, so a
-  held arrow keeps moving.
-- A waiting press belongs to the surface it went down on. If that surface
-  changes before the press is decided (a touch plays a channel, a prompt
-  opens, the guide goes full screen), the press is dropped: neither its tap
-  nor its hold action runs (`iptv_nav::HeldPresses`; the log says "dropped:
-  the surface changed").
-- A key going down keeps the info card and the play bar on screen, as any
-  other key does, so a hold never finds them gone on release.
+  held arrow keeps moving. Menu is the exception: held, it opens its menu
+  once instead of opening and closing it with every repeat.
+- A hold decided by an auto-repeat is the hold's one action, exactly as one
+  decided by the timer.
+- A waiting press belongs to the surface it went down on: the keymap's
+  context and what owns input within it (the info card and the control
+  strip share a context but are different surfaces). If that surface
+  changes before the press is decided (a touch plays a channel or opens
+  More controls, a prompt opens, the guide goes full screen), the press is
+  dropped: neither its tap nor its hold action runs
+  (`iptv_nav::HeldPresses`; the log says "dropped: the surface changed").
+  A dropped Back also takes Android's own Back on its release with it.
+- A PIN prompt or the remote editor takes the keys it gets: a press pending
+  from before is forgotten (its release or timer does nothing once the
+  prompt closes), and a key the prompt took does nothing more while held
+  (the OK that submitted a PIN starts no hold on the video). Back on a PIN
+  prompt closes it once, through Android's Back.
+- A key going down keeps the info card and the play bar on screen until
+  the press is decided, even when their own timeout is shorter than the
+  hold, so a press never finds them gone on release.
 - In a replay the seek arrows have no hold: held, they repeat the seek.
 - Long Back's release takes no step back.
 
@@ -44,7 +56,7 @@ back to live.
 | OK | Choose: plays full screen (or keeps the guide with **Keep the guide after choosing**); the playing channel returns to full screen; a past programme with replay replays; any other programme opens its details | The programme and channel menu |
 | Menu | The programme and channel menu; on the groups column, the group's options | – |
 | Back | Hint card, then back to the programmes on air, then groups, then rail, then leave (see [Back](#back)) | Back to the video, when something plays |
-| Ch+ / Ch− and Page Up / Down | A page of channels | – |
+| Ch+ / Ch− and Page Up / Down | A page of channels | Repeats |
 | Record | Records or schedules the focused programme | – |
 | Guide | – (already the guide) | – |
 | Info | – | – |
@@ -58,10 +70,11 @@ moving on before then cancels it.
 | Key | Tap | Hold |
 |---|---|---|
 | Down | Back to the channel row it was reached from | Repeats |
-| Left / Right | The groups column / the channel rows | Repeats |
+| Left | The groups column (on release: Left has a hold in the guide) | – (the guide's hold, the groups, does nothing here) |
+| Right | The channel rows | Repeats |
 | OK | The playing stream full screen, as it plays (no new stream), even if the guide focuses another channel | Opens the play bar full screen |
 | Menu | The play bar, full screen | – |
-| Back | Back to the channel row it was reached from | – |
+| Back | Back to the channel row it was reached from | The playing stream full screen, as it plays |
 
 ## Full-screen live video
 
@@ -70,7 +83,7 @@ moving on before then cancels it.
 | OK | The info card with its action cards; over a failed stream, try again | The play bar, Play/pause focused |
 | Menu | The play bar (again: hide it) | – |
 | Up / Down | Channel up / down (`remote.player_up_down` can make them open the channel list) | Repeats |
-| Ch+ / Ch− and Page Up / Down | Channel up / down | – |
+| Ch+ / Ch− and Page Up / Down | Channel up / down | Repeats |
 | Left | The channel list over the video | The channel list beside the video |
 | Right | The previous channel (again: back) | The recently watched channels |
 | 0 | Channel number entry | The previous channel |
@@ -189,7 +202,10 @@ Deterministic, run by CI:
 - App scenarios with an Android remote's raw Down/Repeat/Up phases
   (`use_remote_key_phases`): `tv_remote_journey` (long OK by repeats and by
   timer, rapid taps, OK held as the info card times out, OK held while a tap
-  plays another channel, the full journey with stream-open counts and one
+  plays another channel, the info card giving way to the strip mid-hold,
+  PIN prompts that take or swallow keys, Back dropped mid-hold, a card
+  timeout shorter than the hold, a hold decided by a repeat on the play
+  bar, a held Menu, the full journey with stream-open counts and one
   persistent player, extra large text on the play bar).
 - App scenarios with the TV idiom: `tv_shared_controls`, `tv_player`,
   `tv_replay` (replay seek and track choice by remote on one player),

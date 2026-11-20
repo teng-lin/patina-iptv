@@ -67,6 +67,8 @@ the app's long-press timer on the engine clock) on a TV idiom:
 |---|---|
 | `long_ok_rapid_taps_and_a_surface_change_during_a_hold` | Long OK with 50 ms repeats and without repeats: the bar opens once with Play/pause focused, no card. Three rapid OK taps: card, hidden, card; no stream opens. OK held as the info card's timer runs out: the card stays and the release presses its Guide action. OK held in the guide while a tap plays Local B: the early release does nothing (`Short dropped`); held while a tap plays Local C: no menu by the timer, no controls by a repeat, no card by the release (`Long dropped`). One `tv.player` throughout |
 | `the_remote_journey_browses_without_retuning_and_returns_to_the_guide` | Hold Left: groups; choose Local A (1 open); Menu: bar; channel list over video, browse to Local B for 3 s: no open; zap to B (2), previous channel to A (3), ⏮ to B (4); Back to the guide, browse: no open; Up to the mini-player, OK: B full screen, no open; Back. One `tv.player`, never removed or reparented |
+| `a_press_belongs_to_its_owner_and_a_prompt_takes_its_keys` | OK held on the info card while a tap opens More controls: no Search on release. OK held in the guide while a tap opens a PIN prompt, released under the prompt, prompt cancelled before the threshold: no menu by a late timer. Raw Back on a PIN prompt plus Android's Back: one step. The OK that submits the PIN, held with repeats: no play bar, no card, no menu. Back held on the card while a tap takes its TV guide action: Android's Back after the release is swallowed |
+| `holds_keep_their_card_decide_once_and_menu_does_not_toggle` | Menu held with repeats: the menu opens once and stays. Card timeout 1 s, long press 2 s, no repeats: the card outlives its timeout and a 1.5 s release presses its action. On the play bar, a hold decided by its repeat (no timer) refocuses Play/pause |
 | `extra_large_text_keeps_every_focused_bar_control_on_screen` | Extra large text at 960×540: exactly one bar control focused at a time, each whole on screen, live skipping Rewind |
 
 Also: `tv_replay` (replay seek by remote opens the archive once; a subtitle
@@ -75,9 +77,11 @@ focus returns to Tracks), `tv_shared_controls` (mini-player, chooser focus
 identity), `accessibility_visibility` (inactive and covered controls out of
 the accessibility tree; PIN and recordings at the largest text; Back from
 modals restores channel identity after reordering) and the
-`iptv-nav` `hold` unit tests. Without the fix, the dropped-press checks fail
-(the early release shows the card) and so does the held-card check (the card
-times out).
+`iptv-nav` `hold` unit tests. Each fix was checked against its regression: with
+it reverted (the card and strip as one owner, no cancel on capture, no
+consumed key, raw Back acting on a PIN prompt, no swallowed Back, no
+deadline-long card, a repeat-decided hold passed as a repeat, Menu repeats
+acting), at least one of these scenarios fails.
 
 ## Acceptance criteria
 

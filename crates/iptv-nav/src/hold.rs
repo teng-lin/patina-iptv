@@ -1,42 +1,47 @@
 //! Presses tied to the surface they began on.
 //!
 //! A key with a long binding waits before it acts ([`PressDetector`]). If
-//! the surface that owns input ([`Context`]) changes while it waits (a tap
-//! plays a channel full screen, a prompt opens, a timer takes the guide to
-//! full screen), the press is dropped: neither its long nor its short action
-//! runs on a surface the viewer did not press it on. Keys that act at once
-//! (no long binding) act on the surface of the moment, so a held arrow keeps
-//! scrolling whatever opens.
+//! the surface that owns input changes while it waits (a tap plays a channel
+//! full screen, a prompt opens, a timer takes the guide to full screen, the
+//! info card gives way to the control strip), the press is dropped: neither
+//! its long nor its short action runs on a surface the viewer did not press
+//! it on. Keys that act at once (no long binding) act on the surface of the
+//! moment, so a held arrow keeps scrolling whatever opens.
+//!
+//! The surface is the caller's: by default the keymap's [`Context`], or any
+//! finer identity of what owns input (two surfaces can share a context).
+
+use std::fmt::Debug;
 
 use crate::{Context, Phase, Press, PressDetector, RemoteKey};
 
-/// What a key event amounts to.
+/// What a key event amounts to, on surfaces of type `S`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Decision {
-    /// Act on `press` of `key` in `context`.
+pub enum Decision<S = Context> {
+    /// Act on `press` of `key` on surface `context`.
     Act {
         key: RemoteKey,
         press: Press,
-        context: Context,
+        context: S,
     },
     /// A waiting press resolved after its surface changed: nothing acts.
     Dropped {
         key: RemoteKey,
         press: Press,
-        began: Context,
-        now: Context,
+        began: S,
+        now: S,
     },
 }
 
 /// A [`PressDetector`] that remembers where a waiting press began.
 #[derive(Debug)]
-pub struct HeldPresses {
+pub struct HeldPresses<S = Context> {
     detector: PressDetector,
     /// The held key and, while it waits, the surface it went down on.
-    held: Option<(RemoteKey, Option<Context>)>,
+    held: Option<(RemoteKey, Option<S>)>,
 }
 
-impl HeldPresses {
+impl<S: Copy + PartialEq + Debug> HeldPresses<S> {
     pub fn new(threshold_ms: u64) -> Self {
         HeldPresses {
             detector: PressDetector::new(threshold_ms),
@@ -53,16 +58,23 @@ impl HeldPresses {
         self.detector.long_deadline_ms()
     }
 
+    /// Forgets whatever is held: no tap, hold or timer follows from it
+    /// (a prompt took the keys).
+    pub fn cancel(&mut self) {
+        self.detector = PressDetector::new(self.detector.threshold_ms());
+        self.held = None;
+    }
+
     /// Feeds one key event at `now_ms` on surface `context`; `has_long`:
     /// `key` has a long binding there.
     pub fn feed(
         &mut self,
-        context: Context,
+        context: S,
         key: RemoteKey,
         phase: Phase,
         now_ms: u64,
         has_long: bool,
-    ) -> Option<Decision> {
+    ) -> Option<Decision<S>> {
         let began = match phase {
             Phase::Down => self.start(key, context, has_long),
             // A repeat without its press starts a hold, as the detector does.
@@ -83,26 +95,26 @@ impl HeldPresses {
     }
 
     /// The long-press timer ([`PressDetector::poll`]), on surface `context`.
-    pub fn poll(&mut self, context: Context, now_ms: u64) -> Option<Decision> {
+    pub fn poll(&mut self, context: S, now_ms: u64) -> Option<Decision<S>> {
         let (key, press) = self.detector.poll(now_ms)?;
         let began = self.held.and_then(|(_, began)| began);
         Some(decide(key, press, began, context))
     }
 
-    fn start(&mut self, key: RemoteKey, context: Context, has_long: bool) -> Option<Context> {
+    fn start(&mut self, key: RemoteKey, context: S, has_long: bool) -> Option<S> {
         let began = has_long.then_some(context);
         self.held = Some((key, began));
         began
     }
 }
 
-impl Default for HeldPresses {
+impl<S: Copy + PartialEq + Debug> Default for HeldPresses<S> {
     fn default() -> Self {
         HeldPresses::new(crate::DEFAULT_LONG_PRESS_MS)
     }
 }
 
-fn decide(key: RemoteKey, press: Press, began: Option<Context>, now: Context) -> Decision {
+fn decide<S: PartialEq>(key: RemoteKey, press: Press, began: Option<S>, now: S) -> Decision<S> {
     match began {
         Some(began) if began != now => Decision::Dropped {
             key,
@@ -255,5 +267,42 @@ mod tests {
         // A stray release of another key changes nothing.
         assert_eq!(feed(&mut h, &keys, Player, Down, Phase::Up, 650), None);
         assert_eq!(feed(&mut h, &keys, Player, Ok, Phase::Up, 700), None);
+    }
+
+    #[test]
+    fn cancel_forgets_the_held_press_and_its_timer() {
+        let keys = Keymap::defaults();
+        let mut h = HeldPresses::new(400);
+        assert_eq!(feed(&mut h, &keys, Guide, Ok, Phase::Down, 0), None);
+        // A prompt took the keys: its release and the timer do nothing.
+        h.cancel();
+        assert_eq!(h.long_deadline_ms(), None);
+        assert_eq!(h.poll(Guide, 400), None);
+        assert_eq!(feed(&mut h, &keys, Guide, Ok, Phase::Up, 450), None);
+        assert_eq!(h.threshold_ms(), 400);
+    }
+
+    #[test]
+    fn a_finer_surface_tells_apart_owners_that_share_a_context() {
+        // The info card and the control strip are both `Controls`.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum Owner {
+            Card,
+            Strip,
+        }
+        let mut h = HeldPresses::<(Context, Owner)>::new(400);
+        assert_eq!(
+            h.feed((Controls, Owner::Card), Ok, Phase::Down, 0, true),
+            None
+        );
+        assert_eq!(
+            h.feed((Controls, Owner::Strip), Ok, Phase::Up, 100, true),
+            Some(Decision::Dropped {
+                key: Ok,
+                press: Press::Short,
+                began: (Controls, Owner::Card),
+                now: (Controls, Owner::Strip),
+            })
+        );
     }
 }

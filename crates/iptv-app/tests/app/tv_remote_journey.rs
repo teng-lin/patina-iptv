@@ -22,6 +22,7 @@ use iptv_settings::{Settings, Value};
 use nsh_core::platform::{Idiom, Os};
 use nsh_core::{NodeId, Size, ViewKind, prelude::px};
 use nsh_tv::RemoteKey;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -62,6 +63,15 @@ fn tv(
     home: crate::isolated::Home,
     adjust: impl FnOnce(&mut Settings),
 ) -> (Fixture, Arc<Mutex<Lifetime>>, NodeId) {
+    tv_with(home, adjust, |_, _| {})
+}
+
+/// [`tv`], with `prepare` changing the stored library before start.
+fn tv_with(
+    home: crate::isolated::Home,
+    adjust: impl FnOnce(&mut Settings),
+    prepare: impl FnOnce(&Path, iptv_store_sqlite::SourceId),
+) -> (Fixture, Arc<Mutex<Lifetime>>, NodeId) {
     iptv_app::use_remote_key_phases();
     log::set_logger(&LOG).expect("this process's only logger");
     log::set_max_level(log::LevelFilter::Info);
@@ -80,10 +90,11 @@ fn tv(
     adjust(&mut settings);
     let lifetime = Arc::new(Mutex::new(None));
     let recorder = lifetime.clone();
-    let fixture = personalization::launch(
+    let fixture = personalization::launch_prepared(
         home,
         settings,
         true,
+        prepare,
         |config| {
             config.environment.idiom = Idiom::Tv;
             config.environment.os = Os::Android;
@@ -153,6 +164,12 @@ fn plays(app: &mut crate::Headless, lifetime: &Arc<Mutex<Lifetime>>, url: &str, 
 /// A hold of `key` for `ms`: its down, an auto-repeat every 50 ms when
 /// `repeats` (an Android remote; an IR remote sends none), its release.
 fn hold(app: &mut crate::Headless, key: RemoteKey, ms: u64, repeats: bool) {
+    hold_open(app, key, ms, repeats);
+    step(app.remote_phase(key, KeyPhase::Up));
+}
+
+/// [`hold`] without its release: the key is still down.
+fn hold_open(app: &mut crate::Headless, key: RemoteKey, ms: u64, repeats: bool) {
     step(app.remote_phase(key, KeyPhase::Down));
     let mut held = 0;
     while held < ms {
@@ -162,8 +179,42 @@ fn hold(app: &mut crate::Headless, key: RemoteKey, ms: u64, repeats: bool) {
             step(app.remote_phase(key, KeyPhase::Repeat));
         }
     }
-    step(app.remote_phase(key, KeyPhase::Up));
 }
+
+/// A hold decided by an auto-repeat: the first event is a repeat (focus
+/// arrived mid-press, so no down armed a timer), the next comes past the
+/// long-press threshold. The key stays down.
+fn repeat_hold(app: &mut crate::Headless, key: RemoteKey) {
+    step(app.remote_phase(key, KeyPhase::Repeat));
+    step(app.run_for(Duration::from_millis(450)));
+    step(app.remote_phase(key, KeyPhase::Repeat));
+}
+
+/// PIN 2468 (generated, as `recordings_transport`) protecting Local C.
+fn protect_local_c(path: &Path, source: iptv_store_sqlite::SourceId) {
+    let mut store = crate::isolated::open_database(path).unwrap();
+    store
+        .set_parental_credential(&iptv_store_sqlite::parental::ParentalCredential {
+            salt: [0x63; 16],
+            verifier: [
+                108, 253, 222, 238, 40, 38, 77, 8, 100, 135, 138, 42, 133, 48, 171, 236, 123, 169,
+                134, 85, 199, 28, 212, 46, 152, 192, 13, 230, 58, 195, 156, 119,
+            ],
+            recovery_verifier: [0; 32],
+            failures: 0,
+            retry_after: 0,
+        })
+        .unwrap();
+    let m = iptv_providers::m3u::parse_m3u(personalization::M3U);
+    store
+        .set_parental_blocked(
+            &iptv_core::parental::Target::live(source.0, m.channels.items[2].id.as_str()),
+            true,
+        )
+        .unwrap();
+}
+
+const PIN: &str = "id:parental-layer >> text:Enter parental PIN";
 
 /// Back from full screen to the guide: the banner times out first (Back
 /// would only hide it), then Back leaves full screen.
@@ -188,8 +239,11 @@ fn long_ok_rapid_taps_and_a_surface_change_during_a_hold() {
     // single down and up: the controls open once, Play/pause focused; no
     // info card, no press of Play/pause by the repeats or the release.
     for repeats in [true, false] {
-        hold(app, RemoteKey::Ok, 700, repeats);
-        step(app.wait_for("id:play-bar-layer"));
+        hold_open(app, RemoteKey::Ok, 700, repeats);
+        // The hold opened the bar while the key was still down.
+        assert!(shows(app, "id:play-bar-layer"), "repeats: {repeats}");
+        assert!(selected(app, "play-bar-play-pause"), "repeats: {repeats}");
+        step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
         assert!(selected(app, "play-bar-play-pause"), "repeats: {repeats}");
         assert!(
             !shows(app, "id:player-card"),
@@ -199,6 +253,23 @@ fn long_ok_rapid_taps_and_a_surface_change_during_a_hold() {
         step(app.back());
         step(app.wait_for_gone("id:play-bar-layer", Duration::from_secs(2)));
     }
+    // A repeat decides the hold before any timer: a press that focus
+    // reached mid-hold (no down, so no timer) goes long on its repeat.
+    repeat_hold(app, RemoteKey::Ok);
+    assert!(shows(app, "id:play-bar-layer"), "decided by the repeat");
+    assert!(selected(app, "play-bar-play-pause"));
+    assert_eq!(
+        logged("key=ok phase=Repeat ctx=Player action=Some(ShowControls)"),
+        1
+    );
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
+    step(app.back());
+    step(app.wait_for_gone("id:play-bar-layer", Duration::from_secs(2)));
+    assert_eq!(
+        logged("play bar: Play or pause"),
+        0,
+        "no hold pressed Play/pause"
+    );
 
     // Rapid taps: each acts once, on its release, without waiting for
     // the clock. OK shows the card, OK again hides it, a third shows it.
@@ -237,7 +308,7 @@ fn long_ok_rapid_taps_and_a_surface_change_during_a_hold() {
         "the early release does nothing"
     );
     assert_eq!(
-        logged("ok Short dropped: the surface changed from Guide to Player"),
+        logged("ok Short dropped: the surface changed from Guide (Pane(Guide)) to Player (Video)"),
         1
     );
     back_to_guide(app);
@@ -253,7 +324,7 @@ fn long_ok_rapid_taps_and_a_surface_change_during_a_hold() {
     assert!(!shows(app, "id:play-bar-layer"), "no controls by a repeat");
     assert!(!shows(app, "id:player-card"), "no card by the release");
     assert_eq!(
-        logged("ok Long dropped: the surface changed from Guide to Player"),
+        logged("ok Long dropped: the surface changed from Guide (Pane(Guide)) to Player (Video)"),
         1
     );
     persistent(app, &lifetime, player);
@@ -401,6 +472,190 @@ fn extra_large_text_keeps_every_focused_bar_control_on_screen() {
         "the remote reaches the bar's live controls: {visited:?}"
     );
     assert!(!visited.contains(&"play-bar-rewind"), "live skips rewind");
+    assert_eq!(iptv_app::player_opens(0), 1);
+    persistent(app, &lifetime, player);
+}
+
+#[test]
+fn a_press_belongs_to_its_owner_and_a_prompt_takes_its_keys() {
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, lifetime, player) = tv_with(
+        home,
+        |settings| {
+            settings
+                .set("parental.pin_input", Value::Enum("number_keys".into()))
+                .unwrap();
+            settings
+                .set("parental.live_enabled", Value::Bool(true))
+                .unwrap();
+            settings
+                .set("guide.stay_on_guide", Value::Bool(true))
+                .unwrap();
+        },
+        protect_local_c,
+    );
+    let app = &mut fixture.app;
+    step(app.remote_tap(RemoteKey::Ok));
+    plays(app, &lifetime, "http://example.test/a", 1);
+
+    // OK held in the guide while a tap on Local C opens its PIN prompt; OK
+    // goes up while the prompt shows; the prompt is cancelled before the
+    // hold would have been long: no menu by a late timer.
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
+    step(app.press("id:guide-ui >> label:Local C"));
+    step(app.run_for(Duration::from_millis(300)));
+    step(app.wait_for(PIN));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
+    step(app.back());
+    step(app.wait_for_gone(PIN, Duration::from_secs(2)));
+    step(app.run_for(Duration::from_millis(600)));
+    assert!(!menu_open(app), "no menu after the key went up");
+    assert_eq!(logged("long press by timer"), 0);
+
+    // On a PIN prompt the platform's Back closes it once: the raw Back is
+    // not a second step back (to the groups). OK on the focused Local C.
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.run_for(Duration::from_millis(300)));
+    step(app.wait_for(PIN));
+    step(app.remote_tap(RemoteKey::Back));
+    step(app.back());
+    step(app.wait_for_gone(PIN, Duration::from_secs(2)));
+    step(app.remote_tap(RemoteKey::Right));
+    assert_eq!(
+        logged("key=right phase=Down ctx=Guide"),
+        1,
+        "still on the channels after one step back"
+    );
+    step(app.remote_tap(RemoteKey::Left));
+
+    // OK that submits the PIN, held: its repeats neither start a hold
+    // (the play bar) nor act anywhere.
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.run_for(Duration::from_millis(300)));
+    step(app.wait_for(PIN));
+    for digit in [2, 4, 6, 8] {
+        step(app.remote_tap(RemoteKey::Digit(digit)));
+    }
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
+    step(app.wait_for_gone(PIN, Duration::from_secs(20)));
+    for _ in 0..18 {
+        step(app.run_for(Duration::from_millis(50)));
+        step(app.remote_phase(RemoteKey::Ok, KeyPhase::Repeat));
+    }
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
+    // (Opens are not counted here: the headless player reports no state,
+    // so a long wait lets the stall recovery retry the previous stream.)
+    step(
+        app.wait_until("Local C plays", Duration::from_secs(10), |_| {
+            source(&lifetime).as_deref() == Some("http://example.test/c")
+        }),
+    );
+    assert!(
+        !shows(app, "id:play-bar-layer"),
+        "no hold from the PIN's OK"
+    );
+    assert!(!shows(app, "id:player-card"), "no tap from the PIN's OK");
+    assert!(!menu_open(app), "no menu from the PIN's OK");
+    // OK on the playing Local C: full screen.
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("id:player-banner"));
+    step(app.run_for(Duration::from_millis(3_500)));
+
+    // The card and the strip are both Controls: OK held on the card while
+    // a tap opens More controls does not press the strip's first control
+    // (Search) on release.
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("id:player-actions"));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
+    step(app.press("id:player-actions >> text:More controls"));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
+    assert!(
+        !shows(app, "id:search-screen"),
+        "nothing pressed on the strip"
+    );
+    assert_eq!(
+        logged("ok Short dropped: the surface changed from Controls (Card) to Controls (Strip)"),
+        1
+    );
+    step(app.back());
+
+    // Back held on the card while a tap takes its TV guide action: its
+    // release does not also step back in the guide (Android's own Back
+    // follows the raw release; here `back`).
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("id:player-actions"));
+    step(app.remote_phase(RemoteKey::Back, KeyPhase::Down));
+    step(app.press("id:player-actions >> text:TV guide"));
+    step(app.remote_phase(RemoteKey::Back, KeyPhase::Up));
+    step(app.back());
+    assert_eq!(logged("back Short dropped"), 1);
+    assert_eq!(logged("released after a long back; no step back"), 1);
+    step(app.remote_tap(RemoteKey::Right));
+    assert_eq!(
+        logged("key=right phase=Down ctx=Guide"),
+        2,
+        "still on the channels"
+    );
+    persistent(app, &lifetime, player);
+}
+
+#[test]
+fn holds_keep_their_card_decide_once_and_menu_does_not_toggle() {
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, lifetime, player) = tv(home, |settings| {
+        // The card's own timeout is shorter than the long press.
+        settings
+            .set("player.controls_panel_timeout", Value::secs(1))
+            .unwrap();
+        settings.set("remote.long_press", Value::ms(2_000)).unwrap();
+    });
+    let app = &mut fixture.app;
+
+    // A held Menu opens the guide's menu once; its repeats leave it open.
+    hold(app, RemoteKey::Menu, 450, true);
+    assert!(menu_open(app), "the menu stays open through the repeats");
+    step(app.back());
+    assert!(!menu_open(app));
+
+    step(app.remote_tap(RemoteKey::Ok));
+    plays(app, &lifetime, "http://example.test/a", 1);
+    // A tap of OK held 1.5 s on the card's TV guide action (a remote with
+    // no repeats): the card outlives its 1 s timeout and the release
+    // presses the action.
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("id:player-actions"));
+    step(app.remote_tap(RemoteKey::Right));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
+    step(app.run_for(Duration::from_millis(1_500)));
+    assert!(shows(app, "id:player-card"), "the held key keeps the card");
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
+    step(app.wait_for_gone("id:player-card", Duration::from_secs(2)));
+    assert!(!shows(app, "id:player-banner"), "the guide, not the video");
+
+    // On the play bar, a hold decided by its repeat returns focus to
+    // Play/pause, as one decided by the timer does.
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("id:player-banner"));
+    step(app.remote_tap(RemoteKey::Menu));
+    step(app.wait_for("id:play-bar-layer"));
+    step(app.remote_tap(RemoteKey::Right));
+    assert!(!selected(app, "play-bar-play-pause"));
+    // Earlier presses' timers have run, so only a repeat can decide.
+    step(app.run_for(Duration::from_millis(2_100)));
+    assert!(shows(app, "id:play-bar-layer"));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Repeat));
+    step(app.run_for(Duration::from_millis(2_050)));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Repeat));
+    assert!(
+        selected(app, "play-bar-play-pause"),
+        "the hold refocuses Play/pause"
+    );
+    assert_eq!(
+        logged("key=ok phase=Repeat ctx=Controls action=Some(ShowControls)"),
+        1
+    );
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
+    assert_eq!(logged("play bar: Play or pause"), 0);
     assert_eq!(iptv_app::player_opens(0), 1);
     persistent(app, &lifetime, player);
 }

@@ -190,3 +190,22 @@ fn reopening_starts_at_the_first_control_and_no_card() {
     p.show_card(7);
     assert_eq!(p.quick_focused(), None, "a new session starts unfocused");
 }
+
+#[test]
+fn a_held_key_keeps_the_card_until_its_press_is_decided() {
+    let mut p = Panels::default();
+    p.timeouts.controls_ms = 1_000;
+    p.show_card(0);
+    // A key held at 500 decides tap or hold at 2_500 (a 2 s threshold).
+    p.touch(500);
+    p.keep_until(2_500);
+    assert!(!p.tick(1_600), "the card outlives its own timeout");
+    assert!(p.tick(2_500));
+    // A later deadline of its own is kept; hidden panels stay hidden.
+    p.show_card(3_000);
+    p.keep_until(3_100);
+    assert_eq!(p.hide_at_ms(), Some(4_000));
+    p.hide();
+    p.keep_until(9_000);
+    assert_eq!(p.hide_at_ms(), None);
+}

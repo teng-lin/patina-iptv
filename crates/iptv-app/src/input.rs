@@ -19,8 +19,8 @@ mod back;
 mod keys;
 mod number;
 
-use back::act;
 pub(crate) use back::swallow_back;
+use back::{act, swallow_release};
 use keys::{DIGITS, KEYS, RawKeys};
 
 /// The Android remote profile distinguishes a tap from a held key.
@@ -58,8 +58,48 @@ pub(crate) const PROFILE: Profile = if ANDROID_KEYS {
 
 struct Nav {
     keymap: Keymap,
-    presses: HeldPresses,
+    presses: HeldPresses<Surface>,
     raw: RawKeys,
+    /// A key whose press a PIN prompt or the remote editor took: its
+    /// repeats and release do nothing until a new key goes down.
+    consumed: Option<RemoteKey>,
+}
+
+/// What owns input, finer than the keymap's [`Context`]: the info card and
+/// the control strip are both `Controls`, the guide's panes both `Guide`.
+/// A press that waits to tell a tap from a hold belongs to this surface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InputOwner {
+    Overlay(crate::overlays::Overlay),
+    Multiview,
+    PlayBar,
+    Card,
+    Strip,
+    Video,
+    Pane(Pane),
+}
+
+type Surface = (Context, InputOwner);
+
+fn surface(ui: &Ui) -> Surface {
+    let owner = if let Some(overlay) = ui.top_overlay() {
+        InputOwner::Overlay(overlay)
+    } else if crate::multiview::is_open(*ui) {
+        InputOwner::Multiview
+    } else if ui.mode.get() == ViewMode::Fullscreen {
+        if crate::play_bar::captures(*ui) {
+            InputOwner::PlayBar
+        } else {
+            match ui.panels.with(|p| p.shown) {
+                iptv_core::panels::Shown::Card => InputOwner::Card,
+                iptv_core::panels::Shown::Controls => InputOwner::Strip,
+                _ => InputOwner::Video,
+            }
+        }
+    } else {
+        InputOwner::Pane(ui.focus.with(|f| f.pane))
+    };
+    (context(ui), owner)
 }
 
 impl Nav {
@@ -68,6 +108,7 @@ impl Nav {
             keymap: crate::remote_editor::keymap(),
             presses: HeldPresses::default(),
             raw: RawKeys::default(),
+            consumed: None,
         }
     }
 }
@@ -257,17 +298,41 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     if phase != Phase::Up {
         crate::browse_playback::activity(ui);
     }
-    if crate::parental_view::is_open(ui) {
+    let pin = crate::parental_view::is_open(ui);
+    if pin || crate::remote_editor::captures(ui) {
+        // A prompt or the editor takes the keys: a press pending from
+        // before is forgotten (its release or timer must not act once the
+        // prompt closes), and a key it takes acts nowhere else while held.
+        let mut nav = nav.borrow_mut();
+        nav.presses.cancel();
         if phase == Phase::Down {
-            crate::parental_view::remote(ui, key);
+            if key == RemoteKey::Back && (!pin || long_press()) {
+                // The platform's Back (`go_back`) closes the PIN prompt or
+                // cancels the editor's capture, once; acting here too
+                // would also step back from what the prompt exposes.
+                nav.consumed = None;
+                return;
+            }
+            nav.consumed = Some(key);
+            drop(nav);
+            if pin {
+                crate::parental_view::remote(ui, key);
+            } else {
+                crate::remote_editor::capture(ui, key);
+            }
         }
         return;
     }
-    if crate::remote_editor::captures(ui) {
+    {
+        let mut nav = nav.borrow_mut();
         if phase == Phase::Down {
-            crate::remote_editor::capture(ui, key);
+            nav.consumed = None;
+        } else if nav.consumed == Some(key) {
+            if phase == Phase::Up {
+                nav.consumed = None;
+            }
+            return;
         }
-        return;
     }
     // A key going down keeps the panels and the play bar up: a press that
     // waits to tell short from long must not find them gone on release.
@@ -275,7 +340,8 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
         keep_controls(ui);
     }
     let t = std::time::Instant::now();
-    let ctx = context(&ui);
+    let here = surface(&ui);
+    let ctx = here.0;
     let (decision, deadline) = {
         let mut nav = nav.borrow_mut();
         if phase == Phase::Down {
@@ -293,19 +359,32 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
             && nav.keymap.has_long(ctx, key)
             && (crate::remote_editor::overridden(ctx, key)
                 || !crate::player_keys::seeks(&ui, ctx, key));
-        let decision = nav.presses.feed(ctx, key, phase, now, has_long);
+        let decision = nav.presses.feed(here, key, phase, now, has_long);
         let deadline = (phase == Phase::Down)
             .then(|| nav.presses.long_deadline_ms())
             .flatten()
             .map(|at| at.saturating_sub(now));
         (decision, deadline)
     };
-    let action = decision.and_then(|d| resolve(ui, &nav.borrow().keymap, d));
+    // A card or bar on screen outlasts the wait (its own timeout can be
+    // shorter than the long press): the release finds what was pressed.
+    if let Some(wait_ms) = deadline {
+        keep_controls_until(ui, ui.now_ms() + wait_ms + 50);
+    }
     if key == RemoteKey::Back && phase == Phase::Down {
         ui.back_guard.update(BackGuard::pressed);
     }
+    let action = decision.and_then(|d| resolve(ui, &nav.borrow().keymap, d));
     if let Some((key, press, action)) = action {
-        act(ui, key, press, action, phase == Phase::Repeat);
+        // A hold decided by an auto-repeat is the hold's one action, not a
+        // repeat of it.
+        act(
+            ui,
+            key,
+            press,
+            action,
+            phase == Phase::Repeat && press == Press::Short,
+        );
     }
     // Stop/Guide can dispose an auxiliary window before this handler returns.
     if untracked(|| ui.stats.try_get()).is_none() {
@@ -320,8 +399,7 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
             // while it was held does nothing (`HeldPresses`), nor does one
             // that a PIN prompt or the remote editor now captures.
             let captured = crate::parental_view::is_open(ui) || crate::remote_editor::captures(ui);
-            let ctx = context(&ui);
-            let decision = nav.borrow_mut().presses.poll(ctx, ui.now_ms());
+            let decision = nav.borrow_mut().presses.poll(surface(&ui), ui.now_ms());
             let Some(decision) = decision else {
                 return;
             };
@@ -357,12 +435,16 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
 
 /// The action a press decided on, after the player's remapping; none for
 /// a press dropped because its surface changed during the hold.
-fn resolve(ui: Ui, keymap: &Keymap, decision: Decision) -> Option<(RemoteKey, Press, Action)> {
+fn resolve(
+    ui: Ui,
+    keymap: &Keymap,
+    decision: Decision<Surface>,
+) -> Option<(RemoteKey, Press, Action)> {
     match decision {
         Decision::Act {
             key,
             press,
-            context: ctx,
+            context: (ctx, _),
         } => {
             let action = keymap.resolve(ctx, key, press);
             let action = if crate::remote_editor::overridden(ctx, key) {
@@ -379,9 +461,18 @@ fn resolve(ui: Ui, keymap: &Keymap, decision: Decision) -> Option<(RemoteKey, Pr
             now,
         } => {
             log::info!(
-                "iptv key={} {press:?} dropped: the surface changed from {began:?} to {now:?} during the hold",
-                key.name()
+                "iptv key={} {press:?} dropped: the surface changed from {:?} ({:?}) to {:?} ({:?}) during the hold",
+                key.name(),
+                began.0,
+                began.1,
+                now.0,
+                now.1
             );
+            // Android's own Back follows the release: it must not step
+            // back from the surface the press did not begin on either.
+            if key == RemoteKey::Back {
+                swallow_release(ui);
+            }
             None
         }
     }
@@ -398,7 +489,21 @@ fn keep_controls(ui: Ui) {
     }
 }
 
+/// Keeps a shown card or play bar until at least `at` (ms).
+fn keep_controls_until(ui: Ui, at: u64) {
+    if ui.panels.with_untracked(|p| p.shown) != iptv_core::panels::Shown::Hidden {
+        ui.panels.update(|p| p.keep_until(at));
+    }
+    if untracked(|| crate::play_bar::shows(ui)) {
+        crate::play_bar::keep_until(ui, at);
+    }
+}
+
 fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
+    // A held Menu opens a menu once; its repeats would close and reopen it.
+    if repeat && action == Action::ShowMenu {
+        return;
+    }
     if ui.player_surface != 0 {
         match action {
             // The guide is in the main window; dismissing this player lets

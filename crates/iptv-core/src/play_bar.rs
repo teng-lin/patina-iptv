@@ -144,6 +144,14 @@ impl PlayBar {
         }
     }
 
+    /// A remote key is held and decides tap or hold at `at_ms`: the bar
+    /// stays at least until then, so the press finds it on release.
+    pub fn keep_until(&mut self, at_ms: u64) {
+        if self.shown {
+            self.hide_at_ms = Some(self.hide_at_ms.map_or(at_ms, |t| t.max(at_ms)));
+        }
+    }
+
     fn restart(&mut self, now_ms: u64) {
         self.hide_at_ms = Some(now_ms + HIDE_AFTER_MS);
     }
@@ -164,6 +172,17 @@ pub fn seek_target(x: f32, width: f32, length: i32, limit: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_held_key_keeps_the_bar_until_its_press_is_decided() {
+        let mut bar = PlayBar::default();
+        bar.keep_until(10_000);
+        assert_eq!(bar.hide_at_ms(), None, "a hidden bar stays hidden");
+        bar.remote(0);
+        bar.keep_until(HIDE_AFTER_MS + 500);
+        assert!(!bar.tick(HIDE_AFTER_MS));
+        assert!(bar.tick(HIDE_AFTER_MS + 500));
+    }
 
     #[test]
     fn the_mouse_shows_it_until_it_rests() {
