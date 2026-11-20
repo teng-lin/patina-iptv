@@ -373,8 +373,84 @@ fn entry_row(
                     name
                 }
             })
-            .text_color(move || mark().text()),
+            .text_color(move || mark().text())
+            .mr(move || px(group_more_room(ui, current(), at.index()))),
         )
+        .child(group_more(
+            ui,
+            size,
+            move || at.index(),
+            current,
+            move || !crate::multiview::picking(ui),
+            move || {
+                ui.app.data_version.get();
+                entry_name(at.index(), &*crate::schedule())
+            },
+        ))
+}
+
+/// The ⋯ on the shown group's row of a groups column (the guide's and the
+/// channel list's), for touch and a pointer: its group options, which
+/// long press, right-click, Menu and Shift+F10 open. Only the shown row
+/// has one, so the narrow column keeps its names; a click shows another
+/// group, which then has it. Keys hide it.
+pub(crate) fn group_more(
+    ui: Ui,
+    size: Scale,
+    entry: impl Fn() -> usize + Copy + 'static,
+    current: impl Fn() -> bool + Copy + 'static,
+    allowed: impl Fn() -> bool + Copy + 'static,
+    name: impl Fn() -> String + 'static,
+) -> impl IntoElement {
+    let name = std::rc::Rc::new(name);
+    when(
+        move || {
+            current()
+                && allowed()
+                && !ui.keys_shown()
+                && crate::menu_view::has_group_options(ui, entry())
+        },
+        move || {
+            view()
+                .absolute()
+                .top(px(0.0))
+                .bottom(px(0.0))
+                .right(move || size.px(4.0))
+                .justify_center()
+                .child(
+                    crate::ui_kit::round_more(
+                        || GROUP_MORE,
+                        crate::play_bar::back_bg(ui),
+                        {
+                            let name = name.clone();
+                            move || {
+                                let name = name();
+                                crate::i18n::trf(
+                                    "More options for {name}",
+                                    &[("name", name.as_str().into())],
+                                )
+                            }
+                        },
+                        move || {
+                            ui.touched();
+                            crate::menu_view::open_group_options(ui, entry());
+                        },
+                    )
+                    .test_id("group-more"),
+                )
+        },
+    )
+}
+
+const GROUP_MORE: f32 = 28.0;
+
+/// The room a group's name leaves at its end for the ⋯ on its row.
+pub(crate) fn group_more_room(ui: Ui, current: bool, entry: usize) -> f32 {
+    if current && !ui.keys_shown() && crate::menu_view::has_group_options(ui, entry) {
+        GROUP_MORE + 4.0
+    } else {
+        0.0
+    }
 }
 
 /// A row of the list: its number (row + 1, as in the guide), name, the

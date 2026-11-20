@@ -115,6 +115,15 @@ fn follow_lists(local: Ui) {
     });
 }
 
+/// Whether session `id`'s window has the sound. One window at most has
+/// it; moving the keyboard focus between windows never changes which
+/// (only its own Mute, volume or the main player's sound controls do).
+pub fn audible(ui: Ui, id: SessionId) -> bool {
+    ui.player_windows.with(|w| {
+        w.audible == Some(id) && w.sessions().iter().any(|s| s.id == id && !s.volume.muted)
+    })
+}
+
 pub fn close(ui: Ui, id: SessionId) {
     let surface = ui
         .player_windows
@@ -176,12 +185,20 @@ fn player_window(ui: Ui, surface: usize) -> impl IntoElement {
                 return iptv_core::pip_window::TITLE.to_owned();
             }
             ui.guide_data();
-            ui.player
+            let channel = ui
+                .player
                 .stream(surface)
                 .channel
                 .get()
                 .map(crate::channel_name)
-                .unwrap_or_default()
+                .unwrap_or_default();
+            // Which window has the sound shows in its title, where the
+            // taskbar and window switcher show it too (`docs/desktop.md`).
+            if audible(ui, id) {
+                channel
+            } else {
+                crate::i18n::trf("{channel} · muted", &[("channel", channel.as_str().into())])
+            }
         })
         .default_size(nsh_core::Size::new(px(960.0), px(540.0)))
         .attributes(move || window_attributes(compact()))
@@ -342,10 +359,7 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
         });
     });
     effect(move || {
-        let muted = parent.player_windows.with(|w| {
-            w.on_surface(surface)
-                .is_none_or(|s| s.volume.muted || w.audible != Some(id))
-        });
+        let muted = !audible(parent, id);
         untracked(|| {
             if local.media.volume.with(|v| v.muted) != muted {
                 local.media.volume.update(|v| v.muted = muted);
@@ -358,6 +372,7 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
         }
     });
     let window = nsh_core::element::desktop::current_window();
+    super::keep_reachable(window.clone());
     follow_lists(local);
     let input = stored(Some(crate::input::bind(local)));
     crate::pip::bind(local);

@@ -6,7 +6,7 @@
 //! full screen" and do nothing.
 
 use crate::i18n::tr;
-use nsh_core::prelude::effect;
+use nsh_core::prelude::{effect, px, untracked};
 
 use std::cell::{Cell, RefCell};
 
@@ -48,17 +48,69 @@ pub fn bind(ui: Ui) {
         if reason != nsh_core::desktop::CloseReason::System
             && crate::runtime().recording_background_needed()
         {
+            // One contract with or without recordings (`docs/desktop.md`,
+            // "Closing"): closing the main window ends every viewing
+            // window's playback, as quitting does. Only the recorder runs on.
             crate::parental_view::hidden(ui);
             crate::multiview::close(ui);
+            crate::pip::exit(ui, iptv_core::pip_window::Exit::Close);
+            player_windows::close_all(ui);
             crate::player::stop(ui);
             close_window.hide();
         } else {
             quit(ui);
         }
     });
+    keep_reachable(window.clone());
     if recorder_only_startup() {
         window.hide();
     }
+}
+
+/// Whether the host reports and honours window positions: macOS and
+/// Windows. GTK 4 tells no position on Linux (X11 or Wayland), where the
+/// window manager or compositor keeps windows on the displays there are.
+const POSITIONS: bool = cfg!(any(target_os = "macos", windows));
+
+/// Keeps `window` reachable when displays go away or are arranged again
+/// (and at launch, for bounds restored from a display no longer there):
+/// it moves onto the nearest remaining display by
+/// [`iptv_core::playback_windows::reachable`]. A window the viewer can
+/// still grab is never moved. Presentation only: nothing plays or stops.
+pub(crate) fn keep_reachable(window: WindowRef) {
+    if !POSITIONS {
+        return;
+    }
+    let rect = |b: nsh_core::Bounds<nsh_core::Points>| {
+        (b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0)
+    };
+    effect(move || {
+        let areas: Vec<_> = nsh_core::element::desktop::displays()
+            .iter()
+            .map(|d| rect(d.visible_bounds))
+            .collect();
+        untracked(|| {
+            let Some(state) = window.state() else { return };
+            if state.mode != WindowMode::Normal || state.minimized {
+                return;
+            }
+            if let Some((x, y, w, h)) =
+                iptv_core::playback_windows::reachable(rect(state.bounds), &areas)
+            {
+                log::info!(
+                    "iptv window {}: back onto a display at {x},{y}",
+                    window.id()
+                );
+                window.set_bounds(nsh_core::desktop::WindowFrame {
+                    x: Some(px(x)),
+                    y: Some(px(y)),
+                    width: Some(px(w)),
+                    height: Some(px(h)),
+                    ..Default::default()
+                });
+            }
+        });
+    });
 }
 
 /// Runs `f` on the app's window; `None` off desktops.
@@ -150,7 +202,7 @@ pub fn set_fullscreen(on: bool) {
 }
 
 pub fn toggle_fullscreen() {
-    set_fullscreen(!nsh_core::prelude::untracked(fullscreen));
+    set_fullscreen(!untracked(fullscreen));
 }
 
 /// The mouse is at (`x`, `y`) at `now_ms`: whether it moved, at most every
