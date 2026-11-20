@@ -407,6 +407,13 @@ fn live_player_panels_expire_and_back_dismisses_without_stopping() {
     step(app.set_environment("TV remote", |env| env.idiom = Idiom::Tv));
     step(app.press_key("enter"));
     step(app.wait_for("id:player-banner"));
+    // The banner renders before asynchronous tuning reaches the native
+    // player; count opens only once the initial stream has opened.
+    step(app.wait_until(
+        "initial native stream opens",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0) && iptv_app::player_opens(0) > 0,
+    ));
     step(app.run_for(Duration::from_millis(3_100)));
     assert!(!app.screen().matches("id:player-banner").unwrap());
     let playing = iptv_app::player_opens(0);

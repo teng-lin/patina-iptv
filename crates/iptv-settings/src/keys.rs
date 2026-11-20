@@ -139,7 +139,6 @@ pub const ALL: &[(&str, &str)] = &[
     (VOD_AUTOPLAY_NEXT_EPISODE.0, "bool"),
     (GUIDE_SHOW_LOGOS.0, "bool"),
     (GUIDE_STAY_ON_GUIDE.0, "bool"),
-    (GUIDE_STAY_ON_GUIDE_OVERLAY.0, "bool"),
     (GUIDE_STAY_ON_LIST.0, "bool"),
 ];
 
@@ -308,7 +307,5 @@ impl BindingsKey {
 }
 
 pub const GUIDE_STAY_ON_GUIDE: BoolKey = BoolKey("guide.stay_on_guide");
-
-pub const GUIDE_STAY_ON_GUIDE_OVERLAY: BoolKey = BoolKey("guide.stay_on_guide_overlay");
 
 pub const GUIDE_STAY_ON_LIST: BoolKey = BoolKey("guide.stay_on_list");
