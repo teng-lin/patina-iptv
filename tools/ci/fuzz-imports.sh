@@ -38,7 +38,11 @@ for target in "${targets[@]}"; do
     cp -R "fuzz/seeds/$target/." "fuzz/corpus/$target/"
   fi
   # Every target gets its time, also after an earlier one found a crash.
-  cargo-fuzz run "$target" -- -max_total_time="$seconds" -max_len=65537 -rss_limit_mb=512 || failed+=("$target")
+  # One input may allocate at most 512 MiB (a decompression bomb still fails);
+  # the process may grow to 1 GiB, as ASan quarantines up to 256 MiB of freed
+  # memory while it replays the corpus earlier runs accumulated.
+  cargo-fuzz run "$target" -- -max_total_time="$seconds" -max_len=65537 \
+    -rss_limit_mb=1024 -malloc_limit_mb=512 || failed+=("$target")
 done
 if [ "${#failed[@]}" -gt 0 ]; then
   echo "fuzzing failed for: ${failed[*]} (crashing inputs are under fuzz/artifacts/)" >&2
