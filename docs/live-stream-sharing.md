@@ -73,7 +73,10 @@ capability retired uses the normal playback retry path.
 
 The ingestor aligns output to complete 188-byte TS packets. Its shared rewind
 buffer is bounded to 4 MiB; one HLS segment uses the existing recorder's 32 MiB
-validation limit. The most advanced consumer governs read-ahead: ingestion pauses
+validation limit. A segment's packets reach consumers as they arrive, so the
+input is ready, and the player opens, with the live edge's first packets rather
+than after its whole segment (a file capture of its own still writes whole
+segments). The most advanced consumer governs read-ahead: ingestion pauses
 once its unread window reaches 2 MiB. Advancing capture continues while playback
 is paused, and advancing playback continues when a capture stalls. If every
 consumer stalls, ingestion pauses. A consumer behind the retained window receives

@@ -522,3 +522,63 @@ async fn a_transient_accept_error_backs_off_and_keeps_the_capability_serving() {
     assert!(attempts.load(Ordering::SeqCst) >= 2);
     assert!(shared.lock().ended.is_none(), "capture remains live");
 }
+
+/// A segment's first packets: a PAT and one more.
+fn first_packets() -> Vec<u8> {
+    let mut pat = packet(0);
+    pat[..4].copy_from_slice(&[0x47, 0x40, 0, 0x10]);
+    [pat, packet(1)].concat()
+}
+
+#[tokio::test]
+async fn an_hls_input_is_ready_with_its_first_packets_before_the_segment_ends() {
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let url = format!("http://{}/live.m3u8", listener.local_addr().unwrap());
+    let release = Arc::new(Notify::new());
+    let held = release.clone();
+    let server = tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let held = held.clone();
+            tokio::spawn(async move {
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    request.push(socket.read_u8().await?);
+                }
+                if request.starts_with(b"GET /live.m3u8 ") {
+                    let body = b"#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n\
+                                 #EXTINF:1,\nsegment.ts\n";
+                    let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
+                    socket.write_all(head.as_bytes()).await?;
+                    socket.write_all(body).await?;
+                } else {
+                    // A provider's live-edge segment slow to arrive: its
+                    // first packets now, the rest only once released.
+                    let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", 8 * 188);
+                    socket.write_all(head.as_bytes()).await?;
+                    socket.write_all(&first_packets()).await?;
+                    socket.flush().await?;
+                    held.notified().await;
+                    socket.write_all(&packet(2).repeat(6)).await?;
+                }
+                Ok::<(), io::Error>(())
+            });
+        }
+    });
+    let input = tokio::time::timeout(
+        Duration::from_secs(2),
+        LiveInput::start(&url, &[], policy()),
+    )
+    .await
+    .expect("ready before the segment's last packets arrive")
+    .unwrap();
+    // The player joins at the latest PAT, the segment's first packet.
+    let mut reader = input.subscribe();
+    assert_eq!(&reader.next().await.unwrap()[..], &first_packets()[..]);
+    release.notify_waiters();
+    drop(reader);
+    drop(input);
+    server.abort();
+}

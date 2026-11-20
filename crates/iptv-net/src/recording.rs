@@ -184,10 +184,20 @@ fn writer(path: &Path, max_bytes: u64, resume: bool) -> Result<Writer, Failure> 
     })
 }
 
+/// The largest HLS segment accepted.
+const SEGMENT_LIMIT: usize = 32 * 1024 * 1024;
+
 /// Bounded sink used by file capture and live fanout. File owners acknowledge
 /// shutdown separately before finalization.
 pub(crate) trait Sink {
     fn accepts_master_playlist(&self) -> bool {
+        true
+    }
+    /// Whether an HLS segment is written only once it has fully arrived. A
+    /// file buffers it, so cancellation cannot leave half a segment there;
+    /// live fanout takes its packets as they arrive, so a player's first
+    /// packets never wait for the rest of the live edge's segment.
+    fn buffers_segments(&self) -> bool {
         true
     }
     fn write(&mut self, bytes: &[u8]) -> impl Future<Output = Result<(), Failure>> + Send;
@@ -422,26 +432,41 @@ async fn hls(
                 state.next_hls_sequence = None;
                 return Err(Failure::Gap);
             }
-            // Buffer one bounded segment, so cancellation cannot leave half a segment in the file.
             let mut response = get(client, relay, segment).await?;
-            let mut data = Vec::new();
-            while let Some(chunk) = response.chunk().await.map_err(|_| Failure::Network)? {
-                if data.len() + chunk.len() > 32 * 1024 * 1024 {
-                    return Err(Failure::Limit);
+            if writer.buffers_segments() {
+                // Buffer one bounded segment, so cancellation cannot leave half a segment in the file.
+                let mut data = Vec::new();
+                while let Some(chunk) = response.chunk().await.map_err(|_| Failure::Network)? {
+                    if data.len() + chunk.len() > SEGMENT_LIMIT {
+                        return Err(Failure::Limit);
+                    }
+                    data.extend_from_slice(&chunk);
                 }
-                data.extend_from_slice(&chunk);
+                if data.len() < 188
+                    || data.len() % 188 != 0
+                    || !data
+                        .as_chunks::<188>()
+                        .0
+                        .iter()
+                        .all(|packet| packet[0] == 0x47)
+                {
+                    return Err(Failure::Unsupported);
+                }
+                writer.write(&data).await?;
+            } else {
+                // The sink checks each whole packet's sync byte as it arrives.
+                let mut size = 0;
+                while let Some(chunk) = response.chunk().await.map_err(|_| Failure::Network)? {
+                    size += chunk.len();
+                    if size > SEGMENT_LIMIT {
+                        return Err(Failure::Limit);
+                    }
+                    writer.write(&chunk).await?;
+                }
+                if size < 188 || size % 188 != 0 {
+                    return Err(Failure::Unsupported);
+                }
             }
-            if data.len() < 188
-                || data.len() % 188 != 0
-                || !data
-                    .as_chunks::<188>()
-                    .0
-                    .iter()
-                    .all(|packet| packet[0] == 0x47)
-            {
-                return Err(Failure::Unsupported);
-            }
-            writer.write(&data).await?;
             last_progress = tokio::time::Instant::now();
             state.next_hls_sequence = sequence.checked_add(1);
             if state.next_hls_sequence.is_none() {

@@ -233,6 +233,9 @@ impl Sink for Fanout {
     fn accepts_master_playlist(&self) -> bool {
         false
     }
+    fn buffers_segments(&self) -> bool {
+        false
+    }
     async fn write(&mut self, bytes: &[u8]) -> Result<(), Failure> {
         self.pending.extend_from_slice(bytes);
         let whole = self.pending.len() / 188 * 188;

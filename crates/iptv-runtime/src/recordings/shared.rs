@@ -582,6 +582,7 @@ impl Runtime {
                         }
                         created = Some(id);
                         let mut incoming = None;
+                        let asked = std::time::Instant::now();
                         if share
                             && let Ok(input) = LiveInput::begin_with_cancel(
                                 &source.url,
@@ -607,6 +608,12 @@ impl Runtime {
                                 .await
                                 .is_ok()
                             {
+                                // The provider's first packets (a cold
+                                // start's first stream; `startup.rs`).
+                                work.mark(
+                                    "live input ready",
+                                    format_args!("{} ms", asked.elapsed().as_millis()),
+                                );
                                 incoming = Some(shared);
                             } else {
                                 shared.input.clone().shutdown().await;

@@ -28,6 +28,7 @@ mod architecture;
 mod backup_restore;
 mod catalogue_lint;
 mod cold_start;
+mod cold_start_slow_provider;
 mod combined_playlists;
 mod combined_resume;
 mod cov_data;
