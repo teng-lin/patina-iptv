@@ -88,8 +88,9 @@ player sees the input end, keyed by source, source incarnation and channel (not
 the provider URL, whose token may change on every resolve). One segment over
 the limit, or two that failed their checks (a single torn final packet may be a
 connection cut short), send the stream to its provider's own transport for
-30 minutes: the player's retry plays it that way, as a stream refused before its
-first packets does at once. Network failures never do; a changed source
+30 minutes from the failure: the player's retry plays it that way, as a stream
+refused before its first packets does at once. A first segment that validates
+clears the stream's earlier strikes, and network failures never count; a changed source
 incarnation or configuration forgets its streams, and at most 256 are kept,
 the oldest forgotten first.
 

@@ -789,3 +789,78 @@ async fn a_paused_player_does_not_leave_the_segment_body_open() {
     drop(input);
     server.abort();
 }
+
+/// An input whose task went away before its first segment was decided (its
+/// runtime shut down) reports so, instead of pending for ever.
+#[test]
+fn a_validation_without_its_input_task_is_abandoned() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let (validation, input) = runtime.block_on(async {
+        let (url, _server) = hls_provider(|_| Segment {
+            hold: Some(Arc::new(Notify::new())),
+            length: 8 * 188,
+            ..whole(first_packets(), Vec::new())
+        })
+        .await;
+        let input = begin(&url);
+        input.ready().await.unwrap();
+        (input.validation(), input)
+    });
+    assert_eq!(validation.state(), Validated::Pending);
+    drop(runtime);
+    assert_eq!(validation.state(), Validated::Abandoned);
+    drop(input);
+}
+
+#[tokio::test]
+async fn a_validation_is_settled_with_when_it_was_decided() {
+    let (url, server) = hls_provider(|_| whole(first_packets(), packet(2).repeat(6))).await;
+    let before = std::time::Instant::now();
+    let input = begin(&url);
+    input.ready().await.unwrap();
+    // A player takes the packets (the fanout waits for one).
+    let mut reader = input.subscribe();
+    let playing = tokio::spawn(async move { while reader.next().await.is_ok() {} });
+    assert_eq!(input.first_segment().await, Ok(()));
+    match input.validation().state() {
+        Validated::Settled(Ok(()), at) => {
+            assert!(at >= before && at <= std::time::Instant::now());
+        }
+        state => panic!("{state:?}"),
+    }
+    drop(input);
+    playing.abort();
+    server.abort();
+}
+
+/// A start that waits for its first segment takes the packets itself: a
+/// segment arriving in parts, larger than one fanout chunk, still validates
+/// with no player attached yet.
+#[tokio::test]
+async fn a_start_validates_a_segment_arriving_in_parts_without_a_player() {
+    let release = Arc::new(Notify::new());
+    let held = release.clone();
+    let (url, server) = hls_provider(move |_| Segment {
+        hold: Some(held.clone()),
+        ..whole(first_packets(), packet(2).repeat(2 * CHUNK / 188))
+    })
+    .await;
+    let later = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        release.notify_one();
+    });
+    let input = tokio::time::timeout(
+        Duration::from_secs(5),
+        LiveInput::start(&url, &[], policy()),
+    )
+    .await
+    .expect("validated without a player")
+    .unwrap();
+    assert!(input.is_running());
+    later.await.unwrap();
+    drop(input);
+    server.abort();
+}

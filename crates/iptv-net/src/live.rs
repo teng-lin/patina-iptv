@@ -17,7 +17,7 @@ use std::{
         Arc, Mutex, Weak,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -59,7 +59,7 @@ struct Owner {
     lifetime: CancelToken,
     closed: watch::Receiver<bool>,
     ready: watch::Receiver<Option<Result<(), Failure>>>,
-    validated: watch::Receiver<Option<Result<(), Failure>>>,
+    validated: watch::Receiver<Checked>,
     server: AbortHandle,
 }
 impl Drop for Owner {
@@ -95,7 +95,19 @@ impl LiveInput {
         prepare_cancel: CancelToken,
     ) -> Result<Self, Failure> {
         let input = Self::begin_with_cancel(url, headers, policy, prepare_cancel)?;
-        match input.first_segment().await {
+        // Ingestion waits for a consumer once it has offered its first
+        // packets; this one takes them until the first segment is decided.
+        let validated = input.first_segment();
+        let mut probe = LiveReader::new(input.0.shared.clone());
+        let drain = async move {
+            while probe.next().await.is_ok() {}
+            std::future::pending::<()>().await;
+        };
+        let validated = tokio::select! {
+            result = validated => result,
+            () = drain => unreachable!("the drain never ends"),
+        };
+        match validated {
             Ok(()) => Ok(input),
             Err(failure) => {
                 input.shutdown().await;
@@ -165,7 +177,7 @@ impl LiveInput {
                 let _ = ready.send(Some(Err(failure)));
             }
             if let Some(validated) = sink.validated.take() {
-                let _ = validated.send(Some(Err(failure)));
+                let _ = validated.send(Some((Err(failure), Instant::now())));
             }
             sink.shared.lock().ended = Some(failure);
             sink.shared.changed.notify_waiters();
@@ -202,7 +214,15 @@ impl LiveInput {
     /// this stream cannot be shared and its provider's own transport should
     /// play it. Holds no owner: the input may end while this waits.
     pub fn first_segment(&self) -> impl Future<Output = Result<(), Failure>> + Send + 'static {
-        outcome(self.0.validated.clone())
+        let mut checked = self.0.validated.clone();
+        async move {
+            loop {
+                if let Some((result, _)) = *checked.borrow_and_update() {
+                    return result;
+                }
+                checked.changed().await.map_err(|_| Failure::Network)?;
+            }
+        }
     }
     /// [`LiveInput::first_segment`]'s outcome, read without waiting. It is
     /// set before the input's consumers see it end, and holds no owner.
@@ -240,13 +260,29 @@ impl LiveInput {
     }
 }
 
+/// A first segment's validation result, and when it was decided.
+type Checked = Option<(Result<(), Failure>, Instant)>;
+
 /// A live input's first-segment validation, for reading after it ended.
 #[derive(Clone)]
-pub struct Validation(watch::Receiver<Option<Result<(), Failure>>>);
+pub struct Validation(watch::Receiver<Checked>);
+/// Where a [`Validation`] stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Validated {
+    /// The first segment is still arriving.
+    Pending,
+    /// Decided at that instant.
+    Settled(Result<(), Failure>, Instant),
+    /// The input went away without deciding (its task was dropped).
+    Abandoned,
+}
 impl Validation {
-    /// `None` while the first segment is still arriving.
-    pub fn outcome(&self) -> Option<Result<(), Failure>> {
-        *self.0.borrow()
+    pub fn state(&self) -> Validated {
+        match *self.0.borrow() {
+            Some((result, at)) => Validated::Settled(result, at),
+            None if self.0.has_changed().is_err() => Validated::Abandoned,
+            None => Validated::Pending,
+        }
     }
 }
 
@@ -263,7 +299,7 @@ async fn outcome(mut step: watch::Receiver<Option<Result<(), Failure>>>) -> Resu
 struct Fanout {
     shared: Arc<Shared>,
     ready: Option<watch::Sender<Option<Result<(), Failure>>>>,
-    validated: Option<watch::Sender<Option<Result<(), Failure>>>>,
+    validated: Option<watch::Sender<Checked>>,
     pending: Vec<u8>,
     first: Arc<AtomicBool>,
 }
@@ -276,7 +312,7 @@ impl Sink for Fanout {
     }
     fn segment_complete(&mut self) {
         if let Some(validated) = self.validated.take() {
-            let _ = validated.send(Some(Ok(())));
+            let _ = validated.send(Some((Ok(()), Instant::now())));
         }
     }
     async fn write(&mut self, bytes: &[u8]) -> Result<(), Failure> {

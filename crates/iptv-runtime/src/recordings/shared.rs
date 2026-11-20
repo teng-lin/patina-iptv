@@ -3,7 +3,7 @@
 //! shutdown is acknowledged, independently of UI/capture lease removal.
 use super::*;
 use iptv_core::{i18n::key, live::Identity};
-use iptv_net::live::{LiveInput, Validation};
+use iptv_net::live::{LiveInput, Validated};
 use iptv_net::recording::Failure;
 use std::time::Instant;
 
@@ -28,27 +28,36 @@ const STRIKES: u8 = 2;
 #[derive(Default)]
 pub(super) struct Unshareable {
     failures: HashMap<Stream, (u8, Instant)>,
-    watching: Vec<(Stream, Validation)>,
+    /// Shared inputs whose first segment is watched: where each stands
+    /// (`LiveInput::validation`).
+    watching: Vec<(Stream, Box<dyn Fn() -> Validated + Send>)>,
 }
 impl Unshareable {
-    fn watch(&mut self, stream: Stream, validation: Validation) {
+    fn watch(&mut self, stream: Stream, validation: impl Fn() -> Validated + Send + 'static) {
+        // Decided and abandoned inputs first; only then the oldest pending.
+        self.settle();
         if self.watching.len() >= WATCHED {
-            self.watching.remove(0);
+            drop(self.watching.remove(0));
         }
-        self.watching.push((stream, validation));
+        self.watching.push((stream, Box::new(validation)));
     }
     /// Records the watched inputs' outcomes. An input's outcome is set
     /// before its player sees it end, so the player's retry finds it here.
-    fn settle(&mut self, now: Instant) {
+    /// A stream whose first segment validated starts its strikes afresh.
+    fn settle(&mut self) {
         for (stream, validation) in std::mem::take(&mut self.watching) {
-            match validation.outcome() {
-                None => self.watching.push((stream, validation)),
-                Some(Ok(())) => {}
-                Some(Err(failure)) => self.fail(stream, failure, now),
+            match validation() {
+                Validated::Pending => self.watching.push((stream, validation)),
+                Validated::Abandoned => {}
+                Validated::Settled(Ok(()), _) => {
+                    self.failures.remove(&stream);
+                }
+                Validated::Settled(Err(failure), at) => self.fail(stream, failure, at),
             }
         }
     }
-    fn fail(&mut self, stream: Stream, failure: Failure, now: Instant) {
+    /// `stream`'s first segment failed with `failure` at `at`.
+    fn fail(&mut self, stream: Stream, failure: Failure, at: Instant) {
         let strikes = match failure {
             Failure::Limit => STRIKES,
             Failure::Unsupported => 1,
@@ -64,11 +73,11 @@ impl Unshareable {
                 self.failures.remove(&oldest);
             }
         }
-        let entry = self.failures.entry(stream).or_insert((0, now));
-        if now.saturating_duration_since(entry.1) >= UNSHAREABLE_FOR {
+        let entry = self.failures.entry(stream).or_insert((0, at));
+        if at.saturating_duration_since(entry.1) >= UNSHAREABLE_FOR {
             entry.0 = 0;
         }
-        *entry = (entry.0.saturating_add(strikes), now);
+        *entry = (entry.0.saturating_add(strikes), entry.1.max(at));
     }
     fn pinned(&self, stream: &Stream, now: Instant) -> bool {
         self.failures.get(stream).is_some_and(|(strikes, at)| {
@@ -668,7 +677,7 @@ impl Runtime {
                         );
                         let shareable = {
                             let mut data = state.lock();
-                            data.unshareable.settle(asked);
+                            data.unshareable.settle();
                             !data.unshareable.pinned(&stream, asked)
                         };
                         if share
@@ -710,7 +719,10 @@ impl Runtime {
                                 // transport (`Unshareable`).
                                 let validation =
                                     shared.input.shared().expect("shared probe").validation();
-                                state.lock().unshareable.watch(stream, validation);
+                                state
+                                    .lock()
+                                    .unshareable
+                                    .watch(stream, move || validation.state());
                                 incoming = Some(shared);
                             } else {
                                 shared.input.clone().shutdown().await;
@@ -870,5 +882,68 @@ mod unshareable_tests {
             "the oldest is forgotten first"
         );
         assert!(set.pinned(&stream("1"), at + Duration::from_secs(1)));
+    }
+
+    /// A watched input's state, as a test sets it.
+    fn input(state: Validated) -> (Arc<Mutex<Validated>>, impl Fn() -> Validated + Send) {
+        let shared = Arc::new(Mutex::new(state));
+        let read = shared.clone();
+        (shared, move || *read.lock().unwrap())
+    }
+
+    #[test]
+    fn a_validated_first_segment_clears_earlier_strikes() {
+        let stream = || (1, "incarnation".to_owned(), "a".to_owned());
+        let at = Instant::now();
+        let mut set = Unshareable::default();
+        let (_, torn) = input(Validated::Settled(Err(Failure::Unsupported), at));
+        set.watch(stream(), torn);
+        let (_, healthy) = input(Validated::Settled(Ok(()), at));
+        set.watch(stream(), healthy);
+        set.settle();
+        set.fail(stream(), Failure::Unsupported, at);
+        assert!(
+            !set.pinned(&stream(), at),
+            "a strike before a good segment does not count"
+        );
+    }
+
+    #[test]
+    fn abandoned_inputs_leave_the_watch_and_never_evict_a_live_one() {
+        let stream = |n: usize| (1, "incarnation".to_owned(), n.to_string());
+        let at = Instant::now();
+        let mut set = Unshareable::default();
+        let (live, pending) = input(Validated::Pending);
+        set.watch(stream(0), pending);
+        for n in 1..WATCHED * 2 {
+            let (_, abandoned) = input(Validated::Abandoned);
+            set.watch(stream(n), abandoned);
+        }
+        set.settle();
+        assert_eq!(set.watching.len(), 1, "only the live input is watched");
+        *live.lock().unwrap() = Validated::Settled(Err(Failure::Limit), at);
+        set.settle();
+        assert!(set.pinned(&stream(0), at), "its later failure still counts");
+    }
+
+    #[test]
+    fn a_failure_expires_from_when_it_happened() {
+        let stream = || (1, "incarnation".to_owned(), "a".to_owned());
+        let at = Instant::now();
+        let mut set = Unshareable::default();
+        let (_, oversized) = input(Validated::Settled(Err(Failure::Limit), at));
+        set.watch(stream(), oversized);
+        // Settled at the next preparation, two hours on.
+        let later = at + Duration::from_secs(2 * 3600);
+        set.settle();
+        assert!(set.pinned(&stream(), at));
+        assert!(
+            !set.pinned(&stream(), later),
+            "expired 30 minutes after the failure, not after it was read"
+        );
+        // An older failure read late does not move a newer one's time.
+        set.fail(stream(), Failure::Limit, at + Duration::from_secs(60));
+        set.fail(stream(), Failure::Unsupported, at);
+        assert!(set.pinned(&stream(), at + UNSHAREABLE_FOR + Duration::from_secs(30)));
     }
 }
