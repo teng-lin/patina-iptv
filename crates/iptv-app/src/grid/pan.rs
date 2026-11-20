@@ -4,7 +4,7 @@
 //! and rebuilds them only when its [`Band`] moves (`iptv_core::timeline`).
 //!
 //! A horizontal drag over the grid pans (NSH's pan activation decides the
-//! axis on the platform's thread: past [`SLOP`] horizontally it is ours,
+//! axis on the platform's thread: past [`AXIS`] horizontally it is ours,
 //! past it vertically first the channel list scrolls); released moving, it
 //! flings on, one step per display frame. Taps stay taps. The view follows
 //! the focus model's window while nothing pans (keys, ‹ ›, Now), and a pan
@@ -19,7 +19,7 @@
 use std::time::Instant;
 
 use iptv_core::guide::view_range;
-use iptv_core::timeline::{Band, MARGIN, SLOP, Timeline};
+use iptv_core::timeline::{AXIS, Band, MARGIN, Timeline};
 use nsh_core::prelude::*;
 
 use crate::Ui;
@@ -166,13 +166,45 @@ impl Pan {
         }
         let window = self.model.with(|m| m.window());
         let view = crate::lists::view(self.ui);
+        // The pan moves the focus along its row: still the anchored
+        // channel. The anchor moves first, so browse playback never sees
+        // the new focus without it.
+        let mut next = self.ui.focus.get_untracked();
+        next.pan_to(window, &view);
+        let (row, start) = (next.channel, next.program(&view).start);
+        if self
+            .ui
+            .pan_anchor
+            .get_untracked()
+            .is_some_and(|(r, _)| r == row)
+        {
+            self.ui.pan_anchor.set(Some((row, start)));
+        }
         self.ui.focus.update(|f| f.pan_to(window, &view));
         self.show();
+    }
+
+    /// A pan starts from the focus: a live programme anchors its channel
+    /// for browse playback while the pan moves the focus along the row
+    /// (`browse_playback::current`); a pan from where an earlier one left
+    /// the focus keeps that anchor; any other focus has none.
+    fn anchor(&self) {
+        let (row, start, live) = focused(self.ui);
+        let anchor = self.ui.pan_anchor.get_untracked();
+        let next = if live || anchor == Some((row, start)) {
+            Some((row, start))
+        } else {
+            None
+        };
+        if next != anchor {
+            self.ui.pan_anchor.set(next);
+        }
     }
 
     /// The platform found a horizontal drag: it pans from here.
     fn grabbed(&self) {
         self.ui.touched();
+        self.anchor();
         crate::browse_playback::dragged(self.ui);
         self.fling.with(|g| *g += 1);
         self.model.with(Timeline::grab);
@@ -233,6 +265,9 @@ impl Pan {
         if self.model.with(|m| m.dragging()) {
             return;
         }
+        if !self.wheeling.with(|w| *w) {
+            self.anchor();
+        }
         crate::browse_playback::dragged(self.ui);
         self.wheeling.with(|w| *w = true);
         self.fling.with(|g| *g += 1);
@@ -263,10 +298,24 @@ impl Pan {
     }
 }
 
+/// The focused row, its programme's start, and whether that airs now.
+fn focused(ui: Ui) -> (usize, i32, bool) {
+    let view = crate::lists::view(ui);
+    ui.focus.with_untracked(|f| {
+        let p = f.program(&view);
+        (
+            f.channel,
+            p.start,
+            p.airing(f.now) == iptv_core::guide::Airing::Live,
+        )
+    })
+}
+
 /// The pan's touch handling on `area` (the grid around the channel list).
 pub(crate) fn panning<E: Interactive>(area: E, pan: Pan) -> E {
-    let claim = TouchClaim::on_pan(PanActivation::horizontal(px(SLOP), px(SLOP)));
-    area.claim_touches(claim)
+    let claim = TouchClaim::on_pan(PanActivation::horizontal(px(AXIS), px(AXIS)));
+    crate::browse_playback::watch_drags(area, pan.ui)
+        .claim_touches(claim)
         .on_responder_grant(move |_: &ResponderEvent| pan.grabbed())
         .on_responder_move(move |e: &ResponderEvent| pan.dragged(&e.gesture))
         .on_responder_release(move |e: &ResponderEvent| pan.released(&e.gesture))

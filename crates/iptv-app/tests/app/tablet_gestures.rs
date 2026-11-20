@@ -31,7 +31,7 @@ const CHANNELS: usize = 30;
 /// whose boundaries sit a few dp apart.
 const LENGTHS: [i64; 4] = [180, 45, 15, 30];
 /// Longer than the switch delay: a preview that was going to start has.
-const SETTLE: Duration = Duration::from_millis(2_000);
+const SETTLE: Duration = Duration::from_millis(3_000);
 
 fn name(n: usize) -> String {
     format!("Tab Channel {n:02}")
@@ -245,7 +245,10 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     std::fs::create_dir_all(&data).unwrap();
     let mut settings = Settings::new();
     settings.set("guide.autoplay", Value::Bool(true)).unwrap();
-    settings.set("guide.switch_delay", Value::ms(750)).unwrap();
+    // Longer than a drag: a tap's choice still waits when a pan settles.
+    settings
+        .set("guide.switch_delay", Value::ms(2_000))
+        .unwrap();
     settings
         .set("general.resume_last_channel", Value::Bool(false))
         .unwrap();
@@ -310,9 +313,22 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
         top,
         "a horizontal drag scrolls no channels"
     );
+    // Back at now on the same channel: the cancelled preview stays
+    // cancelled (the pan never left the channel).
     step(app.press("text:Now"));
     step(app.wait_for_gone("text:Now", Duration::from_secs(3)));
-    nothing_activated(&app, &tuned, &db, "Now");
+    step(app.wait(SETTLE));
+    nothing_activated(&app, &tuned, &db, "panned back to now");
+
+    // At the list's top a drag down scrolls nothing (a platform's scroll
+    // view may report no drag then), yet it crosses the threshold: the
+    // preview a key started waiting for is cancelled.
+    step(app.press_key("down"));
+    step(app.drag(&format!("text:{}", name(2)), Point::new(px(4.0), px(300.0))));
+    step(app.wait(SETTLE));
+    nothing_activated(&app, &tuned, &db, "a drag down at the top");
+    assert_eq!(row_y(&app, ANCHOR), top, "nothing to scroll above the top");
+    step(app.press_key("up"));
 
     // Vertically: the channels scroll, the timeline stays, and the preview
     // the key started waiting for is cancelled too.
@@ -330,7 +346,10 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     );
     assert!(!app.screen().matches("text:Now").unwrap(), "no pan");
 
-    // Diagonals go the way of their larger component.
+    // Diagonals go the way of their larger component. The first pans into
+    // listings not read yet: the rows the finger scrolled stay where they
+    // are when that day arrives (it once scrolled them back to the
+    // focused channel).
     let rows = on_screen(&app);
     let before = row_y(&app, ANCHOR);
     step(app.drag(
@@ -345,6 +364,17 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
         before,
         "a mostly horizontal drag scrolls nothing"
     );
+    step(app.press("text:Now"));
+    step(app.wait_for_gone("text:Now", Duration::from_secs(3)));
+    // A steeper one, 1.5:1, still pans (the iPad's list once took it).
+    step(app.drag(
+        &format!("text:{}", name(rows[3])),
+        Point::new(px(-300.0), px(200.0)),
+    ));
+    step(app.wait(SETTLE));
+    nothing_activated(&app, &tuned, &db, "1.5:1 diagonal");
+    step(app.wait_for("text:Now"));
+    assert_eq!(row_y(&app, ANCHOR), before, "a 1.5:1 drag scrolls nothing");
     step(app.press("text:Now"));
     step(app.wait_for_gone("text:Now", Duration::from_secs(3)));
     step(app.drag(
@@ -409,7 +439,7 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
 
     // A gesture the system cancels mid-drag rests where it is: no fling,
     // no tap, no tune.
-    step(app.drag_and_hold("text:C1 P0", Point::new(px(-240.0), px(0.0))));
+    step(app.drag_and_hold("text:C1 P0", Point::new(px(-400.0), px(0.0))));
     cancel_touches(&mut app);
     let held = shown(&app);
     step(app.drop_held());
@@ -420,8 +450,13 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     step(app.wait_for_gone("text:Now", Duration::from_secs(3)));
 
     // Under the threshold a drag is still a tap: it chooses the live
-    // programme, which plays full screen.
+    // programme. A pan right after it, before the switch delay, keeps that
+    // choice: it plays full screen.
     step(app.drag(&format!("text:{}", name(2)), Point::new(px(4.0), px(3.0))));
+    step(app.drag(
+        "id:guide-timeline >> text:C2 P0",
+        Point::new(px(-420.0), px(4.0)),
+    ));
     let chosen = tuned.clone();
     step(
         app.wait_until("the tap tuned", Duration::from_secs(5), move |_| {
@@ -432,9 +467,38 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     step(app.wait_until("full screen", Duration::from_secs(3), |s| {
         video_width_of(s) >= 1280.0
     }));
+    let tunes = tuned.lock().unwrap().len();
+
+    // The player's channel list: a key starts a preview of the next
+    // channel, and a drag on the list cancels it.
+    if bounds_of(&app, "play-bar-channels").is_none() {
+        step(app.press("label:Video"));
+    }
+    step(app.press("id:play-bar-channels"));
+    step(app.wait_for("id:channel-list >> text:/Tab Channel 05$/"));
+    step(app.press_key("down"));
+    step(app.drag(
+        "id:channel-list >> text:/Tab Channel 05$/",
+        Point::new(px(4.0), px(-300.0)),
+    ));
+    step(app.wait(SETTLE));
+    assert_eq!(
+        tuned.lock().unwrap().len(),
+        tunes,
+        "a drag on the channel list tunes nothing: {:?}",
+        tuned.lock().unwrap()
+    );
     let jobs = crate::isolated::open_database(&db)
         .unwrap()
         .recording_jobs()
         .unwrap();
     assert!(jobs.is_empty());
+}
+
+fn bounds_of(app: &Headless, test_id: &str) -> Option<f32> {
+    app.screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|n| !n.hidden && n.test_id.as_deref() == Some(test_id))
+        .map(|n| n.bounds.size.width.0)
 }

@@ -394,10 +394,12 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     assert_eq!(sources(&seen), movie);
 
     // The visible ‹ returns to the guide, the movie playing on in its
-    // preview.
+    // preview. (Back to the title's details instead: not yet, see the
+    // validation record.)
     step(app.press("id:play-bar-back"));
     in_preview(&mut app);
-    assert_eq!(sources(&seen), movie);
+    assert_eq!(sources(&seen), movie, "Back opens nothing");
+    persistent(&app, &seen, surface);
 
     // An episode: the shortcut, the show, the episode.
     step(app.press("id:open-shows"));
@@ -405,14 +407,16 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     step(app.press("label:/^Generated Voyage ·/"));
     step(app.wait_for("text:/Generated First/"));
     step(app.press("text:/Generated Second/"));
-    step(app.wait_until("the episode plays", WAIT, |_| true));
     step(app.wait_for_gone("id:vod-screen", WAIT));
+    full_screen(&mut app, LANDSCAPE.0);
     let episode = sources(&seen);
     assert_eq!(episode.len(), 2, "{episode:?}");
     assert!(episode[1].ends_with("/series/generated-user/generated-pass/102.mp4"));
-    show_bar(&mut app);
+    // The visible ‹ returns to the guide; the show's details open again
+    // by touch, the played episode selected.
     step(app.press("id:play-bar-back"));
     in_preview(&mut app);
+    assert_eq!(sources(&seen), episode, "Back opens nothing");
     step(app.press("id:open-shows"));
     step(app.press("label:/^Generated Voyage ·/"));
     step(app.wait_for("text:/Generated First/"));
@@ -465,7 +469,10 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     }
     present(&mut app, LANDSCAPE, 1.0);
     // Close leaves the show for the shelf, then the shelf for the guide.
-    for _ in 0..2 {
+    for _ in 0..3 {
+        if !app.screen().matches("id:vod-screen").unwrap() {
+            break;
+        }
         step(app.press("id:vod-screen >> label:Close"));
     }
     step(app.wait_for_gone("id:vod-screen", WAIT));
@@ -648,4 +655,72 @@ fn calls_and_unplugged_headphones_pause_by_policy_and_never_restart_a_stop() {
     let seen = seen.lock().unwrap();
     assert!(!seen.removed.contains(&surface) && !seen.inserts.contains_key(&surface));
     assert_eq!(player(app), surface);
+}
+
+const TILE: &str = "id:multiview-tile";
+const TILE_MENU: &str = "id:multiview-menu";
+const TILE_PAUSED: &str = "id:multiview-paused";
+
+fn paused_tiles(app: &Headless) -> usize {
+    app.screen()
+        .count(&format!("{TILE} >> {TILE_PAUSED}"))
+        .unwrap()
+}
+
+/// Multiview: the heard tile (the active one; the others are muted) is
+/// what a call or unplugged headphones pause, and what a call's end
+/// resumes.
+#[test]
+fn interruptions_pause_and_resume_the_heard_multiview_tile() {
+    let Some(home) = isolated!() else { return };
+    let mut settings = Settings::new();
+    settings
+        .set("general.resume_last_channel", Value::Bool(false))
+        .unwrap();
+    settings.set("guide.switch_delay", Value::ms(0)).unwrap();
+    let mut fixture = crate::personalization::start_with_setup(home, settings, true, |_| {});
+    let app = &mut fixture.app;
+    step(app.set_environment("Android tablet", |e| {
+        e.idiom = Idiom::Pad;
+        e.os = Os::Android;
+    }));
+    step(app.set_viewport(Size::new(px(LANDSCAPE.0), px(LANDSCAPE.1))));
+    let surface = player(app);
+    step(app.press("id:guide-ui >> text:/Local A$/"));
+    full_screen(app, LANDSCAPE.0);
+    step(app.press("label:Multiview"));
+    step(app.wait_for(TILE));
+    step(app.press("id:multiview-picker >> text:/Local B$/"));
+    step(app.wait_until("two tiles", WAIT, |s| s.count(TILE) == Ok(2)));
+    assert_eq!(paused_tiles(app), 0);
+    // The first tile (its stream open; the fixture's account allows one)
+    // becomes the heard one.
+    step(app.press(&format!("{TILE} >> text:/Local A$/")));
+    if app.screen().matches(TILE_MENU).unwrap() {
+        step(app.press(&format!("{TILE} >> text:/Local A$/")));
+    }
+
+    // Headphones unplugged: the heard tile pauses, and stays paused.
+    audio(app, surface, "noisy");
+    assert_eq!(paused_tiles(app), 1, "the heard tile pauses");
+    audio(app, surface, "focusGain");
+    assert_eq!(paused_tiles(app), 1, "nothing resumes it");
+
+    // The viewer plays it again from its menu.
+    assert!(
+        app.screen()
+            .matches(&format!("{TILE} >> text:/Local A$/"))
+            .unwrap()
+    );
+    step(app.press(&format!("{TILE} >> text:/Local A$/")));
+    step(app.wait_for(TILE_MENU));
+    step(app.press(&format!("{TILE_MENU} >> text:Play")));
+    step(app.wait_for_gone(TILE_MENU, WAIT));
+    assert_eq!(paused_tiles(app), 0);
+
+    // A call pauses the heard tile; its end resumes it.
+    audio(app, surface, "focusLossTransient");
+    assert_eq!(paused_tiles(app), 1, "a call pauses the heard tile");
+    audio(app, surface, "focusGain");
+    assert_eq!(paused_tiles(app), 0, "its end resumes it");
 }

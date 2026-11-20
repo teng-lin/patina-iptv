@@ -96,6 +96,7 @@ pub fn elapsed(ui: Ui) -> Option<(i32, i32)> {
 /// Moves the seek target by `delta` seconds; the archive reopens there
 /// once the keys pause. False when nothing plays from the archive.
 pub fn step(ui: Ui, delta: i32) -> bool {
+    crate::interruption::viewer_acted(ui);
     if crate::on_demand::active(ui) {
         let moved = crate::on_demand::step(ui, delta);
         if moved {
@@ -162,6 +163,7 @@ pub fn span(ui: Ui) -> Option<(i32, i32)> {
 /// [`span`]'s limit): shown at once, opened once `commit` says so or the
 /// pointer pauses.
 pub fn to(ui: Ui, target: i32, commit_now: bool) {
+    crate::interruption::viewer_acted(ui);
     if crate::on_demand::active(ui) {
         crate::on_demand::seek_to(ui, target.max(0) as u64 * 1000);
         return;

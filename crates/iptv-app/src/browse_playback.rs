@@ -32,7 +32,14 @@ fn current(ui: Ui) -> Option<Target> {
                 && ui.focus.with(|f| f.pane == crate::guide::Pane::Guide) =>
         {
             let v = crate::lists::view(ui);
-            if ui.focus.with(|f| f.program(&v).airing(f.now)) != Airing::Live {
+            let (row, start, live) = ui.focus.with(|f| {
+                let p = f.program(&v);
+                (f.channel, p.start, p.airing(f.now) == Airing::Live)
+            });
+            // A pan from the live programme moves the focus along the row
+            // without leaving the channel: a waiting choice stays, and
+            // panning back starts no preview again.
+            if !live && ui.pan_anchor.get() != Some((row, start)) {
                 return None;
             }
             (
@@ -108,11 +115,42 @@ pub fn dragged(ui: Ui) {
     ui.browse_playback.update(|b| b.dragged());
     activity(ui);
 }
+/// The touches on `list` (the guide's rows, the channel list): a finger
+/// that crosses the drag threshold is a drag ([`dragged`]) even where the
+/// list cannot scroll (at its top, dragging down), whose platform view may
+/// then report no scroll drag at all.
+pub fn watch_drags<E: Interactive>(list: E, ui: Ui) -> E {
+    let watch = stored(iptv_core::timeline::Threshold::default());
+    list.on_touch(move |e: &nsh_core::TouchEvent| {
+        let Some(p) = e.points.iter().find(|p| p.changed) else {
+            return;
+        };
+        let (x, y) = (p.page.x.0, p.page.y.0);
+        match e.phase {
+            nsh_core::TouchPhase::Start => watch.with(|w| w.down(x, y)),
+            nsh_core::TouchPhase::Move => {
+                if watch.with(|w| w.moved(x, y)) {
+                    dragged(ui);
+                }
+            }
+            // A scroll view around the list took the finger over (Android
+            // intercepts a drag past its own slop, at the list's end too):
+            // a drag as well.
+            nsh_core::TouchPhase::Cancel => {
+                if watch.with(|w| std::mem::take(w)).is_down() {
+                    dragged(ui);
+                }
+            }
+            _ => watch.with(iptv_core::timeline::Threshold::up),
+        }
+    })
+}
 pub fn activity(ui: Ui) {
     ui.browse_playback.update(|b| b.activity(ui.now_ms()));
     arm(ui);
 }
 pub fn select(ui: Ui) {
+    crate::interruption::viewer_acted(ui);
     sync(ui);
     ui.browse_playback.update(|b| b.select(ui.now_ms()));
     run(ui);
@@ -216,6 +254,7 @@ pub fn bind(ui: Ui) {
 /// Debounced full-screen/list zapping; repeated zaps start from the pending
 /// channel rather than reopening the currently playing one repeatedly.
 pub fn zap(ui: Ui, channel: usize) {
+    crate::interruption::viewer_acted(ui);
     if ui.mode.get_untracked() != ViewMode::Fullscreen {
         crate::lists::show_channel(ui, channel);
         select(ui);

@@ -104,6 +104,7 @@ fn ok_pauses(ui: Ui) -> bool {
 /// The player's own actions (full screen and its panels); false for any
 /// other. `repeat`: the key's auto-repeat.
 pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> bool {
+    crate::interruption::viewer_acted(ui);
     let fullscreen = ui.mode.get() == ViewMode::Fullscreen;
     let buttons = fullscreen && ui.panels.with(|p| p.captures_input());
     let seek = |step: i32| {
@@ -162,6 +163,7 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
 /// Long Back (or Stop): nothing plays (multiview's tiles neither); back to
 /// the guide.
 pub(crate) fn stop_playback(ui: Ui) {
+    crate::interruption::viewer_acted(ui);
     crate::multiview::close(ui);
     log::info!("iptv player: stopped by the viewer");
     ui.playing.set(None);
@@ -173,6 +175,7 @@ pub(crate) fn stop_playback(ui: Ui) {
 /// within the list on screen (from the playing channel's row, else the
 /// focused one); a channel the list does not have zaps within its group.
 pub(crate) fn zap(ui: Ui, step: isize) {
+    crate::interruption::viewer_acted(ui);
     let list = ui.list.get();
     let playing = if ui.mode.get_untracked() != ViewMode::Fullscreen {
         crate::lists::focused_channel(ui)

@@ -292,6 +292,7 @@ pub fn start(ui: &Ui, channel: usize) {
 }
 
 pub fn toggle_pause(ui: Ui) {
+    crate::interruption::viewer_acted(ui);
     if crate::on_demand::active(ui)
         && ui.player.main().finished.get_untracked()
         && ui.player.main().accepts_native(None)
@@ -452,6 +453,7 @@ pub fn play_recording(ui: Ui, job: iptv_core::recording::Job, source: PlaySource
 }
 
 pub fn play_vod(ui: Ui, playing: iptv_runtime::vod::Playing, source: PlaySource) {
+    crate::interruption::viewer_acted(ui);
     crate::on_demand::flush(ui, false);
     let resume = playing.progress.resume_ms();
     crate::multiview::close(ui);

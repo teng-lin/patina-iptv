@@ -306,11 +306,15 @@ class PlayerComponent(
     }
 
     /**
-     * Whether this player means to play aloud: a source, set to play, not
-     * muted, the activity started ([AudioFocusHost] holds the focus then).
+     * Whether this player has an open stream (a source, buffering or ready,
+     * the activity started: not stopped, failed or ended) and plays it
+     * aloud (also set to play and not muted). [AudioFocusHost] holds the
+     * focus by them.
      */
     private fun reportAudible() {
-        audio?.audible(this, !away && url != null && player.playWhenReady && player.volume > 0f)
+        val state = player.playbackState
+        val open = !away && url != null && (state == Player.STATE_BUFFERING || state == Player.STATE_READY)
+        audio?.player(this, open && player.playWhenReady && player.volume > 0f, open)
     }
 
     private val listener =

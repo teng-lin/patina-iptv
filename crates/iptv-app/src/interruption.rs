@@ -1,8 +1,9 @@
 //! The host's audio interruptions (#88): Android's `audio` player event
-//! (the audio focus lost or back, the headphones' route gone) applied to
-//! the main player by the core's policy (`iptv_core::interruption`). It
-//! only pauses and resumes: a stream the viewer stopped stays stopped, and
-//! resuming opens no stream.
+//! (the audio focus lost or back, the headphones' route gone) applied by
+//! the core's policy (`iptv_core::interruption`) to the player that is
+//! heard: the full-screen one, or multiview's active tile (the others are
+//! muted). It only pauses and resumes: a stream the viewer stopped stays
+//! stopped, and resuming opens no stream.
 
 use iptv_core::interruption::Response;
 use iptv_player_mpv::AudioChange;
@@ -10,39 +11,99 @@ use nsh_core::prelude::*;
 
 use crate::Ui;
 
-/// The host reported `change` on `surface`'s player. Only the main
-/// player's (surface 0) is applied: every mounted player reports the one
-/// host-wide change.
+/// The heard player: its surface, and multiview's tile on it while the
+/// grid shows (its pause is the tile's own; otherwise `ui.paused`).
+#[derive(Clone, Copy, PartialEq)]
+struct Heard {
+    surface: usize,
+    tile: Option<usize>,
+}
+
+fn heard(ui: Ui) -> Heard {
+    let surface = (0..crate::player::SURFACES)
+        .find(|&s| crate::multiview::audible(ui, s))
+        .unwrap_or(0);
+    let tile = if crate::multiview::is_open(ui) {
+        ui.multiview
+            .with(|m| m.as_ref().and_then(|m| m.tile_on(surface)))
+    } else {
+        None
+    };
+    Heard { surface, tile }
+}
+
+fn paused(ui: Ui, heard: Heard) -> bool {
+    match heard.tile {
+        Some(_) => crate::multiview::paused(ui, heard.surface),
+        None => ui.paused.get(),
+    }
+}
+
+fn set_paused(ui: Ui, heard: Heard, paused: bool) {
+    match heard.tile {
+        Some(index) => ui.multiview.update(|m| {
+            if let Some(m) = m.as_mut() {
+                m.set_paused(index, paused);
+            }
+        }),
+        None => ui.paused.set(paused),
+    }
+}
+
+/// The policy's identity for what `heard` plays: its surface and its
+/// stream's token (0: nothing open).
+fn stream(ui: Ui, heard: Heard) -> u64 {
+    let s = ui.player.stream(heard.surface);
+    if s.source.with(Option::is_none) {
+        return 0;
+    }
+    ((heard.surface as u64) << 56) | (s.token.get() & ((1 << 56) - 1))
+}
+
+/// The host reported `change` on `surface`'s player. Every mounted player
+/// reports the one host-wide change: surface 0's report is applied.
 pub fn on_change(ui: Ui, surface: usize, change: AudioChange) {
     if surface != 0 {
         return;
     }
-    let main = ui.player.main();
-    let open = main.source.with_untracked(Option::is_some);
-    let token = if open { main.token.get_untracked() } else { 0 };
-    let playing = open && !ui.paused.get_untracked();
-    let mut response = None;
-    ui.interruptions
-        .update(|p| response = p.report(change.interruption(), token, playing));
-    log::info!("iptv audio: {} -> {response:?}", change.wire());
-    match response {
-        Some(Response::Pause) => ui.paused.set(true),
-        Some(Response::Resume) => ui.paused.set(false),
-        None => {}
-    }
+    untracked(|| {
+        let heard = heard(ui);
+        let id = stream(ui, heard);
+        let playing = id != 0 && !paused(ui, heard);
+        let mut response = None;
+        ui.interruptions
+            .update(|p| response = p.report(change.interruption(), id, playing));
+        log::info!(
+            "iptv audio: {} on surface {} -> {response:?}",
+            change.wire(),
+            heard.surface
+        );
+        match response {
+            Some(Response::Pause) => set_paused(ui, heard, true),
+            Some(Response::Resume) => set_paused(ui, heard, false),
+            None => {}
+        }
+    });
 }
 
-/// A pause or play the viewer made, or another stream, hands playback
-/// back to them: the audio focus returning leaves it as it is.
+/// The viewer acted on playback (played, paused, sought, zapped, chose
+/// something, stopped): a call's pause is theirs now, and the audio focus
+/// coming back leaves playback as it is. Called as each explicit action is
+/// accepted, before any delayed work it starts.
+pub fn viewer_acted(ui: Ui) {
+    ui.interruptions.update(|p| p.viewer_acted());
+}
+
+/// Changes nobody reported (a tile's own pause, another stream, the heard
+/// tile changing) hand playback back to the viewer too.
 pub fn bind(ui: Ui) {
+    // Only a change of what is heard or its pause: not every grid move.
+    let now = computed(move || {
+        let heard = heard(ui);
+        (paused(ui, heard), stream(ui, heard))
+    });
     effect(move || {
-        let main = ui.player.main();
-        let token = if main.source.with(Option::is_some) {
-            main.token.get()
-        } else {
-            0
-        };
-        let paused = ui.paused.get();
-        ui.interruptions.update(|p| p.observed(paused, token));
+        let (paused, id) = now.get();
+        ui.interruptions.update(|p| p.observed(paused, id));
     });
 }

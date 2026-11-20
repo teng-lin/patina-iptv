@@ -209,6 +209,7 @@ fn end(ui: Ui) {
 
 /// The remote while the grid owns it (`input.rs`).
 pub fn key(ui: Ui, action: Action) {
+    crate::interruption::viewer_acted(ui);
     let key = match action {
         Action::MoveUp => Key::Up,
         Action::MoveDown => Key::Down,

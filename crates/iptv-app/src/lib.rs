@@ -232,6 +232,10 @@ pub struct Ui {
     /// running: the channel key focused then (`browse_playback::hold`).
     pub autoplay_held: Signal<Option<Option<String>>>,
     pub pending_zap: Signal<Option<iptv_core::browse_playback::Target>>,
+    /// The guide row and programme start a timeline pan left the focus on,
+    /// when the pan started from that row's live programme: browse
+    /// playback keeps the channel (`grid/pan.rs`).
+    pub pan_anchor: Signal<Option<(usize, i32)>>,
     /// The host's audio interruptions' policy (`interruption.rs`).
     pub interruptions: Signal<iptv_core::interruption::Interruptions>,
     /// The list the guide shows: catalog channels (`lists.rs`).
@@ -344,6 +348,7 @@ impl Ui {
             browse_playback: signal(Default::default()),
             autoplay_held: signal(None),
             pending_zap: signal(None),
+            pan_anchor: signal(None),
             interruptions: signal(Default::default()),
             list: signal(Rc::new(ChannelList::build(
                 iptv_core::lists::ALL,
@@ -479,6 +484,7 @@ impl Ui {
 
     /// Starts `channel` live or from the archive.
     pub fn play(&self, channel: usize, playback: Playback) {
+        crate::interruption::viewer_acted(*self);
         if !player::allow_guide_channel(channel) {
             return;
         }

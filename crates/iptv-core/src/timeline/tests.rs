@@ -10,6 +10,21 @@ fn at_now() -> Timeline {
 }
 
 #[test]
+fn the_threshold_is_crossed_once_in_any_direction() {
+    let mut t = Threshold::default();
+    assert!(!t.moved(40.0, 0.0), "no finger down");
+    t.down(100.0, 100.0);
+    assert!(!t.moved(104.0, 103.0), "a tap's wobble");
+    // Down at a list's top: the list cannot scroll, the finger dragged.
+    assert!(t.moved(101.0, 112.0));
+    assert!(!t.moved(101.0, 160.0), "reported once");
+    t.up();
+    assert!(!t.moved(200.0, 200.0));
+    t.down(0.0, 0.0);
+    assert!(t.moved(-8.0, -8.0), "diagonal");
+}
+
+#[test]
 fn a_drag_picks_its_axis_once_past_the_slop() {
     assert_eq!(Lock::Undecided.decide(6.0, 5.0), Lock::Undecided);
     assert_eq!(Lock::Undecided.decide(11.0, 4.0), Lock::Horizontal);

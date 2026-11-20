@@ -221,6 +221,7 @@ fn entered(ui: Ui) {
 
 /// The host's `pipAction` event: one of the window's buttons.
 pub fn on_action(ui: Ui, action: PipAction) {
+    crate::interruption::viewer_acted(ui);
     log::info!("iptv pip: {}", action.wire());
     match action {
         PipAction::Play => {
