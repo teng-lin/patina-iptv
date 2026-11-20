@@ -75,8 +75,16 @@ The ingestor aligns output to complete 188-byte TS packets. Its shared rewind
 buffer is bounded to 4 MiB; one HLS segment uses the existing recorder's 32 MiB
 validation limit. A segment's packets reach consumers as they arrive, so the
 input is ready, and the player opens, with the live edge's first packets rather
-than after its whole segment (a file capture of its own still writes whole
-segments). The most advanced consumer governs read-ahead: ingestion pauses
+than after its whole segment. The segment's body is always read to its end into
+a queue bounded by that limit, so consumers that pause cannot leave the
+provider's response open until its read timeout. Consequently a segment that
+fails validation partway (lost sync, a torn final packet, over the limit, a
+dropped connection) has already delivered its earlier whole packets to every
+consumer, shared captures included, before the input ends; a capture that owns
+its connection still writes whole segments only. When the first segment fails
+that way after the player opened its first packets, the stream is remembered as
+unshareable: the player's retry plays the provider's own transport, as a stream
+refused before its first packets does at once. The most advanced consumer governs read-ahead: ingestion pauses
 once its unread window reaches 2 MiB. Advancing capture continues while playback
 is paused, and advancing playback continues when a capture stalls. If every
 consumer stalls, ingestion pauses. A consumer behind the retained window receives

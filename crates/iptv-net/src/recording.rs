@@ -200,6 +200,8 @@ pub(crate) trait Sink {
     fn buffers_segments(&self) -> bool {
         true
     }
+    /// A whole HLS segment (or a TS stream's first packets) passed its checks.
+    fn segment_complete(&mut self) {}
     fn write(&mut self, bytes: &[u8]) -> impl Future<Output = Result<(), Failure>> + Send;
 }
 
@@ -234,6 +236,7 @@ pub(crate) async fn receive(
             return Err(Failure::Unsupported);
         }
         writer.write(&head).await?;
+        writer.segment_complete();
         while let Some(chunk) = response.chunk().await.map_err(|_| Failure::Network)? {
             writer.write(&chunk).await?;
         }
@@ -384,6 +387,58 @@ async fn reload(
     .map_err(|_| Failure::Network)?
 }
 
+/// Takes one HLS segment's packets as they arrive. The body is always read
+/// to its end into a queue bounded by [`SEGMENT_LIMIT`] while `writer` takes
+/// them at its consumers' pace, so a paused player cannot leave the
+/// provider's response open until its read timeout ends the input; between
+/// segments, the next one waits for the consumers as before.
+async fn stream_segment(
+    mut response: reqwest::Response,
+    writer: &mut impl Sink,
+) -> Result<(), Failure> {
+    let queue = std::sync::Mutex::new((std::collections::VecDeque::new(), false));
+    let arrived = tokio::sync::Notify::new();
+    let lock = || {
+        queue
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    };
+    let receive = async {
+        let mut size = 0usize;
+        while let Some(chunk) = response.chunk().await.map_err(|_| Failure::Network)? {
+            if chunk.len() > SEGMENT_LIMIT - size {
+                return Err(Failure::Limit);
+            }
+            size += chunk.len();
+            lock().0.push_back(chunk);
+            arrived.notify_one();
+        }
+        if size < 188 || !size.is_multiple_of(188) {
+            return Err(Failure::Unsupported);
+        }
+        lock().1 = true;
+        arrived.notify_one();
+        Ok(())
+    };
+    let deliver = async {
+        loop {
+            let next = {
+                let mut queue = lock();
+                match queue.0.pop_front() {
+                    None if queue.1 => return Ok(()),
+                    next => next,
+                }
+            };
+            // The sink checks each whole packet's sync byte as it arrives.
+            match next {
+                Some(chunk) => writer.write(&chunk).await?,
+                None => arrived.notified().await,
+            }
+        }
+    };
+    tokio::try_join!(receive, deliver).map(|_| ())
+}
+
 async fn hls(
     client: &reqwest::Client,
     relay: &PlaybackRelay,
@@ -454,19 +509,9 @@ async fn hls(
                 }
                 writer.write(&data).await?;
             } else {
-                // The sink checks each whole packet's sync byte as it arrives.
-                let mut size = 0;
-                while let Some(chunk) = response.chunk().await.map_err(|_| Failure::Network)? {
-                    size += chunk.len();
-                    if size > SEGMENT_LIMIT {
-                        return Err(Failure::Limit);
-                    }
-                    writer.write(&chunk).await?;
-                }
-                if size < 188 || size % 188 != 0 {
-                    return Err(Failure::Unsupported);
-                }
+                stream_segment(response, writer).await?;
             }
+            writer.segment_complete();
             last_progress = tokio::time::Instant::now();
             state.next_hls_sequence = sequence.checked_add(1);
             if state.next_hls_sequence.is_none() {

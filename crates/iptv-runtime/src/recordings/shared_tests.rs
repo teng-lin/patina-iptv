@@ -1337,3 +1337,70 @@ async fn resolved_authority_cannot_be_rebound_to_an_edited_account_or_channel() 
         }
     }
 }
+
+/// A live HLS stream whose first segment starts as TS but fails validation
+/// after the player already opened its first packets (it loses sync; a
+/// misaligned or oversized segment fails the same way). That input ends;
+/// the stream is remembered, so the player's retry plays the provider's own
+/// transport, as a stream refused before its first packets does at once.
+#[tokio::test]
+async fn a_first_segment_failing_after_its_first_packets_falls_back_on_retry() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/generated.m3u8", listener.local_addr().unwrap());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let held = release.clone();
+    let segments = Arc::new(AtomicUsize::new(0));
+    let requested = segments.clone();
+    let server = tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let (held, requested) = (held.clone(), requested.clone());
+            tokio::spawn(async move {
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    request.push(socket.read_u8().await?);
+                }
+                if request.starts_with(b"GET /generated.m3u8 ") {
+                    let body = b"#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n\
+                                 #EXTINF:1,\nsegment.ts\n";
+                    let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
+                    socket.write_all(head.as_bytes()).await?;
+                    return socket.write_all(body).await;
+                }
+                requested.fetch_add(1, Ordering::SeqCst);
+                let mut packets = [[0x47u8; 188]; 4];
+                packets[0][..4].copy_from_slice(&[0x47, 0x40, 0, 0x10]);
+                packets[3][0] = 0;
+                let body = packets.concat();
+                let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
+                socket.write_all(head.as_bytes()).await?;
+                socket.write_all(&body[..2 * 188]).await?;
+                socket.flush().await?;
+                held.notified().await;
+                socket.write_all(&body[2 * 188..]).await
+            });
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let owner = owner(dir.path());
+    let request = seed(&owner, &url).await;
+    let shared = open(&owner, &request).await;
+    assert_ne!(shared.url, url, "the shared input offers its first packets");
+    let playback = player(&shared).await;
+    release.notify_one();
+    wait(|| !owner.recordings.lock().unshareable.is_empty()).await;
+    drop(playback);
+    let fallback = open(&owner, &request).await;
+    assert!(
+        manifest(&fallback).await.contains("segment.ts"),
+        "the retry plays the provider's own transport"
+    );
+    assert_eq!(
+        segments.load(Ordering::SeqCst),
+        1,
+        "no second shared ingest"
+    );
+    owner.release_viewing(0);
+    assert!(owner.drain_services());
+    server.abort();
+}

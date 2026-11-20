@@ -127,6 +127,11 @@ struct Data {
     active: HashMap<JobId, (Lease, CancelToken)>,
     jobs: Vec<Job>,
     finalization_errors: std::collections::HashSet<JobId>,
+    /// Streams (source, channel, provider URL) whose first HLS segment failed
+    /// validation after a shared input already offered its first packets:
+    /// their next preparation plays the provider's own transport, as one that
+    /// failed before offering any packets does at once.
+    unshareable: std::collections::HashSet<(i64, String, String)>,
     wake_capability: iptv_core::recording::WakeCapability,
     wake_reported: bool,
     published_schedule: Option<(i64, bool)>,

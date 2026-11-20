@@ -106,8 +106,8 @@ fn serve(mut socket: TcpStream, segments: &AtomicUsize, released: &AtomicBool) {
     );
     let _ = socket.write_all(&[pat, packet(1)].concat());
     let _ = socket.flush();
-    let until = Instant::now() + Duration::from_secs(60);
-    while !released.load(Ordering::SeqCst) && Instant::now() < until {
+    // Only the test (or its end) releases the rest.
+    while !released.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(10));
     }
     let _ = socket.write_all(&packet(2).repeat(62));
@@ -219,6 +219,7 @@ fn a_slow_live_edge_does_not_hold_the_resumed_stream_behind_the_guide() {
     .unwrap();
 
     let opens = iptv_app::player_opens(0);
+    let started = Instant::now();
     let mut app = app();
     app.wait_until("the resumed stream is published", IMPORT, |_| {
         iptv_app::player_has_source(0)
@@ -229,9 +230,16 @@ fn a_slow_live_edge_does_not_hold_the_resumed_stream_behind_the_guide() {
         1,
         "one shared ingest of the live edge"
     );
+    // Well inside the provider client's 30 s read timeout and the relay's
+    // stall bound: no timeout and no fallback produced this publication.
+    let published = started.elapsed();
+    assert!(
+        published < Duration::from_secs(15),
+        "published with the segment's first packets, not after all of it: {published:?}"
+    );
     assert!(
         !provider.released.load(Ordering::SeqCst),
-        "published with the segment's first packets, not after all of it"
+        "the segment is still held"
     );
     app.wait_until("the guide window is read", IMPORT, |_| {
         marked("guide window read").is_some()

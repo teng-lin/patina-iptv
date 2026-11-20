@@ -59,6 +59,7 @@ struct Owner {
     lifetime: CancelToken,
     closed: watch::Receiver<bool>,
     ready: watch::Receiver<Option<Result<(), Failure>>>,
+    validated: watch::Receiver<Option<Result<(), Failure>>>,
     server: AbortHandle,
 }
 impl Drop for Owner {
@@ -73,7 +74,8 @@ impl Drop for Owner {
 #[derive(Clone)]
 pub struct LiveInput(Arc<Owner>);
 impl LiveInput {
-    /// Returns only after receiving validated media. Unsupported transports
+    /// Returns only after its first segment (a TS stream's first packets)
+    /// passed validation. Unsupported transports
     /// leave no live owner, allowing the caller's permitted independent path.
     /// Must run on the host's owned Tokio executor.
     pub async fn start(
@@ -93,7 +95,7 @@ impl LiveInput {
         prepare_cancel: CancelToken,
     ) -> Result<Self, Failure> {
         let input = Self::begin_with_cancel(url, headers, policy, prepare_cancel)?;
-        match input.ready().await {
+        match input.first_segment().await {
             Ok(()) => Ok(input),
             Err(failure) => {
                 input.shutdown().await;
@@ -130,6 +132,7 @@ impl LiveInput {
             changed: Notify::new(),
         });
         let (ready, started) = watch::channel(None);
+        let (validated, checked) = watch::channel(None);
         let first = Arc::new(AtomicBool::new(false));
         let lifetime = CancelToken::new();
         let ending = lifetime.clone();
@@ -138,6 +141,7 @@ impl LiveInput {
         let mut sink = Fanout {
             shared: shared.clone(),
             ready: Some(ready),
+            validated: Some(validated),
             pending: Vec::new(),
             first,
         };
@@ -160,6 +164,9 @@ impl LiveInput {
             if let Some(ready) = sink.ready.take() {
                 let _ = ready.send(Some(Err(failure)));
             }
+            if let Some(validated) = sink.validated.take() {
+                let _ = validated.send(Some(Err(failure)));
+            }
             sink.shared.lock().ended = Some(failure);
             sink.shared.changed.notify_waiters();
             let _ = closed_tx.send(true);
@@ -179,18 +186,23 @@ impl LiveInput {
             lifetime,
             closed,
             ready: started,
+            validated: checked,
             server: server.abort_handle(),
         }));
         Ok(owner)
     }
+    /// The first media packets arrived: a player may open the input now.
+    /// An HLS segment's packets are taken as they arrive, so its first
+    /// segment may still fail validation: see [`LiveInput::first_segment`].
     pub async fn ready(&self) -> Result<(), Failure> {
-        let mut ready = self.0.ready.clone();
-        loop {
-            if let Some(result) = *ready.borrow_and_update() {
-                return result;
-            }
-            ready.changed().await.map_err(|_| Failure::Network)?;
-        }
+        outcome(self.0.ready.clone()).await
+    }
+    /// The first HLS segment arrived whole and passed validation (a TS
+    /// stream: its first packets). An `Unsupported` or `Limit` failure means
+    /// this stream cannot be shared and its provider's own transport should
+    /// play it. Holds no owner: the input may end while this waits.
+    pub fn first_segment(&self) -> impl Future<Output = Result<(), Failure>> + Send + 'static {
+        outcome(self.0.validated.clone())
     }
     pub fn is_ready(&self) -> bool {
         *self.0.ready.borrow() == Some(Ok(()))
@@ -223,9 +235,20 @@ impl LiveInput {
     }
 }
 
+/// A watched preparation step's result, once it has one.
+async fn outcome(mut step: watch::Receiver<Option<Result<(), Failure>>>) -> Result<(), Failure> {
+    loop {
+        if let Some(result) = *step.borrow_and_update() {
+            return result;
+        }
+        step.changed().await.map_err(|_| Failure::Network)?;
+    }
+}
+
 struct Fanout {
     shared: Arc<Shared>,
     ready: Option<watch::Sender<Option<Result<(), Failure>>>>,
+    validated: Option<watch::Sender<Option<Result<(), Failure>>>>,
     pending: Vec<u8>,
     first: Arc<AtomicBool>,
 }
@@ -235,6 +258,11 @@ impl Sink for Fanout {
     }
     fn buffers_segments(&self) -> bool {
         false
+    }
+    fn segment_complete(&mut self) {
+        if let Some(validated) = self.validated.take() {
+            let _ = validated.send(Some(Ok(())));
+        }
     }
     async fn write(&mut self, bytes: &[u8]) -> Result<(), Failure> {
         self.pending.extend_from_slice(bytes);

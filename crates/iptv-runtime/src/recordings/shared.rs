@@ -4,6 +4,10 @@
 use super::*;
 use iptv_core::{i18n::key, live::Identity};
 use iptv_net::live::LiveInput;
+use iptv_net::recording::Failure;
+
+/// Streams remembered as unshareable before the set starts over.
+const UNSHAREABLE: usize = 256;
 pub(super) struct Incoming {
     pub id: u64,
     pub identity: Identity,
@@ -583,7 +587,10 @@ impl Runtime {
                         created = Some(id);
                         let mut incoming = None;
                         let asked = std::time::Instant::now();
+                        let stream = (source_id.0, identity.channel.clone(), source.url.clone());
+                        let shareable = !state.lock().unshareable.contains(&stream);
                         if share
+                            && shareable
                             && let Ok(input) = LiveInput::begin_with_cancel(
                                 &source.url,
                                 &source.headers,
@@ -614,6 +621,24 @@ impl Runtime {
                                     "live input ready",
                                     format_args!("{} ms", asked.elapsed().as_millis()),
                                 );
+                                // The player opens with the first packets; a
+                                // first segment that then fails validation
+                                // ends this input, and the player's retry
+                                // falls back to the provider's own transport.
+                                let validated =
+                                    shared.input.shared().expect("shared probe").first_segment();
+                                let unshareable = state.clone();
+                                work.spawn(async move {
+                                    if let Err(Failure::Unsupported | Failure::Limit) =
+                                        validated.await
+                                    {
+                                        let mut data = unshareable.lock();
+                                        if data.unshareable.len() >= UNSHAREABLE {
+                                            data.unshareable.clear();
+                                        }
+                                        data.unshareable.insert(stream);
+                                    }
+                                });
                                 incoming = Some(shared);
                             } else {
                                 shared.input.clone().shutdown().await;
