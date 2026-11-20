@@ -445,3 +445,30 @@ fn live_player_panels_expire_and_back_dismisses_without_stopping() {
     assert!(!app.screen().matches("id:player-banner").unwrap());
     assert!(iptv_app::player_has_source(0));
 }
+
+#[test]
+fn tv_shows_a_visible_back_once_touch_is_used_and_hides_it_for_keys() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = personalization::start(home, Settings::new(), true);
+    let app = &mut fixture.app;
+    step(app.set_environment("TV remote", |env| env.idiom = Idiom::Tv));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:player-banner"));
+    step(app.press_key("m"));
+    step(app.wait_for("id:play-bar-layer"));
+    assert!(
+        !app.screen().matches("id:play-bar-back").unwrap(),
+        "the remote has its own Back"
+    );
+    // A touch on a control: the input, not the device, decides.
+    step(app.press("id:play-bar-mute"));
+    step(app.wait_for("id:play-bar-back"));
+    // A key returns to the remote's view.
+    step(app.press_key("right"));
+    step(app.wait_for_gone("id:play-bar-back", Duration::from_secs(2)));
+    // So does the remote's Back, which the platform handles.
+    step(app.press("id:play-bar-mute"));
+    step(app.wait_for("id:play-bar-back"));
+    step(app.press_remote(nsh_tv::RemoteKey::Back));
+    step(app.wait_for_gone("id:play-bar-back", Duration::from_secs(2)));
+}

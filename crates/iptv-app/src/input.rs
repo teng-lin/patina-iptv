@@ -340,8 +340,8 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         ui.pending_zap.set(None);
     }
     crate::browse_playback::activity(ui);
-    // The first key after touch starts from a row on screen.
-    if ui.input.get() == Input::Touch {
+    // The first key after touch or a pointer starts from a row on screen.
+    if ui.input.get() != Input::Keys {
         if let Some((first, last)) = ui.visible_rows.get() {
             ui.focus.update(|f| f.adopt_rows(first, last));
         }
