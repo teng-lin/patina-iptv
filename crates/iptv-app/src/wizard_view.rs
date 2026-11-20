@@ -401,7 +401,7 @@ fn choose_type(ui: Ui) -> impl IntoElement {
     card(ui, size)
         .h(move || {
             px((window().height.0 * 0.95)
-                .min(size.of(500.0) * (crate::settings::font_factor() * font_scale()).max(1.0)))
+                .min(size.of(500.0) * crate::settings::text_factor().max(1.0)))
         })
         .child(ui_kit::title(size, move || {
             tr("What did your provider give you?")
@@ -549,7 +549,7 @@ fn form(ui: Ui, kind: PlaylistKind) -> impl IntoElement {
         .test_id("wizard-form")
         .h(move || {
             px((window().height.0 * 0.95)
-                .min(size.of(500.0) * (crate::settings::font_factor() * font_scale()).max(1.0)))
+                .min(size.of(500.0) * crate::settings::text_factor().max(1.0)))
         })
         .accessibility_elements_hidden(move || entry::is_editing(ui))
         .gap(move || size.px(4.0))

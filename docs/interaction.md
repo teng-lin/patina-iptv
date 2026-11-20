@@ -213,8 +213,11 @@ what the content needs at the current text size, not from the device type.
   wherever the programme would have less than its room beside them. The
   preview keeps its place at the top left and shrinks to leave that row room,
   but never below 64 points tall, which keeps the corner ‹ inside it. A short
-  window grows the header instead, up to 55% of its height so the rail and the
-  guide keep room; a window too short for that squeezes the preview. The
+  window grows the header instead, for the preview and for the focused
+  programme's title and times (wrapped as the column makes them), up to 55%
+  of its height so the rail and the guide keep room, 70% at the accessibility
+  text sizes; a window too short for that squeezes them, the description
+  giving way first. The
   programme's times wrap onto a second line rather than clip, and a part
   wider than the column (large text in a narrow window) wraps within it; its
   title stays on one line and is truncated. The shortcuts' row scrolls
@@ -232,6 +235,9 @@ what the content needs at the current text size, not from the device type.
   has room for all their buttons; a narrower window (an iPad's Split View or
   Slide Over, a narrow desktop window) gives the right-hand group the rows
   under the transport, its buttons wrapping, so none is cut off at the edge.
+  Choosers over the video keep clear of the bar's laid-out height and are
+  never wider or taller than their room; their lists scroll. The guide's
+  corner ‹ keeps clear of the leading safe area (an iPad window's controls).
 - **Planned:** a list beside its details in Expanded, and collapsing the
   player's panels by class.
 

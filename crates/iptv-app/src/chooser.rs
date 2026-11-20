@@ -378,7 +378,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         // Clear of the play bar while it shows.
         .pb(move || {
             px(if crate::play_bar::shows(ui) {
-                crate::play_bar::height() + 16.0
+                crate::play_bar::height(ui) + 16.0
             } else {
                 40.0
             })
@@ -409,6 +409,12 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         )
         .child(
             view()
+                .test_id("chooser-panel")
+                // Never wider than the window (an iPad's narrowest windows).
+                .max_w(percentage(1.0))
+                // Nor taller than the room between the safe area and the
+                // play bar: the list scrolls in what is left.
+                .max_h(percentage(1.0))
                 .w(move || {
                     size.px(if kind() == Some(Kind::History) {
                         520.0
@@ -431,6 +437,8 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         .estimated_item_size(list_rows::pitch(size, ROW))
                         .element_ref(&list)
                         .test_id("chooser-items")
+                        .flex_shrink(1.0)
+                        .min_h(px(0.0))
                         .h(move || {
                             let content =
                                 count().clamp(1, MAX_ROWS) as f32 * list_rows::pitch(size, ROW)().0;

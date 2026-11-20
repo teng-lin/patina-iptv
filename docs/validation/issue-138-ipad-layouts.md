@@ -33,7 +33,7 @@ needs). NSH was not changed.
 
 | Item | Value |
 |---|---|
-| Branch | `feat/issue-138-ipad-portrait-split` (the simulator app was built from its working tree before the final test-only edits) |
+| Branch | `feat/issue-138-ipad-portrait-split` (the simulator app was built from commit `cc7acc6c`, before the review fixes 5–7 below, which are checked headless only) |
 | Simulator app | `nsh package . --target ios-simulator` (nsh at the pinned rev, built on the Mac), `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true`, development playlist `http://127.0.0.1:8138/iptv/playlist.m3u`, Keychain entitlements embedded at link time (`-sectcreate __TEXT __entitlements`, the #136 workaround) |
 | Mac | macOS 26.6.2, Xcode 27.2, iOS simulator runtime 27.2, Rust 1.99.1 |
 | Simulator | Disposable "Patina 138 Synthetic", iPad Air 11-inch (M4), 820 × 1180 points; deleted after the run |
@@ -46,9 +46,9 @@ needs). NSH was not changed.
 |---|---|---|
 | Portrait and landscape keep the channel, playback and selection by identity | `ipad_guide_keeps_the_focused_channel_and_the_preview_in_every_window`: 1180×820, 820×1180, 678×820, 507×820, 375×820, 320×1180, 700×560 at text 1.0, 1.35 (xxxLarge) and 2.35 (AX3): the focused channel (C) stays focused, the previewed channel (B) plays on, no open, the video under the preview by `GuideHeader`'s policy | Met. Launched in portrait ([guide](../screenshots/issue-138/ipad-portrait-guide.png)); played channel 1 full screen ([portrait](../screenshots/issue-138/ipad-portrait-full-screen.png)); rotated to landscape left ([landscape](../screenshots/issue-138/ipad-landscape-full-screen.png)), portrait upside down and back: same process, still channel 1 full screen, **1 stream request before and after** |
 | 1/3, 1/2 and 2/3 Split View keep the channel, playback and selection | Same scenario (375, 507 and 678 points wide, 320 for the narrowest window); `ipad_full_screen_and_details_keep_progress_and_episode_in_every_window`: a movie at 37 s of 2 min stays full screen with its progress, a show's details keep the selected episode, at every window and text size | Met with iPadOS 26 windows (Settings › Multitasking & Gestures › Windowed Apps; the system has no separate Split View there): the window dragged from 820×1180 to 390×844 kept the guide on channel 1 playing in the preview ([390-point guide](../screenshots/issue-138/ipad-window-390-guide.png)); widened to 820×1057 and narrowed to 390×1057, **no stream request** from any resize |
-| Primary controls reachable at large text | Every window above at text 1.35 and 2.35: the play bar's ‹ and play/pause and **every** bar button inside the window; Close (or the category heading that brings it back) inside; the empty Movies message and Add playlist inside; Search's field inside with the query kept; the header's shortcuts row inside, scrolling sideways | Met at AX3 (Accessibility Extra Large) in portrait: the bar's buttons and times ([play bar](../screenshots/issue-138/ipad-portrait-ax3-play-bar.png)), the guide header with "15 min left" wrapped onto its own line ([guide](../screenshots/issue-138/ipad-portrait-ax3-guide.png)). At 390 points the bar wraps its right-hand buttons under the transport ([390-point bar](../screenshots/issue-138/ipad-window-390-play-bar.png)); at 820 it is one row ([820-point bar](../screenshots/issue-138/ipad-window-820-play-bar.png)) |
-| No extra stream on rotation or resize; the player view never hidden, detached or re-parented | Every step of all four scenarios: one `tv.player` mounted once, never removed, inserted once, never hidden; the stream sources unchanged | Met for streams: 0 requests from 3 rotations, 3 window resizes and 2 text-size changes (mock log). The view's identity is not observable from the simulator; the headless record covers it |
-| The multitasking lifecycle follows the documented background policy | `ipad_another_app_beside_changes_nothing_and_leaving_follows_the_background_policy`: the scene inactive (another app focused beside) at 375 and 820 points wide: not paused, no open, same stream; background then foreground with the native player's `reauthorize`: exactly one reopen of the same channel on the same player | Met. Home: same process returned (pid unchanged), **1 new stream request** (the reopen after fresh admission). Settings over the whole screen backgrounded Patina; Settings made small beside it: Patina visible again with **1 reopen**, then 10 s with Settings focused and Patina inactive: **no request**, video shown ([beside Settings](../screenshots/issue-138/ipad-inactive-beside-settings.png)) |
+| Primary controls reachable at large text | Every window above at text 1.35 and 2.35: the play bar's ‹ and play/pause and **every** bar button inside the window; the picture size chooser at 375 points (text 1.0 and 2.35) inside the window and above the wrapped bar; the guide header's title and times whole inside their column (the header grows for them); the guide's ‹ clear of a 65-point leading inset (an iPad window's controls); Close (or the category heading that brings it back) inside; the empty Movies message and Add playlist inside; Search's field inside with the query kept; the header's shortcuts row inside, scrolling sideways | Met at AX3 (Accessibility Extra Large) in portrait: the bar's buttons and times ([play bar](../screenshots/issue-138/ipad-portrait-ax3-play-bar.png)), the guide header with "15 min left" wrapped onto its own line ([guide](../screenshots/issue-138/ipad-portrait-ax3-guide.png)). At 390 points the bar wraps its right-hand buttons under the transport ([390-point bar](../screenshots/issue-138/ipad-window-390-play-bar.png)); at 820 it is one row ([820-point bar](../screenshots/issue-138/ipad-window-820-play-bar.png)) |
+| No extra stream on rotation or resize; the player view never hidden, detached or re-parented | Every step of all four scenarios: one `tv.player` mounted once, never removed, inserted once, never hidden; the stream sources unchanged, and through the full-screen resizes the player's open count and the source's token too (a reopen of the same movie would change them) | Met for streams: 0 requests from 3 rotations, 3 window resizes and 2 text-size changes (mock log). The view's identity is not observable from the simulator; the headless record covers it |
+| The multitasking lifecycle follows the documented background policy | `ipad_another_app_beside_changes_nothing_and_a_reauthorized_return_reopens_once`: the scene inactive (another app focused beside) at 375 and 820 points wide: not paused, no open, same stream. The app's side of the return only: the test injects the native player's `reauthorize` after foregrounding and sees exactly one reopen of the same channel on the same player. No native player runs headless, so the stop in the background and the request on return are verified on the simulator (the mock server's counts), not here | Met. Home: same process returned (pid unchanged), **1 new stream request** (the reopen after fresh admission). Settings over the whole screen backgrounded Patina; Settings made small beside it: Patina visible again with **1 reopen**, then 10 s with Settings focused and Patina inactive: **no request**, video shown ([beside Settings](../screenshots/issue-138/ipad-inactive-beside-settings.png)) |
 | Evidence on the iPad simulator in a validation doc; a physical iPad separately | This document | Simulator: this document. Physical iPad: **not run** |
 
 Stream counts in order (mock server `index.m3u8`): channel 1 opened (1);
@@ -76,25 +76,38 @@ Patina (4); 10 s inactive beside Settings (4).
    The scale now also keys on the reported idiom, so a tablet keeps the full
    sizes headless as it does on the device (`scale.rs`; release builds are
    unchanged: Android and iOS never scaled).
+5. **Choosers over the video ignored the wrapped play bar.** They kept
+   clear of a one-row bar's height, so in a narrow window a tall chooser
+   covered the wrapped buttons (375 points at AX3: the picture size chooser
+   ended at 692, the bar began at 594), and a 380-point chooser was wider
+   than a 375-point window. The bar now reports its laid-out height
+   (`Ui::play_bar_height`), and the chooser is never wider or taller than
+   its room, its list scrolling (`chooser.rs`).
+6. **The header clipped the programme's title and times** in a short
+   window at large text (700×560 at AX3: 64 points for the title and two
+   lines of times). The header now budgets the title and the times, wrapped
+   as the column's width makes them, before the description
+   (`iptv_core::layout::details_height`), growing up to 55% of the window as
+   before, or 70% at the accessibility text sizes.
+7. **iPadOS 26 window controls covered the guide preview's ‹** in a window
+   ([390-point guide](../screenshots/issue-138/ipad-window-390-guide.png),
+   before this fix). It now sits the leading safe-area inset further in,
+   as the full-screen ‹ does (`header.rs`). Checked headless with a
+   65-point inset; not re-run on the simulator.
 
 ## Observations, not fixed here
 
-1. **iPadOS 26 window controls cover the guide preview's corner ‹** in a
-   window ([390-point guide](../screenshots/issue-138/ipad-window-390-guide.png)).
-   The full-screen ‹ moves clear of them; the preview's does not. The
-   preview's corner needs the window-controls inset NSH reports to the
-   full-screen chrome; not investigated.
-2. **At AX3 the guide's rows truncate hard** (channel names "Sy…", short
+1. **At AX3 the guide's rows truncate hard** (channel names "Sy…", short
    programmes "…"); the times under the bar's progress wrap one character
    per line in portrait ("12:4 / 0 / PM"). Readable but cramped.
-3. **Widening Movies after a compact window keeps the categories closed**:
+2. **Widening Movies after a compact window keeps the categories closed**:
    the one-pane empty catalogue closes them, and `iptv_core::vod` keeps them
    closed in a wider window with the action focused (a tested remote rule).
    Touch then reaches Close through the category heading, one tap away.
-4. **The keyboard focus cannot reach the preview on iPad** (Up from the top
+3. **The keyboard focus cannot reach the preview on iPad** (Up from the top
    row stays there): the preview takes the focus on TVs and desktops only,
    by design (`lists::navigate`).
-5. The development build shows the key-timing line in the header
+4. The development build shows the key-timing line in the header
    (`keys 0 · …`), as debug builds do everywhere.
 
 ## Could and could not drive

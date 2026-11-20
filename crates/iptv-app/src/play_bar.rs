@@ -96,9 +96,15 @@ pub fn bind(ui: Ui) {
     });
 }
 
-/// The bar's height above the window's bottom (with its margin): popups
-/// over the video keep clear of it.
-pub fn height() -> f32 {
+/// The bar's height above the window's bottom (with its margin and the
+/// safe area): popups over the video keep clear of it. The laid-out
+/// height, which counts the rows a narrow window wraps the buttons onto
+/// and times wrapped by large text; one row's until the bar first shows.
+pub fn height(ui: Ui) -> f32 {
+    let laid_out = ui.play_bar_height.get();
+    if laid_out > 0.0 {
+        return laid_out;
+    }
     let row = target() + 8.0;
     // Panel padding, the row, the gap, the progress line, the margin.
     6.0 + row + 4.0 + 20.0 + 10.0 + 16.0
@@ -279,6 +285,12 @@ fn bar(ui: Ui) -> impl IntoElement {
         .bottom(px(0.0))
         .px(px(BAR_MARGIN))
         .pb_safe_area_plus(px(16.0))
+        .on_layout(move |b: &Bounds<Points>| {
+            let h = b.size.height.0;
+            if untracked(|| ui.play_bar_height.get()) != h {
+                ui.play_bar_height.set(h);
+            }
+        })
         // Only the panel takes presses: around it they reach the video.
         .pointer_events(PointerEvents::BoxNone)
         .child(

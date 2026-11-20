@@ -20,6 +20,12 @@ pub const PREVIEW_MARGIN: f32 = 12.0;
 pub const PREVIEW_MIN_H: f32 = 64.0;
 /// The most of the window's height a short window's header grows to.
 pub const HEADER_MAX_SHARE: f32 = 0.55;
+/// At the accessibility text sizes (a text factor from
+/// [`LARGE_TEXT`]), the most the header grows to keep the focused
+/// programme's title and times whole: the guide's rows, drawn as large,
+/// show fewer of themselves either way.
+pub const LARGE_TEXT: f32 = 1.5;
+pub const LARGE_TEXT_MAX_SHARE: f32 = 0.7;
 /// The gap between the header's columns (points at scale 1).
 pub const COLUMN_GAP: f32 = 24.0;
 /// The shortcuts' row under the preview: its height and the gap above it
@@ -31,6 +37,20 @@ pub const SHORTCUTS_GAP: f32 = 8.0;
 /// side, and a programme's title and times.
 pub const SHORTCUTS_W: f32 = 260.0;
 pub const DETAILS_MIN_W: f32 = 240.0;
+/// The focused programme's lines beside the preview, as the app draws
+/// them (points at a text factor of 1): the title's and the times' type,
+/// their line height, and the widths of the times row's parts (the span
+/// "12:40 PM – 1:00 PM", the progress bar, "15 min left") and the gaps.
+/// [`details_height`] estimates from them the room the title and the
+/// times take, before the description, which gives way.
+pub const TITLE_PT: f32 = 22.0;
+pub const TIMES_PT: f32 = 17.0;
+pub const LINE_HEIGHT: f32 = 1.2;
+pub const TIMES_SPAN_W: f32 = 187.0;
+pub const TIMES_PROGRESS_W: f32 = 64.0;
+pub const TIMES_LEFT_W: f32 = 100.0;
+pub const DETAILS_GAP: f32 = 6.0;
+pub const TIMES_GAP: f32 = 12.0;
 
 /// Where the guide's header puts its shortcuts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,7 +84,7 @@ impl GuideHeader {
         let text = scale * font;
         // The programme's width if the shortcuts stayed beside it, with the
         // preview as that arrangement draws it.
-        let (_, beside) = fit(width, height, 0.0);
+        let (_, beside) = fit(width, height, 0.0, 0.0, HEADER_MAX_SHARE);
         let room = width - 2.0 * PREVIEW_MARGIN - beside - 2.0 * COLUMN_GAP * scale;
         let shortcuts = if Class::of(width, text) == Class::Compact
             || room < (SHORTCUTS_W + DETAILS_MIN_W) * text
@@ -80,7 +100,24 @@ impl GuideHeader {
                 (SHORTCUTS_GAP * scale).round(),
             ),
         };
-        let (height, w) = fit(width, height, row + row_gap);
+        // The programme's column, with the preview at its widest share (so
+        // never narrower than drawn), and the room its title and times take.
+        let side = match shortcuts {
+            Shortcuts::Beside => SHORTCUTS_W * text + COLUMN_GAP * scale,
+            Shortcuts::Below => 0.0,
+        };
+        let column = width
+            - 2.0 * PREVIEW_MARGIN
+            - (width * PREVIEW_SHARE).round()
+            - COLUMN_GAP * scale
+            - side;
+        let details = details_height(column, scale, text);
+        let most = if text >= LARGE_TEXT {
+            LARGE_TEXT_MAX_SHARE
+        } else {
+            HEADER_MAX_SHARE
+        };
+        let (height, w) = fit(width, height, row + row_gap, details, most);
         Self {
             height,
             preview: (w, (w * 9.0 / 16.0).round()),
@@ -91,15 +128,52 @@ impl GuideHeader {
     }
 }
 
+/// The height (points) the focused programme's title and times take in a
+/// column `column` points wide at `scale` and text factor `text`: the title
+/// on one line, then the times row, whose parts wrap onto further lines
+/// where the column is narrower than they are (the span over at most two
+/// lines of its own).
+pub fn details_height(column: f32, scale: f32, text: f32) -> f32 {
+    let column = column.max(1.0);
+    let line = |pt: f32| (pt * text * LINE_HEIGHT).ceil();
+    let times_line = line(TIMES_PT);
+    let gap = TIMES_GAP * scale;
+    // Lay the parts out greedily, as the flex row wraps them.
+    let parts = [
+        (TIMES_SPAN_W * text, times_line),
+        (TIMES_PROGRESS_W * scale, times_line),
+        (TIMES_LEFT_W * text, times_line),
+    ];
+    let mut rows: Vec<f32> = Vec::new();
+    let mut used = f32::INFINITY;
+    for (w, h) in parts {
+        let lines = (w / column).ceil().clamp(1.0, 2.0);
+        let w = w.min(column);
+        let h = h * lines;
+        if used + gap + w <= column + 0.5 {
+            used += gap + w;
+            let last = rows.last_mut().expect("a row is open");
+            *last = last.max(h);
+        } else {
+            used = w;
+            rows.push(h);
+        }
+    }
+    let times: f32 = rows.iter().sum::<f32>() + gap * (rows.len().saturating_sub(1)) as f32;
+    line(TITLE_PT) + DETAILS_GAP * scale + times
+}
+
 /// The header's height and the preview's width in a window `width` ×
-/// `height` with `below` points under the preview. A short window grows the
-/// header rather than lose the preview, up to [`HEADER_MAX_SHARE`] of its
-/// height (the rail and the guide keep the rest); a window too short even
-/// for that squeezes the preview instead.
-fn fit(width: f32, height: f32, below: f32) -> (f32, f32) {
+/// `height` with `below` points under the preview and `details` points
+/// wanted by the programme beside it. A short window grows the header
+/// rather than lose the preview or clip the programme, up to `most` of its
+/// height ([`HEADER_MAX_SHARE`], more at the largest text: the rail and
+/// the guide keep the rest); a window too short even for that squeezes
+/// them instead.
+fn fit(width: f32, height: f32, below: f32, details: f32, most: f32) -> (f32, f32) {
     let share = (height * HEADER_SHARE).round();
-    let wanted = 2.0 * PREVIEW_MARGIN + PREVIEW_MIN_H + below;
-    let header = share.max(wanted.min((height * HEADER_MAX_SHARE).floor()));
+    let wanted = 2.0 * PREVIEW_MARGIN + PREVIEW_MIN_H.max(details.ceil()) + below;
+    let header = share.max(wanted.min((height * most).floor()));
     let tall = header - 2.0 * PREVIEW_MARGIN - below;
     let mut w = preview_width(width, tall);
     if tall >= PREVIEW_MIN_H {
@@ -225,6 +299,38 @@ mod tests {
         assert_eq!(g.shortcuts, Shortcuts::Below, "{g:?}");
         let beside = GuideHeader::of(1280.0, 720.0, 0.875, 1.0);
         assert_eq!(beside.shortcuts, Shortcuts::Beside);
+    }
+
+    #[test]
+    fn the_header_keeps_the_programmes_title_and_times_whole() {
+        // An iPad's Split View and Stage Manager windows at the largest
+        // standard text and at Accessibility Extra Large (AX3).
+        for (w, h, font) in [
+            (678.0, 820.0, 40.0 / 17.0),
+            (700.0, 560.0, 40.0 / 17.0),
+            (375.0, 820.0, 23.0 / 17.0),
+            (1180.0, 820.0, 40.0 / 17.0),
+        ] {
+            let g = GuideHeader::of(w, h, 1.0, font);
+            let side = if g.shortcuts == Shortcuts::Beside {
+                SHORTCUTS_W * font + COLUMN_GAP
+            } else {
+                0.0
+            };
+            let column = w - 2.0 * PREVIEW_MARGIN - g.preview.0 - COLUMN_GAP - side;
+            let room = g.height - 2.0 * PREVIEW_MARGIN - g.row - g.row_gap;
+            assert!(
+                room + 0.5 >= details_height(column, 1.0, font),
+                "{w}x{h} at {font}: {g:?}, room {room}"
+            );
+        }
+        // At the default text the title and the times take one line each.
+        assert_eq!(details_height(400.0, 1.0, 1.0), 27.0 + 6.0 + 21.0);
+        // A narrow column wraps the minutes left onto a line of their own.
+        assert_eq!(
+            details_height(200.0, 1.0, 1.0),
+            27.0 + 6.0 + 21.0 + 12.0 + 21.0
+        );
     }
 
     #[test]

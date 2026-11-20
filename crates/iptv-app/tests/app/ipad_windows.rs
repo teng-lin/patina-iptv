@@ -10,8 +10,11 @@
 //! compact empty Movies and Shows and Search's field stay inside the
 //! window. Nothing opens a stream, and the one `tv.player` is never
 //! hidden, detached or re-parented. Another app taking the focus beside
-//! Patina (the scene inactive but visible) changes nothing; leaving the
-//! screen follows the background policy (`docs/interaction.md`).
+//! Patina (the scene inactive but visible) changes nothing; after the
+//! return from the background the app admits the native player's request
+//! once (`docs/interaction.md`; the native stop itself is checked on the
+//! simulator). A chooser keeps clear of the wrapped play bar, and the
+//! guide's ‹ of an iPad window's controls.
 //!
 //! Synthetic data only: the personalization playlist (M3U), and a
 //! generated on-demand catalogue on a local mock server.
@@ -32,6 +35,21 @@ use nsh_engine::EngineConfig;
 use serde_json::{Value as Json, json};
 
 const WAIT: Duration = Duration::from_secs(5);
+/// The play bar's buttons (`play_bar::control_id`): its panel's rows.
+const BAR_CONTROLS: [&str; 12] = [
+    "play-bar-mute",
+    "play-bar-rewind",
+    "play-bar-play-pause",
+    "play-bar-forward",
+    "play-bar-record",
+    "play-bar-favourite",
+    "play-bar-tracks",
+    "play-bar-details",
+    "play-bar-picture",
+    "play-bar-channels",
+    "play-bar-multiview",
+    "play-bar-guide",
+];
 /// An iPad Air 11-inch (M4) full screen, in points.
 const LANDSCAPE: (f32, f32) = (1180.0, 820.0);
 const PORTRAIT: (f32, f32) = (820.0, 1180.0);
@@ -210,6 +228,25 @@ fn header_fits(app: &Headless, player: NodeId, size: (f32, f32), text: f32) {
         left[0] + left[2] <= w + 0.5,
         "minutes left {left:?}: {what}"
     );
+    // The column clips what it has no room for; the header grows for the
+    // title and the times, which come first, so the times (and the title
+    // above them) are whole inside it, the description giving way.
+    let details = bounds(app, "guide-header-details", &what);
+    let times = find(app, |n| {
+        n.text.as_ref().is_some_and(|t| t.text.text.contains(" – "))
+            && n.bounds.origin.x.0 >= details[0] - 0.5
+    })
+    .unwrap_or_else(|| panic!("the programme's times shown: {what}"));
+    for (part, b) in [("times", times), ("minutes left", left)] {
+        assert!(
+            b[1] >= details[1] - 0.5 && b[1] + b[3] <= details[1] + details[3] + 0.5,
+            "{part} {b:?} whole inside the details {details:?}: {what}"
+        );
+    }
+    assert!(
+        details[1] + details[3] <= h,
+        "the details {details:?} inside the window: {what}"
+    );
 }
 
 #[test]
@@ -244,6 +281,20 @@ fn ipad_guide_keeps_the_focused_channel_and_the_preview_in_every_window() {
             header_fits(app, player, size, text);
             persistent(app, &lifetime, player);
         }
+    }
+
+    // An iPad window's controls at its top left (a leading safe-area
+    // inset): the guide's ‹ moves clear of them, still over the preview.
+    present(app, LANDSCAPE, 1.0);
+    for inset in [65.0, 0.0] {
+        step(app.set_environment("window controls", |e| e.safe_area.left = px(inset)));
+        app.settle();
+        let back = bounds(app, "guide-corner-back", "window controls");
+        let preview = bounds(app, "guide-preview", "window controls");
+        assert!(
+            back[0] >= inset + 20.0 - 0.5 && back[0] + back[2] <= preview[0] + preview[2],
+            "‹ {back:?} clear of a {inset}-point inset, over the preview {preview:?}"
+        );
     }
 
     // Keys still move the focus in a Split View window (an iPad's keyboard
@@ -383,6 +434,11 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
     app.settle();
     show_bar(&mut app);
     step(app.wait_for("text:0:37"));
+    // Every open counts, the same movie's again too: a resize that reopened
+    // it would change the count and the source's token.
+    let opens = iptv_app::player_opens(0);
+    let source_token =
+        |seen: &Arc<Mutex<Seen>>| seen.lock().unwrap().props["source"]["token"].clone();
 
     for text in TEXT {
         for size in WINDOWS {
@@ -390,6 +446,8 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
             show_bar(&mut app);
             let what = format!("movie at {size:?}, text {text:.2}");
             assert_eq!(sources(&seen), movie, "no stream opened: {what}");
+            assert_eq!(iptv_app::player_opens(0), opens, "no open: {what}");
+            assert_eq!(source_token(&seen), token, "the same source: {what}");
             assert_eq!(video_width(&app, surface), size.0, "full screen: {what}");
             assert!(app.shows("0:37"), "progress kept: {what}");
             for control in ["play-bar-back", "play-bar-play-pause"] {
@@ -423,6 +481,41 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
             }
             kept(&app, &seen, surface);
         }
+    }
+
+    // A chooser over the video in a Split View window keeps clear of the
+    // bar, whose buttons wrap onto more rows there: at the largest text it
+    // is at its tallest.
+    for text in [TEXT[0], TEXT[2]] {
+        let size = (375.0, 820.0);
+        present(&mut app, size, text);
+        show_bar(&mut app);
+        let what = format!("the picture size chooser at {size:?}, text {text:.2}");
+        step(app.press("id:play-bar-picture"));
+        step(app.wait_for("id:chooser-items"));
+        app.settle();
+        let panel = bounds(&app, "chooser-panel", &what);
+        inside(panel, size, &what);
+        let bar_top = app
+            .screen()
+            .layout_nodes()
+            .into_iter()
+            .filter(|n| {
+                !n.hidden
+                    && n.test_id
+                        .as_deref()
+                        .is_some_and(|id| BAR_CONTROLS.contains(&id))
+            })
+            .map(|n| n.bounds.origin.y.0)
+            .fold(f32::INFINITY, f32::min);
+        assert!(
+            panel[1] + panel[3] <= bar_top + 0.5,
+            "chooser {panel:?} above the bar's top {bar_top}: {what}"
+        );
+        step(app.back());
+        // The chooser stays mounted, clear, while closed.
+        app.settle();
+        assert_eq!(iptv_app::player_opens(0), opens, "no open: {what}");
     }
     present(&mut app, LANDSCAPE, 1.0);
     show_bar(&mut app);
@@ -585,7 +678,7 @@ fn reauthorize(app: &mut Headless, surface: NodeId, seen: &Arc<Mutex<Seen>>) {
 }
 
 #[test]
-fn ipad_another_app_beside_changes_nothing_and_leaving_follows_the_background_policy() {
+fn ipad_another_app_beside_changes_nothing_and_a_reauthorized_return_reopens_once() {
     let Some(home) = isolated!() else { return };
     let mut settings = Settings::new();
     settings
@@ -640,8 +733,11 @@ fn ipad_another_app_beside_changes_nothing_and_leaving_follows_the_background_po
     }
 
     // Leaving the screen: the native player stops its stream in the
-    // background (`mpv/ios.rs`) and asks again on return; the app admits
-    // it once, on the same player.
+    // background and asks again on return (`mpv/ios.rs`; not run headless,
+    // where no native player runs: the simulator run checks it by the mock
+    // server's requests). Here, the app's side: given the player's
+    // `reauthorize` after the return, it admits the stream once, on the
+    // same player.
     step(app.set_environment("background", |e| e.lifecycle = Lifecycle::Background));
     app.settle();
     step(app.set_environment("foreground", |e| e.lifecycle = Lifecycle::Active));

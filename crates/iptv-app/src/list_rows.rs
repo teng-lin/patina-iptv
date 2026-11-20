@@ -87,7 +87,7 @@ pub fn pitch(size: Scale, pitch: f32) -> impl Fn() -> Points + Copy {
 }
 
 fn text_pitch(pitch: f32) -> f32 {
-    pitch * (crate::settings::font_factor() * font_scale()).max(1.0)
+    pitch * crate::settings::text_factor().max(1.0)
 }
 
 /// A row `pitch` apart from the next (its fill [`GAP`] in from both), its

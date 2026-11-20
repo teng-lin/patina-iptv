@@ -193,8 +193,10 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
         })
     };
     view()
+        .test_id("guide-header-details")
         .flex_1()
-        // A compact header gives it less room than its lines want: clip them.
+        // A compact header gives it less room than its lines want: clip them
+        // (the header grows for the title and times: `GuideHeader`).
         .overflow_hidden()
         .gap(move || size.px(6.0))
         .child(
@@ -543,8 +545,10 @@ fn corner_back(ui: Ui) -> impl IntoElement {
     view()
         .test_id("guide-corner-back")
         .absolute()
-        // The player's ‹ is 20 and 16 points in from the safe area.
-        .left(px(20.0))
+        // The player's ‹ is 20 and 16 points in from the safe area: the
+        // header is below the top inset, and the leading one (an iPad
+        // window's controls) moves the ‹ along the preview clear of them.
+        .left(move || px(20.0 + safe_area().left.0))
         .top(px(16.0))
         .child(crate::ui_kit::round_back(
             crate::ui_kit::TOUCH,
