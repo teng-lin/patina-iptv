@@ -34,44 +34,53 @@ pub fn round_back(
          fill='none' stroke='currentColor' stroke-width='2.2' stroke-linecap='round' \
          stroke-linejoin='round'><path d='M15 4.5L7.5 12l7.5 7.5'/></svg>",
     );
-    round_icon(side, slop, bg, chevron, label, on_press)
+    round_icon(
+        move || side,
+        move || slop,
+        bg,
+        chevron,
+        move || label().to_owned(),
+        on_press,
+    )
 }
 
 /// A round ⋯ for pointer and touch: the menu that a remote's Menu key, a
 /// long press or a right-click opens for what it sits beside, so no
-/// action needs a shortcut. Otherwise as [`round_back`].
+/// action needs a shortcut. `side` across (it may follow the text it sits
+/// in), its press reaching at least [`TOUCH`]; otherwise as [`round_back`].
 pub fn round_more(
-    side: f32,
-    slop: f32,
+    side: impl Fn() -> f32 + Copy + 'static,
     bg: impl Fn() -> Rgba + 'static,
+    label: impl Fn() -> String + 'static,
     on_press: impl Fn() + 'static,
 ) -> View {
     let dots = crate::play_bar::icons::src(crate::play_bar::icons::Icon::More);
-    round_icon(side, slop, bg, dots, || tr("More options"), on_press)
+    let slop = move || ((TOUCH - side()) / 2.0).max(0.0);
+    round_icon(side, slop, bg, dots, label, on_press)
 }
 
 fn round_icon(
-    side: f32,
-    slop: f32,
+    side: impl Fn() -> f32 + Copy + 'static,
+    slop: impl Fn() -> f32 + 'static,
     bg: impl Fn() -> Rgba + 'static,
     icon: ImageSrc,
-    label: impl Fn() -> &'static str + 'static,
+    label: impl Fn() -> String + 'static,
     on_press: impl Fn() + 'static,
 ) -> View {
     view()
         .role(AccessibilityRole::Button)
-        .size(px(side))
+        .size(move || px(side()))
         .flex_shrink_0()
         .items_center()
         .justify_center()
-        .rounded(px(side / 2.0))
+        .rounded(move || px(side() / 2.0))
         .bg(bg)
-        .hit_slop(EdgeInsets::all(px(slop)))
-        .label(move || label().to_owned())
+        .hit_slop(move || EdgeInsets::all(px(slop())))
+        .label(label)
         .on_press(on_press)
         .child(
             svg(icon)
-                .size(px((side * 0.55).round()))
+                .size(move || px((side() * 0.55).round()))
                 .text_color(rgb(WHITE)),
         )
 }

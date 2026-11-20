@@ -220,8 +220,14 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                         .text_color(move || rgb(ui.app.theme.with(|t| t.accent.light))),
                 )
                 .child(when(
-                    move || !ui.keys_shown() && program.with(Option::is_some),
-                    move || more(ui),
+                    // Not during the guide's inline reorder: the header
+                    // waits under it, and the order is unfinished.
+                    move || {
+                        !ui.keys_shown()
+                            && program.with(Option::is_some)
+                            && !crate::organization_view::guide_order_open(ui)
+                    },
+                    move || more(ui, size),
                 )),
         )
         .child(
@@ -291,15 +297,15 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
 
 /// The ⋯ at the end of the focused programme's title, for touch and a
 /// pointer: the menu the remote's Menu key opens for it (favourites,
-/// recording, details, replay). Its box fits the title's line, its press
-/// reaches the least touch size around it. Keys hide it: they have Menu.
-const MORE: f32 = 28.0;
-
-fn more(ui: Ui) -> View {
+/// recording, details, replay). Its box is the title's text size (under
+/// the title's line height at every scale and text size, so showing it
+/// moves no text), its press reaches the least touch size around it.
+/// Keys hide it: they have Menu.
+fn more(ui: Ui, size: Scale) -> View {
     crate::ui_kit::round_more(
-        MORE,
-        (crate::ui_kit::TOUCH - MORE) / 2.0,
+        move || size.text_px(HEADER_TITLE).0.round(),
         move || tint(WHITE, RESTING_ALPHA),
+        || tr("More options").to_owned(),
         move || {
             ui.touched();
             crate::menu_view::open(ui);

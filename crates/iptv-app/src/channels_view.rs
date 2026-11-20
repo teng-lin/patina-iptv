@@ -450,8 +450,15 @@ fn channel_row(
             .text_color(move || mark().secondary()),
         )
         .child(when(
-            move || !ui.keys_shown() && entry().is_some(),
+            move || more_shown(ui) && entry().is_some(),
             move || {
+                let name = move || {
+                    ui.app.data_version.get();
+                    ui.list
+                        .with(|l| l.channel(at.index()))
+                        .map(crate::channel_name)
+                        .unwrap_or_default()
+                };
                 view()
                     .absolute()
                     .top(px(0.0))
@@ -460,9 +467,15 @@ fn channel_row(
                     .justify_center()
                     .child(
                         crate::ui_kit::round_more(
-                            MORE,
-                            (crate::ui_kit::TOUCH - MORE) / 2.0,
+                            || MORE,
                             crate::play_bar::back_bg(ui),
+                            move || {
+                                let channel = name();
+                                crate::i18n::trf(
+                                    "More options for {channel}",
+                                    &[("channel", channel.as_str().into())],
+                                )
+                            },
                             move || {
                                 ui.touched();
                                 open_channel_menu(ui, at.index());
@@ -478,9 +491,16 @@ fn channel_row(
 /// right-click or the remote's Menu key opens for its channel.
 const MORE: f32 = 32.0;
 
-/// The room the row's text leaves at its end for the ⋯ (none for keys).
+/// Whether rows show their ⋯: while the list is open, for touch and a
+/// pointer (keys have Menu), and not while multiview picks a channel,
+/// where rows have no menu.
+fn more_shown(ui: Ui) -> bool {
+    is_open(ui) && !ui.keys_shown() && !crate::multiview::picking(ui)
+}
+
+/// The room the row's text leaves at its end for the ⋯.
 fn more_room(ui: Ui) -> f32 {
-    if ui.keys_shown() { 0.0 } else { MORE + 8.0 }
+    if more_shown(ui) { MORE + 8.0 } else { 0.0 }
 }
 
 /// Under the preview: the focused channel and its programme now.
