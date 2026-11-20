@@ -87,11 +87,9 @@ In the guide:
 
 ### Touch gestures in the guide
 
-- **Now:** a drag decides its direction once it has moved 7 points along
-  either axis (`iptv_core::timeline::AXIS`), before a native list's own
-  scroll slop: mostly vertical scrolls the channels, mostly horizontal
-  pans the timeline (a diagonal goes the way of its larger part, 1.5:1
-  included, and stays that way), and a
+- **Now:** a drag decides its direction once it has moved 10 points: mostly
+  vertical scrolls the channels, mostly horizontal pans the timeline (a
+  diagonal goes the way of its larger part, and stays that way), and a
   drag released while moving flings on and slows down. A gesture the
   system cancels (a notification shade, a call) stops where it is,
   without a fling. A drag that started on a channel or a programme, past
@@ -100,15 +98,19 @@ In the guide:
 - **Now:** crossing the drag threshold, in the guide or the channel list,
   cancels a preview `guide.autoplay` was waiting to start; it does not
   come back until the focus moves to another channel. The threshold is
-  read from the finger's own touches, so a drag at the list's end that
-  scrolls nothing counts too (`iptv_core::timeline::Threshold`). A tap's
+  read from the first finger's own touches, so a drag at the list's end
+  that scrolls nothing counts too, and so does a scroll view taking over a
+  finger that moved; a still finger's cancel does not
+  (`iptv_core::timeline::Threshold`). A tap's
   own choice still plays after its switch delay. Scrolling never tunes,
   records or opens a menu or details (`BrowsePlayback::dragged`;
   `tests/app/tablet_gestures.rs`).
 - **Now:** a timeline pan that starts on a channel's programme on air
   keeps that channel for browse playback while it moves the focus along
-  the row (`Ui::pan_anchor`): a choice waiting for its switch delay still
-  plays, and panning back to now starts no preview again.
+  the row (`iptv_core::browse_playback::PanAnchor`, by the channel's
+  identity): a choice waiting for its switch delay still plays, and
+  panning back to now starts no preview again. Any other move of the
+  focus (keys, a tap, another list, a zap) ends that hold.
 - **Now:** a day of listings that a pan pages in keeps the channels where
   the finger scrolled them.
 

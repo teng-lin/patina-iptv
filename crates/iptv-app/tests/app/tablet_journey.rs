@@ -607,9 +607,11 @@ fn calls_and_unplugged_headphones_pause_by_policy_and_never_restart_a_stop() {
     assert_eq!(playing.len(), 1);
     assert!(!paused(&seen));
 
-    // A call: paused, and resumed when it ends.
+    // A call: paused, and resumed when it ends. Keys that are no playback
+    // action meanwhile (Info, moving a highlight) leave it the call's.
     audio(app, surface, "focusLossTransient");
     assert!(paused(&seen), "a call pauses");
+    step(app.press_remote(nsh_tv::RemoteKey::Info));
     audio(app, surface, "focusGain");
     assert!(!paused(&seen), "its end resumes");
 
@@ -688,6 +690,7 @@ fn interruptions_pause_and_resume_the_heard_multiview_tile() {
     let surface = player(app);
     step(app.press("id:guide-ui >> text:/Local A$/"));
     full_screen(app, LANDSCAPE.0);
+    let seen = observe(app);
     step(app.press("label:Multiview"));
     step(app.wait_for(TILE));
     step(app.press("id:multiview-picker >> text:/Local B$/"));
@@ -718,9 +721,28 @@ fn interruptions_pause_and_resume_the_heard_multiview_tile() {
     step(app.wait_for_gone(TILE_MENU, WAIT));
     assert_eq!(paused_tiles(app), 0);
 
-    // A call pauses the heard tile; its end resumes it.
+    // A call pauses the heard tile; its end resumes it, also after the
+    // highlight moved in the tile's menu meanwhile.
     audio(app, surface, "focusLossTransient");
     assert_eq!(paused_tiles(app), 1, "a call pauses the heard tile");
+    step(app.press(&format!("{TILE} >> text:/Local A$/")));
+    step(app.wait_for(TILE_MENU));
+    step(app.press_key("down"));
+    step(app.press_key("up"));
+    step(app.back());
+    step(app.wait_for_gone(TILE_MENU, WAIT));
     audio(app, surface, "focusGain");
     assert_eq!(paused_tiles(app), 0, "its end resumes it");
+
+    // A call pauses it again, then multiview ends: the stream surface 0
+    // keeps stays paused full screen, and the pause is still the call's
+    // (its end resumes it there).
+    audio(app, surface, "focusLossTransient");
+    assert_eq!(paused_tiles(app), 1);
+    // Back with no dialog open leaves to the active tile, full screen.
+    step(app.back());
+    step(app.wait_for_gone(TILE, WAIT));
+    assert!(paused(&seen), "the kept stream stays paused");
+    audio(app, surface, "focusGain");
+    assert!(!paused(&seen), "the call's end resumes it full screen");
 }

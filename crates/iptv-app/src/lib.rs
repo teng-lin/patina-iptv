@@ -232,10 +232,10 @@ pub struct Ui {
     /// running: the channel key focused then (`browse_playback::hold`).
     pub autoplay_held: Signal<Option<Option<String>>>,
     pub pending_zap: Signal<Option<iptv_core::browse_playback::Target>>,
-    /// The guide row and programme start a timeline pan left the focus on,
-    /// when the pan started from that row's live programme: browse
-    /// playback keeps the channel (`grid/pan.rs`).
-    pub pan_anchor: Signal<Option<(usize, i32)>>,
+    /// A timeline pan's hold on the channel whose programme on air it
+    /// started from: browse playback keeps that channel while the pan
+    /// moves the focus along the row (`grid/pan.rs`, `browse_playback.rs`).
+    pub pan_anchor: Signal<Option<iptv_core::browse_playback::PanAnchor>>,
     /// The host's audio interruptions' policy (`interruption.rs`).
     pub interruptions: Signal<iptv_core::interruption::Interruptions>,
     /// The list the guide shows: catalog channels (`lists.rs`).

@@ -21,15 +21,6 @@ use crate::guide::{STEP, VISIBLE, home_window};
 
 /// How far (dp) a finger moves before its drag picks an axis.
 pub const SLOP: f32 = 10.0;
-/// How far (dp) along either axis the platform's pan recognizer lets a
-/// finger move before the timeline takes it (horizontally) or gives it up
-/// (vertically): the same offset on both axes, so the larger component of
-/// a straight diagonal crosses it first, as [`Lock::decide`] rules. Below
-/// the platforms' own scroll slop (about 8 dp on Android, 10 points for
-/// an iOS scroll view, measured along the finger's path): a 1.5:1 diagonal
-/// reaches 7 dp sideways after 8.4 dp of path, before a vertical list
-/// would start scrolling with it.
-pub const AXIS: f32 = 7.0;
 /// A fling's speed falls by `e^(-FRICTION · seconds)`, so from `v` it
 /// travels `v / FRICTION`: with 2.0 about half a second's worth, as an iOS
 /// list's normal deceleration (0.998 per ms, `-ln 0.998 · 1000` ≈ 2.0)
@@ -264,43 +255,70 @@ impl Timeline {
 /// Whether a finger has crossed the drag threshold ([`SLOP`]) in any
 /// direction, seen from its touches alone: at a list's end a drag scrolls
 /// nothing, and a platform's scroll view may then report no drag of its
-/// own, yet the finger dragged (so a waiting preview stops).
+/// own, yet the finger dragged (so a waiting preview stops). It follows
+/// the first finger down only; others are ignored until it lifts.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Threshold {
-    from: Option<(f32, f32)>,
+    /// The finger followed and where it went down.
+    from: Option<(u32, f32, f32)>,
+    /// How far it has been from there (dp).
+    furthest: f32,
     crossed: bool,
 }
 
+/// A cancel after the finger moved this far (dp) counts as a drag: a
+/// scroll view around took the finger over (Android intercepts past its
+/// own slop, at a list's end too). A cancel of a still finger (a dialog,
+/// the system) is no drag.
+pub const CANCEL_MOVE: f32 = SLOP / 2.0;
+
 impl Threshold {
-    /// A finger went down at `(x, y)` dp.
-    pub fn down(&mut self, x: f32, y: f32) {
-        *self = Threshold {
-            from: Some((x, y)),
-            crossed: false,
-        };
+    /// Finger `id` went down at `(x, y)` dp.
+    pub fn down(&mut self, id: u32, x: f32, y: f32) {
+        if self.from.is_none() {
+            *self = Threshold {
+                from: Some((id, x, y)),
+                furthest: 0.0,
+                crossed: false,
+            };
+        }
     }
 
-    /// The finger is at `(x, y)`: true the first time it is [`SLOP`] or
-    /// more from where it went down.
-    pub fn moved(&mut self, x: f32, y: f32) -> bool {
-        let Some((fx, fy)) = self.from else {
+    /// Finger `id` is at `(x, y)`: true the first time the followed
+    /// finger is [`SLOP`] or more from where it went down.
+    pub fn moved(&mut self, id: u32, x: f32, y: f32) -> bool {
+        let Some((fid, fx, fy)) = self.from else {
             return false;
         };
-        if self.crossed || (x - fx).hypot(y - fy) < SLOP {
+        if fid != id {
+            return false;
+        }
+        let distance = (x - fx).hypot(y - fy);
+        self.furthest = self.furthest.max(distance);
+        if self.crossed || distance < SLOP {
             return false;
         }
         self.crossed = true;
         true
     }
 
-    /// Whether a finger is down.
-    pub fn is_down(&self) -> bool {
-        self.from.is_some()
+    /// Finger `id` lifted.
+    pub fn up(&mut self, id: u32) {
+        if self.from.is_some_and(|(fid, ..)| fid == id) {
+            *self = Threshold::default();
+        }
     }
 
-    /// The finger lifted or its touches were cancelled.
-    pub fn up(&mut self) {
+    /// Finger `id`'s touches were cancelled: true when that is a drag
+    /// (the followed finger had moved [`CANCEL_MOVE`] and had not yet
+    /// been reported crossing).
+    pub fn cancelled(&mut self, id: u32) -> bool {
+        if !self.from.is_some_and(|(fid, ..)| fid == id) {
+            return false;
+        }
+        let drag = !self.crossed && self.furthest >= CANCEL_MOVE;
         *self = Threshold::default();
+        drag
     }
 }
 

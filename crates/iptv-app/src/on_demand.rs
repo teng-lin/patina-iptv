@@ -12,7 +12,6 @@ pub fn seekable(ui: Ui) -> bool {
 }
 
 pub fn seek_to(ui: Ui, ms: u64) -> bool {
-    crate::interruption::viewer_acted(ui);
     if !active(ui) || !ui.player.main().accepts_native(None) {
         return false;
     }
@@ -20,6 +19,7 @@ pub fn seek_to(ui: Ui, ms: u64) -> bool {
     let mut command = None;
     stream.timeline.update(|t| command = t.seek_to(ms));
     if let Some(command) = command {
+        crate::interruption::viewer_acted(ui);
         if stream.finished.get_untracked() {
             stream.finished.set(false);
             ui.player.vod.update(|playing| {
@@ -40,7 +40,6 @@ pub fn seek_to(ui: Ui, ms: u64) -> bool {
     }
 }
 pub fn step(ui: Ui, seconds: i32) -> bool {
-    crate::interruption::viewer_acted(ui);
     let position = ui.player.main().timeline.get_untracked().position_ms;
     seek_to(
         ui,

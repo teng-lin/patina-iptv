@@ -96,7 +96,6 @@ pub fn elapsed(ui: Ui) -> Option<(i32, i32)> {
 /// Moves the seek target by `delta` seconds; the archive reopens there
 /// once the keys pause. False when nothing plays from the archive.
 pub fn step(ui: Ui, delta: i32) -> bool {
-    crate::interruption::viewer_acted(ui);
     if crate::on_demand::active(ui) {
         let moved = crate::on_demand::step(ui, delta);
         if moved {
@@ -112,6 +111,7 @@ pub fn step(ui: Ui, delta: i32) -> bool {
             i32::try_from(ui.player.main().position_ms.get_untracked() / 1000).unwrap_or(i32::MAX);
         offset.saturating_add(played)
     });
+    crate::interruption::viewer_acted(ui);
     ui.seek_target.set(Some((from + delta).clamp(0, limit)));
     show_info(ui);
     commit_later(ui, COMMIT_AFTER);
@@ -163,11 +163,11 @@ pub fn span(ui: Ui) -> Option<(i32, i32)> {
 /// [`span`]'s limit): shown at once, opened once `commit` says so or the
 /// pointer pauses.
 pub fn to(ui: Ui, target: i32, commit_now: bool) {
-    crate::interruption::viewer_acted(ui);
     if crate::on_demand::active(ui) {
         crate::on_demand::seek_to(ui, target.max(0) as u64 * 1000);
         return;
     }
+    crate::interruption::viewer_acted(ui);
     ui.seek_target.set(Some(target.max(0)));
     commit_later(
         ui,

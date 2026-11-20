@@ -408,7 +408,6 @@ fn activate(
     if !enabled(ui, control) {
         return;
     }
-    crate::interruption::viewer_acted(ui);
     log::info!("iptv play bar: {}", control_label(control));
     use crate::chooser::{self, Kind};
     match control {

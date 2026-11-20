@@ -104,7 +104,6 @@ fn ok_pauses(ui: Ui) -> bool {
 /// The player's own actions (full screen and its panels); false for any
 /// other. `repeat`: the key's auto-repeat.
 pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> bool {
-    crate::interruption::viewer_acted(ui);
     let fullscreen = ui.mode.get() == ViewMode::Fullscreen;
     let buttons = fullscreen && ui.panels.with(|p| p.captures_input());
     let seek = |step: i32| {

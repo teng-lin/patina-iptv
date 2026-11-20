@@ -52,9 +52,8 @@ is below 1.0, a minor release may change behaviour.
   ended stream. In multiview the heard screen is the one paused and
   resumed. Anything you do to playback during a call (play, pause, seek,
   change channel) keeps the call's end from resuming over it.
-- Guide on tablets: a steeper diagonal drag (up to 1.5:1) pans the
-  timeline instead of scrolling the channels; a drag at the top of the
-  list, or one a scroll takes over, cancels a waiting preview too; and a
+- Guide on tablets: a drag at the top of the list, or one a scroll takes
+  over, cancels a waiting preview too; and a
   pan from the programme on air no longer cancels a channel you just
   tapped or restarts a cancelled preview when you pan back.
 

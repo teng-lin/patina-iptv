@@ -12,16 +12,40 @@ fn at_now() -> Timeline {
 #[test]
 fn the_threshold_is_crossed_once_in_any_direction() {
     let mut t = Threshold::default();
-    assert!(!t.moved(40.0, 0.0), "no finger down");
-    t.down(100.0, 100.0);
-    assert!(!t.moved(104.0, 103.0), "a tap's wobble");
+    assert!(!t.moved(1, 40.0, 0.0), "no finger down");
+    t.down(1, 100.0, 100.0);
+    assert!(!t.moved(1, 104.0, 103.0), "a tap's wobble");
     // Down at a list's top: the list cannot scroll, the finger dragged.
-    assert!(t.moved(101.0, 112.0));
-    assert!(!t.moved(101.0, 160.0), "reported once");
-    t.up();
-    assert!(!t.moved(200.0, 200.0));
-    t.down(0.0, 0.0);
-    assert!(t.moved(-8.0, -8.0), "diagonal");
+    assert!(t.moved(1, 101.0, 112.0));
+    assert!(!t.moved(1, 101.0, 160.0), "reported once");
+    t.up(1);
+    assert!(!t.moved(1, 200.0, 200.0));
+    t.down(1, 0.0, 0.0);
+    assert!(t.moved(1, -8.0, -8.0), "diagonal");
+}
+
+#[test]
+fn the_threshold_follows_one_finger_and_a_still_cancel_is_no_drag() {
+    let mut t = Threshold::default();
+    t.down(1, 100.0, 100.0);
+    // A second finger far away neither moves the start nor crosses.
+    t.down(2, 400.0, 400.0);
+    assert!(!t.moved(2, 400.0, 460.0));
+    assert!(!t.moved(1, 103.0, 100.0));
+    // Its lift leaves the first finger followed.
+    t.up(2);
+    assert!(t.moved(1, 112.0, 100.0));
+    t.up(1);
+    // Cancelled still: no drag; cancelled after moving: a drag.
+    t.down(1, 0.0, 0.0);
+    assert!(!t.cancelled(1));
+    t.down(1, 0.0, 0.0);
+    assert!(!t.moved(1, 0.0, 6.0));
+    assert!(t.cancelled(1), "a scroll view took it after 6 dp");
+    // Already reported crossing: the cancel is not a second drag.
+    t.down(1, 0.0, 0.0);
+    assert!(t.moved(1, 0.0, 12.0));
+    assert!(!t.cancelled(1));
 }
 
 #[test]

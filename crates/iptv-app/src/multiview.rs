@@ -209,7 +209,6 @@ fn end(ui: Ui) {
 
 /// The remote while the grid owns it (`input.rs`).
 pub fn key(ui: Ui, action: Action) {
-    crate::interruption::viewer_acted(ui);
     let key = match action {
         Action::MoveUp => Key::Up,
         Action::MoveDown => Key::Down,
@@ -384,6 +383,15 @@ fn apply(ui: Ui, f: impl FnOnce(&mut State, &dyn Fn(usize) -> bool) -> Outcome<u
 /// surface 0, the other surfaces stop.
 fn leave(ui: Ui, channel: usize, surface: usize) {
     log::info!("iptv multiview: leaving to surface {surface}");
+    // The stream surface 0 keeps takes its tile's pause (a call's or
+    // unplugged headphones' included: the interruption policy still owns
+    // it, as the same stream's pause).
+    let kept = surface == 0 && ui.playing.get_untracked() == Some(channel);
+    // Set before the session ends, so the pause never lapses between.
+    let paused = kept && paused(ui, 0);
+    if kept && paused != ui.paused.get_untracked() {
+        ui.paused.set(paused);
+    }
     end(ui);
     if surface != 0 || ui.playing.get_untracked() != Some(channel) {
         crate::lists::show_channel(ui, channel);

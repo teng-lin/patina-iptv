@@ -313,6 +313,7 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
         top,
         "a horizontal drag scrolls no channels"
     );
+
     // Back at now on the same channel: the cancelled preview stays
     // cancelled (the pan never left the channel).
     step(app.press("text:Now"));
@@ -366,7 +367,10 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     );
     step(app.press("text:Now"));
     step(app.wait_for_gone("text:Now", Duration::from_secs(3)));
-    // A steeper one, 1.5:1, still pans (the iPad's list once took it).
+    // A steeper one, 1.5:1, still pans. (The harness models no native
+    // scroll view's own slop, so this passes whatever the pan's activation
+    // offset: the iPad simulator's list taking such diagonals is not
+    // reproduced here.)
     step(app.drag(
         &format!("text:{}", name(rows[3])),
         Point::new(px(-300.0), px(200.0)),
@@ -449,19 +453,35 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     step(app.press("text:Now"));
     step(app.wait_for_gone("text:Now", Duration::from_secs(3)));
 
-    // Under the threshold a drag is still a tap: it chooses the live
-    // programme. A pan right after it, before the switch delay, keeps that
-    // choice: it plays full screen.
-    step(app.drag(&format!("text:{}", name(2)), Point::new(px(4.0), px(3.0))));
+    // Keys move the focus off where a pan left it and back: the pan's
+    // hold on the channel ended, so coming back to that later programme
+    // starts nothing (only a focus on a programme on air would).
+    step(app.press_key("down"));
     step(app.drag(
-        "id:guide-timeline >> text:C2 P0",
+        &format!("text:{}", name(2)),
+        Point::new(px(-420.0), px(8.0)),
+    ));
+    step(app.wait(SETTLE));
+    step(app.press_key("right"));
+    step(app.press_key("left"));
+    step(app.wait(SETTLE));
+    nothing_activated(&app, &tuned, &db, "keys after a pan");
+    step(app.press("text:Now"));
+    step(app.wait_for_gone("text:Now", Duration::from_secs(3)));
+
+    // Under the threshold a drag is still a tap, an 8 dp sideways wobble
+    // included: it chooses the live programme. A pan right after it,
+    // before the switch delay, keeps that choice: it plays full screen.
+    step(app.drag(&format!("text:{}", name(5)), Point::new(px(8.0), px(1.0))));
+    step(app.drag(
+        "id:guide-timeline >> text:C5 P0",
         Point::new(px(-420.0), px(4.0)),
     ));
     let chosen = tuned.clone();
     step(
         app.wait_until("the tap tuned", Duration::from_secs(5), move |_| {
             chosen.lock().unwrap().last().map(String::as_str)
-                == Some("http://stream.example.test/2.m3u8")
+                == Some("http://stream.example.test/5.m3u8")
         }),
     );
     step(app.wait_until("full screen", Duration::from_secs(3), |s| {
@@ -475,18 +495,20 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
         step(app.press("label:Video"));
     }
     step(app.press("id:play-bar-channels"));
-    step(app.wait_for("id:channel-list >> text:/Tab Channel 05$/"));
+    step(app.wait_for("id:channel-list >> text:/Tab Channel 07$/"));
     step(app.press_key("down"));
     step(app.drag(
-        "id:channel-list >> text:/Tab Channel 05$/",
+        "id:channel-list >> text:/Tab Channel 07$/",
         Point::new(px(4.0), px(-300.0)),
     ));
     step(app.wait(SETTLE));
+    // One lock for the value and its message (two would deadlock on a
+    // failure).
+    let after = tuned.lock().unwrap().clone();
     assert_eq!(
-        tuned.lock().unwrap().len(),
+        after.len(),
         tunes,
-        "a drag on the channel list tunes nothing: {:?}",
-        tuned.lock().unwrap()
+        "a drag on the channel list tunes nothing: {after:?}"
     );
     let jobs = crate::isolated::open_database(&db)
         .unwrap()

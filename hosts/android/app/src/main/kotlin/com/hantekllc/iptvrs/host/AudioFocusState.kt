@@ -112,7 +112,12 @@ internal class AudioFocusState {
     }
 
     private fun settle(): Do {
-        if (waiting && open.isEmpty()) waiting = false
+        // Every stream stopped, closed, failed or in the background: no
+        // call's pause or decision is waiting for the focus any more.
+        if (open.isEmpty()) {
+            waiting = false
+            deciding = false
+        }
         val wanted = aloud.any { it !in blocked }
         return when {
             wanted && !held -> Do.REQUEST

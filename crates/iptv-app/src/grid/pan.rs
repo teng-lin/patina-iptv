@@ -4,7 +4,7 @@
 //! and rebuilds them only when its [`Band`] moves (`iptv_core::timeline`).
 //!
 //! A horizontal drag over the grid pans (NSH's pan activation decides the
-//! axis on the platform's thread: past [`AXIS`] horizontally it is ours,
+//! axis on the platform's thread: past [`SLOP`] horizontally it is ours,
 //! past it vertically first the channel list scrolls); released moving, it
 //! flings on, one step per display frame. Taps stay taps. The view follows
 //! the focus model's window while nothing pans (keys, ‹ ›, Now), and a pan
@@ -19,7 +19,7 @@
 use std::time::Instant;
 
 use iptv_core::guide::view_range;
-use iptv_core::timeline::{AXIS, Band, MARGIN, Timeline};
+use iptv_core::timeline::{Band, MARGIN, SLOP, Timeline};
 use nsh_core::prelude::*;
 
 use crate::Ui;
@@ -171,14 +171,10 @@ impl Pan {
         // the new focus without it.
         let mut next = self.ui.focus.get_untracked();
         next.pan_to(window, &view);
-        let (row, start) = (next.channel, next.program(&view).start);
-        if self
-            .ui
-            .pan_anchor
-            .get_untracked()
-            .is_some_and(|(r, _)| r == row)
-        {
-            self.ui.pan_anchor.set(Some((row, start)));
+        if self.ui.pan_anchor.with_untracked(Option::is_some) {
+            self.ui
+                .pan_anchor
+                .update(|a| a.iter_mut().for_each(|a| a.panned(&next)));
         }
         self.ui.focus.update(|f| f.pan_to(window, &view));
         self.show();
@@ -189,15 +185,24 @@ impl Pan {
     /// (`browse_playback::current`); a pan from where an earlier one left
     /// the focus keeps that anchor; any other focus has none.
     fn anchor(&self) {
-        let (row, start, live) = focused(self.ui);
-        let anchor = self.ui.pan_anchor.get_untracked();
-        let next = if live || anchor == Some((row, start)) {
-            Some((row, start))
-        } else {
-            None
+        let ui = self.ui;
+        let focus = ui.focus.get_untracked();
+        let Some(channel) = untracked(|| crate::lists::focused_channel(ui))
+            .and_then(|ch| crate::schedule().channel_key(ch))
+        else {
+            return ui.pan_anchor.set(None);
         };
-        if next != anchor {
-            self.ui.pan_anchor.set(next);
+        let held = ui
+            .pan_anchor
+            .with_untracked(|a| a.as_ref().is_some_and(|a| a.holds(&channel, &focus)));
+        if held {
+            return;
+        }
+        let next = focused(ui)
+            .2
+            .then(|| iptv_core::browse_playback::PanAnchor::new(channel, &focus));
+        if next.is_some() || ui.pan_anchor.with_untracked(Option::is_some) {
+            ui.pan_anchor.set(next);
         }
     }
 
@@ -313,7 +318,7 @@ fn focused(ui: Ui) -> (usize, i32, bool) {
 
 /// The pan's touch handling on `area` (the grid around the channel list).
 pub(crate) fn panning<E: Interactive>(area: E, pan: Pan) -> E {
-    let claim = TouchClaim::on_pan(PanActivation::horizontal(px(AXIS), px(AXIS)));
+    let claim = TouchClaim::on_pan(PanActivation::horizontal(px(SLOP), px(SLOP)));
     crate::browse_playback::watch_drags(area, pan.ui)
         .claim_touches(claim)
         .on_responder_grant(move |_: &ResponderEvent| pan.grabbed())

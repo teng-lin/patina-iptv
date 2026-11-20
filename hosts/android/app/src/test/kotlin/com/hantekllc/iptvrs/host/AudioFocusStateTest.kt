@@ -69,6 +69,18 @@ class AudioFocusStateTest {
         }
     }
 
+    @Test fun stoppingWhileTheAppDecidesGivesTheFocusUp() {
+        val s = playing()
+        s.lostForAWhile()
+        s.player(main, aloud = false, open = true)
+        assertTrue(s.gained())
+        assertTrue(s.deciding)
+        // Stop, the background or a failure within the decision's time.
+        assertEquals(Do.ABANDON, s.player(main, aloud = false, open = false))
+        assertFalse(s.deciding)
+        assertFalse(s.held)
+    }
+
     @Test fun anEndedOrFailedStreamHoldsNoFocus() {
         val s = playing()
         // Ended: the player still has its source and is set to play.
