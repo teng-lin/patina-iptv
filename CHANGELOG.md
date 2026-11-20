@@ -7,6 +7,17 @@ is below 1.0, a minor release may change behaviour.
 
 ## [Unreleased]
 
+### Changed
+
+- Choosing a channel in the guide now watches it full screen in both guide
+  layouts. One setting, **Keep the guide after choosing**, now applies to both
+  layouts. It replaces the separate setting for the guide drawn over video,
+  which used to be on by default. If you set either one, upgrading keeps the
+  value you chose for the layout you use. If you never changed the old
+  overlay setting, choosing a channel now closes the guide. Turn **Keep the
+  guide after choosing** on to keep the old behaviour. Settings files move to
+  version 3.
+
 ## [0.1.5] - 2026-11-17
 
 ### Distribution

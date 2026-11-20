@@ -169,11 +169,6 @@ pub static APPEARANCE: &[Setting] = &[
     ),
 ];
 
-const IF_OVERLAY: &[Dependency] = &[visible_if(&[when(
-    "guide.browse_mode",
-    Test::EnumIn(&["overlay"]),
-)])];
-
 pub static GUIDE: &[Setting] = &[
     guide(
         "content",
@@ -323,16 +318,8 @@ pub static GUIDE: &[Setting] = &[
         "switching",
         "guide.stay_on_guide",
         boolean(false),
-        key("Keep the guide open after choosing a channel (preview layout)."),
+        key("Keep the guide open after choosing a channel."),
     ),
-    // default: ours
-    guide(
-        "switching",
-        "guide.stay_on_guide_overlay",
-        boolean(true),
-        key("Keep the guide open after choosing a channel when it is drawn over video."),
-    )
-    .depends(IF_OVERLAY),
     // default: ours
     guide(
         "switching",

@@ -238,7 +238,7 @@ fn version_1_documents_are_migrated() {
     });
     let (st, report) = load(v1);
     assert_eq!(report.version, 1);
-    assert_eq!(report.migrations, [1]);
+    assert_eq!(report.migrations, [1, 2]);
     assert!(report.unknown.is_empty());
     assert_eq!(st.duration_ms(keys::CONTROLS_PANEL_TIMEOUT, G), 9_000);
     assert!(st.bool(keys::AUTOPLAY, G));
@@ -251,6 +251,37 @@ fn version_1_documents_are_migrated() {
     let (again, report) = load(saved);
     assert!(report.is_clean());
     assert_eq!(again, st);
+}
+
+#[test]
+fn version_2_folds_the_overlay_stay_choice_into_one() {
+    let v2 = |global: serde_json::Value| json!({"format": FORMAT, "version": 2, "global": global});
+    let stay = |global| load(v2(global)).0.bool(keys::GUIDE_STAY_ON_GUIDE, G);
+
+    // The overlay layout's old default (on) was never written: off now.
+    assert!(!stay(json!({"guide.browse_mode": "overlay"})));
+    // The choice for the layout in use wins.
+    assert!(stay(json!({
+        "guide.browse_mode": "overlay",
+        "guide.stay_on_guide": false,
+        "guide.stay_on_guide_overlay": true
+    })));
+    assert!(!stay(json!({
+        "guide.stay_on_guide": false,
+        "guide.stay_on_guide_overlay": true
+    })));
+    // Otherwise an explicit choice for the other layout carries over.
+    assert!(stay(json!({"guide.stay_on_guide_overlay": true})));
+    assert!(stay(
+        json!({"guide.browse_mode": "overlay", "guide.stay_on_guide": true})
+    ));
+
+    let (st, report) = load(v2(json!({"guide.stay_on_guide_overlay": false})));
+    assert_eq!(report.migrations, [2]);
+    assert!(report.unknown.is_empty(), "the old key is gone, not kept");
+    let saved = st.to_json();
+    assert!(saved["global"].get("guide.stay_on_guide_overlay").is_none());
+    assert!(load(saved).1.is_clean());
 }
 
 #[test]
@@ -445,7 +476,7 @@ fn migrations_reach_every_layer() {
         "groups": {"pl-1": {"grp-1": {"player.panel_timeout_secs": 6}}}
     });
     let (st, report) = load(v1);
-    assert_eq!(report.migrations, [1]);
+    assert_eq!(report.migrations, [1, 2]);
     // The renamed key is global-only, so the overrides are kept but not
     // applied, under the new name.
     let rejected: Vec<&Entry> = report.rejected.iter().map(|(e, _)| e).collect();
