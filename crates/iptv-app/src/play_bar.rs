@@ -106,8 +106,9 @@ pub fn height(ui: Ui) -> f32 {
         return laid_out;
     }
     let row = target() + 8.0;
-    // Panel padding, the row, the gap, the progress line, the margin.
-    6.0 + row + 4.0 + 20.0 + 10.0 + 16.0
+    // Panel padding, the row, the gap, the progress line, the margin and
+    // the safe area under it (`pb_safe_area_plus`).
+    6.0 + row + 4.0 + 20.0 + 10.0 + 16.0 + safe_area().bottom.0
 }
 
 /// Changes the bar's state and (re)schedules its hiding.
@@ -277,6 +278,13 @@ fn narrow(ui: Ui) -> bool {
 }
 
 fn bar(ui: Ui) -> impl IntoElement {
+    // Hidden, the bar is unmounted: forget its height, which a resize or a
+    // text change meanwhile makes stale, until it lays out again.
+    cleanup(move || {
+        if untracked(|| ui.play_bar_height.try_get()).is_some() {
+            ui.play_bar_height.set(0.0);
+        }
+    });
     let panel = move || tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA);
     view()
         .absolute()

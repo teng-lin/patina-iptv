@@ -292,7 +292,7 @@ fn ipad_guide_keeps_the_focused_channel_and_the_preview_in_every_window() {
         let back = bounds(app, "guide-corner-back", "window controls");
         let preview = bounds(app, "guide-preview", "window controls");
         assert!(
-            back[0] >= inset + 20.0 - 0.5 && back[0] + back[2] <= preview[0] + preview[2],
+            back[0] >= inset.max(20.0) - 0.5 && back[0] + back[2] <= preview[0] + preview[2],
             "‹ {back:?} clear of a {inset}-point inset, over the preview {preview:?}"
         );
     }

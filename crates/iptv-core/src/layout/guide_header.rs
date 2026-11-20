@@ -51,6 +51,9 @@ pub const TIMES_PROGRESS_W: f32 = 64.0;
 pub const TIMES_LEFT_W: f32 = 100.0;
 pub const DETAILS_GAP: f32 = 6.0;
 pub const TIMES_GAP: f32 = 12.0;
+/// The most lines each part of the times row takes: the app ends a longer
+/// part with an ellipsis (`header.rs`, `number_of_lines(2)`).
+pub const MAX_TIMES_LINES: f32 = 2.0;
 
 /// Where the guide's header puts its shortcuts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -166,10 +169,13 @@ pub fn details_height(column: f32, scale: f32, text: f32) -> f32 {
     let mut rows: Vec<f32> = Vec::new();
     let mut used = f32::INFINITY;
     for (w, h) in parts {
-        let lines = (w / column).ceil().clamp(1.0, 2.0);
+        // The app draws each part on at most two lines (`number_of_lines`),
+        // ending a longer one with an ellipsis: two is the most it takes.
+        let lines = (w / column).ceil().clamp(1.0, MAX_TIMES_LINES);
         let w = w.min(column);
         let h = h * lines;
-        if used + gap + w <= column + 0.5 {
+        // A part that does not fit the row's rest wraps, even by a hair.
+        if used + gap + w <= column {
             used += gap + w;
             let last = rows.last_mut().expect("a row is open");
             *last = last.max(h);
@@ -349,6 +355,28 @@ mod tests {
         assert_eq!(
             details_height(200.0, 1.0, 1.0),
             27.0 + 6.0 + 21.0 + 12.0 + 21.0
+        );
+        // A part exactly as wide as the row's rest stays; a hair wider wraps.
+        let exact = TIMES_SPAN_W + TIMES_GAP + TIMES_PROGRESS_W + TIMES_GAP + TIMES_LEFT_W;
+        assert_eq!(details_height(exact, 1.0, 1.0), 27.0 + 6.0 + 21.0);
+        assert_eq!(
+            details_height(exact - 0.25, 1.0, 1.0),
+            27.0 + 6.0 + 21.0 + 12.0 + 21.0
+        );
+        // At AX3 in a 214-point column the span (440 points) would need
+        // three lines; the app ellipsizes it after two, so two are budgeted,
+        // then the progress on a line and the minutes left (235 points) on two.
+        let ax3 = 40.0 / 17.0;
+        let line = (TIMES_PT * ax3 * LINE_HEIGHT).ceil();
+        assert_eq!(
+            details_height(214.0, 1.0, ax3),
+            (TITLE_PT * ax3 * LINE_HEIGHT).ceil()
+                + 6.0
+                + 2.0 * line
+                + 12.0
+                + line
+                + 12.0
+                + 2.0 * line
         );
     }
 

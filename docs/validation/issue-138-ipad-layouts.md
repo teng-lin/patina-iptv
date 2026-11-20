@@ -91,9 +91,16 @@ Patina (4); 10 s inactive beside Settings (4).
    before, or 70% at the accessibility text sizes.
 7. **iPadOS 26 window controls covered the guide preview's ‹** in a window
    ([390-point guide](../screenshots/issue-138/ipad-window-390-guide.png),
-   before this fix). It now sits the leading safe-area inset further in,
-   as the full-screen ‹ does (`header.rs`). Checked headless with a
-   65-point inset; not re-run on the simulator.
+   before this fix). It now moves by the part of the leading safe-area
+   inset that overlaps the preview, never past the preview's right edge
+   (`header.rs`; no ancestor pads the header's sides). Checked headless
+   with a 65-point inset and by unit tests; not re-run on the simulator.
+8. **Android tablets in split screen (#163).** The same play bar wrap fixes
+   the physical Galaxy Tab A9+ report (half of an 800 × 1280 dp screen at
+   font scale 1.15: the last buttons ran off the window).
+   `tablet_journey::a_split_screen_tablet_keeps_every_play_bar_button_inside_the_window`
+   checks every bar button inside 400 × 1280, 800 × 640 and 640 × 800 dp
+   windows at 1.15, headless; the physical tablet is not re-run here.
 
 ## Observations, not fixed here
 
