@@ -174,7 +174,7 @@ Linux also builds workspace rustdoc with warnings denied, keeping API links vali
 
 The iOS lane prepares the checksum-pinned MPVKit frameworks and checks both device
 and simulator Rust targets without signing credentials. It builds the simulator
-slice and checks that it carries the Keychain entitlements the simulator needs
+library and checks it carries the Keychain entitlements the simulator needs
 ([iOS simulator validation](ios-validation.md#entitlements)). It establishes
 compilation, not simulator execution, signing or iPad playback. Linux production credential
 validation compiles without test-support, checks that the exact ignored broker test

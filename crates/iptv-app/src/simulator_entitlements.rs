@@ -17,5 +17,4 @@ const PLIST: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/simulator.entitle
 /// nothing reads it.
 #[used]
 #[unsafe(link_section = "__TEXT,__entitlements")]
-static ENTITLEMENTS: [u8; PLIST.len()] =
-    *include_bytes!(concat!(env!("OUT_DIR"), "/simulator.entitlements"));
+static ENTITLEMENTS: [u8; PLIST.len()] = *PLIST.first_chunk().unwrap();

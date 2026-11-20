@@ -27,8 +27,10 @@ flag or re-signing is needed. Check a package with:
 tools/check-ios-simulator-entitlements.sh target/ios-sim/Patina.app
 ```
 
-The iOS CI lane runs the same check on the simulator build of `iptv-app`
-([validation tiers](ci.md)).
+The iOS CI lane checks that the compiled simulator library (`libiptv_app.rlib`)
+carries the section ([validation tiers](ci.md)). It links no app, so checking
+the packaged app is a manual step: run the check above after packaging, as in
+the next section.
 
 ## Build, install and launch
 
