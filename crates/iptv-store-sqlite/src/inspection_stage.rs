@@ -106,6 +106,19 @@ impl InspectionStage {
         self.conn.execute_batch("COMMIT; PRAGMA optimize;")?;
         Ok(())
     }
+    /// Refused in the browser build: `Instant` panics there.
+    #[cfg(target_family = "wasm")]
+    pub fn bounded<T>(
+        &mut self,
+        _cancel: iptv_import::CancelToken,
+        _deadline: std::time::Instant,
+        _operation: impl FnOnce(&Self) -> Result<T>,
+    ) -> Result<T> {
+        Err(crate::StoreError::Unavailable(
+            "a bounded scan needs a monotonic clock the browser build does not have",
+        ))
+    }
+    #[cfg(not(target_family = "wasm"))]
     pub fn bounded<T>(
         &mut self,
         cancel: iptv_import::CancelToken,

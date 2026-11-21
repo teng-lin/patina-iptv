@@ -334,7 +334,24 @@ impl Store {
         self.inspection_read_observed(cancel, deadline, || {}, operation)
     }
 
+    /// `Instant` panics on wasm32-unknown-unknown: the browser build has no
+    /// monotonic clock to bound an inspection with (yet), so it refuses one.
+    #[cfg(target_family = "wasm")]
+    #[doc(hidden)]
+    pub fn inspection_read_observed<T>(
+        &mut self,
+        _cancel: CancelToken,
+        _deadline: Instant,
+        _progress: impl FnMut() + Send + 'static,
+        _operation: impl FnOnce(&Self) -> crate::Result<InspectionResult<T>>,
+    ) -> crate::Result<InspectionResult<T>> {
+        Err(crate::StoreError::Unavailable(
+            "bounded inspection needs a monotonic clock the browser build does not have",
+        ))
+    }
+
     /// Adapter instrumentation for an actual SQLite scan, not a queued-lane barrier.
+    #[cfg(not(target_family = "wasm"))]
     #[doc(hidden)]
     pub fn inspection_read_observed<T>(
         &mut self,
