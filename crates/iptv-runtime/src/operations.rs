@@ -124,7 +124,7 @@ impl Runtime {
     pub(crate) fn note_session_only(&self) {
         if !self.session_only_noted.replace(true) {
             self.emit(crate::RuntimeEvent::Notify(
-                "Changes last until Patina closes on this device.",
+                "Changes are not saved on this device: they last until you show another playlist or close Patina.",
             ));
         }
     }

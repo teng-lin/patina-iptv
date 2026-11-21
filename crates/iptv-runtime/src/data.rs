@@ -180,6 +180,15 @@ fn start_import_with(
             let owner = owner.clone();
             async move {
                 let services = owner.services();
+                let opens_stored = job.purpose.shows_stored_first() && job.stored.is_some();
+                if !services.has_workers() && !opens_stored {
+                    // A new import runs on blocking workers, which this host
+                    // has none of; nothing is read for it.
+                    let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(
+                        FailureKind::Unavailable,
+                    ))));
+                    return;
+                }
                 let authorization = owner.parental_snapshot();
                 let admission = job.clone();
                 let auth = authorization.clone();

@@ -545,8 +545,13 @@ fn send(owner: &super::Runtime, write: Write) {
         match write {
             Write::Barrier(done) => drop(done.send(true)),
             Write::Shutdown(done) => drop(done.send(true)),
-            Write::SaveOrder(done) => done(true),
-            _ => owner.note_session_only(),
+            // Watching is recorded automatically; only an edit of the
+            // user's own lists is worth telling them about.
+            Write::Watched { .. } | Write::WatchTime { .. } => {}
+            Write::SaveOrder(_) => unreachable!("a session-only reorder never builds a writer job"),
+            Write::ClearHistory | Write::MoveFavorite { .. } | Write::Favorite { .. } => {
+                owner.note_session_only()
+            }
         }
         return;
     }
@@ -815,26 +820,34 @@ pub(crate) async fn save_order(
     })?;
     updated.apply_order(&order);
 
-    let (done, result) = futures_channel::oneshot::channel();
-    let services = owner.services();
-    let pending = unsaved(owner);
-    send(
-        owner,
-        Write::SaveOrder(Box::new(move |prior_saved| {
-            let result = if prior_saved {
-                services.blocking(move |store| store.save_favorite_order(source, &original, &order))
-            } else {
-                Err(StoreError::Unavailable(
-                    "recent favorite edits are not saved",
-                ))
-            };
-            pending.fetch_sub(1, Ordering::AcqRel);
-            let _ = done.send(result);
-        })),
-    );
-    result
-        .await
-        .map_err(|_| StoreError::Unavailable("the favorites order was not saved"))??;
+    if owner.services().has_workers() {
+        let (done, result) = futures_channel::oneshot::channel();
+        let services = owner.services();
+        let pending = unsaved(owner);
+        send(
+            owner,
+            Write::SaveOrder(Box::new(move |prior_saved| {
+                let result = if prior_saved {
+                    services
+                        .blocking(move |store| store.save_favorite_order(source, &original, &order))
+                } else {
+                    Err(StoreError::Unavailable(
+                        "recent favorite edits are not saved",
+                    ))
+                };
+                pending.fetch_sub(1, Ordering::AcqRel);
+                let _ = done.send(result);
+            })),
+        );
+        result
+            .await
+            .map_err(|_| StoreError::Unavailable("the favorites order was not saved"))??;
+    } else {
+        // No writer saves the order here: it applies for the session, as
+        // every other change does, and nothing is counted as unsaved.
+        drop((original, order));
+        owner.note_session_only();
+    }
     let changed = owner.favorites.with(|state| {
         let mut state = state.borrow_mut();
         if !state.pending_order.ptr_eq(&Rc::downgrade(&changes)) {
@@ -1397,6 +1410,29 @@ mod start_tests {
             "a session-only change is done"
         );
         assert_eq!(notices.get(), 1, "the user hears it once");
+    }
+
+    #[test]
+    fn without_workers_a_reorder_applies_in_memory_on_the_ui_thread() {
+        let mut ports = crate::Ports::for_tests();
+        ports.execution = std::sync::Arc::new(crate::execution::Cooperative::new(
+            std::sync::Arc::new(Unpolled),
+        ));
+        let owner = crate::Runtime::new(ports);
+        // The UI thread starts the services: a blocking store call here
+        // would assert.
+        owner.start_services();
+        owner
+            .favorites
+            .with(|state| state.borrow_mut().source = Some(SourceId(1)));
+        let saved = save_order(&owner, SourceId(1), Vec::new(), Vec::new());
+        let mut saved = std::pin::pin!(saved);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(matches!(
+            saved.as_mut().poll(&mut context),
+            std::task::Poll::Ready(Ok(()))
+        ));
+        assert_eq!(unsaved(&owner).load(Ordering::Acquire), 0);
     }
 
     #[test]

@@ -167,8 +167,6 @@ pub fn text_factor() -> f32 {
 /// time matters only where keys report their release (Android), and
 /// picture in picture on leaving only on Android.
 pub fn offer(key: &str) -> Offer {
-    // Recording and backups run on blocking workers; a host without them
-    // offers neither.
     // Recording, backups, imports and guide downloads run on blocking
     // workers; a host without them offers none of them.
     if !crate::host::HAS_WORKERS

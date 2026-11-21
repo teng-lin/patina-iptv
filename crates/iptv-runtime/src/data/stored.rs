@@ -297,7 +297,7 @@ fn start_update(
                     // none of (the shell hides the command there); a caller
                     // that asks anyway hears why nothing happens.
                     owner.emit(crate::RuntimeEvent::Notify(
-                        "This device cannot import playlists yet.",
+                        "This device cannot download guides yet.",
                     ));
                     drop(tx);
                     false
