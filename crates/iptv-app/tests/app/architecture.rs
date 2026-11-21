@@ -35,8 +35,8 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("lists.rs", "HINT_SHOWN"),    // Visible navigation hint revision.
     ("host/native/platform_data.rs", "ANDROID_FILES"), // Android files directory handle.
     ("host/native/platform_data.rs", "TEST_DIRECTORY"), // Test-only explicit isolated storage handle.
-    ("host/native/platform_data.rs", "HOST_STOP"),
-    ("host/web.rs", "HOST_STOP"), // The root owner's weak handle, as natively. // The root owner's weak handle for off-thread host callbacks.
+    ("host/native/platform_data.rs", "HOST_STOP"), // The root owner's weak handle for off-thread host callbacks.
+    ("host/web.rs", "HOST_STOP"),                  // The root owner's weak handle, as natively.
     ("host/native/recording_host/android.rs", "HOST"), // JNI VM/class handle for OS wake publication.
     ("host/native/recording_host/windows.rs", "TASKS"), // Serialize OS task registration and removal.
     ("seek.rs", "PRESSES"),                             // Key gesture state.
