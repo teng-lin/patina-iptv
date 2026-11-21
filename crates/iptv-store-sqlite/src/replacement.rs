@@ -15,8 +15,10 @@
 //! never splits a statement.
 //!
 //! Dropping an unfinished job rolls its transaction back: the stored data
-//! is unchanged. A publish copy that committed some steps is marked partial
-//! instead, and `finish_publish` refuses it.
+//! is unchanged. On a publish copy, a job that committed slices and ended
+//! without its last commit leaves half a publish: that copy is never swapped
+//! in (`finish_publish` refuses it, whatever later jobs on it do), and the
+//! host abandons it and begins a new publish.
 
 use rusqlite::{Connection, ToSql};
 
@@ -106,20 +108,22 @@ pub(crate) fn resume(store: &crate::Store) -> Result<()> {
 /// work is committed: rolling back the copy is dropping it, and its swap
 /// is what makes the publish atomic, so one transaction across all slices
 /// would only keep a third copy of every page it touched in the memory
-/// journal. The first such commit of a job registers it on the copy
-/// (`claim`): until it commits its last step the copy holds part of it, and
-/// if it ends without that, the copy holds half a publish for good.
-/// Elsewhere the transaction stays open.
-pub(crate) fn pause(store: &mut crate::Store, claim: &mut bool) -> Result<()> {
+/// journal. The first such commit that changed the copy (`changed`)
+/// registers the job on it (`claim`): until the job commits its last step
+/// the copy holds part of it, and if it ends without that, the copy holds
+/// half a publish for good. Elsewhere the transaction stays open.
+pub(crate) fn pause(store: &mut crate::Store, claim: &mut bool, changed: bool) -> Result<()> {
     #[cfg(target_family = "wasm")]
     if store.is_publish_copy() && !store.conn.is_autocommit() {
-        if !*claim {
+        store.conn.execute_batch("COMMIT")?;
+        // Registered only once a commit changed the copy: a step that wrote
+        // nothing, or whose commit failed, leaves the copy as it was.
+        if changed && !*claim {
             store.copy_job_started();
             *claim = true;
         }
-        store.conn.execute_batch("COMMIT")?;
     }
-    let _ = (store, claim);
+    let _ = (store, claim, changed);
     Ok(())
 }
 

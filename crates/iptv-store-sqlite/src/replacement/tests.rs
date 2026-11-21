@@ -1161,5 +1161,66 @@ fn an_unfinished_job_on_a_copy_cannot_be_published_by_a_later_one() {
             "unfinished first: {unfinished_first}"
         );
         assert!(!store.is_publishing());
+        // The host abandons it and begins a new publish, which works.
+        let mut copy = store.begin_publish().unwrap();
+        completed(&mut copy);
+        store.finish_publish(copy).unwrap();
     }
+}
+
+/// With descriptions off, the description pass of a schedule copy still
+/// walks the program keys in bounded slices, each step paying for the keys
+/// it covered, instead of scanning the whole schedule for described rows in
+/// one step.
+#[test]
+fn a_schedule_without_descriptions_is_still_copied_in_bounded_slices() {
+    let (mut store, source) = store();
+    store.set_guide_sources(source, &guide_sources()).unwrap();
+    let mut stage = EpgStage::create_in_store(&store, stages()).unwrap();
+    let opts = StoreOptions {
+        store_descriptions: false,
+        past_days_to_keep: None,
+    };
+    stage.begin_feed(FeedId(1), 1, opts, NOW).unwrap();
+    for p in 0..700 {
+        let program = ProgramData {
+            start: NOW + p * 1800,
+            stop: Some(NOW + (p + 1) * 1800),
+            title: "Synthetic",
+            ..ProgramData::default()
+        };
+        stage.program("only.example", &program).unwrap();
+    }
+    stage.finish_feed().unwrap();
+    let import = EpgImport {
+        bindings: vec![(
+            iptv_epg::ChannelKey("k".into()),
+            iptv_epg::EpgRef {
+                source: FeedId(1),
+                epg_id: "only.example".into(),
+                kind: MatchKind::TvgId,
+            },
+        )],
+        ..EpgImport::default()
+    };
+    let mut job = EpgReplacement::new(
+        &mut store,
+        source,
+        &mut stage,
+        Cow::Borrowed(&import),
+        feeds(),
+        2,
+    )
+    .unwrap();
+    let mut description_steps = 0;
+    loop {
+        let describing = job.phase().contains("descriptions: true");
+        let step = job.step(7).unwrap();
+        description_steps += usize::from(describing);
+        if let Step::Done(counts) = step {
+            assert_eq!((counts.programs, counts.descriptions), (700, 0));
+            break;
+        }
+    }
+    assert!(description_steps >= 90, "{description_steps} steps");
 }

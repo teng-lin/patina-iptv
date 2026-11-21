@@ -90,7 +90,7 @@ pub struct EpgReplacement<'a, S: BorrowMut<Store>> {
     /// row id is kept in `ids` (no key strings are copied).
     first: Vec<usize>,
     /// The EPG channel row id written for a binding (at its `first`).
-    ids: Vec<Option<i64>>,
+    ids: HashMap<usize, i64>,
     /// Held until the job ends: nothing else can write it, or drop it,
     /// while it is attached.
     stage: StageHold<'a>,
@@ -182,7 +182,8 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
                 .map(|(i, (_, epg))| *seen.entry((epg.source.0, epg.epg_id.as_str())).or_insert(i))
                 .collect()
         };
-        let ids = vec![None; import.bindings.len()];
+        // One entry per EPG channel written, as master's map had.
+        let ids = HashMap::new();
         let known = feeds.iter().map(|f| f.config.id.0).collect();
         Ok(Self {
             store: Some(store),
@@ -253,6 +254,7 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
         if self.progress != Progress::Running {
             return Err(replacement::finished_error());
         }
+        let changes = self.store().conn.total_changes();
         let stepped = self.resume().and_then(|()| self.advance(&mut meter));
         let stepped = match stepped {
             Ok(Step::Pending) => {
@@ -261,7 +263,8 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
                     .as_mut()
                     .expect("the store stays until the job is dropped")
                     .borrow_mut();
-                replacement::pause(store, &mut self.copy_claim).map(|()| Step::Pending)
+                let changed = store.conn.total_changes() != changes;
+                replacement::pause(store, &mut self.copy_claim, changed).map(|()| Step::Pending)
             }
             other => other,
         };
@@ -605,7 +608,7 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
                         staged.last_stop,
                     ),
                 );
-                self.ids[self.first[index]] = Some(copy.channel);
+                self.ids.insert(self.first[index], copy.channel);
                 copy.channel
             }
             None => {
@@ -614,7 +617,7 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
                     self.phase = next;
                     return Ok(());
                 }
-                match self.ids[self.first[index]] {
+                match self.ids.get(&self.first[index]).copied() {
                     Some(id) => id,
                     None => {
                         conn.prepare_cached(
@@ -656,7 +659,7 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
                                     feed,
                                     (n, d, last),
                                 );
-                                self.ids[self.first[index]] = Some(id);
+                                self.ids.insert(self.first[index], id);
                                 id
                             }
                         }
@@ -738,12 +741,14 @@ fn copy_slice(
     // The first slice has no lower bound (a start can be any i64); later
     // ones continue after the last start, a seek on the stage's primary key
     // (ch, start), so each slice reads only what it copies.
-    let mut end = conn.prepare_cached(&slice_end_sql(copy.descriptions, copy.after.is_some()))?;
-    let last: Option<i64> = match copy.after {
-        None => end.query_row(params![copy.staged.id, meter.limit()], |r| r.get(0))?,
-        Some(after) => {
-            end.query_row(params![copy.staged.id, meter.limit(), after], |r| r.get(0))?
-        }
+    // The slice is a bounded run of program keys, for descriptions too
+    // (most programs may have none: counting only described ones could scan
+    // a whole schedule in one step), and the step pays for every key.
+    let mut end = conn.prepare_cached(&slice_end_sql(copy.after.is_some()))?;
+    let row = |r: &rusqlite::Row<'_>| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, i64>(1)?));
+    let (last, keys) = match copy.after {
+        None => end.query_row(params![copy.staged.id, meter.limit()], row)?,
+        Some(after) => end.query_row(params![copy.staged.id, meter.limit(), after], row)?,
     };
     drop(end);
     let Some(last) = last else {
@@ -766,23 +771,19 @@ fn copy_slice(
     } else {
         copy.programs_copied += n as u64;
     }
-    meter.spend(n.max(1));
+    meter.spend(n.max(keys as usize).max(1));
     copy.after = Some(last);
     Ok(copy)
 }
 
-/// The last start of a schedule slice: `?1` the stage channel, `?2` the
-/// limit, `?3` the last start copied (when continuing).
-fn slice_end_sql(descriptions: bool, continuing: bool) -> String {
-    let description = if descriptions {
-        " AND description IS NOT NULL"
-    } else {
-        ""
-    };
+/// The last start of a schedule slice and how many program keys it spans:
+/// `?1` the stage channel, `?2` the limit, `?3` the last start copied (when
+/// continuing).
+fn slice_end_sql(continuing: bool) -> String {
     let lower = if continuing { " AND start > ?3" } else { "" };
     format!(
-        "SELECT max(start) FROM (SELECT start FROM epg_stage.programs
-         WHERE ch = ?1{lower}{description} ORDER BY start LIMIT ?2)"
+        "SELECT max(start), count(*) FROM (SELECT start FROM epg_stage.programs
+         WHERE ch = ?1{lower} ORDER BY start LIMIT ?2)"
     )
 }
 
@@ -881,7 +882,7 @@ mod tests {
             rows.map(Result::unwrap).collect::<Vec<_>>().join("; ")
         };
         for descriptions in [false, true] {
-            let end = plan(&slice_end_sql(descriptions, true));
+            let end = plan(&slice_end_sql(true));
             assert!(end.contains("ch=? AND start>?"), "{end}");
             let insert = plan(&slice_insert_sql(descriptions, true));
             assert!(insert.contains("ch=? AND start>? AND start<?"), "{insert}");

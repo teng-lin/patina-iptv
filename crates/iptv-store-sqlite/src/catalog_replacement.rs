@@ -268,6 +268,7 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
         if self.progress != Progress::Running {
             return Err(replacement::finished_error());
         }
+        let changes = self.store().conn.total_changes();
         let stepped = self.resume().and_then(|()| self.advance(&mut meter));
         let stepped = match stepped {
             Ok(Step::Pending) => {
@@ -276,7 +277,8 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
                     .as_mut()
                     .expect("the store stays until the job is dropped")
                     .borrow_mut();
-                replacement::pause(store, &mut self.copy_claim).map(|()| Step::Pending)
+                let changed = store.conn.total_changes() != changes;
+                replacement::pause(store, &mut self.copy_claim, changed).map(|()| Step::Pending)
             }
             other => other,
         };
