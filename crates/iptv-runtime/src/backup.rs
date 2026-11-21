@@ -280,6 +280,7 @@ fn document_reader(services: &Services, path: &Path) -> Result<(u64, Box<dyn Rea
     Ok((reader.len(), Box::new(reader)))
 }
 
+#[cfg(any(not(test), feature = "native"))]
 fn seal_restore_with_store(
     store: &Store,
     directory: &Path,
@@ -799,13 +800,13 @@ fn activate(ports: &crate::Ports, root: &Path) -> Result<()> {
         &pending.join("settings.json"),
         "settings.json",
     )?)?;
-    #[cfg(test)]
+    #[cfg(all(test, feature = "native"))]
     tests::crash_boundary("validated");
     if root.exists() {
         fs::rename(root, &previous)
             .context("Could not prepare the restore; current data was kept")?;
     }
-    #[cfg(test)]
+    #[cfg(all(test, feature = "native"))]
     tests::crash_boundary("previous");
     if let Err(error) = fs::rename(&pending, root) {
         if previous.exists() {
@@ -816,10 +817,10 @@ fn activate(ports: &crate::Ports, root: &Path) -> Result<()> {
             error,
         ));
     }
-    #[cfg(test)]
+    #[cfg(all(test, feature = "native"))]
     tests::crash_boundary("installed");
     sync_dir(root.parent().ok_or("Application storage has no parent")?)?;
-    #[cfg(test)]
+    #[cfg(all(test, feature = "native"))]
     tests::crash_boundary("synced");
     if previous.exists() {
         fs::remove_dir_all(previous)
@@ -828,5 +829,5 @@ fn activate(ports: &crate::Ports, root: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests;

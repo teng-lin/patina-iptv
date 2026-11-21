@@ -539,7 +539,7 @@ impl HostHandle {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
 
@@ -748,7 +748,7 @@ pub use ports::{MaybeSend, MaybeSync, Ports};
 pub mod storage;
 pub mod time;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 impl Default for Runtime {
     fn default() -> Self {
         Self::new(Ports::for_tests())

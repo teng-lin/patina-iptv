@@ -69,6 +69,20 @@ mod host {
     pub(super) static CLOCK: OnceLock<super::Clock> = OnceLock::new();
 
     pub(super) fn clock() -> super::Clock {
+        // Unit tests of a browser build run on a host that has the
+        // standard clocks.
+        #[cfg(test)]
+        let _ = CLOCK.set(super::Clock {
+            monotonic: || {
+                static ORIGIN: OnceLock<std::time::Instant> = OnceLock::new();
+                ORIGIN.get_or_init(std::time::Instant::now).elapsed()
+            },
+            wall: || {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+            },
+        });
         *CLOCK
             .get()
             .expect("the host installs a clock before the runtime reads the time")

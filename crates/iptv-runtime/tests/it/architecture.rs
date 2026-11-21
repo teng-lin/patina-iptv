@@ -95,6 +95,8 @@ const STATICS: &[(&str, &str)] = &[
     ("backup/instance.rs", "HELD"),
     // A browser host's clocks (no OS clock there), installed once.
     ("time.rs", "CLOCK"),
+    // The standard clock's origin for unit tests of a browser build (`cfg(test)`).
+    ("time.rs", "ORIGIN"),
     // Unique unopened directories of unit-test owners (`cfg(test)`).
     ("ports.rs", "NEXT"),
     // Startup marks seen by one opening unit test (`cfg(test)`): the mark
@@ -318,7 +320,7 @@ fn test_modules(sources: &[(String, String)]) -> BTreeSet<String> {
         };
         let mut lines = code.lines().map(str::trim).peekable();
         while let Some(line) = lines.next() {
-            if line == "#[cfg(test)]"
+            if (line == "#[cfg(test)]" || line.starts_with("#[cfg(all(test,"))
                 && let Some(module) = lines
                     .peek()
                     .and_then(|next| next.strip_prefix("mod "))

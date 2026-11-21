@@ -911,7 +911,7 @@ fn move_write(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod reorder_tests {
     use super::*;
     use iptv_guide::combined::qualified_key;
@@ -1144,7 +1144,7 @@ mod writer_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod vod_availability_tests {
     use super::*;
     use crate::{Ports, Runtime};

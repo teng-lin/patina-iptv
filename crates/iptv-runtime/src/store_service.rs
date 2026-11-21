@@ -323,7 +323,7 @@ impl Service {
     /// Root teardown only, after the favorites writer has submitted its last
     /// work. Accepted requests already belong to their workers, independent
     /// of UI futures.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "native"))]
     pub(crate) fn drain_on_shutdown(self: &Arc<Self>) -> bool {
         self.drain_on_shutdown_with(|| {})
     }
@@ -935,14 +935,14 @@ fn with_store<R>(
     operation(connection.store.as_mut().expect("opened store"))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 impl Default for Service {
     fn default() -> Self {
         Self::new(crate::Ports::for_tests())
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 impl Services {
     /// An owner of its own in `directory`, started on a thread that never
     /// blocks (tests call the blocking requests from their own thread).
@@ -955,7 +955,7 @@ impl Services {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::{Connection, Service};
     use std::sync::Arc;

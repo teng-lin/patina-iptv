@@ -776,7 +776,7 @@ pub fn guide_edit_is_current(owner: &super::Runtime, source: SourceId, generatio
         .with(|edits| edits.borrow().get(&source) == Some(&generation))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use iptv_epg::StoreOptions;
     use iptv_import::RefreshReason;

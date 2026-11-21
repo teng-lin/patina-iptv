@@ -1,7 +1,7 @@
 //! Application-owned immutable repair previews, atomic commit and observed status.
 mod prepare;
 mod publication;
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests;
 mod write;
 use crate::time::Instant;

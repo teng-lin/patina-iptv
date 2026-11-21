@@ -387,7 +387,7 @@ pub fn long_press_ms(settings: &Settings) -> u64 {
     u64::try_from(duration_ms(settings, keys::LONG_PRESS)).unwrap_or(0)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod persistence_tests {
     use super::*;
     /// What a restart reads, with no write queued.
@@ -517,7 +517,7 @@ mod persistence_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod host_tests {
     use super::*;
 

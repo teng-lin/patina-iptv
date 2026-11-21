@@ -303,7 +303,7 @@ async fn send_stored_after(
 #[cfg(test)]
 #[path = "../../iptv-store-sqlite/tests/common/mod.rs"]
 mod common;
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod revocation;
 
 #[cfg(test)]

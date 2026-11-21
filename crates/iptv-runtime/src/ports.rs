@@ -104,7 +104,7 @@ impl Ports {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "native"))]
     pub(crate) fn for_tests() -> Self {
         use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT: AtomicU64 = AtomicU64::new(0);

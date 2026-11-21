@@ -1,5 +1,5 @@
 //! On-demand catalog and playback. Credentials and ephemeral provider links stay here.
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod recovery_tests;
 use crate::{Error, Runtime};
 use iptv_core::{
@@ -1083,7 +1083,7 @@ impl Runtime {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
     #[tokio::test(flavor = "current_thread")]

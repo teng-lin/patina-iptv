@@ -245,7 +245,7 @@ pub fn evict(owner: &Rc<crate::Runtime>) {
     });
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
     use crate::paging::store_window;

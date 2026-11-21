@@ -348,7 +348,7 @@ fn temporary(path: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
 

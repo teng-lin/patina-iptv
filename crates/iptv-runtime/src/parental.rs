@@ -700,7 +700,7 @@ pub(crate) fn native_allowed(
     Ok(!denied || (grants_current && access.granted(target, now_ms())))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
     fn snapshot() -> Snapshot {
@@ -849,7 +849,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod source_tests {
     use super::*;
     use crate::imports::{self, Job, Purpose};
