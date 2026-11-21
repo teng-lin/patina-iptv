@@ -70,17 +70,17 @@ pub fn close(ui: Ui) {
 /// the title was chosen from, the title playing on in the preview. False
 /// when the title did not come from this screen.
 pub fn return_from_player(ui: Ui) -> bool {
-    let Some((details, played)) = ui
-        .player
-        .vod
-        .with_untracked(|p| p.as_ref().map(|(p, _)| (p.details.clone(), p.key.clone())))
-    else {
+    let Some((details, played, saved)) = ui.player.vod.with_untracked(|p| {
+        p.as_ref()
+            .map(|(p, _)| (p.details.clone(), p.key.clone(), p.last_saved_ms.is_some()))
+    }) else {
         return false;
     };
     if !ui.vod.with_untracked(|s| s.returns_to(&details.item.key)) {
         return false;
     }
-    ui.vod.update(|s| s.return_from_player(details, &played));
+    ui.vod
+        .update(|s| s.return_from_player(details, &played, saved));
     ui.mode.set(crate::settings::browse_mode());
     true
 }

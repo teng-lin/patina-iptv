@@ -1315,15 +1315,21 @@ impl Screen {
     /// player's, with the progress just watched). The list underneath is
     /// the one the title was chosen from; its card there (a movie's, or
     /// the series' of the episode played) shows the progress just watched
-    /// without the list being read again (#177).
-    pub fn return_from_player(&mut self, mut details: Details, played: &Key) {
-        if details.item.key.kind == Kind::Series
-            && let Some(progress) = details.series_progress(played)
-        {
+    /// without the list being read again (#177). `saved` tells whether
+    /// the player saved progress for `played`: until it does, the store's
+    /// series record still describes the episode watched before, and the
+    /// series' card stays as it was.
+    pub fn return_from_player(&mut self, mut details: Details, played: &Key, saved: bool) {
+        let progress = if details.item.key.kind == Kind::Series {
+            saved.then(|| details.series_progress(played)).flatten()
+        } else {
+            Some(details.item.progress)
+        };
+        if let Some(progress) = progress {
             details.item.progress = progress;
-        }
-        if let Some(card) = self.cards.iter_mut().find(|c| c.key == details.item.key) {
-            card.progress = details.item.progress;
+            if let Some(card) = self.cards.iter_mut().find(|c| c.key == details.item.key) {
+                card.progress = progress;
+            }
         }
         self.open = true;
         self.search_open = false;
@@ -3054,7 +3060,7 @@ mod tests {
         s.hand_to_player();
         assert!(!s.open && s.returns_to(&details.item.key));
         assert!(!s.returns_to(&card("other").key));
-        s.return_from_player(details.clone(), &played);
+        s.return_from_player(details.clone(), &played, true);
         assert!(s.open && !s.returns_to(&details.item.key));
         assert_eq!(s.episode, Some(played));
         assert_eq!(s.season, Some(2));
@@ -3082,7 +3088,7 @@ mod tests {
         // Part of the first episode watched: the card resumes it.
         s.hand_to_player();
         details.episodes[0].progress = Progress::observed(120_000, Some(600_000), false);
-        s.return_from_player(details.clone(), &first);
+        s.return_from_player(details.clone(), &first, true);
         assert_eq!(s.cards[1].progress, details.episodes[0].progress);
         assert_eq!(
             s.details.as_ref().map(|d| d.item.progress),
@@ -3095,15 +3101,21 @@ mod tests {
         s.show_details(details.clone());
         s.hand_to_player();
         details.episodes[0].progress = Progress::observed(600_000, Some(600_000), true);
-        s.return_from_player(details.clone(), &first);
+        s.return_from_player(details.clone(), &first, true);
         assert_eq!(s.cards[1].progress, Progress::default());
         // Its last episode finished: the series is watched.
         let last = details.episodes[2].key.clone();
         s.hand_to_player();
         details.episodes[2].progress = Progress::observed(600_000, Some(600_000), true);
-        s.return_from_player(details.clone(), &last);
+        s.return_from_player(details.clone(), &last, true);
         assert!(s.cards[1].progress.completed);
         assert_eq!(s.cards[1].progress.resume_ms(), 0);
+        // Another episode left before the player saved anything: the
+        // store still describes the last one, and so does the card.
+        let watched = s.cards[1].progress;
+        s.hand_to_player();
+        s.return_from_player(details.clone(), &details.episodes[1].key.clone(), false);
+        assert_eq!(s.cards[1].progress, watched);
         // The other cards are untouched.
         assert_eq!(s.cards[0].progress, Progress::default());
         assert_eq!(s.cards[2].progress, Progress::default());
@@ -3122,7 +3134,7 @@ mod tests {
         s.show_details(details.clone());
         s.hand_to_player();
         details.item.progress = Progress::observed(120_000, Some(600_000), false);
-        s.return_from_player(details.clone(), &details.item.key.clone());
+        s.return_from_player(details.clone(), &details.item.key.clone(), true);
         assert_eq!(s.control, Control::Play);
         assert_eq!(s.focused, Some(card("b").key));
         assert_eq!(s.cards[1].progress, details.item.progress);
