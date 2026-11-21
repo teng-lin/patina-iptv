@@ -17,6 +17,15 @@ is below 1.0, a minor release may change behaviour.
 
 ### Changed
 
+- Phone held upright, and other narrow portrait windows: the guide's header
+  now stacks a preview as wide as the window over the focused programme,
+  instead of a thumbnail beside it. The channel list stays inside a narrow
+  window, and where the video has no room beside the list it stays full
+  screen under it instead of being laid out past the window's edge. On a
+  phone the guide draws at 0.7 of the tablet's sizes, and the full-screen
+  play bar's 44-point buttons keep one row on its side, the channel's name
+  on a line above them. Phones run in landscape for now; portrait will get
+  its own design (#168).
 - When Patina plays the last channel on start and that channel is one of the
   playlist's favourites, Back from full screen now opens the Favourites list
   with the channel focused instead of All channels. A channel that is not a

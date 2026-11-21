@@ -14,7 +14,7 @@
 //! [`MAX`]: 1920 × 1080 and 2560 × 1440 → 1.0, 1440 × 900 → 0.95,
 //! 1280 × 720 → 0.875, 960 × 540 → 0.8.
 
-use nsh_core::platform::Idiom;
+use nsh_core::platform::{Idiom, Os};
 use nsh_core::prelude::*;
 
 /// The window (logical px) at and above which the full sizes show: a
@@ -31,16 +31,33 @@ pub const STEP: f32 = 0.025;
 /// Whether this build scales the guide with its window (desktops).
 const SCALES: bool = !cfg!(any(target_os = "android", target_os = "ios"));
 
-/// Whether the guide scales with its window: on desktops, not on a tablet,
-/// whose windows (an Android tablet's screen, an iPad's full screen,
-/// Split View, Slide Over or Stage Manager window) are touched and keep the
-/// full sizes. The reported idiom decides too, so a headless tablet lays
-/// out as a tablet does.
+/// Whether the guide scales with its window: on desktops, not on a tablet
+/// or a phone, whose windows (an Android tablet's or phone's screen, an
+/// iPad's full screen, Split View, Slide Over or Stage Manager window) are
+/// touched and keep the full sizes. The reported idiom and system decide
+/// too, so a headless tablet, or a headless Android phone, lays out as the
+/// device does. (NSH's default headless environment is an iOS phone; it
+/// keeps the desktop's scaling, which the scenarios built on it measure.)
 fn scales() -> bool {
-    SCALES && idiom() != Idiom::Pad
+    SCALES && idiom() != Idiom::Pad && !phone()
 }
+
+/// A phone: an Android or iOS build reporting the phone idiom, or a
+/// headless Android phone. (NSH's default headless environment, an iOS
+/// phone, is not one: the scenarios built on it measure the desktop.)
+pub(crate) fn phone() -> bool {
+    idiom() == Idiom::Phone && (!SCALES || os() == Os::Android)
+}
+
 /// The scale on a TV (rows 50 → 40 dp, type 20 → 16).
 pub const TV: f32 = 0.8;
+/// The scale on a phone (rows 50 → 35 dp, type 20 → 14): the tablet's full
+/// sizes are far too large on a screen about 360 to 412 points across, and
+/// the system's font scale still applies on top. Measured on a 360-point
+/// phone at font scale 1.15, the guide's names then draw at about the size
+/// of a phone IPTV app's secondary lines (14 sp), under its list names
+/// (about 17 sp).
+pub const PHONE: f32 = 0.7;
 
 /// The scale for a `width` × `height` window (logical px); 1.0 where the
 /// platform does not scale.
@@ -57,6 +74,9 @@ pub fn scale_for(width: f32, height: f32, scales: bool) -> f32 {
 pub fn now() -> f32 {
     if idiom() == Idiom::Tv {
         return TV;
+    }
+    if phone() {
+        return PHONE;
     }
     let w = window();
     scale_for(w.width.0, w.height.0, scales())

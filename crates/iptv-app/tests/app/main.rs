@@ -65,6 +65,7 @@ mod personalization_overlay;
 mod personalization_playback;
 mod personalization_selection;
 mod personalization_zapping;
+mod phone_windows;
 mod pip_control;
 mod pointer;
 mod recorder_startup;

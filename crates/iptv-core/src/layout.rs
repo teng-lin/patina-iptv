@@ -77,7 +77,9 @@ impl Class {
 }
 
 mod guide_header;
+mod list_panel;
 pub use guide_header::*;
+pub use list_panel::*;
 
 #[cfg(test)]
 mod tests {

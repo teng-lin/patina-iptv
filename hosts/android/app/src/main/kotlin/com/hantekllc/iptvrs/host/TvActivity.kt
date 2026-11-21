@@ -2,6 +2,8 @@ package com.hantekllc.iptvrs.host
 
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
@@ -32,6 +34,11 @@ import dev.nshtv.RemoteKeys
  * One audio focus for all players ([AudioFocusHost]): a call, another
  * app's media or unplugged headphones reach the app as the players'
  * `audio` event, and the app's policy pauses or resumes.
+ *
+ * A phone runs in landscape for now (#168), on either side as the user's
+ * rotation lock allows: the guide and the player are landscape layouts,
+ * and portrait waits for its own design. Tablets, an unfolded phone, TVs
+ * and windows of 600 dp and wider rotate freely ([landscapeOnPhones]).
  */
 class TvActivity : Activity() {
     private lateinit var nsh: NshView
@@ -49,6 +56,7 @@ class TvActivity : Activity() {
         super.onCreate(state)
         mark("activity created")
         edgeToEdge()
+        landscapeOnPhones(resources.configuration)
         nsh = NshView(this)
         mark("library loaded")
         initializeDataDirectory(filesDir.absolutePath)
@@ -127,6 +135,7 @@ class TvActivity : Activity() {
 
     override fun onConfigurationChanged(config: Configuration) {
         super.onConfigurationChanged(config)
+        landscapeOnPhones(config)
         updateSystemBarAppearance(config)
         immersive()
     }
@@ -135,6 +144,25 @@ class TvActivity : Activity() {
         super.onWindowFocusChanged(hasFocus)
         // Dialogs and the system's own windows can bring the bars back.
         if (hasFocus) immersive()
+    }
+
+    /**
+     * A phone's screen (smallest width under 600 dp, not a TV) asks for
+     * landscape, either side as the rotation lock allows; anything wider,
+     * such as a phone unfolded to a tablet's screen, gives the orientation
+     * back. The system ignores the request in multi-window and picture in
+     * picture, where the window is not the screen.
+     */
+    private fun landscapeOnPhones(config: Configuration) {
+        val tv = packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+        val phone = !tv && config.smallestScreenWidthDp in 1 until PHONE_MAX_DP
+        val wanted =
+            if (phone) {
+                ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE
+            } else {
+                ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
+        if (requestedOrientation != wanted) requestedOrientation = wanted
     }
 
     /** Draw under the system bars so their transient appearance leaves the layout in place. */
@@ -208,5 +236,10 @@ class TvActivity : Activity() {
         audio.destroy()
         nsh.destroy()
         super.onDestroy()
+    }
+
+    private companion object {
+        /** A screen narrower than this, at its smallest, is a phone's. */
+        const val PHONE_MAX_DP = 600
     }
 }
