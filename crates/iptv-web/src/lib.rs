@@ -5,13 +5,13 @@
 //! keys and plays streams with the TV's native player; the worker's
 //! JavaScript performs the HTTP requests the import describes.
 //!
-//! - [`host`]: the imports the module calls (fetch, chunks, timers, storage,
+//! - `host`: the imports the module calls (fetch, chunks, timers, storage,
 //!   events, clocks).
-//! - [`exec`]: a single-threaded executor polled after every delivery, and
+//! - `exec`: a single-threaded executor polled after every delivery, and
 //!   the `iptv_import::Fetch` adapter over the host.
-//! - [`store`]: what is kept between launches: the stored guide (an
+//! - `store`: what is kept between launches: the stored guide (an
 //!   `iptv_epg` snapshot) with its refresh state, and the user's lists.
-//! - [`app`]: Live TV: import a source (Xtream or M3U), its guide, the
+//! - `app`: Live TV: import a source (Xtream or M3U), its guide, the
 //!   channel list beside the preview, full screen and zapping, on
 //!   `iptv_core`'s list and focus models.
 //!
