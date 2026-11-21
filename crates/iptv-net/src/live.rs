@@ -535,23 +535,51 @@ async fn serve(
             .await?;
         return Ok(());
     }
-    let shared = shared
-        .upgrade()
-        .ok_or_else(|| io::Error::other("Input closed"))?;
+    // A 200 promises media. An input that has ended (its provider closed
+    // the stream, or a finite playlist reached its end) has none for a new
+    // connection, not even its retained pre-roll. Answered with an empty
+    // 200, a player's next open (mpv's live spare, a reconnect) cannot
+    // recognize the empty body and reports an unsupported format, which is
+    // never retried (#137). So answer only once there are bytes, or say
+    // the input is gone: a player retries that, with a fresh input.
+    let Some(shared) = shared.upgrade() else {
+        return unavailable(&mut socket).await;
+    };
     let mut reader = LiveReader::new(shared);
+    let ended = reader.shared.lock().ended.is_some();
+    let first = if ended {
+        return unavailable(&mut socket).await;
+    } else if method == "HEAD" {
+        None
+    } else {
+        match reader.next().await {
+            Ok(bytes) => Some(bytes),
+            Err(_) => return unavailable(&mut socket).await,
+        }
+    };
     socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n").await?;
-    if method == "HEAD" {
+    let Some(mut bytes) = first else {
         return Ok(());
-    }
+    };
     loop {
-        let bytes = reader
-            .next()
-            .await
-            .map_err(|_| io::Error::other("Input ended or lagged"))?;
         tokio::time::timeout(Duration::from_secs(15), socket.write_all(&bytes))
             .await
             .map_err(io::Error::other)??;
+        bytes = reader
+            .next()
+            .await
+            .map_err(|_| io::Error::other("Input ended or lagged"))?;
     }
+}
+
+/// The input has ended: a transient refusal (a player reconnects, which
+/// starts a fresh input), never an empty stream.
+async fn unavailable(socket: &mut tokio::net::TcpStream) -> io::Result<()> {
+    socket
+        .write_all(
+            b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        )
+        .await
 }
 
 #[cfg(test)]

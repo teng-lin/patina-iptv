@@ -114,8 +114,13 @@ simulator run at `908632e9`, before the follow-up.
 9. **Observation (iPad simulator):** playback stopped after about 100–200 s
    with "This stream's format isn't supported"
    (`ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED`, VTDecompression error
-   −12906), three times including while idle; the cause (the simulator's
-   decoder or the finite 300 s fixture) is tracked in #137.
+   −12906), three times including while idle. **Fixed (#137):** the
+   finite 300 s fixture ended its shared live input, which then answered
+   mpv's next open of the same stream with an empty 200, read as an
+   unsupported format and never retried. An ended input now answers 503,
+   and the app reconnects. The −12906 is the simulator having no
+   VideoToolbox H.264 decoder: mpv falls back to software decoding at
+   every open, unrelated to the stop.
 10. **Observation (iPad simulator):** the simulator package has no
     entitlements, so the keychain was unavailable and adding a playlist
     failed until simulator entitlements were embedded at link time;

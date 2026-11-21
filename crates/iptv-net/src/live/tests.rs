@@ -864,3 +864,64 @@ async fn a_start_validates_a_segment_arriving_in_parts_without_a_player() {
     drop(input);
     server.abort();
 }
+
+/// A provider playlist that ends (`#EXT-X-ENDLIST`, as the 300-second
+/// fixtures do) after one segment. Abort the handle to stop it.
+async fn finite_hls_provider() -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let url = format!("http://{}/vod.m3u8", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    request.push(socket.read_u8().await?);
+                }
+                let body = if request.starts_with(b"GET /vod.m3u8 ") {
+                    b"#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n\
+                      #EXTINF:1,\nsegment.ts\n#EXT-X-ENDLIST\n"
+                        .to_vec()
+                } else {
+                    [first_packets(), packet(2).repeat(6)].concat()
+                };
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                socket.write_all(head.as_bytes()).await?;
+                socket.write_all(&body).await?;
+                Ok::<(), io::Error>(())
+            });
+        }
+    });
+    (url, server)
+}
+
+/// #137: once its playlist reached its end, an input has no media for a
+/// new connection (mpv's live spare, a reconnect). It refuses it with a 503
+/// a player retries, never an empty 200 the player reads as a stream in an
+/// unsupported format.
+#[tokio::test]
+async fn an_ended_input_refuses_new_connections_rather_than_sending_nothing() {
+    let (url, server) = finite_hls_provider().await;
+    let input = begin(&url);
+    input.ready().await.unwrap();
+    until(|| !input.is_running()).await;
+    let client = recording::client().unwrap();
+    for method in [reqwest::Method::GET, reqwest::Method::HEAD] {
+        let response = tokio::time::timeout(
+            Duration::from_secs(3),
+            client.request(method.clone(), input.url()).send(),
+        )
+        .await
+        .expect("answered at once")
+        .unwrap();
+        assert_eq!(response.status(), 503, "{method}");
+        assert!(response.bytes().await.unwrap().is_empty(), "{method}");
+    }
+    drop(input);
+    server.abort();
+}
