@@ -30,8 +30,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        timeout-minutes: 25
         with:
           cache-key: packages-v2-${{ hashFiles('.github/workflows/package-check.yml', 'tools/ci/package-linux.sh', 'tools/package-macos.sh') }}
+          # Linux packaging tools; macOS ignores this list.
+          apt-packages: >-
+            ruby-dev rpm zstd libarchive-tools patchelf file desktop-file-utils
+            libgirepository1.0-dev librsvg2-dev xvfb x11-utils xauth dbus-x11
       - name: Package prerequisites
         shell: bash
         run: |
@@ -45,8 +50,6 @@ jobs:
       - name: Linux package installation and smoke tests
         if: matrix.platform == 'linux'
         run: |
-          sudo apt-get install -y ruby-dev rpm zstd libarchive-tools patchelf file desktop-file-utils \
-            libgirepository1.0-dev librsvg2-dev xvfb x11-utils xauth dbus-x11
           sudo gem install fpm -v 1.16.0 --no-document
           bash tools/ci/setup-linux-packaging.sh
           export PATH="$RUNNER_TEMP/linux-packaging:$PATH"

@@ -15,9 +15,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        timeout-minutes: 25
         with:
           cache-key: dependency-candidate-v1
-      - run: sudo apt-get install -y xvfb libgl1-mesa-dri
+          apt-packages: xvfb libgl1-mesa-dri
       - name: Prepare lockfile candidate and run host validation
         env:
           IPTV_REQUIRE_PLAYER_TESTS: '1'

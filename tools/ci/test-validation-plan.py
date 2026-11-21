@@ -68,7 +68,8 @@ class Selection(unittest.TestCase):
             self.assertFalse(plan[lane], lane)
 
     def test_graph_changes_validate_every_lane(self):
-        for path in (".github/workflows/validation.yml", ".github/actions/setup/action.yml", "tools/ci/check-plan.py",
+        for path in (".github/workflows/validation.yml", ".github/actions/setup/action.yml", "tools/ci/apt-install.sh",
+                     "tools/ci/check-plan.py",
                      "tools/ci/native-candidates.json", "tools/ci/native_candidates.py", "tools/ci/run-xvfb.py"):
             plan = v.select([path])
             self.assertTrue(all(plan[lane] for lane in v.LANES), path)

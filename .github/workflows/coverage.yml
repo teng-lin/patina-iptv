@@ -20,11 +20,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        timeout-minutes: 25
         with:
           cache-on-failure: 'true'
           cache-key: coverage-v2-${{ hashFiles('tools/ci/coverage.sh', '.github/workflows/coverage.yml') }}
-      - name: Prepare the isolated native player display
-        run: sudo apt-get install -y xvfb libgl1-mesa-dri
+          # The isolated native player display.
+          apt-packages: xvfb libgl1-mesa-dri
       - name: Test coverage floor enforcement
         run: python3 tools/ci/test-coverage-floors.py
       - name: Install cargo-llvm-cov

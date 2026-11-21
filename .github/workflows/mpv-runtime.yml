@@ -202,6 +202,7 @@ jobs:
           name: mpv-runtime-linux-candidate
           path: target/mpv-runtime-linux-dist
       - uses: ./.github/actions/setup
+        timeout-minutes: 25
         with:
           cache: 'false'
       - name: Verify the candidate and play synthetic media
@@ -209,7 +210,8 @@ jobs:
           dist=target/mpv-runtime-linux-dist
           (cd "$dist" && sha256sum --check SHA256SUMS)
           sudo apt-get remove -y libmpv-dev libmpv2
-          sudo apt-get install -y libpulse0 libasound2t64 libpipewire-0.3-0t64 libva2 libva-drm2 libssl3t64 libfontconfig1
+          bash tools/ci/apt-install.sh "$RUNNER_TEMP/patina-apt" false \
+            libpulse0 libasound2t64 libpipewire-0.3-0t64 libva2 libva-drm2 libssl3t64 libfontconfig1
           python3 tools/mpv-runtime-unix/runtime.py fetch --platform linux --manifest "$dist/runtime-linux.json" \
             --archive "$dist/mpv-runtime-linux-x86_64.tar.gz" --destination target/mpv-runtime-linux
           mkdir -p target/mpv-runtime-linux-tools

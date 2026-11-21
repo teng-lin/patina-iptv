@@ -76,8 +76,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        timeout-minutes: 25
         with:
           cache: 'false'
+          # Linux packaging tools, installed fresh (uncached) and bounded.
+          apt-packages: >-
+            ${{ matrix.platform == 'linux' && 'ruby-dev rpm zstd libarchive-tools patchelf file desktop-file-utils
+            libgirepository1.0-dev librsvg2-dev xvfb x11-utils xauth dbus-x11' || '' }}
       - uses: ./.github/actions/cargo-tool
         with:
           name: cargo-about
@@ -100,8 +105,6 @@ jobs:
       - name: Linux packages
         if: matrix.platform == 'linux'
         run: |
-          sudo apt-get install -y ruby-dev rpm zstd libarchive-tools patchelf file desktop-file-utils \
-            libgirepository1.0-dev librsvg2-dev xvfb x11-utils xauth dbus-x11
           sudo gem install fpm -v 1.16.0 --no-document
           bash tools/ci/setup-linux-packaging.sh
           export PATH="$RUNNER_TEMP/linux-packaging:$PATH"
@@ -204,6 +207,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        timeout-minutes: 25
         with:
           cache: 'false'
       - name: Set release metadata
