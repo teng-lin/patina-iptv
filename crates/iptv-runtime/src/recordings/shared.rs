@@ -109,7 +109,6 @@ pub(super) struct Passthrough {
     closing: AtomicBool,
     closed: AtomicBool,
     changed: tokio::sync::Notify,
-    executor: tokio::runtime::Handle,
 }
 impl Transport {
     fn passthrough(
@@ -127,7 +126,6 @@ impl Transport {
             closing: AtomicBool::new(false),
             closed: AtomicBool::new(false),
             changed: tokio::sync::Notify::new(),
-            executor: tokio::runtime::Handle::current(),
         })))
     }
     fn url(&self) -> &str {
@@ -165,14 +163,34 @@ impl Transport {
                     .take();
                 if let Some(relay) = relay {
                     input.closing.store(true, Ordering::Release);
-                    let closing = input.clone();
-                    // Closure remains owned even if this retirement waiter is
-                    // canceled by UI teardown or another replacement.
-                    input.executor.spawn(async move {
-                        relay.shutdown().await;
-                        closing.closed.store(true, Ordering::Release);
-                        closing.changed.notify_waiters();
-                    });
+                    // Closure is owned by a thread of its own: it outlives a
+                    // retirement waiter canceled by UI teardown or another
+                    // replacement, and any executor. (Spawned on one, it was
+                    // lost when that executor was dropped, as a recording
+                    // host restarted with new services drops the old ones',
+                    // and this wait then never ended.)
+                    // The flag rises and waiters wake however the closing
+                    // ends: done, unwound, or never started (no thread: the
+                    // relay, dropped with the closure, still stops).
+                    struct Closed(Arc<Passthrough>);
+                    impl Drop for Closed {
+                        fn drop(&mut self) {
+                            self.0.closed.store(true, Ordering::Release);
+                            self.0.changed.notify_waiters();
+                        }
+                    }
+                    let closed = Closed(input.clone());
+                    let close = move || {
+                        let _closed = closed;
+                        // The relay's shutdown only awaits its own thread's
+                        // oneshot: a runtime without IO or timers drives it.
+                        if let Ok(runtime) = tokio::runtime::Builder::new_current_thread().build() {
+                            runtime.block_on(relay.shutdown());
+                        }
+                    };
+                    let _ = std::thread::Builder::new()
+                        .name("iptv-relay-close".into())
+                        .spawn(close);
                 }
                 loop {
                     let changed = input.changed.notified();

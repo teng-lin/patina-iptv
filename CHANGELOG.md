@@ -34,6 +34,14 @@ is below 1.0, a minor release may change behavior.
   tile or opening a window does not take the sound; removing or closing the
   heard one gives it back to the one heard before it, else to the main
   player. A full-screen detour, enlarging, reducing and resizing keep it.
+- Shows: an episode ending no longer pulls the viewer out of where they
+  went (#187). Full screen is unchanged. On the series' details, the next
+  episode plays in the preview behind them (Play or OK takes it full
+  screen), or, with autoplay off, waits there selected with "Ready for the
+  next episode". Anywhere else, such as a list, the guide or settings,
+  playback stops and the series' card and Continue watching hold the next
+  episode. A PIN prompt for the next episode no longer pops up on its own:
+  when one would be needed, the next episode waits as with autoplay off.
 - Back from a movie or an episode playing full screen now returns to its
   details instead of the guide, on every input (a remote's Back, Escape or
   Backspace, and the play bar's ‹, now labeled Movies or Shows): a movie
@@ -109,6 +117,10 @@ is below 1.0, a minor release may change behavior.
 
 ### Fixed
 
+- Movies and Shows: a title that follows another (the next episode, or
+  another title chosen) no longer stays on "Loading…" when the recording
+  host restarted while the earlier one played. Retiring the earlier
+  title's stream waited forever on the stopped host's executor (#187).
 - Movies and Shows: Back to a title beyond the first screenful of the list
   (from its details, or from the title playing full screen) now scrolls the
   list to that title, shown and selected, instead of showing the top of the

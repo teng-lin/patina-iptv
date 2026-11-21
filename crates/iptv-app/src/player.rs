@@ -452,7 +452,15 @@ pub fn play_recording(ui: Ui, job: iptv_core::recording::Job, source: PlaySource
     ui.mode.set(ViewMode::Fullscreen);
 }
 
-pub fn play_vod(ui: Ui, playing: iptv_runtime::vod::Playing, source: PlaySource) {
+/// Plays a movie or an episode on surface 0: full screen, or (`full_screen`
+/// false) where the screen shows the player now, the preview behind a
+/// series' details for its next episode (#187).
+pub fn play_vod(
+    ui: Ui,
+    playing: iptv_runtime::vod::Playing,
+    source: PlaySource,
+    full_screen: bool,
+) {
     crate::interruption::viewer_acted(ui);
     crate::on_demand::flush(ui, false);
     let resume = playing.progress.resume_ms();
@@ -478,7 +486,9 @@ pub fn play_vod(ui: Ui, playing: iptv_runtime::vod::Playing, source: PlaySource)
     if resume > 0 {
         ui.player.main().resume_ms.set(Some(resume));
     }
-    ui.mode.set(ViewMode::Fullscreen);
+    if full_screen {
+        ui.mode.set(ViewMode::Fullscreen);
+    }
 }
 
 /// Surface `surface` plays nothing (surface 0 keeps its channel's key;

@@ -165,6 +165,18 @@ and focus on a live channel follows the clock to the program now on air.
   scrolled to that title however deep it is (#176), and its card (a
   movie's, or the series' of the episode played) shows the progress just
   watched without the list being read again (#177).
+- **Now:** an episode ending never changes the screen on its own
+  (`vod_view::observe`). Full screen, the next episode plays full screen
+  with `vod.autoplay_next_episode` on; with autoplay off, or when the next
+  episode would need a PIN, the series' details open on it with "Ready for
+  the next episode". On that series' details, the next episode plays in
+  the preview behind them with autoplay on, selected with its season, and
+  Play or OK takes it full screen; with autoplay off, or when it would
+  need a PIN, playback stops and the details select it with the same
+  notice. Anywhere else (a list or shelf, the
+  guide, another title's details, settings), playback stops as after the
+  viewer's Stop, and the series' card and Continue watching hold the next
+  episode. A PIN for it is asked for only when the viewer plays it (#187).
 - **Now:** with `guide.back_returns_to_now` (on by default), Back with focus on a
   past or upcoming program in the guide first returns to the programs on
   air, after any dialog or hint card closes.

@@ -481,12 +481,17 @@ fn play(ui: Ui, restart: bool) {
 }
 
 fn play_key(ui: Ui, details: Details, key: Key, restart: bool) {
-    let generation = ui.vod.with_untracked(|s| s.generation);
+    // The viewer's choice supersedes a next episode about to autoplay
+    // (`autoplay_next`), also while its PIN is still being checked.
+    let generation = edit(ui, |s| {
+        s.generation = s.generation.wrapping_add(1);
+        s.generation
+    });
     let parent = (key.kind == Kind::Episode).then(|| details.item.key.clone());
     let run = move || {
         crate::parental_view::request(ui, iptv_runtime::vod::target(&key), move || {
             if ui.vod.with_untracked(|s| s.generation == generation) {
-                play_authorized(ui, details, key, restart);
+                play_authorized(ui, details, key, restart, true);
             }
         })
     };
@@ -497,7 +502,9 @@ fn play_key(ui: Ui, details: Details, key: Key, restart: bool) {
     }
 }
 
-fn play_authorized(ui: Ui, details: Details, key: Key, restart: bool) {
+/// Plays `key` full screen, or (`full_screen` false) in the preview behind
+/// the details, which stay open (#187).
+fn play_authorized(ui: Ui, details: Details, key: Key, restart: bool, full_screen: bool) {
     let generation = edit(ui, |s| s.begin_operation());
     // Retry plays the same title or episode the same way, after reading
     // its details and link afresh.
@@ -510,7 +517,15 @@ fn play_authorized(ui: Ui, details: Details, key: Key, restart: bool) {
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
         let result = owner.vod_play(details, key, restart).await;
+        // An episode that ended, its next one not played in the preview
+        // after all, stops as with autoplay off.
+        let not_played = move || {
+            if !full_screen {
+                stop_ended(ui);
+            }
+        };
         if ui.vod.with_untracked(|s| s.generation != generation) {
+            not_played();
             return;
         }
         ui.vod.update(|s| s.busy = false);
@@ -526,14 +541,17 @@ fn play_authorized(ui: Ui, details: Details, key: Key, restart: bool) {
                             failed,
                         )
                     });
+                    not_played();
                     return;
                 }
                 flush(ui);
-                crate::player::play_vod(ui, playing, source);
-                // The screen waits under the player: Back from the title
-                // returns to its details (`return_from_player`).
-                crate::runtime().vod_discovery_cancel();
-                ui.vod.update(|s| s.hand_to_player());
+                crate::player::play_vod(ui, playing, source, full_screen);
+                if full_screen {
+                    // The screen waits under the player: Back from the
+                    // title returns to its details (`return_from_player`).
+                    crate::runtime().vod_discovery_cancel();
+                    ui.vod.update(|s| s.hand_to_player());
+                }
             }
             Err(_) => {
                 ui.vod.update(|s| {
@@ -544,9 +562,21 @@ fn play_authorized(ui: Ui, details: Details, key: Key, restart: bool) {
                         failed,
                     )
                 });
+                not_played();
             }
         }
     });
+}
+
+/// Nothing plays any more if what played has ended.
+fn stop_ended(ui: Ui) {
+    if ui
+        .player
+        .vod
+        .with_untracked(|p| p.as_ref().is_some_and(|(p, _)| p.ended))
+    {
+        crate::player_keys::stopped(ui);
+    }
 }
 
 fn toggle_block(ui: Ui) {
@@ -818,18 +848,116 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
         // when Back from the next episode comes before that one saves.
         let mut details = p.details.clone();
         ui.vod.update(|s| s.watched(&mut details, &p.key, true));
-        if crate::settings::flag(iptv_settings::keys::VOD_AUTOPLAY_NEXT_EPISODE) {
-            play_key(ui, details, next.key.clone(), false);
-        } else {
-            ui.vod.update(|s| {
-                s.open = true;
-                s.show_details(details);
-                s.episode = Some(next.key.clone());
-                s.season = Some(next.season);
-                s.notice = Some(crate::i18n::key("Ready for the next episode").into());
-            });
+        let autoplay = crate::settings::flag(iptv_settings::keys::VOD_AUTOPLAY_NEXT_EPISODE);
+        let (key, season) = (next.key.clone(), next.season);
+        // The screen never changes on its own (#187).
+        match where_watched(ui, &details.item.key) {
+            Watched::FullScreen | Watched::Details if autoplay => {
+                autoplay_next(ui, p.key, details, key, season)
+            }
+            watched => wait_for_next(ui, watched, details, key, season),
         }
     }
+}
+
+/// Where the viewer is as the playing episode of `series` ends.
+enum Watched {
+    /// Its player full screen, nothing covering the video.
+    FullScreen,
+    /// The series' details, the episode in the preview behind them.
+    Details,
+    /// A list or shelf, the guide, another title's details, settings…
+    Elsewhere,
+}
+
+fn where_watched(ui: Ui, series: &Key) -> Watched {
+    use crate::overlays::Overlay;
+    let details = ui.top_overlay() == Some(Overlay::Vod)
+        && ui
+            .vod
+            .with_untracked(|s| s.details.as_ref().is_some_and(|d| &d.item.key == series));
+    if details {
+        Watched::Details
+    } else if ui.mode.get_untracked() == crate::ViewMode::Fullscreen
+        && !ui.overlay_open(Overlay::covers_video)
+    {
+        Watched::FullScreen
+    } else {
+        Watched::Elsewhere
+    }
+}
+
+/// The series' details shown stay, with the progress just watched, and
+/// choose the next episode `key` of `season`; `ready` says it waits for
+/// Play.
+fn select_next(ui: Ui, details: Details, key: &Key, season: u32, ready: bool) {
+    ui.vod.update(|s| {
+        s.details = Some(details);
+        s.episode = Some(key.clone());
+        s.season = Some(season);
+        s.notice = ready.then(|| crate::i18n::key("Ready for the next episode").into());
+    });
+}
+
+/// The next episode `key` is not played: full screen, the series'
+/// details open on it; on them, playback stops and they choose it; anywhere
+/// else playback stops, its series' card and Continue watching resuming it.
+fn wait_for_next(ui: Ui, watched: Watched, details: Details, key: Key, season: u32) {
+    match watched {
+        Watched::FullScreen => ui.vod.update(|s| {
+            s.open = true;
+            s.show_details(details);
+            s.episode = Some(key);
+            s.season = Some(season);
+            s.notice = Some(crate::i18n::key("Ready for the next episode").into());
+        }),
+        Watched::Details => {
+            crate::player_keys::stopped(ui);
+            select_next(ui, details, &key, season, true);
+        }
+        Watched::Elsewhere => crate::player_keys::stopped(ui),
+    }
+}
+
+/// The next episode `key` plays on where the viewer watches, full screen
+/// or in the preview behind the series' details (chosen there), when it
+/// needs no PIN now. A PIN is asked for only when the viewer plays it:
+/// else it waits as with autoplay off. Nothing happens if the viewer chose
+/// something meanwhile.
+fn autoplay_next(ui: Ui, ended: Key, details: Details, key: Key, season: u32) {
+    let series = details.item.key.clone();
+    // The viewer's choices: a title (`play_key` advances the generation),
+    // or anything else the player plays instead.
+    let generation = ui.vod.with_untracked(|s| s.generation);
+    let chosen = move || {
+        ui.vod.with_untracked(|s| s.generation) != generation
+            || !ui
+                .player
+                .vod
+                .with_untracked(|p| p.as_ref().is_some_and(|(p, _)| p.key == ended))
+    };
+    crate::data::spawn_in_app(async move {
+        let owner = crate::runtime();
+        let allowed = owner
+            .parental_check(&iptv_runtime::vod::target(&series))
+            .await
+            .is_ok()
+            && owner
+                .parental_check(&iptv_runtime::vod::target(&key))
+                .await
+                .is_ok();
+        if chosen() {
+            return;
+        }
+        match where_watched(ui, &series) {
+            Watched::FullScreen if allowed => play_authorized(ui, details, key, false, true),
+            Watched::Details if allowed => {
+                select_next(ui, details.clone(), &key, season, false);
+                play_authorized(ui, details, key, false, false);
+            }
+            watched => wait_for_next(ui, watched, details, key, season),
+        }
+    });
 }
 
 fn next(ui: Ui) {
