@@ -722,10 +722,22 @@ impl Items<'_> {
     fn insert_row(&self, conn: &rusqlite::Connection, source: SourceId, i: usize) -> Result<bool> {
         let position = i as i64;
         match self {
-            Self::Groups(items) => catalog::group_row(conn, source, &items[i], position),
-            Self::Channels(items) => catalog::channel_row(conn, source, &items[i], position),
-            Self::Vod(items) => catalog::vod_row(conn, source, &items[i], position),
-            Self::Series(items) => catalog::series_row(conn, source, &items[i], position),
+            Self::Groups(items) => {
+                let mut stmt = conn.prepare_cached(catalog::GROUP_ROW)?;
+                catalog::group_row(&mut stmt, source, &items[i], position)
+            }
+            Self::Channels(items) => {
+                let mut stmt = conn.prepare_cached(catalog::CHANNEL_ROW)?;
+                catalog::channel_row(&mut stmt, source, &items[i], position)
+            }
+            Self::Vod(items) => {
+                let mut stmt = conn.prepare_cached(catalog::VOD_ROW)?;
+                catalog::vod_row(&mut stmt, source, &items[i], position)
+            }
+            Self::Series(items) => {
+                let mut stmt = conn.prepare_cached(catalog::SERIES_ROW)?;
+                catalog::series_row(&mut stmt, source, &items[i], position)
+            }
         }
     }
 
@@ -755,6 +767,12 @@ impl Items<'_> {
                     member = None;
                     at += 1;
                 }
+                continue;
+            }
+            if meter.unlimited() {
+                // The rest in one call, as the one-shot form inserts them.
+                *inserted += self.insert_all(conn, source, at..self.len())?;
+                at = self.len();
                 continue;
             }
             // As many whole items as the budget holds, in one call.

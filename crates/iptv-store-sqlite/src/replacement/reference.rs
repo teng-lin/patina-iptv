@@ -10,8 +10,9 @@ use iptv_import::EpgImport;
 use iptv_providers::model::{Channel, Group, Series, VodItem};
 use rusqlite::{TransactionBehavior, params};
 
-use crate::catalog::{DELETE_CATALOG, insert_channels, insert_groups, insert_series, insert_vod};
+use crate::catalog::DELETE_CATALOG;
 use crate::catalog_stage::{CatalogStage, STAGE_TABLES as TABLES};
+use crate::codec::{catch_up_to_json, group_ids_to_json, stream_to_json};
 use crate::epg::{
     COPY_CACHE_KIB, EpgCounts, EpgFeedMeta, copy_programs, delete_guide_rows, insert_feed,
     insert_feed_channels, kind_slug, matching_projection_key,
@@ -19,6 +20,8 @@ use crate::epg::{
 use crate::epg_stage::EpgStage;
 use crate::sources::{self, CatalogCounts, ensure_source, record_import_success};
 use crate::{Result, SourceId, Store, StoreError, catalog, search};
+use iptv_providers::{ContentId, GroupId};
+use rusqlite::Connection;
 
 fn count(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
@@ -26,6 +29,184 @@ fn count(n: usize) -> u32 {
 
 fn invalid(s: &str) -> StoreError {
     StoreError::InvalidData(s.into())
+}
+
+// Master's insert loops, unchanged apart from their names.
+fn master_insert_groups(
+    conn: &Connection,
+    source: SourceId,
+    groups: &[Group],
+    offset: i64,
+) -> Result<usize> {
+    let mut stmt = conn.prepare_cached(
+        "INSERT OR IGNORE INTO groups (source_id, id, kind, position, name, provider_id, adult)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+    )?;
+    let mut inserted = 0;
+    for (position, g) in groups.iter().enumerate() {
+        inserted += stmt.execute(params![
+            source.0,
+            g.id.as_str(),
+            g.kind.slug(),
+            position as i64 + offset,
+            g.name,
+            g.provider_id,
+            g.adult
+        ])?;
+    }
+    Ok(inserted)
+}
+
+/// Inserts membership rows for one item; `sql` is a fixed statement.
+fn master_insert_members(
+    conn: &Connection,
+    sql: &str,
+    source: SourceId,
+    item: &ContentId,
+    groups: &[GroupId],
+    position: i64,
+) -> Result<()> {
+    let mut stmt = conn.prepare_cached(sql)?;
+    for g in groups {
+        stmt.execute(params![source.0, g.as_str(), item.as_str(), position])?;
+    }
+    Ok(())
+}
+
+fn master_insert_channels(
+    conn: &Connection,
+    source: SourceId,
+    channels: &[Channel],
+    offset: i64,
+) -> Result<usize> {
+    let mut stmt = conn.prepare_cached(
+        "INSERT OR IGNORE INTO channels (source_id, id, position, provider_id, name, number, logo,
+             group_ids, stream, epg_id, epg_name, epg_shift_minutes, catch_up, radio)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+    )?;
+    let mut inserted = 0;
+    for (position, c) in channels.iter().enumerate() {
+        let position = position as i64 + offset;
+        let added = stmt.execute(params![
+            source.0,
+            c.id.as_str(),
+            position,
+            c.provider_id,
+            c.name,
+            c.number,
+            c.logo,
+            group_ids_to_json(&c.groups),
+            stream_to_json(&c.stream),
+            c.epg_id,
+            c.epg_name,
+            c.epg_shift_minutes,
+            c.catch_up.as_ref().map(catch_up_to_json),
+            c.radio
+        ])?;
+        if added > 0 {
+            inserted += 1;
+            master_insert_members(
+                conn,
+                "INSERT OR IGNORE INTO channel_groups (source_id, group_id, channel_id, position)
+                 VALUES (?1, ?2, ?3, ?4)",
+                source,
+                &c.id,
+                &c.groups,
+                position,
+            )?;
+        }
+    }
+    Ok(inserted)
+}
+
+fn master_insert_vod(
+    conn: &Connection,
+    source: SourceId,
+    vod: &[VodItem],
+    offset: i64,
+) -> Result<usize> {
+    let mut stmt = conn.prepare_cached(
+        "INSERT OR IGNORE INTO vod (source_id, id, position, provider_id, name, group_ids, poster,
+             plot, year, rating_x10, added, duration_secs, stream, is_series, episode_numbers)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+    )?;
+    let mut inserted = 0;
+    for (position, v) in vod.iter().enumerate() {
+        let position = position as i64 + offset;
+        let added = stmt.execute(params![
+            source.0,
+            v.id.as_str(),
+            position,
+            v.provider_id,
+            v.name,
+            group_ids_to_json(&v.groups),
+            v.poster,
+            v.plot,
+            v.year,
+            v.rating_x10,
+            v.added,
+            v.duration_secs,
+            stream_to_json(&v.stream),
+            v.is_series,
+            serde_json::to_string(&v.episode_numbers)?
+        ])?;
+        if added > 0 {
+            inserted += 1;
+            master_insert_members(
+                conn,
+                "INSERT OR IGNORE INTO vod_groups (source_id, group_id, vod_id, position)
+                 VALUES (?1, ?2, ?3, ?4)",
+                source,
+                &v.id,
+                &v.groups,
+                position,
+            )?;
+        }
+    }
+    Ok(inserted)
+}
+
+fn master_insert_series(
+    conn: &Connection,
+    source: SourceId,
+    series: &[Series],
+    offset: i64,
+) -> Result<usize> {
+    let mut stmt = conn.prepare_cached(
+        "INSERT OR IGNORE INTO series (source_id, id, position, provider_id, name, group_ids,
+             poster, plot, year, rating_x10, last_modified)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+    )?;
+    let mut inserted = 0;
+    for (position, s) in series.iter().enumerate() {
+        let position = position as i64 + offset;
+        let added = stmt.execute(params![
+            source.0,
+            s.id.as_str(),
+            position,
+            s.provider_id,
+            s.name,
+            group_ids_to_json(&s.groups),
+            s.poster,
+            s.plot,
+            s.year,
+            s.rating_x10,
+            s.last_modified
+        ])?;
+        if added > 0 {
+            inserted += 1;
+            master_insert_members(
+                conn,
+                "INSERT OR IGNORE INTO series_groups (source_id, group_id, series_id, position)
+                 VALUES (?1, ?2, ?3, ?4)",
+                source,
+                &s.id,
+                &s.groups,
+                position,
+            )?;
+        }
+    }
+    Ok(inserted)
 }
 
 impl Store {
@@ -47,10 +228,10 @@ impl Store {
         for sql in DELETE_CATALOG {
             tx.execute(sql, [source.0])?;
         }
-        let groups_n = insert_groups(&tx, source, groups, 0)?;
-        let channels_n = insert_channels(&tx, source, channels, 0)?;
-        let vod_n = insert_vod(&tx, source, vod, 0)?;
-        let series_n = insert_series(&tx, source, series, 0)?;
+        let groups_n = master_insert_groups(&tx, source, groups, 0)?;
+        let channels_n = master_insert_channels(&tx, source, channels, 0)?;
+        let vod_n = master_insert_vod(&tx, source, vod, 0)?;
+        let series_n = master_insert_series(&tx, source, series, 0)?;
         search::index_source(&tx, fts, source)?;
         let total = groups.len() + channels.len() + vod.len() + series.len();
         let counts = CatalogCounts {

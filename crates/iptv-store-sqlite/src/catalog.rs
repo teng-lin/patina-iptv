@@ -24,24 +24,24 @@ pub(crate) const DELETE_CATALOG: &[&str] = &[
     "DELETE FROM groups WHERE source_id = ?1",
 ];
 
-const GROUP_ROW: &str =
+pub(crate) const GROUP_ROW: &str =
     "INSERT OR IGNORE INTO groups (source_id, id, kind, position, name, provider_id, adult)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
-const CHANNEL_ROW: &str =
+pub(crate) const CHANNEL_ROW: &str =
     "INSERT OR IGNORE INTO channels (source_id, id, position, provider_id, name, number, logo,
              group_ids, stream, epg_id, epg_name, epg_shift_minutes, catch_up, radio)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)";
 pub(crate) const CHANNEL_MEMBERS: &str =
     "INSERT OR IGNORE INTO channel_groups (source_id, group_id, channel_id, position)
                  VALUES (?1, ?2, ?3, ?4)";
-const VOD_ROW: &str =
+pub(crate) const VOD_ROW: &str =
     "INSERT OR IGNORE INTO vod (source_id, id, position, provider_id, name, group_ids, poster,
              plot, year, rating_x10, added, duration_secs, stream, is_series, episode_numbers)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)";
 pub(crate) const VOD_MEMBERS: &str =
     "INSERT OR IGNORE INTO vod_groups (source_id, group_id, vod_id, position)
                  VALUES (?1, ?2, ?3, ?4)";
-const SERIES_ROW: &str =
+pub(crate) const SERIES_ROW: &str =
     "INSERT OR IGNORE INTO series (source_id, id, position, provider_id, name, group_ids,
              poster, plot, year, rating_x10, last_modified)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
@@ -51,12 +51,12 @@ pub(crate) const SERIES_MEMBERS: &str =
 
 /// Inserts one group at `position`; whether it was new.
 pub(crate) fn group_row(
-    conn: &Connection,
+    stmt: &mut rusqlite::CachedStatement<'_>,
     source: SourceId,
     g: &Group,
     position: i64,
 ) -> Result<bool> {
-    let added = conn.prepare_cached(GROUP_ROW)?.execute(params![
+    let added = stmt.execute(params![
         source.0,
         g.id.as_str(),
         g.kind.slug(),
@@ -74,9 +74,10 @@ pub(crate) fn insert_groups(
     groups: &[Group],
     offset: i64,
 ) -> Result<usize> {
+    let mut stmt = conn.prepare_cached(GROUP_ROW)?;
     let mut inserted = 0;
     for (position, g) in groups.iter().enumerate() {
-        inserted += usize::from(group_row(conn, source, g, position as i64 + offset)?);
+        inserted += usize::from(group_row(&mut stmt, source, g, position as i64 + offset)?);
     }
     Ok(inserted)
 }
@@ -99,12 +100,12 @@ pub(crate) fn insert_members(
 
 /// Inserts one channel's row (not its memberships); whether it was new.
 pub(crate) fn channel_row(
-    conn: &Connection,
+    stmt: &mut rusqlite::CachedStatement<'_>,
     source: SourceId,
     c: &Channel,
     position: i64,
 ) -> Result<bool> {
-    let added = conn.prepare_cached(CHANNEL_ROW)?.execute(params![
+    let added = stmt.execute(params![
         source.0,
         c.id.as_str(),
         position,
@@ -129,10 +130,11 @@ pub(crate) fn insert_channels(
     channels: &[Channel],
     offset: i64,
 ) -> Result<usize> {
+    let mut stmt = conn.prepare_cached(CHANNEL_ROW)?;
     let mut inserted = 0;
     for (position, c) in channels.iter().enumerate() {
         let position = position as i64 + offset;
-        if channel_row(conn, source, c, position)? {
+        if channel_row(&mut stmt, source, c, position)? {
             inserted += 1;
             insert_members(conn, CHANNEL_MEMBERS, source, &c.id, &c.groups, position)?;
         }
@@ -142,12 +144,12 @@ pub(crate) fn insert_channels(
 
 /// Inserts one VOD item's row (not its memberships); whether it was new.
 pub(crate) fn vod_row(
-    conn: &Connection,
+    stmt: &mut rusqlite::CachedStatement<'_>,
     source: SourceId,
     v: &VodItem,
     position: i64,
 ) -> Result<bool> {
-    let added = conn.prepare_cached(VOD_ROW)?.execute(params![
+    let added = stmt.execute(params![
         source.0,
         v.id.as_str(),
         position,
@@ -173,10 +175,11 @@ pub(crate) fn insert_vod(
     vod: &[VodItem],
     offset: i64,
 ) -> Result<usize> {
+    let mut stmt = conn.prepare_cached(VOD_ROW)?;
     let mut inserted = 0;
     for (position, v) in vod.iter().enumerate() {
         let position = position as i64 + offset;
-        if vod_row(conn, source, v, position)? {
+        if vod_row(&mut stmt, source, v, position)? {
             inserted += 1;
             insert_members(conn, VOD_MEMBERS, source, &v.id, &v.groups, position)?;
         }
@@ -186,12 +189,12 @@ pub(crate) fn insert_vod(
 
 /// Inserts one series' row (not its memberships); whether it was new.
 pub(crate) fn series_row(
-    conn: &Connection,
+    stmt: &mut rusqlite::CachedStatement<'_>,
     source: SourceId,
     s: &Series,
     position: i64,
 ) -> Result<bool> {
-    let added = conn.prepare_cached(SERIES_ROW)?.execute(params![
+    let added = stmt.execute(params![
         source.0,
         s.id.as_str(),
         position,
@@ -213,10 +216,11 @@ pub(crate) fn insert_series(
     series: &[Series],
     offset: i64,
 ) -> Result<usize> {
+    let mut stmt = conn.prepare_cached(SERIES_ROW)?;
     let mut inserted = 0;
     for (position, s) in series.iter().enumerate() {
         let position = position as i64 + offset;
-        if series_row(conn, source, s, position)? {
+        if series_row(&mut stmt, source, s, position)? {
             inserted += 1;
             insert_members(conn, SERIES_MEMBERS, source, &s.id, &s.groups, position)?;
         }
