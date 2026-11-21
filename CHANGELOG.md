@@ -74,6 +74,9 @@ is below 1.0, a minor release may change behaviour.
 
 ### Fixed
 
+- iPad: a mostly sideways diagonal swipe in the guide, up to about 1.5
+  across for every 1 down, now pans the timeline instead of scrolling the
+  channels. Taps that wobble sideways by less than 10 points still play.
 - With autoplay on, closing the menu that a long press or right-click
   opened on another channel in the guide no longer tunes that channel.
   Autoplay waits until you move the focus to another channel; choosing the
