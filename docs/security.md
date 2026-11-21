@@ -203,8 +203,11 @@ memory and, written by the host in 64 KiB chunks, in the app's IndexedDB,
 readable by anyone who can debug the app on that TV. A browser app has no
 keystore, so a key the app held itself would only obscure the data; the
 store does not pretend to encrypt it. Freed pages are zeroed
-(`secure_delete`), so a deleted source's credentials do not stay in a saved
-chunk. Staging databases and a publish's copy of the database exist only in
+(`secure_delete`), so a deleted source's credentials are not in the chunks
+saved after the deletion. That cannot erase the superseded chunks the
+browser's IndexedDB (LevelDB on these TVs) may keep on its flash until it
+compacts them, just as it cannot erase copies in backups or storage-device
+remapping natively. Staging databases and a publish's copy of the database exist only in
 memory, and only the store's own connection can open its database.
 
 The host saves after a commit: it takes the changed chunks, which are a

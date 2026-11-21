@@ -89,6 +89,8 @@ def plan(root=ROOT, release=False, tier="full", host="linux"):
         # run in Node (needs a clang with the wasm32 target, and Node).
         steps.append(step("store-wasm-check", "cargo", "check", "--locked", "-p", "iptv-store-sqlite",
                           "--target", "wasm32-unknown-unknown", "--lib", "--tests"))
+        steps.append(step("store-wasm-clippy", "cargo", "clippy", "--locked", "-p", "iptv-store-sqlite",
+                          "--target", "wasm32-unknown-unknown", "--lib", "--tests", "--", "-D", "warnings"))
         steps.append(step("store-wasm-tests", "node", "tools/wasm-test.mjs", "--cargo", "--locked",
                           "-p", "iptv-store-sqlite", "--lib", "--test", "it"))
     steps.extend([

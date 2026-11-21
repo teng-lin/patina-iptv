@@ -154,13 +154,16 @@ class Plan(unittest.TestCase):
         self.assertEqual(self.by_name["store-wasm-check"],
                          ["cargo", "check", "--locked", "-p", "iptv-store-sqlite",
                           "--target", "wasm32-unknown-unknown", "--lib", "--tests"])
+        self.assertEqual(self.by_name["store-wasm-clippy"],
+                         ["cargo", "clippy", "--locked", "-p", "iptv-store-sqlite",
+                          "--target", "wasm32-unknown-unknown", "--lib", "--tests", "--", "-D", "warnings"])
         self.assertEqual(self.by_name["store-wasm-tests"],
                          ["node", "tools/wasm-test.mjs", "--cargo", "--locked",
                           "-p", "iptv-store-sqlite", "--lib", "--test", "it"])
         self.assertTrue((checks.ROOT / "tools/wasm-test.mjs").is_file())
         for host in ("macos", "windows"):
             names = {step["name"] for step in checks.plan(host=host)}
-            self.assertFalse(names & {"store-wasm-check", "store-wasm-tests"})
+            self.assertFalse(names & {"store-wasm-check", "store-wasm-clippy", "store-wasm-tests"})
 
     def test_release_only_changes_the_normal_app_build(self):
         release = {step["name"]: step["argv"] for step in checks.plan(release=True)}
