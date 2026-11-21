@@ -1309,17 +1309,13 @@ impl Screen {
             && self.handoff == Handoff::Playing
             && self.details.as_ref().is_some_and(|d| &d.item.key == item)
     }
-    /// Back from `played` (a movie, or an episode of `details`) full
-    /// screen: its details reopen, the played episode and its season
-    /// chosen and the focus on Play, found by identity in `details` (the
-    /// player's, with the progress just watched). The list underneath is
-    /// the one the title was chosen from; its card there (a movie's, or
-    /// the series' of the episode played) shows the progress just watched
-    /// without the list being read again (#177). `saved` tells whether
-    /// the player saved progress for `played`: until it does, the store's
-    /// series record still describes the episode watched before, and the
-    /// series' card stays as it was.
-    pub fn return_from_player(&mut self, mut details: Details, played: &Key, saved: bool) {
+    /// `played` (a movie, or an episode of `details`, the player's) was
+    /// watched: its title's card in the list, and `details`' own item,
+    /// show the progress just watched, without the list being read again
+    /// (#177). `saved` tells whether the player saved progress for
+    /// `played`: until it does, the store's series record still describes
+    /// the episode watched before, and a series' card stays as it was.
+    pub fn watched(&mut self, details: &mut Details, played: &Key, saved: bool) {
         let progress = if details.item.key.kind == Kind::Series {
             saved.then(|| details.series_progress(played)).flatten()
         } else {
@@ -1331,6 +1327,16 @@ impl Screen {
                 card.progress = progress;
             }
         }
+    }
+    /// Back from `played` (a movie, or an episode of `details`) full
+    /// screen: its details reopen, the played episode and its season
+    /// chosen and the focus on Play, found by identity in `details` (the
+    /// player's, with the progress just watched). The list underneath is
+    /// the one the title was chosen from; its card there (a movie's, or
+    /// the series' of the episode played) shows the progress just watched
+    /// without the list being read again (#177; see [`Screen::watched`]).
+    pub fn return_from_player(&mut self, mut details: Details, played: &Key, saved: bool) {
+        self.watched(&mut details, played, saved);
         self.open = true;
         self.search_open = false;
         self.clear_failure();

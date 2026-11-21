@@ -817,9 +817,12 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
         if crate::settings::flag(iptv_settings::keys::VOD_AUTOPLAY_NEXT_EPISODE) {
             play_key(ui, p.details.clone(), next.key.clone(), false);
         } else {
+            // The episode's end was saved: its series' card shows it.
+            let mut details = p.details.clone();
             ui.vod.update(|s| {
+                s.watched(&mut details, &p.key, true);
                 s.open = true;
-                s.show_details(p.details.clone());
+                s.show_details(details);
                 s.episode = Some(next.key.clone());
                 s.season = Some(next.season);
                 s.notice = Some(crate::i18n::key("Ready for the next episode").into());
