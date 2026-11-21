@@ -346,10 +346,12 @@ never moves the sound (#135). The state is the core's
   prefer the focused tile to be heard (#179). Its row is reached like
   every settings row, by a remote's OK, a tap, a click or the keyboard.
   With it on, each focus move of the viewer's in multiview (the arrows, a
-  tap or a click on another tile, a channel picked to add or change a
-  tile, or one already on a tile) makes that tile heard, as **Listen to
-  this** would, and the speaker badge moves with it. Opening a tile's
-  menu moves nothing, and **Listen to this** still works. A full-screen
+  tap or a click on another tile, a tile added, or a picked channel
+  already on another tile) makes that tile heard, as **Listen to this**
+  would, and the speaker badge moves with it. Only a focus that moves
+  takes the sound: opening a tile's menu, changing the focused tile's
+  channel and an arrow at the grid's edge move nothing, and **Listen to
+  this** still works. A full-screen
   detour, enlarging or reducing (also of another tile, which takes the
   focus) and removing a tile keep the rules above in both modes; focus
   left by them takes the sound only at the next focus move. Desktop

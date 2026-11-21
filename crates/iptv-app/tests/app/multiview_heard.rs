@@ -279,12 +279,12 @@ pub(crate) fn saved_follows(app: &mut Headless, path: &std::path::Path, on: bool
     });
 }
 
-/// With the settings screen open on its pages: Playback's rows, then
+/// With the settings screen on its Playback page: into its rows, then
 /// Down until the row's description (the focused row's) shows; `key`
 /// presses "right" or "down" by the input under test.
 pub(crate) fn to_follows_row(app: &mut Headless, key: impl Fn(&mut Headless, &str)) {
-    step(app.press("text:Playback >> nth=0"));
     key(app, "right");
+    step(app.wait_for("text:Hide the info panel after"));
     let help = "text:In multiview, hear the tile you select instead of choosing Listen to this.";
     for _ in 0..40 {
         if app.screen().matches(help).unwrap() {
@@ -314,6 +314,7 @@ fn the_sound_follows_the_selected_tile_row_works_by_keyboard_and_pointer_and_per
     step(app.press_key("left"));
     step(app.press("label:Settings"));
     step(app.wait_for("id:settings-screen"));
+    step(app.press("text:Playback >> nth=0"));
     // Down to the row by keys; Enter and a click or tap change it.
     to_follows_row(app, |app, key| step(app.press_key(key)));
     assert!(!follows_on(app), "off by default");

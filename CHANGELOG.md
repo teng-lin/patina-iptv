@@ -17,8 +17,8 @@ is below 1.0, a minor release may change behavior.
 - Multiview: an optional setting, **Sound follows the selected tile**
   (Settings, Playback, Player, Multiview; off by default), for viewers who
   prefer the focused tile to be heard (#179). With it on, moving the focus
-  to a tile (the arrows, a tap or a click, or a channel picked to add or
-  change a tile) makes it heard, and its speaker badge moves with it. A
+  to another tile (the arrows, a tap or a click, or a tile added) makes it
+  heard, and its speaker badge moves with it. A
   full-screen detour, enlarging, reducing and removing a tile keep the
   rules of #135. Desktop player windows and picture in picture keep
   **Listen to this**. Settings documents move to version 5; existing

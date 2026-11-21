@@ -4,10 +4,11 @@
 //! only by its menu's Listen to this ([`Multiview::listen`]), unless the
 //! viewer turned on "Sound follows the selected tile" (#179,
 //! [`Multiview::set_sound_follows_focus`]): then each focus move of the
-//! viewer's (an arrow, a tap on another tile, a channel picked to add or
-//! replace) is a Listen to this on the tile it lands on. Enlarging or
-//! reducing, a detour and a tile removed move the focus by themselves and
-//! keep the rules below either way. Opening
+//! viewer's (an arrow, a tap on another tile, a tile added, a picked
+//! channel already on another tile) is a Listen to this on the tile it
+//! lands on. A focus that stays (changing the focused tile's channel) takes
+//! nothing. Enlarging or reducing, a detour and a tile removed move the
+//! focus by themselves and keep the rules below either way. Opening
 //! keeps the sound on the channel that was playing (the first tile);
 //! adding or replacing a tile does not take it (a replaced heard tile
 //! stays heard, with its new channel); removing the heard tile hands it
@@ -263,8 +264,9 @@ impl<C: Clone + PartialEq> Multiview<C> {
 
     /// "Sound follows the selected tile" (#179): from now on, each focus
     /// move of the viewer's makes the tile it lands on heard (an arrow, a
-    /// tap on another tile, a channel picked to add or replace, or one
-    /// already on a tile). Turning it on moves nothing by itself.
+    /// tap on another tile, a tile added, a picked channel already on
+    /// another tile). A focus that stays where it is takes nothing, and
+    /// turning it on moves nothing by itself.
     pub fn set_sound_follows_focus(&mut self, on: bool) {
         self.sound_follows_focus = on;
     }
@@ -274,10 +276,15 @@ impl<C: Clone + PartialEq> Multiview<C> {
     }
 
     /// The viewer moved the focus to tile `index`; with the sound
-    /// following the focus it is heard too.
+    /// following the focus it is heard too. Focus that stays where it is
+    /// (changing the focused tile's channel, picking the channel it
+    /// already plays) moves no sound, so a tile chosen with Listen to
+    /// this keeps it.
     fn focus(&mut self, index: usize) {
+        let moved = index != self.active;
         self.active = index;
-        if self.sound_follows_focus
+        if moved
+            && self.sound_follows_focus
             && let Some(id) = self.tiles.get(index).map(|t| t.id)
         {
             self.heard.listen(id);

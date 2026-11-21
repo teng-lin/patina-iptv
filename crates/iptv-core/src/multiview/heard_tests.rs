@@ -235,7 +235,8 @@ fn with_the_sound_following_focus_each_focus_move_takes_it() {
     // Listen to this still works where the focus is not.
     mv.listen(0);
     assert_eq!(heard(&mv), 10);
-    // Replacing a tile's channel: the tile is focused, so heard.
+    // The tap to tile 3's menu takes the sound; replacing its channel
+    // keeps it there.
     assert_eq!(
         choose(&mut mv, 3, TileAction::Replace),
         Outcome::PickChannel
@@ -293,4 +294,49 @@ fn with_the_sound_following_focus_the_hand_back_rules_hold() {
     // Removing another tile keeps it.
     assert!(mv.remove_tile(1));
     assert_eq!(heard(&mv), 10);
+}
+
+/// Tile `active`'s menu item Change channel, by OK on the focused tile.
+fn change_channel(mv: &mut Multiview<u32>) -> Outcome<u32> {
+    mv.key(Key::Ok, ok);
+    let at = items(mv)
+        .iter()
+        .position(|a| *a == TileAction::Replace)
+        .unwrap();
+    mv.choose(at)
+}
+
+/// With the sound following the focus, only a focus that moves takes it:
+/// once focus and sound are apart (Listen to this on another tile),
+/// changing the focused tile's channel, picking the channel it already
+/// plays and an arrow at the grid's edge leave the sound where the viewer
+/// put it.
+#[test]
+fn with_the_sound_following_focus_a_focus_that_stays_moves_no_sound() {
+    let mut mv = following();
+    assert_eq!(mv.active().channel, 13);
+    mv.listen(1);
+    assert_eq!(heard(&mv), 11);
+    assert_eq!(change_channel(&mut mv), Outcome::PickChannel);
+    mv.picked(20);
+    assert_eq!(mv.active().channel, 20);
+    assert_eq!(heard(&mv), 11, "replacing the focused tile's channel");
+    change_channel(&mut mv);
+    mv.picked(20);
+    assert_eq!(heard(&mv), 11, "re-picking its own channel");
+    // Adding the channel the focused tile plays only focuses it again.
+    assert!(mv.remove_tile(2));
+    assert_eq!(mv.active().channel, 20);
+    assert_eq!(mv.add(), Outcome::PickChannel);
+    mv.picked(20);
+    assert_eq!(heard(&mv), 11, "picking the focused tile's channel");
+    // Arrows at the edge (20 is alone on the bottom row) move nothing.
+    mv.key(Key::Right, ok);
+    mv.key(Key::Down, ok);
+    assert_eq!(mv.active().channel, 20);
+    assert_eq!(heard(&mv), 11, "arrows that move no focus");
+    // A focus that moves takes it.
+    mv.key(Key::Up, ok);
+    assert_ne!(mv.active().channel, 20);
+    assert_eq!(heard(&mv), mv.active().channel);
 }
