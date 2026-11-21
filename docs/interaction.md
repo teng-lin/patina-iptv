@@ -161,7 +161,10 @@ and focus on a live channel follows the clock to the program now on air.
   and its season selected (`vod_view::return_from_player`; the play bar's ‹
   reads Movies or Shows). Back from the details returns to the list or
   shelf the title was chosen from, on that title, and from there to the
-  guide, the title playing on in the preview (#147).
+  guide, the title playing on in the preview (#147). The list opens
+  scrolled to that title however deep it is (#176), and its card (a
+  movie's, or the series' of the episode played) shows the progress just
+  watched without the list being read again (#177).
 - **Now:** with `guide.back_returns_to_now` (on by default), Back with focus on a
   past or upcoming program in the guide first returns to the programs on
   air, after any dialog or hint card closes.

@@ -100,6 +100,13 @@ is below 1.0, a minor release may change behavior.
 
 ### Fixed
 
+- Movies and Shows: Back to a title beyond the first screenful of the list
+  (from its details, or from the title playing full screen) now scrolls the
+  list to that title, shown and selected, instead of showing the top of the
+  list with the focus out of sight (#176).
+- Shows: Back from an episode to an ordinary category now shows the new
+  progress on the series' card at once, as movie cards already did, without
+  the list being read again (#177).
 - Cold start: the guide's first screen (the channels around the last one
   watched) shows as soon as it is read from the store, instead of only
   after the whole guide window was read, about half a second later with
