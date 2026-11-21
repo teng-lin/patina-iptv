@@ -1,5 +1,16 @@
-//! Multiview: up to four channels at once, one of them *active* (its sound
-//! plays, the others are muted; the remote's focus is on it).
+//! Multiview: up to four channels at once, one of them *active* (the
+//! remote's focus is on it) and one *heard* (its sound plays, the others
+//! are muted). Focus never moves the sound (#135): the heard tile changes
+//! only by its menu's Listen to this ([`Multiview::listen`]). Opening
+//! keeps the sound on the channel that was playing (the first tile);
+//! adding or replacing a tile does not take it (a replaced heard tile
+//! stays heard, with its new channel); removing the heard tile hands it
+//! back to the tile heard before it, else to the one on surface 0 (the
+//! full-screen player), else the first ([`crate::heard`]). The heard tile
+//! is kept by its identity ([`Tile::id`]), so enlarging, reducing,
+//! reflowing and a detour never move it; on a detour the tile watched
+//! full screen is heard, and the grid coming back brings the sound back
+//! to the heard tile ([`Multiview::audible_surface`]).
 //!
 //! The screen holds just the tiles ([`Layout`]): no empty cells, and the
 //! tiles flow again at once when one comes or goes. One tile sits centered
@@ -12,9 +23,11 @@
 //! its menu (`menu.rs`): try again (when it failed), add a screen from the
 //! channel list or the search screen (while another fits), change
 //! channel, pause or play that tile alone, enlarge or reduce (with two or
-//! more), full screen, remove (with two or more). Long OK (a long press on
+//! more), Listen to this (with two or more, on a tile not heard), full
+//! screen, remove (with two or more). Long OK (a long press on
 //! a tile) enlarges or reduces directly. A tap on another tile makes it
-//! active. Remove acts at once and the sound moves to a remaining tile.
+//! active. Remove acts at once; removing the heard tile hands the sound
+//! back as above.
 //! Back closes a dialog, else leaves multiview to the active tile in full
 //! screen.
 //!
@@ -37,12 +50,16 @@
 //! first; once the viewer insists it does not ask again in this multiview.
 //! Channels are the caller's (`C`); nothing here plays anything.
 
+#[cfg(test)]
+mod heard_tests;
 mod layout;
 mod menu;
 #[cfg(test)]
 mod tests;
 
 pub use layout::{Layout, Rect, THUMB, VIDEO};
+
+use crate::heard::Heard;
 pub use menu::{Dialog, TileAction, WARNING_CHOICES, WarningChoice};
 
 /// The most tiles (and player surfaces) multiview uses.
@@ -50,11 +67,21 @@ pub const MAX_SURFACES: usize = 4;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tile<C> {
+    /// Its identity for the session: kept while it plays, whatever its
+    /// place, surface or channel; never reused.
+    id: u32,
     /// The player surface it plays on (0 to [`MAX_SURFACES`] − 1).
     pub surface: usize,
     pub channel: C,
     /// Its player holds (the menu's Pause); the others play on.
     pub paused: bool,
+}
+
+impl<C> Tile<C> {
+    /// Its identity for the session (what the heard tile is kept by).
+    pub fn id(&self) -> u32 {
+        self.id
+    }
 }
 
 /// What the channel being picked is for.
@@ -113,8 +140,12 @@ pub struct Limits {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Multiview<C> {
     tiles: Vec<Tile<C>>,
-    /// The tile whose sound plays, which the remote's focus is on.
+    /// The tile the remote's focus is on.
     active: usize,
+    /// The tile whose sound plays, by [`Tile::id`].
+    heard: Heard<u32>,
+    /// The next tile's id.
+    next_id: u32,
     /// The enlarged tile (only with two or more).
     enlarged: Option<usize>,
     limits: Limits,
@@ -141,11 +172,14 @@ impl<C: Clone + PartialEq> Multiview<C> {
         };
         Multiview {
             tiles: vec![Tile {
+                id: 0,
                 surface: 0,
                 channel,
                 paused: false,
             }],
             active: 0,
+            heard: Heard::new(0),
+            next_id: 1,
             enlarged: None,
             limits,
             insisted: false,
@@ -183,13 +217,39 @@ impl<C: Clone + PartialEq> Multiview<C> {
         self.enlarged
     }
 
-    /// The tile whose sound plays.
+    /// The tile the remote's focus is on.
     pub fn active(&self) -> &Tile<C> {
         &self.tiles[self.active]
     }
 
     pub fn active_index(&self) -> usize {
         self.active
+    }
+
+    /// The tile whose sound plays in the grid, by index (focus never
+    /// changes it).
+    pub fn heard_index(&self) -> usize {
+        let id = self.heard.current();
+        self.tiles.iter().position(|t| t.id == id).unwrap_or(0)
+    }
+
+    /// The surface heard now: the heard tile's, or on a detour the one
+    /// watched full screen (surface 0).
+    pub fn audible_surface(&self) -> usize {
+        if self.detour.is_some() {
+            return 0;
+        }
+        self.tiles.get(self.heard_index()).map_or(0, |t| t.surface)
+    }
+
+    /// Listen to this: tile `index` is heard from now on (also while the
+    /// focus goes elsewhere). Whether it changed.
+    pub fn listen(&mut self, index: usize) -> bool {
+        let Some(id) = self.tiles.get(index).map(|t| t.id) else {
+            return false;
+        };
+        self.dialog = None;
+        self.heard.listen(id)
     }
 
     pub fn dialog(&self) -> Option<&Dialog> {
@@ -386,7 +446,10 @@ impl<C: Clone + PartialEq> Multiview<C> {
                 let surface = (0..MAX_SURFACES)
                     .find(|s| self.tile_on(*s).is_none())
                     .unwrap_or(0);
+                let id = self.next_id;
+                self.next_id += 1;
                 self.tiles.push(Tile {
+                    id,
                     surface,
                     channel,
                     paused: false,
@@ -464,7 +527,18 @@ impl<C: Clone + PartialEq> Multiview<C> {
         if tile >= self.tiles.len() {
             return;
         }
-        self.tiles.remove(tile);
+        let gone = self.tiles.remove(tile).id;
+        // The sound back to the tile heard before, else the full-screen
+        // player's, else the first.
+        let fallback = self
+            .tiles
+            .iter()
+            .find(|t| t.surface == 0)
+            .or(self.tiles.first())
+            .map_or(gone, |t| t.id);
+        let tiles = &self.tiles;
+        self.heard
+            .gone(gone, fallback, |id| tiles.iter().any(|t| t.id == id));
         let shift = |i: usize| if i > tile { i - 1 } else { i };
         self.pick = match self.pick {
             Some(Pick::Replace(t)) if t == tile => None,

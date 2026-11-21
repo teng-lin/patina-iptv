@@ -2,8 +2,9 @@
 //! tablet touch; never a TV) gets, while it is active
 //! (`multiview::chrome_shows`): a toolbar at the top center (Add screen
 //! while another fits, else the device's limit; exit multiview) and on
-//! each tile, with two or more, buttons to enlarge or reduce it and to
-//! remove it, named as the tile menu's items are. They are not mounted
+//! each tile, with two or more, buttons to listen to it (on a tile not
+//! heard), to enlarge or reduce it and to remove it, named as the tile
+//! menu's items are. They are not mounted
 //! while hidden, so they never take a press meant for a tile. Keys get a
 //! short hint instead, which goes with the first key or after a few
 //! seconds.
@@ -124,8 +125,9 @@ fn under_toolbar(tile: (f32, f32, f32, f32), buttons_w: f32, width: f32) -> bool
     tile.1 + INSET < TOOLBAR_H && left < center + TOOLBAR_HALF_W && right > center - TOOLBAR_HALF_W
 }
 
-/// Tile `index`'s enlarge (or reduce) and remove buttons, with two or
-/// more tiles while the pointer chrome shows.
+/// Tile `index`'s Listen to this (when another tile is heard), enlarge
+/// (or reduce) and remove buttons, with two or more tiles while the
+/// pointer chrome shows.
 pub fn tile_buttons(ui: Ui, index: usize) -> impl IntoElement {
     let several = move || with_state(ui, |m| m.tiles().len() > 1).unwrap_or(false);
     let shown = computed(move || multiview::chrome_shows(ui) && several());
@@ -138,15 +140,19 @@ pub fn tile_buttons(ui: Ui, index: usize) -> impl IntoElement {
         .unwrap_or_default()
     };
     let enlarged = move || with_state(ui, |m| m.enlarged() == Some(index)).unwrap_or(false);
+    let heard = move || with_state(ui, |m| m.heard_index() == index).unwrap_or(true);
     let size = target();
-    let buttons_w = 2.0 * size + 6.0;
+    let buttons_w = move || {
+        let count = if heard() { 2.0 } else { 3.0 };
+        count * size + (count - 1.0) * 6.0
+    };
     // From the tile's left edge: at its top right, unless the toolbar is there.
     let left = move || {
         let rect = multiview::tile_rect(ui, index).unwrap_or((0.0, 0.0, 0.0, 0.0));
-        if under_toolbar(rect, buttons_w, window().width.0) {
+        if under_toolbar(rect, buttons_w(), window().width.0) {
             INSET
         } else {
-            rect.2 - INSET - buttons_w
+            rect.2 - INSET - buttons_w()
         }
     };
     let button = move |icon: Box<dyn Fn() -> Icon>, act: fn(Ui, usize)| {
@@ -175,6 +181,13 @@ pub fn tile_buttons(ui: Ui, index: usize) -> impl IntoElement {
                 .left(move || px(left()))
                 .flex_row()
                 .gap(px(6.0))
+                .child(when(
+                    move || !heard(),
+                    move || {
+                        button(Box::new(|| Icon::Volume), multiview::listen)
+                            .label(move || format!("{}: {}", tr("Listen to this"), name()))
+                    },
+                ))
                 .child(
                     button(
                         Box::new(move || {

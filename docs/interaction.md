@@ -310,6 +310,37 @@ They issue no playback command of their own.
   [Input modes](#input-modes)). With `guide.autoplay` on, focus that lands on a
   live program after a pane closes can tune it.
 
+## Which player is heard
+
+Exactly one player is heard at a time, and the viewer chooses it; focus
+never moves the sound (#135). The state is the core's
+(`iptv_core::heard`, kept by `iptv_core::multiview` and
+`iptv_core::playback_windows`), by the surface's identity.
+
+- **Now:** in multiview, moving the focus between tiles (the arrows, a
+  tap, opening a tile's menu, changing its channel, enlarging or reducing
+  it) never changes what is heard. A tile's menu offers **Listen to this**
+  on every tile that is not heard, reached by OK on a remote and by a tap
+  or click on touch and pointer; the pointer chrome also has a speaker
+  button on those tiles. With two or more tiles the heard tile shows a
+  speaker beside its channel and the others a muted speaker; a screen
+  reader hears "· muted" after a muted tile's name.
+- **Now:** entering multiview keeps the sound on the channel that was
+  playing. Adding a tile does not take it, and changing the heard tile's
+  channel keeps the sound on that tile. Removing the heard tile (its menu,
+  its ✕, or its channel leaving the guide) gives the sound to the tile
+  heard before it that is still there, else to the tile on the full-screen
+  player, else to the first.
+- **Now:** a full-screen detour plays the watched tile aloud; back on the
+  grid the heard tile is heard again. Enlarging, reducing, reflowing and
+  resizing keep the heard tile, and none of them opens a stream.
+- **Now (Linux, macOS):** the main player and its player windows follow
+  the same rule; see [desktop viewing](desktop.md#several-players).
+- **Now:** the [interruption policy](#interruptions-and-the-background)
+  pauses and resumes the heard player, whichever it is.
+- **Planned:** an optional setting, "Sound follows the selected tile", for
+  viewers who prefer the focused tile to be heard.
+
 ## Text entry
 
 - **Now:** while a text field has the focus, the keys typed go to it: a
@@ -337,12 +368,13 @@ pauses and resumes: it never opens, retunes or restarts a stream.
 | Home with picture in picture on | Plays on in the window, on the same player and stream |
 | The picture-in-picture window closed | Stops as above |
 
-In multiview the policy pauses and resumes the heard tile (the active
-one; the others are muted), as the tile's own pause.
+In multiview the policy pauses and resumes the heard tile (the one the
+viewer chose with Listen to this, whatever has the focus; the others are
+muted), as the tile's own pause.
 
 | During a call | Playback |
 |---|---|
-| The viewer chooses another multiview tile | Stays silent until the call ends (Android: every player is silenced while the focus is lost for a while); the app pauses nothing more, and the call's end resumes nothing: the heard tile is the viewer's choice |
+| The viewer chooses Listen to this on another multiview tile | Stays silent until the call ends (Android: every player is silenced while the focus is lost for a while); the app pauses nothing more, and the call's end resumes nothing: the heard tile is the viewer's choice. Only moving the focus changes nothing |
 | The viewer picks a channel a guard refuses (blocked, locked) | Nothing changes: the pause is still the call's, and its end resumes |
 | Keys and controls that are no playback action (Info, menus, highlights) | Nothing changes |
 
@@ -442,6 +474,9 @@ Unavailable actions say why, using the host's reported capabilities
 - The repository's required checks in [AGENTS.md](../AGENTS.md), including
   `cargo test -p iptv-core` for core state and transition rules, the
   `iptv-core` wasm build and `cargo build -p iptv-app`.
+- Which player is heard: core tests in `iptv_core::heard`,
+  `iptv_core::multiview` (`heard_tests`) and `iptv_core::playback_windows`;
+  app scenarios `multiview_heard` and, for windows, `desktop_workflows`.
 - Choosing, staying and returning: app scenarios `personalization_overlay`,
   `tv_shared_controls`, `pip_control`, `cov_nav` and `cov_nav_touch`; on a
   remote's raw key phases, `tv_remote_journey`.

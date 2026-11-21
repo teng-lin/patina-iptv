@@ -24,8 +24,9 @@ pub const PANEL_W: f32 = 260.0;
 pub const MARGIN: f32 = 10.0;
 const PAD: f32 = 10.0;
 const CORNER: f32 = 10.0;
-/// The most items a menu has (a failed tile among two or more that fit).
-const ITEMS: usize = 8;
+/// The most items a menu has (a failed tile not heard, among two or
+/// more that fit).
+const ITEMS: usize = 9;
 
 const WHITE: u32 = 0xFFFFFF;
 
@@ -37,6 +38,7 @@ pub fn action_label(action: TileAction) -> &'static str {
         TileAction::Replace => tr("Change channel"),
         TileAction::Pause => tr("Pause"),
         TileAction::Play => tr("Play"),
+        TileAction::Listen => tr("Listen to this"),
         TileAction::Enlarge => tr("Enlarge screen"),
         TileAction::Reduce => tr("Reduce screen"),
         TileAction::FullScreen => tr("Full screen"),

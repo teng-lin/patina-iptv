@@ -57,6 +57,16 @@ pub fn remove(ui: Ui, index: usize) {
     });
 }
 
+/// A tile's Listen to this button: its sound plays, the others' not.
+pub fn listen(ui: Ui, index: usize) {
+    ui.touched();
+    used_chrome(ui);
+    apply(ui, |m, _| {
+        m.listen(index);
+        Outcome::Stay
+    });
+}
+
 /// A tile's enlarge (or reduce) button.
 pub fn toggle_enlarge(ui: Ui, index: usize) {
     used_chrome(ui);

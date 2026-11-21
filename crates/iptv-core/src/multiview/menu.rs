@@ -3,8 +3,9 @@
 //!
 //! The menu's items, in order: Try again (when its stream failed), Add
 //! screen and Search and add (while another tile fits), Change channel,
-//! Pause or Play, Enlarge screen or Reduce screen (two or more tiles),
-//! Full screen, Remove screen (two or more tiles).
+//! Pause or Play, Listen to this (two or more tiles, on one not heard),
+//! Enlarge screen or Reduce screen (two or more tiles), Full screen,
+//! Remove screen (two or more tiles).
 
 use super::{Multiview, Outcome, Pick};
 
@@ -22,6 +23,9 @@ pub enum TileAction {
     Pause,
     /// While the tile is paused.
     Play,
+    /// With two or more tiles, when another one is heard: the sound moves
+    /// to this one.
+    Listen,
     /// With two or more tiles, when this one is not the enlarged one.
     Enlarge,
     /// When this tile is the enlarged one.
@@ -79,6 +83,9 @@ impl<C: Clone + PartialEq> Multiview<C> {
         } else {
             TileAction::Pause
         });
+        if several && self.heard_index() != tile {
+            items.push(TileAction::Listen);
+        }
         if several {
             items.push(if self.enlarged == Some(tile) {
                 TileAction::Reduce
@@ -135,6 +142,10 @@ impl<C: Clone + PartialEq> Multiview<C> {
                     }
                     TileAction::Pause | TileAction::Play => {
                         self.set_paused(tile, *action == TileAction::Pause);
+                        Outcome::Stay
+                    }
+                    TileAction::Listen => {
+                        self.listen(tile);
                         Outcome::Stay
                     }
                     TileAction::Enlarge | TileAction::Reduce => {

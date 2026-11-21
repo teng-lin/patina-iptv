@@ -55,6 +55,7 @@ mod keyboard_dismissal;
 mod library_cached_epg;
 mod library_management;
 mod library_refresh;
+mod multiview_heard;
 mod multiview_menu;
 mod pane_collapse;
 mod parental;

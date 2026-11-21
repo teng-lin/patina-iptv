@@ -15,6 +15,7 @@ pub mod clock;
 pub mod editor;
 pub mod favorites;
 pub mod guide;
+pub mod heard;
 pub mod i18n;
 pub mod import_limits;
 pub mod interruption;

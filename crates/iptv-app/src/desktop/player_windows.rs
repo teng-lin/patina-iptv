@@ -56,13 +56,11 @@ fn admit_session(
 ) {
     batch(|| {
         let mut session = None;
+        // Opening another channel leaves the heard player as it was.
         workspace.update(|w| {
-            let audible = w.audible;
             if let Some(id) = w.open_auxiliary(key) {
                 session = w.sessions().iter().find(|s| s.id == id).cloned();
             }
-            // Opening another channel leaves the main player's audio unchanged.
-            w.audible = audible;
         });
         if let Some(session) = session
             && !start(session.surface)
@@ -115,12 +113,13 @@ fn follow_lists(local: Ui) {
     });
 }
 
-/// Whether session `id`'s window has the sound. One window at most has
+/// Whether session `id`'s window has the sound. One player at most has
 /// it; moving the keyboard focus between windows never changes which
-/// (only its own Mute, volume or the main player's sound controls do).
+/// (only Listen to this, its own Mute or volume, or the main player's
+/// sound controls do; `listen.rs`).
 pub fn audible(ui: Ui, id: SessionId) -> bool {
     ui.player_windows.with(|w| {
-        w.audible == Some(id) && w.sessions().iter().any(|s| s.id == id && !s.volume.muted)
+        w.audible() == Some(id) && w.sessions().iter().any(|s| s.id == id && !s.volume.muted)
     })
 }
 
@@ -331,6 +330,9 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
         .unwrap();
     let mut local = Ui::new(parent.app, parent.player.for_window(surface));
     local.player_surface = surface;
+    // The one workspace: which player is heard shows, and Listen to this
+    // acts, in every window alike (`listen.rs`).
+    local.player_windows = parent.player_windows;
     // This presentation controls the already-mounted native surface. The
     // catalog and settings are shared; overlays and input state are fresh.
     local.playing = parent.player.stream(surface).channel;

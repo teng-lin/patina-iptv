@@ -11,7 +11,10 @@
 //!
 //! It shows the full-screen player's picture ([`VIEW`], `mpv/pip.rs`: the
 //! same player, no second stream) and, while the pointer moves over it,
-//! play/pause, back to the app and close. Dragging it moves it (a window
+//! play/pause, back to the app and close. While other players play too
+//! (player windows, #135), a badge in its bottom left corner always says
+//! whether it is heard (its title cannot), and the controls offer Listen
+//! to this at the bottom right while it is not. Dragging it moves it (a window
 //! drag region; elsewhere the compositor's own move, Super+drag); a double
 //! click or Escape brings the video back to the app; the system closing
 //! it (Super+W, Alt+F4) closes it, as its ✕ does. Meanwhile the main
@@ -149,7 +152,41 @@ pub(super) fn chrome(ui: Ui) -> impl IntoElement {
                 .window_drag(move || drags.get())
                 .on_press(move |e: &PressEvent| clicked(ui, hover, drags, e.clicks)),
         )
+        .child(sound_badge(ui))
         .child(when(move || shown.get(), move || controls(ui)))
+}
+
+/// Whether this window is heard, while there is a choice: a speaker, or
+/// a muted one. It takes no presses.
+fn sound_badge(ui: Ui) -> impl IntoElement {
+    let badge = move |id: &'static str, name: fn() -> &'static str, icon: Icon| {
+        view()
+            .test_id(id)
+            .label(name)
+            .absolute()
+            .left(px(8.0))
+            .bottom(px(8.0))
+            .w(px(24.0))
+            .h(px(24.0))
+            .rounded(px(12.0))
+            .items_center()
+            .justify_center()
+            .bg(tint(0x000000, 0x99))
+            .pointer_events(PointerEvents::None)
+            .child(svg(icons::src(icon)).size(px(14.0)).text_color(rgb(WHITE)))
+    };
+    view()
+        .absolute()
+        .inset_0()
+        .pointer_events(PointerEvents::None)
+        .child(when(
+            move || crate::listen::choice(ui) && crate::listen::sounding(ui),
+            move || badge("pip-heard", || tr("Sound on"), Icon::Volume),
+        ))
+        .child(when(
+            move || crate::listen::choice(ui) && !crate::listen::sounding(ui),
+            move || badge("pip-muted", || tr("Muted"), Icon::Muted),
+        ))
 }
 
 /// The pointer moved over the window: the controls show, and hide after
@@ -228,6 +265,21 @@ fn controls(ui: Ui) -> impl IntoElement {
             .top(px(8.0))
             .right(px(8.0)),
         )
+        .child(when(
+            move || crate::listen::choice(ui) && !crate::listen::heard(ui),
+            move || {
+                button(
+                    "pip-listen",
+                    || tr("Listen to this"),
+                    || Icon::Volume,
+                    32.0,
+                    move || crate::listen::listen(ui),
+                )
+                .absolute()
+                .bottom(px(8.0))
+                .right(px(8.0))
+            },
+        ))
         .child(
             view()
                 .absolute()
