@@ -318,6 +318,10 @@ pub enum Control {
 pub enum Operation {
     /// The list: a catalogue from its top, a shelf around its focused title.
     List,
+    /// A catalogue read again from its top through at least `through`
+    /// titles (the refresh after Back), so a title focused pages down is
+    /// found again.
+    Through { through: u32 },
     /// The page starting at shelf position `offset` (the window's start plus
     /// its titles); those already shown stay, and so does the focus.
     More { offset: u32 },

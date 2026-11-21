@@ -100,7 +100,7 @@ pub fn back(ui: Ui) -> bool {
     if ui.player.vod.with_untracked(Option::is_none) {
         crate::runtime().parental_content_closed();
     }
-    let (closed, refresh) = edit(ui, |s| {
+    let (closed, refresh, end) = edit(ui, |s| {
         let pending = s.busy;
         let had_details = s.details.is_some();
         // Details reopened from the player over a list that watching
@@ -120,13 +120,14 @@ pub fn back(ui: Ui) -> bool {
         (
             !s.open,
             s.open && (watched || (pending && !had_details && !s.is_shelf())),
+            s.end,
         )
     });
     crate::parental_view::enforce(ui);
     if closed {
         crate::runtime().vod_discovery_cancel();
     } else if refresh {
-        load(ui, false, true);
+        load(ui, false, Some(end));
     }
     true
 }
@@ -135,19 +136,18 @@ pub fn back(ui: Ui) -> bool {
 /// title), or (`append`) the page after the titles shown, which stay with
 /// the focus.
 fn reload(ui: Ui, append: bool) {
-    load(ui, append, false);
+    load(ui, append, None);
 }
 
-/// [`reload`]; with `keep`, a catalogue read again from its top reads at
-/// least as many titles as it had loaded, so a title focused pages down
-/// keeps the focus by identity (a shelf always reads the window around
-/// its focused title).
-fn load(ui: Ui, append: bool, keep: bool) {
+/// [`reload`]; with `keep` (the titles it had loaded), a catalogue read
+/// again from its top reads at least that many, so a title focused pages
+/// down keeps the focus by identity (a shelf always reads the window
+/// around its focused title). Retry of that read reads as many again.
+fn load(ui: Ui, append: bool, keep: Option<u32>) {
     let (query, shelf, generation, offset, anchor, through) = edit(ui, |s| {
-        let through = if keep && !append && !s.is_shelf() {
-            s.end
-        } else {
-            0
+        let through = match keep {
+            Some(end) if !append && !s.is_shelf() => end,
+            _ => 0,
         };
         let offset = if append {
             s.begin_more()
@@ -238,6 +238,8 @@ fn load(ui: Ui, append: bool, keep: bool) {
                     crate::i18n::key("On-demand library could not be loaded"),
                     if append {
                         Operation::More { offset }
+                    } else if through > 0 {
+                        Operation::Through { through }
                     } else {
                         Operation::List
                     },
@@ -295,6 +297,7 @@ fn retry(ui: Ui) {
     };
     match operation {
         Operation::List => reload(ui, false),
+        Operation::Through { through } => load(ui, false, Some(through)),
         Operation::More { .. } => reload(ui, true),
         Operation::Previous { step_up, .. } => load_previous(ui, step_up),
         Operation::Details(key) => retry_details(ui, key),
