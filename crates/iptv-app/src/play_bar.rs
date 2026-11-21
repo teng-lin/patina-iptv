@@ -58,12 +58,33 @@ pub fn pointer_available() -> bool {
 }
 
 /// A button's side: a finger's target on touch devices, smaller under a
-/// mouse.
+/// mouse. A phone's is 44 points (Apple's touch minimum), so the bar's
+/// three groups keep one row on a phone on its side (740 to 915 points
+/// across); 48 would wrap them there.
 fn target() -> f32 {
     if idiom() == Idiom::Desktop {
         40.0
+    } else if crate::scale::phone() {
+        44.0
     } else {
         48.0
+    }
+}
+
+/// Whether the bar has the desktop's own controls (the volume slider, the
+/// window's full screen): a desktop build, not a TV, and not a headless
+/// phone (whose device has neither).
+fn desktop_controls() -> bool {
+    DESKTOP && idiom() != Idiom::Tv && !crate::scale::phone()
+}
+
+/// The bar's margin at the window's sides (points): narrower on a phone,
+/// for the same row.
+fn bar_margin() -> f32 {
+    if crate::scale::phone() {
+        PHONE_BAR_MARGIN
+    } else {
+        BAR_MARGIN
     }
 }
 
@@ -255,6 +276,7 @@ pub(crate) fn back_bg(ui: Ui) -> impl Fn() -> Rgba + Copy + 'static {
 /// The bar's margin at the window's sides, and the panel's padding inside
 /// it (points).
 const BAR_MARGIN: f32 = 24.0;
+const PHONE_BAR_MARGIN: f32 = 12.0;
 const PANEL_PADDING: f32 = 12.0;
 /// The gap between the bar's groups, and between the transport's buttons.
 const GROUP_GAP: f32 = 8.0;
@@ -266,7 +288,7 @@ const TRANSPORT_GAP: f32 = 6.0;
 fn one_row_width(ui: Ui) -> f32 {
     let size = target();
     let transport = 3.0 * size + 8.0 + 2.0 * TRANSPORT_GAP;
-    2.0 * (BAR_MARGIN + PANEL_PADDING + GROUP_GAP) + size + transport + right_width(ui, size)
+    2.0 * (bar_margin() + PANEL_PADDING + GROUP_GAP) + size + transport + right_width(ui, size)
 }
 
 /// Whether the window is too narrow for one row (an iPad's Split View or
@@ -277,7 +299,14 @@ fn narrow(ui: Ui) -> bool {
     window().width.0 < one_row_width(ui)
 }
 
+/// The bar, made again when the screen turns from a phone's into a
+/// tablet's or back (a foldable phone, unfolded): its buttons' side and
+/// margins are read as it is made.
 fn bar(ui: Ui) -> impl IntoElement {
+    when(crate::scale::phone, move || bar_now(ui)).otherwise(move || bar_now(ui))
+}
+
+fn bar_now(ui: Ui) -> impl IntoElement {
     // Hidden, the bar is unmounted: forget its height, which a resize or a
     // text change meanwhile makes stale, until it lays out again.
     cleanup(move || {
@@ -291,7 +320,7 @@ fn bar(ui: Ui) -> impl IntoElement {
         .left(px(0.0))
         .right(px(0.0))
         .bottom(px(0.0))
-        .px(px(BAR_MARGIN))
+        .px(move || px(bar_margin()))
         .pb_safe_area_plus(px(16.0))
         .on_layout(move |b: &Bounds<Points>| {
             let h = b.size.height.0;
@@ -311,6 +340,7 @@ fn bar(ui: Ui) -> impl IntoElement {
                 .bg(panel)
                 .on_mouse_enter(move |_: &MouseEvent| hover(ui, true))
                 .on_mouse_leave(move |_: &MouseEvent| hover(ui, false))
+                .child(when(crate::scale::phone, move || title_line(ui)))
                 .child(
                     view()
                         .flex_row()
@@ -447,7 +477,7 @@ fn enabled(ui: Ui, control: Control) -> bool {
         Control::Tracks => tracks(ui).is_some(),
         Control::Multiview => crate::capabilities::multiview(ui).available(),
         Control::Pip => crate::pip::can_enter(ui),
-        Control::Fullscreen => DESKTOP && idiom() != Idiom::Tv,
+        Control::Fullscreen => desktop_controls(),
         _ => true,
     }
 }
@@ -645,10 +675,34 @@ fn badge(value: impl Fn() -> Option<String> + Copy + 'static) -> impl IntoElemen
         })
 }
 
-/// Mute, volume, quality, channel.
+/// Mute, volume, quality, channel. On a phone the quality and the channel
+/// take a line of their own above the buttons ([`title_line`]): beside
+/// them, the one row of buttons a phone on its side keeps would leave the
+/// channel's name no room.
 fn left(ui: Ui) -> impl IntoElement {
     let size = target();
     let muted = move || crate::media::muted(ui) || ui.media.volume.with(|v| v.level == 0);
+    // It gives way first on a narrow window: the channel's name shortens,
+    // then the rest is cut, never the buttons beside it.
+    view()
+        .flex_1()
+        .min_w(px(size))
+        .overflow_hidden()
+        .flex_row()
+        .items_center()
+        .gap(px(8.0))
+        .child(button(
+            ui,
+            Control::Mute,
+            move || if muted() { Icon::Muted } else { Icon::Volume },
+            size,
+        ))
+        .child(when(desktop_controls, move || volume(ui)))
+        .child(when(|| !crate::scale::phone(), move || title(ui)))
+}
+
+/// The quality badges and the channel's (or the title's) name.
+fn title(ui: Ui) -> impl IntoElement {
     let height = move || {
         ui.player
             .main()
@@ -666,22 +720,13 @@ fn left(ui: Ui) -> impl IntoElement {
             .filter(|(w, h)| *w > 0 && *h > 0)
             .map(|(w, h)| resolution_class(w, h).to_owned())
     };
-    // It gives way first on a narrow window: the channel's name shortens,
-    // then the rest is cut, never the buttons beside it.
     view()
-        .flex_1()
-        .min_w(px(size))
+        .flex_shrink(1.0)
+        .min_w(px(0.0))
         .overflow_hidden()
         .flex_row()
         .items_center()
         .gap(px(8.0))
-        .child(button(
-            ui,
-            Control::Mute,
-            move || if muted() { Icon::Muted } else { Icon::Volume },
-            size,
-        ))
-        .child(when(|| DESKTOP && idiom() != Idiom::Tv, move || volume(ui)))
         .child(badge(lines))
         .child(badge(class))
         .child(
@@ -691,11 +736,17 @@ fn left(ui: Ui) -> impl IntoElement {
                     .or_else(|| ui.playing.get().map(channel_name))
                     .unwrap_or_default()
             })
+            .test_id("bar-title")
             .flex_shrink(1.0)
             .number_of_lines(1)
             .text_size(px(TEXT_SIZE))
             .text_color(rgb(WHITE)),
         )
+}
+
+/// A phone's line above the buttons: the quality and the name, whole.
+fn title_line(ui: Ui) -> impl IntoElement {
+    view().px(px(4.0)).pt(px(4.0)).child(title(ui))
 }
 
 /// The desktop's volume: press or drag along it.
@@ -765,12 +816,9 @@ fn centre(ui: Ui) -> impl IntoElement {
 /// picture and window full screen where the host has them) and the frame
 /// rate.
 fn right_width(ui: Ui, size: f32) -> f32 {
-    let buttons =
-        8.0 + if DESKTOP && idiom() != Idiom::Tv {
-            1.0
-        } else {
-            0.0
-        } + if crate::pip::supported(ui) { 1.0 } else { 0.0 };
+    let buttons = 8.0
+        + if desktop_controls() { 1.0 } else { 0.0 }
+        + if crate::pip::supported(ui) { 1.0 } else { 0.0 };
     buttons * size + (buttons - 1.0) * 2.0 + FPS_W + 6.0
 }
 
@@ -836,27 +884,24 @@ fn right(ui: Ui) -> impl IntoElement {
             move || button(ui, Control::Pip, || Icon::PictureInPicture, size),
         ))
         .child(button(ui, Control::Guide, || Icon::Guide, size))
-        .child(when(
-            || DESKTOP && idiom() != Idiom::Tv,
-            move || {
-                let icon_window = icon_window.clone();
-                button(
-                    ui,
-                    Control::Fullscreen,
-                    move || {
-                        if icon_window
-                            .state()
-                            .is_some_and(|s| s.mode == nsh_core::desktop::WindowMode::FullScreen)
-                        {
-                            Icon::ExitFullScreen
-                        } else {
-                            Icon::FullScreen
-                        }
-                    },
-                    size,
-                )
-            },
-        ))
+        .child(when(desktop_controls, move || {
+            let icon_window = icon_window.clone();
+            button(
+                ui,
+                Control::Fullscreen,
+                move || {
+                    if icon_window
+                        .state()
+                        .is_some_and(|s| s.mode == nsh_core::desktop::WindowMode::FullScreen)
+                    {
+                        Icon::ExitFullScreen
+                    } else {
+                        Icon::FullScreen
+                    }
+                },
+                size,
+            )
+        }))
         .child(
             text(move || fps_label(ui.player.main().format.with(|f| f.fps)).unwrap_or_default())
                 .w(px(FPS_W))
