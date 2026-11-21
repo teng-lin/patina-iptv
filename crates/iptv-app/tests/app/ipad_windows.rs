@@ -526,6 +526,14 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
             .any(|n| n.kind == ViewKind::Native && n.bounds.size.width.0 < LANDSCAPE.0)
     }));
     assert_eq!(sources(&seen), movie);
+    // ‹ from a movie returns to its details (#147); close them and the
+    // library.
+    step(app.wait_for("text:Play from beginning"));
+    for _ in 0..2 {
+        step(app.press("id:vod-screen >> label:Close"));
+    }
+    step(app.wait_for_gone("id:vod-screen", WAIT));
+    assert_eq!(sources(&seen), movie);
 
     // A show's details with its second episode selected by touch.
     step(app.press("id:open-shows"));
