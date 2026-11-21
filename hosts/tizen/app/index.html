@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Patina</title>
+<script src="$WEBAPIS/webapis/webapis.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- The native video plane is under the page; the preview area stays transparent over it. -->
+<object id="player" type="application/avplayer"></object>
+<video id="fallback" playsinline></video>
+
+<div id="list">
+  <section id="groups" class="column"><h2>Groups</h2><ol id="group-rows"></ol></section>
+  <section id="channels" class="column"><h2 id="list-title">Channels</h2><ol id="channel-rows"></ol>
+    <div id="list-count" class="muted"></div></section>
+  <section id="side">
+    <div id="preview-frame"></div>
+    <div id="info">
+      <div id="info-channel"></div>
+      <div id="info-now"></div>
+      <div id="info-progress"><div></div></div>
+      <div id="info-next" class="muted"></div>
+    </div>
+    <div id="status" class="muted"></div>
+  </section>
+</div>
+
+<div id="banner" class="hidden">
+  <div id="banner-channel"></div>
+  <div id="banner-now"></div>
+  <div id="banner-progress"><div></div></div>
+  <div id="banner-next" class="muted"></div>
+</div>
+
+<div id="loading" class="hidden"><div id="loading-text">Loading…</div></div>
+<div id="notice" class="hidden"></div>
+<div id="confirm" class="hidden"><div>Exit Patina?</div><div class="muted">OK or Back: exit · any other button: keep watching</div></div>
+
+<div id="setup" class="hidden">
+  <h1>Add a playlist</h1>
+  <p class="muted">Patina connects to your provider from this TV. Your details stay on the TV.</p>
+  <div class="field" data-kind-toggle>Type: <span id="kind-label">Xtream Codes</span> <span class="muted">(OK to change)</span></div>
+  <div class="field" data-for="xtream"><label>Server</label><input id="server" type="url" autocomplete="off"></div>
+  <div class="field" data-for="xtream"><label>Username</label><input id="username" type="text" autocomplete="off"></div>
+  <div class="field" data-for="xtream"><label>Password</label><input id="password" type="password" autocomplete="off"></div>
+  <div class="field" data-for="m3u"><label>Playlist URL</label><input id="m3u" type="url" autocomplete="off"></div>
+  <div class="field button" data-save>Save and load</div>
+  <p class="muted hint">Later: red changes the playlist, green updates the TV guide, yellow adds or removes a favorite.</p>
+</div>
+
+<script src="main.js"></script>
+</body>
+</html>

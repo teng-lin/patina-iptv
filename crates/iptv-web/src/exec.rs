@@ -1,0 +1,446 @@
+//! A single-threaded executor and the [`Fetch`] adapter over the host.
+//!
+//! Tasks are polled whenever the host delivers something (`poll` after each
+//! export call), so no waker has to schedule anything: a pending future
+//! simply waits for the next delivery.
+
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::rc::Rc;
+use std::task::{Context, Poll, Waker};
+use std::time::Duration;
+
+use iptv_import::{BodyStream, Fetch, FetchError, FetchErrorKind, StreamingResponse};
+use iptv_providers::{HttpRequest, HttpResponse, Method};
+
+use crate::host::host;
+
+type Task = Pin<Box<dyn Future<Output = ()>>>;
+
+thread_local! {
+    static TASKS: RefCell<Vec<Task>> = const { RefCell::new(Vec::new()) };
+    static SPAWNED: RefCell<Vec<Task>> = const { RefCell::new(Vec::new()) };
+    static POLLING: Cell<bool> = const { Cell::new(false) };
+    static SLOTS: RefCell<HashMap<u32, Slot>> = RefCell::new(HashMap::new());
+    static NEXT_ID: Cell<u32> = const { Cell::new(1) };
+}
+
+/// Runs `task` from the next [`poll`] on.
+pub(crate) fn spawn(task: impl Future<Output = ()> + 'static) {
+    SPAWNED.with(|s| s.borrow_mut().push(Box::pin(task)));
+}
+
+/// Polls every task until none makes progress without a new delivery.
+pub(crate) fn poll() {
+    if POLLING.with(|p| p.replace(true)) {
+        return; // A task's host call answered synchronously: the outer poll continues.
+    }
+    let mut cx = Context::from_waker(Waker::noop());
+    // Every task runs until it waits on the host; a task spawned meanwhile
+    // gets its first poll in the next round.
+    loop {
+        let mut tasks = TASKS.with(|t| std::mem::take(&mut *t.borrow_mut()));
+        tasks.extend(SPAWNED.with(|s| std::mem::take(&mut *s.borrow_mut())));
+        tasks.retain_mut(|t| t.as_mut().poll(&mut cx).is_pending());
+        TASKS.with(|t| *t.borrow_mut() = tasks);
+        if SPAWNED.with(|s| s.borrow().is_empty()) {
+            break;
+        }
+    }
+    POLLING.with(|p| p.set(false));
+}
+
+#[cfg(test)]
+pub(crate) fn pending_tasks() -> usize {
+    TASKS.with(|t| t.borrow().len()) + SPAWNED.with(|s| s.borrow().len())
+}
+
+/// What the host has delivered for one request.
+#[derive(Default)]
+struct Slot {
+    status: Option<(u16, Option<u64>)>,
+    body: Option<Vec<u8>>,
+    /// `Some(None)`: the stream ended.
+    chunk: Option<Option<Vec<u8>>>,
+    waiting_chunk: bool,
+    error: Option<FetchError>,
+    woke: bool,
+    /// The request's scheme was HTTPS (a redirect must not downgrade it).
+    https: bool,
+    /// Content-supplied: every hop must be a public address.
+    public_only: bool,
+}
+
+fn next_id() -> u32 {
+    NEXT_ID.with(|n| {
+        let id = n.get();
+        n.set(id.wrapping_add(1).max(1));
+        id
+    })
+}
+
+fn with_slot<R>(id: u32, f: impl FnOnce(&mut Slot) -> R) -> Option<R> {
+    SLOTS.with(|s| s.borrow_mut().get_mut(&id).map(f))
+}
+
+fn open_slot(id: u32) {
+    SLOTS.with(|s| s.borrow_mut().insert(id, Slot::default()));
+}
+
+/// Owns a slot while a future waits on it. Dropped before the host
+/// answered (an import canceled mid-request), it frees the slot and, for a
+/// request, tells the host to abort it so no connection stays open.
+struct Pending {
+    id: u32,
+    request: bool,
+    done: bool,
+}
+
+impl Pending {
+    fn new(id: u32, request: bool) -> Self {
+        open_slot(id);
+        Self {
+            id,
+            request,
+            done: false,
+        }
+    }
+    /// The slot now belongs to someone else (a streamed body).
+    fn hand_over(mut self) {
+        self.done = true;
+    }
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        if self.done {
+            return;
+        }
+        if self.request
+            && let Some(host) = crate::host::host_if_alive()
+        {
+            host.fetch_close(self.id);
+        }
+        close_slot(self.id);
+    }
+}
+
+fn close_slot(id: u32) {
+    // try_with: also called from destructors while the thread shuts down.
+    let _ = SLOTS.try_with(|s| s.borrow_mut().remove(&id));
+}
+
+// Deliveries from the host (the exports call these).
+
+pub(crate) fn deliver_status(id: u32, status: u16, length: Option<u64>) {
+    with_slot(id, |s| s.status = Some((status, length)));
+}
+
+pub(crate) fn deliver_body(id: u32, bytes: Vec<u8>) {
+    with_slot(id, |s| s.body = Some(bytes));
+}
+
+pub(crate) fn deliver_chunk(id: u32, bytes: Option<Vec<u8>>) {
+    with_slot(id, |s| {
+        s.chunk = Some(bytes);
+        s.waiting_chunk = false;
+    });
+}
+
+pub(crate) fn deliver_error(id: u32, kind: u32, detail: String) {
+    let kind = match kind {
+        1 => FetchErrorKind::Connect,
+        2 => FetchErrorKind::Timeout,
+        3 => FetchErrorKind::Body,
+        4 => FetchErrorKind::InvalidRequest,
+        5 => FetchErrorKind::TooLarge,
+        7 => FetchErrorKind::Deadline,
+        _ => FetchErrorKind::Other,
+    };
+    with_slot(id, |s| s.error = Some(FetchError::new(kind, detail)));
+}
+
+/// The browser followed a redirect to `url` before answering request `id`.
+/// A downgrade to HTTP, or a non-public hop of a content-supplied request,
+/// fails the request and aborts it.
+pub(crate) fn deliver_redirect(id: u32, url: &str) {
+    let refused = with_slot(id, |s| {
+        let downgrade = s.https && !url.trim_start().to_ascii_lowercase().starts_with("https:");
+        let private = s.public_only && iptv_providers::content_url::validate(url).is_err();
+        if downgrade || private {
+            let why = if downgrade {
+                "redirect to plain HTTP refused"
+            } else {
+                "redirect to a non-public address refused"
+            };
+            s.error = Some(FetchError::new(FetchErrorKind::Redirect, why));
+            true
+        } else {
+            false
+        }
+    });
+    if refused == Some(true) {
+        host().fetch_close(id);
+    }
+}
+
+pub(crate) fn deliver_wake(id: u32) {
+    with_slot(id, |s| s.woke = true);
+}
+
+/// A stored value arrived (`None`: there is none).
+pub(crate) fn deliver_stored(id: u32, value: Option<Vec<u8>>) {
+    with_slot(id, |s| {
+        s.chunk = Some(value);
+    });
+}
+
+/// Reads `key` from the host's storage.
+pub(crate) async fn storage_get(key: &str) -> Option<Vec<u8>> {
+    let pending = Pending::new(next_id(), false);
+    let id = pending.id;
+    host().store_get(id, key);
+    std::future::poll_fn(|_| match with_slot(id, |s| s.chunk.take()) {
+        Some(Some(v)) => Poll::Ready(v),
+        Some(None) => Poll::Pending,
+        None => Poll::Ready(None),
+    })
+    .await
+}
+
+/// Writes `value` under `key`; writes keep their order. Empty deletes.
+pub(crate) fn storage_put(key: &str, value: &[u8]) {
+    host().store_put(key, value);
+}
+
+/// The request as the host reads it.
+fn request_json(request: &HttpRequest) -> String {
+    let headers: Vec<serde_json::Value> = request
+        .headers
+        .iter()
+        .map(|(k, v)| serde_json::json!([k, v]))
+        .collect();
+    serde_json::json!({
+        "url": request.url,
+        "method": match request.method { Method::Get => "GET", Method::Post => "POST" },
+        "headers": headers,
+        "body": request.body,
+        "timeoutMs": request.timeout.map(|t| t.as_millis() as u64),
+        "idleMs": IDLE_TIMEOUT_MS,
+    })
+    .to_string()
+}
+
+/// A download that receives nothing for this long fails (the native
+/// adapter's read timeout); the import's own deadline bounds the total.
+const IDLE_TIMEOUT_MS: u64 = 60_000;
+
+/// Whether `url` may be opened: any HTTP(S) address the user chose, and
+/// only public ones when the address came from content
+/// (`iptv_providers::content_url`). The browser resolves names itself, so a
+/// public name that resolves to a LAN address cannot be refused here; see
+/// the crate documentation.
+pub(crate) fn allowed(url: &str, public_only: bool) -> bool {
+    if public_only {
+        iptv_providers::content_url::validate(url).is_ok()
+    } else {
+        iptv_providers::content_url::validate_picked(url).is_ok()
+    }
+}
+
+pub(crate) fn check_destination(request: &HttpRequest) -> Result<(), FetchError> {
+    if allowed(&request.url, request.public_only) {
+        Ok(())
+    } else if request.public_only {
+        Err(FetchError::new(
+            FetchErrorKind::InvalidRequest,
+            "a content-supplied address must be public",
+        ))
+    } else {
+        Err(FetchError::new(
+            FetchErrorKind::Unsupported,
+            "only HTTP(S) addresses are fetched",
+        ))
+    }
+}
+
+/// [`Fetch`] through the JavaScript host.
+#[derive(Clone)]
+pub(crate) struct HostFetch {
+    started_ms: f64,
+}
+
+impl HostFetch {
+    pub(crate) fn new() -> Self {
+        Self {
+            started_ms: host().monotonic_ms(),
+        }
+    }
+
+    async fn status(
+        &self,
+        request: &HttpRequest,
+        stream: bool,
+    ) -> Result<(Pending, u16, Option<u64>), FetchError> {
+        check_destination(request)?;
+        let pending = Pending::new(next_id(), true);
+        let id = pending.id;
+        with_slot(id, |s| {
+            s.https = request
+                .url
+                .trim_start()
+                .to_ascii_lowercase()
+                .starts_with("https:");
+            s.public_only = request.public_only;
+        });
+        host().fetch(id, &request_json(request), stream);
+        let (status, length) = std::future::poll_fn(|_| {
+            match with_slot(id, |s| {
+                if let Some(e) = s.error.take() {
+                    Some(Err(e))
+                } else {
+                    s.status.map(Ok)
+                }
+            }) {
+                Some(Some(r)) => Poll::Ready(r),
+                Some(None) => Poll::Pending,
+                None => Poll::Ready(Err(FetchError::new(FetchErrorKind::Other, "request lost"))),
+            }
+        })
+        .await?;
+        Ok((pending, status, length))
+    }
+}
+
+impl Fetch for HostFetch {
+    type Body = HostBody;
+
+    fn elapsed(&self) -> Duration {
+        Duration::from_secs_f64(((host().monotonic_ms() - self.started_ms) / 1000.0).max(0.0))
+    }
+
+    async fn sleep(&self, duration: Duration) {
+        sleep_while(duration, || true).await;
+    }
+
+    async fn fetch(&self, request: HttpRequest) -> Result<HttpResponse, FetchError> {
+        let (mut pending, status, _) = self.status(&request, false).await?;
+        let id = pending.id;
+        let body = std::future::poll_fn(|_| {
+            match with_slot(id, |s| {
+                if let Some(e) = s.error.take() {
+                    Some(Err(e))
+                } else {
+                    s.body.take().map(Ok)
+                }
+            }) {
+                Some(Some(r)) => Poll::Ready(r),
+                Some(None) => Poll::Pending,
+                None => Poll::Ready(Err(FetchError::new(FetchErrorKind::Body, "request lost"))),
+            }
+        })
+        .await;
+        // Answered (body or error): nothing is left to abort.
+        pending.request = false;
+        drop(pending);
+        Ok(HttpResponse::new(status, body?))
+    }
+
+    async fn fetch_stream(
+        &self,
+        request: HttpRequest,
+    ) -> Result<StreamingResponse<HostBody>, FetchError> {
+        let (pending, status, content_length) = self.status(&request, true).await?;
+        let id = pending.id;
+        pending.hand_over();
+        Ok(StreamingResponse {
+            status,
+            content_length,
+            body: HostBody {
+                id,
+                done: Rc::new(Cell::new(false)),
+            },
+        })
+    }
+}
+
+/// Waits `duration`, or less: it ends as soon as `keep()` is false (checked
+/// whenever the executor polls), so a superseded task stops at the next
+/// delivery instead of holding its state until the timer fires.
+pub(crate) async fn sleep_while(duration: Duration, keep: impl Fn() -> bool) {
+    let pending = Pending::new(next_id(), false);
+    let id = pending.id;
+    host().sleep(id, duration.as_secs_f64() * 1000.0);
+    std::future::poll_fn(|_| {
+        if !keep() || with_slot(id, |s| s.woke).unwrap_or(true) {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    })
+    .await;
+}
+
+/// The body of a streamed response, read chunk by chunk from the host.
+pub(crate) struct HostBody {
+    id: u32,
+    done: Rc<Cell<bool>>,
+}
+
+impl BodyStream for HostBody {
+    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, FetchError> {
+        if self.done.get() {
+            return Ok(None);
+        }
+        let id = self.id;
+        let ask = with_slot(id, |s| {
+            if s.chunk.is_none() && !s.waiting_chunk {
+                s.waiting_chunk = true;
+                true
+            } else {
+                false
+            }
+        });
+        if ask == Some(true) {
+            host().fetch_next(id);
+        }
+        let got = std::future::poll_fn(|_| {
+            match with_slot(id, |s| {
+                if let Some(e) = s.error.take() {
+                    Some(Err(e))
+                } else {
+                    s.chunk.take().map(Ok)
+                }
+            }) {
+                Some(Some(r)) => Poll::Ready(r),
+                Some(None) => Poll::Pending,
+                None => Poll::Ready(Err(FetchError::new(FetchErrorKind::Body, "stream lost"))),
+            }
+        })
+        .await;
+        match got {
+            Ok(Some(bytes)) => Ok(Some(bytes)),
+            Ok(None) => {
+                self.done.set(true);
+                Ok(None)
+            }
+            Err(e) => {
+                self.done.set(true);
+                Err(e)
+            }
+        }
+    }
+}
+
+impl Drop for HostBody {
+    fn drop(&mut self) {
+        if !self.done.get()
+            && let Some(host) = crate::host::host_if_alive()
+        {
+            host.fetch_close(self.id);
+        }
+        close_slot(self.id);
+    }
+}

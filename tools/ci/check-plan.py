@@ -81,6 +81,10 @@ def plan(root=ROOT, release=False, tier="full", host="linux"):
         step(f"wasm-{crate}", "cargo", "build", "--locked", "-p", crate, "--target", "wasm32-unknown-unknown")
         for crate in PORTABLE if host == "linux"
     )
+    if host == "linux":
+        # The Tizen host's core; its TV artifact is built by hosts/tizen/build.sh.
+        steps.append(step("web-core-wasm", "cargo", "build", "--locked", "-p", "iptv-web",
+                          "--target", "wasm32-unknown-unknown"))
     steps.extend([
         step("guide-input-budget", "cargo", "test", *test_args,
              "--test", "app", LATENCY, "--", "--ignored", "--exact", "--format=pretty"),

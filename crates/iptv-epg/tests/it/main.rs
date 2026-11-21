@@ -9,6 +9,7 @@
 mod large;
 mod matching;
 mod parse;
+mod snapshot;
 mod store;
 
 mod record_limits;

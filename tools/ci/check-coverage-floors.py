@@ -21,6 +21,8 @@ FLOORS = {
     "iptv-library": 91.0,
     "iptv-runtime": 90.0,
     "iptv-app": 90.0,
+    # The wasm-only host bindings (exports and imports) run on the TV only.
+    "iptv-web": 80.0,
 }
 
 

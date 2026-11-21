@@ -17,6 +17,7 @@ members = [
     "crates/iptv-player-mpv",
     "crates/iptv-library",
     "crates/iptv-runtime",
+    "crates/iptv-web",
     "vendor/nsh-tv",
 ]
 # nsh generates its own Cargo workspaces under the app crate.

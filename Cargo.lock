@@ -2608,6 +2608,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "iptv-web"
+version = "0.1.5"
+dependencies = [
+ "iptv-core",
+ "iptv-epg",
+ "iptv-guide",
+ "iptv-import",
+ "iptv-providers",
+ "serde_json",
+ "url",
+]
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

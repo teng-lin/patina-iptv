@@ -166,6 +166,26 @@ restoring encrypted files alone cannot reconstruct a lost platform credential.
 Keep an intentionally exported portable backup separately and protect it as a
 credential. No automatic telemetry or support upload is enabled.
 
+## Samsung Tizen host
+
+The Tizen host (`hosts/tizen`, `crates/iptv-web`) has no SQLCipher store and
+no platform credential broker. Its account (Xtream server, username and
+password, or the M3U address) is kept in the app's local storage on the TV,
+in clear, readable by anyone who can debug the app on that TV; Favorites,
+Recently watched and the stored guide are in the app's IndexedDB. Stored
+guide feed addresses are kept only as hashes, and storage keys name a
+playlist by a hash of its identity, but an M3U address with a short password
+could be recovered from that hash by trying candidates.
+
+Requests go through the browser. Content-supplied destinations (guide feeds a
+playlist names, stream and logo addresses) are checked with
+`iptv_providers::content_url` before use, and a redirect the browser followed
+is checked again and may not downgrade HTTPS; the request is aborted when a
+hop is refused. The browser resolves names itself, so a public name that
+resolves to a LAN address is not detected, and the TV's player (AVPlay) and
+image loader follow redirects of streams and logos without these checks.
+Logos are not size-limited. The TV sends its own User-Agent on API requests.
+
 ## Native assumptions and dependency exceptions
 
 The libmpv client header requires process-wide `LC_NUMERIC=C`. Current Unix
