@@ -10,6 +10,9 @@ use std::{
 };
 use tokio::sync::Semaphore;
 
+use crate::runtime::network::Client;
+use iptv_import::Fetch;
+
 const IMAGE_BYTES: u64 = 4 << 20;
 const CACHE_BYTES: usize = 8 << 20;
 const IMAGE_SIDE: u32 = 8192;
@@ -89,31 +92,34 @@ fn permits() -> &'static Semaphore {
     &PERMITS
 }
 
-/// One client for every artwork download, made on the network runtime.
-fn client() -> Option<&'static iptv_net::NetClient> {
-    static CLIENT: OnceLock<Option<iptv_net::NetClient>> = OnceLock::new();
+/// The limits of an artwork download.
+fn config() -> crate::runtime::network::NetworkConfig {
+    crate::runtime::network::NetworkConfig {
+        max_streamed_bytes: IMAGE_BYTES,
+        max_buffered_bytes: IMAGE_BYTES as usize,
+        request_timeout: Duration::from_secs(10),
+        allow_files: false,
+        #[cfg(debug_assertions)]
+        allow_private_fixture: cfg!(feature = "test-support")
+            || crate::data::DEV_PLAYLIST.is_some(),
+        ..Default::default()
+    }
+}
+
+/// One client for every artwork download, made by the runtime's network
+/// port on the UI thread at the first download.
+fn client() -> Option<Client> {
+    static CLIENT: OnceLock<Option<Client>> = OnceLock::new();
     CLIENT
-        .get_or_init(|| {
-            let config = iptv_net::NetConfig {
-                max_streamed_bytes: IMAGE_BYTES,
-                max_buffered_bytes: IMAGE_BYTES as usize,
-                request_timeout: Duration::from_secs(10),
-                allow_files: false,
-                #[cfg(debug_assertions)]
-                allow_private_fixture: cfg!(feature = "test-support")
-                    || crate::data::DEV_PLAYLIST.is_some(),
-                ..Default::default()
-            };
-            iptv_net::NetClient::new(config).ok()
-        })
-        .as_ref()
+        .get_or_init(|| crate::runtime().network_client(&config()).ok())
+        .clone()
 }
 
 /// The artwork at `url` as a data URI (the no-logo image when it cannot
 /// be had), from the cache or downloaded on the shared runtime. `None`
 /// when `wanted` was dropped (its view shows something else) before its
 /// turn came.
-async fn fetch(url: String, wanted: Reply) -> Option<String> {
+async fn fetch(client: Option<Client>, url: String, wanted: Reply) -> Option<String> {
     let _turn = permits().acquire().await.ok()?;
     if wanted.is_canceled() {
         return None;
@@ -122,7 +128,7 @@ async fn fetch(url: String, wanted: Reply) -> Option<String> {
         let _ = wanted.send(value.clone());
         return Some(value);
     }
-    let value = match client() {
+    let value = match &client {
         Some(net) => download(net, &url).await,
         None => None,
     }
@@ -132,7 +138,7 @@ async fn fetch(url: String, wanted: Reply) -> Option<String> {
     Some(value)
 }
 
-async fn download(net: &iptv_net::NetClient, url: &str) -> Option<String> {
+async fn download(net: &Client, url: &str) -> Option<String> {
     let mut request = iptv_providers::HttpRequest::get(url);
     request.public_only = true;
     let response = net.fetch(request).await.ok()?;
@@ -168,7 +174,7 @@ pub(crate) fn source(url: impl Fn() -> String + 'static) -> impl Fn() -> String 
         // Detached: the download fills the cache even if this view moves
         // on meanwhile; dropping `rx` (the effect's next run ends this
         // task) only skips a download that has not started.
-        drop(crate::runtime().spawn_network(fetch(url, tx)));
+        drop(crate::runtime().spawn_network(fetch(client(), url, tx)));
         drop(spawn(async move {
             if let Ok(value) = rx.await
                 && generation.get_untracked() == current
@@ -182,6 +188,16 @@ pub(crate) fn source(url: impl Fn() -> String + 'static) -> impl Fn() -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A native client for `config`, as the runtime's network port makes it.
+    fn client_with(config: crate::runtime::network::NetworkConfig) -> Client {
+        let ports = crate::runtime::Ports::new(std::env::temp_dir(), |_| {
+            Err(crate::runtime::model::StoreError::unavailable(
+                "synthetic: no store",
+            ))
+        });
+        ports.network.client(&config).unwrap()
+    }
     #[test]
     fn raster_headers_cannot_expand_beyond_the_decode_budget() {
         // Synthetic PNG IHDR: enough to inspect dimensions without allocating
@@ -284,7 +300,7 @@ mod tests {
             .build()
             .unwrap();
         rt.block_on(async {
-            let net = iptv_net::NetClient::new(Default::default()).unwrap();
+            let net = client_with(Default::default());
             for url in [
                 "file:///etc/hosts",
                 "http://127.0.0.1:9/logo",
@@ -322,11 +338,10 @@ mod tests {
             .build()
             .unwrap();
         rt.block_on(async {
-            let config = iptv_net::NetConfig {
+            let net = client_with(crate::runtime::network::NetworkConfig {
                 allow_private_fixture: true,
                 ..Default::default()
-            };
-            let net = iptv_net::NetClient::new(config).unwrap();
+            });
             for (index, bytes) in expected.iter().enumerate() {
                 let uri = download(&net, &format!("http://{address}/{index}"))
                     .await
@@ -355,7 +370,7 @@ mod tests {
             let value = "data:image/png;base64,synthetic".to_owned();
             let permits = permits().acquire_many(PARALLEL as u32).await.unwrap();
             let (sender, mut receiver) = oneshot::channel();
-            let mut waiting = std::pin::pin!(fetch(url.clone(), sender));
+            let mut waiting = std::pin::pin!(fetch(None, url.clone(), sender));
             assert!(
                 std::future::poll_fn(|cx| std::task::Poll::Ready(waiting.as_mut().poll(cx)))
                     .await
@@ -378,7 +393,7 @@ mod tests {
             let url = "http://art.example.test/cancelled-cache-marker".to_owned();
             let permits = permits().acquire_many(PARALLEL as u32).await.unwrap();
             let (sender, receiver) = oneshot::channel();
-            let mut waiting = std::pin::pin!(fetch(url.clone(), sender));
+            let mut waiting = std::pin::pin!(fetch(None, url.clone(), sender));
             assert!(
                 std::future::poll_fn(|cx| std::task::Poll::Ready(waiting.as_mut().poll(cx)))
                     .await

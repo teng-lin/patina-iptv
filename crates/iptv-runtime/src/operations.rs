@@ -111,6 +111,15 @@ impl Runtime {
         crate::playback::link_client(self, config)
     }
 
+    /// A client of this owner's network port for `config` (artwork, which
+    /// sets its own limits).
+    pub fn network_client(
+        &self,
+        config: &crate::network::NetworkConfig,
+    ) -> Result<crate::network::Client, iptv_import::FetchError> {
+        self.services().ports().network.client(config)
+    }
+
     /// Runs `future` on this owner's network runtime (link resolves,
     /// artwork); await the handle for its output.
     pub fn spawn_network<F>(&self, future: F) -> crate::execution::Join<F::Output>

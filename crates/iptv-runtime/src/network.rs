@@ -15,7 +15,9 @@
 //!
 //! Futures and bodies are boxed: one allocation per request or chunk, which
 //! is nothing beside a network round trip. They are `Send` exactly when the
-//! runtime's executors are threaded ([`crate::MaybeSend`]).
+//! runtime's executors are threaded ([`crate::MaybeSend`]). A transport
+//! itself is always `Send` and `Sync`, so a client can be kept anywhere: a
+//! browser adapter is a handle whose state stays with the page's host.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -25,7 +27,7 @@ use std::time::Duration;
 use iptv_import::{BodyStream, Fetch, FetchError, StreamingResponse};
 use iptv_providers::{HttpRequest, HttpResponse};
 
-use crate::ports::{MaybeSend, MaybeSync};
+use crate::ports::MaybeSend;
 
 /// A boxed future of an adapter: `Send` when the runtime is threaded.
 #[cfg(feature = "native")]
@@ -84,7 +86,7 @@ pub trait Network: Send + Sync {
 }
 
 /// One adapter client: the object-safe form of [`Fetch`].
-pub trait Transport: MaybeSend + MaybeSync {
+pub trait Transport: Send + Sync {
     /// The adapter's monotonic clock since the client was made.
     fn elapsed(&self) -> Duration;
     /// Waits `duration` on the adapter's timer.
