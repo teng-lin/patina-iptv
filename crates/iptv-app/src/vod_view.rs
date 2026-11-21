@@ -589,7 +589,7 @@ fn activate(ui: Ui) {
         Control::Next => next(ui),
         Control::Block => toggle_block(ui),
         Control::Retry => retry(ui),
-        Control::Search => ui.vod.update(|s| s.search_open = true),
+        Control::Search => ui.vod.update(|s| s.open_search()),
     }
 }
 

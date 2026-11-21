@@ -231,9 +231,9 @@ fn cancel_touches(app: &mut Headless) {
     app.settle();
 }
 
-#[test]
-fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
-    let Some(home) = isolated!() else { return };
+/// The tablet's guide with the generated playlist and guide imported,
+/// `guide.autoplay` on: the app, the channels it tuned, and its database.
+fn start(home: &crate::isolated::Home) -> (Headless, Tuned, std::path::PathBuf) {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -281,6 +281,13 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     step(app.wait_for_within("text:Playlist added", IMPORT));
     step(app.press("text:Watch"));
     step(app.wait_for_within("text:C1 P0", IMPORT));
+    (app, tuned, db)
+}
+
+#[test]
+fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, tuned, db) = start(&home);
     // Autoplay previews the first channel: the baseline. (The generated
     // stream never plays headless, so the player retries it meanwhile:
     // what counts is which channels were tuned.)
@@ -523,4 +530,68 @@ fn bounds_of(app: &Headless, test_id: &str) -> Option<f32> {
         .into_iter()
         .find(|n| !n.hidden && n.test_id.as_deref() == Some(test_id))
         .map(|n| n.bounds.size.width.0)
+}
+
+/// #156: a long press on another channel, or on one of its programmes,
+/// focuses it and opens its menu. Dismissed (Back), or left for the
+/// programme's details, it tunes nothing until a key moves the focus,
+/// which autoplays as before. A menu action that plays still plays.
+#[test]
+fn tablet_long_press_menus_tune_nothing_until_the_focus_moves() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, tuned, db) = start(&home);
+    step(app.wait(SETTLE));
+    nothing_activated(&app, &tuned, &db, "start");
+
+    let menu = "id:menu-panel >> text:Details";
+    step(app.long_press(&format!("id:guide-ui >> label:{}", name(4))));
+    step(app.wait_for(menu));
+    step(app.back());
+    step(app.wait_for_gone(menu, Duration::from_secs(3)));
+    step(app.wait(SETTLE));
+    nothing_activated(&app, &tuned, &db, "a channel's menu dismissed");
+
+    step(app.long_press("text:C5 P0"));
+    step(app.wait_for(menu));
+    step(app.back());
+    step(app.wait_for_gone(menu, Duration::from_secs(3)));
+    step(app.wait(SETTLE));
+    nothing_activated(&app, &tuned, &db, "a programme's menu dismissed");
+
+    // Its details, from the menu, then Back: the same.
+    step(app.long_press("text:C7 P0"));
+    step(app.wait_for(menu));
+    step(app.press(menu));
+    let details = "id:description-layer >> text:C7 P0";
+    step(app.wait_for(details));
+    step(app.back());
+    step(app.wait_for_gone(details, Duration::from_secs(3)));
+    step(app.wait(SETTLE));
+    nothing_activated(&app, &tuned, &db, "a programme's details closed");
+
+    // A key moves the focus on: autoplay previews that channel.
+    step(app.press_key("down"));
+    let seen = tuned.clone();
+    step(
+        app.wait_until("autoplay resumes", Duration::from_secs(5), move |_| {
+            seen.lock().unwrap().last().map(String::as_str)
+                == Some("http://stream.example.test/8.m3u8")
+        }),
+    );
+
+    // Channel 1 replays: its menu's Play from the beginning plays.
+    let before = tuned.lock().unwrap().len();
+    step(app.long_press("text:C1 P0"));
+    step(app.wait_for("id:menu-panel >> text:Play from the beginning"));
+    step(app.press("id:menu-panel >> text:Play from the beginning"));
+    let seen = tuned.clone();
+    step(
+        app.wait_until("the replay plays", Duration::from_secs(5), move |_| {
+            let seen = seen.lock().unwrap();
+            seen.len() > before
+                && seen
+                    .last()
+                    .is_some_and(|url| url.starts_with("http://stream.example.test/1.m3u8"))
+        }),
+    );
 }

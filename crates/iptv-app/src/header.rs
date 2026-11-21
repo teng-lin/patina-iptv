@@ -193,8 +193,10 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
         })
     };
     view()
+        .test_id("guide-header-details")
         .flex_1()
-        // A compact header gives it less room than its lines want: clip them.
+        // A compact header gives it less room than its lines want: clip them
+        // (the header grows for the title and times: `GuideHeader`).
         .overflow_hidden()
         .gap(move || size.px(6.0))
         .child(
@@ -241,7 +243,9 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
         )
         .child(
             // Times, progress and minutes left; the group at the right. A
-            // narrow header wraps them onto a second line rather than clip.
+            // narrow header wraps them onto a second line rather than clip,
+            // and a part wider than the column (large text in a Split View
+            // window) wraps within it.
             view()
                 .flex_row()
                 .flex_wrap()
@@ -249,7 +253,8 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                 .gap(move || size.px(12.0))
                 .child(
                     text(move || program.with(|p| p.map(|p| span(p.4)).unwrap_or_default()))
-                        .number_of_lines(1)
+                        .max_w(percentage(1.0))
+                        .number_of_lines(2)
                         .font_family(SANS)
                         .text_size(move || size.text_px(HEADER_TIMES))
                         .text_color(rgb(BRIGHT_TEXT)),
@@ -282,7 +287,8 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                         program
                             .with(|p| p.map(|(_, now, _, _, p)| left(now, p)).unwrap_or_default())
                     })
-                    .number_of_lines(1)
+                    .max_w(percentage(1.0))
+                    .number_of_lines(2)
                     .font_family(SANS)
                     .text_size(move || size.text_px(HEADER_TIMES))
                     .text_color(secondary()),
@@ -530,6 +536,15 @@ fn corner_back_shown(ui: Ui) -> bool {
         && ui.focus.with(|f| f.layout_pane()) != Pane::Rail
 }
 
+/// The corner ‹'s distance from the header's left edge: 20 points into
+/// the preview, plus the part of a leading inset `inset` that overlaps the
+/// preview, kept inside a preview `preview_w` wide.
+fn corner_back_left(inset: f32, preview_w: f32) -> f32 {
+    let wanted = 20.0 + (inset - PREVIEW_MARGIN).max(0.0);
+    let last = PREVIEW_MARGIN + preview_w - crate::ui_kit::TOUCH;
+    wanted.min(last.max(PREVIEW_MARGIN))
+}
+
 /// A pointer or touch route to the left columns, over the preview where
 /// the full-screen player keeps its ‹: one step of the chain a remote's
 /// Back and Left walk, the guide to its groups, the groups to the rail
@@ -539,8 +554,12 @@ fn corner_back(ui: Ui) -> impl IntoElement {
     view()
         .test_id("guide-corner-back")
         .absolute()
-        // The player's ‹ is 20 and 16 points in from the safe area.
-        .left(px(20.0))
+        // The player's ‹ is 20 and 16 points in from the safe area: the
+        // header is below the top inset (no ancestor pads the sides), and
+        // the part of the leading one over the preview (an iPad window's
+        // controls) moves the ‹ along it clear of them, never past the
+        // preview's right edge.
+        .left(move || px(corner_back_left(safe_area().left.0, header_now().1)))
         .top(px(16.0))
         .child(crate::ui_kit::round_back(
             crate::ui_kit::TOUCH,
@@ -563,6 +582,18 @@ fn corner_back(ui: Ui) -> impl IntoElement {
 #[cfg(test)]
 mod tests {
     use super::overlay_wanted;
+
+    #[test]
+    fn the_corner_back_clears_a_leading_inset_inside_the_preview() {
+        use super::corner_back_left;
+        // No inset, or one inside the preview's margin: where it always was.
+        assert_eq!(corner_back_left(0.0, 300.0), 20.0);
+        assert_eq!(corner_back_left(12.0, 300.0), 20.0);
+        // An iPad window's controls: only the part over the preview counts.
+        assert_eq!(corner_back_left(65.0, 300.0), 73.0);
+        // A large inset beside a narrow preview: the ‹ stays inside it.
+        assert_eq!(corner_back_left(120.0, 114.0), 12.0 + 114.0 - 48.0);
+    }
 
     #[test]
     fn the_key_timing_line_is_for_development_only() {

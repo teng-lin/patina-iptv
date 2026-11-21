@@ -783,10 +783,8 @@ pub fn layer(ui: Ui) -> View {
                     .max_w(percentage(0.95))
                     .max_h(percentage(0.95))
                     .h(move || {
-                        px((window().height.0 * 0.95).min(
-                            size.of(540.0)
-                                * (crate::settings::font_factor() * font_scale()).max(1.0),
-                        ))
+                        px((window().height.0 * 0.95)
+                            .min(size.of(540.0) * crate::settings::text_factor().max(1.0)))
                     })
                     .p(move || size.px(16.0))
                     .gap(px(8.0))

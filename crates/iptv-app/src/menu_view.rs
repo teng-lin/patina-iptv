@@ -784,6 +784,16 @@ fn description(ui: Ui) -> impl IntoElement {
 pub fn open_at(ui: Ui, channel: usize, minute: i32) {
     ui.touched();
     crate::lists::tap(ui, channel, minute);
+    open_focused(ui);
+}
+
+/// A right-click or long press moved the guide's focus to a programme:
+/// its menu opens, and autoplay holds on it. The focus stays there when
+/// the menu (or the details it opens) closes, and opening a menu never
+/// starts playback (`docs/interaction.md`): nothing tunes it until the
+/// viewer moves the focus again. A choice still plays.
+pub fn open_focused(ui: Ui) {
+    crate::browse_playback::hold(ui);
     open(ui);
 }
 

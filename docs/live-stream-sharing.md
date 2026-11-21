@@ -73,8 +73,29 @@ capability retired uses the normal playback retry path.
 
 The ingestor aligns output to complete 188-byte TS packets. Its shared rewind
 buffer is bounded to 4 MiB; one HLS segment uses the existing recorder's 32 MiB
-validation limit. The most advanced consumer governs read-ahead: ingestion pauses
-once its unread window reaches 2 MiB. Advancing capture continues while playback
+validation limit. A segment's packets reach consumers as they arrive, so the
+input is ready, and the player opens, with the live edge's first packets rather
+than after its whole segment. The segment's body is always read to its end into
+a queue bounded by that limit, so consumers that pause cannot leave the
+provider's response open until its read timeout. Consequently a segment that
+fails validation partway (lost sync, a torn final packet, over the limit, a
+dropped connection) may already have delivered some of its earlier whole packets
+to every consumer, shared captures included, before the input ends; packets
+still queued when it fails are dropped. A capture that owns its connection
+still writes whole segments only. When a stream's first segment fails that way
+after the player opened its first packets, the failure is recorded before the
+player sees the input end, keyed by source, source incarnation and channel (not
+the provider URL, whose token may change on every resolve). One segment over
+the limit, or two that failed their checks (a single torn final packet may be a
+connection cut short), send the stream to its provider's own transport for
+30 minutes from the failure: the player's retry plays it that way, as a stream
+refused before its first packets does at once. A first segment that validates
+clears the stream's earlier strikes, and network failures never count; a changed source
+incarnation or configuration forgets its streams, and at most 256 are kept,
+the oldest forgotten first.
+
+The most advanced consumer governs read-ahead: ingestion pauses once its unread
+window reaches 2 MiB. Advancing capture continues while playback
 is paused, and advancing playback continues when a capture stalls. If every
 consumer stalls, ingestion pauses. A consumer behind the retained window receives
 an explicit gap; bytes are never silently skipped. Live provider pacing is preserved. Synthetic

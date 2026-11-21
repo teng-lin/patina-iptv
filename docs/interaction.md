@@ -89,7 +89,11 @@ In the guide:
   off by default) keeps the guide open after tuning a live channel, in both
   layouts. A replay and the channel already playing always go full screen.
   `guide.autoplay` tunes the focused channel while browsing, without a choice.
-- **Now:** opening a programme's details or menu never starts playback.
+- **Now:** opening a programme's details or menu never starts playback. A
+  long press or right-click moves the focus to what it opens the menu for;
+  `guide.autoplay` then holds on that channel, after the menu or its details
+  close, until the viewer moves the focus to another channel. A choice still
+  plays.
 
 ### Touch gestures in the guide
 
@@ -203,19 +207,28 @@ what the content needs at the current text size, not from the device type.
 - Remote focus treatment does not change with window size.
 - **Now:** the class policy (`iptv_core::layout::Class`): Compact below 620
   points and Expanded from 960, each divided by the text factor (the guide's
-  scale times the text size). Search's two-row header uses Compact.
+  scale times the text size: the app's own text size times the system's,
+  Android's font scale or iOS Dynamic Type). Search's two-row header uses
+  Compact.
 - **Now:** the guide scales from 1.0 to 0.8 with the desktop window
-  (`crates/iptv-app/src/scale.rs`).
+  (`crates/iptv-app/src/scale.rs`). Tablets keep the full sizes in every
+  window: an Android tablet's screen, and an iPad's full screen in either
+  orientation, Split View, Slide Over and Stage Manager windows.
 - **Now:** the guide's header (`iptv_core::layout::GuideHeader`) puts its
   shortcuts (the list on screen, Movies, Shows, Add playlist) on a row of their
   own under the preview and the focused programme in Compact, and in Medium
   wherever the programme would have less than its room beside them. The
   preview keeps its place at the top left and shrinks to leave that row room,
   but never below 64 points tall, which keeps the corner ‹ inside it. A short
-  window grows the header instead, up to 55% of its height so the rail and the
-  guide keep room; a window too short for that squeezes the preview. The
-  programme's times wrap onto a second line rather than clip; its title stays
-  on one line and is truncated. The
+  window grows the header instead, for the preview and for the focused
+  programme's title and times (wrapped as the column makes them), up to 55%
+  of its height so the rail and the guide keep room, 70% at the accessibility
+  text sizes; a window too short for that squeezes them, the description
+  giving way first. The
+  programme's times wrap onto a second line rather than clip, and a part
+  wider than the column (large text in a narrow window) wraps within it; its
+  title stays on one line and is truncated. The shortcuts' row scrolls
+  sideways where the window is narrower than it. The
   guide's rows already take the full width below the header in every class.
 - **Now:** in Movies and Shows, details replace the list in every class and
   the poster grid reflows its columns. In Compact, an empty catalogue (no
@@ -225,6 +238,13 @@ what the content needs at the current text size, not from the device type.
   filter, give way (`iptv_core::vod::Screen::one_pane`).
 - **Planned:** collapsing the categories beside the posters in Compact; until
   then they share the width with the poster grid.
+- **Now:** the play bar keeps its three groups on one row where the window
+  has room for all their buttons; a narrower window (an iPad's Split View or
+  Slide Over, a narrow desktop window) gives the right-hand group the rows
+  under the transport, its buttons wrapping, so none is cut off at the edge.
+  Choosers over the video keep clear of the bar's laid-out height and are
+  never wider or taller than their room; their lists scroll. The guide's
+  corner ‹ keeps clear of the leading safe area (an iPad window's controls).
 - **Planned:** a list beside its details in Expanded, and collapsing the
   player's panels by class.
 
@@ -285,6 +305,7 @@ pauses and resumes: it never opens, retunes or restarts a stream.
 | Headphones unplugged, a Bluetooth headset disconnected | Pauses; never resumes by itself |
 | A notification's sound | Plays on, quieter (the system ducks it) |
 | Home or another app, picture in picture off | Stops and closes the stream; on return it reopens what played, after fresh admission |
+| Another app beside Patina takes the focus (iPad Split View, Slide Over, Stage Manager; the window stays visible) | Plays on; nothing pauses or reopens |
 | Home with picture in picture on | Plays on in the window, on the same player and stream |
 | The picture-in-picture window closed | Stops as above |
 
@@ -313,6 +334,14 @@ one; the others are muted), as the tile's own pause.
   background, from what the host reports: precise background starts
   unavailable, a wake that could not be registered, or a device that must
   stay awake (`iptv_core::capabilities::Recording::notice`).
+- **Now (iPad):** the app runs in either orientation and in Split View,
+  Slide Over and Stage Manager windows. Another app taking the focus beside
+  Patina leaves the scene visible (inactive): playback carries on, with no
+  pause and no new stream. When Patina leaves the screen (Home, the app
+  switcher, a Slide Over window pushed away, another app taking the full
+  screen) iOS sends it to the background: the player stops its stream there
+  and on return asks for a freshly admitted one, opened once on the same
+  player (`mpv/ios.rs`, `tests/app/ipad_windows.rs`).
 - **Planned:** the picture-in-picture action says that closing its window
   stops playback; iPad's audio session (interruptions and route changes)
   under the same policy, and its foreground-only capture explained at the
@@ -339,7 +368,17 @@ below wins, after "some playlist has titles".
 On a remote the action sits where the titles would be: Right from the
 categories, then OK. If the action moves to another playlist while the remote
 is on it, the remote goes back to the categories, so OK never acts on a
-playlist the screen did not show. In a Compact window (see
+playlist the screen did not show. In a Medium or Expanded window with no
+action (an import running, or titles only elsewhere) the remote never rests
+on the empty place: an action that goes away (Refresh now started) sends it
+to the categories, Right from the categories reaches Search and Sort, Down
+from them stays, Left from Search returns to the categories, OK on a
+category stays, and closing Search keeps the remote on it. Search closed
+while its list is still being read keeps the remote on Search until the
+list arrives, then moves it to the titles or the action if there is one. A
+remote sent off the action's place this way stays off a later action, even
+when the window becomes Compact, until it moves there itself. Once an action
+shows, Right and Down reach it as before. In a Compact window (see
 [Layout classes](#layout-classes)) the message and action take the width and
 the categories give way. A remote or keyboard that was on the categories goes
 to the action, or to the rail when there is no action (an import running) or
@@ -381,6 +420,9 @@ Unavailable actions say why, using the host's reported capabilities
 - Tablet gestures, the touch journey, rotation, split screen, large text,
   text entry and interruptions: `tablet_gestures` and `tablet_journey`,
   and the [issue #88 tablet validation](validation/issue-88-tablet-journey.md).
+- iPad portrait, resizable windows, Dynamic Type and another app beside:
+  `ipad_windows`, and the
+  [issue #138 iPad validation](validation/issue-138-ipad-layouts.md).
 - Pointer, keyboard and windows on desktops: `desktop_workflows`, and the
   [issue #89 desktop journey](validation/issue-89-desktop-journey.md).
 - Native behaviour on Android TV and tablets: the

@@ -96,12 +96,19 @@ pub fn bind(ui: Ui) {
     });
 }
 
-/// The bar's height above the window's bottom (with its margin): popups
-/// over the video keep clear of it.
-pub fn height() -> f32 {
+/// The bar's height above the window's bottom (with its margin and the
+/// safe area): popups over the video keep clear of it. The laid-out
+/// height, which counts the rows a narrow window wraps the buttons onto
+/// and times wrapped by large text; one row's until the bar first shows.
+pub fn height(ui: Ui) -> f32 {
+    let laid_out = ui.play_bar_height.get();
+    if laid_out > 0.0 {
+        return laid_out;
+    }
     let row = target() + 8.0;
-    // Panel padding, the row, the gap, the progress line, the margin.
-    6.0 + row + 4.0 + 20.0 + 10.0 + 16.0
+    // Panel padding, the row, the gap, the progress line, the margin and
+    // the safe area under it (`pb_safe_area_plus`).
+    6.0 + row + 4.0 + 20.0 + 10.0 + 16.0 + safe_area().bottom.0
 }
 
 /// Changes the bar's state and (re)schedules its hiding.
@@ -252,20 +259,58 @@ pub(crate) fn back_bg(ui: Ui) -> impl Fn() -> Rgba + Copy + 'static {
     move || tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA)
 }
 
+/// The bar's margin at the window's sides, and the panel's padding inside
+/// it (points).
+const BAR_MARGIN: f32 = 24.0;
+const PANEL_PADDING: f32 = 12.0;
+/// The gap between the bar's groups, and between the transport's buttons.
+const GROUP_GAP: f32 = 8.0;
+const TRANSPORT_GAP: f32 = 6.0;
+
+/// The width (points) the bar needs for its three groups on one row: its
+/// margins, the left group at its least (mute), the transport and every
+/// button of the right group.
+fn one_row_width(ui: Ui) -> f32 {
+    let size = target();
+    let transport = 3.0 * size + 8.0 + 2.0 * TRANSPORT_GAP;
+    2.0 * (BAR_MARGIN + PANEL_PADDING + GROUP_GAP) + size + transport + right_width(ui, size)
+}
+
+/// Whether the window is too narrow for one row (an iPad's Split View or
+/// Slide Over, a narrow desktop window): the right group then takes the
+/// rows under the transport, its buttons wrapping, rather than run past
+/// the window's edge (reactive).
+fn narrow(ui: Ui) -> bool {
+    window().width.0 < one_row_width(ui)
+}
+
 fn bar(ui: Ui) -> impl IntoElement {
+    // Hidden, the bar is unmounted: forget its height, which a resize or a
+    // text change meanwhile makes stale, until it lays out again.
+    cleanup(move || {
+        if untracked(|| ui.play_bar_height.try_get()).is_some() {
+            ui.play_bar_height.set(0.0);
+        }
+    });
     let panel = move || tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA);
     view()
         .absolute()
         .left(px(0.0))
         .right(px(0.0))
         .bottom(px(0.0))
-        .px(px(24.0))
+        .px(px(BAR_MARGIN))
         .pb_safe_area_plus(px(16.0))
+        .on_layout(move |b: &Bounds<Points>| {
+            let h = b.size.height.0;
+            if untracked(|| ui.play_bar_height.get()) != h {
+                ui.play_bar_height.set(h);
+            }
+        })
         // Only the panel takes presses: around it they reach the video.
         .pointer_events(PointerEvents::BoxNone)
         .child(
             view()
-                .px(px(12.0))
+                .px(px(PANEL_PADDING))
                 .pt(px(6.0))
                 .pb(px(10.0))
                 .gap(px(4.0))
@@ -276,8 +321,9 @@ fn bar(ui: Ui) -> impl IntoElement {
                 .child(
                     view()
                         .flex_row()
+                        .flex_wrap()
                         .items_center()
-                        .gap(px(8.0))
+                        .gap(px(GROUP_GAP))
                         .child(left(ui))
                         .child(centre(ui))
                         .child(right(ui)),
@@ -705,7 +751,7 @@ fn centre(ui: Ui) -> impl IntoElement {
         .flex_shrink_0()
         .flex_row()
         .items_center()
-        .gap(px(6.0))
+        .gap(px(TRANSPORT_GAP))
         .child(button(ui, Control::Rewind, || Icon::Rewind, size))
         .child(button(
             ui,
@@ -722,6 +768,19 @@ fn centre(ui: Ui) -> impl IntoElement {
         .child(button(ui, Control::Forward, || Icon::Forward, size))
 }
 
+/// The right group's width on one row: its buttons (recording, picture in
+/// picture and window full screen where the host has them) and the frame
+/// rate.
+fn right_width(ui: Ui, size: f32) -> f32 {
+    let buttons =
+        8.0 + if DESKTOP && idiom() != Idiom::Tv {
+            1.0
+        } else {
+            0.0
+        } + if crate::pip::supported(ui) { 1.0 } else { 0.0 };
+    buttons * size + (buttons - 1.0) * 2.0 + FPS_W + 6.0
+}
+
 /// Favourite, tracks, details, picture size, channels, multiview, guide,
 /// window full screen, frame rate.
 fn right(ui: Ui) -> impl IntoElement {
@@ -733,18 +792,19 @@ fn right(ui: Ui) -> impl IntoElement {
             .is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)))
     };
     // Reserve space for every control, including recording and optional
-    // native window controls, so none overlap the transport hit targets.
-    let buttons = move || {
-        8.0 + if DESKTOP && idiom() != Idiom::Tv {
-            1.0
-        } else {
-            0.0
-        } + if crate::pip::supported(ui) { 1.0 } else { 0.0 }
-    };
+    // native window controls, so none overlap the transport hit targets;
+    // a narrow window gives the group its own rows instead.
     view()
         .flex_1()
-        .min_w(move || px(buttons() * size + (buttons() - 1.0) * 2.0 + FPS_W + 6.0))
+        .min_w(move || -> Length {
+            if narrow(ui) {
+                percentage(1.0).into()
+            } else {
+                px(right_width(ui, size)).into()
+            }
+        })
         .flex_row()
+        .flex_wrap()
         .items_center()
         .justify_end()
         .gap(px(2.0))

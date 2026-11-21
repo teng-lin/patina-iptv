@@ -1099,3 +1099,91 @@ fn back_from_a_movie_restores_the_window_then_its_details_and_continue_watching(
     assert_eq!(iptv_app::player_opens(0), opens, "Back opens nothing");
     assert_eq!(seen.player(0), player, "the same player");
 }
+
+/// The stream surface 0's player was given last.
+fn main_stream(seen: &Observed) -> String {
+    if seen.player(0).is_none() {
+        return String::new();
+    }
+    let source = seen.prop(0, "source");
+    crate::support::upstream_source(&source)["url"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// #156: with autoplay on, a right-click on another channel focuses it
+/// and opens its menu; dismissing the menu (Back, Backspace) tunes nothing
+/// until the viewer moves the focus. A click on it still plays, and a
+/// menu action that plays still does.
+#[test]
+fn with_autoplay_dismissing_a_right_clicked_menu_tunes_nothing() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start(home, |settings| {
+        settings.set("guide.autoplay", Setting::Bool(true)).unwrap();
+    });
+    let app = &mut fixture.app;
+    let seen = fixture.seen.clone();
+    // The baseline: whatever start-up played has settled.
+    app.idle(Duration::from_millis(2500)).unwrap();
+    let opens = iptv_app::player_opens(0);
+    let before = main_stream(&seen);
+
+    for (n, dismiss) in [(3, "Back"), (5, "Backspace")] {
+        step(app.right_click(&format!("id:guide-ui >> text:{}", channel(n))));
+        step(app.wait_for("id:menu-panel >> text:Add to favourites"));
+        if dismiss == "Back" {
+            step(app.back());
+        } else {
+            step(app.press_key("backspace"));
+        }
+        menu_closed(app);
+        app.idle(Duration::from_millis(2500)).unwrap();
+        assert_eq!(
+            iptv_app::player_opens(0),
+            opens,
+            "{dismiss} on Desk {n:02}'s menu tunes nothing"
+        );
+        assert_eq!(main_stream(&seen), before);
+    }
+
+    // A key moves the focus on from Desk 05: autoplay as before.
+    step(app.press_key("down"));
+    step(app.wait_until(
+        "autoplay tunes the next channel",
+        Duration::from_secs(5),
+        |_| main_stream(&seen).ends_with("/6.m3u8"),
+    ));
+
+    // A click on a right-clicked channel is a choice: it plays.
+    step(app.right_click(&format!("id:guide-ui >> text:{}", channel(8))));
+    step(app.wait_for("id:menu-panel >> text:Add to favourites"));
+    step(app.back());
+    menu_closed(app);
+    step(app.press(&format!("id:guide-ui >> text:{}", channel(8))));
+    step(
+        app.wait_until("the chosen channel plays", Duration::from_secs(5), |_| {
+            main_stream(&seen).ends_with("/8.m3u8")
+        }),
+    );
+
+    // A menu action that plays still plays: Watch in new window.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        for _ in 0..3 {
+            if !video_full_screen(app) {
+                break;
+            }
+            step(app.back());
+        }
+        step(app.right_click(&format!("id:guide-ui >> text:{}", channel(10))));
+        step(app.wait_for("id:menu-panel >> text:Watch in new window"));
+        step(app.press("id:menu-panel >> text:Watch in new window"));
+        step(
+            app.wait_until("the new window plays", Duration::from_secs(5), |_| {
+                iptv_app::player_has_source(1)
+            }),
+        );
+        assert!(main_stream(&seen).ends_with("/8.m3u8"));
+    }
+}

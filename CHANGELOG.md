@@ -77,11 +77,18 @@ is below 1.0, a minor release may change behaviour.
 
 ### Fixed
 
+- With autoplay on, closing the menu that a long press or right-click
+  opened on another channel in the guide no longer tunes that channel.
+  Autoplay waits until you move the focus to another channel; choosing the
+  channel, or a menu action that plays, still plays.
 - Windows and iPad: right-clicking a channel's name in the guide (on iPad, a
   mouse's or trackpad's secondary click) now opens the channel's menu, as it
   does on Linux and macOS. Before, only programmes and the groups columns
   opened a menu there. The menu offers nothing new on these platforms:
   Watch in new window stays Linux and macOS only.
+- iOS simulator: the package now carries the Keychain entitlements the
+  simulator reads, so it stores its database key and adding a playlist
+  works without a linker workaround (#136).
 - TV remote: a press of OK (or another key with a hold action) no longer
   acts on a different screen when the screen changes while the key is held,
   for example when a tap plays a channel. Holding a key also keeps the info
@@ -93,6 +100,10 @@ is below 1.0, a minor release may change behaviour.
   the prompt does not close it), holding Menu or `M` no longer opens and
   closes the menu or the play bar repeatedly, and a hold on the play bar
   always returns focus to Play/pause.
+- Movies and Shows, TV remote: in a wider window an empty screen without an
+  action (an import running) no longer leaves the remote on nothing. After
+  **Refresh now** it moves to the categories; Right from them reaches Search
+  and Sort, and Right reaches the action again once it shows.
 
 ## [0.1.5] - 2026-11-17
 
