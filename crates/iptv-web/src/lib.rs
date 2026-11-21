@@ -28,9 +28,11 @@
 //! The exports are a C ABI: bytes cross through [`input`] (a buffer the host
 //! fills before an export that reads it) and the host's `emit` import.
 
+#[cfg(feature = "bridge")]
 mod app;
 mod exec;
 mod host;
+#[cfg(feature = "bridge")]
 mod store;
 
 /// The adapters an application on the real runtime builds its ports from
@@ -65,13 +67,23 @@ pub mod adapters {
         Duration::from_secs_f64((crate::host::host().monotonic_ms() / 1000.0).max(0.0))
     }
 
+    /// The value stored under `key` in the host's key-value storage.
+    pub async fn storage_get(key: &str) -> Option<Vec<u8>> {
+        crate::exec::storage_get(key).await
+    }
+
+    /// Stores `value` under `key`; writes keep their order. Empty deletes.
+    pub fn storage_put(key: &str, value: &[u8]) {
+        crate::exec::storage_put(key, value);
+    }
+
     /// The host's wall clock: time since the Unix epoch.
     pub fn wall() -> Duration {
         Duration::from_secs_f64((crate::host::host().wall_ms() / 1000.0).max(0.0))
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "bridge"))]
 mod tests;
 
 use std::cell::RefCell;
@@ -100,6 +112,7 @@ pub extern "C" fn input(len: u32) -> *mut u8 {
 }
 
 /// A command (JSON, `len` bytes in [`input`]).
+#[cfg(feature = "bridge")]
 #[unsafe(no_mangle)]
 pub extern "C" fn command(len: u32) {
     let bytes = take_input(len);

@@ -52,7 +52,8 @@ getrandom = "0.4"
 
 # The browser host (host/web): iptv-web's adapters.
 [target.'cfg(target_family = "wasm")'.dependencies]
-iptv-web = { path = "../iptv-web" }
+# The adapters only, without the Live TV bridge.
+iptv-web = { path = "../iptv-web", default-features = false }
 # Artwork headers (NSH's own probe is native only).
 imagesize = "0.15"
 

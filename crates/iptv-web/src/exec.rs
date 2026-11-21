@@ -99,7 +99,7 @@ pub(crate) fn poll() {
     POLLING.with(|p| p.set(false));
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "bridge"))]
 pub(crate) fn pending_tasks() -> usize {
     TASKS.with(|t| t.borrow().len()) + SPAWNED.with(|s| s.borrow().len())
 }

@@ -28,6 +28,7 @@ pub(crate) trait Host {
     /// Writes `value` under `key`, in call order; an empty value deletes it.
     fn store_put(&self, key: &str, value: &[u8]);
     /// One JSON event for the UI: a view, a request to play, progress.
+    #[cfg_attr(not(feature = "bridge"), allow(dead_code))]
     fn emit(&self, event: &str);
     /// A monotonic clock in milliseconds.
     fn monotonic_ms(&self) -> f64;
@@ -39,7 +40,7 @@ thread_local! {
     static HOST: RefCell<Option<Rc<dyn Host>>> = const { RefCell::new(None) };
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "bridge"))]
 pub(crate) fn install(host: Rc<dyn Host>) {
     HOST.with(|h| *h.borrow_mut() = Some(host));
 }
@@ -79,6 +80,7 @@ mod wasm {
         fn sleep(id: u32, ms: f64);
         fn store_get(id: u32, key: *const u8, key_len: usize);
         fn store_put(key: *const u8, key_len: usize, value: *const u8, value_len: usize);
+        #[cfg_attr(not(feature = "bridge"), allow(dead_code))]
         fn emit(ptr: *const u8, len: usize);
         fn monotonic_ms() -> f64;
         fn wall_ms() -> f64;
