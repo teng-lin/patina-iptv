@@ -155,6 +155,18 @@ impl Lane {
             metrics: Arc::default(),
         }
     }
+
+    /// A lane on `connection`, another lane's (a browser store has one).
+    fn sharing(
+        name: &'static str,
+        execution: Arc<dyn crate::execution::Execution>,
+        connection: Arc<Mutex<Connection>>,
+    ) -> Self {
+        Self {
+            connection,
+            ..Self::new(name, execution)
+        }
+    }
 }
 
 #[derive(Default)]
@@ -200,6 +212,9 @@ impl Epochs {
 /// Nothing here is process-wide: a second owner has its own.
 pub(crate) struct Service {
     ports: crate::Ports,
+    /// The lanes share the writer's connection (`Execution::shares_connection`):
+    /// reads open the store itself, not a reader connection.
+    shared: bool,
     writer: Lane,
     reader: Lane,
     analysis: Lane,
@@ -221,10 +236,21 @@ pub(crate) struct Service {
 impl Service {
     pub(crate) fn new(ports: crate::Ports) -> Self {
         let execution = ports.execution.clone();
+        let shared = execution.shares_connection();
+        let writer = Lane::new("iptv-store", execution.clone());
+        let lane = |name| {
+            if shared {
+                Lane::sharing(name, execution.clone(), writer.connection.clone())
+            } else {
+                Lane::new(name, execution.clone())
+            }
+        };
+        let (reader, analysis) = (lane("iptv-store-read"), lane("iptv-store-analysis"));
         Self {
-            writer: Lane::new("iptv-store", execution.clone()),
-            reader: Lane::new("iptv-store-read", execution.clone()),
-            analysis: Lane::new("iptv-store-analysis", execution.clone()),
+            shared,
+            writer,
+            reader,
+            analysis,
             files: super::file_writer::Files::new(execution),
             ports,
             epochs: Epochs::default(),
@@ -330,6 +356,11 @@ impl Service {
             #[cfg(feature = "test-support")]
             self.hooks.drained();
             return true;
+        }
+        // A publish still in slices is abandoned, not finished: the owner is
+        // closing (natively a publish runs as one job and is never pending).
+        if let Some(lane) = self.writer.jobs.get() {
+            lane.cancel_sliced();
         }
         // The writer first: once it closed the epoch, a late read cannot open
         // the reader's connection again.
@@ -597,7 +628,7 @@ impl Services {
                     &owner.epochs,
                     epoch,
                     connection,
-                    || owner.open_reader(epoch),
+                    || owner.open_lane(epoch),
                     operation,
                 ));
             }))
@@ -716,9 +747,19 @@ impl Service {
             &self.epochs,
             epoch,
             connection,
-            || self.open_reader(epoch),
+            || self.open_lane(epoch),
             |store| operation(store),
         )
+    }
+
+    /// A reading lane's connection: the writer's own store where the lanes
+    /// share one, else a reader connection ([`Service::open_reader`]).
+    fn open_lane(self: &Arc<Self>, epoch: u64) -> Result<Store, StoreError> {
+        if self.shared {
+            self.open_store()
+        } else {
+            self.open_reader(epoch)
+        }
     }
 
     /// The reader's connection, made by the writer from its own open store
@@ -1024,6 +1065,60 @@ mod tests {
         fn is_current(&self) -> bool {
             false
         }
+    }
+
+    /// A host loop that is never polled: blocking requests run inline.
+    struct Unpolled;
+    impl crate::execution::CooperativeHost for Unpolled {
+        fn spawn(&self, _: crate::execution::Task) {}
+        fn delay(&self, _: std::time::Duration) -> crate::execution::Task {
+            Box::pin(std::future::pending())
+        }
+        fn now(&self) -> std::time::Duration {
+            std::time::Duration::ZERO
+        }
+    }
+
+    #[test]
+    fn cooperative_lanes_read_on_the_writers_store() {
+        let directory = tempfile::tempdir().unwrap();
+        let ports = crate::Ports::with_adapters(
+            directory.path().to_owned(),
+            |_| Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x73; 32])),
+            Arc::new(crate::native::network::NativeNetwork),
+            Arc::new(crate::execution::Cooperative::new(Arc::new(Unpolled))),
+        );
+        let owner = Arc::new(Service::new(ports));
+        assert!(Arc::ptr_eq(
+            &owner.reader.connection,
+            &owner.writer.connection
+        ));
+        assert!(Arc::ptr_eq(
+            &owner.analysis.connection,
+            &owner.writer.connection
+        ));
+        owner.epochs.begin();
+        let services = owner.accept();
+        services
+            .blocking(|store| store.set_combined_last_channel("synthetic-shared"))
+            .unwrap();
+        assert_eq!(
+            services
+                .blocking_read(|store| store.combined_last_channel())
+                .unwrap()
+                .as_deref(),
+            Some("synthetic-shared")
+        );
+        assert!(owner.drain_on_shutdown());
+    }
+
+    #[test]
+    fn a_thread_lane_whose_worker_stopped_refuses_work() {
+        let (sender, receiver) = std::sync::mpsc::channel::<crate::execution::Job>();
+        drop(receiver);
+        let lane = crate::native::execution::ThreadLane::for_tests(sender);
+        assert!(!crate::execution::Lane::push(&lane, Box::new(|| {})));
+        assert!(!crate::execution::Lane::run(&lane, Box::new(|| {}), None));
     }
 
     #[test]

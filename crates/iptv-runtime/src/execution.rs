@@ -57,6 +57,13 @@ pub trait Execution: Send + Sync {
     /// A task executor for one owner, made on that owner's first use and
     /// dropped with it.
     fn tasks(&self) -> Box<dyn Tasks>;
+
+    /// The store lanes share one connection: a browser store has a single
+    /// one (no reader connection), and reads run on the writer's store
+    /// between the writer's jobs and slices. Natively each lane has its own.
+    fn shares_connection(&self) -> bool {
+        false
+    }
 }
 
 /// A serial queue: jobs run one at a time, in the order they were pushed.
@@ -71,35 +78,62 @@ pub trait Lane: Send + Sync {
 
     /// Queues a job that runs in slices: [`Sliced::step`] until it reports
     /// [`Progress::Done`]. Natively all steps run at once, in one job; a
-    /// cooperative lane runs one step per turn of the host's event loop, so
-    /// jobs queued behind wait for the whole of it but the page does not.
-    fn push_sliced(&self, mut job: Box<dyn Sliced>) -> bool {
-        self.push(Box::new(move || {
-            while job.step(Budget::UNLIMITED) == Progress::Pending {}
-        }))
+    /// cooperative lane runs one step per turn of the host's event loop, and
+    /// the other lanes' jobs (reads) run between them. Jobs queued behind it
+    /// on this lane wait for the whole of it, in order.
+    fn push_sliced(&self, job: Box<dyn Sliced>) -> bool {
+        self.push(Box::new(move || run_to_end(job)))
     }
+
+    /// Cancels the sliced jobs this lane has not finished
+    /// ([`Sliced::cancel`]): the owner is closing, and a publish must be
+    /// abandoned, not completed. Natively a sliced job runs as one job to its
+    /// end, so there is nothing left to cancel.
+    fn cancel_sliced(&self) {}
 
     /// The caller is running one of this lane's jobs (a job may not wait for
     /// its own lane).
     fn is_current(&self) -> bool;
 }
 
-/// A job that runs in slices, such as a resumable catalog or guide publish.
+/// Runs `job` to its end in one go; a panicking step ends the job (and is
+/// logged), not the lane that runs it.
+pub(crate) fn run_to_end(mut job: Box<dyn Sliced>) {
+    let stepped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        while job.step(Budget::UNLIMITED) == Progress::Pending {}
+    }));
+    if stepped.is_err() {
+        log::error!("iptv execution: a sliced job panicked; it was dropped");
+    }
+}
+
+/// A job that runs in slices, such as a resumable catalog or guide publish
+/// (`iptv-store-sqlite`'s `CatalogReplacement` and `EpgReplacement`, whose
+/// `step(rows)` is this `step`).
+///
+/// A step that returns [`Progress::Pending`] must have done work: a job
+/// that never ends would hold its lane, and a blocking request behind it,
+/// forever. A job reports its own failures (an abandoned publish) and then
+/// returns [`Progress::Done`].
 pub trait Sliced: Send {
     /// Does work worth at most `budget`, then returns.
     fn step(&mut self, budget: Budget) -> Progress;
+
+    /// The owner closed before the job finished: undo what it began (a
+    /// publish's `abandon_publish`) instead of finishing it.
+    fn cancel(self: Box<Self>) {}
 }
 
-/// How much one [`Sliced::step`] may do.
+/// How much one [`Sliced::step`] may do: rows, as the store's resumable
+/// jobs count their work (it needs no clock).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Budget {
-    /// Wall time the step may take; `None` for no limit.
-    pub time: Option<Duration>,
+    pub rows: u32,
 }
 
 impl Budget {
     /// No limit: the step runs the job to its end.
-    pub const UNLIMITED: Self = Self { time: None };
+    pub const UNLIMITED: Self = Self { rows: u32::MAX };
 }
 
 /// What a [`Sliced::step`] left.

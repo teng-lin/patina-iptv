@@ -55,9 +55,20 @@ impl Execution for NativeExecution {
 
 /// A lane on its own thread, which owns nothing but the queue: its jobs
 /// carry what they work on.
-struct ThreadLane {
+pub(crate) struct ThreadLane {
     sender: mpsc::Sender<Job>,
     thread: ThreadId,
+}
+
+#[cfg(test)]
+impl ThreadLane {
+    /// A lane over `sender`, as if its thread were another one.
+    pub(crate) fn for_tests(sender: mpsc::Sender<Job>) -> Self {
+        let thread = std::thread::spawn(|| std::thread::current().id())
+            .join()
+            .unwrap();
+        Self { sender, thread }
+    }
 }
 
 impl Lane for ThreadLane {
