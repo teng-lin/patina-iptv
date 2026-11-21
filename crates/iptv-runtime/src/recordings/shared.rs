@@ -163,18 +163,29 @@ impl Transport {
                     .take();
                 if let Some(relay) = relay {
                     input.closing.store(true, Ordering::Release);
+                    // Closure is owned by a thread of its own: it outlives a
+                    // retirement waiter canceled by UI teardown or another
+                    // replacement, and any executor. (Spawned on one, it was
+                    // lost when that executor was dropped, as a recording
+                    // host restarted with new services drops the old ones',
+                    // and this wait then never ended.)
                     let closing = input.clone();
-                    // Closure remains owned even if this retirement waiter is
-                    // canceled by UI teardown or another replacement. It runs
-                    // on the executor retiring it: the one the relay was made
-                    // on can be gone by now (a recording host restarted with
-                    // new services drops the old ones' executor and its
-                    // tasks), and this wait would then never end.
-                    tokio::spawn(async move {
-                        relay.shutdown().await;
+                    let close = move || {
+                        if let Ok(runtime) = tokio::runtime::Builder::new_current_thread().build() {
+                            runtime.block_on(relay.shutdown());
+                        }
                         closing.closed.store(true, Ordering::Release);
                         closing.changed.notify_waiters();
-                    });
+                    };
+                    if std::thread::Builder::new()
+                        .name("iptv-relay-close".into())
+                        .spawn(close)
+                        .is_err()
+                    {
+                        // No thread: the relay, dropped with the closure,
+                        // still stops; nothing is left to wait for.
+                        input.closed.store(true, Ordering::Release);
+                    }
                 }
                 loop {
                     let changed = input.changed.notified();
