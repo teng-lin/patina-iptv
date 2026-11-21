@@ -825,3 +825,86 @@ fn failed_terminal_update_retains_receipt_for_retry() {
         .unwrap();
     assert!(store.commit_recording_completion(&completion).unwrap());
 }
+
+#[test]
+fn portable_backups_drop_recording_children_and_still_validate() {
+    use iptv_core::on_demand::Progress;
+    use iptv_core::recording::{Repeat, Rule, RuleId};
+    let (mut store, job, completion) = completion_fixture();
+    // A pending completion receipt for a job still recording.
+    assert!(
+        store
+            .prepare_recording_completion(&job, &completion)
+            .unwrap()
+    );
+    // Playback progress for a finished job.
+    let mut later = job.request.clone();
+    later.start += 7200;
+    later.end += 7200;
+    let finished = store
+        .schedule_recording(JobId(701), &later, job.request.start - 1)
+        .unwrap();
+    store
+        .conn
+        .execute(
+            "UPDATE recording_jobs SET status='completed',bytes=1200 WHERE id=?1",
+            [finished.0],
+        )
+        .unwrap();
+    let point = Progress::observed(24_000, Some(120_000), false);
+    store
+        .save_recording_progress(finished, point, later.start)
+        .unwrap();
+    assert_eq!(store.recording_progress(finished).unwrap(), point);
+    // A recurring rule with a materialized occurrence.
+    let mut recurring = job.request.clone();
+    recurring.start += 86_400;
+    recurring.end += 86_400;
+    let rule = Rule {
+        id: RuleId(702),
+        local_start: recurring.start,
+        request: recurring.clone(),
+        repeat: Repeat::Daily,
+        enabled: true,
+        lead_seconds: 0,
+        trail_seconds: 0,
+    };
+    store
+        .schedule_recording_rule_and_first_at(
+            &rule,
+            JobId(703),
+            recurring.start,
+            recurring.start - 1000,
+        )
+        .unwrap();
+    let children = |conn: &rusqlite::Connection| -> i64 {
+        conn.query_row(
+            "SELECT (SELECT count(*) FROM recording_completions)
+                  + (SELECT count(*) FROM recording_playback_progress)
+                  + (SELECT count(*) FROM recording_rule_jobs)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(children(&store.conn), 3);
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("generated.db");
+    store.snapshot_to(&path).unwrap();
+    Store::validate_snapshot(&path).unwrap();
+    let archived = rusqlite::Connection::open(&path).unwrap();
+    let recordings: i64 = archived
+        .query_row(
+            "SELECT (SELECT count(*) FROM recording_jobs)
+                  + (SELECT count(*) FROM recording_rules)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(recordings, 0);
+    assert_eq!(children(&archived), 0);
+    drop(archived);
+    // The live store keeps every host-local row.
+    assert_eq!(children(&store.conn), 3);
+}

@@ -103,6 +103,10 @@ impl Store {
                 )?;
             }
             // Media and host-local jobs are outside portable catalog backups.
+            // Their receipts, progress and rule occurrences cascade with them;
+            // say so here as Store::init does, rather than rely on the bundled
+            // build's SQLITE_DEFAULT_FOREIGN_KEYS, or orphans fail validation.
+            destination.pragma_update(None, "foreign_keys", true)?;
             destination.execute("DELETE FROM recording_rules", [])?;
             destination.execute("DELETE FROM recording_jobs", [])?;
             // A standalone file, even when the source uses WAL.
