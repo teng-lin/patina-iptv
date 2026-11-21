@@ -1350,10 +1350,16 @@ async fn a_first_segment_failing_after_its_first_packets_falls_back_on_retry() {
     let url = format!("http://{}/generated.m3u8", listener.local_addr().unwrap());
     let segments = Arc::new(AtomicUsize::new(0));
     let requested = segments.clone();
+    // The player holds its first packet before the segment's lost sync is
+    // sent. A delay would not order them: an ingest scheduled late reads the
+    // whole segment at once and refuses it before offering any packet.
+    let joined = Arc::new(tokio::sync::Notify::new());
+    let player_joined = joined.clone();
     let server = tokio::spawn(async move {
         loop {
             let (mut socket, _) = listener.accept().await.unwrap();
             let requested = requested.clone();
+            let joined = player_joined.clone();
             tokio::spawn(async move {
                 let mut request = Vec::new();
                 while !request.ends_with(b"\r\n\r\n") {
@@ -1376,7 +1382,7 @@ async fn a_first_segment_failing_after_its_first_packets_falls_back_on_retry() {
                 socket.write_all(&body[..2 * 188]).await?;
                 socket.flush().await?;
                 // The rest, with its lost sync, once the player has joined.
-                tokio::time::sleep(Duration::from_millis(200)).await;
+                joined.notified().await;
                 socket.write_all(&body[2 * 188..]).await
             });
         }
@@ -1414,6 +1420,7 @@ async fn a_first_segment_failing_after_its_first_packets_falls_back_on_retry() {
             "the shared input's own address"
         );
         let mut playback = player(&shared).await;
+        joined.notify_one();
         let mut rest = Vec::new();
         let _ = playback.read_to_end(&mut rest).await;
     }
