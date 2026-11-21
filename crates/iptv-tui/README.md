@@ -18,7 +18,9 @@ cargo build --release -p iptv-tui
 ## Usage
 
 ```sh
-patina-tui [--video=kitty|inline|popup|none] [--headless] [--demo]
+./target/release/patina-tui [--video=kitty|inline|popup|none] [--headless] [--demo]
+# or build and run directly:
+cargo run --release -p iptv-tui -- [--video=kitty|inline|popup|none] [--headless] [--demo]
 ```
 
 - `--video=kitty`: Fullscreen video via the Kitty Graphics Protocol (auto-selected on Ghostty, Kitty, and WezTerm; video-only). Uses a private `0700` `/dev/shm` directory locally (`1280x720@30`) and falls back to zlib-compressed inline chunked streaming over SSH (`1280x720@20`) or non-Linux systems.
@@ -32,6 +34,5 @@ Controls: Arrows to navigate, `Enter` to select, `Esc` / `Backspace` for Back/Gu
 
 ## Limitations
 
-- `TuiPlayer` is a lightweight subprocess player prototype (`ffmpeg`/`mpv`) and does not yet implement the full bidirectional `iptv-player-mpv` event contract (`state`, `position`, `tracks`, `headers` forwarding).
+- `TuiPlayer` is a lightweight subprocess player prototype (`ffmpeg`/`mpv`) routed through `iptv_net::playback::PlaybackRelay` (public-only destination policy, origin-scoped headers, credentials kept out of `argv`), and does not yet emit the full bidirectional `iptv-player-mpv` event contract (`state`, `position`, `tracks`).
 - Video in `kitty` and `inline` modes is fullscreen-only (no preview player in Guide mode) and video-only (no audio).
-- Stream URLs are passed to `mpv`/`ffmpeg` via `argv` (only `http://`/`https://` schemes are allowed).

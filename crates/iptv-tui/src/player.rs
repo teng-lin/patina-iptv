@@ -12,6 +12,7 @@ use std::{
 
 use base64::Engine as _;
 use flate2::{Compression, write::ZlibEncoder};
+use iptv_net::playback::PlaybackRelay;
 use nsh_core::{Command, JsonValue};
 use nsh_platform_tui::NativeComponent;
 use ratatui_core::{
@@ -39,14 +40,6 @@ pub fn is_ssh() -> bool {
     std::env::var_os("SSH_CONNECTION").is_some() || std::env::var_os("SSH_TTY").is_some()
 }
 
-fn is_allowed_stream_url(url: &str) -> bool {
-    let lower = url.to_ascii_lowercase();
-    (lower.starts_with("http://") || lower.starts_with("https://"))
-        && !url.contains('\0')
-        && !url.contains('\r')
-        && !url.contains('\n')
-}
-
 impl VideoMode {
     pub fn detect_default() -> Self {
         if std::env::var_os("GHOSTTY_RESOURCES_DIR").is_some()
@@ -70,6 +63,19 @@ impl VideoMode {
             Self::Popup => "popup",
             Self::None => "none",
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SourceSpec {
+    url: String,
+    token: Option<u64>,
+    headers: Vec<(String, String)>,
+}
+
+impl SourceSpec {
+    fn same_identity(&self, other: &Self) -> bool {
+        self.url == other.url && self.token == other.token
     }
 }
 
@@ -239,12 +245,15 @@ impl KittyOverlay {
 pub struct TuiPlayer {
     mode: VideoMode,
     kitty: Arc<KittyOverlay>,
-    current_url: Option<String>,
+    current_source: Option<SourceSpec>,
+    relay: Option<PlaybackRelay>,
     paused: bool,
     muted: bool,
     frame: Arc<Mutex<Option<Arc<RgbFrame>>>>,
     stop_flag: Arc<AtomicBool>,
     child: Option<Child>,
+    mpv_ipc_dir: Option<TempDir>,
+    mpv_ipc_path: Option<PathBuf>,
     reader_thread: Option<JoinHandle<()>>,
     last_area: (u16, u16),
     is_fullscreen: bool,
@@ -255,12 +264,15 @@ impl TuiPlayer {
         Self {
             mode,
             kitty,
-            current_url: None,
+            current_source: None,
+            relay: None,
             paused: false,
             muted: false,
             frame: Arc::new(Mutex::new(None)),
             stop_flag: Arc::new(AtomicBool::new(false)),
             child: None,
+            mpv_ipc_dir: None,
+            mpv_ipc_path: None,
             reader_thread: None,
             last_area: (80, 24),
             is_fullscreen: false,
@@ -276,6 +288,9 @@ impl TuiPlayer {
         if let Some(handle) = self.reader_thread.take() {
             let _ = handle.join();
         }
+        self.relay = None;
+        self.mpv_ipc_path = None;
+        self.mpv_ipc_dir = None;
         if let Ok(mut f) = self.frame.lock() {
             *f = None;
         }
@@ -293,21 +308,92 @@ impl TuiPlayer {
             if let Some(handle) = self.reader_thread.take() {
                 let _ = handle.join();
             }
+            self.relay = None;
+            self.mpv_ipc_path = None;
+            self.mpv_ipc_dir = None;
+        }
+    }
+
+    #[cfg(unix)]
+    fn send_mpv_property(&self, prop: &str, value: bool) -> bool {
+        let Some(path) = &self.mpv_ipc_path else {
+            return false;
+        };
+        let Ok(mut stream) = std::os::unix::net::UnixStream::connect(path) else {
+            return false;
+        };
+        let cmd = format!("{{\"command\":[\"set_property\",\"{prop}\",{value}]}}\n");
+        stream.write_all(cmd.as_bytes()).is_ok()
+    }
+
+    #[cfg(not(unix))]
+    fn send_mpv_property(&self, _prop: &str, _value: bool) -> bool {
+        false
+    }
+
+    fn apply_pause(&mut self) {
+        if self.child.is_none() {
+            if !self.paused {
+                self.start_playback();
+            }
+            return;
+        }
+        match self.mode {
+            VideoMode::None => {}
+            VideoMode::Popup => {
+                if !self.send_mpv_property("pause", self.paused) {
+                    log::warn!("patina-tui: mpv IPC unavailable for pause toggle");
+                }
+            }
+            VideoMode::Kitty | VideoMode::Inline => {
+                #[cfg(unix)]
+                if let Some(child) = &self.child {
+                    let pid = child.id() as libc::pid_t;
+                    let sig = if self.paused {
+                        libc::SIGSTOP
+                    } else {
+                        libc::SIGCONT
+                    };
+                    // SAFETY: `pid` belongs to our live owned child process (not yet waited on).
+                    unsafe {
+                        let _ = libc::kill(pid, sig);
+                    }
+                }
+            }
+        }
+    }
+
+    fn apply_mute(&self) {
+        if self.mode == VideoMode::Popup && self.child.is_some() {
+            let _ = self.send_mpv_property("mute", self.muted);
         }
     }
 
     fn start_playback(&mut self) {
         self.stop_playback();
-        if self.paused {
-            return;
-        }
-        let Some(url) = self.current_url.clone() else {
+        let Some(src) = self.current_source.clone() else {
             return;
         };
-        if !is_allowed_stream_url(&url) {
-            log::warn!("patina-tui: rejected unsupported stream URL scheme");
+        if matches!(self.mode, VideoMode::Kitty | VideoMode::Inline) && !self.is_fullscreen {
             return;
         }
+        if self.mode == VideoMode::None {
+            return;
+        }
+
+        // Route all subprocess media fetches through Patina's PlaybackRelay so
+        // public-only destination policy, redirect/manifest checks, and
+        // origin-scoped headers are enforced and credentials stay out of argv.
+        let relay = match PlaybackRelay::start(&src.url, &src.headers) {
+            Ok(relay) => relay,
+            Err(err) => {
+                log::warn!("patina-tui: playback policy rejected stream: {err}");
+                return;
+            }
+        };
+        let relay_url = relay.url().to_owned();
+        self.relay = Some(relay);
+
         match self.mode {
             VideoMode::None => {}
             VideoMode::Popup => {
@@ -321,9 +407,19 @@ impl TuiPlayer {
                 if self.muted {
                     cmd.arg("--mute=yes");
                 }
-                // `--` prevents option injection from untrusted playlist URLs.
+                if self.paused {
+                    cmd.arg("--pause=yes");
+                }
+                #[cfg(unix)]
+                if let Ok(dir) = tempfile::Builder::new().prefix("patina-mpv-").tempdir() {
+                    let sock = dir.path().join("ipc.sock");
+                    cmd.arg(format!("--input-ipc-server={}", sock.display()));
+                    self.mpv_ipc_path = Some(sock);
+                    self.mpv_ipc_dir = Some(dir);
+                }
+                // `--` prevents option injection even on the loopback relay URL.
                 cmd.arg("--")
-                    .arg(&url)
+                    .arg(&relay_url)
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null());
@@ -333,9 +429,6 @@ impl TuiPlayer {
                 }
             }
             VideoMode::Kitty | VideoMode::Inline => {
-                if !self.is_fullscreen {
-                    return;
-                }
                 let (w, h, fps) = if self.mode == VideoMode::Kitty {
                     if is_ssh() {
                         (1280usize, 720usize, 20)
@@ -358,7 +451,7 @@ impl TuiPlayer {
                     "http,https,tcp,tls,crypto,hls",
                     "-re",
                     "-i",
-                    &url,
+                    &relay_url,
                     "-vf",
                     &format!("scale={w}:{h}:flags=lanczos,fps={fps}"),
                     "-f",
@@ -410,6 +503,9 @@ impl TuiPlayer {
                             }));
                         }
                         self.child = Some(child);
+                        if self.paused {
+                            self.apply_pause();
+                        }
                     }
                     Err(err) => log::warn!("patina-tui: failed to spawn ffmpeg: {err}"),
                 }
@@ -448,14 +544,14 @@ impl NativeComponent for TuiPlayer {
 
         let draw_area = area;
         self.last_area = (draw_area.width, draw_area.height);
-        if mode_changed && self.mode != VideoMode::Popup && self.current_url.is_some() {
+        if mode_changed && self.mode != VideoMode::Popup && self.current_source.is_some() {
             self.start_playback();
         }
 
         // For Kitty graphics with z=-1, cells must use Color::Reset (default
         // background) so the image is visible behind the cell layer rather than
         // occluded by an opaque RGB cell background.
-        let bg = if self.mode == VideoMode::Kitty && self.current_url.is_some() && !self.paused {
+        let bg = if self.mode == VideoMode::Kitty && self.current_source.is_some() {
             Style::default().bg(Color::Reset).fg(Color::Reset)
         } else {
             Style::default()
@@ -474,7 +570,7 @@ impl NativeComponent for TuiPlayer {
             if let Ok(mut r) = self.kitty.rect.lock() {
                 *r = Some(draw_area);
             }
-            if self.current_url.is_some() && !self.paused {
+            if self.current_source.is_some() {
                 self.kitty.active.store(true, Ordering::Relaxed);
                 return;
             }
@@ -517,7 +613,7 @@ impl NativeComponent for TuiPlayer {
             return;
         }
 
-        let label = match (self.mode, &self.current_url, self.paused) {
+        let label = match (self.mode, &self.current_source, self.paused) {
             (_, None, _) => "[No stream]",
             (_, Some(_), true) => "[Paused]",
             (VideoMode::Popup, Some(_), false) => "[Playing in mpv]",
@@ -539,42 +635,66 @@ impl NativeComponent for TuiPlayer {
     }
 
     fn set_props(&mut self, props: &[(Arc<str>, Option<JsonValue>)]) {
-        let mut restart = false;
+        let mut source_changed = false;
+        let mut pause_changed = false;
+        let mut mute_changed = false;
         for (key, value) in props {
             match key.as_ref() {
                 "source" => {
-                    let new_url = value
-                        .as_ref()
-                        .and_then(|v| v.as_object())
-                        .and_then(|obj| obj.get("url"))
-                        .and_then(|u| u.as_str())
-                        .map(ToOwned::to_owned);
-                    if new_url != self.current_url {
-                        self.current_url = new_url;
-                        restart = true;
+                    let new_src = value.as_ref().and_then(|v| v.as_object()).and_then(|obj| {
+                        let url = obj.get("url")?.as_str()?.to_owned();
+                        let token = obj.get("token").and_then(|t| t.as_u64());
+                        let headers = obj
+                            .get("headers")
+                            .and_then(|h| h.as_object())
+                            .map(|map| {
+                                map.iter()
+                                    .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        Some(SourceSpec {
+                            url,
+                            token,
+                            headers,
+                        })
+                    });
+                    let same = match (&self.current_source, &new_src) {
+                        (Some(a), Some(b)) => a.same_identity(b),
+                        (None, None) => true,
+                        _ => false,
+                    };
+                    if !same {
+                        self.current_source = new_src;
+                        source_changed = true;
                     }
                 }
                 "paused" => {
                     let p = value.as_ref().and_then(|v| v.as_bool()).unwrap_or(false);
                     if p != self.paused {
                         self.paused = p;
-                        restart = true;
+                        pause_changed = true;
                     }
                 }
                 "muted" => {
                     let m = value.as_ref().and_then(|v| v.as_bool()).unwrap_or(false);
                     if m != self.muted {
                         self.muted = m;
-                        if self.mode == VideoMode::Popup {
-                            restart = true;
-                        }
+                        mute_changed = true;
                     }
                 }
                 _ => {}
             }
         }
-        if restart {
+        if source_changed {
             self.start_playback();
+        } else {
+            if pause_changed {
+                self.apply_pause();
+            }
+            if mute_changed {
+                self.apply_mute();
+            }
         }
     }
 

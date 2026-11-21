@@ -355,10 +355,11 @@ fn main() -> io::Result<()> {
         return Ok(());
     }
 
-    let panic_kitty = (video_mode == VideoMode::Kitty).then(|| kitty.clone());
+    let panic_kitty = (video_mode == VideoMode::Kitty).then(|| Arc::downgrade(&kitty));
     let prev_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        restore_terminal(panic_kitty.as_deref());
+        let upgraded = panic_kitty.as_ref().and_then(std::sync::Weak::upgrade);
+        restore_terminal(upgraded.as_deref());
         prev_hook(info);
     }));
 
