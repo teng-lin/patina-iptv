@@ -3,10 +3,9 @@ use super::*;
 use chrono::{DateTime, Local, TimeZone, Utc};
 use iptv_core::recording::{RecurrenceTiming, Repeat, Rule, RuleId};
 
-fn identity() -> Result<i64, Error> {
+fn identity(entropy: crate::ports::Entropy) -> Result<i64, Error> {
     let mut bytes = [0; 8];
-    getrandom::fill(&mut bytes)
-        .map_err(|_| Error::unavailable("Recording identity unavailable"))?;
+    entropy(&mut bytes).map_err(|_| Error::unavailable("Recording identity unavailable"))?;
     Ok((i64::from_ne_bytes(bytes) & i64::MAX).max(1))
 }
 pub(super) fn local_timestamp(utc: i64) -> Option<i64> {
@@ -73,7 +72,7 @@ impl Runtime {
         }
         nominal.validate(now()).map_err(Error::unavailable)?;
         let mut rule = Rule {
-            id: RuleId(identity()?),
+            id: RuleId(identity(self.services().ports().entropy)?),
             local_start: local_timestamp(nominal.start)
                 .ok_or_else(|| Error::unavailable("Recording time unavailable"))?,
             request: nominal,
@@ -107,7 +106,7 @@ impl Runtime {
         };
         self.sync_recording_contexts();
         self.start_recordings();
-        let job = JobId(identity()?);
+        let job = JobId(identity(self.services().ports().entropy)?);
         // The first occurrence and the recurring intent are one acknowledgement.
         let first = self
             .services()
@@ -264,7 +263,7 @@ pub(super) async fn materialize(services: &Services) -> Result<(), Error> {
             if request.validate(current).is_err() {
                 continue;
             }
-            let job = JobId(identity()?);
+            let job = JobId(identity(services.ports().entropy)?);
             services
                 .call(move |store| {
                     store
