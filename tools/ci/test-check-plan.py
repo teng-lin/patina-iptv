@@ -145,6 +145,11 @@ class Plan(unittest.TestCase):
                                             "--target", "wasm32-unknown-unknown"])
         self.assertLess(set(checks.PORTABLE), set(checks.workspace_crates()) - {"iptv-app"})
 
+    def test_the_web_core_builds_for_wasm_outside_the_portable_set(self):
+        self.assertNotIn("iptv-web", checks.PORTABLE)
+        self.assertEqual(self.by_name["web-core-wasm"],
+                         ["cargo", "build", "--locked", "-p", "iptv-web", "--target", "wasm32-unknown-unknown"])
+
     def test_release_only_changes_the_normal_app_build(self):
         release = {step["name"]: step["argv"] for step in checks.plan(release=True)}
         self.assertEqual(self.by_name.keys(), release.keys())

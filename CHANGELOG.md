@@ -9,6 +9,12 @@ is below 1.0, a minor release may change behavior.
 
 ### Added
 
+- Samsung Tizen TVs (experimental, 2020 / Tizen 5.5 and later): Live TV
+  from an Xtream Codes account or an M3U playlist with its TV guide, the
+  channel list beside the playing channel, full screen, channel zapping,
+  Favorites and Recently watched. The app talks to the provider directly,
+  keeps the guide between launches and downloads it again on the same
+  schedule as the other platforms. See `hosts/tizen/README.md`.
 - Desktop: a visible ⋯ "More options" on recordings rows and on the shown
   group in the guide's and the channel list's groups columns, so every
   secondary action has a pointer entry point beside right-click. A second

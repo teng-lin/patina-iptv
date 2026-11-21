@@ -1,0 +1,127 @@
+//! Web application layer of iptv-rs, for TV web runtimes (Samsung Tizen).
+//!
+//! The portable core runs in WebAssembly inside a Web Worker. The page's
+//! JavaScript (`hosts/tizen`) renders the views this emits, sends remote
+//! keys and plays streams with the TV's native player; the worker's
+//! JavaScript performs the HTTP requests the import describes.
+//!
+//! - [`host`]: the imports the module calls (fetch, chunks, timers, storage,
+//!   events, clocks).
+//! - [`exec`]: a single-threaded executor polled after every delivery, and
+//!   the `iptv_import::Fetch` adapter over the host.
+//! - [`store`]: what is kept between launches: the stored guide (an
+//!   `iptv_epg` snapshot) with its refresh state, and the user's lists.
+//! - [`app`]: Live TV: import a source (Xtream or M3U), its guide, the
+//!   channel list beside the preview, full screen and zapping, on
+//!   `iptv_core`'s list and focus models.
+//!
+//! Live channels only: movies and series are not imported here.
+//!
+//! **Destination policy.** Content-supplied addresses must be public. The
+//! browser resolves host names itself and does not expose the answer, so
+//! this adapter refuses literal non-public addresses and local names only;
+//! a public name that resolves to a LAN address is not detected.
+//!
+//! The exports are a C ABI: bytes cross through [`input`] (a buffer the host
+//! fills before an export that reads it) and the host's `emit` import.
+
+mod app;
+mod exec;
+mod host;
+mod store;
+
+#[cfg(test)]
+mod tests;
+
+use std::cell::RefCell;
+
+thread_local! {
+    static INPUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+}
+
+fn take_input(len: u32) -> Vec<u8> {
+    INPUT.with(|i| {
+        let mut i = i.borrow_mut();
+        i.truncate(len as usize);
+        std::mem::take(&mut *i)
+    })
+}
+
+/// A buffer of `len` bytes the host writes the next export's input into.
+#[unsafe(no_mangle)]
+pub extern "C" fn input(len: u32) -> *mut u8 {
+    INPUT.with(|i| {
+        let mut i = i.borrow_mut();
+        i.clear();
+        i.resize(len as usize, 0);
+        i.as_mut_ptr()
+    })
+}
+
+/// A command (JSON, `len` bytes in [`input`]).
+#[unsafe(no_mangle)]
+pub extern "C" fn command(len: u32) {
+    let bytes = take_input(len);
+    app::command(&String::from_utf8_lossy(&bytes));
+    exec::poll();
+}
+
+/// Request `id` answered with `status`; `length` is the declared body size,
+/// negative when unknown.
+#[unsafe(no_mangle)]
+pub extern "C" fn on_status(id: u32, status: u32, length: f64) {
+    let length = (length >= 0.0).then_some(length as u64);
+    exec::deliver_status(id, status.min(u32::from(u16::MAX)) as u16, length);
+    exec::poll();
+}
+
+/// The whole body of request `id` (`len` bytes in [`input`]).
+#[unsafe(no_mangle)]
+pub extern "C" fn on_body(id: u32, len: u32) {
+    exec::deliver_body(id, take_input(len));
+    exec::poll();
+}
+
+/// The next chunk of stream `id` (`len` bytes in [`input`]).
+#[unsafe(no_mangle)]
+pub extern "C" fn on_chunk(id: u32, len: u32) {
+    exec::deliver_chunk(id, Some(take_input(len)));
+    exec::poll();
+}
+
+/// Stream `id` ended.
+#[unsafe(no_mangle)]
+pub extern "C" fn on_end(id: u32) {
+    exec::deliver_chunk(id, None);
+    exec::poll();
+}
+
+/// Request `id` failed: `kind` 1 connect, 2 timeout, 3 body, 4 invalid
+/// request, 5 too large, else other; the detail (`len` bytes) is in [`input`].
+#[unsafe(no_mangle)]
+pub extern "C" fn on_error(id: u32, kind: u32, len: u32) {
+    let detail = String::from_utf8_lossy(&take_input(len)).into_owned();
+    exec::deliver_error(id, kind, detail);
+    exec::poll();
+}
+
+/// The stored value asked for with `id` (`len` bytes in [`input`]).
+#[unsafe(no_mangle)]
+pub extern "C" fn on_stored(id: u32, len: u32) {
+    exec::deliver_stored(id, Some(take_input(len)));
+    exec::poll();
+}
+
+/// Nothing is stored under the key asked for with `id`.
+#[unsafe(no_mangle)]
+pub extern "C" fn on_missing(id: u32) {
+    exec::deliver_stored(id, None);
+    exec::poll();
+}
+
+/// The timer `id` fired.
+#[unsafe(no_mangle)]
+pub extern "C" fn on_wake(id: u32) {
+    exec::deliver_wake(id);
+    exec::poll();
+}

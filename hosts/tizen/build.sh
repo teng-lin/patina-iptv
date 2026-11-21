@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Builds Patina for Samsung Tizen TVs: the core (crates/iptv-web) for the
+# oldest supported engine's WebAssembly features, staged with the page into
+# a signed .wgt.
+#
+#   hosts/tizen/build.sh                    build and sign target/tizen/Patina.wgt
+#   hosts/tizen/build.sh --install HOST:PORT  also install it on a TV in Developer Mode
+#
+# Signing uses a local Tizen Studio certificate profile named by
+# TIZEN_SIGNING_PROFILE (Certificate Manager; keep it out of the repository).
+# Requires Tizen Studio's `tizen` CLI and a nightly toolchain with rust-src.
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+out="$root/target/tizen"
+# Tizen 5.5 (2020, Chromium 69) validates only MVP WebAssembly plus
+# sign-extension and mutable globals. Stable Rust's std uses reference types
+# and bulk memory, so std is rebuilt for that feature set (needs nightly).
+nightly="nightly-2026-10-24"
+features="-C target-cpu=mvp -C target-feature=+sign-ext,+mutable-globals"
+
+install_host=""
+if [[ "${1:-}" == "--install" ]]; then
+    install_host="${2:?--install needs the TV address}"
+fi
+
+tizen_cli="$(command -v tizen || true)"
+if [[ -z "$tizen_cli" && -x "$HOME/tizen-studio/tools/ide/bin/tizen" ]]; then
+    tizen_cli="$HOME/tizen-studio/tools/ide/bin/tizen"
+fi
+
+echo "Building the core for the TV engine…"
+RUSTFLAGS="$features" cargo "+$nightly" build \
+    -Zbuild-std=std,panic_abort \
+    --target wasm32-unknown-unknown \
+    --release -p iptv-web \
+    --target-dir "$root/target/tizen-wasm" \
+    --config 'profile.release.panic="abort"' \
+    --config 'profile.release.lto=true' \
+    --config 'profile.release.codegen-units=1' \
+    --config 'profile.release.strip=true'
+
+version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -1)"
+stage="$out/stage"
+rm -rf "$stage"
+mkdir -p "$stage"
+cp "$root"/hosts/tizen/app/{index.html,main.js,worker.js,style.css} "$stage/"
+cp "$root/art/icon/play-512.png" "$stage/icon.png"
+cp "$root/target/tizen-wasm/wasm32-unknown-unknown/release/iptv_web.wasm" "$stage/"
+sed "s/__VERSION__/$version/" "$root/hosts/tizen/app/config.xml" >"$stage/config.xml"
+
+if [[ -z "${TIZEN_SIGNING_PROFILE:-}" || -z "$tizen_cli" ]]; then
+    echo "Staged (unsigned) in $stage. Set TIZEN_SIGNING_PROFILE and install Tizen Studio to sign."
+    exit 0
+fi
+
+echo "Signing with profile $TIZEN_SIGNING_PROFILE…"
+rm -f "$stage"/*.wgt
+"$tizen_cli" package -t wgt -s "$TIZEN_SIGNING_PROFILE" -- "$stage" >/dev/null
+# The TV's installer rejects file names with spaces.
+mv "$stage"/*.wgt "$out/Patina.wgt"
+echo "Built $out/Patina.wgt"
+
+if [[ -n "$install_host" ]]; then
+    sdb="$(command -v sdb || echo "$HOME/tizen-studio/tools/sdb")"
+    "$sdb" connect "$install_host" >/dev/null
+    "$tizen_cli" install -s "$install_host" -n Patina.wgt -- "$out"
+    "$tizen_cli" run -s "$install_host" -p PatinaIPTV.Patina
+fi

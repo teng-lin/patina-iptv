@@ -21,6 +21,7 @@ FLOORS = {
     "iptv-library": 91.0,
     "iptv-runtime": 90.0,
     "iptv-app": 90.0,
+    "iptv-web": 80.0,
 }
 
 

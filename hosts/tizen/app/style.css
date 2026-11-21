@@ -1,0 +1,214 @@
+/*
+ * Patina's own palette (crates/iptv-app/src/theme.rs, Blue on Dark):
+ * panel #1C2429, window #141C21, alternate #262E33, accent #285575,
+ * light accent #9CCBEB. Chromium 69: no flex gap, min()/clamp() or inset.
+ */
+html, body {
+    margin: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    background: transparent;
+    color: #E3E8EC;
+    font-family: "SamsungOne", "Tizen Sans", sans-serif;
+    font-size: 28px;
+}
+.muted { color: #9AA5AD; }
+.hidden { display: none !important; }
+
+#player, #fallback {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920px;
+    height: 1080px;
+}
+#fallback { display: none; background: #000; }
+
+#list {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920px;
+    height: 1080px;
+}
+.column {
+    position: absolute;
+    top: 0;
+    height: 1080px;
+    background: #141C21;
+    box-sizing: border-box;
+    padding: 48px 0 0 0;
+}
+.column h2 {
+    margin: 0 0 20px 0;
+    padding: 0 32px;
+    font-size: 26px;
+    font-weight: 600;
+    color: #9CCBEB;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.column ol { list-style: none; margin: 0; padding: 0; }
+
+#groups { left: 0; width: 360px; background: #1C2429; }
+#groups li {
+    height: 76px;
+    line-height: 76px;
+    padding: 0 32px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#groups li.shown { color: #9CCBEB; }
+#channels { left: 360px; width: 760px; }
+#channels li {
+    position: relative;
+    height: 100px;
+    padding: 10px 24px 10px 132px;
+    box-sizing: border-box;
+    border-bottom: 1px solid #1C2429;
+}
+#channels li .num {
+    position: absolute;
+    left: 16px;
+    top: 0;
+    width: 40px;
+    line-height: 100px;
+    text-align: right;
+    color: #9AA5AD;
+    font-size: 24px;
+}
+#channels li img {
+    position: absolute;
+    left: 66px;
+    top: 26px;
+    width: 56px;
+    height: 48px;
+    object-fit: contain;
+}
+#channels li .name, #channels li .prog {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#channels li .prog { color: #9AA5AD; font-size: 24px; margin-top: 6px; }
+#channels li.playing .name { color: #9CCBEB; }
+#list-count { position: absolute; left: 32px; bottom: 24px; font-size: 22px; }
+
+/* Focus: a light pill with near-black text, whatever the background. */
+.column.active li.focus { background: #9CCBEB; color: #101418; }
+.column.active li.focus .num, .column.active li.focus .prog { color: #23303A; }
+.column li.focus { background: #262E33; }
+
+#side {
+    position: absolute;
+    left: 1120px;
+    top: 0;
+    width: 800px;
+    height: 1080px;
+}
+#preview-frame {
+    position: absolute;
+    left: 24px;
+    top: 48px;
+    width: 752px;
+    height: 423px;
+    outline: 2px solid #262E33;
+}
+#info {
+    position: absolute;
+    left: 24px;
+    top: 500px;
+    width: 752px;
+    padding: 24px;
+    box-sizing: border-box;
+    background: #1C2429;
+}
+#info-channel, #banner-channel { font-size: 30px; font-weight: 600; margin-bottom: 10px; }
+#info-now, #banner-now { margin-bottom: 14px; }
+#info-progress, #banner-progress { height: 6px; background: #262E33; margin-bottom: 14px; }
+#info-progress div, #banner-progress div { height: 6px; width: 0; background: #9CCBEB; }
+#status { position: absolute; left: 48px; bottom: 32px; width: 720px; font-size: 22px; }
+
+/* Behind the preview the page is transparent: the video plane shows. */
+#side { background: transparent; }
+body.full #list { display: none; }
+
+#banner {
+    position: absolute;
+    left: 120px;
+    bottom: 80px;
+    width: 1680px;
+    padding: 28px 36px;
+    box-sizing: border-box;
+    background: rgba(20, 28, 33, 0.92);
+}
+
+#loading {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920px;
+    height: 1080px;
+    background: #141C21;
+}
+#loading-text { position: absolute; left: 0; top: 500px; width: 1920px; text-align: center; }
+
+#notice {
+    position: absolute;
+    left: 660px;
+    top: 60px;
+    width: 600px;
+    padding: 20px 28px;
+    box-sizing: border-box;
+    background: #70463F;
+    text-align: center;
+}
+
+#confirm {
+    position: absolute;
+    left: 610px;
+    top: 420px;
+    width: 700px;
+    padding: 40px;
+    box-sizing: border-box;
+    background: #1C2429;
+    outline: 4px solid #9CCBEB;
+    text-align: center;
+    font-size: 34px;
+}
+#confirm .muted { font-size: 22px; margin-top: 16px; }
+
+#notice.info { background: #285575; }
+
+#setup {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920px;
+    height: 1080px;
+    box-sizing: border-box;
+    padding: 120px 560px;
+    background: #141C21;
+}
+#setup h1 { margin: 0 0 16px 0; font-size: 44px; color: #9CCBEB; }
+#setup .field {
+    margin-top: 18px;
+    padding: 16px 24px;
+    background: #1C2429;
+}
+#setup .field.focus { outline: 4px solid #9CCBEB; }
+#setup label { display: block; font-size: 22px; color: #9AA5AD; margin-bottom: 6px; }
+#setup input {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 28px;
+    padding: 6px 8px;
+    border: 0;
+    background: #262E33;
+    color: #E3E8EC;
+}
+#setup .button { text-align: center; background: #285575; }
+#setup .hint { margin-top: 28px; font-size: 22px; }
