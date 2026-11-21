@@ -814,13 +814,14 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
     if let Some(p) = finished
         && let Some(next) = p.details.next_episode(&p.key)
     {
+        // The episode's end was saved: its series' card shows it, also
+        // when Back from the next episode comes before that one saves.
+        let mut details = p.details.clone();
+        ui.vod.update(|s| s.watched(&mut details, &p.key, true));
         if crate::settings::flag(iptv_settings::keys::VOD_AUTOPLAY_NEXT_EPISODE) {
-            play_key(ui, p.details.clone(), next.key.clone(), false);
+            play_key(ui, details, next.key.clone(), false);
         } else {
-            // The episode's end was saved: its series' card shows it.
-            let mut details = p.details.clone();
             ui.vod.update(|s| {
-                s.watched(&mut details, &p.key, true);
                 s.open = true;
                 s.show_details(details);
                 s.episode = Some(next.key.clone());

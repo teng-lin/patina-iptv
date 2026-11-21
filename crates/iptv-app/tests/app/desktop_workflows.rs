@@ -981,7 +981,6 @@ fn native(app: &mut Headless, seen: &Observed, name: &str, data: Value) {
     app.settle();
 }
 
-/// Back from a movie playing full screen, the bar hidden first if shown.
 /// Whether the poster `card` is selected and drawn inside the poster grid's
 /// viewport: a recycled row can still be mounted outside it.
 fn card_shown_and_selected(s: &nsh_testing::Screen, card: &str) -> bool {
@@ -1009,6 +1008,7 @@ fn card_shown_and_selected(s: &nsh_testing::Screen, card: &str) -> bool {
     top >= grid_top - 0.5 && top + card.size.height.0 <= grid_top + grid.size.height.0 + 0.5
 }
 
+/// Back from a movie playing full screen, the bar hidden first if shown.
 fn back_to_details(app: &mut Headless) {
     for _ in 0..2 {
         if app.screen().matches("id:vod-screen").unwrap() {
