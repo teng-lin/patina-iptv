@@ -677,3 +677,50 @@ mod futures_like {
         }
     }
 }
+
+#[test]
+fn a_spawn_before_any_host_does_not_silence_later_wakes() {
+    // No host on this thread yet: nothing can be asked for.
+    crate::exec::spawn(async {});
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    crate::exec::spawn(async {});
+    assert_eq!(
+        fake.timers.borrow().len(),
+        1,
+        "the second spawn asks for a poll"
+    );
+    crate::exec::poll();
+    assert_eq!(crate::exec::pending_tasks(), 0);
+}
+
+#[test]
+fn a_request_wakes_its_task_under_another_executor() {
+    use iptv_import::Fetch;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Wake, Waker};
+    struct Count(AtomicUsize);
+    impl Wake for Count {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    let count = std::sync::Arc::new(Count(AtomicUsize::new(0)));
+    let waker = Waker::from(count.clone());
+    let mut cx = Context::from_waker(&waker);
+    let fetch = crate::exec::HostFetch::new();
+    let mut request = std::pin::pin!(fetch.fetch_stream(iptv_providers::HttpRequest::get(
+        "https://example.test/list.m3u"
+    )));
+    assert!(request.as_mut().poll(&mut cx).is_pending());
+    let id = fake.requests.borrow()[0].0;
+    crate::exec::deliver_status(id, 200, None);
+    assert_eq!(
+        count.0.load(Ordering::SeqCst),
+        1,
+        "the delivery woke the task"
+    );
+    assert!(request.as_mut().poll(&mut cx).is_ready());
+}

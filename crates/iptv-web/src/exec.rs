@@ -1,8 +1,9 @@
 //! A single-threaded executor and the [`Fetch`] adapter over the host.
 //!
 //! Tasks are polled whenever the host delivers something (`poll` after each
-//! export call), so no waker has to schedule anything: a pending future
-//! simply waits for the next delivery.
+//! export call) and whenever one is woken. A future waiting on the host
+//! registers its waker with its slot, and each delivery wakes it, so the
+//! adapter's futures also run under another executor (NSH's).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -54,10 +55,13 @@ fn woken() {
 
 /// Asks the host to call back soon, which polls.
 fn schedule() {
-    if SCHEDULED.with(|s| s.replace(true)) {
+    if SCHEDULED.with(Cell::get) {
         return;
     }
-    if let Some(host) = crate::host::host_if_alive() {
+    // Only a timer actually asked for counts: without a host yet, the next
+    // wake asks again.
+    if let Some(host) = crate::host::host_for_wake() {
+        SCHEDULED.with(|s| s.set(true));
         host.sleep(next_id(), 0.0);
     }
 }
@@ -72,7 +76,10 @@ pub(crate) fn spawn(task: impl Future<Output = ()> + 'static) {
 /// Polls every task until none makes progress without a new delivery.
 pub(crate) fn poll() {
     if POLLING.with(|p| p.replace(true)) {
-        return; // A task's host call answered synchronously: the outer poll continues.
+        // A task's host call answered synchronously: the outer poll runs
+        // another round for what this delivery woke.
+        WOKEN.with(|w| w.set(true));
+        return;
     }
     SCHEDULED.with(|s| s.set(false));
     let waker = Waker::from(std::sync::Arc::new(Wake));
@@ -107,6 +114,8 @@ pub(crate) fn pending_tasks() -> usize {
 /// What the host has delivered for one request.
 #[derive(Default)]
 struct Slot {
+    /// The task waiting on this slot, woken by its next delivery.
+    waker: Option<Waker>,
     status: Option<(u16, Option<u64>)>,
     body: Option<Vec<u8>>,
     /// `Some(None)`: the stream ended.
@@ -130,6 +139,28 @@ fn next_id() -> u32 {
 
 fn with_slot<R>(id: u32, f: impl FnOnce(&mut Slot) -> R) -> Option<R> {
     SLOTS.with(|s| s.borrow_mut().get_mut(&id).map(f))
+}
+
+/// Applies a delivery to slot `id` and wakes the task waiting on it.
+fn deliver<R>(id: u32, f: impl FnOnce(&mut Slot) -> R) -> Option<R> {
+    let (result, waker) = SLOTS.with(|s| {
+        let mut slots = s.borrow_mut();
+        let slot = slots.get_mut(&id)?;
+        let result = f(slot);
+        Some((result, slot.waker.take()))
+    })?;
+    if let Some(waker) = waker {
+        waker.wake();
+    }
+    Some(result)
+}
+
+/// Remembers `cx`'s waker for slot `id`'s next delivery.
+fn register(id: u32, cx: &Context<'_>) {
+    with_slot(id, |s| match &s.waker {
+        Some(waker) if waker.will_wake(cx.waker()) => {}
+        _ => s.waker = Some(cx.waker().clone()),
+    });
 }
 
 fn open_slot(id: u32) {
@@ -182,15 +213,15 @@ fn close_slot(id: u32) {
 // Deliveries from the host (the exports call these).
 
 pub(crate) fn deliver_status(id: u32, status: u16, length: Option<u64>) {
-    with_slot(id, |s| s.status = Some((status, length)));
+    deliver(id, |s| s.status = Some((status, length)));
 }
 
 pub(crate) fn deliver_body(id: u32, bytes: Vec<u8>) {
-    with_slot(id, |s| s.body = Some(bytes));
+    deliver(id, |s| s.body = Some(bytes));
 }
 
 pub(crate) fn deliver_chunk(id: u32, bytes: Option<Vec<u8>>) {
-    with_slot(id, |s| {
+    deliver(id, |s| {
         s.chunk = Some(bytes);
         s.waiting_chunk = false;
     });
@@ -206,14 +237,14 @@ pub(crate) fn deliver_error(id: u32, kind: u32, detail: String) {
         7 => FetchErrorKind::Deadline,
         _ => FetchErrorKind::Other,
     };
-    with_slot(id, |s| s.error = Some(FetchError::new(kind, detail)));
+    deliver(id, |s| s.error = Some(FetchError::new(kind, detail)));
 }
 
 /// The browser followed a redirect to `url` before answering request `id`.
 /// A downgrade to HTTP, or a non-public hop of a content-supplied request,
 /// fails the request and aborts it.
 pub(crate) fn deliver_redirect(id: u32, url: &str) {
-    let refused = with_slot(id, |s| {
+    let refused = deliver(id, |s| {
         let downgrade = s.https && !url.trim_start().to_ascii_lowercase().starts_with("https:");
         let private = s.public_only && iptv_providers::content_url::validate(url).is_err();
         if downgrade || private {
@@ -234,12 +265,12 @@ pub(crate) fn deliver_redirect(id: u32, url: &str) {
 }
 
 pub(crate) fn deliver_wake(id: u32) {
-    with_slot(id, |s| s.woke = true);
+    deliver(id, |s| s.woke = true);
 }
 
 /// A stored value arrived (`None`: there is none).
 pub(crate) fn deliver_stored(id: u32, value: Option<Vec<u8>>) {
-    with_slot(id, |s| {
+    deliver(id, |s| {
         s.chunk = Some(value);
     });
 }
@@ -249,10 +280,13 @@ pub(crate) async fn storage_get(key: &str) -> Option<Vec<u8>> {
     let pending = Pending::new(next_id(), false);
     let id = pending.id;
     host().store_get(id, key);
-    std::future::poll_fn(|_| match with_slot(id, |s| s.chunk.take()) {
-        Some(Some(v)) => Poll::Ready(v),
-        Some(None) => Poll::Pending,
-        None => Poll::Ready(None),
+    std::future::poll_fn(|cx| {
+        register(id, cx);
+        match with_slot(id, |s| s.chunk.take()) {
+            Some(Some(v)) => Poll::Ready(v),
+            Some(None) => Poll::Pending,
+            None => Poll::Ready(None),
+        }
     })
     .await
 }
@@ -363,7 +397,8 @@ impl HostFetch {
             s.public_only = request.public_only;
         });
         host().fetch(id, &request_json(request, self.idle_ms), stream);
-        let (status, length) = std::future::poll_fn(|_| {
+        let (status, length) = std::future::poll_fn(|cx| {
+            register(id, cx);
             match with_slot(id, |s| {
                 if let Some(e) = s.error.take() {
                     Some(Err(e))
@@ -395,7 +430,8 @@ impl Fetch for HostFetch {
     async fn fetch(&self, request: HttpRequest) -> Result<HttpResponse, FetchError> {
         let (mut pending, status, _) = self.status(&request, false).await?;
         let id = pending.id;
-        let body = std::future::poll_fn(|_| {
+        let body = std::future::poll_fn(|cx| {
+            register(id, cx);
             match with_slot(id, |s| {
                 if let Some(e) = s.error.take() {
                     Some(Err(e))
@@ -440,7 +476,8 @@ pub(crate) async fn sleep_while(duration: Duration, keep: impl Fn() -> bool) {
     let pending = Pending::new(next_id(), false);
     let id = pending.id;
     host().sleep(id, duration.as_secs_f64() * 1000.0);
-    std::future::poll_fn(|_| {
+    std::future::poll_fn(|cx| {
+        register(id, cx);
         if !keep() || with_slot(id, |s| s.woke).unwrap_or(true) {
             Poll::Ready(())
         } else {
@@ -473,7 +510,8 @@ impl BodyStream for HostBody {
         if ask == Some(true) {
             host().fetch_next(id);
         }
-        let got = std::future::poll_fn(|_| {
+        let got = std::future::poll_fn(|cx| {
+            register(id, cx);
             match with_slot(id, |s| {
                 if let Some(e) = s.error.take() {
                     Some(Err(e))

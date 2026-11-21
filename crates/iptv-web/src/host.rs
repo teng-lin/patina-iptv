@@ -51,6 +51,21 @@ pub(crate) fn host_if_alive() -> Option<Rc<dyn Host>> {
     HOST.try_with(|h| h.borrow().clone()).ok().flatten()
 }
 
+/// The host to ask for a wake-up poll: installed on first use in
+/// WebAssembly, as [`host`] does; `None` while the thread shuts down, or
+/// natively before one is installed (tests).
+pub(crate) fn host_for_wake() -> Option<Rc<dyn Host>> {
+    HOST.try_with(|h| {
+        #[cfg(target_arch = "wasm32")]
+        if h.borrow().is_none() {
+            *h.borrow_mut() = Some(default_host());
+        }
+        h.borrow().clone()
+    })
+    .ok()
+    .flatten()
+}
+
 pub(crate) fn host() -> Rc<dyn Host> {
     HOST.with(|h| {
         if h.borrow().is_none() {
