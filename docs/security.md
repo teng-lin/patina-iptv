@@ -189,6 +189,21 @@ resolves to a LAN address is not detected, and the TV's player (AVPlay) and
 image loader follow redirects of streams and logos without these checks.
 Logos are not size-limited. The TV sends its own User-Agent on API requests.
 
+### The SQLite store in the browser (NSH build, in progress)
+
+The NSH build for browser TVs runs the same SQLite store
+(`crates/iptv-store-sqlite`) compiled to WebAssembly, without SQLCipher. Its
+database (sources with their credentials, the catalog with stream and logo
+addresses, the guide, favorites and history) is kept in clear: in the app's
+memory and, written by the host in 64 KiB chunks, in the app's IndexedDB,
+readable by anyone who can debug the app on that TV. A browser app has no
+keystore, so a key the app held itself would only obscure the data; the
+store does not pretend to encrypt it. Staging databases and a publish's copy
+of the database exist only in memory. The host persists changed chunks a
+moment after each commit, so a crash or power loss can lose the last
+changes, never mix two commits, as long as it writes one commit's chunks in
+one IndexedDB transaction.
+
 ## Native assumptions and dependency exceptions
 
 The libmpv client header requires process-wide `LC_NUMERIC=C`. Current Unix
