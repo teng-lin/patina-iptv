@@ -318,6 +318,10 @@ pub enum Control {
 pub enum Operation {
     /// The list: a catalogue from its top, a shelf around its focused title.
     List,
+    /// A catalogue read again from its top through at least `through`
+    /// titles (the refresh after Back), so a title focused pages down is
+    /// found again.
+    Through { through: u32 },
     /// The page starting at shelf position `offset` (the window's start plus
     /// its titles); those already shown stay, and so does the focus.
     More { offset: u32 },
@@ -363,6 +367,19 @@ pub enum Destination {
     Shows,
     Recordings,
 }
+/// Where the screen stands with the persistent player: a title played
+/// full screen hands the screen to the player, and Back from that title
+/// returns to its details over the same player (#147).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Handoff {
+    /// Nothing played from this screen, or the viewer left it.
+    #[default]
+    None,
+    /// Closed for the title it played: Back from full screen reopens it.
+    Playing,
+    /// Reopened from full screen on the played title's details.
+    Returned,
+}
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Screen {
     pub destination: Destination,
@@ -403,6 +420,9 @@ pub struct Screen {
     /// Why the catalogue may be empty; kept across [`Screen::begin`] and
     /// updated by the shell through [`Screen::set_library`].
     pub library: VodState,
+    /// Whether the screen waits under the player for Back from the title
+    /// it played ([`Screen::hand_to_player`]).
+    pub handoff: Handoff,
     /// The playlist the empty screen's action last acted on (`Some(None)`:
     /// adding a playlist).
     offered: Option<Option<i64>>,
@@ -1250,6 +1270,52 @@ impl Screen {
                 .map(|e| e.key.clone());
         }
     }
+    /// A title chosen here now plays full screen: the screen closes but
+    /// keeps its list, focus and details, for Back from that title
+    /// ([`Screen::return_from_player`]).
+    pub fn hand_to_player(&mut self) {
+        self.open = false;
+        self.busy = false;
+        self.pending_down = None;
+        self.handoff = Handoff::Playing;
+        self.generation = self.generation.wrapping_add(1);
+    }
+    /// Whether Back from `item` (a movie, or the series of an episode)
+    /// playing full screen returns to its details here.
+    pub fn returns_to(&self, item: &Key) -> bool {
+        !self.open
+            && self.handoff == Handoff::Playing
+            && self.details.as_ref().is_some_and(|d| &d.item.key == item)
+    }
+    /// Back from `played` (a movie, or an episode of `details`) full
+    /// screen: its details reopen, the played episode and its season
+    /// chosen and the focus on Play, found by identity in `details` (the
+    /// player's, with the progress just watched). The list underneath is
+    /// the one the title was chosen from; a movie's card there shows the
+    /// progress just watched.
+    pub fn return_from_player(&mut self, details: Details, played: &Key) {
+        if details.item.key.kind == Kind::Movie
+            && let Some(card) = self.cards.iter_mut().find(|c| c.key == details.item.key)
+        {
+            card.progress = details.item.progress;
+        }
+        self.open = true;
+        self.search_open = false;
+        self.clear_failure();
+        self.notice = None;
+        self.generation = self.generation.wrapping_add(1);
+        self.show_details(details);
+        if let Some(season) = self.details.as_ref().and_then(|d| {
+            d.episodes
+                .iter()
+                .find(|e| &e.key == played)
+                .map(|e| e.season)
+        }) {
+            self.episode = Some(played.clone());
+            self.season = Some(season);
+        }
+        self.handoff = Handoff::Returned;
+    }
     pub fn back(&mut self) {
         // A pending catalogue read is cancelled here and read again by the
         // shell ([`Screen::reload`]).
@@ -1286,6 +1352,7 @@ impl Screen {
             self.open = false;
             self.generation = self.generation.wrapping_add(1);
         }
+        self.handoff = Handoff::None;
     }
 }
 #[cfg(test)]
@@ -2951,5 +3018,54 @@ mod tests {
         details.resume_episode = None;
         screen.show_details(details.clone());
         assert_eq!(screen.episode, Some(details.episodes[0].key.clone()));
+    }
+    #[test]
+    fn back_from_a_played_episode_reopens_its_show_on_that_episode() {
+        let mut s = Screen::default();
+        let g = s.begin(Kind::Series);
+        let mut details = series_details(4);
+        details.episodes[2].season = 2;
+        details.episodes[3].season = 2;
+        s.publish(g, vec![details.item.clone()], false, false);
+        s.show_details(details.clone());
+        let played = details.episodes[3].key.clone();
+        s.hand_to_player();
+        assert!(!s.open && s.returns_to(&details.item.key));
+        assert!(!s.returns_to(&card("other").key));
+        s.return_from_player(details.clone(), &played);
+        assert!(s.open && !s.returns_to(&details.item.key));
+        assert_eq!(s.episode, Some(played));
+        assert_eq!(s.season, Some(2));
+        assert_eq!(s.control, Control::Play);
+        assert_eq!(s.handoff, Handoff::Returned);
+        // A second Back leaves the details for the list, on the same title.
+        s.back();
+        assert!(s.open && s.details.is_none());
+        assert_eq!(s.focused, Some(details.item.key.clone()));
+        assert_eq!(s.handoff, Handoff::None);
+    }
+    #[test]
+    fn back_from_a_played_movie_shows_its_progress_on_the_list() {
+        let mut s = Screen::default();
+        let g = s.begin(Kind::Movie);
+        s.publish(g, vec![card("a"), card("b")], false, false);
+        let mut details = Details {
+            incarnation: "generated".into(),
+            item: card("b"),
+            episodes: vec![],
+            resume_episode: None,
+        };
+        s.show_details(details.clone());
+        s.hand_to_player();
+        details.item.progress = Progress::observed(120_000, Some(600_000), false);
+        s.return_from_player(details.clone(), &details.item.key.clone());
+        assert_eq!(s.control, Control::Play);
+        assert_eq!(s.focused, Some(card("b").key));
+        assert_eq!(s.cards[1].progress, details.item.progress);
+        assert!(s.resumes());
+        // Choosing anything else ends the handoff.
+        s.hand_to_player();
+        s.begin(Kind::Series);
+        assert!(!s.returns_to(&card("b").key));
     }
 }

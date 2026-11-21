@@ -948,6 +948,282 @@ fn with_autoplay_closing_the_main_window_plays_nothing_until_the_viewer_moves() 
     ));
 }
 
+/// How many movies the store lists under Continue watching.
+fn continuing(home: &crate::isolated::Home) -> usize {
+    let path = crate::isolated::data_dir(home.path()).join("iptv.sqlite");
+    crate::isolated::open_database(&path)
+        .unwrap()
+        .vod_page(
+            &iptv_core::vod::Query {
+                kind: iptv_core::vod::Kind::Movie,
+                continue_watching: true,
+                ..Default::default()
+            },
+            0,
+            20,
+        )
+        .unwrap()
+        .0
+        .len()
+}
+
+/// Tells surface 0 what its native player reports.
+fn native(app: &mut Headless, seen: &Observed, name: &str, data: Value) {
+    let player = seen.player(0).expect("the persistent player");
+    app.engine().control().dispatch_event(
+        player,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: name.into(),
+            data,
+        },
+    );
+    app.settle();
+}
+
+/// Back from a movie playing full screen, the bar hidden first if shown.
+fn back_to_details(app: &mut Headless) {
+    for _ in 0..2 {
+        if app.screen().matches("id:vod-screen").unwrap() {
+            break;
+        }
+        step(app.press_key("backspace"));
+    }
+    step(app.wait_for("text:Play from beginning"));
+}
+
+/// A movie in the operating system's full screen: Backspace first restores
+/// the window, then returns to the movie's details (#147), opening
+/// nothing. Chosen again from the Continue watching category and watched
+/// to its end, Back twice returns to that category read again: the
+/// finished movie has left it.
+#[test]
+fn back_from_a_movie_restores_the_window_then_its_details_and_continue_watching() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start(home, |_| {});
+    let seen = fixture.seen.clone();
+    let app = &mut fixture.app;
+    step(app.press("id:navigation-rail >> label:Movies"));
+    step(app.press("label:/^Generated film 01 ·/"));
+    step(app.wait_for("text:Play from beginning"));
+    step(app.press("text:Play"));
+    step(app.wait_for_gone("id:vod-screen", Duration::from_secs(5)));
+    step(
+        app.wait_until("the movie plays", Duration::from_secs(5), |_| {
+            iptv_app::player_has_source(0)
+        }),
+    );
+    let opens = iptv_app::player_opens(0);
+    let player = seen.player(0);
+    let token = seen.prop(0, "source")["token"].clone();
+    native(
+        app,
+        &seen,
+        "timeline",
+        json!({"token": token, "seekId": 0, "ms": 37_000, "durationMs": 120_000, "seekable": true}),
+    );
+    step(
+        app.wait_until("progress saved", Duration::from_secs(5), |_| {
+            continuing(&fixture._home) == 1
+        }),
+    );
+
+    // A double click: the operating system's full screen.
+    step(app.press("id:app-ui >> label:Video"));
+    step(app.press("id:app-ui >> label:Video"));
+    assert_eq!(
+        app.window_state("main").unwrap().unwrap().mode,
+        nsh_core::desktop::WindowMode::FullScreen
+    );
+    // Backspace restores the window first; the video stays full screen in it.
+    step(app.press_key("backspace"));
+    assert_eq!(
+        app.window_state("main").unwrap().unwrap().mode,
+        nsh_core::desktop::WindowMode::Normal
+    );
+    assert_eq!(app.screen().count("id:vod-screen").unwrap(), 0);
+    assert!(video_full_screen(app), "still full screen in the window");
+    // Then Backspace returns to the movie's details.
+    back_to_details(app);
+    assert!(
+        app.screen()
+            .accessibility_state("label:Resume")
+            .is_ok_and(|s| s.selected),
+        "the movie's details, on Resume"
+    );
+    assert_eq!(iptv_app::player_opens(0), opens, "Back opens nothing");
+    assert_eq!(seen.player(0), player, "the same player");
+
+    // The Continue watching category: the movie, chosen and watched to
+    // its end.
+    step(app.back());
+    step(app.wait_for_gone("text:Play from beginning", Duration::from_secs(5)));
+    step(app.press("id:vod-continue"));
+    step(app.wait_until(
+        "Continue watching lists the movie",
+        Duration::from_secs(5),
+        |s| s.count("id:vod-title").unwrap() == 1,
+    ));
+    step(app.press("label:/^Generated film 01 ·/"));
+    step(app.wait_for("text:Play from beginning"));
+    step(app.press("text:Resume"));
+    step(app.wait_for_gone("id:vod-screen", Duration::from_secs(5)));
+    step(
+        app.wait_until("the movie plays again", Duration::from_secs(5), |_| {
+            iptv_app::player_opens(0) > opens
+        }),
+    );
+    let opens = iptv_app::player_opens(0);
+    let token = seen.prop(0, "source")["token"].clone();
+    native(
+        app,
+        &seen,
+        "timeline",
+        json!({"token": token, "seekId": 0, "ms": 120_000, "durationMs": 120_000, "seekable": true}),
+    );
+    native(app, &seen, "state", json!({"state": "ended"}));
+    step(
+        app.wait_until("the end saved", Duration::from_secs(5), |_| {
+            continuing(&fixture._home) == 0
+        }),
+    );
+    back_to_details(app);
+    step(app.back());
+    step(app.wait_for_gone("text:Play from beginning", Duration::from_secs(5)));
+    step(app.wait_until(
+        "Continue watching read again: the finished movie left it",
+        Duration::from_secs(5),
+        |s| s.count("id:vod-title").unwrap() == 0,
+    ));
+    assert!(app.screen().matches("id:vod-screen").unwrap());
+    assert_eq!(iptv_app::player_opens(0), opens, "Back opens nothing");
+    assert_eq!(seen.player(0), player, "the same player");
+}
+
+/// Continue watching under name order holds more titles than its first
+/// page: a movie chosen pages down and played, Back twice returns to that
+/// category read again with the focus still on the movie, by identity
+/// (#147), and opens nothing.
+#[test]
+fn back_from_a_movie_keeps_a_deep_continue_watching_title_focused() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start(home, |_| {});
+    let seen = fixture.seen.clone();
+    // A second playlist's 40 films sort before the first one's 48; every
+    // film is part watched, so Generated film 48 is the 88th, past the
+    // first page of 80.
+    let path = crate::isolated::data_dir(fixture._home.path()).join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    let extra = store
+        .add_source(&Source {
+            name: "Generated extra playlist".into(),
+            config: SourceConfig::Xtream(XtreamCredentials {
+                server_url: fixture._server.base.clone(),
+                username: Secret::new("generated-extra"),
+                password: Secret::new("generated-pass"),
+                user_agent: None,
+            }),
+        })
+        .unwrap();
+    let films: Vec<String> = (1..=40)
+        .map(|i| {
+            format!(
+                r#"{{"stream_id": {i}, "name": "Generated extra {i:02}", "container_extension": "mp4"}}"#
+            )
+        })
+        .collect();
+    let films = iptv_providers::xtream::parse_vod_streams(&HttpResponse::ok(format!(
+        "[{}]",
+        films.join(",")
+    )))
+    .unwrap();
+    store
+        .replace_catalog(extra, &[], &[], &films.items, &[])
+        .unwrap();
+    store
+        .set_source_policy(
+            extra,
+            iptv_store_sqlite::SourcePolicy {
+                refresh_on_start: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let all = iptv_core::vod::Query {
+        kind: iptv_core::vod::Kind::Movie,
+        ..Default::default()
+    };
+    let (cards, _) = store.vod_page(&all, 0, 200).unwrap();
+    assert_eq!(cards.len(), MOVIES + 40);
+    for card in &cards {
+        store
+            .save_vod_progress(
+                &card.key,
+                None,
+                iptv_core::vod::Progress {
+                    position_ms: 37_000,
+                    duration_ms: Some(120_000),
+                    completed: false,
+                },
+            )
+            .unwrap();
+    }
+    drop(store);
+    let app = &mut fixture.app;
+    let deep = "label:/^Generated film 48 ·/";
+
+    step(app.press("id:navigation-rail >> label:Movies"));
+    step(app.press("id:vod-continue"));
+    step(app.wait_for("text:1 / 80+"));
+    step(app.press("text:Load more"));
+    let total = MOVIES + 40;
+    step(app.wait_for(&format!("text:1 / {total}")));
+    // The keyboard walks down to the deep film, the list scrolling with it.
+    step(app.press_key("right"));
+    for _ in 1..total {
+        step(app.press_key("down"));
+    }
+    step(app.wait_for(&format!("text:{total} / {total}")));
+    assert!(
+        app.screen()
+            .accessibility_state(deep)
+            .is_ok_and(|state| state.selected),
+        "the deep film focused"
+    );
+    step(app.press_key("enter"));
+    step(app.wait_for("text:Play from beginning"));
+    step(app.press("text:Resume"));
+    step(app.wait_for_gone("id:vod-screen", Duration::from_secs(5)));
+    step(
+        app.wait_until("the movie plays", Duration::from_secs(5), |_| {
+            iptv_app::player_has_source(0)
+        }),
+    );
+    let opens = iptv_app::player_opens(0);
+    let player = seen.player(0);
+    let token = seen.prop(0, "source")["token"].clone();
+    native(
+        app,
+        &seen,
+        "timeline",
+        json!({"token": token, "seekId": 0, "ms": 50_000, "durationMs": 120_000, "seekable": true}),
+    );
+    back_to_details(app);
+    step(app.back());
+    step(app.wait_for_gone("text:Play from beginning", Duration::from_secs(5)));
+    step(app.wait_until(
+        "Continue watching read again, the deep movie focused",
+        Duration::from_secs(5),
+        |s| {
+            s.matches(&format!("text:{total} / {total}")).unwrap()
+                && s.matches("id:vod-focused-metadata >> text:Generated film 48")
+                    .unwrap()
+        },
+    ));
+    assert_eq!(iptv_app::player_opens(0), opens, "Back opens nothing");
+    assert_eq!(seen.player(0), player, "the same player");
+}
+
 /// The stream surface 0's player was given last.
 fn main_stream(seen: &Observed) -> String {
     if seen.player(0).is_none() {

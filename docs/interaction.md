@@ -133,7 +133,8 @@ on the video, or the window's own control).
 ## Getting back
 
 Back from full screen returns to where the viewer chose: the guide on the
-chosen channel, Recordings for a recording, or the multiview grid for a tile.
+chosen channel, Recordings for a recording, a movie's or a show's details,
+or the multiview grid for a tile.
 In the guide the playing stream continues in the preview or behind the guide,
 and focus on a live channel follows the clock to the programme now on air.
 
@@ -150,11 +151,13 @@ and focus on a live channel follows the clock to the programme now on air.
   the guide while a channel plays returns to the video. On a remote, long Back
   in the player stops playback. The play bar shows a Back button except on TVs
   and terminals (`Ui::back_controls`).
-- **Planned:** Back from a movie or an episode played full screen returns
-  to its details, the played episode selected, over the video on the same
-  player. Today it returns to the guide, the title playing on in the
-  preview; Movies or Shows reopen the details with the episode selected
-  (#147).
+- **Now:** Back from a movie or an episode played full screen, by any
+  input, returns to its details over the video on the same player, nothing
+  opened again: a movie on Play or Resume, a series with the played episode
+  and its season selected (`vod_view::return_from_player`; the play bar's ‹
+  reads Movies or Shows). Back from the details returns to the list or
+  shelf the title was chosen from, on that title, and from there to the
+  guide, the title playing on in the preview (#147).
 - **Now:** with `guide.back_returns_to_now` (on by default), Back with focus on a
   past or upcoming programme in the guide first returns to the programmes on
   air, after any dialog or hint card closes.
