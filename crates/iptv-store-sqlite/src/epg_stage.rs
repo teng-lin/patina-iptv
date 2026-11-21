@@ -7,10 +7,13 @@
 //! store's write lock, and so a failed or canceled download leaves the
 //! stored guide untouched: dropping the stage deletes its file. The file
 //! is scratch space (no journal, no fsync): a crash leaves a stale file
-//! that [`EpgStage::remove_stale`] deletes at the next start.
+//! that [`EpgStage::remove_stale`] deletes at the next start. A browser
+//! store's stage ([`EpgStage::create_in_store`]) is a scratch file among
+//! its memory files instead, gone with its last connection.
 //!
-//! A writer thread owns the stage connection, so parsing and writing
-//! overlap. Memory stays bounded: SQLite's page cache ([`CACHE_KIB`]), at
+//! Natively a writer thread owns the stage connection, so parsing and
+//! writing overlap; the browser's one thread writes in place. Memory stays
+//! bounded: SQLite's page cache ([`CACHE_KIB`]), at
 //! most [`IN_FLIGHT`] batches of at most [`BATCH`] programs or
 //! [`BATCH_TEXT`] bytes of text on their way, and per feed a map of its
 //! staged EPG channel ids; the guide itself is never held.
@@ -44,6 +47,7 @@ const BATCH: usize = 4096;
 /// ...or fewer when their texts reach this many bytes.
 const BATCH_TEXT: usize = 1 << 20;
 /// Batches queued for the writer before the import waits for it.
+#[cfg(not(target_family = "wasm"))]
 const IN_FLIGHT: usize = 2;
 const PREFIX: &str = "epg-stage-";
 
@@ -94,15 +98,19 @@ struct Loaded {
 
 /// Where the stage's commands go.
 enum Lane {
-    /// The writer's own thread, behind a bounded queue.
+    /// The writer's own thread (native), behind a bounded queue.
+    #[cfg(not(target_family = "wasm"))]
     Thread {
         tx: mpsc::SyncSender<Cmd>,
         thread: std::thread::JoinHandle<()>,
     },
+    /// In place, on the caller's thread (the browser has one thread).
+    #[cfg(target_family = "wasm")]
+    Inline(std::sync::Mutex<Writer>),
 }
 
-/// A guide download staged on disk; see the module docs. Implements
-/// [`GuideSink`]. Dropping it deletes the file.
+/// A guide download staged in its own database; see the module docs.
+/// Implements [`GuideSink`]. Dropping it deletes the file.
 pub struct EpgStage {
     path: PathBuf,
     lane: Option<Lane>,
@@ -140,7 +148,12 @@ impl EpgStage {
     fn next_path(dir: &Path) -> PathBuf {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        // Natively the process id keeps names of concurrent processes apart;
+        // a browser store's memory files belong to one instance.
+        #[cfg(not(target_family = "wasm"))]
         let name = format!("{PREFIX}{}-{n}.sqlite", std::process::id());
+        #[cfg(target_family = "wasm")]
+        let name = format!("{PREFIX}{n}.sqlite");
         dir.join(name)
     }
 
@@ -151,7 +164,7 @@ impl EpgStage {
         let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
             | OpenFlags::SQLITE_OPEN_CREATE
             | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-        iptv_sqlcipher_init::initialize()?;
+        crate::initialize_sqlite()?;
         let conn = Connection::open_with_flags(&path, flags)?;
         Self::create_with_connection(path, conn)
     }
@@ -173,6 +186,7 @@ impl EpgStage {
         }
         let failed = Arc::new(AtomicBool::new(false));
         let writer = Writer::new(conn, failed.clone());
+        #[cfg(not(target_family = "wasm"))]
         let lane = {
             let (tx, rx) = mpsc::sync_channel(IN_FLIGHT);
             let thread = std::thread::Builder::new()
@@ -181,6 +195,8 @@ impl EpgStage {
                 .map_err(|e| StoreError::InvalidData(format!("guide stage thread: {e}")))?;
             Lane::Thread { tx, thread }
         };
+        #[cfg(target_family = "wasm")]
+        let lane = Lane::Inline(std::sync::Mutex::new(writer));
         Ok(Self {
             path,
             lane: Some(lane),
@@ -217,7 +233,13 @@ impl EpgStage {
     fn send(&self, cmd: Cmd) -> Result<()> {
         let stopped = || StoreError::InvalidData("guide stage writer stopped".into());
         match self.lane.as_ref().ok_or_else(stopped)? {
+            #[cfg(not(target_family = "wasm"))]
             Lane::Thread { tx, .. } => tx.send(cmd).map_err(|_| stopped()),
+            #[cfg(target_family = "wasm")]
+            Lane::Inline(writer) => {
+                writer.lock().map_err(|_| stopped())?.handle(cmd);
+                Ok(())
+            }
         }
     }
 
@@ -336,9 +358,15 @@ impl EpgStage {
 impl Drop for EpgStage {
     fn drop(&mut self) {
         // Ends the writer, which closes the connection.
-        if let Some(Lane::Thread { tx, thread }) = self.lane.take() {
-            drop(tx);
-            let _ = thread.join();
+        match self.lane.take() {
+            #[cfg(not(target_family = "wasm"))]
+            Some(Lane::Thread { tx, thread }) => {
+                drop(tx);
+                let _ = thread.join();
+            }
+            #[cfg(target_family = "wasm")]
+            Some(Lane::Inline(writer)) => drop(writer),
+            None => {}
         }
         remove(&self.path);
     }

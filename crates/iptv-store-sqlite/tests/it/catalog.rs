@@ -23,13 +23,27 @@ fn fresh_store_is_current() {
     let s = store();
     assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
     assert_eq!(s.journal_mode().unwrap(), "memory");
-    let dir = tempfile::tempdir().unwrap();
-    let file = Store::open(dir.path().join("store.db")).unwrap();
-    assert_eq!(file.journal_mode().unwrap(), "wal");
-    drop(file);
-    // Reopening runs no migration and keeps the version.
-    let again = Store::open(dir.path().join("store.db")).unwrap();
-    assert_eq!(again.schema_version().unwrap(), SCHEMA_VERSION);
+    #[cfg(not(target_family = "wasm"))]
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let file = Store::open(dir.path().join("store.db")).unwrap();
+        assert_eq!(file.journal_mode().unwrap(), "wal");
+        drop(file);
+        // Reopening runs no migration and keeps the version.
+        let again = Store::open(dir.path().join("store.db")).unwrap();
+        assert_eq!(again.schema_version().unwrap(), SCHEMA_VERSION);
+    }
+    // The browser's memory files journal in memory; persistence is the
+    // host's chunk write after each commit.
+    #[cfg(target_family = "wasm")]
+    {
+        let files = iptv_store_sqlite::BrowserFiles::new().unwrap();
+        let file = Store::open_browser(&files).unwrap();
+        assert_eq!(file.journal_mode().unwrap(), "memory");
+        drop(file);
+        let again = Store::open_browser(&files).unwrap();
+        assert_eq!(again.schema_version().unwrap(), SCHEMA_VERSION);
+    }
 }
 
 #[test]

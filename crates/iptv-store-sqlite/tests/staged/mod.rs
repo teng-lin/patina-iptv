@@ -10,10 +10,11 @@ use iptv_import::{EpgImport, GuideSink, ListedChannel};
 use iptv_store_sqlite::{EpgCounts, EpgFeedMeta, EpgStage, Result, SourceId, Store};
 
 /// `guide`'s bound schedules (every program, descriptions included)
-/// and its feeds' channel lists, as an import of them would leave them.
-pub fn stage(guide: &GuideStore) -> (EpgStage, EpgImport, tempfile::TempDir) {
+/// and its feeds' channel lists, as an import of them would leave them,
+/// staged where `store` publishes from (its memory files in the browser).
+pub fn stage(store: &Store, guide: &GuideStore) -> (EpgStage, EpgImport, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let mut stage = EpgStage::create_in(dir.path()).unwrap();
+    let mut stage = EpgStage::create_in_store(store, dir.path()).unwrap();
     let mut bindings: Vec<(ChannelKey, EpgRef)> = guide
         .bindings()
         .map(|(k, e)| (k.clone(), e.clone()))
@@ -62,6 +63,6 @@ pub fn replace_epg(
     feeds: &[EpgFeedMeta],
     match_fingerprint: u64,
 ) -> Result<EpgCounts> {
-    let (mut stage, import, _dir) = stage(guide);
+    let (mut stage, import, _dir) = stage(store, guide);
     store.replace_epg(source, &mut stage, &import, feeds, match_fingerprint)
 }

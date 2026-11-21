@@ -8,7 +8,7 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
-rusqlite.workspace = true
+rusqlite = { workspace = true, features = ["bundled-sqlcipher"] }
 
 [target.'cfg(not(target_vendor = "apple"))'.dependencies]
 rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"] }

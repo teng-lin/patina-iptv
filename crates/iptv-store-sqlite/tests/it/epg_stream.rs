@@ -452,6 +452,7 @@ fn stage_files(dir: &std::path::Path) -> Vec<String> {
 }
 
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "needs a file system")]
 fn a_canceled_or_failed_download_keeps_the_stored_guide() {
     let shape = |from, days| GenShape {
         channels: 40,
@@ -616,6 +617,7 @@ fn the_store_stays_writable_while_a_guide_downloads() {
 }
 
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "needs a file system")]
 fn stale_stage_files_are_removed() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("epg-stage-1-0.sqlite"), b"left over").unwrap();

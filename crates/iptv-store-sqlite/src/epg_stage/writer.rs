@@ -1,6 +1,7 @@
-//! The stage's own thread: it owns the stage connection and writes the
-//! batches the import thread sends (so parsing and SQLite overlap), and
-//! settles a feed's channels when asked.
+//! The stage's writer: it owns the stage connection and writes the batches
+//! the import sends, and settles a feed's channels when asked. Natively it
+//! runs on its own thread (so parsing and SQLite overlap); in the browser,
+//! which has one thread, the import's own calls run it in place.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -190,6 +191,7 @@ impl Writer {
 }
 
 /// The writer thread's loop; ends when the stage is dropped.
+#[cfg(not(target_family = "wasm"))]
 pub(super) fn run(mut writer: Writer, rx: std::sync::mpsc::Receiver<Cmd>) {
     for cmd in rx {
         writer.handle(cmd);

@@ -145,7 +145,7 @@ impl Store {
         result
     }
     pub fn read_private_file(&self, path: &Path) -> Result<PrivateFileReader> {
-        iptv_sqlcipher_init::initialize()?;
+        crate::initialize_sqlite()?;
         let conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -167,7 +167,8 @@ impl Store {
         })
     }
 }
-#[cfg(test)]
+// Files, keys and child processes: native only.
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use super::*;
     #[test]

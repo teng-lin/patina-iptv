@@ -67,35 +67,48 @@ impl CatalogStage {
         dir: impl AsRef<Path>,
         open: impl FnOnce(&Path) -> Result<Connection>,
     ) -> Result<Self> {
-        iptv_sqlcipher_init::initialize()?;
+        crate::initialize_sqlite()?;
         static NEXT: AtomicU32 = AtomicU32::new(0);
-        let path = loop {
+        // The browser has no files to reserve the name with: `open` makes
+        // the stage among the store's memory files.
+        #[cfg(target_family = "wasm")]
+        {
             let path = dir.as_ref().join(format!(
-                "catalog-stage-{}-{}.sqlite",
-                std::process::id(),
+                "catalog-stage-{}.sqlite",
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
-            let mut options = std::fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            match options.open(&path) {
-                Ok(file) => {
-                    drop(file);
-                    break path;
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(_) => return Err(invalid("cannot create catalog stage")),
-            }
-        };
-        let result = open(&path).and_then(|conn| Self::from_connection(path.clone(), conn));
-        if result.is_err() {
-            let _ = std::fs::remove_file(path);
+            open(&path).and_then(|conn| Self::from_connection(path, conn))
         }
-        result
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let path = loop {
+                let path = dir.as_ref().join(format!(
+                    "catalog-stage-{}-{}.sqlite",
+                    std::process::id(),
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                ));
+                let mut options = std::fs::OpenOptions::new();
+                options.write(true).create_new(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    options.mode(0o600);
+                }
+                match options.open(&path) {
+                    Ok(file) => {
+                        drop(file);
+                        break path;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(_) => return Err(invalid("cannot create catalog stage")),
+                }
+            };
+            let result = open(&path).and_then(|conn| Self::from_connection(path.clone(), conn));
+            if result.is_err() {
+                let _ = std::fs::remove_file(path);
+            }
+            result
+        }
     }
     /// Call once at startup, before import workers start. A killed process
     /// cannot run Drop; remove its stages and SQLite sidecars here.

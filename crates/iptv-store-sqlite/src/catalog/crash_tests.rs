@@ -28,6 +28,7 @@ fn replace(store: &mut Store, source: SourceId, title: &str) {
         .unwrap();
 }
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "needs child processes and files")]
 fn catalog_crash_child() {
     let Some(path) = std::env::var_os("IPTV_TEST_CATALOG_PATH") else {
         return;
@@ -38,6 +39,7 @@ fn catalog_crash_child() {
     panic!("catalog boundary was not reached");
 }
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "needs child processes and files")]
 fn catalog_publication_is_atomic_across_process_death() {
     for (at, expected) in [
         ("staged", "Generated current"),

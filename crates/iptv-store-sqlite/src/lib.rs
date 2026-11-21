@@ -1,5 +1,10 @@
-#![forbid(unsafe_code)]
-//! Native SQLite store of iptv-rs.
+// Unsafe code only in the browser VFS (`browser.rs`), which SQLite calls.
+#![deny(unsafe_code)]
+// The browser's `std::fs` is a stub whose `File` has no destructor; the
+// file-based paths (backups, encrypted opens, file stages) only fail there.
+#![cfg_attr(target_family = "wasm", allow(clippy::drop_non_drop))]
+//! SQLite store of iptv-rs: SQLCipher files natively, memory files persisted
+//! in chunks by the host in the browser (`wasm32-unknown-unknown`).
 //!
 //! - **Provider data** (groups, channels, VOD, series) is replaced wholesale
 //!   on each refresh, inside one transaction ([`Store::replace_catalog`]).
@@ -28,8 +33,28 @@
 //!   descriptions ([`Store::load_epg`]) and reads descriptions on demand.
 //!   The wiring for app start and background refresh is documented in
 //!   `src/epg.rs` and the README.
+//! - **In the browser** (`wasm32`, rusqlite's `sqlite-wasm-rs` backend) a
+//!   store opens on in-memory files that record which chunks each commit
+//!   changed, for the host to persist (`Store::open_browser`, `browser.rs`).
+//!   There is one connection and no encryption; long replacements run on a
+//!   copy of the database while reads continue (`Store::begin_publish`).
+
+// The unit tests' browser build: host services for SQLite and a stand-in
+// for `tempfile`, shared with the integration executable.
+#[cfg(all(test, target_family = "wasm"))]
+extern crate self as tempfile;
+#[cfg(all(test, target_family = "wasm"))]
+#[allow(unsafe_code)]
+#[path = "../tests/it/wasm.rs"]
+mod wasm_test;
+#[cfg(all(test, target_family = "wasm"))]
+use wasm_test::tempdir;
 
 mod backup;
+#[cfg(target_family = "wasm")]
+mod browser;
+#[cfg(target_family = "wasm")]
+pub use browser::{BrowserFiles, CHUNK_BYTES, ChangedChunks};
 mod encryption;
 pub use encryption::DatabaseKey;
 mod catalog;
@@ -73,7 +98,7 @@ mod sources;
 mod vod;
 
 use std::path::Path;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use rusqlite::{Connection, OpenFlags};
 
@@ -118,10 +143,33 @@ const CACHE_KIB: i64 = 16 * 1024;
 pub const WAL_SIZE_LIMIT_BYTES: i64 = 16 * 1024 * 1024;
 
 /// Unix seconds from the system clock.
+#[cfg(not(target_family = "wasm"))]
 fn system_now() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+}
+
+/// Unix seconds from the host clock SQLite itself reads in the browser
+/// (`rust_sqlite_wasm_host_epoch_timestamp_in_ms`, which the app links in):
+/// `std::time::SystemTime` is not available on `wasm32-unknown-unknown`.
+#[cfg(target_family = "wasm")]
+fn system_now() -> i64 {
+    use rsqlite_vfs::OsCallback;
+    sqlite_wasm_rs::WasmOsCallback
+        .epoch_timestamp_in_ms()
+        .map_or(0, |ms| ms.div_euclid(1000))
+}
+
+/// Completes SQLite's initialization before a connection opens. Natively
+/// that includes SQLCipher's provider ([`iptv_sqlcipher_init`]); the
+/// browser's SQLite has no cipher and needs nothing beyond what opening does.
+pub(crate) fn initialize_sqlite() -> rusqlite::Result<()> {
+    #[cfg(not(target_family = "wasm"))]
+    return iptv_sqlcipher_init::initialize();
+    #[cfg(target_family = "wasm")]
+    Ok(())
 }
 
 pub struct Store {
@@ -133,6 +181,20 @@ pub struct Store {
     clock: fn() -> i64,
     key: Option<DatabaseKey>,
     inspection_access: std::cell::RefCell<Option<inspection::InspectionAccess>>,
+    /// The in-memory files of a browser store (after `conn`, which must
+    /// close first).
+    #[cfg(target_family = "wasm")]
+    browser: Option<browser::Link>,
+}
+
+/// How a connection journals its writes.
+#[derive(Clone, Copy)]
+enum Journal {
+    /// Files: WAL, so reader connections see the last commit during a write.
+    Wal,
+    /// The browser's memory files: one connection, the journal in memory.
+    #[cfg(target_family = "wasm")]
+    Browser,
 }
 
 impl std::fmt::Debug for Store {
@@ -174,7 +236,7 @@ impl Store {
             | OpenFlags::SQLITE_OPEN_CREATE
             | OpenFlags::SQLITE_OPEN_NO_MUTEX
             | OpenFlags::SQLITE_OPEN_URI;
-        iptv_sqlcipher_init::initialize()?;
+        crate::initialize_sqlite()?;
         Self::init(Connection::open_with_flags(path, flags)?, options)
     }
 
@@ -183,20 +245,37 @@ impl Store {
         Self::open_in_memory_with(&OpenOptions::default())
     }
 
+    /// In the browser this is a browser store on files of its own
+    /// (`BrowserFiles`), so stages and publishing work as they do there.
     pub fn open_in_memory_with(options: &OpenOptions) -> Result<Self> {
-        iptv_sqlcipher_init::initialize()?;
-        Self::init(Connection::open_in_memory()?, options)
+        #[cfg(target_family = "wasm")]
+        return Self::open_browser_with(&BrowserFiles::new()?, options);
+        #[cfg(not(target_family = "wasm"))]
+        {
+            crate::initialize_sqlite()?;
+            Self::init(Connection::open_in_memory()?, options)
+        }
     }
 
-    fn init(mut conn: Connection, options: &OpenOptions) -> Result<Self> {
+    fn init(conn: Connection, options: &OpenOptions) -> Result<Self> {
+        Self::init_with(conn, options, Journal::Wal)
+    }
+
+    fn init_with(mut conn: Connection, options: &OpenOptions, journal: Journal) -> Result<Self> {
         conn.busy_timeout(options.busy_timeout)?;
         conn.pragma_update(None, "foreign_keys", true)?;
-        // Persistent for files; in-memory databases answer "memory".
-        let _mode: String =
-            conn.pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get(0))?;
-        // Durable across app crashes in WAL; a power cut may lose the last
-        // commit, never corrupt the file.
-        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        match journal {
+            Journal::Wal => {
+                // Persistent for files; in-memory databases answer "memory".
+                let _mode: String =
+                    conn.pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get(0))?;
+                // Durable across app crashes in WAL; a power cut may lose the
+                // last commit, never corrupt the file.
+                conn.pragma_update(None, "synchronous", "NORMAL")?;
+            }
+            #[cfg(target_family = "wasm")]
+            Journal::Browser => browser::configure(&conn)?,
+        }
         // 16 MiB page cache (default 2 MiB): a 50k-channel refresh touches
         // several index B-trees.
         conn.pragma_update(None, "cache_size", -CACHE_KIB)?;
@@ -210,6 +289,8 @@ impl Store {
             fts: options.prefer_fts && fts_index,
             clock: system_now,
             key: None,
+            #[cfg(target_family = "wasm")]
+            browser: None,
         })
     }
 
@@ -220,13 +301,17 @@ impl Store {
     /// reads the last commit while this store holds a write transaction,
     /// so reads need not queue behind a long catalog or guide publish.
     pub fn open_reader(&self) -> Result<Self> {
+        #[cfg(target_family = "wasm")]
+        if self.browser.is_some() {
+            return Err(StoreError::Unavailable("a browser store has no reader"));
+        }
         let path = self
             .conn
             .path()
             .filter(|path| !path.is_empty())
             .ok_or(StoreError::Unavailable("an in-memory store has no reader"))?;
         // No CREATE: the file must be the one this store opened.
-        iptv_sqlcipher_init::initialize()?;
+        crate::initialize_sqlite()?;
         let conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -252,6 +337,8 @@ impl Store {
             fts: self.fts,
             clock: self.clock,
             key: self.key.clone(),
+            #[cfg(target_family = "wasm")]
+            browser: None,
         })
     }
 

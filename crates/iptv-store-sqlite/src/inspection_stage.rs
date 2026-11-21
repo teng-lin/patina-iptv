@@ -29,7 +29,7 @@ pub struct InspectionStage {
 }
 impl InspectionStage {
     pub fn create(path: &Path, key: &DatabaseKey) -> Result<Self> {
-        iptv_sqlcipher_init::initialize()?;
+        crate::initialize_sqlite()?;
         let mut options = std::fs::OpenOptions::new();
         options.read(true).write(true).create_new(true);
         #[cfg(unix)]
@@ -63,7 +63,7 @@ impl InspectionStage {
         })
     }
     pub fn open(path: &Path, key: &DatabaseKey) -> Result<Self> {
-        iptv_sqlcipher_init::initialize()?;
+        crate::initialize_sqlite()?;
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         key.apply(&conn)?;
         Ok(Self {
@@ -162,7 +162,8 @@ impl InspectionStage {
     }
 }
 
-#[cfg(test)]
+// Files, keys and child processes: native only.
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use super::*;
     use crate::encryption::initialization_support;

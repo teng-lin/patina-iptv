@@ -8,7 +8,7 @@ use zeroize::Zeroizing;
 
 use crate::{OpenOptions as StoreOptions, Result, Store, StoreError};
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 #[path = "../tests/initialization_support/mod.rs"]
 pub(crate) mod initialization_support;
 
@@ -30,7 +30,7 @@ impl DatabaseKey {
         value
     }
     pub(super) fn apply(&self, conn: &Connection) -> Result<()> {
-        iptv_sqlcipher_init::initialize()?;
+        crate::initialize_sqlite()?;
         let version: String = conn
             .pragma_query_value(None, "cipher_version", |r| r.get(0))
             .map_err(|_| StoreError::Unavailable("SQLCipher is not available"))?;
@@ -96,7 +96,7 @@ impl Store {
         }
         // Create with private permissions before SQLite opens a new file.
         drop(private_file(path, false)?);
-        iptv_sqlcipher_init::initialize()?;
+        crate::initialize_sqlite()?;
         let conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -119,9 +119,24 @@ impl Store {
     }
     /// Opens scratch storage with exactly the live store's encryption policy.
     /// Plaintext is possible only for an explicitly plaintext/test Store.
+    ///
+    /// A browser store has no files: the stage is a scratch file among its
+    /// memory files, named by `path`, gone when its last connection closes.
     pub fn open_staging_connection(&self, path: &Path) -> Result<Connection> {
+        #[cfg(target_family = "wasm")]
+        if let Some(link) = &self.browser {
+            let name = path.to_str().ok_or(StoreError::Unavailable(
+                "scratch database path is not UTF-8",
+            ))?;
+            let conn = link.files().open_scratch(name)?;
+            conn.pragma_update(None, "temp_store", "MEMORY")?;
+            return Ok(conn);
+        }
+        // Without files (wasm), `path` names a file of SQLite's default
+        // memory VFS.
+        #[cfg(not(target_family = "wasm"))]
         drop(private_file(path, false)?);
-        iptv_sqlcipher_init::initialize()?;
+        crate::initialize_sqlite()?;
         let conn = Connection::open(path)?;
         if let Some(key) = &self.key {
             key.apply(&conn)?;
@@ -139,6 +154,16 @@ impl Store {
         {
             return Err(StoreError::Unavailable(
                 "invalid scratch database schema name",
+            ));
+        }
+        // ATTACH creates a missing file: a stage made outside this store's
+        // memory files would be published as an empty catalog.
+        #[cfg(target_family = "wasm")]
+        if let Some(link) = &self.browser
+            && !link.files().contains(path)
+        {
+            return Err(StoreError::Unavailable(
+                "the stage is not among the browser store's files",
             ));
         }
         let key = self
@@ -177,7 +202,7 @@ impl Store {
         }
         drop(private_file(&destination, true)?);
         let result = (|| {
-            iptv_sqlcipher_init::initialize()?;
+            crate::initialize_sqlite()?;
             let original = Connection::open_with_flags(
                 path,
                 OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -211,7 +236,7 @@ impl Store {
             original.execute_batch("COMMIT; DETACH DATABASE encrypted;")?;
             // Run every pending schema migration on the encrypted copy before
             // replacing the legacy database. An unsupported schema keeps the old file.
-            iptv_sqlcipher_init::initialize()?;
+            crate::initialize_sqlite()?;
             let conn = Connection::open(&destination)?;
             key.apply(&conn)?;
             let checked = Self::init(conn, &StoreOptions::default())?;
@@ -253,7 +278,8 @@ impl Store {
     }
 }
 
-#[cfg(test)]
+// Files, keys and child processes: native only.
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use super::*;
     use crate::{SCHEMA_VERSION, migrate};

@@ -4,6 +4,7 @@ use iptv_import::{CatalogRow, CatalogSink};
 use iptv_store_sqlite::{CatalogStage, ChannelQuery, Store};
 
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "needs a file system")]
 fn incomplete_and_failed_steps_preserve_saved_rows_and_overlays() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::open(dir.path().join("store.sqlite")).unwrap();
@@ -72,6 +73,7 @@ fn incomplete_and_failed_steps_preserve_saved_rows_and_overlays() {
 }
 
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "needs a file system")]
 fn startup_removes_only_abandoned_catalog_stage_files() {
     let dir = tempfile::tempdir().unwrap();
     for name in [
