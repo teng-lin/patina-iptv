@@ -81,6 +81,7 @@ iptv-core/src/guide.rs	Channel {}
 iptv-core/src/guide.rs	Group {:02}
 iptv-core/src/guide.rs	Show {}
 # HTTP header names.
+iptv-runtime/src/network.rs	User-Agent
 iptv-runtime/src/settings.rs	User-Agent
 iptv-runtime/src/recordings/shared.rs	User-Agent
 iptv-guide/src/playback.rs	Referer
@@ -279,3 +280,7 @@ iptv-app/src/play_bar/icons.rs	<path d='M4 6h16M4 12h11M4 18h6'/>
 iptv-runtime/src/execution.rs	the task ended without an output
 iptv-runtime/src/execution/cooperative.rs	a cooperative executor has no workers
 iptv-runtime/src/ports.rs	the host supplied no entropy
+# Byte-budget refusals become typed TooLarge failures; the text is for the log.
+iptv-app/src/host/web.rs	response exceeds its byte budget
+iptv-runtime/src/network.rs	declared body
+iptv-runtime/src/network.rs	{what} exceeds its byte budget

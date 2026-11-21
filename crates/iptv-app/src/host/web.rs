@@ -16,12 +16,11 @@
 //! - The local time zone is UTC until the host reports its offset.
 //! - Recording, backup files and staged probes are unavailable (the
 //!   runtime's capability model reports them so).
-//! - Artwork headers are not probed before the page decodes them.
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use iptv_import::{BodyStream, Fetch, FetchError, StreamingResponse};
+use iptv_import::{BodyStream, Fetch, FetchError, FetchErrorKind, StreamingResponse};
 use iptv_providers::{HttpRequest, HttpResponse};
 use iptv_web::adapters::{HostBody, HostFetch};
 
@@ -61,24 +60,61 @@ pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
 struct PageNetwork;
 
 impl Network for PageNetwork {
+    /// The page's fetch cannot cap redirects, the connection time or the
+    /// `User-Agent` (the browser owns them); the idle timeout goes to the
+    /// host, and the client enforces the time and byte budgets.
     fn client(&self, config: &NetworkConfig) -> Result<Client, FetchError> {
-        Ok(Client::new(Page(HostFetch::new()), config.clone()))
+        let fetch = HostFetch::new().with_idle_timeout(config.read_timeout);
+        Ok(Client::new(
+            Page {
+                fetch,
+                buffered: config.max_buffered_bytes,
+            },
+            config.clone(),
+        ))
     }
 }
 
-struct Page(HostFetch);
+struct Page {
+    fetch: HostFetch,
+    /// A buffered response is read as a stream up to this many bytes, so
+    /// the Worker never holds a larger one whole.
+    buffered: usize,
+}
 
 impl Transport for Page {
     fn elapsed(&self) -> Duration {
-        self.0.elapsed()
+        self.fetch.elapsed()
     }
 
     fn sleep(&self, duration: Duration) -> NetFuture<'_, ()> {
-        Box::pin(self.0.sleep(duration))
+        Box::pin(self.fetch.sleep(duration))
     }
 
     fn fetch(&self, request: HttpRequest) -> NetFuture<'_, Result<HttpResponse, FetchError>> {
-        Box::pin(self.0.fetch(request))
+        Box::pin(async move {
+            let mut response = self.fetch.fetch_stream(request).await?;
+            if response
+                .content_length
+                .is_some_and(|length| length > self.buffered as u64)
+            {
+                return Err(FetchError::new(
+                    FetchErrorKind::TooLarge,
+                    "response exceeds its byte budget",
+                ));
+            }
+            let mut bytes = Vec::new();
+            while let Some(chunk) = response.body.next_chunk().await? {
+                if bytes.len() + chunk.len() > self.buffered {
+                    return Err(FetchError::new(
+                        FetchErrorKind::TooLarge,
+                        "response exceeds its byte budget",
+                    ));
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            Ok(HttpResponse::new(response.status, bytes))
+        })
     }
 
     fn fetch_stream(
@@ -86,7 +122,7 @@ impl Transport for Page {
         request: HttpRequest,
     ) -> NetFuture<'_, Result<StreamingResponse<Body>, FetchError>> {
         Box::pin(async move {
-            let response = self.0.fetch_stream(request).await?;
+            let response = self.fetch.fetch_stream(request).await?;
             Ok(StreamingResponse {
                 status: response.status,
                 content_length: response.content_length,
@@ -159,10 +195,16 @@ pub(crate) fn recording_command(_key: &str) {
     crate::settings_view::notify(crate::i18n::tr("Recording unavailable"));
 }
 
-/// NSH's header probe is native only. The page's image element decodes
-/// artwork with the browser's own limits.
-pub(crate) fn image_extent(_bytes: &[u8]) -> super::Extent {
-    super::Extent::Unchecked
+/// An image's size from its header (NSH's own probe is native only).
+pub(crate) fn image_extent(bytes: &[u8]) -> super::Extent {
+    match imagesize::blob_size(bytes) {
+        Ok(size) => super::Extent::Pixels(
+            u32::try_from(size.width).unwrap_or(u32::MAX),
+            u32::try_from(size.height).unwrap_or(u32::MAX),
+        ),
+        Err(_) if nsh_core::svg::sniff(bytes) => super::Extent::Vector,
+        Err(_) => super::Extent::Unknown,
+    }
 }
 
 /// One thread: `work` runs now, before this returns.

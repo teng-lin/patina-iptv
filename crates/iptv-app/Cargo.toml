@@ -53,6 +53,8 @@ getrandom = "0.4"
 # The browser host (host/web): iptv-web's adapters.
 [target.'cfg(target_family = "wasm")'.dependencies]
 iptv-web = { path = "../iptv-web" }
+# Artwork headers (NSH's own probe is native only).
+imagesize = "0.15"
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"

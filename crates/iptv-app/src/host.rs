@@ -24,7 +24,6 @@ pub(crate) use web::*;
 use iptv_core::capabilities::Platform;
 
 /// What an image's header says about its size, before anything decodes it.
-#[cfg_attr(target_family = "wasm", allow(dead_code))]
 pub(crate) enum Extent {
     /// A raster of this many pixels across and down.
     Pixels(u32, u32),
@@ -32,9 +31,6 @@ pub(crate) enum Extent {
     Vector,
     /// Not an image this host decodes.
     Unknown,
-    /// The host does not read headers: its own decoder bounds the image.
-    #[cfg_attr(not(target_family = "wasm"), allow(dead_code))]
-    Unchecked,
 }
 
 const fn on(platform: Platform) -> bool {

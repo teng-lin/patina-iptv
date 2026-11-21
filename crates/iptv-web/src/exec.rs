@@ -216,7 +216,13 @@ pub(crate) fn storage_put(key: &str, value: &[u8]) {
 }
 
 /// The request as the host reads it.
-fn request_json(request: &HttpRequest) -> String {
+///
+/// `redirect` is `error` for a content-supplied request: the page's fetch
+/// follows redirects before Rust sees a hop, so a public address could
+/// lead it to a private one. Hosts that honour it refuse such a request's
+/// redirects; the Live TV bridge's worker always follows and checks the
+/// final address afterwards (`deliver_redirect`).
+fn request_json(request: &HttpRequest, idle_ms: u64) -> String {
     let headers: Vec<serde_json::Value> = request
         .headers
         .iter()
@@ -228,7 +234,8 @@ fn request_json(request: &HttpRequest) -> String {
         "headers": headers,
         "body": request.body,
         "timeoutMs": request.timeout.map(|t| t.as_millis() as u64),
-        "idleMs": IDLE_TIMEOUT_MS,
+        "idleMs": idle_ms,
+        "redirect": if request.public_only { "error" } else { "follow" },
     })
     .to_string()
 }
@@ -270,6 +277,7 @@ pub(crate) fn check_destination(request: &HttpRequest) -> Result<(), FetchError>
 #[derive(Clone)]
 pub struct HostFetch {
     started_ms: f64,
+    idle_ms: u64,
 }
 
 impl Default for HostFetch {
@@ -282,7 +290,13 @@ impl HostFetch {
     pub fn new() -> Self {
         Self {
             started_ms: host().monotonic_ms(),
+            idle_ms: IDLE_TIMEOUT_MS,
         }
+    }
+    /// A download that receives nothing for `idle` fails.
+    pub fn with_idle_timeout(mut self, idle: Duration) -> Self {
+        self.idle_ms = u64::try_from(idle.as_millis()).unwrap_or(u64::MAX);
+        self
     }
 
     async fn status(
@@ -301,7 +315,7 @@ impl HostFetch {
                 .starts_with("https:");
             s.public_only = request.public_only;
         });
-        host().fetch(id, &request_json(request), stream);
+        host().fetch(id, &request_json(request, self.idle_ms), stream);
         let (status, length) = std::future::poll_fn(|_| {
             match with_slot(id, |s| {
                 if let Some(e) = s.error.take() {
@@ -448,5 +462,24 @@ impl Drop for HostBody {
             host.fetch_close(self.id);
         }
         close_slot(self.id);
+    }
+}
+
+#[cfg(test)]
+mod request_tests {
+    use super::*;
+
+    #[test]
+    fn a_content_supplied_request_refuses_redirects_the_page_would_follow() {
+        let mut content = HttpRequest::get("https://example.test/logo.png");
+        content.public_only = true;
+        let json: serde_json::Value =
+            serde_json::from_str(&request_json(&content, 15_000)).unwrap();
+        assert_eq!(json["redirect"], "error");
+        assert_eq!(json["idleMs"], 15_000);
+        let picked = HttpRequest::get("https://example.test/list.m3u");
+        let json: serde_json::Value =
+            serde_json::from_str(&request_json(&picked, IDLE_TIMEOUT_MS)).unwrap();
+        assert_eq!(json["redirect"], "follow");
     }
 }

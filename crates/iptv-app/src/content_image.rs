@@ -29,7 +29,7 @@ fn acceptable_dimensions(bytes: &[u8]) -> bool {
                 && height <= IMAGE_SIDE
                 && u64::from(width) * u64::from(height) <= IMAGE_PIXELS
         }
-        Extent::Vector | Extent::Unchecked => true,
+        Extent::Vector => true,
         Extent::Unknown => false,
     }
 }

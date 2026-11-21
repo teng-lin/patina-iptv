@@ -2881,6 +2881,7 @@ dependencies = [
  "env_logger",
  "futures-channel",
  "getrandom 0.4.3",
+ "imagesize",
  "iptv-core",
  "iptv-epg",
  "iptv-guide",
