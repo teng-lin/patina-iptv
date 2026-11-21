@@ -159,5 +159,109 @@ pathlib.Path(os.environ["INSTALL_LOG"]).write_text(json.dumps({
         self.assertTrue((root / "bin/cargo-about").is_file())
 
 
+APT = ROOT / "tools/ci/apt-install.sh"
+SETUP = (ROOT / ".github/actions/setup/action.yml").read_text(encoding="utf-8")
+# Stand-ins for the root-only commands, so the script runs unprivileged.
+FAKES = {
+    "sudo": 'exec "$@"\n',
+    "chown": "exit 0\n",
+    "debconf-set-selections": 'cat >> "$FAKE_LOG.debconf"\n',
+    # `timeout --kill-after=30 SECONDS COMMAND...` records the bound it was given.
+    "timeout": 'echo "bound $2" >> "$FAKE_LOG"; shift 2; exec "$@"\n',
+    "dpkg": 'echo "dpkg $*" >> "$FAKE_LOG"\n',
+    "apt-get": textwrap.dedent("""\
+        echo "apt-get $*" >> "$FAKE_LOG"
+        count=$(grep -c '^apt-get' "$FAKE_LOG")
+        for failing in ${FAKE_FAIL:-}; do
+          if [ "$failing" = "$count" ]; then exit 100; fi
+        done
+        """),
+}
+
+
+@unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "the Linux package install uses Bash")
+class AptInstall(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        for name, body in FAKES.items():
+            path = bin_dir / name
+            path.write_text("#!/usr/bin/env bash\n" + body)
+            path.chmod(0o755)
+        self.log = self.root / "log"
+        self.initramfs = self.root / "update-initramfs.conf"
+        self.initramfs.write_text("MODULES=generated\nupdate_initramfs=yes\n")
+        self.man_db = self.root / "man-db-auto-update"
+        self.man_db.write_text("")
+        self.environment = {
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "FAKE_LOG": str(self.log),
+            "PATINA_APT_CONF": str(self.root / "apt.conf"), "PATINA_INITRAMFS_CONF": str(self.initramfs),
+            "PATINA_MAN_DB_TRIGGER": str(self.man_db), "PATINA_APT_ATTEMPT_SECONDS": "7",
+        }
+
+    def install(self, restored, fail=""):
+        environment = os.environ | self.environment | {"FAKE_FAIL": fail}
+        result = subprocess.run(["bash", str(APT), str(self.root / "state"), restored, "generated-a", "generated-b"],
+                                env=environment, capture_output=True, text=True)
+        calls = self.log.read_text().splitlines() if self.log.exists() else []
+        return result, [call for call in calls if not call.startswith("bound")], calls
+
+    def test_cache_miss_refreshes_lists_once_and_bounds_every_apt_call(self):
+        result, calls, raw = self.install("false")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, ["apt-get update -q", "apt-get install -q generated-a generated-b"])
+        self.assertEqual([call for call in raw if call.startswith("bound")], ["bound 7", "bound 7"])
+
+    def test_cache_hit_installs_without_contacting_the_mirror(self):
+        result, calls, _ = self.install("true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, ["apt-get install -q generated-a generated-b"])
+
+    def test_a_failed_or_stalled_install_is_retried_once_with_refreshed_lists(self):
+        result, calls, _ = self.install("true", fail="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("retrying once", result.stdout)
+        self.assertEqual(calls, ["apt-get install -q generated-a generated-b", "dpkg --configure -a",
+                                 "apt-get update -q", "apt-get install -q generated-a generated-b"])
+
+    def test_a_second_failure_fails_the_step(self):
+        result, calls, _ = self.install("false", fail="2 4")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(len([call for call in calls if call.startswith("apt-get install")]), 2)
+
+    def test_apt_retries_times_out_and_skips_slow_triggers(self):
+        result, _, _ = self.install("false")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        conf = Path(self.environment["PATINA_APT_CONF"]).read_text()
+        state = self.root / "state"
+        for line in ('Acquire::Retries "3";', 'Acquire::http::Timeout "30";', 'Acquire::https::Timeout "30";',
+                     f'Dir::State::Lists "{state}/lists";', f'Dir::Cache::Archives "{state}/archives";',
+                     'Binary::apt-get::APT::Keep-Downloaded-Packages "true";'):
+            self.assertIn(line, conf)
+        self.assertIn("update_initramfs=no", self.initramfs.read_text())
+        self.assertIn("MODULES=generated", self.initramfs.read_text())
+        self.assertFalse(self.man_db.exists())
+        self.assertIn("man-db/auto-update boolean false", Path(f"{self.log}.debconf").read_text())
+
+    def test_setup_caches_packages_per_runner_image_and_package_list(self):
+        self.assertIn("bash tools/ci/apt-install.sh", SETUP)
+        self.assertIn("ImageVersion", SETUP)
+        self.assertIn('cat tools/ci/apt-install.sh', SETUP)
+        self.assertIn("${{ inputs.apt-packages }}", SETUP)
+        # Shipping builds (cache: 'false') never install cached packages.
+        self.assertEqual(SETUP.count("runner.os == 'Linux' && inputs.cache == 'true'"), 2)
+        self.assertNotIn("sudo apt-get", SETUP)
+
+    def test_every_setup_step_has_its_own_timeout(self):
+        for workflow in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            text = workflow.read_text(encoding="utf-8")
+            for step in re.findall(r"(?m)^ *- uses: \./\.github/actions/setup\n.*", text):
+                with self.subTest(workflow=workflow.name):
+                    self.assertRegex(step, r"\n *timeout-minutes: \d+$")
+
+
 if __name__ == "__main__":
     unittest.main()

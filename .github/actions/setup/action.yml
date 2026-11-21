@@ -13,6 +13,9 @@ inputs:
   cache-key:
     description: Additional identity for mode-specific build recipes
     default: host-v2
+  apt-packages:
+    description: Further Linux packages the job needs, installed and cached with the build packages
+    default: ''
 runs:
   using: composite
   steps:
@@ -29,16 +32,58 @@ runs:
         persist-credentials: false
     - shell: bash
       run: mv nsh-source ../nsh-patina
-    - shell: bash
+    # Linux packages come from a cache keyed on the runner image and package
+    # list, so most runs never contact the Ubuntu mirror (#159). Shipping
+    # builds (cache: 'false') always install the mirror's current packages.
+    - name: Identify the Linux packages
+      id: apt
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        APT_PACKAGES: >-
+          libgtk-4-dev libmpv-dev libssl-dev libdbus-1-dev
+          libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+          pkg-config clang cmake ninja-build ffmpeg libpipewire-0.3-0t64 libva-drm2
+          ${{ inputs.apt-packages }}
+      run: |
+        read -ra requested <<< "$APT_PACKAGES"
+        packages=$(printf '%s\n' "${requested[@]}" | sort -u | paste -sd ' ' -)
+        identity=$({ echo "$packages"; cat tools/ci/apt-install.sh; } | sha256sum | cut -c1-16)
+        image="${ImageOS:-$(. /etc/os-release && echo "$ID$VERSION_ID")}-${ImageVersion:-unversioned}"
+        {
+          echo "state=$RUNNER_TEMP/patina-apt"
+          echo "packages=$packages"
+          echo "key=apt-v1-$image-$(dpkg --print-architecture)-$identity"
+        } >> "$GITHUB_OUTPUT"
+    - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      id: apt-cache
+      if: runner.os == 'Linux' && inputs.cache == 'true'
+      env:
+        # A stalled cache download falls back to the mirror instead of hanging.
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '3'
+      with:
+        path: ${{ steps.apt.outputs.state }}
+        key: ${{ steps.apt.outputs.key }}
+    - name: Install system packages
+      shell: bash
+      env:
+        APT_STATE: ${{ steps.apt.outputs.state }}
+        APT_RESTORED: ${{ steps.apt-cache.outputs.cache-hit == 'true' }}
+        APT_PACKAGES: ${{ steps.apt.outputs.packages }}
       run: |
         if [ "${RUNNER_OS}" = Linux ]; then
-          sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libmpv-dev libssl-dev libdbus-1-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-            pkg-config clang cmake ninja-build ffmpeg libpipewire-0.3-0t64 libva-drm2
+          read -ra packages <<< "$APT_PACKAGES"
+          bash tools/ci/apt-install.sh "$APT_STATE" "$APT_RESTORED" "${packages[@]}"
         else
           brew install mpv pkg-config ffmpeg
         fi
+    # Saved here rather than in a post step, so the cache holds exactly this
+    # install, not whatever the job's later steps leave behind.
+    - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      if: runner.os == 'Linux' && inputs.cache == 'true' && steps.apt-cache.outputs.cache-hit != 'true'
+      with:
+        path: ${{ steps.apt.outputs.state }}
+        key: ${{ steps.apt.outputs.key }}
     - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       with:
         toolchain: ${{ steps.pins.outputs.toolchain }}

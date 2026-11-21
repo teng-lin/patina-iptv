@@ -36,8 +36,10 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: ./.github/actions/setup
+        timeout-minutes: 25
         with:
           cache-on-failure: 'true'
+          apt-packages: xvfb libgl1-mesa-dri
       - name: Install linters
         if: matrix.os == 'ubuntu-24.04'
         run: |
@@ -54,9 +56,7 @@ jobs:
           PERF_EVENT: ${{ github.event_name }}
           PERF_REF: ${{ github.ref }}
           PERF_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
-        run: |
-          python3 tools/performance/base-policy.py
-          sudo apt-get install -y xvfb libgl1-mesa-dri
+        run: python3 tools/performance/base-policy.py
       - name: Validate the host tier
         shell: bash
         run: |

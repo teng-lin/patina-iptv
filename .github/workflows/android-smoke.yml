@@ -21,6 +21,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        timeout-minutes: 25
         with:
           cache-key: smoke-v2-${{ hashFiles('tools/sync-host.sh', 'tools/ci/android-ndk-env.sh', '.github/actions/android/action.yml', '.github/workflows/android-smoke.yml') }}
       - uses: ./.github/actions/android

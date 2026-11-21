@@ -202,6 +202,7 @@ jobs:
           name: mpv-runtime-linux-candidate
           path: target/mpv-runtime-linux-dist
       - uses: ./.github/actions/setup
+        timeout-minutes: 25
         with:
           cache: 'false'
       - name: Verify the candidate and play synthetic media

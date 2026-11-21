@@ -162,6 +162,40 @@ and total runner-minutes after master caches warm; cold runs and queue time are
 not steady-state measurements.
 
 
+## Runner setup and re-runs
+
+Hosted runner setup must fail fast, not consume a job's whole timeout (#159).
+`.github/actions/setup` installs Linux packages through `tools/ci/apt-install.sh`:
+each apt call is bounded to five minutes and a failed or stalled install is
+retried once with refreshed lists, so a stalled Ubuntu mirror fails the step in
+about ten minutes. apt itself retries downloads and gives up on a connection
+that sends nothing for 30 seconds. The script skips the image's initramfs and
+man-db rebuilds, which GTK's udev/systemd upgrade otherwise triggers. Every
+workflow step using the setup action has its own `timeout-minutes`, and a job
+needing further Linux packages names them in the action's `apt-packages`
+input rather than running its own `apt-get install`.
+
+Package lists and downloaded `.deb` files are cached under a key naming the
+runner image (`ImageOS`/`ImageVersion`), the architecture, the package list and
+the install script, so most runs install without contacting the mirror. A new
+runner image or package list misses once and saves its own entry; any branch may
+save it because it is small and exact. Shipping builds (`cache: 'false'`) never
+use it and install the mirror's current packages. Recommended packages are kept:
+Linux packaging bundles runtime modules and copyright files from the build host.
+
+The `android-check` loss attributed to post-run cleanup on #143 (run 44780222843,
+attempt 1) was in fact this download: its setup step spent 40 minutes fetching
+193 MB from the mirror, and its post steps took about one second.
+
+When a hosted runner or mirror still stalls, re-run only the failed jobs:
+
+```bash
+gh run rerun <run-id> --failed
+```
+
+This keeps successful jobs and their artifacts. Use the run's **Re-run failed
+jobs** button in the Actions UI, never **Re-run all jobs**.
+
 ## Executable inputs and production-only behavior
 
 `docs/capabilities.md` is consumed by a core test and selects host validation;
