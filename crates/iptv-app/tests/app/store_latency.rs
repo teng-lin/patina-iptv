@@ -92,7 +92,7 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
     app.wait_for("text:Add to favourites").unwrap();
     app.press("text:Add to favourites").unwrap();
     let before: i64 = lock
-        .query_row("SELECT count(*) FROM favourites", [], |row| row.get(0))
+        .query_row("SELECT count(*) FROM favorites", [], |row| row.get(0))
         .unwrap();
     assert_eq!(before, 0, "the pending write cannot pass the held lock");
     let empty_cells: HashSet<_> = app
@@ -161,7 +161,7 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
     let end = Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(10));
     loop {
         let saved: i64 = lock
-            .query_row("SELECT count(*) FROM favourites", [], |row| row.get(0))
+            .query_row("SELECT count(*) FROM favorites", [], |row| row.get(0))
             .unwrap();
         if saved == 1 {
             break;
@@ -186,7 +186,7 @@ fn a_store_read_does_not_wait_for_a_busy_writer() {
     let Some(home) = isolated!() else { return };
     let mut app = ten_thousand_channels(&home);
     let lock = hold_writer(&home);
-    lock.execute_batch("DELETE FROM epg_programmes").unwrap();
+    lock.execute_batch("DELETE FROM epg_programs").unwrap();
     iptv_app::occupy_writer(PUBLISH);
     let started = Instant::now();
     app.press_key("/").unwrap();

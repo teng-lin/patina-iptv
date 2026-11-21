@@ -158,7 +158,7 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
         ("guide.show_channel_names", boolean(true), GL, ""),
         ("guide.show_channel_numbers", boolean(true), GL, ""),
         ("guide.show_now_playing", boolean(true), GL, ""),
-        ("guide.show_programmes", boolean(true), GL, ""),
+        ("guide.show_programs", boolean(true), GL, ""),
         ("guide.show_description", boolean(true), GL, ""),
         ("guide.show_source_labels", boolean(false), GL, ""),
         ("guide.show_catchup_badge", boolean(true), GL, ""),
@@ -167,7 +167,7 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
         ("guide.highlight_now", boolean(true), GL, ""),
         (
             "guide.now_highlight_style",
-            choice(&c::NOW_HIGHLIGHT, "colour"),
+            choice(&c::NOW_HIGHLIGHT, "color"),
             GL,
             "",
         ),

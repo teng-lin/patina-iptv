@@ -86,7 +86,7 @@ fn main() {
         ..EpgWindow::from(now, 0)
     };
     let guide = store.load_epg(source, &first).expect("first screen");
-    let programmes: usize = guide.sources().iter().map(|s| s.programme_count()).sum();
+    let programmes: usize = guide.sources().iter().map(|s| s.program_count()).sum();
     println!(
         "first screen: {} channels, {programmes} programmes, {} KiB in {:.1} ms",
         guide.bound_count(),
@@ -100,7 +100,7 @@ fn main() {
         ..EpgWindow::from(now, 0)
     };
     let guide = store.load_epg(source, &window).expect("window");
-    let programmes: usize = guide.sources().iter().map(|s| s.programme_count()).sum();
+    let programmes: usize = guide.sources().iter().map(|s| s.program_count()).sum();
     println!(
         "guide window: {} channels, {programmes} programmes, {} KiB in {:.1} ms",
         guide.bound_count(),

@@ -148,6 +148,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "on_demand_errors",
         sql: include_str!("../migrations/0024_on_demand_errors.sql"),
     },
+    Migration {
+        version: 25,
+        name: "us_spelling",
+        sql: include_str!("../migrations/0025_us_spelling.sql"),
+    },
 ];
 
 /// The schema version this build writes.

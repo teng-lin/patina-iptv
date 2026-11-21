@@ -540,7 +540,7 @@ fn overlapping_stored_programmes_count_separately_from_union_coverage() {
         .unwrap();
     assert_eq!(
         raw.execute(
-            "INSERT INTO epg_programmes(channel_id,start,stop,title)
+            "INSERT INTO epg_programs(channel_id,start,stop,title)
          SELECT id,?2,?3,'Synthetic overlapping segment' FROM epg_channels
          WHERE source_id=?1 AND feed_id=1 AND epg_channel='synthetic.0'",
             rusqlite::params![source.0, NOW + 100, NOW + 200],
@@ -559,7 +559,7 @@ fn overlapping_stored_programmes_count_separately_from_union_coverage() {
         .iter()
         .find(|row| row.channel.key == f.channel(source, 0))
         .unwrap();
-    assert_eq!(amber.programme_count, 4);
+    assert_eq!(amber.program_count, 4);
     assert_eq!(amber.covered_seconds, 2 * HOUR as u64);
 }
 

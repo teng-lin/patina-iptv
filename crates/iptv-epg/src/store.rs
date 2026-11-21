@@ -188,7 +188,7 @@ impl EpgSource {
     }
 
     /// Number of programmes held.
-    pub fn programme_count(&self) -> usize {
+    pub fn program_count(&self) -> usize {
         self.schedules.iter().map(|s| s.slots.len()).sum()
     }
 

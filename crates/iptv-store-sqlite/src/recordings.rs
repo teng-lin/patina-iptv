@@ -11,7 +11,8 @@ fn status(value: &str) -> Status {
         "recording" => Status::Recording,
         "completed" => Status::Completed,
         "partial" => Status::Partial,
-        "cancelled" => Status::Cancelled,
+        // Schema 25 rewrote the stored 'cancelled'; the CHECK admits no other.
+        "canceled" => Status::Cancelled,
         "missed" => Status::Missed,
         _ => Status::Failed,
     }
@@ -23,7 +24,7 @@ fn stored(value: Status) -> &'static str {
         Status::Completed => "completed",
         Status::Partial => "partial",
         Status::Failed => "failed",
-        Status::Cancelled => "cancelled",
+        Status::Cancelled => "canceled",
         Status::Missed => "missed",
     }
 }
@@ -31,7 +32,7 @@ fn stored(value: Status) -> &'static str {
 fn cancel_rule(tx: &rusqlite::Transaction<'_>, rule: iptv_core::recording::RuleId) -> Result<()> {
     tx.execute("UPDATE recording_rules SET enabled=0 WHERE id=?1", [rule.0])?;
     tx.execute(
-        "UPDATE recording_jobs SET status='cancelled',message='Recurring schedule disabled'
+        "UPDATE recording_jobs SET status='canceled',message='Recurring schedule disabled'
         WHERE status='scheduled' AND id IN (SELECT job_id FROM recording_rule_jobs WHERE rule_id=?1)
         AND NOT EXISTS(SELECT 1 FROM recording_rule_jobs j JOIN recording_rules q ON q.id=j.rule_id
             WHERE j.job_id=recording_jobs.id AND q.enabled=1)",
@@ -635,11 +636,11 @@ impl Store {
             // Only a rule pause can be undone. Manual cancellation and deleted
             // occurrence tombstones keep their original authority.
             tx.execute("UPDATE recording_jobs SET status='scheduled',message=''
-                WHERE status='cancelled' AND message='Recurring schedule disabled' AND ends_at>?2
+                WHERE status='canceled' AND message='Recurring schedule disabled' AND ends_at>?2
                 AND id IN (SELECT job_id FROM recording_rule_jobs WHERE rule_id=?1)
                 AND source_incarnation=(SELECT incarnation FROM guide_revisions WHERE source_id=recording_jobs.source_id)",[rule.0,now])?;
         } else {
-            tx.execute("UPDATE recording_jobs SET status='cancelled',message='Recurring schedule disabled'
+            tx.execute("UPDATE recording_jobs SET status='canceled',message='Recurring schedule disabled'
                 WHERE status='scheduled' AND id IN (SELECT job_id FROM recording_rule_jobs WHERE rule_id=?1)
                 AND NOT EXISTS(SELECT 1 FROM recording_rule_jobs j JOIN recording_rules q ON q.id=j.rule_id
                     WHERE j.job_id=recording_jobs.id AND q.enabled=1)",[rule.0])?;
@@ -697,7 +698,7 @@ impl Store {
         rule: &iptv_core::recording::Rule,
         now: i64,
     ) -> Result<Vec<(i64, i64)>> {
-        Ok(self.conn.prepare("SELECT p.start,p.stop FROM epg_programmes p JOIN epg_bindings b ON b.epg_channel_id=p.channel_id
+        Ok(self.conn.prepare("SELECT p.start,p.stop FROM epg_programs p JOIN epg_bindings b ON b.epg_channel_id=p.channel_id
             WHERE b.source_id=?1 AND b.channel_key=?2 AND p.title=?3 AND p.stop>?4 AND p.start<?5 ORDER BY p.start LIMIT 64")?
             .query_map(params![rule.request.source,rule.request.channel,rule.request.title,now,now.saturating_add(14*86400)],|r|Ok((r.get(0)?,r.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?)

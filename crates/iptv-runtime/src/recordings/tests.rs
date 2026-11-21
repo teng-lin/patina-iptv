@@ -379,7 +379,7 @@ fn seed_series_guide(owner: &Runtime, request: &Request, start: i64, end: i64) {
     raw.execute("INSERT INTO epg_bindings(source_id,channel_key,epg_channel_id,match_kind) VALUES(?1,?2,1,'tvg-id')", rusqlite::params![request.source, request.channel]).unwrap();
     for offset in [0, 86400] {
         raw.execute(
-            "INSERT INTO epg_programmes(channel_id,start,stop,title) VALUES(1,?1,?2,?3)",
+            "INSERT INTO epg_programs(channel_id,start,stop,title) VALUES(1,?1,?2,?3)",
             rusqlite::params![start + offset, end + offset, request.title],
         )
         .unwrap();

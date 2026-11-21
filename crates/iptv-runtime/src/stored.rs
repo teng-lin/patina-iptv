@@ -865,7 +865,7 @@ mod tests {
                         bytes: 1,
                     },
                     channel_count: 10,
-                    programme_count: 100,
+                    program_count: 100,
                 })
                 .collect(),
         }

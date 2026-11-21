@@ -813,7 +813,7 @@ Exact guide id	Identificador de guía exacto	Identifiant exact du guide	Genaue P
 Guide id differs in case	El identificador difiere en mayúsculas	La casse de l’identifiant diffère	Programmkennung mit anderer Großschreibung	L’identificativo differisce per maiuscole	O identificador difere nas maiúsculas	Отличается регистр идентификатора	节目单标识大小写不同	節目表識別碼大小寫不同	番組表IDの大文字と小文字が異なります	편성표 ID 대소문자가 다릅니다
 Similar channel name	Nombre de canal similar	Nom de chaîne similaire	Ähnlicher Sendername	Nome del canale simile	Nome de canal semelhante	Похожее название канала	相似的频道名称	相似的頻道名稱	類似するチャンネル名	유사한 채널 이름
 Alternative guide channel	Canal de guía alternativo	Autre chaîne du guide	Alternativer Programmsender	Canale alternativo della guida	Canal alternativo do guia	Другой канал телепрограммы	其他节目单频道	其他節目表頻道	別の番組表チャンネル	다른 편성표 채널
-Cancelled	Cancelado	Annulé	Abgebrochen	Annullato	Cancelado	Отменено	已取消	已取消	キャンセル済み	취소됨
+Canceled	Cancelado	Annulé	Abgebrochen	Annullato	Cancelado	Отменено	已取消	已取消	キャンセル済み	취소됨
 The request timed out	La solicitud agotó el tiempo	La requête a expiré	Zeitüberschreitung der Anfrage	La richiesta è scaduta	O pedido excedeu o tempo	Время запроса истекло	请求超时	請求逾時	リクエストがタイムアウトしました	요청 시간이 초과되었습니다
 Channel is blocked	El canal está bloqueado	La chaîne est bloquée	Sender ist gesperrt	Il canale è bloccato	O canal está bloqueado	Канал заблокирован	频道已被阻止	頻道已封鎖	チャンネルはブロックされています	채널이 차단되었습니다
 Guide evidence changed; inspect again	La guía cambió; inspeccionar de nuevo	Le guide a changé ; examinez-le à nouveau	Programmdaten geändert; erneut prüfen	La guida è cambiata; controlla di nuovo	O guia mudou; inspecione novamente	Данные изменились; проверьте снова	节目单证据已更改，请重新检查	節目表依據已變更，請重新檢查	番組表の情報が変更されました。再確認してください	편성표 정보가 변경되었습니다. 다시 확인하세요
@@ -1179,12 +1179,12 @@ Number keys	Teclas numéricas	Touches numériques	Zifferntasten	Tasti numerici	T
 As the provider says	Según el proveedor	Selon le fournisseur	Nach Anbieterangabe	Come indicato dal fornitore	Conforme o fornecedor	Как указано провайдером	按照提供商	依照供應商	プロバイダーの指定どおり	제공업체 설정대로
 Amber	Ámbar	Ambre	Bernstein	Ambra	Âmbar	Янтарный	琥珀色	琥珀色	アンバー	호박색
 Black	Negro	Noir	Schwarz	Nero	Preto	Чёрный	黑色	黑色	黒	검정
-Blue grey	Gris azulado	Bleu gris	Blaugrau	Grigio blu	Cinzento azulado	Серо-синий	蓝灰色	藍灰色	ブルーグレー	청회색
+Blue gray	Gris azulado	Bleu gris	Blaugrau	Grigio blu	Cinzento azulado	Серо-синий	蓝灰色	藍灰色	ブルーグレー	청회색
 Brown	Marrón	Marron	Braun	Marrone	Castanho	Коричневый	棕色	棕色	茶	갈색
 Cyan	Cian	Cyan	Cyan	Ciano	Ciano	Голубой	青色	青色	シアン	청록
 Dark	Oscuro	Sombre	Dunkel	Scuro	Escuro	Тёмный	深色	深色	ダーク	어두움
-Dark grey	Gris oscuro	Gris foncé	Dunkelgrau	Grigio scuro	Cinzento-escuro	Тёмно-серый	深灰色	深灰色	ダークグレー	진회색
-Grey	Gris	Gris	Grau	Grigio	Cinzento	Серый	灰色	灰色	グレー	회색
+Dark gray	Gris oscuro	Gris foncé	Dunkelgrau	Grigio scuro	Cinzento-escuro	Тёмно-серый	深灰色	深灰色	ダークグレー	진회색
+Gray	Gris	Gris	Grau	Grigio	Cinzento	Серый	灰色	灰色	グレー	회색
 Indigo	Índigo	Indigo	Indigo	Indaco	Índigo	Индиго	靛蓝色	靛藍色	藍	남색
 Lime	Verde lima	Vert citron	Limettengrün	Verde lime	Verde-lima	Лаймовый	青柠色	萊姆色	ライム	라임
 Orange	Naranja	Orange	Orange	Arancione	Laranja	Оранжевый	橙色	橙色	オレンジ	주황

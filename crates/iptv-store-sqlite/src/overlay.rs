@@ -18,7 +18,7 @@ use crate::{SourceId, Store, search};
 
 fn favourite_ids(conn: &Connection, source: SourceId) -> Result<Vec<String>> {
     let mut stmt = conn.prepare_cached(
-        "SELECT channel_id FROM favourites WHERE source_id = ?1 ORDER BY position",
+        "SELECT channel_id FROM favorites WHERE source_id = ?1 ORDER BY position",
     )?;
     Ok(stmt
         .query_map([source.0], |row| row.get(0))?
@@ -27,7 +27,7 @@ fn favourite_ids(conn: &Connection, source: SourceId) -> Result<Vec<String>> {
 
 fn write_favourite_order(conn: &Connection, source: SourceId, keys: &[String]) -> Result<()> {
     let mut stmt = conn.prepare_cached(
-        "UPDATE favourites SET position = ?3 WHERE source_id = ?1 AND channel_id = ?2",
+        "UPDATE favorites SET position = ?3 WHERE source_id = ?1 AND channel_id = ?2",
     )?;
     for (position, key) in keys.iter().enumerate() {
         stmt.execute(params![source.0, key, position as i64])?;
@@ -118,7 +118,7 @@ pub struct OrphanedOverlay {
 /// ordered, in_custom_group)` rows.
 const OVERLAY_ROWS: &str = "
     SELECT source_id, channel_id, 1 AS favourite, 0 AS customised, 0 AS ordered, 0 AS grouped
-        FROM favourites
+        FROM favorites
     UNION ALL SELECT source_id, channel_id, 0, 1, 0, 0 FROM channel_overlays
     UNION ALL SELECT source_id, channel_id, 0, 0, 1, 0 FROM manual_order
     UNION ALL SELECT g.source_id, m.channel_id, 0, 0, 0, 1
@@ -126,8 +126,8 @@ const OVERLAY_ROWS: &str = "
 
 /// Deletes a source's orphans, one statement per overlay table.
 const PURGE_ORPHANS: &[&str] = &[
-    "DELETE FROM favourites WHERE source_id = ?1 AND NOT EXISTS (
-         SELECT 1 FROM channels c WHERE c.source_id = ?1 AND c.id = favourites.channel_id)",
+    "DELETE FROM favorites WHERE source_id = ?1 AND NOT EXISTS (
+         SELECT 1 FROM channels c WHERE c.source_id = ?1 AND c.id = favorites.channel_id)",
     "DELETE FROM channel_overlays WHERE source_id = ?1 AND NOT EXISTS (
          SELECT 1 FROM channels c WHERE c.source_id = ?1 AND c.id = channel_overlays.channel_id)",
     "DELETE FROM manual_order WHERE source_id = ?1 AND NOT EXISTS (
@@ -218,14 +218,14 @@ impl Store {
         ensure_source(&tx, source)?;
         if on {
             tx.execute(
-                "INSERT OR IGNORE INTO favourites (source_id, channel_id, position, added_at)
-                 VALUES (?1, ?2, (SELECT COALESCE(MAX(position) + 1, 0) FROM favourites
+                "INSERT OR IGNORE INTO favorites (source_id, channel_id, position, added_at)
+                 VALUES (?1, ?2, (SELECT COALESCE(MAX(position) + 1, 0) FROM favorites
                                   WHERE source_id = ?1), ?3)",
                 params![source.0, id.as_str(), now],
             )?;
         } else {
             tx.execute(
-                "DELETE FROM favourites WHERE source_id = ?1 AND channel_id = ?2",
+                "DELETE FROM favorites WHERE source_id = ?1 AND channel_id = ?2",
                 params![source.0, id.as_str()],
             )?;
         }
@@ -242,7 +242,7 @@ impl Store {
 
     pub fn is_favourite(&self, source: SourceId, id: &ContentId) -> Result<bool> {
         Ok(self.conn.query_row(
-            "SELECT EXISTS (SELECT 1 FROM favourites WHERE source_id = ?1 AND channel_id = ?2)",
+            "SELECT EXISTS (SELECT 1 FROM favorites WHERE source_id = ?1 AND channel_id = ?2)",
             params![source.0, id.as_str()],
             |r| r.get(0),
         )?)

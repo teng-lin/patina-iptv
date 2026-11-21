@@ -65,6 +65,12 @@ is below 1.0, a minor release may change behaviour.
 - Catalog schema 24 records movie and series lists that failed to download.
   Downgrading an existing catalog is unsupported; retain a compatible backup
   before upgrading.
+- Catalog schema 25 and settings version 4 store their names in US spelling
+  (#139): favorites, guide programs and canceled recordings and imports keep
+  their data when an existing catalog upgrades or an older backup restores.
+  Settings and backups written before keep loading; a backup made before a
+  settings version change now restores instead of being refused. Downgrading
+  is unsupported; retain a compatible backup before upgrading.
 - Tablets: scrolling the guide's channels or the channel list, or panning its
   timeline, cancels a preview that **Play the focused channel by itself**
   was about to start; a channel you tapped still plays. Panning into another day no

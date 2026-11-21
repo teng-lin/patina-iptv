@@ -51,7 +51,7 @@ impl Status {
             Self::Completed => "Completed",
             Self::Partial => "Partial recording",
             Self::Failed => "Failed",
-            Self::Cancelled => "Cancelled",
+            Self::Cancelled => "Canceled",
             Self::Missed => "Missed",
         }
     }

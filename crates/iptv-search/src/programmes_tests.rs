@@ -252,7 +252,7 @@ fn hit_fields_and_index_stats() {
             score: Prefix,
         }]
     );
-    assert_eq!(idx.programme_count(), 12);
+    assert_eq!(idx.program_count(), 12);
     assert_eq!(idx.title_count(), 7);
     assert!(idx.word_count() >= 12);
     assert!(idx.heap_bytes() > 0);

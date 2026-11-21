@@ -3,7 +3,7 @@
 //! ```json
 //! {
 //!   "format": "iptv-rs.settings",
-//!   "version": 3,
+//!   "version": 4,
 //!   "global":    { "player.info_panel_timeout": 5000 },
 //!   "playlists": { "<playlist id>": { "channels.group_sort": "name" } },
 //!   "groups":    { "<playlist id>": { "<group id>": { "channels.channel_sort": "manual" } } }
@@ -51,7 +51,7 @@ use crate::value::{KeyBinding, PressKind, Value};
 
 pub const FORMAT: &str = "iptv-rs.settings";
 /// The version [`Settings::to_json`] writes.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 
 const RESERVED: [&str; 5] = ["format", "version", "global", "playlists", "groups"];
 
@@ -76,7 +76,43 @@ pub static MIGRATIONS: &[Migration] = &[
         summary: "guide.stay_on_guide_overlay folds into guide.stay_on_guide (both layouts)",
         apply: v2_one_stay_on_guide,
     },
+    Migration {
+        from: 3,
+        summary: "US spelling: guide.show_programmes → guide.show_programs; \
+                  grey palettes → gray; now_highlight colour → color",
+        apply: v3_us_spelling,
+    },
 ];
+
+/// Stored names in US spelling (#139). The renamed key keeps its value
+/// unless the document already has the new key; renamed choices keep the
+/// same meaning. Values of other types are left for the loader to judge.
+fn v3_us_spelling(doc: &mut Map<String, Json>) {
+    const PALETTES: [(&str, &str); 3] = [
+        ("grey", "gray"),
+        ("blue_grey", "blue_gray"),
+        ("dark_grey", "dark_gray"),
+    ];
+    let renamed = |layer: &mut Map<String, Json>, key: &str, from: &str, to: &str| {
+        if layer.get(key).and_then(Json::as_str) == Some(from) {
+            layer.insert(key.to_owned(), Json::from(to));
+        }
+    };
+    for_each_layer(doc, &mut |layer| {
+        let (old, new) = ("guide.show_programmes", "guide.show_programs");
+        if let Some(value) = layer.remove(old)
+            && !layer.contains_key(new)
+        {
+            layer.insert(new.to_owned(), value);
+        }
+        for key in ["appearance.accent", "appearance.background"] {
+            for (from, to) in PALETTES {
+                renamed(layer, key, from, to);
+            }
+        }
+        renamed(layer, "guide.now_highlight_style", "colour", "color");
+    });
+}
 
 /// One "keep the guide open" choice now covers both guide layouts. The
 /// choice made for the layout in use wins; otherwise an explicit choice

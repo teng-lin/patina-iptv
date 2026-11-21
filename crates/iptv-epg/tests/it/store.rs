@@ -303,7 +303,7 @@ fn repeated_titles_are_interned_once() {
         })
         .collect();
     let src = build(1, 0, progs, StoreOptions::default(), T0);
-    assert_eq!(src.programme_count(), 1000);
+    assert_eq!(src.program_count(), 1000);
     assert_eq!(src.string_count(), 2);
 }
 

@@ -368,7 +368,7 @@ fn prepare(ui: Ui) {
             };
             log::info!(
                 "iptv search: indexed {} programmes in {} ms",
-                index.programme_count(),
+                index.program_count(),
                 t.elapsed().as_millis()
             );
             crate::runtime().install_programme_index(index);

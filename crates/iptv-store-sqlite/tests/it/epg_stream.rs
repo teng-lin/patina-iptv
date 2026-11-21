@@ -379,7 +379,7 @@ fn check_equivalent(store_opts: StoreOptions) {
     for f in &stored.feeds {
         let (chans, programmes) = &per_feed[&f.meta.config.id];
         assert_eq!(f.channel_count, chans.len() as u64);
-        assert_eq!(f.programme_count, *programmes);
+        assert_eq!(f.program_count, *programmes);
     }
     assert_eq!(
         counts.programmes,

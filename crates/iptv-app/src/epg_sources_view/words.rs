@@ -98,7 +98,7 @@ pub fn status(line: &SourceLine, when: impl Fn(i64) -> String) -> (String, bool)
                 ),
                 trf(
                     "{count, plural, one {# programme} other {# programmes}}",
-                    &[("count", state.programme_count.into())],
+                    &[("count", state.program_count.into())],
                 ),
                 updated,
             ],
@@ -279,7 +279,7 @@ mod tests {
             attempted_at: 0,
             error: None,
             channel_count: 1,
-            programme_count: 240,
+            program_count: 240,
             listed_count: 50,
         };
         assert_eq!(
@@ -308,7 +308,7 @@ mod tests {
             attempted_at: 0,
             error: None,
             channel_count: 2,
-            programme_count: 240,
+            program_count: 240,
             listed_count: 50,
         };
         let used = line(true, Some(r.clone()));

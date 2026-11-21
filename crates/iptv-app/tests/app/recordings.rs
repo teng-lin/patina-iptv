@@ -227,7 +227,7 @@ fn exercise(home: crate::isolated::Home, idiom: Idiom) {
     } else {
         step(app.press("label:/^Cancel recording ·/"));
     }
-    step(app.wait_for_within("text:/Cancelled ·/", Duration::from_secs(10)));
+    step(app.wait_for_within("text:/Canceled ·/", Duration::from_secs(10)));
     if idiom == Idiom::Tv {
         step(app.press_key("m"));
         step(app.press_key("enter"));

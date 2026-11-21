@@ -68,7 +68,7 @@ fn main() {
     let took = t.elapsed();
     let peak = status_kib("VmHWM:");
     let after = status_kib("VmRSS:");
-    let programmes: usize = guide.sources().iter().map(|s| s.programme_count()).sum();
+    let programmes: usize = guide.sources().iter().map(|s| s.program_count()).sum();
     println!(
         "{mode} {n}: {} channels, {programmes} programmes in {:.2}s; guide heap {:.1} MiB; \
          rss before {:.0} MiB, peak +{:.0} MiB, after +{:.0} MiB",

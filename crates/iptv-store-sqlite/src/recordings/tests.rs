@@ -97,7 +97,7 @@ fn series_occurrences_keep_raw_identity_across_padding_cancellation_and_retry() 
         first
     );
     store
-        .transition_recording(first, Status::Scheduled, Status::Cancelled, 0, "Cancelled")
+        .transition_recording(first, Status::Scheduled, Status::Cancelled, 0, "Canceled")
         .unwrap();
     store.remove_recording(first).unwrap();
     assert_eq!(
@@ -408,7 +408,7 @@ fn recurrence_claim_cancel_and_deletion_never_rearm_an_occurrence() {
         None
     );
     store
-        .transition_recording(first, Status::Scheduled, Status::Cancelled, 0, "Cancelled")
+        .transition_recording(first, Status::Scheduled, Status::Cancelled, 0, "Canceled")
         .unwrap();
     assert!(store.remove_recording(first).unwrap());
     assert!(
@@ -517,7 +517,7 @@ fn enabling_a_rule_restores_only_future_jobs_cancelled_by_disabling_it() {
         .unwrap()
         .unwrap();
     store
-        .transition_recording(manual, Status::Scheduled, Status::Cancelled, 0, "Cancelled")
+        .transition_recording(manual, Status::Scheduled, Status::Cancelled, 0, "Canceled")
         .unwrap();
     store
         .set_recording_rule_enabled(rule.id, false, request.start - 1)

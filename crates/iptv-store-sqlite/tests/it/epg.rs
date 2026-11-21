@@ -128,7 +128,7 @@ fn replace_then_load_round_trips_bindings_and_priorities() {
         stored
             .feeds
             .iter()
-            .map(|f| (f.meta.config.id.0, f.channel_count, f.programme_count))
+            .map(|f| (f.meta.config.id.0, f.channel_count, f.program_count))
             .collect::<Vec<_>>(),
         [(1, 1, 9), (2, 1, 9)]
     );

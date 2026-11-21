@@ -129,7 +129,7 @@ mod tests {
             "Outside compact range",
         );
         let index = b.finish();
-        assert_eq!(index.programme_count(), 1);
+        assert_eq!(index.program_count(), 1);
         let opts = ProgrammeSearchOptions {
             include_past_without_catchup: true,
             ..Default::default()
@@ -186,7 +186,7 @@ mod tests {
         store.set_matches(matches);
         let from_store = ProgrammeIndex::build(&store, &keys);
         let built = built.finish();
-        assert_eq!(built.programme_count(), from_store.programme_count());
+        assert_eq!(built.program_count(), from_store.program_count());
         assert_eq!(built.title_count(), from_store.title_count());
         let opts = ProgrammeSearchOptions {
             include_past_without_catchup: true,

@@ -13,11 +13,11 @@ pub static ACCENT: Choices = Choices {
         "amber",
         "black",
         "blue",
-        "blue_grey",
+        "blue_gray",
         "brown",
         "cyan",
         "green",
-        "grey",
+        "gray",
         "indigo",
         "lime",
         "orange",
@@ -37,13 +37,13 @@ pub static BACKGROUND: Choices = Choices {
         "amber",
         "black",
         "blue",
-        "blue_grey",
+        "blue_gray",
         "brown",
         "cyan",
         "dark",
-        "dark_grey",
+        "dark_gray",
         "green",
-        "grey",
+        "gray",
         "indigo",
         "lime",
         "orange",
@@ -108,7 +108,7 @@ pub static BROWSE_MODE: Choices = Choices {
 
 pub static NOW_HIGHLIGHT: Choices = Choices {
     family: "now_highlight",
-    variants: &["plain", "colour", "progress_only"],
+    variants: &["plain", "color", "progress_only"],
 };
 
 pub static CORNER: Choices = Choices {

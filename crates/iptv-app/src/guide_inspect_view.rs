@@ -433,7 +433,7 @@ fn evidence(value: Evidence) -> &'static str {
 }
 pub(crate) fn error_text(error: InspectionError) -> &'static str {
     match error {
-        InspectionError::Cancelled => tr("Cancelled"),
+        InspectionError::Cancelled => tr("Canceled"),
         InspectionError::Deadline => tr("The request timed out"),
         InspectionError::PermissionDenied => tr("Channel is blocked"),
         InspectionError::StaleCursor | InspectionError::StaleEvidence => {

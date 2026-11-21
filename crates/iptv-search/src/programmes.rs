@@ -301,7 +301,7 @@ impl ProgrammeIndex {
     }
 
     /// Programmes indexed.
-    pub fn programme_count(&self) -> usize {
+    pub fn program_count(&self) -> usize {
         self.occ.len()
     }
 

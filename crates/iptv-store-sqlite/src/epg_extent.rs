@@ -22,7 +22,7 @@ impl Store {
         let seek = crate::epg_window::seek("b.epg_channel_id");
         let mut stmt = self.conn.prepare_cached(&format!(
             "SELECT b.channel_key, (
-                 SELECT p.start FROM epg_programmes p
+                 SELECT p.start FROM epg_programs p
                  WHERE p.channel_id = b.epg_channel_id AND p.stop > ?2 AND {seek}
                  ORDER BY p.start LIMIT 1
              ) FROM epg_bindings b WHERE b.source_id = ?1",
@@ -44,7 +44,7 @@ impl Store {
         let first = self
             .conn
             .prepare_cached(
-                "SELECT MIN((SELECT p.start FROM epg_programmes p
+                "SELECT MIN((SELECT p.start FROM epg_programs p
                              WHERE p.channel_id = b.epg_channel_id
                              ORDER BY p.start LIMIT 1))
                  FROM epg_bindings b WHERE b.source_id = ?1",

@@ -253,7 +253,7 @@ pub fn browse_mode() -> crate::ViewMode {
     }
 }
 
-/// A theme bundle's palette key (`"Blue grey"` → `blue_grey`).
+/// A theme bundle's palette key (`"Blue gray"` → `blue_gray`).
 pub fn palette_key(name: &str) -> String {
     name.to_lowercase().replace(' ', "_")
 }
@@ -390,11 +390,11 @@ mod tests {
         let mut s = Settings::new();
         assert_eq!(theme_of(&s), Theme::default());
         s.set("appearance.accent", Value::colour("red")).unwrap();
-        s.set("appearance.background", Value::colour("blue_grey"))
+        s.set("appearance.background", Value::colour("blue_gray"))
             .unwrap();
         let theme = theme_of(&s);
         assert_eq!(theme.accent.name, "Red");
-        assert_eq!(theme.background.name, "Blue grey");
+        assert_eq!(theme.background.name, "Blue gray");
         // Every palette key names a bundle.
         for name in catalogue::choices::ACCENT.variants {
             s.set("appearance.accent", Value::colour(name)).unwrap();

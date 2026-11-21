@@ -93,7 +93,7 @@ pub(crate) const ROW_COLUMNS: &str = "c.source_id, c.id, c.provider_id, c.name, 
 
 pub(crate) const OVERLAY_JOINS: &str = "
     LEFT JOIN channel_overlays o ON o.source_id = c.source_id AND o.channel_id = c.id
-    LEFT JOIN favourites f ON f.source_id = c.source_id AND f.channel_id = c.id";
+    LEFT JOIN favorites f ON f.source_id = c.source_id AND f.channel_id = c.id";
 
 pub(crate) fn decode(row: &rusqlite::Row<'_>) -> Result<ChannelRow> {
     let catch_up: Option<String> = row.get(11)?;
@@ -161,9 +161,9 @@ fn build(
         matches!(purpose, Purpose::Rows { manual: true }) && q.order == ChannelOrder::Effective;
     let overlay = rows || !q.include_hidden || q.exclude_blocked;
     let favourites = if q.favourites_only {
-        " JOIN favourites f ON f.source_id = c.source_id AND f.channel_id = c.id"
+        " JOIN favorites f ON f.source_id = c.source_id AND f.channel_id = c.id"
     } else if rows {
-        " LEFT JOIN favourites f ON f.source_id = c.source_id AND f.channel_id = c.id"
+        " LEFT JOIN favorites f ON f.source_id = c.source_id AND f.channel_id = c.id"
     } else {
         ""
     };
@@ -192,7 +192,7 @@ fn build(
         // Favourites are few: drive the scan from them, in their order.
         ChannelScope::All if q.favourites_only => (
             format!(
-                "FROM favourites f
+                "FROM favorites f
                  JOIN channels c ON c.source_id = f.source_id AND c.id = f.channel_id{joins}
                  WHERE f.source_id = ?1"
             ),

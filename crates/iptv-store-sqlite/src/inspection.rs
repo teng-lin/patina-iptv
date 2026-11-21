@@ -509,7 +509,7 @@ impl Store {
             let mut statement = self.conn.prepare_cached(&format!(
                 "SELECT b.channel_key,c.feed_id,c.epg_channel,p.start,p.stop,p.title
                  FROM epg_bindings b JOIN epg_channels c ON c.id=b.epg_channel_id
-                 JOIN epg_programmes p ON p.channel_id=c.id
+                 JOIN epg_programs p ON p.channel_id=c.id
                  JOIN channels ch ON ch.source_id=b.source_id AND ch.id=b.channel_key
                  LEFT JOIN channel_overlays o ON o.source_id=b.source_id AND o.channel_id=b.channel_key
                  WHERE b.source_id=?1 AND p.start<?3 AND p.stop>?2
@@ -751,7 +751,7 @@ impl Store {
                 ("SELECT feed_id,error_kind FROM epg_feed_results WHERE source_id=?1 ORDER BY feed_id",2),
                 ("SELECT b.channel_key,c.feed_id,c.epg_channel,b.match_kind FROM epg_bindings b
                    JOIN epg_channels c ON c.id=b.epg_channel_id WHERE b.source_id=?1 ORDER BY b.channel_key",4),
-                ("SELECT c.feed_id,c.epg_channel,MIN(p.start),MAX(p.stop) FROM epg_programmes p
+                ("SELECT c.feed_id,c.epg_channel,MIN(p.start),MAX(p.stop) FROM epg_programs p
                    JOIN epg_channels c ON c.id=p.channel_id WHERE c.source_id=?1
                    GROUP BY c.feed_id,c.epg_channel ORDER BY c.feed_id,c.epg_channel",4),
             ] {
@@ -760,7 +760,7 @@ impl Store {
                 while let Some(row)=rows.next()?{hash.row(row,columns)?;}
             }
             let mut statement = self.conn.prepare_cached(
-                "SELECT c.feed_id,c.epg_channel,p.start,p.stop,p.title FROM epg_programmes p
+                "SELECT c.feed_id,c.epg_channel,p.start,p.stop,p.title FROM epg_programs p
                  JOIN epg_channels c ON c.id=p.channel_id WHERE c.source_id=?1
                  AND p.start<?3 AND p.stop>?2 ORDER BY c.feed_id,c.epg_channel,p.start",
             )?;
@@ -811,7 +811,7 @@ impl Store {
                 (0u64, 0, None, None, window.from);
             if let Some((feed, ref epg, _)) = binding {
                 let mut statement=self.conn.prepare_cached(
-                    "SELECT p.start,p.stop FROM epg_programmes p JOIN epg_channels c ON c.id=p.channel_id
+                    "SELECT p.start,p.stop FROM epg_programs p JOIN epg_channels c ON c.id=p.channel_id
                      WHERE c.source_id=?1 AND c.feed_id=?2 AND c.epg_channel=?3 ORDER BY p.start")?;
                 let mut rows = statement.query(params![channel.key.source.0, feed.0, epg])?;
                 while let Some(row) = rows.next()? {
@@ -902,7 +902,7 @@ impl Store {
                 diagnosis,
                 window,
                 covered_seconds: covered,
-                programme_count: count,
+                program_count: count,
                 binding,
                 identity_verified: false,
             });

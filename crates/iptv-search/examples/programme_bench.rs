@@ -142,7 +142,7 @@ fn main() {
     println!("guide: {channels} channels x {days} days");
     println!(
         "index: {} programmes, {} distinct titles, {} words, {:.1} MiB heap (store {:.1} MiB)",
-        idx.programme_count(),
+        idx.program_count(),
         idx.title_count(),
         idx.word_count(),
         idx.heap_bytes() as f64 / 1048576.0,

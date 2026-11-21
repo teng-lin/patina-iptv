@@ -100,7 +100,7 @@ pub fn build(
             Ok(index) => {
                 log::info!(
                     "iptv search: read {} stored programmes in {} ms",
-                    index.programme_count(),
+                    index.program_count(),
                     started.elapsed().as_millis()
                 );
                 done(Ok(index));

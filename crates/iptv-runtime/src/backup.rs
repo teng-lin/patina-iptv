@@ -545,7 +545,13 @@ fn validate_settings(text: &str) -> Result<()> {
         .context("Backup structured entry is too large")?;
     let (_, report) =
         Settings::from_json(text).context("Backup settings are invalid or from a newer version")?;
-    if !report.is_clean() {
+    // An older document is migrated like the live settings file at startup,
+    // so a backup made before a settings version bump still restores.
+    let migrated = iptv_settings::LoadReport {
+        migrations: Vec::new(),
+        ..report
+    };
+    if !migrated.is_clean() {
         return Err("Backup settings are not supported by this version".into());
     }
     Ok(())

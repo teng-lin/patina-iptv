@@ -222,7 +222,7 @@ pub static GUIDE: &[Setting] = &[
     // default: ours
     guide(
         "content",
-        "guide.show_programmes",
+        "guide.show_programs",
         boolean(true),
         key("Show programme cells; off leaves a plain channel list."),
     ),
@@ -272,7 +272,7 @@ pub static GUIDE: &[Setting] = &[
     guide(
         "emphasis",
         "guide.now_highlight_style",
-        choice(&NOW_HIGHLIGHT, "colour"),
+        choice(&NOW_HIGHLIGHT, "color"),
         key("How on-air programmes are emphasised: plain, tinted, or only by their progress bar."),
     )
     .depends(&[visible_if(&[when("guide.highlight_now", Test::IsTrue)])]),

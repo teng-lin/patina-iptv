@@ -517,7 +517,7 @@ fn error(error: &model::Error) -> &'static str {
             tr("Guide evidence changed; inspect again")
         }
         model::Error::Inspection(value) => crate::guide_inspect_view::error_text(value.clone()),
-        model::Error::Cancelled => tr("Cancelled"),
+        model::Error::Cancelled => tr("Canceled"),
         _ => tr("Guide changes could not be saved"),
     }
 }

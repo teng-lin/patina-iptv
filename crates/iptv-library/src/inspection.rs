@@ -165,7 +165,7 @@ pub struct Coverage {
     pub diagnosis: Diagnosis,
     pub window: TimeWindow,
     pub covered_seconds: u64,
-    pub programme_count: u32,
+    pub program_count: u32,
     pub binding: Option<CandidateRef>,
     /// Coverage is schedule evidence, never proof of station identity.
     pub identity_verified: bool,

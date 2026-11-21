@@ -143,7 +143,7 @@ pub struct StoredEpgFeed {
     pub meta: EpgFeedMeta,
     /// EPG channels stored (bound ones only).
     pub channel_count: u64,
-    pub programme_count: u64,
+    pub program_count: u64,
 }
 
 /// A playlist source's stored guide (or its failed attempts).
@@ -246,7 +246,7 @@ const DELETE_GUIDE: &[&str] = &[
     "DELETE FROM epg_feed_channels WHERE source_id = ?1",
     "DELETE FROM epg_descriptions WHERE channel_id IN
          (SELECT id FROM epg_channels WHERE source_id = ?1)",
-    "DELETE FROM epg_programmes WHERE channel_id IN
+    "DELETE FROM epg_programs WHERE channel_id IN
          (SELECT id FROM epg_channels WHERE source_id = ?1)",
     "DELETE FROM epg_bindings WHERE source_id = ?1",
     "DELETE FROM epg_channels WHERE source_id = ?1",
@@ -310,12 +310,12 @@ fn insert_feed_channels(
 ///
 /// `OR FAIL`, with foreign keys off ([`Store::replace_epg`]): a multi-row
 /// statement that may abort half-way needs a statement journal, which
-/// copies every page of `epg_programmes_by_stop` it touches first (3-4x
+/// copies every page of `epg_programs_by_stop` it touches first (3-4x
 /// slower, and temporary files).
 fn copy_programmes(conn: &Connection, channel: i64, stage: i64) -> Result<(u64, u64)> {
     let n = conn
         .prepare_cached(
-            "INSERT OR FAIL INTO main.epg_programmes (channel_id, start, stop, title, sub_title,
+            "INSERT OR FAIL INTO main.epg_programs (channel_id, start, stop, title, sub_title,
                  category, icon, rating, catchup_id, season, episode)
              SELECT ?1, start, stop, title, sub_title, category, icon, rating, catchup_id,
                  season, episode
@@ -366,7 +366,7 @@ impl Store {
         // Every row references a row written just before it in the same
         // transaction: consistent by construction. Off for the copy's sake
         // (`copy_programmes`); it cannot change inside a transaction. A
-        // larger page cache holds more of `epg_programmes_by_stop`, which
+        // larger page cache holds more of `epg_programs_by_stop`, which
         // every channel's programmes sweep (a third faster).
         let replaced = self
             .conn
@@ -481,7 +481,7 @@ impl Store {
         }
         for (feed, (channels, programmes)) in per_feed {
             tx.execute(
-                "UPDATE epg_feeds SET channel_count = ?3, programme_count = ?4
+                "UPDATE epg_feeds SET channel_count = ?3, program_count = ?4
                  WHERE source_id = ?1 AND feed_id = ?2",
                 params![source.0, feed, channels as i64, programmes as i64],
             )?;
@@ -553,7 +553,7 @@ impl Store {
         let mut stmt = self.conn.prepare_cached(
             "SELECT feed_id, url, priority, user_agent, assumed_offset_minutes, shift_minutes,
                  store_descriptions, past_days_to_keep, fetched_at, etag, last_modified, bytes,
-                 channel_count, programme_count, content_supplied
+                 channel_count, program_count, content_supplied
              FROM epg_feeds WHERE source_id = ?1 ORDER BY priority DESC, feed_id",
         )?;
         let rows = stmt.query_map([source.0], |r| {
@@ -581,7 +581,7 @@ impl Store {
                     bytes: to_u64(r.get(11)?),
                 },
                 channel_count: to_u64(r.get(12)?),
-                programme_count: to_u64(r.get(13)?),
+                program_count: to_u64(r.get(13)?),
             })
         })?;
         for row in rows {
@@ -680,10 +680,10 @@ impl Store {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute(
             "DELETE FROM epg_descriptions WHERE (channel_id, start) IN
-                 (SELECT channel_id, start FROM epg_programmes WHERE stop <= ?1)",
+                 (SELECT channel_id, start FROM epg_programs WHERE stop <= ?1)",
             [before],
         )?;
-        let n = tx.execute("DELETE FROM epg_programmes WHERE stop <= ?1", [before])?;
+        let n = tx.execute("DELETE FROM epg_programs WHERE stop <= ?1", [before])?;
         tx.commit()?;
         Ok(n as u64)
     }

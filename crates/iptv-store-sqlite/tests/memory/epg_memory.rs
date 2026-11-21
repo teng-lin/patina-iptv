@@ -136,7 +136,7 @@ fn stored_load(shape: Shape) -> (Report, Report) {
             let loaded = guide
                 .sources()
                 .iter()
-                .map(|s| s.programme_count())
+                .map(|s| s.program_count())
                 .sum::<usize>();
             (schedule(shape, guide), loaded)
         });

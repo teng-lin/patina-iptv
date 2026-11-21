@@ -85,6 +85,78 @@ fn existing_episode_progress_gains_a_resume_identity_when_upgraded() {
     assert_eq!(store.vod_progress(&episode).unwrap().position_ms, 37_000);
 }
 
+/// Schema 25 spells stored names the US way (#139): the rows of `favourites`
+/// and `epg_programmes`, a `cancelled` recording and `cancelled` import
+/// kinds written by a v24 build all survive the upgrade, with their ids and
+/// children.
+#[test]
+fn a_v24_store_keeps_its_data_under_us_spelling() {
+    use iptv_core::recording::{JobId, Status};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("generated-v24.db");
+    build_old_file(&path, HISTORY.iter().find(|v| v.version == 24).unwrap());
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "INSERT INTO recording_jobs(id,source_id,channel_id,channel_name,title,starts_at,ends_at,
+             status,message,source_incarnation)
+         SELECT 43,source_id,channel_id,channel_name,title,starts_at+120,ends_at+120,
+             'cancelled','Cancelled',source_incarnation FROM recording_jobs WHERE id=41;
+         UPDATE source_imports SET last_error_kind='cancelled',series_error_kind='cancelled'
+         WHERE source_id=1;",
+    )
+    .unwrap();
+    let old_favorites: i64 = conn
+        .query_row("SELECT COUNT(*) FROM favourites", [], |r| r.get(0))
+        .unwrap();
+    let old_programs: i64 = conn
+        .query_row("SELECT COUNT(*) FROM epg_programmes", [], |r| r.get(0))
+        .unwrap();
+    assert!(old_favorites > 0 && old_programs > 0);
+    drop(conn);
+
+    let store = Store::open(&path).unwrap();
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    let jobs = store.recording_jobs().unwrap();
+    let canceled = jobs.iter().find(|j| j.id == JobId(43)).unwrap();
+    assert_eq!(canceled.status, Status::Cancelled);
+    assert_eq!(canceled.message, "Canceled");
+    let completed = jobs.iter().find(|j| j.id == JobId(41)).unwrap();
+    assert_eq!(
+        (completed.status, completed.bytes),
+        (Status::Completed, 18_800)
+    );
+    assert_eq!(
+        store.recording_progress(JobId(41)).unwrap().position_ms,
+        12_000
+    );
+    check_recording_completion(&store, 24);
+    let status = store.import_status(SRC).unwrap();
+    assert_eq!(status.last_error, Some(ImportErrorKind::Cancelled));
+    assert_eq!(status.series_error, Some(ImportErrorKind::Cancelled));
+    assert_eq!(status.movies_error, Some(ImportErrorKind::HttpStatus));
+    check_overlays(&store, 24);
+    check_guide(&store, 24);
+    drop(store);
+
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+    assert_eq!(count("SELECT COUNT(*) FROM favorites"), old_favorites);
+    assert_eq!(count("SELECT COUNT(*) FROM epg_programs"), old_programs);
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE '%favourite%' OR name LIKE '%programme%' OR sql LIKE '%cancelled%'"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM source_imports WHERE 'cancelled' IN (last_error_kind,movie_error_kind,series_error_kind)"
+        ),
+        0
+    );
+}
+
 /// A historical version: its schema snapshot and the data files to load
 /// into it, in order.
 struct Version {
@@ -470,6 +542,35 @@ const HISTORY: &[Version] = &[
             "data_v23.sql",
         ],
     },
+    Version {
+        version: 24,
+        data: &[
+            "data_v1.sql",
+            "data_v2.sql",
+            "data_v3.sql",
+            "data_v4.sql",
+            "data_v5.sql",
+            "data_v6.sql",
+            "data_v7.sql",
+            "data_v8.sql",
+            "data_v9.sql",
+            "data_v10.sql",
+            "data_v11.sql",
+            "data_v12.sql",
+            "data_v13.sql",
+            "data_v14.sql",
+            "data_v15.sql",
+            "data_v16.sql",
+            "data_v17.sql",
+            "data_v18.sql",
+            "data_v19.sql",
+            "data_v20.sql",
+            "data_v21.sql",
+            "data_v22.sql",
+            "data_v23.sql",
+            "data_v24.sql",
+        ],
+    },
 ];
 
 fn fixture(name: &str) -> String {
@@ -835,7 +936,7 @@ fn check_feed_results(store: &Store, version: u32) {
         attempted_at: 1_700_001_000,
         error: None,
         channel_count: channels,
-        programme_count: programmes,
+        program_count: programmes,
         listed_count: listed,
     };
     let listed = if version >= 6 { 2 } else { 0 };
@@ -848,7 +949,7 @@ fn check_feed_results(store: &Store, version: u32) {
                 attempted_at: 1_700_001_100,
                 error: Some(ImportErrorKind::Timeout),
                 channel_count: 0,
-                programme_count: 0,
+                program_count: 0,
                 listed_count: 0,
             }]
         );
@@ -905,7 +1006,7 @@ fn check_guide(store: &Store, version: u32) {
         guide.feeds[0].meta.etag.as_deref(),
         Some("\"fixture-etag\"")
     );
-    assert_eq!(guide.feeds[0].programme_count, 3);
+    assert_eq!(guide.feeds[0].program_count, 3);
     let state = guide.refresh_state();
     assert_eq!(state.feeds, configs);
     assert!(!state.last_attempt_failed);

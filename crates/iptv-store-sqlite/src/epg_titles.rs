@@ -54,7 +54,7 @@ impl Store {
         }
         drop(rows);
         let mut titles = self.conn.prepare_cached(
-            "SELECT start, stop, title FROM epg_programmes
+            "SELECT start, stop, title FROM epg_programs
              WHERE channel_id = ?1 AND start < ?3 AND stop > ?2 ORDER BY start",
         )?;
         let mut n = 0;
@@ -64,7 +64,7 @@ impl Store {
                 let (start, stop) = (r.get(0)?, r.get(1)?);
                 let title = match r.get_ref(2)?.as_str_or_null() {
                     Ok(t) => t.unwrap_or_default(),
-                    Err(_) => return Err(StoreError::InvalidData("epg_programmes title".into())),
+                    Err(_) => return Err(StoreError::InvalidData("epg_programs title".into())),
                 };
                 for &position in at {
                     f(position, start, stop, title);

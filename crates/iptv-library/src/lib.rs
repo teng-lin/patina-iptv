@@ -69,7 +69,7 @@ pub struct FeedResult {
     pub error: Option<ImportErrorKind>,
     /// What was stored from it (bound EPG channels and their programmes).
     pub channel_count: u64,
-    pub programme_count: u64,
+    pub program_count: u64,
     /// The channels it lists (0 for a guide stored before schema v6).
     pub listed_count: u64,
 }
@@ -138,13 +138,17 @@ impl ImportErrorKind {
             Self::AccountRejected => "account_rejected",
             Self::AuthFailed => "auth_failed",
             Self::Blocked => "blocked",
-            Self::Cancelled => "cancelled",
+            Self::Cancelled => "canceled",
             Self::Other => "other",
         }
     }
 
     /// Unknown slugs (written by a newer build) read as [`Self::Other`].
+    /// `cancelled`, the slug before schema 25, still reads as canceled.
     pub fn from_slug(slug: &str) -> Self {
+        if slug == "cancelled" {
+            return Self::Cancelled;
+        }
         [
             Self::Network,
             Self::Timeout,
@@ -159,6 +163,26 @@ impl ImportErrorKind {
         .into_iter()
         .find(|k| k.slug() == slug)
         .unwrap_or(Self::Other)
+    }
+}
+
+#[cfg(test)]
+mod import_error_kind_tests {
+    use super::ImportErrorKind;
+
+    #[test]
+    fn slugs_round_trip_and_the_old_canceled_slug_still_reads() {
+        assert_eq!(ImportErrorKind::Cancelled.slug(), "canceled");
+        assert_eq!(
+            ImportErrorKind::from_slug("canceled"),
+            ImportErrorKind::Cancelled
+        );
+        // Written by builds before schema 25.
+        assert_eq!(
+            ImportErrorKind::from_slug("cancelled"),
+            ImportErrorKind::Cancelled
+        );
+        assert_eq!(ImportErrorKind::from_slug("newer"), ImportErrorKind::Other);
     }
 }
 

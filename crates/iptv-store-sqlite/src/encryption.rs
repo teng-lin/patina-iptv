@@ -382,8 +382,11 @@ mod tests {
             let path = dir.path().join(format!("v{version}.sqlite"));
             let mut conn = Connection::open(&path).unwrap();
             conn.pragma_update(None, "journal_mode", "WAL").unwrap();
-            migrate::migrate_to(&mut conn, version, 0).unwrap();
+            // Seeds 1..=24 are written in the names before schema 25 renamed
+            // tables (US spelling), so they load into a v24 file that is then
+            // upgraded like a user's; newer seeds load after that.
             for seed in 1..=version {
+                migrate::migrate_to(&mut conn, version.min(24).max(seed), 0).unwrap();
                 let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join(format!("tests/fixtures/data_v{seed}.sql"));
                 conn.execute_batch(&std::fs::read_to_string(fixture).unwrap())

@@ -24,7 +24,7 @@ const COLUMNS: &str = "p.start, p.stop, p.title, p.sub_title, p.category, p.icon
 /// `?2` on (`?2` itself when none does).
 pub(crate) fn seek(ch: &str) -> String {
     format!(
-        "p.start >= COALESCE((SELECT MAX(q.start) FROM epg_programmes q
+        "p.start >= COALESCE((SELECT MAX(q.start) FROM epg_programs q
                               WHERE q.channel_id = {ch} AND q.start <= ?2), ?2)"
     )
 }
@@ -33,7 +33,7 @@ pub(crate) fn seek(ch: &str) -> String {
 fn channel_sql(descriptions: bool) -> String {
     let (desc, join) = desc_parts(descriptions);
     format!(
-        "SELECT {COLUMNS}, {desc} FROM epg_programmes p {join}
+        "SELECT {COLUMNS}, {desc} FROM epg_programs p {join}
          WHERE p.channel_id = ?1 AND p.start < ?3 AND p.stop > ?2 AND {}
          ORDER BY p.start",
         seek("?1")
@@ -102,8 +102,8 @@ fn text<'r>(row: &'r Row<'_>, i: usize) -> Result<Option<&'r str>> {
         ValueRef::Null => Ok(None),
         ValueRef::Text(t) => std::str::from_utf8(t)
             .map(Some)
-            .map_err(|_| StoreError::InvalidData("epg_programmes text".into())),
-        _ => Err(StoreError::InvalidData("epg_programmes text".into())),
+            .map_err(|_| StoreError::InvalidData("epg_programs text".into())),
+        _ => Err(StoreError::InvalidData("epg_programs text".into())),
     }
 }
 

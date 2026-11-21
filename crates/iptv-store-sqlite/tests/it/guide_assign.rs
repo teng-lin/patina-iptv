@@ -115,7 +115,7 @@ fn each_feed_keeps_how_its_last_download_went() {
                 attempted_at: NOW,
                 error: None,
                 channel_count: 1,
-                programme_count: 1,
+                program_count: 1,
                 listed_count: 3,
             },
             FeedResult {
@@ -123,7 +123,7 @@ fn each_feed_keeps_how_its_last_download_went() {
                 attempted_at: NOW,
                 error: Some(ImportErrorKind::Network),
                 channel_count: 0,
-                programme_count: 0,
+                program_count: 0,
                 listed_count: 0,
             },
         ]

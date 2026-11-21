@@ -195,7 +195,7 @@ pub fn label(key: &str) -> &'static str {
         "guide.show_channel_names" => tr("Channel names"),
         "guide.show_channel_numbers" => tr("Channel numbers"),
         "guide.show_now_playing" => tr("Programme on air in the list"),
-        "guide.show_programmes" => tr("Programme grid"),
+        "guide.show_programs" => tr("Programme grid"),
         "guide.show_description" => tr("Programme description"),
         "guide.show_source_labels" => tr("Playlist and group of channels"),
         "guide.show_catchup_badge" => tr("Replay mark"),
@@ -346,7 +346,7 @@ pub fn choice(family: &str, variant: &str) -> String {
         ("browse_mode", "preview") => tr("Video beside the list"),
         ("browse_mode", "overlay") => tr("List over the video"),
         ("now_highlight", "plain") => tr("Plain"),
-        ("now_highlight", "colour") => tr("Tinted"),
+        ("now_highlight", "color") => tr("Tinted"),
         ("now_highlight", "progress_only") => tr("Progress bar only"),
         ("corner", "top_left") => tr("Top left"),
         ("corner", "top_right") => tr("Top right"),
@@ -404,7 +404,7 @@ pub fn choice(family: &str, variant: &str) -> String {
         ("card_style", "poster") => tr("Poster"),
         ("card_style", "landscape") => tr("Wide"),
         ("card_style", "compact") => tr("Compact"),
-        // Palettes: the theme's names (`blue_grey` → "Blue grey").
+        // Palettes: the theme's names (`blue_gray` → "Blue gray").
         ("accent" | "background", v) => return title(v),
         _ => "",
     };
@@ -416,13 +416,13 @@ fn title(key: &str) -> String {
         "amber" => tr("Amber"),
         "black" => tr("Black"),
         "blue" => tr("Blue"),
-        "blue_grey" => tr("Blue grey"),
+        "blue_gray" => tr("Blue gray"),
         "brown" => tr("Brown"),
         "cyan" => tr("Cyan"),
         "dark" => tr("Dark"),
-        "dark_grey" => tr("Dark grey"),
+        "dark_gray" => tr("Dark gray"),
         "green" => tr("Green"),
-        "grey" => tr("Grey"),
+        "gray" => tr("Gray"),
         "indigo" => tr("Indigo"),
         "lime" => tr("Lime"),
         "orange" => tr("Orange"),
@@ -593,8 +593,8 @@ mod tests {
         assert_eq!(read("catchup.start_offset", Value::secs(75)), "+0:01:15");
         assert_eq!(read("appearance.ui_transparency", Value::Int(20)), "20 %");
         assert_eq!(
-            read("appearance.accent", Value::colour("blue_grey")),
-            "Blue grey"
+            read("appearance.accent", Value::colour("blue_gray")),
+            "Blue gray"
         );
         assert_eq!(
             read("catchup.seek_keys", Value::choice("down_up")),

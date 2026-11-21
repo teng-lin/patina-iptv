@@ -767,7 +767,7 @@ impl Runtime {
                     Status::Scheduled,
                     Status::Cancelled,
                     0,
-                    "Cancelled",
+                    "Canceled",
                 )?;
                 Ok(())
             })

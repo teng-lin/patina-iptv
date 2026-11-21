@@ -103,7 +103,7 @@ fn two_thousand_channels_for_seven_days() {
     assert_eq!(stats.warnings, ParseWarnings::default());
     assert_eq!(stats.channels, CHANNELS as u64);
     assert_eq!(stats.programmes, generated);
-    assert_eq!(src.programme_count() as u64, generated);
+    assert_eq!(src.program_count() as u64, generated);
     assert_eq!(src.report().overlaps_trimmed, 0);
     // Bounded: one chunk plus at most one element, whatever the input size.
     assert!(
