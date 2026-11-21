@@ -142,7 +142,7 @@ fn the_device_caps_the_tiles() {
 }
 
 #[test]
-fn the_arrows_move_the_sound_between_tiles() {
+fn the_arrows_move_the_focus_between_tiles() {
     let mut mv = Multiview::open(10, DESKTOP);
     add(&mut mv, 11);
     add(&mut mv, 12);
@@ -203,8 +203,10 @@ fn the_menu_offers_what_applies() {
     mv.key(Key::Menu, ok);
     assert_eq!(
         items(&mv),
-        vec![Add, SearchAdd, Replace, Pause, Enlarge, FullScreen, Remove],
-        "two tiles"
+        vec![
+            Add, SearchAdd, Replace, Pause, Listen, Enlarge, FullScreen, Remove
+        ],
+        "two tiles: the focused one is not heard"
     );
     mv.key(Key::Back, ok);
     // A failed tile offers Try again first.
@@ -212,7 +214,7 @@ fn the_menu_offers_what_applies() {
     assert_eq!(
         items(&mv),
         vec![
-            Retry, Add, SearchAdd, Replace, Pause, Enlarge, FullScreen, Remove
+            Retry, Add, SearchAdd, Replace, Pause, Listen, Enlarge, FullScreen, Remove
         ]
     );
     assert_eq!(mv.key(Key::Ok, ok), Outcome::Retry(1));
@@ -224,7 +226,10 @@ fn the_menu_offers_what_applies() {
     mv.set_paused(1, true);
     mv.tap(1, ok);
     mv.tap(1, ok);
-    assert_eq!(items(&mv), vec![Replace, Play, Reduce, FullScreen, Remove]);
+    assert_eq!(
+        items(&mv),
+        vec![Replace, Play, Listen, Reduce, FullScreen, Remove]
+    );
     // Add from the menu picks a channel.
     let mut two = Multiview::open(1u32, DESKTOP);
     two.key(Key::Ok, ok);
@@ -267,9 +272,9 @@ fn removing_keeps_the_rest_consistent() {
     // Removing one before the enlarged tile shifts it.
     assert!(mv.remove_tile(0));
     assert_eq!(mv.enlarged(), Some(1));
-    assert_eq!(mv.active().channel, 12, "the sound stays with its tile");
+    assert_eq!(mv.active().channel, 12, "the focus stays with its tile");
     assert_eq!(surfaces(&mv), vec![(1, 11), (2, 12), (3, 13)]);
-    // Removing the enlarged tile: the grid again, the sound on a neighbour.
+    // Removing the enlarged tile: the grid again, the focus on a neighbour.
     assert!(mv.remove_tile(1));
     assert_eq!(mv.enlarged(), None);
     assert_eq!(mv.layout(), Layout::Grid { tiles: 2 });
@@ -546,7 +551,7 @@ fn pause_holds_one_tile_only() {
     mv.tap(0, ok);
     assert!(items(&mv).contains(&Pause));
     mv.key(Key::Back, ok);
-    // Pausing moves nothing: the sound stays where it was chosen.
+    // Pausing moves nothing: the focus stays where it was.
     assert_eq!(mv.active_index(), 0);
     assert_eq!(choose(&mut mv, 1, Play), Outcome::Stay);
     assert_eq!(paused(&mv), vec![false, false, false]);

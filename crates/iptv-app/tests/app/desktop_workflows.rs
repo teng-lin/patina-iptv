@@ -32,14 +32,14 @@ const CHANNELS: usize = 40;
 const MOVIES: usize = 48;
 const RECORDINGS: usize = 36;
 
-fn channel(i: usize) -> String {
+pub(crate) fn channel(i: usize) -> String {
     format!("Desk {i:02}")
 }
 
 /// Native player props by node, the players in the order they were
 /// mounted, and window titles by window id.
 #[derive(Clone, Default)]
-struct Observed {
+pub(crate) struct Observed {
     props: Arc<Mutex<HashMap<NodeId, HashMap<String, Value>>>>,
     players: Arc<Mutex<Vec<NodeId>>>,
     titles: Arc<Mutex<HashMap<String, String>>>,
@@ -50,7 +50,7 @@ impl Observed {
     /// `popupSurface` routing prop (`video.rs`), which their player windows
     /// need, and the scenarios require it there.
     #[cfg(not(windows))]
-    fn player(&self, surface: usize) -> Option<NodeId> {
+    pub(crate) fn player(&self, surface: usize) -> Option<NodeId> {
         self.props
             .lock()
             .unwrap()
@@ -63,11 +63,11 @@ impl Observed {
     /// surfaces' players are the `tv.player`s in mount order (surface 0,
     /// the persistent one, first).
     #[cfg(windows)]
-    fn player(&self, surface: usize) -> Option<NodeId> {
+    pub(crate) fn player(&self, surface: usize) -> Option<NodeId> {
         self.players.lock().unwrap().get(surface).copied()
     }
 
-    fn prop(&self, surface: usize, name: &str) -> Value {
+    pub(crate) fn prop(&self, surface: usize, name: &str) -> Value {
         let id = self.player(surface).expect("the player of this surface");
         self.props.lock().unwrap()[&id]
             .get(name)
@@ -76,7 +76,7 @@ impl Observed {
     }
 
     #[cfg_attr(windows, allow(dead_code))]
-    fn title(&self, window: &str) -> String {
+    pub(crate) fn title(&self, window: &str) -> String {
         self.titles
             .lock()
             .unwrap()
@@ -120,9 +120,9 @@ fn reopen(app: &mut Headless) {
     }
 }
 
-struct Fixture {
-    app: Headless,
-    seen: Observed,
+pub(crate) struct Fixture {
+    pub(crate) app: Headless,
+    pub(crate) seen: Observed,
     _server: Server,
     // Dropped last: it stops the scenario's recorder.
     _home: crate::isolated::Home,
@@ -130,7 +130,7 @@ struct Fixture {
 
 /// A desktop window on Linux with a generated Xtream playlist: 40 live
 /// channels in two groups, 48 movies, and 36 scheduled recordings.
-fn start(
+pub(crate) fn start(
     home: crate::isolated::Home,
     settings: impl FnOnce(&mut iptv_settings::Settings),
 ) -> Fixture {
@@ -496,7 +496,7 @@ fn list_rows(app: &Headless) -> Vec<String> {
 
 /// Whether the video fills the window (the guide drawn see-through over
 /// it): Patina's full screen, not the operating system's.
-fn video_full_screen(app: &Headless) -> bool {
+pub(crate) fn video_full_screen(app: &Headless) -> bool {
     app.screen()
         .view_style("id:guide-ui")
         .ok()
@@ -504,7 +504,7 @@ fn video_full_screen(app: &Headless) -> bool {
         .is_some_and(|s| s.effective_opacity == 0.0)
 }
 
-fn show_controls(app: &mut Headless, control: &str) {
+pub(crate) fn show_controls(app: &mut Headless, control: &str) {
     step(app.hover("id:app-ui >> label:Video"));
     if !app.screen().matches(control).unwrap() {
         step(app.press("id:app-ui >> label:Video"));
@@ -641,7 +641,7 @@ fn window_full_screen_resizing_and_display_scale_keep_the_stream_and_the_channel
 
 /// Plays `n` from the guide, then comes back to the guide with it playing
 /// in the preview.
-fn play_then_guide(app: &mut Headless, n: usize) {
+pub(crate) fn play_then_guide(app: &mut Headless, n: usize) {
     step(app.press(&format!("id:guide-ui >> text:{}", channel(n))));
     step(
         app.wait_until("the channel plays", Duration::from_secs(5), |_| {

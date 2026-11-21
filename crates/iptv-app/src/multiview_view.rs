@@ -1,6 +1,8 @@
 //! Multiview on screen (`multiview.rs` runs it): over each tile's video a
-//! frame (the active tile's a thin light outline: its sound plays), its
-//! channel (with ⏸ while paused) and its own waiting or error state with
+//! frame (the active tile's a thin light outline: the focus is on it), its
+//! channel (with ⏸ while paused, and with two or more tiles a speaker on
+//! the heard one, a muted speaker on the others: focus never moves the
+//! sound, #135) and its own waiting or error state with
 //! Retry; the pointer chrome and the key hint (`multiview_view/chrome.rs`);
 //! a tile's menu as a panel at the right edge (`multiview_view/menu.rs`),
 //! with no backdrop over the tiles; and the connection warning, centred
@@ -20,13 +22,14 @@ use nsh_core::prelude::*;
 
 use crate::fonts::{OSD_DETAIL, OSD_TEXT, OSD_TITLE};
 use crate::multiview::{self, State};
+use crate::play_bar::icons::{self, Icon};
 use crate::theme::{FOCUS_ALPHA, RADIUS, RADIUS_LARGE, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, channel_name, tint};
 
 const WHITE: u32 = 0xFFFFFF;
 const PANEL_ALPHA: u8 = 0xE0;
 /// The active tile's outline: thin, light grey; the others keep a clear
-/// one as wide, so no tile's content moves when the sound does.
+/// one as wide, so no tile's content moves when the focus does.
 const FRAME: f32 = 2.0;
 const FRAME_COLOUR: u32 = 0x9F9F9F;
 /// A held press enlarges a tile after this long, ms.
@@ -124,13 +127,23 @@ fn tile(ui: Ui, index: usize) -> impl IntoElement {
     let active = move || with_state(ui, |m| m.active_index() == index).unwrap_or(false);
     let paused =
         move || with_state(ui, |m| m.tiles().get(index).is_some_and(|t| t.paused)).unwrap_or(false);
+    let several = move || with_state(ui, |m| m.tiles().len() > 1).unwrap_or(false);
+    let heard = move || with_state(ui, |m| m.heard_index() == index).unwrap_or(false);
     let accent = move || ui.app.theme.with(|t| t.accent.main);
     let panel = move || tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA);
     let status = move || surface().map_or(TileStatus::Playing, |s| tile_status(ui, s));
     view()
         .test_id("multiview-tile")
         .role(AccessibilityRole::Button)
-        .label(move || channel().map_or_else(|| tr("Channels").to_owned(), channel_name))
+        .label(move || {
+            let name = channel().map_or_else(|| tr("Channels").to_owned(), channel_name);
+            let silent = !heard() || ui.media.volume.with(|v| v.muted);
+            if several() && silent {
+                trf("{channel} · muted", &[("channel", name.as_str().into())])
+            } else {
+                name
+            }
+        })
         .accessibility_state(move || AccessibilityState {
             selected: active(),
             ..Default::default()
@@ -239,7 +252,27 @@ fn tile(ui: Ui, index: usize) -> impl IntoElement {
                         .test_id("multiview-paused")
                         .text_size(px(OSD_DETAIL))
                         .text_color(rgb(WHITE))
-                })),
+                }))
+                // Which tile is heard: its speaker, the others' muted.
+                .child(when(
+                    move || several() && heard(),
+                    move || {
+                        let muted = move || ui.media.volume.with(|v| v.muted);
+                        svg(move || icons::src(if muted() { Icon::Muted } else { Icon::Volume }))
+                            .test_id("multiview-heard")
+                            .size(px(OSD_DETAIL + 2.0))
+                            .text_color(rgb(WHITE))
+                    },
+                ))
+                .child(when(
+                    move || several() && !heard(),
+                    || {
+                        svg(icons::src(Icon::Muted))
+                            .test_id("multiview-muted")
+                            .size(px(OSD_DETAIL + 2.0))
+                            .text_color(tint(WHITE, TEXT_SECONDARY_ALPHA))
+                    },
+                )),
         )
         .child(chrome::tile_buttons(ui, index))
 }

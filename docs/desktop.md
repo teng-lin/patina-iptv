@@ -93,17 +93,25 @@ Windows and Command on macOS.
 A guide channel's menu has **Watch in new window** (Linux and macOS): a
 separate player window for that channel, beside the main window's player.
 
-- **Now: one window has the sound.** A new player window opens muted, and
-  its title says so ("Music 05 · muted"); the title is the channel's name
-  alone in the window that has the sound. A compact window keeps the title
-  "Picture-in-Picture" (window managers' rules match it), so there its Mute
-  control shows the sound. The main player shows its sound in
-  its play bar's Mute control. Only an explicit sound control moves the
-  sound: a window's Mute or volume, or the main player's Mute, Ctrl+M or
-  volume, which takes the sound back from the other windows. Clicking into
-  a window or moving the keyboard focus never moves the sound. Closing the
-  window that has the sound gives it back to the main player, unless the
-  main player is muted.
+- **Now: one player has the sound** (#135). A new player window opens
+  muted, and opening one never takes the sound. Its title says so ("Music
+  05 · muted"); the title is the channel's name alone in the window that
+  has the sound. A compact window keeps the title "Picture-in-Picture"
+  (window managers' rules match it), so it, and the main player's
+  picture-in-picture window, always show a speaker or a muted speaker in
+  the bottom left corner while other players are open. The main player
+  shows its sound in its play bar's Mute control.
+- **Now: Listen to this.** Every player that is not heard offers **Listen
+  to this**: in its play bar beside Mute (the main player's too, while a
+  window has the sound), and among a compact window's controls (bottom
+  right). Choosing it moves the sound there, unmuted, and mutes every other
+  player. A window's own Mute or volume, and the main player's Mute, Ctrl+M
+  or volume, move it as before. Clicking into a window, moving the keyboard
+  focus, resizing, full screen and compact never move the sound.
+- **Now:** closing the window that has the sound gives it back to the
+  player heard before it that is still open, else to the main player. A
+  main player whose own Mute is on stays muted: only its Mute or Listen to
+  this turns it on again.
 - **Now:** each window shows its own channel and keeps its own pause,
   volume, audio delay and channel list. A window's compact
   picture-in-picture is that window made small and floating; its player and
@@ -160,5 +168,6 @@ recordings keep the app running, as it already did when quitting.
   `pip_control`, `pane_collapse`, `guide_nav` (the wheel through time) and
   `pointer`.
 - Core unit tests in `iptv_core::playback_windows` (display recovery,
-  session and sound state).
+  session and sound state) and `iptv_core::heard` (the heard player and
+  its hand-back).
 - The real-window journey: [issue #89 desktop journey](validation/issue-89-desktop-journey.md).

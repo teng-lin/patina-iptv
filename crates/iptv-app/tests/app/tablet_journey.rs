@@ -774,9 +774,9 @@ fn paused_tiles(app: &Headless) -> usize {
         .unwrap()
 }
 
-/// Multiview: the heard tile (the active one; the others are muted) is
-/// what a call or unplugged headphones pause, and what a call's end
-/// resumes.
+/// Multiview: the heard tile (the one chosen with Listen to this, not
+/// the focused one; the others are muted, #135) is what a call or
+/// unplugged headphones pause, and what a call's end resumes.
 #[test]
 fn interruptions_pause_and_resume_the_heard_multiview_tile() {
     let Some(home) = isolated!() else { return };
@@ -802,7 +802,7 @@ fn interruptions_pause_and_resume_the_heard_multiview_tile() {
     step(app.wait_until("two tiles", WAIT, |s| s.count(TILE) == Ok(2)));
     assert_eq!(paused_tiles(app), 0);
     // The first tile (its stream open; the fixture's account allows one)
-    // becomes the heard one.
+    // is the heard one: opening keeps the sound on it. A tap focuses it.
     step(app.press(&format!("{TILE} >> text:/Local A$/")));
     if app.screen().matches(TILE_MENU).unwrap() {
         step(app.press(&format!("{TILE} >> text:/Local A$/")));
@@ -839,23 +839,43 @@ fn interruptions_pause_and_resume_the_heard_multiview_tile() {
     audio(app, surface, "focusGain");
     assert_eq!(paused_tiles(app), 0, "its end resumes it");
 
-    // During a call the viewer chooses another tile: the app pauses
-    // nothing more (the host keeps every player silent until the focus
-    // returns, `AudioFocusState.silenced`), and the call's end resumes
-    // nothing, the heard tile being the viewer's choice now.
+    // During a call the viewer focuses another tile: that moves no sound,
+    // so the call's end still resumes the heard one.
     audio(app, surface, "focusLossTransient");
     assert_eq!(paused_tiles(app), 1);
     step(app.press(&format!("{TILE} >> text:/Local B$/")));
+    assert_eq!(paused_tiles(app), 1, "focusing a tile pauses nothing more");
+    audio(app, surface, "focusGain");
+    assert_eq!(
+        paused_tiles(app),
+        0,
+        "focus moved no sound: the end resumes"
+    );
+
+    // During a call the viewer chooses Listen to this on another tile: the
+    // app pauses nothing more (the host keeps every player silent until the
+    // focus returns, `AudioFocusState.silenced`), and the call's end
+    // resumes nothing, the heard tile being the viewer's choice now.
+    audio(app, surface, "focusLossTransient");
+    assert_eq!(paused_tiles(app), 1);
+    step(app.press(&format!("{TILE} >> text:/Local B$/")));
+    step(app.wait_for(TILE_MENU));
+    step(app.press(&format!("{TILE_MENU} >> text:Listen to this")));
+    step(app.wait_for_gone(TILE_MENU, WAIT));
     assert_eq!(paused_tiles(app), 1, "choosing a tile pauses nothing more");
     audio(app, surface, "focusGain");
     assert_eq!(paused_tiles(app), 1, "nor does the call's end resume");
-    // Back to the first tile, played again by its menu.
+    // Back to the first tile, played again and heard again by its menu.
     step(app.press(&format!("{TILE} >> text:/Local A$/")));
     step(app.press(&format!("{TILE} >> text:/Local A$/")));
     step(app.wait_for(TILE_MENU));
     step(app.press(&format!("{TILE_MENU} >> text:Play")));
     step(app.wait_for_gone(TILE_MENU, WAIT));
     assert_eq!(paused_tiles(app), 0);
+    step(app.press(&format!("{TILE} >> text:/Local A$/")));
+    step(app.wait_for(TILE_MENU));
+    step(app.press(&format!("{TILE_MENU} >> text:Listen to this")));
+    step(app.wait_for_gone(TILE_MENU, WAIT));
 
     // A call pauses it again, then multiview ends: the stream surface 0
     // keeps stays paused full screen, and the pause is still the call's

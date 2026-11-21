@@ -17,6 +17,14 @@ is below 1.0, a minor release may change behaviour.
 
 ### Changed
 
+- Multiview and desktop player windows: the viewer chooses which player is
+  heard, and focus never moves the sound (#135). A tile's menu, its pointer
+  chrome, a window's play bar and a compact picture-in-picture window's
+  controls offer **Listen to this**; the heard tile shows a speaker and the
+  others a muted one, and compact windows show theirs in a corner. Adding a
+  tile or opening a window does not take the sound; removing or closing the
+  heard one gives it back to the one heard before it, else to the main
+  player. A full-screen detour, enlarging, reducing and resizing keep it.
 - Back from a movie or an episode playing full screen now returns to its
   details instead of the guide, on every input (a remote's Back, Escape or
   Backspace, and the play bar's ‹, now labelled Movies or Shows): a movie

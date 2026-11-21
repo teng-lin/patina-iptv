@@ -1,5 +1,14 @@
 //! Experimental desktop workspace for the multi-window UX demo.
 //! Playback sessions outlive browsing and carry stable identities.
+//!
+//! Exactly one player is heard (#135): the main player (`None`) or one
+//! session's window, kept by the session's identity ([`crate::heard`]),
+//! so resizing, full screen or the compact presentation never move it,
+//! nor does the keyboard focus. Opening a window does not take the sound;
+//! Listen to this ([`Workspace::listen`], [`Workspace::listen_to_main`])
+//! or a window's own sound controls do; closing the heard window hands
+//! it back to the player heard before it that is still open, else to
+//! the main player.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SessionId(pub u64);
@@ -22,7 +31,8 @@ pub struct Workspace<C> {
     sessions: Vec<Session<C>>,
     next_id: u64,
     pub browsing: Option<C>,
-    pub audible: Option<SessionId>,
+    /// The heard player: a session, or the main player (`None`).
+    heard: crate::heard::Heard<Option<SessionId>>,
 }
 
 impl<C> Default for Workspace<C> {
@@ -31,7 +41,7 @@ impl<C> Default for Workspace<C> {
             sessions: Vec::new(),
             next_id: 1,
             browsing: None,
-            audible: None,
+            heard: crate::heard::Heard::new(None),
         }
     }
 }
@@ -39,6 +49,10 @@ impl<C> Default for Workspace<C> {
 impl<C: Clone + PartialEq> Workspace<C> {
     pub fn sessions(&self) -> &[Session<C>] {
         &self.sessions
+    }
+    /// The session whose window is heard; `None`: the main player.
+    pub fn audible(&self) -> Option<SessionId> {
+        self.heard.current()
     }
     pub fn on_surface(&self, surface: usize) -> Option<&Session<C>> {
         self.sessions.iter().find(|s| s.surface == surface)
@@ -48,6 +62,7 @@ impl<C: Clone + PartialEq> Workspace<C> {
     }
 
     /// Reopening a channel finds its existing player, without a new stream.
+    /// A new one does not take the sound (an auxiliary one opens muted).
     pub fn open(&mut self, channel: C) -> Option<SessionId> {
         self.open_from(channel, 0)
     }
@@ -79,9 +94,6 @@ impl<C: Clone + PartialEq> Workspace<C> {
             },
             audio_delay: 0,
         });
-        if self.audible.is_none() {
-            self.audible = Some(id);
-        }
         Some(id)
     }
 
@@ -100,14 +112,21 @@ impl<C: Clone + PartialEq> Workspace<C> {
             session.compact = compact;
         }
     }
+    /// Listen to this: session `id`'s window is heard (unmuted), the
+    /// others are not.
     pub fn listen(&mut self, id: SessionId) {
-        if self.sessions.iter().any(|s| s.id == id) {
-            self.audible = Some(id);
+        if !self.sessions.iter().any(|s| s.id == id) {
+            return;
         }
+        for s in &mut self.sessions {
+            s.volume.muted = s.id != id;
+        }
+        self.heard.listen(Some(id));
     }
-    /// The main player's audio controls reclaim sound from auxiliary windows.
+    /// The main player's Listen to this and audio controls reclaim sound
+    /// from auxiliary windows.
     pub fn listen_to_main(&mut self) {
-        self.audible = None;
+        self.heard.listen(None);
         for session in &mut self.sessions {
             session.volume.muted = true;
         }
@@ -125,12 +144,16 @@ impl<C: Clone + PartialEq> Workspace<C> {
     pub fn set_volume(&mut self, id: SessionId, volume: crate::sound::Volume) {
         if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
             s.volume = volume;
+            // Its own Mute gives the sound to the main player; its
+            // volume (or unmuting) takes it.
             if volume.muted {
-                if self.audible == Some(id) {
-                    self.audible = None;
+                if self.heard.current() == Some(id) {
+                    self.heard.listen(None);
                 }
-            } else {
-                self.audible = Some(id);
+            } else if self.heard.listen(Some(id)) {
+                for other in self.sessions.iter_mut().filter(|s| s.id != id) {
+                    other.volume.muted = true;
+                }
             }
         }
     }
@@ -139,10 +162,19 @@ impl<C: Clone + PartialEq> Workspace<C> {
             s.audio_delay = delay;
         }
     }
+    /// Closes session `id`; when its window was heard, the sound goes
+    /// back to the player heard before it that is still open, else to the
+    /// main player.
     pub fn close(&mut self, id: SessionId) {
         self.sessions.retain(|s| s.id != id);
-        if self.audible == Some(id) {
-            self.audible = self.sessions.iter().find(|s| !s.volume.muted).map(|s| s.id);
+        let sessions = &self.sessions;
+        self.heard.gone(Some(id), None, |k| {
+            k.is_none_or(|k| sessions.iter().any(|s| s.id == k))
+        });
+        if let Some(heard) = self.heard.current()
+            && let Some(s) = self.sessions.iter_mut().find(|s| s.id == heard)
+        {
+            s.volume.muted = false;
         }
     }
 }
@@ -320,12 +352,70 @@ mod tests {
         let mut w = Workspace::default();
         let id = w.open_auxiliary("one").unwrap();
         w.set_volume(id, crate::sound::Volume::default());
-        assert_eq!(w.audible, Some(id));
+        assert_eq!(w.audible(), Some(id));
         w.listen_to_main();
-        assert_eq!(w.audible, None);
+        assert_eq!(w.audible(), None);
         assert!(w.on_surface(1).unwrap().volume.muted);
         w.set_volume(id, crate::sound::Volume::default());
-        assert_eq!(w.audible, Some(id), "sound can be selected again");
+        assert_eq!(w.audible(), Some(id), "sound can be selected again");
+        // Taking it with another window's volume mutes this one.
+        let other = w.open_auxiliary("two").unwrap();
+        w.set_volume(other, crate::sound::Volume::default());
+        assert_eq!(w.audible(), Some(other));
+        assert!(w.on_surface(1).unwrap().volume.muted);
+    }
+    #[test]
+    fn exactly_one_player_is_heard_and_closing_it_hands_the_sound_back() {
+        let mut w = Workspace::default();
+        let a = w.open_auxiliary("a").unwrap();
+        let b = w.open_auxiliary("b").unwrap();
+        assert_eq!(
+            w.audible(),
+            None,
+            "opening windows keeps the main player heard"
+        );
+        assert!(w.sessions().iter().all(|s| s.volume.muted));
+        // Compact or not, a window's presentation moves no sound.
+        w.set_compact(a, true);
+        assert_eq!(w.audible(), None);
+        w.listen(a);
+        assert_eq!(w.audible(), Some(a));
+        assert!(!w.on_surface(1).unwrap().volume.muted);
+        w.listen(b);
+        assert_eq!(w.audible(), Some(b));
+        assert!(w.on_surface(1).unwrap().volume.muted, "the other one muted");
+        // Closing a window not heard changes nothing.
+        let c = w.open_auxiliary("c").unwrap();
+        w.close(c);
+        assert_eq!(w.audible(), Some(b));
+        // The heard one closed: the one heard before it, unmuted.
+        w.close(b);
+        assert_eq!(w.audible(), Some(a));
+        assert!(!w.on_surface(1).unwrap().volume.muted);
+        // Then the main player.
+        w.close(a);
+        assert_eq!(w.audible(), None);
+        // A window heard before but closed meanwhile is skipped.
+        let d = w.open_auxiliary("d").unwrap();
+        let e = w.open_auxiliary("e").unwrap();
+        w.listen(d);
+        w.listen(e);
+        w.close(d);
+        w.close(e);
+        assert_eq!(w.audible(), None);
+        // Listen to this on the main player, then a window's back: the
+        // main one heard before it gets the sound when it closes.
+        let f = w.open_auxiliary("f").unwrap();
+        let g = w.open_auxiliary("g").unwrap();
+        w.listen(f);
+        w.listen_to_main();
+        w.listen(g);
+        w.close(g);
+        assert_eq!(w.audible(), None);
+        assert!(w.on_surface(1).unwrap().volume.muted);
+        // Stale identities move nothing.
+        w.listen(g);
+        assert_eq!(w.audible(), None);
     }
     #[test]
     fn auxiliary_players_reserve_the_main_surface_and_enforce_the_limit() {
@@ -354,7 +444,7 @@ mod tests {
         w.toggle_pause(second);
         assert!(!w.sessions()[0].paused && w.sessions()[1].paused);
         w.listen(second);
-        assert_eq!(w.audible, Some(second));
+        assert_eq!(w.audible(), Some(second));
     }
     #[test]
     fn closing_one_releases_only_its_surface_and_old_actions_cannot_close_a_new_session() {
