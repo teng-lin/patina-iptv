@@ -74,6 +74,10 @@ impl Runtime {
     /// Holds this owner's storage for the life of the process. Call before
     /// settings, restore activation or any storage worker starts.
     pub fn lock_storage(&self) -> Result<(), crate::backup::error::Error> {
+        if !self.services().ports().file_storage {
+            // One Worker owns a browser host's storage; there is no file to lock.
+            return Ok(());
+        }
         crate::backup::lock(self.data_dir())
     }
 
@@ -85,6 +89,10 @@ impl Runtime {
     ) -> impl FnOnce() -> Result<(), crate::backup::StartupError> + Send + 'static + use<> {
         let ports = self.services().ports().clone();
         move || {
+            if !ports.file_storage {
+                // No files, so no restore can be pending (backups need them).
+                return Ok(());
+            }
             if crate::backup::is_pending(&ports.directory)
                 && !crate::recordings::host::stop_background_host(&ports.directory)
             {

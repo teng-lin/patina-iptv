@@ -57,6 +57,7 @@ pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
         Arc::new(Cooperative::new(Arc::new(WorkerLoop))),
     );
     ports.startup_mark = |phase, detail| crate::startup::mark_with(phase, detail);
+    ports.file_storage = false;
     ports
 }
 

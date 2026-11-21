@@ -606,6 +606,18 @@ mod tests {
     }
 
     #[test]
+    fn storage_without_files_is_neither_locked_nor_restored() {
+        // A directory no process could create: the browser host's storage
+        // has no file system under it.
+        let mut ports = Ports::for_tests();
+        ports.directory = std::path::PathBuf::from("/proc/patina-synthetic/storage");
+        ports.file_storage = false;
+        let owner = Runtime::new(ports);
+        assert!(owner.lock_storage().is_ok());
+        assert!(owner.restore_activation()().is_ok());
+    }
+
+    #[test]
     fn independent_runtimes_can_apply_events_during_delivery() {
         let first = Rc::new(Runtime::default());
         let second = Runtime::default();

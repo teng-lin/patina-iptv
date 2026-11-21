@@ -57,6 +57,11 @@ pub struct Ports {
     /// operating system's natively; a browser host supplies its own, and
     /// without one every operation that needs randomness fails.
     pub entropy: Entropy,
+    /// The private directory is a file-system directory this process must
+    /// hold alone: it is locked against other instances and a scheduled
+    /// restore is activated in it at startup. A browser host keeps its
+    /// storage in one Worker and has neither, so it sets this false.
+    pub file_storage: bool,
 }
 
 impl Ports {
@@ -101,6 +106,7 @@ impl Ports {
                     "the host supplied no entropy",
                 ))
             },
+            file_storage: true,
         }
     }
 
