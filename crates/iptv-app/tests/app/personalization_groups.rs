@@ -309,3 +309,35 @@ fn guide_group_controls_and_channel_visibility_work_without_a_pin() {
     assert_eq!(store.guide_groups(f.source).unwrap()[0].name, "Sport");
     assert!(store.parental_credential().unwrap().is_none());
 }
+
+#[test]
+fn a_repeated_notice_keeps_its_full_time_after_the_earlier_one_expires() {
+    // A notice shows for 2.5 s of the app's clock.
+    const SHOWN: Duration = Duration::from_millis(2_500);
+    let Some(home) = isolated!() else { return };
+    let mut f = start(home, Settings::new(), true);
+    let app = &mut f.app;
+    group(app, "News");
+    menu(app, "Manage blocked channels…");
+    step(app.wait_for("id:organization-row-0 >> text:Unblocked"));
+    step(app.press_key("enter"));
+    step(app.wait_for("text:Content blocked"));
+    // No later than the first notice was shown: it ends by first + SHOWN.
+    let first = app.clock().now();
+    step(app.run_for(Duration::from_millis(1_000)));
+    step(app.press_key("down"));
+    // No earlier than the second notice is shown: it lasts past second + SHOWN.
+    let second = app.clock().now();
+    step(app.press_key("enter"));
+    step(app.wait_for("id:organization-row-1 >> text:Blocked"));
+    // Waiting on a manual clock moves it while the store writes: just past
+    // the first notice's end must still be inside the second one's time.
+    let past_first = first + SHOWN + Duration::from_millis(100);
+    let now = app.clock().now();
+    assert!(now < past_first);
+    step(app.run_for(past_first - now));
+    assert!(app.clock().now() < second + SHOWN);
+    assert!(app.shows("Content blocked"), "{:?}", app.screen().texts());
+    step(app.run_for(SHOWN));
+    assert!(!app.shows("Content blocked"), "{:?}", app.screen().texts());
+}

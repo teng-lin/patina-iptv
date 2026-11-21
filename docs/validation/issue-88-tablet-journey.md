@@ -166,8 +166,10 @@ playlist on port 8093: SHA-256
 Run on 20 November 2026 on a fresh iPad Air 11-inch (M4) simulator
 (iOS 27.2, Xcode 27.2, macOS 26.6.2), landscape (1180×820 pt). The app was
 built with `nsh package . --target ios-simulator` from the #149 branch with
-NSH at `09788806` (teng-lin/nsh#1). The build used debug assertions, so the
-development playlist, the generated 300-channel fixtures and
+NSH at `09788806` (teng-lin/nsh#1). The same change merged upstream as
+longbridge/nsh#2724 and is pinned as `fd847c95`. The build used debug
+assertions, so the development playlist, the generated 300-channel
+fixtures and
 `tools/mock-server.py` on port 8149 apply, and the #136 simulator
 entitlements were embedded at link time. Input was `idb ui swipe` with
 `--duration 0.5 --delta 5` unless noted. idb's default swipe, with no

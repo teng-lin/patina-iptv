@@ -1791,8 +1791,10 @@ const EMPTY_MOVIES: &str = "text:No movies found. Refresh the playlist to look f
 
 /// A failed import says so and Retry runs it again; an import that found no
 /// movies offers Refresh, which says it is importing (nothing to press)
-/// and brings the provider's new movie in place. A search that finds
-/// nothing then offers no action.
+/// and brings the provider's new movie in place. While an import offers
+/// nothing, the remote waits on the categories (#146): Right reaches
+/// Search, not the empty pane, and Right reaches the action once it shows.
+/// A search that finds nothing then offers no action.
 fn failed_then_empty(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     let provider = provider(true, false);
     let base = provider_server(provider.clone());
@@ -1824,20 +1826,29 @@ fn failed_then_empty(home: crate::isolated::Home, idiom: nsh_core::platform::Idi
         answer.movies = true;
         answer.holding = true;
     }
-    if tv {
-        // The remote is still where the titles would be.
-        step(app.wait_for("id:vod-empty >> label:Refresh now"));
-        step(app.press_key("enter"));
-    } else {
-        empty_action(&mut app, tv, "Refresh now");
-    }
+    // Retry's import hid the action: the remote went to the categories,
+    // and Right reaches the action now shown.
+    empty_action(&mut app, tv, "Refresh now");
     step(app.wait_for("text:Importing movies and shows…"));
     assert_eq!(app.screen().count("id:vod-empty-action").unwrap(), 0);
+    if tv {
+        // Nothing to focus where the titles would be: Right from the
+        // categories reaches Search, whose OK opens its field; closing it
+        // keeps the remote there, and Left returns to the categories.
+        step(app.press_key("right"));
+        step(app.press_key("enter"));
+        step(app.wait_for("id:vod-search"));
+        step(app.back());
+        step(app.wait_for_gone("id:vod-search", Duration::from_secs(2)));
+        step(app.press_key("left"));
+    }
     provider.lock().unwrap().holding = false;
     step(app.wait_for_within("text:Generated Aurora", Duration::from_secs(20)));
     assert_eq!(app.screen().count("id:vod-empty").unwrap(), 0);
     if !tv {
-        // Up from the first title reaches Search; OK opens its field.
+        // Right from the categories enters the titles; Up from the first
+        // title reaches Search; OK opens its field.
+        step(app.press_key("right"));
         step(app.press_key("up"));
         step(app.press_key("enter"));
         step(app.wait_for("id:vod-search"));

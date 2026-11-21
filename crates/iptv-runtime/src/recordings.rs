@@ -127,6 +127,7 @@ struct Data {
     active: HashMap<JobId, (Lease, CancelToken)>,
     jobs: Vec<Job>,
     finalization_errors: std::collections::HashSet<JobId>,
+    unshareable: shared::Unshareable,
     wake_capability: iptv_core::recording::WakeCapability,
     wake_reported: bool,
     published_schedule: Option<(i64, bool)>,

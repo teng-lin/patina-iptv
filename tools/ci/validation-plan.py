@@ -53,7 +53,8 @@ STRESS = (*BUILD, *(f"crates/{crate}/**" for crate in STRESS_CRATES), "tools/ci/
 COVERAGE = ("tools/ci/coverage.sh", "tools/ci/*coverage*.py")
 HOST_INPUTS = ("docs/capabilities.md", "tools/ci/lint.sh", "tools/ci/check-line-length.sh")
 HELPER_INPUTS = ("docs/contributing.md",)
-IOS = (*BUILD, "crates/**/*.rs", "tools/fetch-mpvkit.sh", "tools/ci/check-ios.sh",
+IOS = (*BUILD, "crates/**/*.rs", "crates/iptv-app/nsh.json", "tools/fetch-mpvkit.sh", "tools/ci/check-ios.sh",
+       "tools/check-ios-simulator-entitlements.sh",
        "tools/mpv-runtime-ios/**", "hosts/ios/**")
 CREDENTIALS = (*BUILD, "crates/iptv-app/src/credential_key*", "crates/iptv-app/src/credential_key/**",
                "crates/iptv-store-sqlite/**", "crates/iptv-sqlcipher-init/**",

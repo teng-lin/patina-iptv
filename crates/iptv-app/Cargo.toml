@@ -91,6 +91,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [build-dependencies]
 embed-resource = "3.0"
+# The bundle id for the iOS simulator's entitlements (build.rs).
+serde_json.workspace = true
 
 [[example]]
 name = "guide_window_preview"

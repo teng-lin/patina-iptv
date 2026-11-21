@@ -14,6 +14,9 @@ source "$root/tools/ci/locked-build-env.sh"
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim
 bash tools/fetch-mpvkit.sh
 export IPTV_RS_MPVKIT="$PWD/target/mpvkit"
-for target in aarch64-apple-ios aarch64-apple-ios-sim; do
-  cargo check --locked -p iptv-app --lib --target "$target"
-done
+cargo check --locked -p iptv-app --lib --target aarch64-apple-ios
+# Build the simulator slice: its Keychain needs the entitlements iptv-app
+# links itself (#136), so check its objects carry them. This links no app;
+# docs/ios-validation.md checks the packaged one by hand.
+cargo build --locked -p iptv-app --lib --target aarch64-apple-ios-sim
+bash tools/check-ios-simulator-entitlements.sh target/aarch64-apple-ios-sim/debug/libiptv_app.rlib

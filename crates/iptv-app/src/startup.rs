@@ -11,8 +11,10 @@
 //! startup source read), `last channel resolved` (its stream known from
 //! the stored catalog), `channels read` and `guide window read` (on the
 //! import thread), `guide shown` (the schedule swapped in on the UI
-//! thread), `guide frame` (the next display frame after it), `player
-//! opened` (the stream handed to the player), `video size` (reported dimensions;
+//! thread), `guide frame` (the next display frame after it), `live input
+//! ready` (a shared live stream's first packets from the provider, with how
+//! long they took), `player opened` (the stream handed to the player),
+//! `video size` (reported dimensions;
 //! the shared `size` event does not distinguish metadata from a renderer callback),
 //! and `video rendered` (a current-source native renderer submission where supported,
 //! never display presentation/scanout).

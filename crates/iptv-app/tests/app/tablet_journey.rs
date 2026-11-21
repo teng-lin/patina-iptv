@@ -827,3 +827,54 @@ fn interruptions_pause_and_resume_the_heard_multiview_tile() {
     audio(app, surface, "focusGain");
     assert!(!paused(&seen), "the call's end resumes it full screen");
 }
+
+// --- An Android tablet's split screen at its default text (#163) ----------
+
+/// A Galaxy Tab A9+ (800 × 1280 dp) half of a split screen either way, at
+/// the 1.15 font scale such tablets default to: the full-screen play bar
+/// keeps every button inside the window, its right-hand group wrapping
+/// under the transport rather than running past the edge.
+#[test]
+fn a_split_screen_tablet_keeps_every_play_bar_button_inside_the_window() {
+    let Some(home) = isolated!() else { return };
+    let _server = crate::pane_collapse::library(&home);
+    let mut app = Headless::start(tablet(LANDSCAPE)).unwrap();
+    let seen = observe(&mut app);
+    step(app.wait_for_within("text:Generated group", IMPORT));
+    let surface = player(&app);
+    step(app.press("id:open-movies"));
+    step(app.wait_for("id:vod-screen"));
+    step(app.press("label:/^Generated Aurora ·/"));
+    step(app.wait_for("text:Play"));
+    step(app.press("text:Play"));
+    step(app.wait_for_gone("id:vod-screen", WAIT));
+    let movie = sources(&seen);
+    assert_eq!(movie.len(), 1, "{movie:?}");
+    for size in [(400.0, 1280.0), (800.0, 640.0), (640.0, 800.0)] {
+        present(&mut app, size, 1.15);
+        show_bar(&mut app);
+        let what = format!("full screen at {size:?}, font scale 1.15");
+        let buttons: Vec<_> = app
+            .screen()
+            .layout_nodes()
+            .into_iter()
+            .filter(|n| {
+                !n.hidden
+                    && n.test_id.as_deref().is_some_and(|id| {
+                        id.starts_with("play-bar-")
+                            && id != "play-bar-seek"
+                            && id != "play-bar-layer"
+                    })
+            })
+            .filter_map(|n| n.test_id.clone())
+            .collect();
+        for id in ["play-bar-guide", "play-bar-multiview", "play-bar-channels"] {
+            assert!(buttons.iter().any(|b| &**b == id), "{id} shown: {what}");
+        }
+        for id in &buttons {
+            reachable(&app, id, size, 0.0, &what);
+        }
+        assert_eq!(sources(&seen), movie, "no stream opened: {what}");
+        persistent(&app, &seen, surface);
+    }
+}
