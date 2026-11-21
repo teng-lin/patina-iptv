@@ -9,6 +9,12 @@ use std::{cell::Cell, rc::Rc, task::Poll};
 const NOW: UnixTime = 1_800_000_000;
 
 fn fixture() -> (tempfile::TempDir, Rc<crate::Runtime>, Job, ChannelKey) {
+    fixture_marking(|_, _| {})
+}
+
+fn fixture_marking(
+    mark: fn(&'static str, String),
+) -> (tempfile::TempDir, Rc<crate::Runtime>, Job, ChannelKey) {
     let directory = tempfile::tempdir().unwrap();
     let key = DatabaseKey::from_bytes([0x76; 32]);
     let mut store = Store::open_encrypted(directory.path().join("iptv.sqlite"), &key).unwrap();
@@ -33,10 +39,9 @@ fn fixture() -> (tempfile::TempDir, Rc<crate::Runtime>, Job, ChannelKey) {
         .record_epg_failure(id, iptv_library::ImportErrorKind::Network)
         .unwrap();
     drop(store);
-    let owner = Rc::new(crate::Runtime::new(crate::Ports::new(
-        directory.path().to_owned(),
-        move |_| Ok(key.clone()),
-    )));
+    let mut ports = crate::Ports::new(directory.path().to_owned(), move |_| Ok(key.clone()));
+    ports.startup_mark = mark;
+    let owner = Rc::new(crate::Runtime::new(ports));
     let job = Job {
         source,
         epg_url: None,
@@ -271,6 +276,89 @@ fn a_superseded_download_cannot_replace_a_newer_guide() {
         });
         assert!(owner.drain_services());
     };
+}
+
+/// The startup phases marked by the one test whose fixture records them
+/// (a port is a function pointer, so it cannot own them).
+static MARKS: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+fn marked(phase: &str) -> bool {
+    MARKS.lock().unwrap().contains(&phase)
+}
+
+/// Showing the first screen reads the store on the reader lane (the
+/// library, organisation and favourites): the whole window's read, far
+/// longer on a large catalogue, waits until it is shown instead of
+/// queueing those reads behind it (#160).
+#[test]
+fn the_window_read_waits_until_the_first_screen_is_shown() {
+    let (_directory, owner, job, key) = fixture_marking(|phase, _| {
+        MARKS.lock().unwrap().push(phase);
+    });
+    owner.start_services();
+    let services = owner.services();
+    support::block_on(async {
+        let source = job.stored.unwrap();
+        services
+            .call(move |store| write_guide(store, source, &key, "Generated programme"))
+            .await
+            .unwrap();
+        let cancel = CancelToken::new();
+        let work = crate::library::import_completion(cancel.clone());
+        crate::library::track_import(&owner, source, &work);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let stops = [&cancel, &work.guide];
+        let mut opening = Box::pin(send_stored_after(
+            &services,
+            &job,
+            source,
+            NOW,
+            &tx,
+            &stops,
+            async {},
+        ));
+        let shown = std::future::poll_fn(|cx| {
+            assert!(opening.as_mut().poll(cx).is_pending());
+            match rx.poll_recv(cx) {
+                Poll::Ready(Some(Msg::FirstScreen(_, held, shown))) => {
+                    assert!(!held.keys.is_empty());
+                    Poll::Ready(shown)
+                }
+                Poll::Ready(_) => panic!("the first screen comes first"),
+                Poll::Pending => Poll::Pending,
+            }
+        })
+        .await;
+        assert!(marked("first screen read"));
+        // A read the first screen's show makes now runs at once, and the
+        // window has not been read when it is answered.
+        let mut showing = Box::pin(services.read(|store| store.active_source()));
+        std::future::poll_fn(|cx| {
+            assert!(opening.as_mut().poll(cx).is_pending());
+            showing.as_mut().poll(cx).map(|read| read.unwrap())
+        })
+        .await;
+        std::future::poll_fn(|cx| {
+            assert!(opening.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        assert!(
+            !marked("guide window read"),
+            "the first screen's reads queued behind the window's"
+        );
+        assert!(rx.try_recv().is_err());
+        // Shown: the window is read and replaces it.
+        drop(shown);
+        opening.await;
+        assert!(marked("guide window read"));
+        drop(tx);
+        let mut whole = false;
+        while let Some(message) = rx.recv().await {
+            whole |= matches!(message, Msg::Guide(_) | Msg::Playlist(Ok(_)));
+        }
+        assert!(whole, "the window follows the first screen");
+    });
+    assert!(owner.drain_services());
 }
 
 #[path = "../../tests/support/mod.rs"]

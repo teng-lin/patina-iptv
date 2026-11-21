@@ -13,6 +13,7 @@ members = [
     "crates/iptv-sqlcipher-init",
     "crates/iptv-search",
     "crates/iptv-app",
+    "crates/iptv-tui",
     "crates/iptv-player-mpv",
     "crates/iptv-library",
     "crates/iptv-runtime",
@@ -46,6 +47,7 @@ nsh-core = { path = "../nsh-patina/crates/nsh-core" }
 nsh-base = { path = "../nsh-patina/crates/nsh-base", default-features = false }
 nsh-platform-windows = { path = "../nsh-patina/crates/nsh-platform-windows", default-features = false }
 nsh-platform-linux = { path = "../nsh-patina/crates/nsh-platform-linux", default-features = false }
+nsh-platform-tui = { path = "../nsh-patina/crates/nsh-platform-tui", default-features = false, features = ["run-app"] }
 # Headless tests of the app (no QuickJS).
 nsh-engine = { path = "../nsh-patina/crates/nsh-engine", default-features = false }
 nsh-testing = { path = "../nsh-patina/crates/nsh-testing", default-features = false }

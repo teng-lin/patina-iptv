@@ -39,6 +39,10 @@ pub struct HeldPresses<S = Context> {
     detector: PressDetector,
     /// The held key and, while it waits, the surface it went down on.
     held: Option<(RemoteKey, Option<S>)>,
+    /// Keys with a long binding that another key's press replaced while
+    /// they were held: their repeats start nothing until their release or
+    /// a fresh press.
+    displaced: Vec<RemoteKey>,
 }
 
 impl<S: Copy + PartialEq + Debug> HeldPresses<S> {
@@ -46,6 +50,7 @@ impl<S: Copy + PartialEq + Debug> HeldPresses<S> {
         HeldPresses {
             detector: PressDetector::new(threshold_ms),
             held: None,
+            displaced: Vec::new(),
         }
     }
 
@@ -64,7 +69,7 @@ impl<S: Copy + PartialEq + Debug> HeldPresses<S> {
     }
 
     /// Forgets whatever is held: no tap, hold or timer follows from it
-    /// (a prompt took the keys).
+    /// (a prompt took the keys). A displaced key stays displaced.
     pub fn cancel(&mut self) {
         self.detector = PressDetector::new(self.detector.threshold_ms());
         self.held = None;
@@ -81,10 +86,15 @@ impl<S: Copy + PartialEq + Debug> HeldPresses<S> {
         has_long: bool,
     ) -> Option<Decision<S>> {
         let began = match phase {
-            Phase::Down => self.start(key, context, has_long),
-            // A repeat without its press starts a hold, as the detector does.
+            Phase::Down => {
+                self.displaced.retain(|k| *k != key);
+                self.start(key, context, has_long)
+            }
             Phase::Repeat => match self.held {
                 Some((held, began)) if held == key => began,
+                _ if self.displaced.contains(&key) => return None,
+                // A repeat whose press was never seen (focus arrived
+                // mid-hold) starts a hold, as the detector does.
                 _ => self.start(key, context, has_long),
             },
             Phase::Up => match self.held {
@@ -92,7 +102,10 @@ impl<S: Copy + PartialEq + Debug> HeldPresses<S> {
                     self.held = None;
                     began
                 }
-                _ => None,
+                _ => {
+                    self.displaced.retain(|k| *k != key);
+                    None
+                }
             },
         };
         let (key, press) = self.detector.feed(key, phase, now_ms, has_long)?;
@@ -107,6 +120,14 @@ impl<S: Copy + PartialEq + Debug> HeldPresses<S> {
     }
 
     fn start(&mut self, key: RemoteKey, context: S, has_long: bool) -> Option<S> {
+        // A waiting (or decided) press another key replaces: its repeats
+        // must not start a new press where it did not go down.
+        if let Some((held, Some(_))) = self.held
+            && held != key
+            && !self.displaced.contains(&held)
+        {
+            self.displaced.push(held);
+        }
         let began = has_long.then_some(context);
         self.held = Some((key, began));
         began
@@ -272,6 +293,42 @@ mod tests {
         // A stray release of another key changes nothing.
         assert_eq!(feed(&mut h, &keys, Player, Down, Phase::Up, 650), None);
         assert_eq!(feed(&mut h, &keys, Player, Ok, Phase::Up, 700), None);
+    }
+
+    #[test]
+    fn a_displaced_press_does_not_restart_from_its_repeats() {
+        let keys = Keymap::defaults();
+        let mut h = HeldPresses::new(400);
+        // OK held on the controls; Menu goes down over it (the bar hides).
+        assert_eq!(feed(&mut h, &keys, Controls, Ok, Phase::Down, 0), None);
+        assert_eq!(feed(&mut h, &keys, Controls, Ok, Phase::Repeat, 50), None);
+        assert!(feed(&mut h, &keys, Controls, RemoteKey::Menu, Phase::Down, 100).is_some());
+        assert_eq!(
+            feed(&mut h, &keys, Player, RemoteKey::Menu, Phase::Up, 150),
+            None
+        );
+        // OK's repeats and release on the video start and decide nothing.
+        for at in [200, 250, 600, 700] {
+            assert_eq!(feed(&mut h, &keys, Player, Ok, Phase::Repeat, at), None);
+        }
+        assert_eq!(h.poll(Player, 1_000), None);
+        assert_eq!(feed(&mut h, &keys, Player, Ok, Phase::Up, 750), None);
+        // Released, OK presses afresh as usual.
+        assert_eq!(feed(&mut h, &keys, Player, Ok, Phase::Down, 800), None);
+        assert_eq!(
+            feed(&mut h, &keys, Player, Ok, Phase::Up, 850),
+            act(Ok, Press::Short, Player)
+        );
+        // A repeat of a key whose press was never seen displaces too.
+        assert_eq!(feed(&mut h, &keys, Player, Ok, Phase::Down, 860), None);
+        assert!(feed(&mut h, &keys, Player, Down, Phase::Repeat, 870).is_some());
+        assert_eq!(feed(&mut h, &keys, Player, Ok, Phase::Repeat, 880), None);
+        assert_eq!(feed(&mut h, &keys, Player, Ok, Phase::Up, 890), None);
+        // A fresh Down of a displaced key also ends its displacement.
+        assert_eq!(feed(&mut h, &keys, Player, Ok, Phase::Down, 900), None);
+        assert!(feed(&mut h, &keys, Player, Down, Phase::Down, 950).is_some());
+        assert_eq!(feed(&mut h, &keys, Player, Ok, Phase::Down, 1_000), None);
+        assert_eq!(h.poll(Player, 1_400), act(Ok, Press::Long, Player));
     }
 
     #[test]

@@ -751,3 +751,239 @@ fn a_back_or_ok_held_into_a_pin_prompt_stays_cut_short() {
     assert!(!menu_open(app), "no menu by a new hold");
     persistent(app, &lifetime, player);
 }
+
+#[test]
+fn touch_around_a_held_key_leaves_it_cut_short_and_back_with_its_prompt() {
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, lifetime, player) = tv_with(
+        home,
+        |settings| {
+            settings
+                .set("parental.live_enabled", Value::Bool(true))
+                .unwrap();
+            settings
+                .set("guide.stay_on_guide", Value::Bool(true))
+                .unwrap();
+            // Holds outlast a prompt opened and closed by touch.
+            settings.set("remote.long_press", Value::ms(2_000)).unwrap();
+        },
+        protect_local_c,
+    );
+    let app = &mut fixture.app;
+    step(app.remote_tap(RemoteKey::Ok));
+    plays(app, &lifetime, "http://example.test/a", 1);
+    let swallowed = "released after a long back; no step back";
+    let on_channels = "key=right phase=Down ctx=Guide";
+
+    // OK held in the guide while touch opens Local C's PIN prompt and
+    // cancels it, no key reaching the prompt; OK goes up before its hold
+    // would be long: the prompt took the press, so the release chooses
+    // nothing (it would open the prompt again).
+    let select = "key=ok phase=Up ctx=Guide action=Some(Select)";
+    let selects = logged(select);
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
+    step(app.press("id:guide-ui >> label:Local C"));
+    step(app.run_for(Duration::from_millis(300)));
+    step(app.wait_for(PIN));
+    step(app.press("id:parental-cancel"));
+    step(app.wait_for_gone(PIN, Duration::from_secs(2)));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
+    step(app.run_for(Duration::from_millis(300)));
+    assert_eq!(logged(select), selects, "the cut-short OK selects nothing");
+    assert!(!shows(app, PIN), "no prompt reopened");
+
+    // Back held likewise, its hold timer running out under the prompt:
+    // after touch cancels the prompt, Android's Back on the release does
+    // not step back from the guide.
+    let before = logged(swallowed);
+    step(app.remote_phase(RemoteKey::Back, KeyPhase::Down));
+    step(app.press("id:guide-ui >> label:Local C"));
+    step(app.run_for(Duration::from_millis(300)));
+    step(app.wait_for(PIN));
+    step(app.run_for(Duration::from_millis(2_000)));
+    step(app.press("id:parental-cancel"));
+    step(app.wait_for_gone(PIN, Duration::from_secs(2)));
+    step(app.remote_phase(RemoteKey::Back, KeyPhase::Up));
+    step(app.back());
+    assert_eq!(logged(swallowed), before + 1, "the release takes no step");
+    let rights = logged(on_channels);
+    step(app.remote_tap(RemoteKey::Right));
+    assert_eq!(logged(on_channels), rights + 1, "still on the channels");
+    step(app.remote_tap(RemoteKey::Left));
+
+    // Back pressed in the prompt, which touch then cancels while Back is
+    // down: its repeats past the hold do nothing (no Long Back to the
+    // video), and Android's Back on its release closes nothing beneath.
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.run_for(Duration::from_millis(300)));
+    step(app.wait_for(PIN));
+    step(app.remote_phase(RemoteKey::Back, KeyPhase::Down));
+    step(app.press("id:parental-cancel"));
+    step(app.wait_for_gone(PIN, Duration::from_secs(2)));
+    for _ in 0..44 {
+        step(app.run_for(Duration::from_millis(50)));
+        step(app.remote_phase(RemoteKey::Back, KeyPhase::Repeat));
+    }
+    let before = logged(swallowed);
+    step(app.remote_phase(RemoteKey::Back, KeyPhase::Up));
+    step(app.back());
+    assert_eq!(
+        logged("key=back phase=Repeat"),
+        0,
+        "its repeats reach nothing"
+    );
+    assert!(!shows(app, "id:player-banner"), "no Long Back to the video");
+    assert_eq!(logged(swallowed), before + 1, "the release takes no step");
+    let rights = logged(on_channels);
+    step(app.remote_tap(RemoteKey::Right));
+    assert_eq!(logged(on_channels), rights + 1, "still on the channels");
+    step(app.remote_tap(RemoteKey::Left));
+
+    // Back held in the guide, touch opens the prompt, Right is tapped in
+    // it, then Back goes up: Right's press does not lose Back's release,
+    // so Android's Back on it leaves the prompt open.
+    step(app.remote_phase(RemoteKey::Back, KeyPhase::Down));
+    step(app.press("id:guide-ui >> label:Local C"));
+    step(app.run_for(Duration::from_millis(300)));
+    step(app.wait_for(PIN));
+    step(app.remote_tap(RemoteKey::Right));
+    step(app.remote_phase(RemoteKey::Back, KeyPhase::Up));
+    step(app.back());
+    assert!(shows(app, PIN), "the earlier Back leaves the prompt open");
+    step(app.remote_tap(RemoteKey::Back));
+    step(app.back());
+    step(app.wait_for_gone(PIN, Duration::from_secs(2)));
+
+    // Back held, OK pressed over it (Back's press is replaced), then
+    // touch opens the prompt: Back, still down, is cut short too.
+    step(app.remote_phase(RemoteKey::Back, KeyPhase::Down));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
+    step(app.press("id:guide-ui >> label:Local C"));
+    step(app.run_for(Duration::from_millis(300)));
+    step(app.wait_for(PIN));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
+    step(app.remote_phase(RemoteKey::Back, KeyPhase::Up));
+    step(app.back());
+    assert!(shows(app, PIN), "the replaced Back leaves the prompt open");
+    step(app.remote_tap(RemoteKey::Back));
+    step(app.back());
+    step(app.wait_for_gone(PIN, Duration::from_secs(2)));
+    persistent(app, &lifetime, player);
+}
+
+#[test]
+fn a_zap_or_menu_during_a_hold_does_not_cut_it_short_or_restart_it() {
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, lifetime, player) = tv(home, |settings| {
+        // The card's own timeout is shorter than the long press.
+        settings
+            .set("player.controls_panel_timeout", Value::secs(1))
+            .unwrap();
+        settings.set("remote.long_press", Value::ms(2_000)).unwrap();
+    });
+    let app = &mut fixture.app;
+    step(app.remote_tap(RemoteKey::Ok));
+    plays(app, &lifetime, "http://example.test/a", 1);
+
+    // A zap queued from the card, then OK held on its TV guide action
+    // before the zap commits: the zap's banner restarts the card's own
+    // timer, not the held key's, so the card outlives both and the
+    // release presses the action.
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("id:player-actions"));
+    step(app.remote_tap(RemoteKey::Right));
+    step(app.remote_tap(RemoteKey::Down));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
+    step(app.run_for(Duration::from_millis(1_500)));
+    plays(app, &lifetime, "http://example.test/b", 2);
+    assert!(shows(app, "id:player-card"), "the held key keeps the card");
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
+    step(app.wait_for_gone("id:player-card", Duration::from_secs(2)));
+    assert!(!shows(app, "id:player-banner"), "the guide, not the video");
+
+    // Right held on the card, OK goes down, then Right goes up: Right's
+    // release leaves OK's hold of the card as it is.
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("id:player-banner"));
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("id:player-actions"));
+    step(app.remote_phase(RemoteKey::Right, KeyPhase::Down));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
+    step(app.remote_phase(RemoteKey::Right, KeyPhase::Up));
+    step(app.run_for(Duration::from_millis(1_500)));
+    assert!(shows(app, "id:player-card"), "the held OK keeps the card");
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
+    step(app.wait_for_gone("id:player-card", Duration::from_secs(2)));
+    assert!(!shows(app, "id:player-banner"), "the guide, not the video");
+
+    // OK held on the play bar, Menu pressed over it (the bar hides): OK's
+    // later repeats and release, now on the video, start no press of
+    // their own (no info card).
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("id:player-banner"));
+    step(app.remote_tap(RemoteKey::Menu));
+    step(app.wait_for("id:play-bar-layer"));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
+    step(app.run_for(Duration::from_millis(50)));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Repeat));
+    step(app.remote_tap(RemoteKey::Menu));
+    assert!(!shows(app, "id:play-bar-layer"), "Menu hid the bar");
+    for _ in 0..3 {
+        step(app.run_for(Duration::from_millis(50)));
+        step(app.remote_phase(RemoteKey::Ok, KeyPhase::Repeat));
+    }
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
+    assert!(
+        !shows(app, "id:player-actions"),
+        "the displaced OK opens no card"
+    );
+    persistent(app, &lifetime, player);
+}
+
+/// A desktop keyboard's Enter held on a PIN prompt: the keystroke that
+/// closed the prompt does not fire again on its auto-repeats, and a fresh
+/// press does. (The headless keyboard sends no repeats: what is checked is
+/// the binding's repeat rule, which the platform's keymap follows.)
+#[test]
+fn a_keyboard_key_a_prompt_took_holds_its_repeats_until_pressed_again() {
+    let Some(home) = isolated!() else { return };
+    let mut settings = Settings::new();
+    settings.set("guide.autoplay", Value::Bool(false)).unwrap();
+    settings
+        .set("general.resume_last_channel", Value::Bool(false))
+        .unwrap();
+    settings
+        .set("parental.pin_input", Value::Enum("number_keys".into()))
+        .unwrap();
+    settings
+        .set("parental.live_enabled", Value::Bool(true))
+        .unwrap();
+    settings
+        .set("guide.stay_on_guide", Value::Bool(true))
+        .unwrap();
+    let mut fixture =
+        personalization::launch_prepared(home, settings, false, protect_local_c, |_| {}, |_| {});
+    let app = &mut fixture.app;
+    step(app.press("text:/^☰  /"));
+    step(app.press_key("right"));
+    assert_eq!(iptv_app::keyboard_repeats("enter"), Some(true));
+    step(app.press_key("down"));
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    step(app.wait_for(PIN));
+    for digit in ["2", "4", "6", "8"] {
+        step(app.press_key(digit));
+    }
+    step(app.press_key("enter"));
+    step(app.wait_for_gone(PIN, Duration::from_secs(20)));
+    assert_eq!(
+        iptv_app::keyboard_repeats("enter"),
+        Some(false),
+        "the Enter that submitted the PIN repeats nowhere"
+    );
+    assert_eq!(iptv_app::keyboard_repeats("8"), Some(false));
+    assert_eq!(iptv_app::keyboard_repeats("down"), Some(true));
+    // A fresh press acts, and repeats again.
+    step(app.press_key("enter"));
+    assert_eq!(iptv_app::keyboard_repeats("enter"), Some(true));
+}
