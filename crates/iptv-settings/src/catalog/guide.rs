@@ -73,8 +73,8 @@ pub static EPG: &[Setting] = &[
     ),
     // default: ours — on, except in browser builds (browser TVs): there the
     // guide lives in memory and in an IndexedDB quota of about 92 MB, and
-    // descriptions take a real account's database from 23 to 57 MB
-    // (docs/plans/2026-11-21-browser-tv-architecture.md, decision 2).
+    // descriptions take a real account's database from 23 to 57 MB (the
+    // browser TV architecture plan, decision 2).
     epg(
         "storage",
         "epg.store_descriptions",
