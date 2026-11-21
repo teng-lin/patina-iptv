@@ -103,7 +103,8 @@ def fields(data):
             offset += 1 + p[4]
         pes = p[offset:]
         pts = dts = None
-        if pes[:3] == b"\x00\x00\x01":
+        # Only a PES start: a continuation's payload may open with a start code.
+        if p[3] & 0x10 and p[1] & 0x40 and pes[:3] == b"\x00\x00\x01" and len(pes) >= 14 and pes[7] & 0x80:
             pts = mock.read_timestamp(pes[9:14])
             if pes[7] >> 6 == 3:
                 dts = mock.read_timestamp(pes[14:19])
@@ -163,6 +164,9 @@ class Timestamps(unittest.TestCase):
         crowded = bytearray(packet(VIDEO, 0, pts=9000, dts=5400))
         crowded[3] |= 0x20
         crowded[4:] = bytes([170]) + bytes(170) + crowded[4:17]
+        with self.assertRaises(ValueError):
+            mock.shift_ts(bytes(crowded), 0, {})
+        crowded[4:] = bytes([178]) + bytes(178) + b"\x00\x00\x01\xe0\x00"
         with self.assertRaises(ValueError):
             mock.shift_ts(bytes(crowded), 0, {})
 
@@ -411,9 +415,11 @@ class EncodedMedia(unittest.TestCase):
         self.assertGreater(count, 600)
         # The encoder's continuity counters and PCR run on through each wrap too.
         counters, clocks = {}, []
-        for pid, counter, _, _, pcr in fields(joined):
+        for start, (pid, counter, _, _, pcr) in zip(range(0, len(joined), 188), fields(joined)):
             if pid in counters:
-                self.assertEqual(counter, (counters[pid] + 1) % 16, f"PID {pid:#x} counter")
+                # A packet without payload repeats the counter.
+                step = 1 if joined[start + 3] & 0x10 else 0
+                self.assertEqual(counter, (counters[pid] + step) % 16, f"PID {pid:#x} counter")
             counters[pid] = counter
             if pcr is not None:
                 clocks.append(pcr)

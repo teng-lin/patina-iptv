@@ -99,9 +99,11 @@ def shift_ts(data, ticks, counters):
         if not (control & 0x01 and packet[1] & 0x40):
             continue
         pes = packet[offset:]
-        if pes[:3] != b"\x00\x00\x01" or len(pes) < 4 or pes[3] in NO_TIMESTAMPS:
+        if pes[:3] != b"\x00\x00\x01":
             continue
-        if len(pes) < 9 or pes[6] >> 6 != 0x02:
+        if len(pes) < 9 and (len(pes) < 4 or pes[3] not in NO_TIMESTAMPS):
+            raise ValueError("a PES header that does not fit its packet")
+        if pes[3] in NO_TIMESTAMPS or pes[6] >> 6 != 0x02:
             continue
         flags = pes[7] >> 6
         if len(pes) < (19 if flags == 0x03 else 14 if flags else 9):
