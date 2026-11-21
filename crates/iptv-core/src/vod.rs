@@ -283,6 +283,28 @@ impl Details {
             .position(|e| &e.key == key)
             .and_then(|i| self.episodes.get(i + 1))
     }
+    /// The series' own progress after episode `played` was watched, as
+    /// its card reads it from the store: the episode's resume point, or
+    /// none once that episode is finished (its next one starts from the
+    /// beginning). The series counts as watched when that finished
+    /// episode was its last or every episode is finished. None when
+    /// `played` is not one of its episodes.
+    pub fn series_progress(&self, played: &Key) -> Option<Progress> {
+        let episode = self.episodes.iter().find(|e| &e.key == played)?;
+        Some(if episode.progress.completed {
+            Progress {
+                position_ms: 0,
+                duration_ms: None,
+                completed: self.next_episode(played).is_none()
+                    || self.episodes.iter().all(|e| e.progress.completed),
+            }
+        } else {
+            Progress {
+                completed: false,
+                ..episode.progress
+            }
+        })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Playing {
@@ -1287,18 +1309,34 @@ impl Screen {
             && self.handoff == Handoff::Playing
             && self.details.as_ref().is_some_and(|d| &d.item.key == item)
     }
+    /// `played` (a movie, or an episode of `details`, the player's) was
+    /// watched: its title's card in the list, and `details`' own item,
+    /// show the progress just watched, without the list being read again
+    /// (#177). `saved` tells whether the player saved progress for
+    /// `played`: until it does, the store's series record still describes
+    /// the episode watched before, and a series' card stays as it was.
+    pub fn watched(&mut self, details: &mut Details, played: &Key, saved: bool) {
+        let progress = if details.item.key.kind == Kind::Series {
+            saved.then(|| details.series_progress(played)).flatten()
+        } else {
+            Some(details.item.progress)
+        };
+        if let Some(progress) = progress {
+            details.item.progress = progress;
+            if let Some(card) = self.cards.iter_mut().find(|c| c.key == details.item.key) {
+                card.progress = progress;
+            }
+        }
+    }
     /// Back from `played` (a movie, or an episode of `details`) full
     /// screen: its details reopen, the played episode and its season
     /// chosen and the focus on Play, found by identity in `details` (the
     /// player's, with the progress just watched). The list underneath is
-    /// the one the title was chosen from; a movie's card there shows the
-    /// progress just watched.
-    pub fn return_from_player(&mut self, details: Details, played: &Key) {
-        if details.item.key.kind == Kind::Movie
-            && let Some(card) = self.cards.iter_mut().find(|c| c.key == details.item.key)
-        {
-            card.progress = details.item.progress;
-        }
+    /// the one the title was chosen from; its card there (a movie's, or
+    /// the series' of the episode played) shows the progress just watched
+    /// without the list being read again (#177; see [`Screen::watched`]).
+    pub fn return_from_player(&mut self, mut details: Details, played: &Key, saved: bool) {
+        self.watched(&mut details, played, saved);
         self.open = true;
         self.search_open = false;
         self.clear_failure();
@@ -3028,7 +3066,7 @@ mod tests {
         s.hand_to_player();
         assert!(!s.open && s.returns_to(&details.item.key));
         assert!(!s.returns_to(&card("other").key));
-        s.return_from_player(details.clone(), &played);
+        s.return_from_player(details.clone(), &played, true);
         assert!(s.open && !s.returns_to(&details.item.key));
         assert_eq!(s.episode, Some(played));
         assert_eq!(s.season, Some(2));
@@ -3039,6 +3077,54 @@ mod tests {
         assert!(s.open && s.details.is_none());
         assert_eq!(s.focused, Some(details.item.key.clone()));
         assert_eq!(s.handoff, Handoff::None);
+    }
+    #[test]
+    fn back_from_a_played_episode_shows_its_series_progress_on_the_list() {
+        let mut s = Screen::default();
+        let g = s.begin(Kind::Series);
+        let mut details = series_details(3);
+        s.publish(
+            g,
+            vec![card("a"), details.item.clone(), card("b")],
+            false,
+            false,
+        );
+        s.show_details(details.clone());
+        let first = details.episodes[0].key.clone();
+        // Part of the first episode watched: the card resumes it.
+        s.hand_to_player();
+        details.episodes[0].progress = Progress::observed(120_000, Some(600_000), false);
+        s.return_from_player(details.clone(), &first, true);
+        assert_eq!(s.cards[1].progress, details.episodes[0].progress);
+        assert_eq!(
+            s.details.as_ref().map(|d| d.item.progress),
+            Some(s.cards[1].progress)
+        );
+        s.back();
+        assert_eq!(s.focused, Some(details.item.key.clone()));
+        assert_eq!(s.cards[1].progress.resume_ms(), 120_000);
+        // Finished: no resume point, the series not yet watched.
+        s.show_details(details.clone());
+        s.hand_to_player();
+        details.episodes[0].progress = Progress::observed(600_000, Some(600_000), true);
+        s.return_from_player(details.clone(), &first, true);
+        assert_eq!(s.cards[1].progress, Progress::default());
+        // Its last episode finished: the series is watched.
+        let last = details.episodes[2].key.clone();
+        s.hand_to_player();
+        details.episodes[2].progress = Progress::observed(600_000, Some(600_000), true);
+        s.return_from_player(details.clone(), &last, true);
+        assert!(s.cards[1].progress.completed);
+        assert_eq!(s.cards[1].progress.resume_ms(), 0);
+        // Another episode left before the player saved anything: the
+        // store still describes the last one, and so does the card.
+        let watched = s.cards[1].progress;
+        s.hand_to_player();
+        s.return_from_player(details.clone(), &details.episodes[1].key.clone(), false);
+        assert_eq!(s.cards[1].progress, watched);
+        // The other cards are untouched.
+        assert_eq!(s.cards[0].progress, Progress::default());
+        assert_eq!(s.cards[2].progress, Progress::default());
     }
     #[test]
     fn back_from_a_played_movie_shows_its_progress_on_the_list() {
@@ -3054,7 +3140,7 @@ mod tests {
         s.show_details(details.clone());
         s.hand_to_player();
         details.item.progress = Progress::observed(120_000, Some(600_000), false);
-        s.return_from_player(details.clone(), &details.item.key.clone());
+        s.return_from_player(details.clone(), &details.item.key.clone(), true);
         assert_eq!(s.control, Control::Play);
         assert_eq!(s.focused, Some(card("b").key));
         assert_eq!(s.cards[1].progress, details.item.progress);

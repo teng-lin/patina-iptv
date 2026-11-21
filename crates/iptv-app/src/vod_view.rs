@@ -70,17 +70,17 @@ pub fn close(ui: Ui) {
 /// the title was chosen from, the title playing on in the preview. False
 /// when the title did not come from this screen.
 pub fn return_from_player(ui: Ui) -> bool {
-    let Some((details, played)) = ui
-        .player
-        .vod
-        .with_untracked(|p| p.as_ref().map(|(p, _)| (p.details.clone(), p.key.clone())))
-    else {
+    let Some((details, played, saved)) = ui.player.vod.with_untracked(|p| {
+        p.as_ref()
+            .map(|(p, _)| (p.details.clone(), p.key.clone(), p.last_saved_ms.is_some()))
+    }) else {
         return false;
     };
     if !ui.vod.with_untracked(|s| s.returns_to(&details.item.key)) {
         return false;
     }
-    ui.vod.update(|s| s.return_from_player(details, &played));
+    ui.vod
+        .update(|s| s.return_from_player(details, &played, saved));
     ui.mode.set(crate::settings::browse_mode());
     true
 }
@@ -814,12 +814,16 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
     if let Some(p) = finished
         && let Some(next) = p.details.next_episode(&p.key)
     {
+        // The episode's end was saved: its series' card shows it, also
+        // when Back from the next episode comes before that one saves.
+        let mut details = p.details.clone();
+        ui.vod.update(|s| s.watched(&mut details, &p.key, true));
         if crate::settings::flag(iptv_settings::keys::VOD_AUTOPLAY_NEXT_EPISODE) {
-            play_key(ui, p.details.clone(), next.key.clone(), false);
+            play_key(ui, details, next.key.clone(), false);
         } else {
             ui.vod.update(|s| {
                 s.open = true;
-                s.show_details(p.details.clone());
+                s.show_details(details);
                 s.episode = Some(next.key.clone());
                 s.season = Some(next.season);
                 s.notice = Some(crate::i18n::key("Ready for the next episode").into());
@@ -930,15 +934,25 @@ fn card_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
         ..Default::default()
     })
 }
+/// A list opening on its focused row. A list mounted again (Back from
+/// details or from the player) runs its scroll-to-focused effect before
+/// it is rendered, while its element ref carries nothing, so that first
+/// scroll is dropped; the list starts on the row instead (#176).
+trait StartingAt {
+    fn starting_at(self, at: Option<usize>) -> Self;
+}
+impl StartingAt for VirtualList {
+    fn starting_at(self, at: Option<usize>) -> Self {
+        match at {
+            Some(at) => self.initial_scroll_index(at),
+            None => self,
+        }
+    }
+}
 fn shelf_catalog(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = element_ref();
     effect(move || {
-        let at = ui.vod.with(|s| {
-            s.focused
-                .as_ref()
-                .and_then(|key| s.cards.iter().position(|c| &c.key == key))
-        });
-        if let Some(at) = at {
+        if let Some(at) = ui.vod.with(|s| s.focused_index()) {
             rows.scroll_to_index(at as u32, percentage(0.5), px(0.0), false);
         }
     });
@@ -963,6 +977,7 @@ fn shelf_catalog(ui: Ui, size: Scale) -> impl IntoElement {
         move || ui.vod.with(|s| s.cards.len()),
         move |at| card_row(ui, size, at),
     )
+    .starting_at(ui.vod.with_untracked(|s| s.focused_index()))
     .element_ref(&rows)
     .flex_1();
     let more = when(
@@ -1058,16 +1073,18 @@ fn episode_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
 }
 fn episodes(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = element_ref();
-    effect(move || {
-        let at = ui.vod.with(|s| {
+    let chosen = move || {
+        ui.vod.with(|s| {
             s.details.as_ref().and_then(|d| {
                 d.episodes
                     .iter()
                     .filter(|e| Some(e.season) == s.season)
                     .position(|e| Some(&e.key) == s.episode.as_ref())
             })
-        });
-        if let Some(at) = at {
+        })
+    };
+    effect(move || {
+        if let Some(at) = chosen() {
             rows.scroll_to_index(at as u32, percentage(0.5), px(0.0), false);
         }
     });
@@ -1112,6 +1129,7 @@ fn episodes(ui: Ui, size: Scale) -> impl IntoElement {
         },
         move |at| episode_row(ui, size, at),
     )
+    .starting_at(untracked(chosen))
     .element_ref(&rows)
     .horizontal()
     .estimated_item_size(move || size.px(312.0))

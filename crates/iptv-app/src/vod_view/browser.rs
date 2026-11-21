@@ -195,8 +195,8 @@ fn categories(ui: Ui, size: Scale) -> impl IntoElement {
         move || ui.vod.with(|s| s.shows_categories()),
         move || {
             let rows = element_ref();
-            effect(move || {
-                let at = ui.vod.with(|s| {
+            let chosen = move || {
+                ui.vod.with(|s| {
                     if s.query.continue_watching {
                         0
                     } else {
@@ -210,8 +210,10 @@ fn categories(ui: Ui, size: Scale) -> impl IntoElement {
                             })
                             .map_or(1, |at| at + 2)
                     }
-                });
-                rows.scroll_to_index(at as u32, percentage(0.5), px(0.0), false);
+                })
+            };
+            effect(move || {
+                rows.scroll_to_index(chosen() as u32, percentage(0.5), px(0.0), false);
             });
             view()
                 .w(move || size.px(320.0))
@@ -292,6 +294,7 @@ fn categories(ui: Ui, size: Scale) -> impl IntoElement {
                             })
                         },
                     )
+                    .starting_at(Some(untracked(chosen)))
                     .element_ref(&rows)
                     .estimated_item_size(move || size.px(ui_kit::TOUCH))
                     .flex_1(),
@@ -628,6 +631,7 @@ fn grid(ui: Ui, size: Scale) -> impl IntoElement {
                         }))
                 },
             )
+            .starting_at(focused_row.get_untracked())
             .element_ref(&rows)
             .estimated_item_size(move || px(width.get() * 1.5 + size.of(50.0)))
             .flex_1(),

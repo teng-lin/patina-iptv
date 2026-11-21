@@ -981,6 +981,33 @@ fn native(app: &mut Headless, seen: &Observed, name: &str, data: Value) {
     app.settle();
 }
 
+/// Whether the poster `card` is selected and drawn inside the poster grid's
+/// viewport: a recycled row can still be mounted outside it.
+fn card_shown_and_selected(s: &nsh_testing::Screen, card: &str) -> bool {
+    if !s
+        .accessibility_state(card)
+        .is_ok_and(|state| state.selected)
+    {
+        return false;
+    }
+    let (Ok(card), Ok(grid)) = (s.id(card), s.id("id:vod-poster-grid")) else {
+        return false;
+    };
+    let nodes = s.layout_nodes();
+    let bounds = |id| {
+        nodes
+            .iter()
+            .find(|n| n.id == id && !n.hidden)
+            .map(|n| n.bounds)
+    };
+    let (Some(card), Some(grid)) = (bounds(card), bounds(grid)) else {
+        return false;
+    };
+    let top = card.origin.y.0;
+    let grid_top = grid.origin.y.0;
+    top >= grid_top - 0.5 && top + card.size.height.0 <= grid_top + grid.size.height.0 + 0.5
+}
+
 /// Back from a movie playing full screen, the bar hidden first if shown.
 fn back_to_details(app: &mut Headless) {
     for _ in 0..2 {
@@ -1220,8 +1247,29 @@ fn back_from_a_movie_keeps_a_deep_continue_watching_title_focused() {
                     .unwrap()
         },
     ));
+    // The list scrolls to the film: its row is drawn and selected (#176).
+    step(app.wait_until(
+        "the deep film's row shown and selected",
+        Duration::from_secs(5),
+        |s| card_shown_and_selected(s, deep),
+    ));
     assert_eq!(iptv_app::player_opens(0), opens, "Back opens nothing");
     assert_eq!(seen.player(0), player, "the same player");
+    // A click on the row shown opens its details; a plain Back, with no
+    // list read again, returns to it shown and selected.
+    step(app.press(deep));
+    step(app.wait_for("text:Play from beginning"));
+    step(app.back());
+    step(app.wait_for_gone("text:Play from beginning", Duration::from_secs(5)));
+    step(app.wait_until(
+        "the deep film's row shown and selected again",
+        Duration::from_secs(5),
+        |s| {
+            s.matches(&format!("text:{total} / {total}")).unwrap()
+                && card_shown_and_selected(s, deep)
+        },
+    ));
+    assert_eq!(iptv_app::player_opens(0), opens, "details open nothing");
 }
 
 /// The stream surface 0's player was given last.

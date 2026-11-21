@@ -471,6 +471,17 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     let episode = sources(&seen);
     assert_eq!(episode.len(), 2, "{episode:?}");
     assert!(episode[1].ends_with("/series/generated-user/generated-pass/102.mp4"));
+    // The player reports 3 min of the episode's 10 played.
+    let token = seen.lock().unwrap().props["source"]["token"].clone();
+    app.engine().control().dispatch_event(
+        surface,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "timeline".into(),
+            data: json!({"token": token, "seekId": 0, "ms": 180_000, "durationMs": 600_000, "seekable": true}),
+        },
+    );
+    app.settle();
     // The visible ‹ (Shows) returns to the show's details, the played
     // episode selected.
     let opened = opens(&seen);
@@ -540,7 +551,18 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
         }
     }
     present(&mut app, LANDSCAPE, 1.0);
-    // Close leaves the show for the shelf, then the shelf for the guide.
+    // Close leaves the show for its list, which is not read again: the
+    // show's card, still chosen, already resumes the episode (#177).
+    step(app.press("id:vod-screen >> label:Close"));
+    step(app.wait_for_gone("text:/Generated First/", WAIT));
+    let show = "label:/^Generated Voyage · .*Resume at 3 min$/";
+    assert!(
+        app.screen()
+            .accessibility_state(show)
+            .is_ok_and(|s| s.selected),
+        "the show's card chosen, with its new progress"
+    );
+    // Close then leaves the shelf for the guide.
     for _ in 0..3 {
         if !app.screen().matches("id:vod-screen").unwrap() {
             break;
