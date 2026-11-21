@@ -5,7 +5,7 @@
   provider URLs, names, channel lists or credentials. Real-provider testing
   reads credentials at runtime from outside the repo and leaves no trace in
   logs, screenshots or files.
-- **Behaviour, not artwork.** The UX reference is `~/src/tivimate/docs`. Never
+- **Behavior, not artwork.** The UX reference is `~/src/tivimate/docs`. Never
   copy files, code, artwork, icons, fonts, layouts or wording from the
   reference APK. `crates/iptv-app/src/theme.rs` holds the original Patina palette;
   preserve its independent design.
