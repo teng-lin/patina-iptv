@@ -34,6 +34,7 @@ rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"]
 [target.'cfg(target_family = "wasm")'.dependencies]
 rusqlite = { workspace = true, features = ["bundled", "ffi-sqlite-wasm-rs"] }
 rsqlite-vfs = "0.2"
+log.workspace = true
 sqlite-wasm-rs = { version = "0.6.3", default-features = false }
 
 [dev-dependencies]

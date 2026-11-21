@@ -4,8 +4,8 @@
 
 use std::borrow::{BorrowMut, Cow};
 
-use iptv_providers::SecretUrl;
 use iptv_providers::model::{Channel, Group, Series, Source, VodItem};
+use iptv_providers::{ContentId, GroupId, SecretUrl};
 use rusqlite::types::Value;
 
 use crate::catalog::{self, DELETE_CATALOG};
@@ -103,11 +103,13 @@ enum Phase {
     Delete {
         table: usize,
     },
-    /// Rows: groups, channels, VOD, series from index `at`. Stage: table
-    /// `STAGE_TABLES[part]` after key `after`.
+    /// Rows: groups, channels, VOD, series from index `at`, item `at`'s
+    /// group memberships from `member` when it was inserted without them.
+    /// Stage: table `STAGE_TABLES[part]` after key `after`.
     Insert {
         part: usize,
         at: usize,
+        member: Option<usize>,
         after: Option<Vec<Value>>,
     },
     Index {
@@ -240,7 +242,7 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
             .expect("the store stays until the job is dropped")
     }
 
-    fn store(&mut self) -> &mut Store {
+    pub(crate) fn store(&mut self) -> &mut Store {
         self.store
             .as_mut()
             .expect("the store stays until the job is dropped")
@@ -263,8 +265,14 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
 
     /// Rolls back an open transaction and detaches the stage.
     fn abort(&mut self) {
+        let _ = self.detach();
+    }
+
+    /// Rolls back an open transaction, then detaches the stage; the detach's
+    /// error.
+    fn detach(&mut self) -> Result<()> {
         let Some(store) = self.store.as_mut() else {
-            return;
+            return Ok(());
         };
         let store = store.borrow_mut();
         if self.progress == Progress::Running {
@@ -273,8 +281,9 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
         if let Input::Stage { attached, .. } = &mut self.input
             && std::mem::take(attached)
         {
-            let _ = store.conn.execute_batch("DETACH DATABASE catalog_import");
+            store.conn.execute_batch("DETACH DATABASE catalog_import")?;
         }
+        Ok(())
     }
 
     fn advance(&mut self, meter: &mut Meter) -> Result<Step<CatalogPublished>> {
@@ -286,7 +295,12 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
                 Phase::Begin => self.begin()?,
                 Phase::Forget { after } => self.forget(meter, after)?,
                 Phase::Delete { table } => self.delete(meter, table)?,
-                Phase::Insert { part, at, after } => self.insert(meter, part, at, after)?,
+                Phase::Insert {
+                    part,
+                    at,
+                    member,
+                    after,
+                } => self.insert(meter, part, at, member, after)?,
                 Phase::Index { after } => self.index(meter, after)?,
                 Phase::Commit => return self.commit().map(Step::Done),
             }
@@ -346,7 +360,7 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
     fn forget(&mut self, meter: &mut Meter, after: i64) -> Result<()> {
         let source = self.source;
         let conn = &self.store().conn;
-        if meter.unlimited() {
+        if meter.unlimited() && after == i64::MIN {
             search::forget_source(conn, true, source)?;
             self.phase = Phase::Delete { table: 0 };
             return Ok(());
@@ -372,6 +386,7 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
                 Phase::Insert {
                     part: 0,
                     at: 0,
+                    member: None,
                     after: None,
                 }
             }
@@ -395,6 +410,7 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
         meter: &mut Meter,
         part: usize,
         at: usize,
+        member: Option<usize>,
         after: Option<Vec<Value>>,
     ) -> Result<()> {
         let source = self.source;
@@ -409,6 +425,7 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
                 Phase::Insert {
                     part: part + 1,
                     at: 0,
+                    member: None,
                     after: None,
                 }
             } else if store.fts_index {
@@ -424,21 +441,19 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
                 vod,
                 series,
             } => {
-                let len = [groups.len(), channels.len(), vod.len(), series.len()][part];
-                let n = meter.take(len - at);
-                let range = at..at + n;
-                let offset = at as i64;
-                self.inserted[part] += match part {
-                    0 => catalog::insert_groups(conn, source, &groups[range], offset)?,
-                    1 => catalog::insert_channels(conn, source, &channels[range], offset)?,
-                    2 => catalog::insert_vod(conn, source, &vod[range], offset)?,
-                    _ => catalog::insert_series(conn, source, &series[range], offset)?,
+                let items = match part {
+                    0 => Items::Groups(groups),
+                    1 => Items::Channels(channels),
+                    2 => Items::Vod(vod),
+                    _ => Items::Series(series),
                 };
-                meter.spend(n);
-                self.phase = if at + n < len {
+                let (at, member) =
+                    items.insert(conn, source, meter, at, member, &mut self.inserted[part])?;
+                self.phase = if at < items.len() {
                     Phase::Insert {
                         part,
-                        at: at + n,
+                        at,
+                        member,
                         after: None,
                     }
                 } else {
@@ -449,7 +464,9 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
                 let table = STAGE_TABLES[part];
                 let columns = stage_columns(conn, table)?;
                 let list = columns.names.join(",");
-                if meter.unlimited() {
+                // The whole table in one statement, unless earlier steps
+                // copied part of it (`finish` after `step`).
+                if meter.unlimited() && after.is_none() {
                     conn.execute(
                         &format!(
                             "INSERT INTO main.{table}(source_id,{list}) \
@@ -525,6 +542,7 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
                     Some(end) => Phase::Insert {
                         part,
                         at: 0,
+                        member: None,
                         after: Some(end),
                     },
                     None => after_insert(part, STAGE_TABLES.len()),
@@ -537,7 +555,7 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
     fn index(&mut self, meter: &mut Meter, after: i64) -> Result<()> {
         let source = self.source;
         let conn = &self.store().conn;
-        if meter.unlimited() {
+        if meter.unlimited() && after == i64::MIN {
             search::index_source(conn, true, source)?;
             self.phase = Phase::Commit;
             return Ok(());
@@ -590,8 +608,10 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
         if rows {
             crate::catalog::crash_boundary("committed");
         }
-        // Detaches the stage.
-        self.abort();
+        // The catalog is published. Natively a failed detach is still
+        // reported, as it always was; in the browser the publish copy must
+        // not be abandoned over it (`replacement::after_commit`).
+        replacement::after_commit(self.detach())?;
         Ok(CatalogPublished {
             counts,
             guides: self.guides.take(),
@@ -642,4 +662,122 @@ fn stage_columns(conn: &rusqlite::Connection, table: &str) -> Result<StageColumn
         key.into_iter().map(|(_, name)| name).collect()
     };
     Ok(StageColumns { names, key })
+}
+
+/// One kind of catalog row, for inserting in slices.
+enum Items<'x> {
+    Groups(&'x [Group]),
+    Channels(&'x [Channel]),
+    Vod(&'x [VodItem]),
+    Series(&'x [Series]),
+}
+
+impl Items<'_> {
+    fn len(&self) -> usize {
+        match self {
+            Self::Groups(items) => items.len(),
+            Self::Channels(items) => items.len(),
+            Self::Vod(items) => items.len(),
+            Self::Series(items) => items.len(),
+        }
+    }
+
+    /// Item `i`'s id, groups and membership statement (none for groups).
+    fn members(&self, i: usize) -> Option<(&ContentId, &[GroupId], &'static str)> {
+        match self {
+            Self::Groups(_) => None,
+            Self::Channels(items) => {
+                Some((&items[i].id, &items[i].groups, catalog::CHANNEL_MEMBERS))
+            }
+            Self::Vod(items) => Some((&items[i].id, &items[i].groups, catalog::VOD_MEMBERS)),
+            Self::Series(items) => Some((&items[i].id, &items[i].groups, catalog::SERIES_MEMBERS)),
+        }
+    }
+
+    /// Rows item `i` writes: its own and its memberships.
+    fn cost(&self, i: usize) -> u64 {
+        1 + self
+            .members(i)
+            .map_or(0, |(_, groups, _)| groups.len() as u64)
+    }
+
+    /// Inserts items `range` with their memberships, as the one-shot form
+    /// does; how many were new.
+    fn insert_all(
+        &self,
+        conn: &rusqlite::Connection,
+        source: SourceId,
+        range: std::ops::Range<usize>,
+    ) -> Result<usize> {
+        let offset = range.start as i64;
+        match self {
+            Self::Groups(items) => catalog::insert_groups(conn, source, &items[range], offset),
+            Self::Channels(items) => catalog::insert_channels(conn, source, &items[range], offset),
+            Self::Vod(items) => catalog::insert_vod(conn, source, &items[range], offset),
+            Self::Series(items) => catalog::insert_series(conn, source, &items[range], offset),
+        }
+    }
+
+    /// Inserts item `i`'s own row; whether it was new.
+    fn insert_row(&self, conn: &rusqlite::Connection, source: SourceId, i: usize) -> Result<bool> {
+        let position = i as i64;
+        match self {
+            Self::Groups(items) => catalog::group_row(conn, source, &items[i], position),
+            Self::Channels(items) => catalog::channel_row(conn, source, &items[i], position),
+            Self::Vod(items) => catalog::vod_row(conn, source, &items[i], position),
+            Self::Series(items) => catalog::series_row(conn, source, &items[i], position),
+        }
+    }
+
+    /// Inserts from item `at` (and its memberships from `member`, when it
+    /// was inserted without them) until `meter` is spent, counting every row
+    /// a membership writes too; returns the cursor and adds new items to
+    /// `inserted`. An item with more memberships than the budget is written
+    /// over several steps.
+    fn insert(
+        &self,
+        conn: &rusqlite::Connection,
+        source: SourceId,
+        meter: &mut Meter,
+        mut at: usize,
+        mut member: Option<usize>,
+        inserted: &mut usize,
+    ) -> Result<(usize, Option<usize>)> {
+        while at < self.len() && !meter.exhausted() {
+            if let Some(from) = member {
+                let (id, groups, sql) = self.members(at).expect("only items with groups");
+                let n = meter.take(groups.len() - from);
+                catalog::insert_members(conn, sql, source, id, &groups[from..from + n], at as i64)?;
+                meter.spend(n);
+                if from + n < groups.len() {
+                    member = Some(from + n);
+                } else {
+                    member = None;
+                    at += 1;
+                }
+                continue;
+            }
+            // As many whole items as the budget holds, in one call.
+            let mut end = at;
+            let mut cost = 0;
+            while end < self.len() && meter.fits(cost + self.cost(end)) {
+                cost += self.cost(end);
+                end += 1;
+            }
+            if end > at {
+                *inserted += self.insert_all(conn, source, at..end)?;
+                meter.spend(cost as usize);
+                at = end;
+            } else if self.insert_row(conn, source, at)? {
+                // The item alone, its memberships in the next slices.
+                *inserted += 1;
+                meter.spend(1);
+                member = Some(0);
+            } else {
+                meter.spend(1);
+                at += 1;
+            }
+        }
+        Ok((at, member))
+    }
 }

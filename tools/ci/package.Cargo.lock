@@ -3082,6 +3082,7 @@ dependencies = [
  "iptv-library",
  "iptv-providers",
  "iptv-sqlcipher-init",
+ "log",
  "rsqlite-vfs",
  "rusqlite",
  "serde_json",

@@ -24,33 +24,65 @@ pub(crate) const DELETE_CATALOG: &[&str] = &[
     "DELETE FROM groups WHERE source_id = ?1",
 ];
 
+const GROUP_ROW: &str =
+    "INSERT OR IGNORE INTO groups (source_id, id, kind, position, name, provider_id, adult)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
+const CHANNEL_ROW: &str =
+    "INSERT OR IGNORE INTO channels (source_id, id, position, provider_id, name, number, logo,
+             group_ids, stream, epg_id, epg_name, epg_shift_minutes, catch_up, radio)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)";
+pub(crate) const CHANNEL_MEMBERS: &str =
+    "INSERT OR IGNORE INTO channel_groups (source_id, group_id, channel_id, position)
+                 VALUES (?1, ?2, ?3, ?4)";
+const VOD_ROW: &str =
+    "INSERT OR IGNORE INTO vod (source_id, id, position, provider_id, name, group_ids, poster,
+             plot, year, rating_x10, added, duration_secs, stream, is_series, episode_numbers)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)";
+pub(crate) const VOD_MEMBERS: &str =
+    "INSERT OR IGNORE INTO vod_groups (source_id, group_id, vod_id, position)
+                 VALUES (?1, ?2, ?3, ?4)";
+const SERIES_ROW: &str =
+    "INSERT OR IGNORE INTO series (source_id, id, position, provider_id, name, group_ids,
+             poster, plot, year, rating_x10, last_modified)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
+pub(crate) const SERIES_MEMBERS: &str =
+    "INSERT OR IGNORE INTO series_groups (source_id, group_id, series_id, position)
+                 VALUES (?1, ?2, ?3, ?4)";
+
+/// Inserts one group at `position`; whether it was new.
+pub(crate) fn group_row(
+    conn: &Connection,
+    source: SourceId,
+    g: &Group,
+    position: i64,
+) -> Result<bool> {
+    let added = conn.prepare_cached(GROUP_ROW)?.execute(params![
+        source.0,
+        g.id.as_str(),
+        g.kind.slug(),
+        position,
+        g.name,
+        g.provider_id,
+        g.adult
+    ])?;
+    Ok(added > 0)
+}
+
 pub(crate) fn insert_groups(
     conn: &Connection,
     source: SourceId,
     groups: &[Group],
     offset: i64,
 ) -> Result<usize> {
-    let mut stmt = conn.prepare_cached(
-        "INSERT OR IGNORE INTO groups (source_id, id, kind, position, name, provider_id, adult)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-    )?;
     let mut inserted = 0;
     for (position, g) in groups.iter().enumerate() {
-        inserted += stmt.execute(params![
-            source.0,
-            g.id.as_str(),
-            g.kind.slug(),
-            position as i64 + offset,
-            g.name,
-            g.provider_id,
-            g.adult
-        ])?;
+        inserted += usize::from(group_row(conn, source, g, position as i64 + offset)?);
     }
     Ok(inserted)
 }
 
 /// Inserts membership rows for one item; `sql` is a fixed statement.
-fn insert_members(
+pub(crate) fn insert_members(
     conn: &Connection,
     sql: &str,
     source: SourceId,
@@ -65,50 +97,74 @@ fn insert_members(
     Ok(())
 }
 
+/// Inserts one channel's row (not its memberships); whether it was new.
+pub(crate) fn channel_row(
+    conn: &Connection,
+    source: SourceId,
+    c: &Channel,
+    position: i64,
+) -> Result<bool> {
+    let added = conn.prepare_cached(CHANNEL_ROW)?.execute(params![
+        source.0,
+        c.id.as_str(),
+        position,
+        c.provider_id,
+        c.name,
+        c.number,
+        c.logo,
+        group_ids_to_json(&c.groups),
+        stream_to_json(&c.stream),
+        c.epg_id,
+        c.epg_name,
+        c.epg_shift_minutes,
+        c.catch_up.as_ref().map(catch_up_to_json),
+        c.radio
+    ])?;
+    Ok(added > 0)
+}
+
 pub(crate) fn insert_channels(
     conn: &Connection,
     source: SourceId,
     channels: &[Channel],
     offset: i64,
 ) -> Result<usize> {
-    let mut stmt = conn.prepare_cached(
-        "INSERT OR IGNORE INTO channels (source_id, id, position, provider_id, name, number, logo,
-             group_ids, stream, epg_id, epg_name, epg_shift_minutes, catch_up, radio)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-    )?;
     let mut inserted = 0;
     for (position, c) in channels.iter().enumerate() {
         let position = position as i64 + offset;
-        let added = stmt.execute(params![
-            source.0,
-            c.id.as_str(),
-            position,
-            c.provider_id,
-            c.name,
-            c.number,
-            c.logo,
-            group_ids_to_json(&c.groups),
-            stream_to_json(&c.stream),
-            c.epg_id,
-            c.epg_name,
-            c.epg_shift_minutes,
-            c.catch_up.as_ref().map(catch_up_to_json),
-            c.radio
-        ])?;
-        if added > 0 {
+        if channel_row(conn, source, c, position)? {
             inserted += 1;
-            insert_members(
-                conn,
-                "INSERT OR IGNORE INTO channel_groups (source_id, group_id, channel_id, position)
-                 VALUES (?1, ?2, ?3, ?4)",
-                source,
-                &c.id,
-                &c.groups,
-                position,
-            )?;
+            insert_members(conn, CHANNEL_MEMBERS, source, &c.id, &c.groups, position)?;
         }
     }
     Ok(inserted)
+}
+
+/// Inserts one VOD item's row (not its memberships); whether it was new.
+pub(crate) fn vod_row(
+    conn: &Connection,
+    source: SourceId,
+    v: &VodItem,
+    position: i64,
+) -> Result<bool> {
+    let added = conn.prepare_cached(VOD_ROW)?.execute(params![
+        source.0,
+        v.id.as_str(),
+        position,
+        v.provider_id,
+        v.name,
+        group_ids_to_json(&v.groups),
+        v.poster,
+        v.plot,
+        v.year,
+        v.rating_x10,
+        v.added,
+        v.duration_secs,
+        stream_to_json(&v.stream),
+        v.is_series,
+        serde_json::to_string(&v.episode_numbers)?
+    ])?;
+    Ok(added > 0)
 }
 
 pub(crate) fn insert_vod(
@@ -117,45 +173,38 @@ pub(crate) fn insert_vod(
     vod: &[VodItem],
     offset: i64,
 ) -> Result<usize> {
-    let mut stmt = conn.prepare_cached(
-        "INSERT OR IGNORE INTO vod (source_id, id, position, provider_id, name, group_ids, poster,
-             plot, year, rating_x10, added, duration_secs, stream, is_series, episode_numbers)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-    )?;
     let mut inserted = 0;
     for (position, v) in vod.iter().enumerate() {
         let position = position as i64 + offset;
-        let added = stmt.execute(params![
-            source.0,
-            v.id.as_str(),
-            position,
-            v.provider_id,
-            v.name,
-            group_ids_to_json(&v.groups),
-            v.poster,
-            v.plot,
-            v.year,
-            v.rating_x10,
-            v.added,
-            v.duration_secs,
-            stream_to_json(&v.stream),
-            v.is_series,
-            serde_json::to_string(&v.episode_numbers)?
-        ])?;
-        if added > 0 {
+        if vod_row(conn, source, v, position)? {
             inserted += 1;
-            insert_members(
-                conn,
-                "INSERT OR IGNORE INTO vod_groups (source_id, group_id, vod_id, position)
-                 VALUES (?1, ?2, ?3, ?4)",
-                source,
-                &v.id,
-                &v.groups,
-                position,
-            )?;
+            insert_members(conn, VOD_MEMBERS, source, &v.id, &v.groups, position)?;
         }
     }
     Ok(inserted)
+}
+
+/// Inserts one series' row (not its memberships); whether it was new.
+pub(crate) fn series_row(
+    conn: &Connection,
+    source: SourceId,
+    s: &Series,
+    position: i64,
+) -> Result<bool> {
+    let added = conn.prepare_cached(SERIES_ROW)?.execute(params![
+        source.0,
+        s.id.as_str(),
+        position,
+        s.provider_id,
+        s.name,
+        group_ids_to_json(&s.groups),
+        s.poster,
+        s.plot,
+        s.year,
+        s.rating_x10,
+        s.last_modified
+    ])?;
+    Ok(added > 0)
 }
 
 pub(crate) fn insert_series(
@@ -164,38 +213,12 @@ pub(crate) fn insert_series(
     series: &[Series],
     offset: i64,
 ) -> Result<usize> {
-    let mut stmt = conn.prepare_cached(
-        "INSERT OR IGNORE INTO series (source_id, id, position, provider_id, name, group_ids,
-             poster, plot, year, rating_x10, last_modified)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-    )?;
     let mut inserted = 0;
     for (position, s) in series.iter().enumerate() {
         let position = position as i64 + offset;
-        let added = stmt.execute(params![
-            source.0,
-            s.id.as_str(),
-            position,
-            s.provider_id,
-            s.name,
-            group_ids_to_json(&s.groups),
-            s.poster,
-            s.plot,
-            s.year,
-            s.rating_x10,
-            s.last_modified
-        ])?;
-        if added > 0 {
+        if series_row(conn, source, s, position)? {
             inserted += 1;
-            insert_members(
-                conn,
-                "INSERT OR IGNORE INTO series_groups (source_id, group_id, series_id, position)
-                 VALUES (?1, ?2, ?3, ?4)",
-                source,
-                &s.id,
-                &s.groups,
-                position,
-            )?;
+            insert_members(conn, SERIES_MEMBERS, source, &s.id, &s.groups, position)?;
         }
     }
     Ok(inserted)

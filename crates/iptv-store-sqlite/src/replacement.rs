@@ -56,6 +56,11 @@ impl Meter {
             .map_or(i64::MAX, |n| i64::try_from(n).unwrap_or(i64::MAX))
     }
 
+    /// Whether `rows` more rows fit in the budget.
+    pub(crate) fn fits(&self, rows: u64) -> bool {
+        self.left.is_none_or(|left| rows <= left)
+    }
+
     /// How many of `len` items the next slice may take.
     pub(crate) fn take(&self, len: usize) -> usize {
         self.left
@@ -88,6 +93,23 @@ pub(crate) fn begin(conn: &Connection) -> Result<()> {
 pub(crate) fn roll_back(conn: &Connection) {
     if !conn.is_autocommit() {
         let _ = conn.execute_batch("ROLLBACK");
+    }
+}
+
+/// What a cleanup after a committed publish (a detach, restoring a
+/// connection setting) returns to the caller. Natively its error, as the
+/// one-shot methods always reported it. In the browser the publish runs on
+/// a copy that the caller swaps in on success and abandons on error, so a
+/// cleanup failure is logged instead of discarding committed work.
+pub(crate) fn after_commit(cleanup: Result<()>) -> Result<()> {
+    #[cfg(not(target_family = "wasm"))]
+    return cleanup;
+    #[cfg(target_family = "wasm")]
+    {
+        if let Err(e) = cleanup {
+            log::warn!("cleanup after a committed publish failed: {e}");
+        }
+        Ok(())
     }
 }
 
