@@ -415,11 +415,11 @@ fn diagnosis(value: Diagnosis) -> &'static str {
         Diagnosis::Unmatched => tr("No matching guide channel"),
         Diagnosis::MissingMetadata => tr("Missing guide identity metadata"),
         Diagnosis::Ambiguous => tr("Several guide channels match"),
-        Diagnosis::Empty => tr("No programmes in this interval"),
+        Diagnosis::Empty => tr("No programs in this interval"),
         Diagnosis::Stale => tr("Guide data is out of date"),
-        Diagnosis::Partial => tr("Partial programme coverage"),
-        Diagnosis::SuspiciousTiming => tr("Check programme times"),
-        Diagnosis::Covered => tr("Programme coverage available"),
+        Diagnosis::Partial => tr("Partial program coverage"),
+        Diagnosis::SuspiciousTiming => tr("Check program times"),
+        Diagnosis::Covered => tr("Program coverage available"),
     }
 }
 fn evidence(value: Evidence) -> &'static str {
@@ -551,7 +551,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     .unwrap_or_default()
                 }))
                 .child(ui_kit::body(size, move || {
-                    tr("Programme coverage does not verify channel identity")
+                    tr("Program coverage does not verify channel identity")
                 }))
                 .child(when(
                     move || state(ui, |s| s.busy).unwrap_or(false),
@@ -629,7 +629,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         state(ui, |s| s.mode == Mode::Samples && s.samples.is_empty())
                             .unwrap_or(false)
                     },
-                    move || ui_kit::body(size, move || tr("No programmes in this interval")),
+                    move || ui_kit::body(size, move || tr("No programs in this interval")),
                 ))
                 .child(when(
                     move || state(ui, |s| s.mode == Mode::Link).unwrap_or(false),

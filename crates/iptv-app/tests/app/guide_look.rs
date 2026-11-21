@@ -86,7 +86,7 @@ fn the_guide_uses_the_bundled_fonts_and_proportions() {
     step(app.press_key("m"));
     step(app.press("text:Details"));
     step(app.wait_for("id:description-layer >> text:Generated details for Quiet Harbour"));
-    assert!(!app.screen().matches("text:A synthetic programme description for testing the guide. Real descriptions come from the EPG.").unwrap());
+    assert!(!app.screen().matches("text:A synthetic program description for testing the guide. Real descriptions come from the EPG.").unwrap());
     step(app.back());
 
     let roboto = Some("Roboto, sans-serif".to_owned());
@@ -169,7 +169,7 @@ fn the_guide_uses_the_bundled_fonts_and_proportions() {
             .into_iter()
             .find(|t| t.ends_with("  Quiet Harbour"))
             .map(str::to_owned)
-            .expect("the list's programme line");
+            .expect("the list's program line");
         let condensed = Some("'Roboto Condensed', Roboto, sans-serif".to_owned());
         assert!(close_to(
             &styles(&mut app, &on),

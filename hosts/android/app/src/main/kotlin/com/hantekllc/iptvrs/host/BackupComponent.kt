@@ -75,7 +75,7 @@ class BackupComponent(
             nsh.emit("complete", mapOf(
                 "requestId" to id,
                 "success" to success,
-                "cancelled" to canceled,
+                "canceled" to canceled,
             ))
         }
     }
@@ -179,7 +179,7 @@ class BackupHost(private val activity: Activity) {
         Thread({
             var success = false
             try {
-                if (request.canceled.get()) throw java.io.IOException("Cancelled")
+                if (request.canceled.get()) throw java.io.IOException("Canceled")
                 // Recheck ownership after the chooser. Import requires an
                 // absent file; exclusive creation will never overwrite one.
                 val archive = privateArchive(request.archive.path, request.importing)
@@ -222,7 +222,7 @@ class BackupHost(private val activity: Activity) {
         val buffer = ByteArray(64 * 1024)
         var total = 0L
         while (true) {
-            if (request.canceled.get()) throw java.io.IOException("Cancelled")
+            if (request.canceled.get()) throw java.io.IOException("Canceled")
             val count = input.read(buffer)
             if (count < 0) break
             total += count

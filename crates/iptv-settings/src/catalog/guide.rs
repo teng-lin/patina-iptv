@@ -68,7 +68,7 @@ pub static EPG: &[Setting] = &[
         "epg.keep_past",
         days(0, 14, 1, 7),
         key(
-            "How many days of finished programmes stay in the guide (for catch-up and browsing back).",
+            "How many days of finished programs stay in the guide (for catch-up and browsing back).",
         ),
     ),
     // default: ours
@@ -76,7 +76,7 @@ pub static EPG: &[Setting] = &[
         "storage",
         "epg.store_descriptions",
         boolean(true),
-        key("Keep programme descriptions; turning this off saves storage on large guides."),
+        key("Keep program descriptions; turning this off saves storage on large guides."),
     ),
     // default: declared (06) — partial scan unless a full scan is chosen
     epg(
@@ -99,35 +99,35 @@ pub static EPG: &[Setting] = &[
 pub static APPEARANCE: &[Setting] = &[
     // default: observed (07) — accent Blue
     appearance(
-        "colours",
+        "colors",
         "appearance.accent",
         color(&ACCENT, "blue"),
         key("Accent bundle used for focus, selection and progress."),
     ),
     // default: observed (07) — background Dark
     appearance(
-        "colours",
+        "colors",
         "appearance.background",
         color(&BACKGROUND, "dark"),
         key("Background bundle for panels and windows."),
     ),
     // default: ours
     appearance(
-        "colours",
+        "colors",
         "appearance.selection_style",
         choice(&SELECTION_STYLE, "accent_fill"),
         key("Whether the focused item is filled with the accent or a neutral tone."),
     ),
     // default: ours
     appearance(
-        "colours",
+        "colors",
         "appearance.ui_transparency",
         int(0, 80, 5, IntUnit::Percent, 20),
         key("How much video shows through browsing surfaces drawn over it."),
     ),
     // default: ours
     appearance(
-        "colours",
+        "colors",
         "appearance.panel_transparency",
         choice(&LEVEL, "low"),
         key("See-through level of the player's info and control panels."),
@@ -151,7 +151,7 @@ pub static APPEARANCE: &[Setting] = &[
         "text",
         "appearance.two_line_program_titles",
         boolean(false),
-        key("Wrap long programme titles onto a second line instead of truncating."),
+        key("Wrap long program titles onto a second line instead of truncating."),
     ),
     // default: ours
     appearance(
@@ -174,7 +174,7 @@ pub static GUIDE: &[Setting] = &[
         "content",
         "guide.visible_minutes",
         int(60, 360, 30, IntUnit::None, 150),
-        key("Minutes visible across the programme grid; navigation retains its focused programme."),
+        key("Minutes visible across the program grid; navigation retains its focused program."),
     ),
     guide(
         "content",
@@ -217,21 +217,21 @@ pub static GUIDE: &[Setting] = &[
         "content",
         "guide.show_now_playing",
         boolean(true),
-        key("Show the programme on air under each channel in the channel list."),
+        key("Show the program on air under each channel in the channel list."),
     ),
     // default: ours
     guide(
         "content",
         "guide.show_programs",
         boolean(true),
-        key("Show programme cells; off leaves a plain channel list."),
+        key("Show program cells; off leaves a plain channel list."),
     ),
     // default: ours
     guide(
         "content",
         "guide.show_description",
         boolean(true),
-        key("Show the focused programme's description in the details area."),
+        key("Show the focused program's description in the details area."),
     ),
     // default: ours
     guide(
@@ -245,35 +245,35 @@ pub static GUIDE: &[Setting] = &[
         "content",
         "guide.show_catchup_badge",
         boolean(true),
-        key("Mark channels whose past programmes can be replayed."),
+        key("Mark channels whose past programs can be replayed."),
     ),
     // default: ours
     guide(
         "emphasis",
         "guide.dim_past",
         boolean(true),
-        key("Draw finished programmes with less contrast."),
+        key("Draw finished programs with less contrast."),
     ),
     // default: ours
     guide(
         "emphasis",
         "guide.highlight_playing",
         boolean(true),
-        key("Colour the channel that is playing, independently of focus."),
+        key("Color the channel that is playing, independently of focus."),
     ),
     // default: ours
     guide(
         "emphasis",
         "guide.highlight_now",
         boolean(true),
-        key("Emphasise programmes that are on air."),
+        key("Emphasize programs that are on air."),
     ),
     // default: ours
     guide(
         "emphasis",
         "guide.now_highlight_style",
         choice(&NOW_HIGHLIGHT, "color"),
-        key("How on-air programmes are emphasised: plain, tinted, or only by their progress bar."),
+        key("How on-air programs are emphasized: plain, tinted, or only by their progress bar."),
     )
     .depends(&[visible_if(&[when("guide.highlight_now", Test::IsTrue)])]),
     // default: ours
@@ -325,7 +325,7 @@ pub static GUIDE: &[Setting] = &[
         "switching",
         "guide.back_returns_to_now",
         boolean(true),
-        key("Back in a guide scrolled away from now first returns to the programmes on air."),
+        key("Back in a guide scrolled away from now first returns to the programs on air."),
     ),
 ];
 

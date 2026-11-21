@@ -41,7 +41,7 @@ fn replace_50k_channel_catalog() {
         replace(&mut s, src, &first)
     });
     // A realistic amount of customisation.
-    timed("1000 favourites + 500 renames + 500 hides", || {
+    timed("1000 favorites + 500 renames + 500 hides", || {
         for i in 0..1000 {
             s.set_favorite(src, &first.channels[i * 37].id, true)
                 .unwrap();
@@ -100,7 +100,7 @@ fn replace_50k_channel_catalog() {
         .unwrap()
     });
     assert_eq!(rows[0].channel.id, first.channels[7 + GROUPS * 100].id);
-    timed("load_channels favourites", || {
+    timed("load_channels favorites", || {
         s.load_channels(
             src,
             &ChannelQuery {

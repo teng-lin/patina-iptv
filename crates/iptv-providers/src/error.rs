@@ -173,8 +173,8 @@ impl fmt::Display for CatchupError {
             Self::MissingTemplate => "the channel's catch-up needs a source it does not declare",
             Self::Unsupported => "catch-up is not available for this channel",
             Self::MalformedUrl => "the stream URL does not fit the channel's catch-up type",
-            Self::FutureProgram => "the programme has not been broadcast yet",
-            Self::OutsideArchive => "the programme is outside the archive window",
+            Self::FutureProgram => "the program has not been broadcast yet",
+            Self::OutsideArchive => "the program is outside the archive window",
         })
     }
 }

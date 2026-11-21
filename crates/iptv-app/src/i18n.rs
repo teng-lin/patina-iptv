@@ -299,9 +299,9 @@ mod tests {
             "Rewind",
             "Play or pause",
             "Fast-forward",
-            "Favourite",
+            "Favorite",
             "Subtitles and tracks",
-            "Programme details",
+            "Program details",
             "Picture size",
             "Channel list",
             "Multiview",
@@ -334,7 +334,7 @@ mod tests {
                 .iter()
                 .filter(|language| translate(language, label) != label)
                 .count();
-            assert!(translated > 0, "no catalogue row for {label:?}");
+            assert!(translated > 0, "no catalog row for {label:?}");
         }
         assert_eq!(translate(resolve("es", None), "Volume"), "Volumen");
         assert_eq!(translate(resolve("de", None), "Mute"), "Stumm");

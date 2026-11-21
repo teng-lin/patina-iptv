@@ -135,7 +135,7 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
     step(app.press("text:/^☰  /"));
     step(app.press_key("right"));
     step(app.press_key("m"));
-    step(app.wait_for(&message("Manage favourites…")));
+    step(app.wait_for(&message("Manage favorites…")));
     step(app.press(&message("Settings >> nth=1")));
     step(app.wait_for(&message("Back up")));
     let archive = home.join("generated.patinabackup");
@@ -163,7 +163,7 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
     step(app.press(&message("Restore a backup")));
     step(app.press_key("down"));
     step(app.press_key("enter"));
-    step(app.wait_for(&message("Scheduled restore cancelled")));
+    step(app.wait_for(&message("Scheduled restore canceled")));
     step(app.wait_for_gone(
         &message("Scheduled for next launch"),
         Duration::from_secs(3),

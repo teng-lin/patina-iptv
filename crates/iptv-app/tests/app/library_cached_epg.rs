@@ -29,7 +29,7 @@ fn cached_playlist_still_downloads_its_guide_when_epg_startup_refresh_is_enabled
             "<tv><channel id=\"a.test\"><display-name>Cached A</display-name></channel>\
              <programme channel=\"a.test\" start=\"{}\" stop=\"{}\">\
              <title>Independent guide refresh</title>\
-             <desc>Synthetic test programme.</desc></programme></tv>",
+             <desc>Synthetic test program.</desc></programme></tv>",
             format_xmltv_time(now - 3600),
             format_xmltv_time(now + 3600)
         ),

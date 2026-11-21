@@ -141,7 +141,7 @@ fn feed_one() -> String {
     for (c, h, title) in &titles {
         let start = from + h * HOUR;
         let mut p = prog(&ids[*c], start, Some(start + HOUR), title);
-        p.desc = Some("An invented programme.");
+        p.desc = Some("An invented program.");
         if h % 5 == 0 {
             p.sub_title = Some("Part one");
             p.episode = Some("S01E02");

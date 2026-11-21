@@ -800,7 +800,7 @@ mod tests {
         let live = f.program(&S);
         f.enter_past(&S);
         let first = f.program(&S);
-        assert_eq!(first.end, live.start, "the programme before the live one");
+        assert_eq!(first.end, live.start, "the program before the live one");
         assert_eq!(f.pane, Pane::Guide);
         f.apply(Move::Left, &S);
         assert_eq!(
@@ -931,7 +931,7 @@ mod tests {
         assert!(!f.tick(0, &S), "same minute");
         assert!(f.tick(live.end, &S));
         assert_eq!(f.cursor, live.end);
-        assert_eq!(f.program(&S).start, live.end, "the next programme");
+        assert_eq!(f.program(&S).start, live.end, "the next program");
         assert_eq!(f.program(&S).airing(f.now), Airing::Live);
         assert_eq!(f.window, home_window(live.end), "the default window moves");
         // Back and the groups return to the new now.

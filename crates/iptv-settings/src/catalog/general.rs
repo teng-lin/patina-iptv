@@ -221,7 +221,7 @@ pub static CHANNELS: &[Setting] = &[
         "categories",
         "channels.show_favorites",
         boolean(true),
-        key("Offer a category with the favourite channels."),
+        key("Offer a category with the favorite channels."),
     ),
     // default: ours
     channels(

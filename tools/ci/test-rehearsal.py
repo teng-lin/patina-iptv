@@ -299,7 +299,7 @@ class CleaningUp(Rehearsal):
     }
 
     def rehearsed(self, tag=None, releases=(release(501),), rules=()):
-        """The neighbours, and what a rehearsal leaves: its tag and its draft."""
+        """The neighbors, and what a rehearsal leaves: its tag and its draft."""
         refs = {**self.NEIGHBORS["refs"], REF: tag or lightweight()}
         self.world(refs=refs, releases=[*releases, *self.NEIGHBORS["releases"]], rules=rules)
         return self.state()

@@ -291,10 +291,7 @@ pub fn cancel_running(owner: &super::Runtime, id: SourceId) {
     owner.cancel_guide_check(id);
     revoke_import_handoff(owner, id);
     if let Some((_, token)) = owner.imports.with(|r| r.borrow_mut().remove(&id)) {
-        log::info!(
-            "iptv data: cancelling the running import of source {}",
-            id.0
-        );
+        log::info!("iptv data: canceling the running import of source {}", id.0);
         token.cancel();
     }
 }

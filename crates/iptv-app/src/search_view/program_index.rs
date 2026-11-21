@@ -99,7 +99,7 @@ pub fn build(
         match read.await {
             Ok(index) => {
                 log::info!(
-                    "iptv search: read {} stored programmes in {} ms",
+                    "iptv search: read {} stored programs in {} ms",
                     index.program_count(),
                     started.elapsed().as_millis()
                 );

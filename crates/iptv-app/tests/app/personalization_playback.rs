@@ -82,7 +82,7 @@ fn rapid_navigation_cancels_tuning_menus_cancel_preview_and_input_extends_fullsc
     opened.lock().unwrap().clear();
     step(app.press_key("up"));
     step(app.press_key("m"));
-    step(app.wait_for("text:Manage favourites…"));
+    step(app.wait_for("text:Manage favorites…"));
     step(app.run_for(Duration::from_secs(1)));
     assert!(
         opened.lock().unwrap().is_empty(),

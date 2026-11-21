@@ -97,7 +97,7 @@ pub fn status(line: &SourceLine, when: impl Fn(i64) -> String) -> (String, bool)
                     &[("count", state.channel_count.into())],
                 ),
                 trf(
-                    "{count, plural, one {# programme} other {# programmes}}",
+                    "{count, plural, one {# program} other {# programs}}",
                     &[("count", state.program_count.into())],
                 ),
                 updated,
@@ -155,7 +155,7 @@ pub fn sheet(kind: &EditKind) -> (&'static str, &'static str) {
 pub fn remove_consequences(s: &GuideSource) -> String {
     trf(
         "“{name}” will no longer be downloaded. \
-         Its programmes go away at the next guide update.",
+         Its programs go away at the next guide update.",
         &[("name", (&title(s)).into())],
     )
 }
@@ -215,7 +215,7 @@ mod tests {
         assert_eq!(
             remove_consequences(&l.source),
             "“Synthetic Guide” will no longer be downloaded. \
-             Its programmes go away at the next guide update."
+             Its programs go away at the next guide update."
         );
         assert_eq!(shift(30), "Times +0:30 h");
         assert_eq!(act(Act::Switch, &l.source), "Switch off");
@@ -285,7 +285,7 @@ mod tests {
         assert_eq!(
             status(&line(true, Some(r.clone())), when),
             (
-                "1 channel used · 240 programmes · updated 14:05 · Times −1:30 h".to_owned(),
+                "1 channel used · 240 programs · updated 14:05 · Times −1:30 h".to_owned(),
                 false
             )
         );

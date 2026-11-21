@@ -732,8 +732,8 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.press_key("enter"));
     strip(&mut app);
     step(app.wait_for("text:Sleep timer · Off"));
-    step(app.press("text:☆ Favourite"));
-    step(app.wait_for("text:★ Favourite"));
+    step(app.press("text:☆ Favorite"));
+    step(app.wait_for("text:★ Favorite"));
     // Recordings opens management without replacing the viewing surface.
     step(app.press("text:Recordings"));
     step(app.wait_for("id:recordings-screen"));
@@ -857,7 +857,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     let replay = wait_archive_source(&mut app, &props, &older_archive, false);
     assert!(
         archive_start(&replay) > archive_start(&older_archive),
-        "the newly selected programme replaces the older day's archive"
+        "the newly selected program replaces the older day's archive"
     );
     assert_eq!(replay["live"], json!(false));
     state(&mut app, "ready");
@@ -936,7 +936,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     // The replay ends: its card says so, and Next (⏭) returns to live.
     state(&mut app, "ready");
     state(&mut app, "ended");
-    step(app.wait_for("text:The programme has ended"));
+    step(app.wait_for("text:The program has ended"));
     step(app.wait_for("text:Next (⏭) returns to live."));
     step(app.press_key("n"));
     wait_live_source(&mut app, &props, "one");
@@ -965,7 +965,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     card_action(&mut app, 3);
     step(app.back());
     card_action(&mut app, 4);
-    step(app.wait_for("text:★ Favourite"));
+    step(app.wait_for("text:★ Favorite"));
     step(app.back());
     card_action(&mut app, 6);
     step(app.wait_for(STRIP));
@@ -1096,9 +1096,9 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     wait_archive_source(&mut app, &props, &previous, false);
     assert_eq!(opens(), before + 3, "reopened where the finger lifted");
     let titles = app.screen().count("text:Show -2").unwrap();
-    step(app.press("label:Programme details"));
+    step(app.press("label:Program details"));
     step(app.wait_for(&format!("text:Show -2 >> nth={titles}")));
-    step(app.press("label:Programme details"));
+    step(app.press("label:Program details"));
 
     // The strip's channel list over the video, closed again.
     strip(&mut app);

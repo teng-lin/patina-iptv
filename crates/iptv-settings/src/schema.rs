@@ -92,7 +92,7 @@ impl Section {
             Section::Playlists => &["content", "updates"],
             Section::Channels => &["sorting", "categories", "names"],
             Section::Epg => &["updates", "storage", "matching"],
-            Section::Appearance => &["colours", "text", "motion"],
+            Section::Appearance => &["colors", "text", "motion"],
             Section::Guide => &["browsing", "content", "emphasis", "switching"],
             Section::Logos => &[],
             Section::Player => &["panels", "info", "clock", "buttons", "pip"],
@@ -103,7 +103,7 @@ impl Section {
             Section::Recordings => &["recording", "reminders"],
             Section::Parental => &["scope", "unlock"],
             Section::Remote => &["timing", "mapping"],
-            Section::Vod => &["catalogue", "playback"],
+            Section::Vod => &["catalog", "playback"],
         }
     }
 
@@ -232,7 +232,7 @@ impl ValueType {
             ValueType::Duration { .. } => "duration",
             ValueType::Enum { .. } => "enum",
             ValueType::Text { .. } => "text",
-            ValueType::Color { .. } => "colour",
+            ValueType::Color { .. } => "color",
             ValueType::KeyBindings { .. } => "key_bindings",
         }
     }

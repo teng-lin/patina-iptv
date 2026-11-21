@@ -257,7 +257,7 @@ fn edit_organization_native(
             Ok(StoredKind::Channels)
         }
         Kind::Favorites => Err(StoreError::Unavailable(
-            "favourites use their ordered writer",
+            "favorites use their ordered writer",
         )),
     };
     services.call(move |store| {

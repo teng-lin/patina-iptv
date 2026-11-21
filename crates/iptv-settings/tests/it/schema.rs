@@ -132,7 +132,7 @@ fn dependencies_refer_to_existing_settings_of_a_matching_type() {
                 let ok = match (w.test, &target.ty) {
                     (Test::IsTrue, ValueType::Bool { .. }) => true,
                     (Test::EnumIn(vs), ty) => {
-                        let c = ty.choices().expect("EnumIn needs an enum or colour");
+                        let c = ty.choices().expect("EnumIn needs an enum or color");
                         !vs.is_empty() && vs.iter().all(|v| c.contains(v))
                     }
                     (Test::NotEmpty, ValueType::Text { .. }) => true,
@@ -450,11 +450,7 @@ fn types_name_themselves_and_give_their_default() {
             Value::choice("large"),
         ),
         (text(TextKind::Plain, 8, "abc"), "text", Value::text("abc")),
-        (
-            color(&choices::ACCENT, "red"),
-            "colour",
-            Value::color("red"),
-        ),
+        (color(&choices::ACCENT, "red"), "color", Value::color("red")),
         (bindings(4), "key_bindings", Value::KeyBindings(vec![])),
     ];
     for (ty, name, default) in cases {
@@ -463,7 +459,7 @@ fn types_name_themselves_and_give_their_default() {
         assert_eq!(s.default_value(), default, "{name}");
         assert_eq!(s.default_value().type_name(), name, "value and type agree");
         // Choices exist exactly for enums and colours.
-        assert_eq!(ty.choices().is_some(), matches!(name, "enum" | "colour"));
+        assert_eq!(ty.choices().is_some(), matches!(name, "enum" | "color"));
     }
     assert_eq!(
         choice(&choices::SIZE, "large").choices(),

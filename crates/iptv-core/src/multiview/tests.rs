@@ -85,7 +85,7 @@ fn enlarged_puts_one_big_over_a_centered_strip() {
     let (sx, sy, sw, sh) = two(0);
     assert!((sy - (by + bh)).abs() <= 1, "the strip under it");
     assert!((sw - 630).abs() <= 10, "{sw}");
-    assert!((sx - (2560 - sw) / 2).abs() <= 1, "one small tile centred");
+    assert!((sx - (2560 - sw) / 2).abs() <= 1, "one small tile centered");
     assert!(sy + sh <= 1600);
     // Four: three small ones side by side, centred, in tile order.
     let four = |i| Layout::Enlarged { tiles: 4, big: 2 }.rect(i, TABLET);
@@ -151,7 +151,7 @@ fn the_arrows_move_the_sound_between_tiles() {
     mv.key(Key::Right, ok);
     assert_eq!(mv.active().channel, 12, "nothing right of the third");
     mv.key(Key::Up, ok);
-    assert_eq!(mv.active_index(), 0, "up from the centre: the left one");
+    assert_eq!(mv.active_index(), 0, "up from the center: the left one");
     mv.key(Key::Up, ok);
     assert_eq!(mv.active_index(), 0, "no wrap");
     mv.key(Key::Right, ok);

@@ -84,7 +84,7 @@ fn the_groups_column_starts_with_favorites_recent_and_all() {
     assert_eq!(
         names,
         [
-            "Favourites",
+            "Favorites",
             "Recently watched",
             "All channels",
             "News",
@@ -171,7 +171,7 @@ fn a_list_view_reads_the_catalog_channel_behind_each_row() {
     assert_eq!(fav.title(0, fav.program_at(0, 0)), "T7");
     assert_eq!(fav.find_channel("k4"), Some(1));
     assert_eq!(fav.find_channel("k0"), None, "not in this list");
-    assert_eq!(fav.group_name(0), "Favourites");
+    assert_eq!(fav.group_name(0), "Favorites");
     // Rows the list does not have still answer (an empty list's cursor).
     assert_eq!(fav.channel_name(5), "");
     assert_eq!(fav.program_at(5, 75).airing(75), Airing::Live);

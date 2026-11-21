@@ -213,7 +213,7 @@ fn resizing_the_guide_keeps_the_focused_channel_and_the_playing_preview() {
     assert!(channel_selected(app, "Local A"), "back to the first row");
     // A tap on a compact header's shortcut still works.
     step(app.press("id:guide-header-shortcuts >> text:/^☰  /"));
-    step(app.wait_for("id:guide-groups >> text:Favourites"));
+    step(app.wait_for("id:guide-groups >> text:Favorites"));
     assert_eq!(iptv_app::player_opens(0), opens);
     persistent(app, &lifetime, player);
 }

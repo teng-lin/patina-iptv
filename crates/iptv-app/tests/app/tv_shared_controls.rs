@@ -310,7 +310,7 @@ fn sidebar_up_reaches_preview_on_desktop_and_tv_without_reopening_video() {
             nsh_core::prelude::px(h),
         )));
         step(app.press("text:/^☰  /"));
-        step(app.press("id:guide-groups >> text:Favourites"));
+        step(app.press("id:guide-groups >> text:Favorites"));
         if idiom == Idiom::Desktop {
             step(app.press_key("tab"));
         }
@@ -328,14 +328,14 @@ fn sidebar_up_reaches_preview_on_desktop_and_tv_without_reopening_video() {
         step(app.press_key("down"));
         assert!(!selected(app, "guide-preview"));
         step(app.press("text:/^☰  /"));
-        step(app.press("id:guide-groups >> text:Favourites"));
+        step(app.press("id:guide-groups >> text:Favorites"));
         if idiom == Idiom::Desktop {
             step(app.press_key("tab"));
         }
         let groups_width = width(app, "guide-groups");
         let rail_width = width(app, "navigation-rail");
         step(app.press_key("up"));
-        assert!(selected(app, "guide-preview"), "Favourites, {idiom:?}");
+        assert!(selected(app, "guide-preview"), "Favorites, {idiom:?}");
         assert_eq!(width(app, "guide-groups"), groups_width);
         assert_eq!(width(app, "navigation-rail"), rail_width);
         step(app.press_key("down"));
@@ -496,7 +496,7 @@ fn tv_shows_a_visible_back_once_touch_is_used_and_hides_it_for_keys() {
 /// channel); Back closes it.
 #[track_caller]
 fn menu_opens_for(app: &mut crate::Headless, channel: &str) {
-    step(app.wait_for("id:menu-panel >> text:Manage favourites…"));
+    step(app.wait_for("id:menu-panel >> text:Manage favorites…"));
     assert!(
         app.screen()
             .matches(&format!("id:menu-panel >> text:/^{channel}$/"))
@@ -505,7 +505,7 @@ fn menu_opens_for(app: &mut crate::Headless, channel: &str) {
         app.screen().texts()
     );
     step(app.back());
-    step(app.wait_for_gone("text:Manage favourites…", Duration::from_secs(2)));
+    step(app.wait_for_gone("text:Manage favorites…", Duration::from_secs(2)));
 }
 
 const GUIDE_MORE: &str = "id:guide-ui >> label:More options";
@@ -630,7 +630,7 @@ fn a_tv_remote_sees_no_more_control() {
         );
     }
     step(app.press_key("m"));
-    step(app.wait_for("id:menu-panel >> text:Manage favourites…"));
+    step(app.wait_for("id:menu-panel >> text:Manage favorites…"));
     assert!(!app.screen().matches("id:guide-more").unwrap());
 }
 

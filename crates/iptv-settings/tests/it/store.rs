@@ -427,7 +427,7 @@ fn a_value_of_another_type_names_both_types() {
         (Value::ms(1), "duration"),
         (Value::choice("x"), "enum"),
         (Value::text("x"), "text"),
-        (Value::color("x"), "colour"),
+        (Value::color("x"), "color"),
         (Value::KeyBindings(vec![]), "key_bindings"),
     ];
     for (value, name) in found {

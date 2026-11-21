@@ -141,7 +141,7 @@ fn main() {
 
     println!("guide: {channels} channels x {days} days");
     println!(
-        "index: {} programmes, {} distinct titles, {} words, {:.1} MiB heap (store {:.1} MiB)",
+        "index: {} programs, {} distinct titles, {} words, {:.1} MiB heap (store {:.1} MiB)",
         idx.program_count(),
         idx.title_count(),
         idx.word_count(),

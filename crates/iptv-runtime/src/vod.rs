@@ -1240,7 +1240,7 @@ mod tests {
         .unwrap();
         let source = store
             .add_source(&Source {
-                name: "Generated bounded catalogue".into(),
+                name: "Generated bounded catalog".into(),
                 config: SourceConfig::M3u(M3uSourceConfig {
                     location: SecretUrl::new("https://example.test/generated.m3u"),
                     user_agent: None,

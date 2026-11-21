@@ -176,7 +176,7 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_pauses() {
     assert_eq!(
         iptv_app::player_opens(0),
         opens + 1,
-        "the cancelled seek timer does not reopen again"
+        "the canceled seek timer does not reopen again"
     );
 
     // Track selection by the remote on the same bar: the host reports a

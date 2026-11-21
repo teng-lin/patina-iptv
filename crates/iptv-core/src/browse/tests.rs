@@ -181,7 +181,7 @@ fn moving_over_the_groups_filters_the_guide_live() {
     for _ in 0..10 {
         s.mv(Move::Up);
     }
-    assert_eq!(s.focus.group, FAVORITES, "Favourites is first");
+    assert_eq!(s.focus.group, FAVORITES, "Favorites is first");
     assert!(s.shown().is_empty());
 }
 
@@ -295,7 +295,7 @@ fn the_rail_skips_items_without_a_screen() {
     assert_eq!(s.focus.rail, RailItem::Tv);
     for item in [RailItem::Movies, RailItem::Shows] {
         assert_eq!(s.mv(Move::Down), Outcome::Moved);
-        assert_eq!(s.focus.rail, item, "catalogues are always reachable");
+        assert_eq!(s.focus.rail, item, "catalogs are always reachable");
         assert_eq!(s.ok(), Outcome::Open(item));
     }
     assert_eq!(s.mv(Move::Down), Outcome::Moved);
@@ -374,7 +374,7 @@ fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
     assert_eq!(
         f.tap_rail(4, &cols, &SyntheticList),
         Outcome::Open(Continue),
-        "Continue watching remains available after the catalogues"
+        "Continue watching remains available after the catalogs"
     );
     assert_eq!(
         f.tap_rail(5, &cols, &SyntheticList),
@@ -538,7 +538,7 @@ fn tab_toggles_between_the_grid_and_the_groups() {
     s.mv(Move::Right);
     let (row, cursor) = (s.focus.channel, s.focus.cursor);
     assert!(s.focus.toggle_groups(&s.view));
-    assert_eq!(s.focus.pane, Pane::Groups, "also off the live programme");
+    assert_eq!(s.focus.pane, Pane::Groups, "also off the live program");
     assert!(s.focus.toggle_groups(&s.view));
     assert_eq!(
         (s.focus.pane, s.focus.channel, s.focus.cursor),

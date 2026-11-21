@@ -1247,7 +1247,7 @@ fn indirect_preview_uses_actual_low_feed_binding_when_high_feed_only_lists_chann
                     &ProgramData {
                         start: 1_794_657_600,
                         stop: Some(1_794_664_800),
-                        title: "Synthetic lower priority programme",
+                        title: "Synthetic lower priority program",
                         ..Default::default()
                     },
                 )
@@ -1327,7 +1327,7 @@ fn indirect_preview_uses_actual_low_feed_binding_when_high_feed_only_lists_chann
 
 #[test]
 #[cfg(feature = "test-support")]
-#[ignore = "large synthetic catalogue; tools/check.sh runs this in isolation"]
+#[ignore = "large synthetic catalog; tools/check.sh runs this in isolation"]
 fn repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive() {
     use iptv_providers::{
         GroupId,
@@ -1820,11 +1820,7 @@ fn automatic_verification_waits_for_full_projection_after_no_guide_undo() {
 #[test]
 fn automatic_verification_rejects_stale_binding_and_partial_fingerprint_renewal() {
     let fixture = Fixture::new();
-    retained_guide(
-        fixture.dir.path(),
-        fixture.source,
-        "Synthetic old catalogue",
-    );
+    retained_guide(fixture.dir.path(), fixture.source, "Synthetic old catalog");
     let mut changed = channels();
     changed[0].epg_id = Some("amber.other".into());
     fixture
@@ -1864,7 +1860,7 @@ fn automatic_verification_rejects_stale_binding_and_partial_fingerprint_renewal(
         .unwrap();
     assert_eq!(
         result.programs_available, 1,
-        "old real programmes remain visible"
+        "old real programs remain visible"
     );
     assert!(!result.configuration_effective && !result.verified_coverage);
 }
@@ -1930,7 +1926,7 @@ fn held_verification_detects_catalog_change_without_mapping_or_config_edit() {
     retained_guide(
         fixture.dir.path(),
         fixture.source,
-        "Synthetic before catalogue change",
+        "Synthetic before catalog change",
     );
     let request = fixture.request("amber", Target::Automatic);
     let saved = fixture.apply(&fixture.preview(request.clone()));

@@ -42,7 +42,7 @@ pub(crate) const BAR_CONTROLS: [&str; 12] = [
     "play-bar-play-pause",
     "play-bar-forward",
     "play-bar-record",
-    "play-bar-favourite",
+    "play-bar-favorite",
     "play-bar-tracks",
     "play-bar-details",
     "play-bar-picture",
@@ -248,7 +248,7 @@ pub(crate) fn header_fits_as(
         n.text.as_ref().is_some_and(|t| t.text.text.contains(" – "))
             && n.bounds.origin.x.0 >= details[0] - 0.5
     })
-    .unwrap_or_else(|| panic!("the programme's times shown: {what}"));
+    .unwrap_or_else(|| panic!("the program's times shown: {what}"));
     for (part, b) in [("times", times), ("minutes left", left)] {
         assert!(
             b[1] >= details[1] - 0.5 && b[1] + b[3] <= details[1] + details[3] + 0.5,
@@ -319,7 +319,7 @@ fn ipad_guide_keeps_the_focused_channel_and_the_preview_in_every_window() {
     assert!(channel_selected(app, "Local C"));
     present(app, (375.0, 820.0), TEXT[1]);
     step(app.press("id:guide-header-shortcuts >> text:/^☰  /"));
-    step(app.wait_for("id:guide-groups >> text:Favourites"));
+    step(app.wait_for("id:guide-groups >> text:Favorites"));
     assert_eq!(iptv_app::player_opens(0), opens);
     persistent(app, &lifetime, player);
 }

@@ -127,7 +127,7 @@ async fn main() {
             for s in &epg.sources {
                 match &s.result {
                     Ok(st) => println!(
-                        "epg source {}: {} channels, {} programmes kept, {} KiB",
+                        "epg source {}: {} channels, {} programs kept, {} KiB",
                         s.id.0,
                         st.parse.channels,
                         st.ingest.kept,

@@ -114,7 +114,7 @@ fn a_queued_registration_cannot_outlive_its_application_owner() {
     static CALLS: AtomicUsize = AtomicUsize::new(0);
     let directory = tempfile::tempdir().unwrap();
     let mut ports = crate::Ports::new(directory.path().to_owned(), |_| {
-        panic!("a wake report must not open the catalogue")
+        panic!("a wake report must not open the catalog")
     });
     ports.recording_schedule = |_, _| {
         CALLS.fetch_add(1, Ordering::SeqCst);
@@ -147,7 +147,7 @@ fn a_registration_spanning_native_restart_cannot_publish_the_old_report() {
     }
     let directory = tempfile::tempdir().unwrap();
     let mut ports = crate::Ports::new(directory.path().to_owned(), |_| {
-        panic!("a wake report must not open the catalogue")
+        panic!("a wake report must not open the catalog")
     });
     ports.recording_schedule = register;
     let owner = Runtime::new(ports);
@@ -177,7 +177,7 @@ async fn foreground_refresh_preserves_the_native_series_deadline_and_newer_inten
     }
     let directory = tempfile::tempdir().unwrap();
     let mut ports = crate::Ports::new(directory.path().to_owned(), |_| {
-        panic!("wake refresh must not open the catalogue")
+        panic!("wake refresh must not open the catalog")
     });
     ports.recording_schedule = register;
     let owner = Runtime::new(ports);
@@ -191,7 +191,7 @@ async fn foreground_refresh_preserves_the_native_series_deadline_and_newer_inten
             source: 1,
             channel: "generated".into(),
             channel_name: "Generated channel".into(),
-            title: "Generated programme".into(),
+            title: "Generated program".into(),
             start: at + 86400,
             end: at + 86460,
         },
@@ -293,7 +293,7 @@ pub(super) async fn seed(owner: &Runtime, url: &str) -> Request {
                 source: source.0,
                 channel: channels[0].id.as_str().into(),
                 channel_name: "Generated channel".into(),
-                title: "Generated programme".into(),
+                title: "Generated program".into(),
                 start: now() + 3600,
                 end: now() + 7200,
             })

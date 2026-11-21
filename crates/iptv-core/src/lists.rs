@@ -62,7 +62,7 @@ pub fn entry_count(catalog: &dyn Schedule) -> usize {
 /// The entry's name in the groups column (iptv-rs's own wording).
 pub fn entry_name(entry: usize, catalog: &dyn Schedule) -> String {
     match Entry::at(entry) {
-        Entry::Favorites => "Favourites".to_owned(),
+        Entry::Favorites => "Favorites".to_owned(),
         Entry::Recent => "Recently watched".to_owned(),
         Entry::All => catalog.all_channels_name(),
         Entry::Group(g) => catalog.group_name(g),
@@ -364,7 +364,7 @@ impl Schedule for ListView {
     fn group_name_in(&self, _group: usize, language: &crate::i18n::Language) -> String {
         use crate::i18n::translate;
         match Entry::at(self.list.entry()) {
-            Entry::Favorites => translate(language, "Favourites").to_owned(),
+            Entry::Favorites => translate(language, "Favorites").to_owned(),
             Entry::Recent => translate(language, "Recently watched").to_owned(),
             Entry::Group(group) => self.catalog.group_name_in(group, language),
             Entry::All => match self.catalog.all_channels_name().as_str() {

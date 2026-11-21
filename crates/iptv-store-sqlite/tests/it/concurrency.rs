@@ -290,7 +290,7 @@ fn recording_favorite_and_custom_order_mutations_wait_for_the_other_writer() {
         source: source.0,
         channel: first.as_str().into(),
         channel_name: "Synthetic channel".into(),
-        title: "Synthetic programme".into(),
+        title: "Synthetic program".into(),
         start: 1_800_000_000,
         end: 1_800_003_600,
     };
@@ -396,7 +396,7 @@ fn concurrent_identical_recording_requests_commit_one_job() {
         source: source.0,
         channel: catalog.channels[0].id.as_str().into(),
         channel_name: "Synthetic channel".into(),
-        title: "Synthetic programme".into(),
+        title: "Synthetic program".into(),
         start: 1_800_000_000,
         end: 1_800_003_600,
     };

@@ -347,8 +347,8 @@ fn guide_keys(app: &mut Headless) {
     // changes nothing; Right adds all, Left removes them; Back closes.
     const STAR: &str = "text:★ Test Channel Four";
     step(app.press_key("m"));
-    step(app.wait_for("text:Manage favourites…"));
-    step(app.press("text:Manage favourites…"));
+    step(app.wait_for("text:Manage favorites…"));
+    step(app.press("text:Manage favorites…"));
     step(app.press_key("down"));
     step(app.press_key("up"));
     step(app.press_key("enter"));
@@ -374,7 +374,7 @@ fn search_keys(app: &mut Headless) {
     // the keyboard down, Down to the tabs, Right (no other tab with
     // results), Down to it, OK: its details.
     step(app.type_text(FIELD, "Gala"));
-    step(app.wait_for("text:/^Programmes · 1$/"));
+    step(app.wait_for("text:/^Programs · 1$/"));
     step(app.back());
     step(app.press_key("down"));
     step(app.press_key("right"));
@@ -478,9 +478,9 @@ fn channel_list_keys(app: &mut Headless) {
     step(app.press_key("up"));
     step(app.wait_until("recent", WAIT, |s| lit(s, "Recently watched")));
     step(app.press_key("up"));
-    step(app.wait_for("text:No favourites yet"));
+    step(app.wait_for("text:No favorites yet"));
     step(app.press_key("right"));
-    assert!(lit(app.screen(), "Favourites"), "still in the groups");
+    assert!(lit(app.screen(), "Favorites"), "still in the groups");
     // Down to the News group (entry 3); OK enters it.
     for _ in 0..3 {
         step(app.press_key("down"));
@@ -560,7 +560,7 @@ fn list_open(screen: &nsh_testing::Screen) -> bool {
         return true;
     }
     let entries = [
-        "Favourites",
+        "Favorites",
         "Recently watched",
         "All channels",
         "News",

@@ -101,8 +101,8 @@ pub const ALL: &[(&str, &str)] = &[
     (FULLSCREEN_TIMEOUT.0, "duration"),
     (AUTOPLAY.0, "bool"),
     (BROWSE_MODE.0, "enum"),
-    (ACCENT.0, "colour"),
-    (BACKGROUND.0, "colour"),
+    (ACCENT.0, "color"),
+    (BACKGROUND.0, "color"),
     (FONT_SIZE.0, "enum"),
     (CHANNEL_SORT.0, "enum"),
     (GROUP_SORT.0, "enum"),
@@ -275,10 +275,10 @@ impl ColorKey {
         let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
         let found = setting.ty.type_name();
-        if found != "colour" {
+        if found != "color" {
             return Err(crate::SettingsError::TypeMismatch {
                 key,
-                expected: "colour",
+                expected: "color",
                 found,
             });
         }

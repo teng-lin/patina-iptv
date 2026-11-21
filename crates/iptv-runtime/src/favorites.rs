@@ -189,7 +189,7 @@ async fn load<R: Send + 'static>(
     if unsaved(owner).load(Ordering::Acquire) > 0 {
         if !flush(owner).await {
             return Err(StoreError::Unavailable(
-                "recent favourite edits are not saved",
+                "recent favorite edits are not saved",
             ));
         }
         owner.services().call(move |store| read(store)).await
@@ -245,7 +245,7 @@ pub async fn prepare_source(
     let ((has_vod, any_vod), keys, recent) = match loaded {
         Ok(loaded) => loaded,
         Err(error) => {
-            log::warn!("iptv favourites: store unavailable ({error})");
+            log::warn!("iptv favorites: store unavailable ({error})");
             return None;
         }
     };
@@ -553,7 +553,7 @@ fn send(owner: &super::Runtime, write: Write) {
             tx
         });
         if tx.send(write).is_err() {
-            log::warn!("iptv favourites: the writer stopped");
+            log::warn!("iptv favorites: the writer stopped");
         }
         // A write that never reached the thread is never saved; it stays
         // counted, so reads keep going behind the writer's queue.
@@ -648,7 +648,7 @@ fn write_all(
             return true;
         }
         if let Err(e) = result {
-            log::warn!("iptv favourites: could not save ({e})");
+            log::warn!("iptv favorites: could not save ({e})");
             return false;
         }
         unsaved.fetch_sub(1, Ordering::AcqRel);
@@ -719,7 +719,7 @@ fn write_all_with(rx: Receiver<Write>, mut persist: impl FnMut(&PendingWrite) ->
     }
     if !pending.is_empty() {
         log::warn!(
-            "iptv favourites: writer stopped with {} unsaved changes",
+            "iptv favorites: writer stopped with {} unsaved changes",
             pending.len()
         );
     }
@@ -786,7 +786,7 @@ pub(crate) async fn save_order(
         let mut state = state.borrow_mut();
         if state.source != Some(source) || state.pending_order.upgrade().is_some() {
             return Err(StoreError::Unavailable(
-                "the favourites list changed during editing",
+                "the favorites list changed during editing",
             ));
         }
         state.pending_order = Rc::downgrade(&changes);
@@ -804,7 +804,7 @@ pub(crate) async fn save_order(
                 services.blocking(move |store| store.save_favorite_order(source, &original, &order))
             } else {
                 Err(StoreError::Unavailable(
-                    "recent favourite edits are not saved",
+                    "recent favorite edits are not saved",
                 ))
             };
             pending.fetch_sub(1, Ordering::AcqRel);
@@ -813,7 +813,7 @@ pub(crate) async fn save_order(
     );
     result
         .await
-        .map_err(|_| StoreError::Unavailable("the favourites order was not saved"))??;
+        .map_err(|_| StoreError::Unavailable("the favorites order was not saved"))??;
     let changed = owner.favorites.with(|state| {
         let mut state = state.borrow_mut();
         if !state.pending_order.ptr_eq(&Rc::downgrade(&changes)) {

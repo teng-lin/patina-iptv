@@ -757,7 +757,7 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
                         surface,
                         session,
                         ErrorKind::Unavailable,
-                        crate::i18n::tr("Programme guide could not be loaded").into(),
+                        crate::i18n::tr("Program guide could not be loaded").into(),
                     );
                 }
             },

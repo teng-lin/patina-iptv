@@ -377,7 +377,7 @@ fn cached_static_stalker_playback_keeps_its_origin_without_a_portal_session() {
     assert_eq!(
         requests.0.lock().unwrap().requests,
         0,
-        "cached catalogue needs no portal session"
+        "cached catalog needs no portal session"
     );
     let before = iptv_app::player_opens(0);
     app.press_key("home").unwrap();

@@ -115,8 +115,8 @@ fn label(ui: Ui, control: Control) -> String {
                     }),
             ),
         ),
-        Favorite if is_favorite(ui) => tr("★ Favourite").to_owned(),
-        Favorite => tr("☆ Favourite").to_owned(),
+        Favorite if is_favorite(ui) => tr("★ Favorite").to_owned(),
+        Favorite => tr("☆ Favorite").to_owned(),
         ChannelOptions => tr("Channel options").to_owned(),
         Settings => tr("Settings").to_owned(),
     }

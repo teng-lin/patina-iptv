@@ -149,11 +149,11 @@ fn two_thousand_channels_for_seven_days() {
 
     let secs = parsed_in.as_secs_f64();
     eprintln!(
-        "large: {CHANNELS} channels x {DAYS} days = {generated} programmes, {:.1} MB XML",
+        "large: {CHANNELS} channels x {DAYS} days = {generated} programs, {:.1} MB XML",
         bytes as f64 / 1e6
     );
     eprintln!(
-        "large: parse+ingest {:.2}s ({:.1} MB/s, {:.0}k programmes/s), finish {:.0} ms, match {:.0} ms, now/next x{CHANNELS} + 12 windows {:.2} ms",
+        "large: parse+ingest {:.2}s ({:.1} MB/s, {:.0}k programs/s), finish {:.0} ms, match {:.0} ms, now/next x{CHANNELS} + 12 windows {:.2} ms",
         secs,
         bytes as f64 / 1e6 / secs,
         generated as f64 / 1e3 / secs,
@@ -162,7 +162,7 @@ fn two_thousand_channels_for_seven_days() {
         queried_in.as_secs_f64() * 1e3,
     );
     eprintln!(
-        "large: peak parser buffer {} KiB, store heap ~{:.1} MiB ({:.0} B/programme), {} distinct strings",
+        "large: peak parser buffer {} KiB, store heap ~{:.1} MiB ({:.0} B/program), {} distinct strings",
         stats.peak_buffer_bytes / 1024,
         store.heap_bytes() as f64 / (1 << 20) as f64,
         store.heap_bytes() as f64 / generated as f64,

@@ -192,7 +192,7 @@ fn revoked_cached_metadata_cannot_discard_a_newer_guide() {
                 let channel = key.clone();
                 services
                     .call(move |store| {
-                        write_guide(store, source, &channel, "Fresh generated programme")
+                        write_guide(store, source, &channel, "Fresh generated program")
                     })
                     .await
                     .unwrap();
@@ -200,7 +200,7 @@ fn revoked_cached_metadata_cannot_discard_a_newer_guide() {
                 let cached = opening.await;
                 assert_eq!(
                     title(&services, source, key.clone()).await.as_deref(),
-                    Some("Fresh generated programme")
+                    Some("Fresh generated program")
                 );
                 assert!(!cached, "a superseded discard is no cached policy answer");
                 drop(tx);
@@ -226,7 +226,7 @@ fn a_superseded_download_cannot_replace_a_newer_guide() {
             let source = job.stored.unwrap();
             let channel = key.clone();
             services
-                .call(move |store| write_guide(store, source, &channel, "New generated programme"))
+                .call(move |store| write_guide(store, source, &channel, "New generated program"))
                 .await
                 .unwrap();
             let channel = key.clone();
@@ -235,11 +235,7 @@ fn a_superseded_download_cannot_replace_a_newer_guide() {
                 move || {
                     let (downloaded, _scratch, meta) = services
                         .blocking(move |store| {
-                            Ok(staged_guide(
-                                store,
-                                &channel,
-                                "Obsolete generated programme",
-                            ))
+                            Ok(staged_guide(store, &channel, "Obsolete generated program"))
                         })
                         .unwrap();
                     let stop = CancelToken::new();
@@ -266,7 +262,7 @@ fn a_superseded_download_cannot_replace_a_newer_guide() {
             std::thread::spawn(worker).join().unwrap();
             assert_eq!(
                 title(&services, source, key).await.as_deref(),
-                Some("New generated programme")
+                Some("New generated program")
             );
         });
         assert!(owner.drain_services());

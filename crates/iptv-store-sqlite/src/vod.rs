@@ -443,7 +443,7 @@ x WHERE x.value=?4))) AND instr(lower(v.name),lower(?5))>0 AND (?6=0 OR (",
         cancel: &iptv_import::CancelToken,
         read: impl FnOnce(&Self) -> Result<T>,
     ) -> Result<T> {
-        let canceled = || StoreError::Unavailable("On-demand read cancelled");
+        let canceled = || StoreError::Unavailable("On-demand read canceled");
         if cancel.is_canceled() {
             return Err(canceled());
         }
@@ -762,14 +762,14 @@ mod tests {
         assert_eq!(result.unwrap().unwrap().key, key);
         assert!(
             budget.load(Ordering::Relaxed) <= 20,
-            "identity lookup scanned the catalogue"
+            "identity lookup scanned the catalog"
         );
     }
     fn fixture() -> (Store, Key) {
         let mut store = Store::open_in_memory().unwrap();
         let source = store
             .add_source(&Source {
-                name: "Generated catalogue".into(),
+                name: "Generated catalog".into(),
                 config: SourceConfig::M3u(M3uSourceConfig {
                     location: SecretUrl::new("https://example.test/generated.m3u"),
                     user_agent: None,
@@ -1622,7 +1622,7 @@ mod tests {
         let lines = plan(&store, CONTINUE_WATCHING_SQL, params![41, 0, 5_000]);
         assert!(
             scans(&lines, &["v", "z", "vod", "series"]).is_empty(),
-            "catalogue scan in {lines:#?}"
+            "catalog scan in {lines:#?}"
         );
         assert!(
             lines.iter().any(|line| {
@@ -1636,7 +1636,7 @@ mod tests {
             lines
                 .iter()
                 .any(|line| line.starts_with("SEARCH v USING PRIMARY KEY")),
-            "each watched title is looked up by catalogue identity: {lines:#?}"
+            "each watched title is looked up by catalog identity: {lines:#?}"
         );
         let lines = plan(
             &store,
@@ -1645,7 +1645,7 @@ mod tests {
         );
         assert!(
             scans(&lines, &["v", "z", "vod", "series"]).is_empty(),
-            "a reopened shelf finds its place without a catalogue scan: {lines:#?}"
+            "a reopened shelf finds its place without a catalog scan: {lines:#?}"
         );
         let lines = plan(&store, RECENTLY_ADDED_SQL, params![41, 0]);
         assert!(
@@ -1710,7 +1710,7 @@ mod tests {
         });
         assert!(
             result.is_err(),
-            "a read cancelled while it ran is not reported as current"
+            "a read canceled while it ran is not reported as current"
         );
         assert_eq!(steps.load(Ordering::Relaxed), 1);
         // The handler is removed afterwards: later reads run normally.
@@ -1769,7 +1769,7 @@ mod tests {
         assert_eq!(page.unwrap().cards.len(), 3);
         assert!(
             budget.load(Ordering::Relaxed) <= 40,
-            "Continue watching scanned the catalogue"
+            "Continue watching scanned the catalog"
         );
     }
     #[test]

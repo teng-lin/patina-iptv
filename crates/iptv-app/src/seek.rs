@@ -211,7 +211,7 @@ fn commit(ui: Ui) {
         ui.seek_target.set(None);
         return;
     };
-    log::info!("iptv seek: catch-up to {target} s into the programme");
+    log::info!("iptv seek: catch-up to {target} s into the program");
     ui.player.main().position_ms.set(0);
     ui.play(
         channel,

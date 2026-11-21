@@ -260,7 +260,7 @@ impl fmt::Display for ImportError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidConfig(why) => write!(f, "invalid source settings: {why}"),
-            Self::Canceled => f.write_str("import cancelled"),
+            Self::Canceled => f.write_str("import canceled"),
             Self::Limit { step, error } => write!(f, "{step}: {error}"),
             Self::Network { step, error } => write!(f, "{step}: {error}"),
             Self::HttpStatus { step, status } => write!(f, "{step}: server answered HTTP {status}"),

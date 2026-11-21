@@ -150,7 +150,7 @@ fn back_until(app: &mut Headless, done: impl Fn(&Screen) -> bool) {
 #[track_caller]
 fn open_menu(app: &mut Headless) {
     step(app.press_key("m"));
-    step(app.wait_for("text:Manage favourites…"));
+    step(app.wait_for("text:Manage favorites…"));
 }
 
 fn menu(app: &mut Headless) {
@@ -167,13 +167,13 @@ fn menu(app: &mut Headless) {
         "a disabled item keeps the menu"
     );
     // Favourites: added, and the menu then offers to remove it.
-    step(app.press("text:Add to favourites"));
-    step(app.wait_for_gone("text:Manage favourites…", GONE));
+    step(app.press("text:Add to favorites"));
+    step(app.wait_for_gone("text:Manage favorites…", GONE));
     open_menu(app);
-    step(app.wait_for("text:Remove from favourites"));
+    step(app.wait_for("text:Remove from favorites"));
     // Menu again closes it.
     step(app.press_key("m"));
-    step(app.wait_for_gone("text:Remove from favourites", GONE));
+    step(app.wait_for_gone("text:Remove from favorites", GONE));
 
     // Details: the description over the guide; Back closes it, as does a
     // tap.
@@ -210,19 +210,19 @@ fn menu(app: &mut Headless) {
     open_menu(app);
     step(app.press("text:Choose guide data…"));
     step(app.wait_for("text:Guide data for Test Channel One"));
-    assert!(!app.shows("Manage favourites…"));
+    assert!(!app.shows("Manage favorites…"));
     // Back ends typing in its search field, then closes it.
     back_until(app, |s| !s.shows("Guide data for Test Channel One"));
 
     // Back closes the menu.
     open_menu(app);
     step(app.back());
-    step(app.wait_for_gone("text:Manage favourites…", GONE));
+    step(app.wait_for_gone("text:Manage favorites…", GONE));
 
     // Play from the beginning: the replay, full screen; Back returns.
     open_menu(app);
     step(app.press("text:Play from the beginning"));
-    step(app.wait_for_gone("text:Manage favourites…", GONE));
+    step(app.wait_for_gone("text:Manage favorites…", GONE));
     step(app.wait_for("text:▶"));
     step(app.back());
     step(app.back());
@@ -230,13 +230,13 @@ fn menu(app: &mut Headless) {
 }
 
 /// The favourites editor's title (empty while it is closed).
-const EDITOR: &str = "text:/^Favourites · /";
+const EDITOR: &str = "text:/^Favorites · /";
 
 fn favorites(app: &mut Headless) {
     // Opened on the list on screen: one of two starred (Channel One).
     open_menu(app);
-    step(app.press("text:Manage favourites…"));
-    step(app.wait_for("text:/^Favourites · .* · 1 of 2$/"));
+    step(app.press("text:Manage favorites…"));
+    step(app.wait_for("text:/^Favorites · .* · 1 of 2$/"));
     step(app.wait_for("text:Tap a channel to add or remove it"));
     assert!(app.screen().matches("role:checkbox").unwrap());
     // Keys: Left removes all, Right adds all, OK toggles the focused one.
@@ -262,7 +262,7 @@ fn favorites(app: &mut Headless) {
     step(app.wait_for_gone(EDITOR, GONE));
     // Back (a key) leaves it too.
     open_menu(app);
-    step(app.press("text:Manage favourites…"));
+    step(app.press("text:Manage favorites…"));
     step(app.wait_for(EDITOR));
     step(app.back());
     step(app.wait_for_gone(EDITOR, GONE));
@@ -362,7 +362,7 @@ fn settings(app: &mut Headless, home: &Path) {
     // description and Restore's are reachable before the startup switches.
     step(app.press_key("right"));
     step(app.wait_for(ROWS_HINT));
-    step(app.wait_for("text:Write settings and customisations to a backup file."));
+    step(app.wait_for("text:Write settings and customizations to a backup file."));
     step(app.press_key("down"));
     step(app.wait_for("text:Replace everything with a backup's contents."));
     // Globally unavailable command rows no longer interrupt navigation.
@@ -437,17 +437,17 @@ fn appearance(app: &mut Headless, home: &Path) {
     // A colour: the choice at the right, the current one ticked, each with
     // its swatch; a tap picks.
     step(app.press("text:Appearance >> nth=0"));
-    step(app.wait_for("text:Accent colour"));
-    row_value(app, "Accent colour", "Blue");
-    step(app.press("text:Accent colour >> nth=0"));
+    step(app.wait_for("text:Accent color"));
+    row_value(app, "Accent color", "Blue");
+    step(app.press("text:Accent color >> nth=0"));
     step(app.wait_for("text:✓  Blue"));
     assert!(app.screen().matches("role:option").unwrap());
     step(app.press("text:Red"));
     step(app.wait_for_gone("text:✓  Blue", GONE));
-    row_value(app, "Accent colour", "Red");
+    row_value(app, "Accent color", "Red");
     saved(app, home, "\"red\"");
     // By keys: OK opens, Down moves, OK picks; Back cancels.
-    step(app.press("text:Background colour"));
+    step(app.press("text:Background color"));
     step(app.wait_for("text:✓  Dark"));
     step(app.back());
     step(app.wait_for_gone("text:✓  Dark", GONE));
@@ -526,7 +526,7 @@ fn guide_data(app: &mut Headless, home: &Path) {
     step(app.press("text:Delete stored guide data"));
     step(app.wait_for("text:Delete stored guide data?"));
     step(app.wait_for(
-        "text:The stored programmes are deleted. The guide stays empty until it is downloaded again.",
+        "text:The stored programs are deleted. The guide stays empty until it is downloaded again.",
     ));
     step(app.press("text:Cancel"));
     step(app.wait_for_gone("text:Delete stored guide data?", GONE));

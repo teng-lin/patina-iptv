@@ -18,14 +18,14 @@ const NO_STOP: i64 = i64::MIN;
 
 /// Same start as a staged row: the longer one stays (equal: the first).
 const UPSERT: &str = "
-    INSERT INTO programmes (ch, start, stop, title, sub_title, category, icon, rating,
+    INSERT INTO programs (ch, start, stop, title, sub_title, category, icon, rating,
         catchup_id, season, episode, description)
     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
     ON CONFLICT (ch, start) DO UPDATE SET stop = excluded.stop, title = excluded.title,
         sub_title = excluded.sub_title, category = excluded.category, icon = excluded.icon,
         rating = excluded.rating, catchup_id = excluded.catchup_id, season = excluded.season,
         episode = excluded.episode, description = excluded.description
-    WHERE excluded.stop > programmes.stop";
+    WHERE excluded.stop > programs.stop";
 
 /// Text fields of a staged row, in [`Batch`] order.
 const TEXTS: usize = 7;
@@ -155,7 +155,7 @@ pub(super) fn run(conn: Connection, rx: Receiver<Cmd>, failed: Arc<AtomicBool>) 
             Cmd::Delete { first, end, reply } => {
                 let r = take(&mut error).and_then(|()| {
                     conn.execute(
-                        "DELETE FROM programmes WHERE ch >= ?1 AND ch < ?2",
+                        "DELETE FROM programs WHERE ch >= ?1 AND ch < ?2",
                         params![first, end],
                     )?;
                     Ok(())
@@ -207,11 +207,11 @@ fn settle(conn: &Connection, channels: FeedChannels, rules: ScheduleRules) -> Re
     conn.execute_batch("BEGIN")?;
     let settled = (|| {
         let mut select =
-            conn.prepare_cached("SELECT start, stop FROM programmes WHERE ch = ?1 ORDER BY start")?;
+            conn.prepare_cached("SELECT start, stop FROM programs WHERE ch = ?1 ORDER BY start")?;
         let mut update =
-            conn.prepare_cached("UPDATE programmes SET stop = ?3 WHERE ch = ?1 AND start = ?2")?;
+            conn.prepare_cached("UPDATE programs SET stop = ?3 WHERE ch = ?1 AND start = ?2")?;
         let mut delete =
-            conn.prepare_cached("DELETE FROM programmes WHERE ch = ?1 AND start = ?2")?;
+            conn.prepare_cached("DELETE FROM programs WHERE ch = ?1 AND start = ?2")?;
         for (epg_id, ch, admitted) in channels {
             rows.clear();
             let mut q = select.query([ch])?;

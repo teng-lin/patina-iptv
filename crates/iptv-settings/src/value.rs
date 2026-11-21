@@ -44,7 +44,7 @@ impl Value {
             Value::Duration(_) => "duration",
             Value::Enum(_) => "enum",
             Value::Text(_) => "text",
-            Value::Color(_) => "colour",
+            Value::Color(_) => "color",
             Value::KeyBindings(_) => "key_bindings",
         }
     }

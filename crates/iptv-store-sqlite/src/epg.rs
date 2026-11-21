@@ -319,13 +319,13 @@ fn copy_programs(conn: &Connection, channel: i64, stage: i64) -> Result<(u64, u6
                  category, icon, rating, catchup_id, season, episode)
              SELECT ?1, start, stop, title, sub_title, category, icon, rating, catchup_id,
                  season, episode
-             FROM epg_stage.programmes WHERE ch = ?2 ORDER BY start",
+             FROM epg_stage.programs WHERE ch = ?2 ORDER BY start",
         )?
         .execute(params![channel, stage])?;
     let d = conn
         .prepare_cached(
             "INSERT OR FAIL INTO main.epg_descriptions (channel_id, start, description)
-             SELECT ?1, start, description FROM epg_stage.programmes
+             SELECT ?1, start, description FROM epg_stage.programs
              WHERE ch = ?2 AND description IS NOT NULL ORDER BY start",
         )?
         .execute(params![channel, stage])?;

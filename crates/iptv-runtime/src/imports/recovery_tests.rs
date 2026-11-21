@@ -521,7 +521,7 @@ async fn added_and_edited_playback_contexts_retain_the_committed_source_authorit
                 checked += 1;
             }
         }
-        assert_eq!(checked, 1, "one committed catalogue context");
+        assert_eq!(checked, 1, "one committed catalog context");
         server.join().unwrap();
         assert!(owner.drain_services());
     }

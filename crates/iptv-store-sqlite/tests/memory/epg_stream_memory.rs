@@ -80,8 +80,8 @@ fn import_memory_does_not_grow_with_the_guide() {
             let (short_heap, short_staging, short_sqlite, short_n) = import(1);
             let (long_heap, long_staging, long_sqlite, long_n) = import(8);
             eprintln!(
-                "{short_n} programmes: heap {:.1} MiB, SQLite {:.1} MiB staging, {:.1} MiB in all; \
-         {long_n} programmes: heap {:.1} MiB, SQLite {:.1} MiB staging, {:.1} MiB in all",
+                "{short_n} programs: heap {:.1} MiB, SQLite {:.1} MiB staging, {:.1} MiB in all; \
+         {long_n} programs: heap {:.1} MiB, SQLite {:.1} MiB staging, {:.1} MiB in all",
                 mib(short_heap),
                 mib(short_staging),
                 mib(short_sqlite),

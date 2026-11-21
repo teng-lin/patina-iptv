@@ -172,7 +172,7 @@ pub(super) fn cell(
         }
     };
     view()
-        .test_id("guide-programme")
+        .test_id("guide-program")
         .accessible(true)
         .role(AccessibilityRole::Cell)
         .accessibility_state(move || AccessibilityState {

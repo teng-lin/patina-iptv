@@ -144,7 +144,7 @@ fn inspection_error(error: InspectionError) -> &'static str {
         InspectionError::PermissionDenied => "access denied",
         InspectionError::StaleCursor => "stale continuation",
         InspectionError::StaleEvidence => "stale evidence",
-        InspectionError::Canceled => "cancelled",
+        InspectionError::Canceled => "canceled",
         InspectionError::Deadline => "deadline",
         InspectionError::Busy => "busy",
         InspectionError::Storage => "storage failure",
@@ -168,7 +168,7 @@ fn repair_error(error: RepairError) -> &'static str {
         RepairError::Conflict(_) => "conflict",
         RepairError::Storage => "storage failure",
         RepairError::Busy => "busy",
-        RepairError::Canceled => "cancelled",
+        RepairError::Canceled => "canceled",
     }
 }
 fn operation_phase(phase: OperationPhase) -> &'static str {
@@ -179,7 +179,7 @@ fn operation_phase(phase: OperationPhase) -> &'static str {
         OperationPhase::Verified => "verified",
         OperationPhase::Failed => "failed",
         OperationPhase::Superseded => "superseded",
-        OperationPhase::Canceled => "cancelled",
+        OperationPhase::Canceled => "canceled",
     }
 }
 fn effective(value: Effective) -> &'static str {

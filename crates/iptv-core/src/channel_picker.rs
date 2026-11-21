@@ -276,7 +276,7 @@ mod tests {
         assert_eq!(
             picker.selected(),
             Some(1),
-            "k4 moved from catalogue index 4 to 1"
+            "k4 moved from catalog index 4 to 1"
         );
         assert_eq!(picker.row(), Some(1));
         let gone = Catalog::new(vec![("News", 3)], vec![0, 1, 2]);

@@ -530,7 +530,7 @@ pub fn parse_epg(
     };
     for (i, item) in listings.into_iter().enumerate() {
         let Some(o) = Obj::of(item) else {
-            out.skip(WarningLocation::Index(i), "programme is not an object");
+            out.skip(WarningLocation::Index(i), "program is not an object");
             continue;
         };
         let local = |key: &str| {
@@ -547,11 +547,11 @@ pub fn parse_epg(
             .or_else(|| local("stop"))
             .or_else(|| local("end"));
         let (Some(start), Some(end)) = (start, end) else {
-            out.skip(WarningLocation::Index(i), "programme without start/end");
+            out.skip(WarningLocation::Index(i), "program without start/end");
             continue;
         };
         if end <= start {
-            out.skip(WarningLocation::Index(i), "programme ends before it starts");
+            out.skip(WarningLocation::Index(i), "program ends before it starts");
             continue;
         }
         out.items.push(Program {

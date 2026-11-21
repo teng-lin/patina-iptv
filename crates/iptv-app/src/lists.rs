@@ -610,7 +610,7 @@ mod identity_tests {
                 key
             );
             restored.retain_preview(false);
-            assert_eq!(restored.pane, pane, "Stop after a catalogue refresh");
+            assert_eq!(restored.pane, pane, "Stop after a catalog refresh");
             assert_eq!(restored.rail, RailItem::Search);
         }
     }
@@ -637,10 +637,7 @@ mod identity_tests {
             }));
             assert_eq!(restored.rail, item);
             restored.retain_rail(&rail_items(VodAvailability::default()));
-            assert_eq!(
-                restored.rail, item,
-                "catalogues remain available without VOD"
-            );
+            assert_eq!(restored.rail, item, "catalogs remain available without VOD");
             assert_eq!(restored.pane, Pane::Rail);
             assert_eq!(
                 ListView::new(after, list)

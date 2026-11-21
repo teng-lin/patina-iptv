@@ -380,7 +380,7 @@ fn question(key: &str) -> &'static str {
             "Choose a backup to apply when you next open Patina. You can cancel the scheduled restore before closing the app.",
         ),
         "epg.clear" => tr(
-            "The stored programmes are deleted. The guide stays empty until it is downloaded again.",
+            "The stored programs are deleted. The guide stays empty until it is downloaded again.",
         ),
         _ => tr("This cannot be undone."),
     }
@@ -424,7 +424,7 @@ mod tests {
 
     #[test]
     fn a_confirmation_says_what_goes() {
-        assert!(question("epg.clear").contains("stored programmes are deleted"));
+        assert!(question("epg.clear").contains("stored programs are deleted"));
         assert_eq!(
             question("general.reset_watch_time"),
             "This cannot be undone."

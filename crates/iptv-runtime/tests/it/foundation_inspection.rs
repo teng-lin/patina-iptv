@@ -405,7 +405,7 @@ fn cursors_refuse_other_owner_scope_filter_window_and_changed_catalog() {
         )),
         Err(InspectionError::StaleCursor)
     );
-    f.catalog.channels[3].name = "Synthetic changed catalogue".into();
+    f.catalog.channels[3].name = "Synthetic changed catalog".into();
     common::replace(&mut f.store, a, &f.catalog);
     assert_eq!(
         block_on(f.owner.query_channels(query, InspectionControl::default())),
@@ -689,7 +689,7 @@ fn completing_one_query_does_not_cancel_a_shared_callers_control() {
     assert_eq!(block_on(first).unwrap().items.len(), 4);
     assert!(
         !control.cancel.is_canceled(),
-        "successful completion cancelled the caller's token"
+        "successful completion canceled the caller's token"
     );
     assert_eq!(block_on(second).unwrap().items.len(), 4);
 }

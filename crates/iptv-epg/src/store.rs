@@ -534,7 +534,7 @@ impl<'a> ProgramRef<'a> {
 
 impl std::fmt::Debug for ProgramRef<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Programme")
+        f.debug_struct("Program")
             .field("start", &self.start())
             .field("stop", &self.stop())
             .field("title", &self.title())

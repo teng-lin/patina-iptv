@@ -27,7 +27,7 @@ pub(super) async fn fixture(root: &Path) -> (Runtime, Request) {
                 source: source.0,
                 channel,
                 channel_name: "Generated channel".into(),
-                title: "Generated retained programme".into(),
+                title: "Generated retained program".into(),
                 start: now() - 120,
                 end: now() - 60,
             })

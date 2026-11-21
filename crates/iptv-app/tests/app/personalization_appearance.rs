@@ -5,7 +5,7 @@ use personalization::*;
 use std::time::Duration;
 fn settings(app: &mut Headless) {
     step(app.press_key("m"));
-    step(app.wait_for("text:Manage favourites…"));
+    step(app.wait_for("text:Manage favorites…"));
     step(app.press("text:Settings >> nth=1"));
     step(app.wait_for("text:Appearance >> nth=0"));
     step(app.press("text:Appearance >> nth=0"));
@@ -63,7 +63,7 @@ fn appearance_controls_apply_live_persist_and_change_actual_guide_geometry() {
         app.screen()
             .layout_nodes()
             .into_iter()
-            .filter(|n| n.test_id.as_deref() == Some("guide-programme"))
+            .filter(|n| n.test_id.as_deref() == Some("guide-program"))
             .map(|n| n.bounds.size.width.0)
             .fold(0.0_f32, f32::max)
     };
@@ -121,12 +121,12 @@ fn appearance_controls_apply_live_persist_and_change_actual_guide_geometry() {
         .screen()
         .layout_nodes()
         .into_iter()
-        .filter(|n| n.test_id.as_deref() == Some("guide-programme"))
+        .filter(|n| n.test_id.as_deref() == Some("guide-program"))
         .map(|n| n.bounds.size.width.0)
         .fold(0.0_f32, f32::max);
     assert!(
         ((largest + 3.0) / (before_cell + 3.0) - 150.0 / 240.0).abs() < 0.02,
-        "visible time span changes the actual programme widths: {before_cell} -> {largest}"
+        "visible time span changes the actual program widths: {before_cell} -> {largest}"
     );
     settings(app);
     setting(app, "Channel numbers");

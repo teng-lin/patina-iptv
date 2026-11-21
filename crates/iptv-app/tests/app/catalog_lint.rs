@@ -81,7 +81,7 @@ const ROOTS: &[&str] = &[
     "iptv-library/src",
     "iptv-runtime/src",
     // What a settings row says under the list when it is focused.
-    "iptv-settings/src/catalogue",
+    "iptv-settings/src/catalog",
 ];
 
 /// The catalogue itself and its formatter: messages about messages.
@@ -158,7 +158,7 @@ const MESSAGE_CALLS_IN: &[(&str, &[&str])] = &[
 /// translated by the shell's `lists::entry_name`.
 const LIST_NAMES: &[(&str, &str)] = &[
     ("iptv-core/src/guide.rs", "All channels"),
-    ("iptv-core/src/lists.rs", "Favourites"),
+    ("iptv-core/src/lists.rs", "Favorites"),
     ("iptv-core/src/lists.rs", "Recently watched"),
     ("iptv-guide/src/combined.rs", "All playlists"),
 ];
@@ -1531,7 +1531,7 @@ fn text_outside_the_catalog_is_listed_and_the_list_only_shrinks() {
         list.untranslated.len(),
         UNTRANSLATED,
         "[untranslated] may only shrink: translate rather than add; after removing entries, \
-         lower UNTRANSLATED in catalogue_lint.rs to the new size"
+         lower UNTRANSLATED in catalog_lint.rs to the new size"
     );
 }
 
@@ -2297,16 +2297,16 @@ fn extracted_runtime_messages_and_shell_failures_remain_checked() {
     // Moving orchestration retains the notices as checked catalogue messages.
     let (messages, carried, unproven) = followed(
         "iptv-runtime/src/data/organization.rs",
-        "fn f() { emit(RuntimeEvent::Notify(\"Synthetic uncatalogued guide failure\")); }",
+        "fn f() { emit(RuntimeEvent::Notify(\"Synthetic uncataloged guide failure\")); }",
     );
-    assert_eq!(messages, ["Synthetic uncatalogued guide failure"]);
+    assert_eq!(messages, ["Synthetic uncataloged guide failure"]);
     assert!(!is_cataloged(&messages[0]));
     assert!(carried.is_empty() && unproven.is_empty());
     // The moved data path rejects a missing catalogue row as before.
     let file = "iptv-runtime/src/backup.rs";
     let literal = literals(
         file,
-        "fn f() { Err(\"Synthetic uncatalogued backup failure\") }",
+        "fn f() { Err(\"Synthetic uncataloged backup failure\") }",
     )
     .remove(0);
     assert_eq!(verdict(file, &literal), Verdict::Message);

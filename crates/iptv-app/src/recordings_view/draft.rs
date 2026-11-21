@@ -197,7 +197,7 @@ fn row_value(d: &Draft, row: usize) -> String {
                     iptv_core::recording::Repeat::Once => tr("Once"),
                     iptv_core::recording::Repeat::Daily => tr("Every day"),
                     iptv_core::recording::Repeat::Weekly => tr("Every week"),
-                    iptv_core::recording::Repeat::Series => tr("Every matching programme"),
+                    iptv_core::recording::Repeat::Series => tr("Every matching program"),
                 }
                 .into(),
             )],

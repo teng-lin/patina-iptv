@@ -96,7 +96,7 @@ impl Provider {
     }
     fn source(&self) -> Source {
         Source {
-            name: "Generated full catalogue".into(),
+            name: "Generated full catalog".into(),
             config: SourceConfig::Xtream(XtreamCredentials {
                 server_url: format!("http://{}", self.address),
                 username: Secret::new("generated-viewer"),

@@ -85,12 +85,12 @@ fn hint(ui: Ui) -> &'static str {
     match (ui.keys_shown(), idle) {
         (true, true) => tr("OK type   ▼ recent searches   Back close"),
         (true, false) if add => {
-            tr("▲▼ move   ◀▶ channels / programmes   OK add   Back keyboard, then close")
+            tr("▲▼ move   ◀▶ channels / programs   OK add   Back keyboard, then close")
         }
         (true, false) => {
-            tr("▲▼ move   ◀▶ channels / programmes   OK watch   Back keyboard, then close")
+            tr("▲▼ move   ◀▶ channels / programs   OK watch   Back keyboard, then close")
         }
-        (false, true) => tr("Type a channel or programme, or tap a recent search"),
+        (false, true) => tr("Type a channel or program, or tap a recent search"),
         (false, false) if add => tr("Tap a result to add its channel to multiview"),
         (false, false) => tr("Tap a result to watch it"),
     }
@@ -153,9 +153,9 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
                 .col_start(move || if compact() { 1_i16 } else { 2 })
                 .col_end(move || if compact() { -1_i16 } else { 3 })
                 .min_w(px(0.0))
-                .label(move || tr("Channel, number or programme"))
+                .label(move || tr("Channel, number or program"))
                 .value(move || state(ui, |s| s.state.query().to_owned()).unwrap_or_default())
-                .placeholder(move || tr("Channel, number or programme"))
+                .placeholder(move || tr("Channel, number or program"))
                 .auto_focus(want_keyboard.get_untracked())
                 .auto_capitalize(AutoCapitalize::None)
                 .auto_correct(false)

@@ -204,7 +204,7 @@ fn open_channel_menu(ui: Ui, row: usize) {
 fn empty_text(ui: Ui) -> String {
     match ui.list.with(|l| (l.is_empty(), l.entry())) {
         (false, _) => String::new(),
-        (true, FAVORITES) => tr("No favourites yet").to_owned(),
+        (true, FAVORITES) => tr("No favorites yet").to_owned(),
         (true, _) => tr("No channels here").to_owned(),
     }
 }

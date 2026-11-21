@@ -284,7 +284,7 @@ impl Store {
         ensure_source(&self.conn, source)?;
         if *scope == OrganizationScope::Favorites && sort != Sort::Manual {
             return Err(crate::StoreError::Unavailable(
-                "favourites support manual ordering",
+                "favorites support manual ordering",
             ));
         }
         if sort.uses_watch_history() && *scope == OrganizationScope::Groups {

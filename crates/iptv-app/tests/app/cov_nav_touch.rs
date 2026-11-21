@@ -372,8 +372,8 @@ fn search_by_touch(app: &mut Headless, data: &std::path::Path) {
     // tapped): its details over the screen; Back closes them.
     open_search(app);
     step(app.type_text(FIELD, "Gala"));
-    step(app.wait_for("text:/^Programmes · 1$/"));
-    step(app.press("text:/^Programmes · 1$/"));
+    step(app.wait_for("text:/^Programs · 1$/"));
+    step(app.press("text:/^Programs · 1$/"));
     step(app.wait_for("text:Later"));
     step(app.press("text:Later"));
     step(app.wait_until("details", WAIT, |s| s.count(GALA) == Ok(2)));
@@ -390,8 +390,8 @@ fn search_by_touch(app: &mut Headless, data: &std::path::Path) {
     gone(app, FIELD);
     // Its channel a favourite (the play bar's ☆).
     step(app.press("label:Video"));
-    step(app.wait_for("label:Favourite"));
-    step(app.press("label:Favourite"));
+    step(app.wait_for("label:Favorite"));
+    step(app.press("label:Favorite"));
     step(app.wait_for("label:Video"));
     step(app.press("label:Video"));
     gone(app, "label:Mute");
@@ -543,7 +543,7 @@ fn multiview_by_pointer(app: &mut Headless) {
     step(app.press(&format!("{MENU} >> text:Search and add")));
     step(app.wait_for(FIELD));
     step(app.type_text(FIELD, "Gala"));
-    step(app.wait_for("text:/^Programmes · 1$/"));
+    step(app.wait_for("text:/^Programs · 1$/"));
     step(app.wait_for("text:Tap a result to add its channel to multiview"));
     step(app.clear(FIELD));
     step(app.type_text(FIELD, "Four"));

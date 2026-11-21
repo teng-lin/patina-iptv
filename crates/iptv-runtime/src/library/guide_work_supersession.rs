@@ -31,7 +31,7 @@ fn only_newer_work_takes_the_next_guide_check_over() {
         let downloading = work();
         downloading.playlist_done();
         library::track_import(&runtime, source, &downloading);
-        let canceled = library::supersede_import(&runtime, source).expect("the cancelled work");
+        let canceled = library::supersede_import(&runtime, source).expect("the canceled work");
         assert!(Rc::ptr_eq(&canceled, &downloading));
         assert!(downloading.cancel.is_canceled() && !downloading.superseded.get());
 

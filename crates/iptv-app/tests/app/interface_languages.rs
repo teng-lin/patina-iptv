@@ -288,7 +288,7 @@ fn custom_groups_and_guide_assignment_speak_the_interface_language() {
     let app = &mut fixture.app;
     step(app.wait_for(r"text:/^(пн|вт|ср|чт|пт|сб|вс), \d{1,2} \S+  \d\d:\d\d$/"));
     step(app.press_key("m"));
-    shown(app, &ru.t("Manage favourites…"));
+    shown(app, &ru.t("Manage favorites…"));
     press(app, &ru.t("New group…"));
     step(app.wait_for("id:custom-groups-screen"));
     shown(app, &ru.t("Custom groups"));
@@ -348,7 +348,7 @@ fn custom_groups_and_guide_assignment_speak_the_interface_language() {
     step(app.wait_for_gone("id:custom-groups-screen", Duration::from_secs(3)));
     // No guide is stored: the chooser says so instead of opening.
     step(app.press_key("m"));
-    shown(app, &ru.t("Manage favourites…"));
+    shown(app, &ru.t("Manage favorites…"));
     press(app, &ru.t("Choose guide data…"));
     shown(
         app,
@@ -372,7 +372,7 @@ fn backup_remote_keys_and_the_clock_speak_the_interface_language() {
         ),
     );
     step(app.press_key("m"));
-    shown(app, &ja.t("Manage favourites…"));
+    shown(app, &ja.t("Manage favorites…"));
     step(app.press(&format!("text:{} >> nth=1", ja.t("Settings"))));
     shown(app, &ja.t("Back up"));
     // Backing up asks first, in Japanese; the answer here is "Cancel".

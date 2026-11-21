@@ -649,7 +649,7 @@ fn a_refresh_reporting_after_the_guide_was_deleted_does_not_show_it_again() {
     s.settle();
     assert!(
         !s.shows("text:/ Now$/"),
-        "the deleted programmes came back with the refresh's report"
+        "the deleted programs came back with the refresh's report"
     );
     assert!(
         store(&s.data).epg_guide(s.source).unwrap().is_none(),
@@ -668,7 +668,7 @@ fn deleting_guide_data_stops_a_guide_check_that_is_downloading() {
     let mut s = Scenario::start(&home, true, false);
     // Changed storage settings: the next check downloads the guide again.
     s.guide_settings();
-    step(s.app.press("text:Keep programme descriptions"));
+    step(s.app.press("text:Keep program descriptions"));
     to_guide(&mut s.app);
     s.server.hold();
     let asked = s.server.requests();

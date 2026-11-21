@@ -350,9 +350,7 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
         (Some(l), _) => words::origin(&l.source),
         (None, Some(Item::Add)) => tr("An XMLTV link (.xml or .xml.gz)").to_owned(),
         (None, Some(Item::Update)) => tr("Downloads every source switched on").to_owned(),
-        (None, Some(Item::Inspect)) => {
-            tr("Compare guide channels and programme samples").to_owned()
-        }
+        (None, Some(Item::Inspect)) => tr("Compare guide channels and program samples").to_owned(),
         _ => String::new(),
     };
     let status = move || match (line(), item(), playlist()) {

@@ -54,7 +54,7 @@ impl Runtime {
         if running.as_ref().is_some_and(|(at, _)| *at == id)
             && let Some((_, token)) = running.take()
         {
-            log::info!("iptv wizard: import {id:?} cancelled");
+            log::info!("iptv wizard: import {id:?} canceled");
             token.cancel();
         }
     }

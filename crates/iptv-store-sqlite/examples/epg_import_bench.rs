@@ -146,7 +146,7 @@ async fn main() {
     let total = t.elapsed();
     let peak = status_kib("VmHWM:");
     println!(
-        "guide: {} channels, {} programmes, {} descriptions; stage file {:.0} MiB",
+        "guide: {} channels, {} programs, {} descriptions; stage file {:.0} MiB",
         counts.bindings,
         counts.programs,
         counts.descriptions,

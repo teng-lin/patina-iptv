@@ -77,7 +77,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 let starred = ui.app.favorites.with(|f| e.starred(f));
                 let group = crate::lists::entry_name(e.group, &*crate::schedule());
                 trf(
-                    "Favourites · {group} · {starred} of {total}",
+                    "Favorites · {group} · {starred} of {total}",
                     &[
                         ("group", (&group).into()),
                         ("starred", starred.into()),

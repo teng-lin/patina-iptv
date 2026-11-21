@@ -250,7 +250,7 @@ impl Settings {
 
     /// The backup document as pretty-printed text.
     pub fn to_json_string(&self) -> String {
-        serde_json::to_string_pretty(&self.to_json()).expect("settings JSON always serialises")
+        serde_json::to_string_pretty(&self.to_json()).expect("settings JSON always serializes")
     }
 
     /// Loads a backup document (see the module docs for the rules).

@@ -271,9 +271,9 @@ pub fn param_value(form: &Form, p: Param) -> String {
 pub fn delete_consequences(p: &Playlist, next: Option<&str>, shown: bool) -> String {
     let gone = trf(
         "{count, plural, \
-         one {Its # channel, its guide and your favourites from it will be gone from the app. \
+         one {Its # channel, its guide and your favorites from it will be gone from the app. \
          The playlist at your provider is not affected.} \
-         other {Its # channels, its guide and your favourites from it will be gone from the app. \
+         other {Its # channels, its guide and your favorites from it will be gone from the app. \
          The playlist at your provider is not affected.}}",
         &[("count", p.channels.into())],
     );
@@ -511,7 +511,7 @@ mod tests {
     fn deleting_states_its_consequences() {
         let p = playlist();
         let text = delete_consequences(&p, Some("Other"), true);
-        assert!(text.contains("1 channel,") && text.contains("favourites"));
+        assert!(text.contains("1 channel,") && text.contains("favorites"));
         assert!(text.contains("switches to “Other”"));
         assert!(delete_consequences(&p, None, true).contains("No playlists will be left"));
         assert!(!delete_consequences(&p, Some("Other"), false).contains("switches"));

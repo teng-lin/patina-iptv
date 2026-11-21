@@ -132,7 +132,7 @@ fn seed(directory: &std::path::Path, url: SecretUrl, shift: i32) -> SourceId {
     .unwrap();
     let source = store
         .add_source(&Source {
-            name: "Synthetic catalogue".into(),
+            name: "Synthetic catalog".into(),
             config: SourceConfig::M3u(M3uSourceConfig {
                 location: SecretUrl::new("https://synthetic.invalid/generated.m3u"),
                 user_agent: Some("Synthetic-Private-Agent".into()),
@@ -1032,7 +1032,7 @@ fn queued_probe_configuration_honors_original_cancel_and_deadline_until_worker_e
                 .unwrap()
                 .items
                 .is_empty(),
-            "the empty synthetic catalogue remains queryable after worker exit"
+            "the empty synthetic catalog remains queryable after worker exit"
         );
         runtime.drain_services();
     }

@@ -81,7 +81,7 @@ fn seed(store: &mut Store, home: &Path, name: &str) -> SourceId {
             "<tv><channel id=\"shared\"><display-name>Shared</display-name></channel>\
              <programme channel=\"shared\" start=\"{}\" stop=\"{}\">\
              <title>{name} bulletin</title>\
-             <desc>{name} synthetic programme details.</desc></programme></tv>",
+             <desc>{name} synthetic program details.</desc></programme></tv>",
             iptv_epg::format_xmltv_time(now - 1800),
             iptv_epg::format_xmltv_time(now + 1800)
         ),
@@ -254,8 +254,8 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
     // must not change Alpha's membership.
     step(app.press("text:/^Shared · Beta/"));
     step(app.press_key("m"));
-    step(app.wait_for("text:Add to favourites"));
-    step(app.press("text:Add to favourites"));
+    step(app.wait_for("text:Add to favorites"));
+    step(app.press("text:Add to favorites"));
     step(crate::isolated::wait_outside(
         &mut app,
         "owning source favorite saved",
@@ -298,8 +298,8 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
     step(app.wait_for("text:/Shared · Beta/"));
     step(app.clear("id:search-field"));
     step(app.type_text("id:search-field", "bulletin"));
-    step(app.wait_for("text:/^Programmes/"));
-    step(app.press("text:/^Programmes/"));
+    step(app.wait_for("text:/^Programs/"));
+    step(app.press("text:/^Programs/"));
     step(app.wait_for_within("text:/Alpha bulletin/", Duration::from_secs(10)));
     step(app.wait_for("text:/Beta bulletin/"));
     step(app.press("text:Close"));

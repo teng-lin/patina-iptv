@@ -94,9 +94,9 @@ fn seed(root: &std::path::Path, now: i64) -> (SourceId, String, Settings) {
                         start,
                         stop: Some(start + 3600),
                         title: if index == 0 {
-                            "Generated first programme"
+                            "Generated first program"
                         } else {
-                            "Generated second programme"
+                            "Generated second program"
                         },
                         desc: Some("Generated retained description"),
                         ..Default::default()

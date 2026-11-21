@@ -62,8 +62,8 @@ fn guide(now: i64) -> String {
             let (a, b) = (start + shift + k * 1800, start + shift + (k + 1) * 1800);
             xml.push_str(&format!(
                 "<programme channel=\"c{n}\" start=\"{}\" stop=\"{}\">\
-                 <title>Programme {n}-{k}</title>\
-                 <desc>A synthetic description of programme {n}-{k}, long enough to take two \
+                 <title>Program {n}-{k}</title>\
+                 <desc>A synthetic description of program {n}-{k}, long enough to take two \
                  lines of the header.</desc></programme>",
                 format_xmltv_time(a),
                 format_xmltv_time(b)
@@ -181,7 +181,7 @@ fn a_down_press_mounts_little_and_the_guide_draws_no_empty_cells_or_layers() {
     step(app.press("text:Add playlist"));
     step(app.wait_for_within("text:Playlist added", IMPORT));
     step(app.press("text:Watch"));
-    step(app.wait_for_within("text:Programme 1-12", IMPORT));
+    step(app.wait_for_within("text:Program 1-12", IMPORT));
     // Keys from here (the press above was a touch), down to where the
     // list scrolls with the focus.
     for _ in 0..WARM {

@@ -667,7 +667,7 @@ mod description_regressions {
             &ProgramData {
                 start: 1_800_000_000 - 1800,
                 stop: Some(1_800_000_000 + 1800),
-                title: "Synthetic selected programme",
+                title: "Synthetic selected program",
                 desc: description,
                 ..Default::default()
             },

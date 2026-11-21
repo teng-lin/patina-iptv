@@ -243,7 +243,7 @@ fn empty_state(ui: Ui) -> impl IntoElement {
     let empty = move || ui.list.with(|l| l.is_empty());
     let message = move || match ui.list.with(|l| l.entry()) {
         FAVORITES => tr(
-            "No favourite channels yet. Hold OK (or press Menu) on a channel and choose “Add to favourites”, or star channels with “Manage favourites…”.",
+            "No favorite channels yet. Hold OK (or press Menu) on a channel and choose “Add to favorites”, or star channels with “Manage favorites…”.",
         ),
         RECENT => tr("Channels you watch will appear here."),
         _ => tr("This group has no channels."),
@@ -292,19 +292,19 @@ fn hint_card(ui: Ui) -> impl IntoElement {
 fn hint_lines() -> [&'static str; 4] {
     match crate::input::PROFILE {
         iptv_nav::Profile::Remote => [
-            tr("◀  ·  earlier programmes, then groups"),
+            tr("◀  ·  earlier programs, then groups"),
             tr("◀ in the groups  ·  search"),
             tr("Hold ◀  ·  groups      Search  ·  search"),
             tr("Hold OK  ·  menu"),
         ],
         iptv_nav::Profile::Keyboard if cfg!(target_os = "macos") => [
-            tr("◀  ·  earlier programmes, then groups"),
+            tr("◀  ·  earlier programs, then groups"),
             tr("Tab  ·  groups      / or ⌘F  ·  search"),
             tr("Home  ·  now      Shift ◀ ▶  ·  hours      ⌘ ◀ ▶  ·  days"),
             tr("◀ in the groups  ·  search      m  ·  menu"),
         ],
         iptv_nav::Profile::Keyboard => [
-            tr("◀  ·  earlier programmes, then groups"),
+            tr("◀  ·  earlier programs, then groups"),
             tr("Tab  ·  groups      / or Ctrl+F  ·  search"),
             tr("Home  ·  now      Shift ◀ ▶  ·  hours      Ctrl ◀ ▶  ·  days"),
             tr("◀ in the groups  ·  search      m  ·  menu"),

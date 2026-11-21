@@ -4,7 +4,7 @@
 Serves the synthetic HLS channels from fixtures/hls (see
 make-hls-fixtures.sh) and answers catch-up requests: any path under
 /archive/ is served as the same path without the prefix, whatever the
-query string, so the app can play "archived" programmes. Every request is
+query string, so the app can play "archived" programs. Every request is
 logged with its full query to stdout, so catch-up URL construction can be
 checked against what the app actually sent.
 

@@ -508,7 +508,7 @@ fn catchup_id_placeholder() {
     assert_eq!(
         build_catchup_url(&ch, REQ),
         Err(CatchupError::MissingTemplate),
-        "a programme without a catchup-id cannot fill the template"
+        "a program without a catchup-id cannot fill the template"
     );
 }
 

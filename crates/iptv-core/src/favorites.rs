@@ -200,7 +200,7 @@ mod tests {
         let mut f = Favorites::default();
         assert!(f.set(&key(40), true));
         assert!(f.set(&key(7), true));
-        assert!(!f.set(&key(7), true), "already a favourite");
+        assert!(!f.set(&key(7), true), "already a favorite");
         let index = KeyIndex::build(&SyntheticSchedule);
         assert_eq!(f.channels(&index), vec![40, 7], "the order they were added");
         assert_eq!(f.set_of(&index), BTreeSet::from([7, 40]));

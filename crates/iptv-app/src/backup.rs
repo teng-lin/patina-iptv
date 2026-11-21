@@ -66,7 +66,7 @@ pub(crate) fn export_ui() {
         let result = save_export(&busy, root, settings).await;
         crate::settings_view::notify(tr(match result {
             Ok(true) => "Backup saved",
-            Ok(false) => "Backup cancelled",
+            Ok(false) => "Backup canceled",
             Err(error) => report("writing a backup", error),
         }));
     });
@@ -92,8 +92,8 @@ pub(crate) fn restore_ui(ui: crate::Ui) {
                     let result = busy.worker(|archive| archive.cancel()).await;
                     crate::settings_view::refresh(ui);
                     crate::settings_view::notify(tr(match result {
-                        Ok(()) => "Scheduled restore cancelled",
-                        Err(error) => report("cancelling the scheduled restore", error),
+                        Ok(()) => "Scheduled restore canceled",
+                        Err(error) => report("canceling the scheduled restore", error),
                     }));
                     return;
                 }
@@ -191,7 +191,7 @@ mod android {
                         let (_, tx) = answer.take().unwrap();
                         let value = if event.data["success"].as_bool() == Some(true) {
                             Ok(true)
-                        } else if event.data["cancelled"].as_bool() == Some(true) {
+                        } else if event.data["canceled"].as_bool() == Some(true) {
                             Ok(false)
                         } else {
                             Err("Could not read or write the chosen backup document".into())

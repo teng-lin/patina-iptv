@@ -548,7 +548,7 @@ async fn show_part(
     owner.emit(crate::RuntimeEvent::SchedulePresented(vec![
         ("schedule", built),
         ("pages", wrapped),
-        ("favourites", favorites),
+        ("favorites", favorites),
         ("swapped", started.elapsed()),
     ]));
     owner.emit(crate::RuntimeEvent::SourceReady(resume && resumes));

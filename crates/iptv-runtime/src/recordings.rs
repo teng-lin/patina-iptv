@@ -713,7 +713,7 @@ impl Runtime {
             .await?
         {
             return Err(Error::unavailable(
-                "This recording has already started or was cancelled",
+                "This recording has already started or was canceled",
             ));
         }
         self.acknowledge_recording(id).await?;

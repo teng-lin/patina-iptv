@@ -323,7 +323,7 @@ fn row(ui: Ui, size: Scale, index: usize, focused: Memo<Option<usize>>) -> AnyEl
         })
         .unwrap_or_default(),
         Some(Row::Automatic) => tr("Matched by its guide id and name").to_owned(),
-        Some(Row::NoGuide) => tr("The guide shows no programmes for it").to_owned(),
+        Some(Row::NoGuide) => tr("The guide shows no programs for it").to_owned(),
         Some(Row::Channel(..)) => channel()
             .map(|c| channel_detail(ui, &c))
             .unwrap_or_default(),

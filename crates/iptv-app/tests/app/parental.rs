@@ -354,7 +354,7 @@ mod hidden_window {
                     source: source.0,
                     channel: catalog.channels.items[0].id.as_str().into(),
                     channel_name: "Generated recording channel".into(),
-                    title: "Generated future programme".into(),
+                    title: "Generated future program".into(),
                     start: now + 3600,
                     end: now + 7200,
                 },

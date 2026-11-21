@@ -3,7 +3,7 @@
 
 The first half runs tools/ci/release-plan.py. The second half reads
 .github/workflows/release.yml and evaluates its own expressions for each kind
-of run, with every secret set to a recognisable value: the signing jobs of a
+of run, with every secret set to a recognizable value: the signing jobs of a
 rehearsal must select the `release-rehearsal` environment and hand no secret
 to any step, and every other run must select `release` and hand over all of
 them.
@@ -162,7 +162,7 @@ class Evaluation:
             return render(arguments[0]).lower().startswith(render(arguments[1]).lower())
         if name == "always":
             return True
-        raise ValueError(f"function {name} is not modelled by this test")
+        raise ValueError(f"function {name} is not modeled by this test")
 
 
 def evaluate(text, contexts):

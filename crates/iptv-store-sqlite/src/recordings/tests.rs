@@ -26,7 +26,7 @@ fn fixture() -> (Store, Request) {
         source: source.0,
         channel: parsed.channels.items[0].id.as_str().into(),
         channel_name: "Generated channel".into(),
-        title: "Generated programme".into(),
+        title: "Generated program".into(),
         start: 1800000000,
         end: 1800003600,
     };

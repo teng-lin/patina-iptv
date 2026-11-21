@@ -106,7 +106,7 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
         source: source.0,
         channel: channel.id.clone(),
         channel_name: "Generated channel".into(),
-        title: "Generated programme".into(),
+        title: "Generated program".into(),
         start: now + 3600,
         end: now + 7200,
     };

@@ -346,7 +346,7 @@ fn catchup_urls_carry_epoch_times_and_numbers_come_from_the_playlist() {
         start: -120,
         end: -60,
     };
-    let url = s.catchup_url(1, past, 15).expect("archived programme");
+    let url = s.catchup_url(1, past, 15).expect("archived program");
     assert_eq!(
         url,
         format!(
@@ -360,7 +360,7 @@ fn catchup_urls_carry_epoch_times_and_numbers_come_from_the_playlist() {
     let sought = s
         .resolve_from(1, Some(past), 600, s.clock_at(15))
         .ready()
-        .expect("archived programme");
+        .expect("archived program");
     assert_eq!(
         sought.url,
         format!(

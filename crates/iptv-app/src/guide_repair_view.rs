@@ -860,7 +860,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     .unwrap_or_default()
                 }))
                 .child(ui_kit::body(size, move || {
-                    tr("Programme coverage does not verify channel identity")
+                    tr("Program coverage does not verify channel identity")
                 }));
             let screen = screen.child(when(
                 move || state(ui, |s| s.busy).unwrap_or(false),
@@ -901,7 +901,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                 s.verification.as_ref().map(|v| {
                                     format!(
                                         "{}: {} / {}",
-                                        tr("Programme coverage available"),
+                                        tr("Program coverage available"),
                                         v.programs_available,
                                         v.channels
                                     )

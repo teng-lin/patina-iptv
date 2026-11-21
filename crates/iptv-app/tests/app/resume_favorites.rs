@@ -202,8 +202,8 @@ fn lands_in(app: &mut Headless, list: &str, channel: &str) {
 fn toggle_favorite(app: &mut Headless) {
     step(app.press_key("m"));
     step(app.wait_for("text:/M or Esc hide/"));
-    step(app.press("text:☆ Favourite"));
-    step(app.wait_for("text:★ Favourite"));
+    step(app.press("text:☆ Favorite"));
+    step(app.wait_for("text:★ Favorite"));
     step(app.press_key("escape"));
 }
 
@@ -211,7 +211,7 @@ fn toggle_favorite(app: &mut Headless) {
 fn a_resumed_favorite_returns_to_favorites() {
     let Some(home) = isolated!() else { return };
     let mut app = resume(&home, Setup::new(Favorite::Here));
-    lands_in(&mut app, "Favourites", "Local C");
+    lands_in(&mut app, "Favorites", "Local C");
     // Favorites lists A and C only.
     assert!(
         !app.screen()
@@ -239,7 +239,7 @@ fn another_playlists_favorite_returns_to_all_channels() {
 fn a_resumed_favorite_beside_another_playlist_returns_to_favorites() {
     let Some(home) = isolated!() else { return };
     let mut app = resume(&home, Setup::new(Favorite::HereBeside));
-    lands_in(&mut app, "Favourites", "Local C · Synthetic resume");
+    lands_in(&mut app, "Favorites", "Local C · Synthetic resume");
     assert!(
         !app.screen()
             .matches("id:guide-ui >> label:Local C · Synthetic other")
@@ -342,7 +342,7 @@ fn a_locked_resumed_favorite_moves_the_guide_only_after_its_pin() {
     step(app.press("id:parental-layer >> text:Continue"));
     playing(&mut app, before);
     to_guide(&mut app);
-    lands_in(&mut app, "Favourites", "Local C");
+    lands_in(&mut app, "Favorites", "Local C");
 }
 
 #[test]

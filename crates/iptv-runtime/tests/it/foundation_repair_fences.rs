@@ -331,7 +331,7 @@ fn repair_during_old_work(hold_report: bool) {
     if hold_report {
         assert!(
             !seen.borrow().is_empty(),
-            "old catalogue report was actually presented"
+            "old catalog report was actually presented"
         );
     }
     let schedule = owner.schedule();

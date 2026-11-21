@@ -944,7 +944,7 @@ fn library_content(ui: Ui, size: Scale) -> View {
             .px(move || size.px(24.0)))
         .child(when(move || ui.recordings.with(|s| s.visible().next().is_none()), move || {
             ui_kit::body(size, tr(
-                "No recordings here. Choose a programme in the guide, then Record or Schedule a recording."
+                "No recordings here. Choose a program in the guide, then Record or Schedule a recording."
             )).px(move || size.px(24.0)).py(move || size.px(24.0))
         }))
         .child(recording_list(ui, size))

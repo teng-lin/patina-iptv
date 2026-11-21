@@ -142,7 +142,7 @@ fn list_open(app: &crate::Headless) -> bool {
 /// Whether the programme and channel menu is open (its items exist only
 /// while it is).
 fn menu_open(app: &crate::Headless) -> bool {
-    shows(app, "id:menu-panel >> text:Manage favourites…")
+    shows(app, "id:menu-panel >> text:Manage favorites…")
 }
 
 /// The last source the player was given.
@@ -338,7 +338,7 @@ fn the_remote_journey_browses_without_retuning_and_returns_to_the_guide() {
 
     // Groups: hold Left in the guide; Right returns to the channels.
     hold(app, RemoteKey::Left, 600, true);
-    step(app.wait_for("id:guide-groups >> text:Favourites"));
+    step(app.wait_for("id:guide-groups >> text:Favorites"));
     step(app.remote_tap(RemoteKey::Right));
     assert_eq!(iptv_app::player_opens(0), 0, "browsing never plays");
 
@@ -414,7 +414,7 @@ const BAR: [&str; 13] = [
     "play-bar-play-pause",
     "play-bar-forward",
     "play-bar-record",
-    "play-bar-favourite",
+    "play-bar-favorite",
     "play-bar-tracks",
     "play-bar-details",
     "play-bar-picture",

@@ -99,7 +99,7 @@ impl Repeat {
             Self::Once => "Once",
             Self::Daily => "Every day",
             Self::Weekly => "Every week",
-            Self::Series => "Every matching programme",
+            Self::Series => "Every matching program",
         }
     }
     pub fn advance(self, step: i64) -> Self {
@@ -467,7 +467,7 @@ mod tests {
                 source: 1,
                 channel: "synthetic".into(),
                 channel_name: "Synthetic channel".into(),
-                title: "Generated programme".into(),
+                title: "Generated program".into(),
                 start: 100,
                 end: 200,
             },
@@ -482,7 +482,7 @@ mod tests {
             source: 1,
             channel: "generated".into(),
             channel_name: "Generated".into(),
-            title: "Generated programme".into(),
+            title: "Generated program".into(),
             start: 1000,
             end: 2000,
         });
@@ -507,7 +507,7 @@ mod tests {
             source: 1,
             channel: "generated".into(),
             channel_name: "Generated".into(),
-            title: "Generated programme".into(),
+            title: "Generated program".into(),
             start: 1000,
             end: 2000,
         };

@@ -504,9 +504,7 @@ mod tests {
             .unwrap();
         let count: i64 = store
             .conn
-            .query_row("SELECT count(*) FROM stage_test.programmes", [], |r| {
-                r.get(0)
-            })
+            .query_row("SELECT count(*) FROM stage_test.programs", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 0);
         no_plaintext(stage.path());

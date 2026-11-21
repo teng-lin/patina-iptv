@@ -336,7 +336,7 @@ mod tests {
         assert_eq!(
             m.focused(),
             Some(StartFromBeginning),
-            "skipped the programme heading"
+            "skipped the program heading"
         );
     }
 

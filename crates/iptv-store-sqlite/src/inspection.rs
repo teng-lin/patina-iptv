@@ -493,7 +493,7 @@ impl Store {
         {
             return Ok(Err(e));
         }
-        let context = query_context(query, &format!("programmes:{window:?}:{channel:?}"));
+        let context = query_context(query, &format!("programs:{window:?}:{channel:?}"));
         let mut hash = Sha256::new();
         hash.update(snapshot(self, &ids)?.as_bytes());
         let mut items = Vec::new();

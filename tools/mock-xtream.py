@@ -123,7 +123,7 @@ def short_epg(stream_id, limit, table=False):
         start = now + k * 3600
         rows.append({
             "id": str(k + 100), "epg_id": f"ch{stream_id}.synthetic.example",
-            "title": b64(f"Mock show {stream_id}-{k}"), "description": b64("Invented programme."),
+            "title": b64(f"Mock show {stream_id}-{k}"), "description": b64("Invented program."),
             "start": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(start)),
             "end": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(start + 3600)),
             "start_timestamp": str(start), "stop_timestamp": str(start + 3600),

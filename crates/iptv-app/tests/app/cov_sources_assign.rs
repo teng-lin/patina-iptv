@@ -164,7 +164,7 @@ fn lists_and_narrows(t: &mut T) {
         "Automatic",
         "Matched by its guide id and name",
         "No guide data",
-        "The guide shows no programmes for it",
+        "The guide shows no programs for it",
         "one · Main Guide · in use",
         "two · Main Guide · in use",
         "spare · Main Guide",

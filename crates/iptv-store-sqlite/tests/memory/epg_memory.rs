@@ -65,7 +65,7 @@ fn in_memory_import(shape: Shape) -> Report {
         (schedule(shape, guide), programs)
     });
     eprintln!(
-        "epg memory {}ch: in-memory import of {programs} programmes: live {:.1} MiB, peak {:.1} MiB (store estimate {:.1} MiB)",
+        "epg memory {}ch: in-memory import of {programs} programs: live {:.1} MiB, peak {:.1} MiB (store estimate {:.1} MiB)",
         shape.channels,
         mib(live),
         mib(peak),
@@ -141,7 +141,7 @@ fn stored_load(shape: Shape) -> (Report, Report) {
             (schedule(shape, guide), loaded)
         });
         eprintln!(
-            "epg memory {}ch: stored load, {label}, no descriptions: {loaded} programmes in {:.0} ms: live {:.1} MiB, peak {:.1} MiB (store estimate {:.1} MiB; SQLite heap {:.1} MiB)",
+            "epg memory {}ch: stored load, {label}, no descriptions: {loaded} programs in {:.0} ms: live {:.1} MiB, peak {:.1} MiB (store estimate {:.1} MiB; SQLite heap {:.1} MiB)",
             shape.channels,
             started.elapsed().as_secs_f64() * 1e3,
             mib(live),
@@ -157,7 +157,7 @@ fn stored_load(shape: Shape) -> (Report, Report) {
         drop(sched);
     }
     eprintln!(
-        "epg memory {}ch: replace {programs} programmes in {:.2} s, file {:.1} MiB",
+        "epg memory {}ch: replace {programs} programs in {:.2} s, file {:.1} MiB",
         shape.channels,
         replaced_in.as_secs_f64(),
         size as f64 / f64::from(1 << 20),

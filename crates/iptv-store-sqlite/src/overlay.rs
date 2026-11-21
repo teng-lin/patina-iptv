@@ -117,7 +117,7 @@ pub struct OrphanedOverlay {
 /// Every overlay table as `(source_id, channel_id, favourite, customised,
 /// ordered, in_custom_group)` rows.
 const OVERLAY_ROWS: &str = "
-    SELECT source_id, channel_id, 1 AS favourite, 0 AS customised, 0 AS ordered, 0 AS grouped
+    SELECT source_id, channel_id, 1 AS favorite, 0 AS customized, 0 AS ordered, 0 AS grouped
         FROM favorites
     UNION ALL SELECT source_id, channel_id, 0, 1, 0, 0 FROM channel_overlays
     UNION ALL SELECT source_id, channel_id, 0, 0, 1, 0 FROM manual_order
@@ -289,7 +289,7 @@ impl Store {
             || original.iter().collect::<HashSet<_>>() != order.iter().collect::<HashSet<_>>()
         {
             return Err(crate::StoreError::Unavailable(
-                "the favourites list changed during editing",
+                "the favorites list changed during editing",
             ));
         }
         let mut favorites = iptv_core::favorites::Favorites::from_keys(list);
@@ -385,7 +385,7 @@ impl Store {
     /// source or all.
     pub fn orphaned_overlays(&self, source: Option<SourceId>) -> Result<Vec<OrphanedOverlay>> {
         let sql = format!(
-            "SELECT x.source_id, x.channel_id, MAX(x.favourite), MAX(x.customised),
+            "SELECT x.source_id, x.channel_id, MAX(x.favorite), MAX(x.customized),
                  MAX(x.ordered), MAX(x.grouped)
              FROM ({OVERLAY_ROWS}) x
              WHERE (?1 IS NULL OR x.source_id = ?1)

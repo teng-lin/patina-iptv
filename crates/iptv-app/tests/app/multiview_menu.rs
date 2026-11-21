@@ -312,7 +312,7 @@ fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
     let (x, y, w, h) = panel(&app);
     assert!((w - 208.0).abs() < 0.5, "208 dp wide: {w}");
     assert!((W - (x + w) - 8.0).abs() < 0.5, "8 dp from the edge: {x}");
-    assert!((y + h / 2.0 - H / 2.0).abs() < 1.0, "centred: {y} + {h}");
+    assert!((y + h / 2.0 - H / 2.0).abs() < 1.0, "centered: {y} + {h}");
     assert_eq!(
         labels(&app),
         [
@@ -484,7 +484,7 @@ fn closing_the_main_window_stops_grid_streams_and_keeps_pending_recordings() {
                 source: source.0,
                 channel: parsed.channels.items[0].id.as_str().into(),
                 channel_name: "Generated One".into(),
-                title: "Generated future programme".into(),
+                title: "Generated future program".into(),
                 start: now + 3600,
                 end: now + 7200,
             },

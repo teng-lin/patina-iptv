@@ -70,7 +70,7 @@ fn main() {
     let after = status_kib("VmRSS:");
     let programs: usize = guide.sources().iter().map(|s| s.program_count()).sum();
     println!(
-        "{mode} {n}: {} channels, {programs} programmes in {:.2}s; guide heap {:.1} MiB; \
+        "{mode} {n}: {} channels, {programs} programs in {:.2}s; guide heap {:.1} MiB; \
          rss before {:.0} MiB, peak +{:.0} MiB, after +{:.0} MiB",
         guide.bound_count(),
         took.as_secs_f64(),

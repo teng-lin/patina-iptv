@@ -455,8 +455,8 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     let held = shown(&app);
     step(app.drop_held());
     step(app.wait(SETTLE));
-    nothing_activated(&app, &tuned, &db, "cancelled drag");
-    assert_eq!(shown(&app), held, "a cancelled drag does not fling");
+    nothing_activated(&app, &tuned, &db, "canceled drag");
+    assert_eq!(shown(&app), held, "a canceled drag does not fling");
     step(app.press("text:Now"));
     step(app.wait_for_gone("text:Now", Duration::from_secs(3)));
 
@@ -556,7 +556,7 @@ fn tablet_long_press_menus_tune_nothing_until_the_focus_moves() {
     step(app.back());
     step(app.wait_for_gone(menu, Duration::from_secs(3)));
     step(app.wait(SETTLE));
-    nothing_activated(&app, &tuned, &db, "a programme's menu dismissed");
+    nothing_activated(&app, &tuned, &db, "a program's menu dismissed");
 
     // Its details, from the menu, then Back: the same.
     step(app.long_press("text:C7 P0"));
@@ -567,7 +567,7 @@ fn tablet_long_press_menus_tune_nothing_until_the_focus_moves() {
     step(app.back());
     step(app.wait_for_gone(details, Duration::from_secs(3)));
     step(app.wait(SETTLE));
-    nothing_activated(&app, &tuned, &db, "a programme's details closed");
+    nothing_activated(&app, &tuned, &db, "a program's details closed");
 
     // A key moves the focus on: autoplay previews that channel.
     step(app.press_key("down"));

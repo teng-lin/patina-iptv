@@ -406,7 +406,7 @@ pub(crate) fn replace(
             store.record_epg_failure(source, error_kind(e))?;
         }
         log::info!(
-            "iptv data: stored the guide of source {}: {} channels, {} programmes ({pruned} old ones pruned)",
+            "iptv data: stored the guide of source {}: {} channels, {} programs ({pruned} old ones pruned)",
             source.0,
             counts.bindings,
             counts.programs

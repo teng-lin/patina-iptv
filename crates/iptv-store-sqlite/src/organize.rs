@@ -371,7 +371,7 @@ impl Store {
             }
             OrganizationScope::Favorites => {
                 return Err(StoreError::Unavailable(
-                    "favourites use their ordered writer",
+                    "favorites use their ordered writer",
                 ));
             }
         }

@@ -432,7 +432,7 @@ mod tests {
         assert_eq!(
             tracks.entries_in(Kind::Text, japanese)[1],
             "French",
-            "provider labels that happen to match a catalogue key stay unchanged"
+            "provider labels that happen to match a catalog key stay unchanged"
         );
         tracks.text[0].label.clear();
         assert_eq!(tracks.entries_in(Kind::Text, japanese)[1], "トラック1");

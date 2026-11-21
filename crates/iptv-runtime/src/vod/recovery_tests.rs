@@ -351,7 +351,7 @@ fn canceling_a_focused_preview_closes_its_pending_provider_request() {
     );
     assert!(
         observed.recv_timeout(Duration::from_secs(6)).unwrap(),
-        "cancelled preview retained its provider connection"
+        "canceled preview retained its provider connection"
     );
     task.join().unwrap();
     assert!(owner.vod.entries.lock().unwrap().is_empty());

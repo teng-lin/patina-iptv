@@ -206,8 +206,8 @@ impl Runtime {
     /// Host/storage readiness and source failures remain typed operation results.
     pub fn foundation_capabilities(&self) -> Vec<Capability> {
         [
-            ("catalogue_queries", CapabilityState::Implemented),
-            ("programme_queries", CapabilityState::Implemented),
+            ("catalog_queries", CapabilityState::Implemented),
+            ("program_queries", CapabilityState::Implemented),
             ("epg_inspection", CapabilityState::Implemented),
             ("epg_probe", CapabilityState::Implemented),
             ("epg_repair", CapabilityState::Implemented),

@@ -91,8 +91,8 @@ fn fixture(
         let stamp = iptv_epg::format_xmltv_time;
         let xml = format!(
             "<tv><channel id=\"generated\"><display-name>A</display-name></channel>\
-             <programme channel=\"generated\" start=\"{}\" stop=\"{}\"><title>Generated live programme</title></programme>\
-             <programme channel=\"generated\" start=\"{}\" stop=\"{}\"><title>Generated future programme</title></programme></tv>",
+             <programme channel=\"generated\" start=\"{}\" stop=\"{}\"><title>Generated live program</title></programme>\
+             <programme channel=\"generated\" start=\"{}\" stop=\"{}\"><title>Generated future program</title></programme></tv>",
             stamp(now - 1200),
             stamp(future),
             stamp(future),
@@ -286,21 +286,21 @@ fn desktop_schedules_cancels_and_confirms_deletion() {
 fn future_program(home: crate::isolated::Home, idiom: Idiom) {
     let (mut app, path, source, expected) =
         fixture(&home, idiom, "https://example.test/generated.ts", true);
-    step(app.wait_for("text:Generated future programme"));
+    step(app.wait_for("text:Generated future program"));
     step(app.press_key("right"));
     let selected = app
         .screen()
         .layout_nodes()
         .into_iter()
         .find(|node| {
-            node.test_id.as_deref() == Some("guide-programme")
+            node.test_id.as_deref() == Some("guide-program")
                 && app
                     .screen()
                     .accessibility_state(&format!("view:{}", node.id))
                     .unwrap()
                     .selected
         })
-        .expect("focused future programme")
+        .expect("focused future program")
         .id;
     if idiom == Idiom::Desktop {
         step(app.right_click(&format!("view:{selected}")));
@@ -329,10 +329,10 @@ fn future_program(home: crate::isolated::Home, idiom: Idiom) {
         .unwrap();
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].request.source, source.0);
-    assert_eq!(jobs[0].request.title, "Generated future programme");
+    assert_eq!(jobs[0].request.title, "Generated future program");
     assert!(
         jobs[0].request.start > now,
-        "future programme must not become record-now"
+        "future program must not become record-now"
     );
     assert_eq!(
         (jobs[0].request.start, jobs[0].request.end),
@@ -375,10 +375,10 @@ fn long_press_on_a_future_program_schedules_without_a_form() {
 fn long_press_on_a_current_program_offers_record_without_starting_playback() {
     let Some(home) = isolated!() else { return };
     let (mut app, _, _, _) = fixture(&home, Idiom::Pad, "https://example.test/generated.ts", true);
-    step(app.wait_for("text:Generated live programme"));
+    step(app.wait_for("text:Generated live program"));
     let opens = iptv_app::player_opens(0);
-    step(app.long_press("role:cell[Generated live programme]"));
-    step(app.wait_for("id:menu-panel >> text:/^Generated live programme ·/"));
+    step(app.long_press("role:cell[Generated live program]"));
+    step(app.wait_for("id:menu-panel >> text:/^Generated live program ·/"));
     step(app.wait_for("id:menu-panel >> label:Record"));
     assert!(
         !app.screen()

@@ -63,7 +63,7 @@ pub(super) fn guide(prefix: &str, channels: &[&str]) -> String {
         while t < hour + 2 * 86_400 {
             let title = if t == hour { "Now" } else { "Other" };
             xml.push_str(&format!(
-                "<programme channel=\"{c}\" start=\"{}\" stop=\"{}\"><title>{prefix} {title}</title><desc>A synthetic programme.</desc></programme>",
+                "<programme channel=\"{c}\" start=\"{}\" stop=\"{}\"><title>{prefix} {title}</title><desc>A synthetic program.</desc></programme>",
                 format_xmltv_time(t),
                 format_xmltv_time(t + 3600)
             ));
@@ -320,7 +320,7 @@ fn stored_playlists_switch_refresh_and_go() {
         step(app.press_key("right"));
     }
     step(app.press_key("enter"));
-    step(app.wait_for("text:★ Favourite"));
+    step(app.wait_for("text:★ Favorite"));
     step(app.back());
     step(app.back());
     step(app.wait_for("text:★ Alpha Two"));
@@ -341,7 +341,7 @@ fn stored_playlists_switch_refresh_and_go() {
     assert!(!iptv_app::player_has_source(0), "playback stopped");
     assert!(
         !app.screen().matches("text:/^★/").unwrap(),
-        "its favourites went"
+        "its favorites went"
     );
     assert!(
         data.join("last_channel-1").exists(),

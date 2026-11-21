@@ -210,10 +210,10 @@ fn tab_label(tab: Tab, count: usize, programs: ProgramSearch) -> String {
     };
     match (tab, programs) {
         (Tab::Channels, _) => trf("Channels · {count}", &[("count", (&count).into())]),
-        (Tab::Programs, ProgramSearch::Unavailable) => tr("Programmes · no guide data").to_owned(),
-        (Tab::Programs, ProgramSearch::Building) => tr("Programmes · …").to_owned(),
+        (Tab::Programs, ProgramSearch::Unavailable) => tr("Programs · no guide data").to_owned(),
+        (Tab::Programs, ProgramSearch::Building) => tr("Programs · …").to_owned(),
         (Tab::Programs, ProgramSearch::Ready) => {
-            trf("Programmes · {count}", &[("count", (&count).into())])
+            trf("Programs · {count}", &[("count", (&count).into())])
         }
     }
 }
@@ -367,7 +367,7 @@ fn prepare(ui: Ui) {
                 }
             };
             log::info!(
-                "iptv search: indexed {} programmes in {} ms",
+                "iptv search: indexed {} programs in {} ms",
                 index.program_count(),
                 t.elapsed().as_millis()
             );
@@ -754,7 +754,7 @@ mod tests {
     fn times_convert_to_guide_minutes() {
         let epoch = 1_800_000_000;
         assert_eq!(guide_minute(epoch, epoch), 0);
-        assert_eq!(guide_minute(epoch + 90, epoch), 2, "inside the programme");
+        assert_eq!(guide_minute(epoch + 90, epoch), 2, "inside the program");
         assert_eq!(guide_minute(epoch - 3_600, epoch), -60);
         assert_eq!(guide_minute(epoch - 3_590, epoch), -59);
         assert_eq!(display_minute(epoch + 90, epoch), 1);
@@ -774,20 +774,20 @@ mod tests {
         );
         assert_eq!(
             tab_label(Tab::Programs, 0, ProgramSearch::Unavailable),
-            "Programmes · no guide data"
+            "Programs · no guide data"
         );
         assert_eq!(
             tab_label(Tab::Programs, 0, ProgramSearch::Building),
-            "Programmes · …"
+            "Programs · …"
         );
         assert_eq!(
             tab_label(Tab::Programs, 12, ProgramSearch::Ready),
-            "Programmes · 12"
+            "Programs · 12"
         );
         // A list cut at the limit is not a total.
         assert_eq!(
             tab_label(Tab::Programs, LIMIT, ProgramSearch::Ready),
-            format!("Programmes · {LIMIT}+")
+            format!("Programs · {LIMIT}+")
         );
     }
 }

@@ -1,8 +1,8 @@
-# What the catalogue lint (catalogue_lint.rs) lets pass: `file<TAB>literal`.
+# What the catalog lint (catalog_lint.rs) lets pass: `file<TAB>literal`.
 #
 # [untranslated] is text the user reads that no translation reaches yet. It only
 # shrinks: translate a literal (tr/trf and a row in messages.tsv), remove its line
-# and lower UNTRANSLATED in catalogue_lint.rs. Nothing is added here.
+# and lower UNTRANSLATED in catalog_lint.rs. Nothing is added here.
 #
 # [not-shown] is text that never reaches the screen, or is not the app's to
 # translate. A new line here says why by the group it joins.
@@ -43,9 +43,9 @@ iptv-library/src/epg_sources.rs	Relink
 iptv-library/src/epg_sources.rs	Rename
 iptv-library/src/guide_inspect.rs	Screen
 iptv-library/src/playlists.rs	Editing
-# Search build errors are logged; the screen uses translated Programmes status labels.
-iptv-app/src/search_view/programme_index.rs	Search guide is unavailable
-iptv-app/src/search_view/programme_index.rs	Search source is unavailable
+# Search build errors are logged; the screen uses translated Programs status labels.
+iptv-app/src/search_view/program_index.rs	Search guide is unavailable
+iptv-app/src/search_view/program_index.rs	Search source is unavailable
 iptv-runtime/src/search.rs	search source changed while indexing
 # Guide identity diagnostics become typed failures in the import wizard;
 # guide edits log their error. Neither path displays the Display implementation.
@@ -65,7 +65,7 @@ iptv-app/src/platform_data.rs	test storage was already installed or resolved
 iptv-app/src/platform_data.rs	test storage directory must be absolute
 iptv-app/src/platform_data.rs	synthetic database key was not installed
 # Persisted locale token; shown by the picker as the translated System language label.
-iptv-settings/src/catalogue/general.rs	system
+iptv-settings/src/catalog/general.rs	system
 # CLDR territory codes used to choose the automatic clock.
 iptv-core/src/clock.rs	419 AE AG AL AS AU BB BD BH BM BN BO BS BT CA CO CR CU CY DJ DM DO DZ EC EG EH ER ET FJ FM GD GH GM GR GT GU GY HK HN IN IQ JM JO KH KI KN KP KR KW KY LB LC LR LS LY MH MO MP MR MW MX MY NA NI NZ OM PA PE PG PH PK PR PS PW QA SA SB SD SG SL SO SS SV SY SZ TC TD TN TO TT TW UM US VC VE VG VI VU WS YE
 # Font families and measuring.
@@ -155,9 +155,9 @@ iptv-app/src/platform_data.rs	Patina
 iptv-app/src/platform_data.rs	Storage path is not UTF-8
 iptv-runtime/src/backup/error.rs	{} (library: {class})
 iptv-runtime/src/credential_store.rs	pending restore cannot be read
-iptv-runtime/src/favorites.rs	recent favourite edits are not saved
-iptv-runtime/src/favorites.rs	the favourites list changed during editing
-iptv-runtime/src/favorites.rs	the favourites order was not saved
+iptv-runtime/src/favorites.rs	recent favorite edits are not saved
+iptv-runtime/src/favorites.rs	the favorites list changed during editing
+iptv-runtime/src/favorites.rs	the favorites order was not saved
 iptv-runtime/src/imports.rs	cannot create document identity
 iptv-runtime/src/imports.rs	cannot create private document directory
 iptv-runtime/src/imports.rs	import superseded
@@ -220,7 +220,7 @@ iptv-app/src/playlists_view.rs	show all playlists
 iptv-app/src/playlists_view.rs	try new details of {}
 # Internal store refusal classes: the shell logs the reason and presents a
 # translated generic edit failure; a superseded guide reply is never displayed.
-iptv-runtime/src/commands.rs	favourites use their ordered writer
+iptv-runtime/src/commands.rs	favorites use their ordered writer
 iptv-runtime/src/stored.rs	the guide download was superseded
 # Only the thread-affinity assertion uses these operation names; they never
 # enter a result, RuntimeEvent, or visible notice.

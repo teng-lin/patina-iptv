@@ -107,7 +107,7 @@ fn phone_guide_stacks_upright_and_keeps_the_preview_beside_on_its_side() {
                 let details = bounds(app, "guide-header-details").expect("details");
                 assert!(
                     details[1] >= v[1] + v[3],
-                    "the programme {details:?} under the preview {v:?}: {what}"
+                    "the program {details:?} under the preview {v:?}: {what}"
                 );
             }
         }

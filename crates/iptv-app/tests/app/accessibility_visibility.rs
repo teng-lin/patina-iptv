@@ -598,7 +598,7 @@ fn a_popup_hides_its_underlay_while_the_pointer_bar_keeps_its_visible_controls()
     step(app.press_key("m"));
     exposure.shown(app, "menu-panel", true);
     exposure.shown(app, "guide-ui", false);
-    step(app.press("text:Manage favourites…"));
+    step(app.press("text:Manage favorites…"));
     exposure.shown(app, "favorites-editor", true);
     exposure.shown(app, "menu-layer", false);
     exposure.shown(app, "guide-ui", false);
@@ -616,12 +616,12 @@ fn a_popup_hides_its_underlay_while_the_pointer_bar_keeps_its_visible_controls()
     exposure.shown(app, "video", false);
     step(app.press("label:Picture size"));
     exposure.shown(app, "chooser-layer", false);
-    step(app.press("label:Programme details"));
+    step(app.press("label:Program details"));
     exposure.shown(app, "description-layer", true);
     exposure.shown(app, "menu-layer", true);
     exposure.shown(app, "menu-panel", false);
     exposure.shown(app, "play-bar-layer", true);
-    step(app.press("label:Programme details"));
+    step(app.press("label:Program details"));
     exposure.shown(app, "description-layer", false);
     exposure.shown(app, "menu-layer", false);
     step(app.press("label:Guide"));

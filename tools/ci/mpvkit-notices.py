@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download checksum-pinned native licence texts; reject incomplete inventory."""
+"""Download checksum-pinned native license texts; reject incomplete inventory."""
 import argparse
 import hashlib
 import json
@@ -16,24 +16,24 @@ def generate(manifest_path, output, fetch_script):
     expected = {name: (url, checksum) for name, url, checksum in artifacts}
     actual = {entry['name']: (entry['url'], entry['sha256']) for entry in manifest['artifacts']}
     if not expected or actual != expected:
-        raise ValueError('MPVKit artifact inventory is stale; regenerate the licence manifest')
+        raise ValueError('MPVKit artifact inventory is stale; regenerate the license manifest')
     components = {entry['component']: entry for entry in manifest['components']}
     for artifact in manifest['artifacts']:
         if not artifact['components'] or not set(artifact['components']) <= components.keys():
-            raise ValueError(f"Missing licence coverage for {artifact['name']}")
+            raise ValueError(f"Missing license coverage for {artifact['name']}")
     output.mkdir(parents=True, exist_ok=True)
     downloads = {}
     for name, component in components.items():
         if not component['files']:
-            raise ValueError(f'Missing licence texts for {name}')
+            raise ValueError(f'Missing license texts for {name}')
         for item in component['files']:
             if not item['url'].startswith('https://'):
-                raise ValueError('Licence source must use HTTPS')
+                raise ValueError('License source must use HTTPS')
             if item['url'] not in downloads:
                 with urllib.request.urlopen(item['url'], timeout=60) as response:
                     data = response.read(32 * 1024 * 1024 + 1)
                 if len(data) > 32 * 1024 * 1024:
-                    raise ValueError('Licence download exceeds limit')
+                    raise ValueError('License download exceeds limit')
                 downloads[item['url']] = data
             data = downloads[item['url']]
             if 'archive_member' in item:
@@ -42,13 +42,13 @@ def generate(manifest_path, output, fetch_script):
                 with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as archive:
                     member = archive.getmember(item['archive_member'])
                     if not member.isfile() or member.size > 4 * 1024 * 1024:
-                        raise ValueError('Invalid licence archive member')
+                        raise ValueError('Invalid license archive member')
                     data = archive.extractfile(member).read()
             if len(data) > 4 * 1024 * 1024 or hashlib.sha256(data).hexdigest() != item['sha256']:
-                raise ValueError(f"Licence checksum mismatch: {name}/{item['path']}")
+                raise ValueError(f"License checksum mismatch: {name}/{item['path']}")
             relative = Path(name) / item['path']
             if relative.is_absolute() or '..' in relative.parts:
-                raise ValueError('Unsafe licence path')
+                raise ValueError('Unsafe license path')
             destination = output / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(data)

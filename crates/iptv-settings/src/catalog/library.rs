@@ -63,7 +63,7 @@ pub static HISTORY: &[Setting] = &[
         "history",
         "history.keep_days",
         days(1, 90, 1, 30),
-        key("Watched channels and programmes are forgotten after this many days."),
+        key("Watched channels and programs are forgotten after this many days."),
     ),
     // default: ours
     history(
@@ -99,7 +99,7 @@ pub static SEARCH: &[Setting] = &[
     search(
         "search.favorites_first",
         boolean(true),
-        key("Rank favourite channels above other matches."),
+        key("Rank favorite channels above other matches."),
     ),
     // default: ours
     search(
@@ -111,7 +111,7 @@ pub static SEARCH: &[Setting] = &[
     search(
         "search.include_past_without_catchup",
         boolean(false),
-        key("Also match finished programmes that cannot be replayed."),
+        key("Also match finished programs that cannot be replayed."),
     ),
     // default: ours
     search(
@@ -141,21 +141,21 @@ pub static RECORDINGS: &[Setting] = &[
         "recording",
         "recordings.lead_padding",
         mins(0, 60, 1, 1),
-        key("Start a programme recording this early."),
+        key("Start a program recording this early."),
     ),
     // default: ours
     recordings(
         "recording",
         "recordings.trail_padding",
         mins(0, 120, 1, 5),
-        key("Keep recording this long after the programme's scheduled end."),
+        key("Keep recording this long after the program's scheduled end."),
     ),
     // default: ours
     recordings(
         "reminders",
         "recordings.reminder_lead",
         mins(0, 60, 1, 5),
-        key("A reminder fires this long before its programme starts."),
+        key("A reminder fires this long before its program starts."),
     ),
     // default: ours
     recordings(
@@ -266,28 +266,28 @@ pub static REMOTE: &[Setting] = &[
 pub static VOD: &[Setting] = &[
     // default: ours
     vod(
-        "catalogue",
+        "catalog",
         "vod.movies_by_category",
         boolean(true),
         key("Split the full movie list into its categories."),
     ),
     // default: ours
     vod(
-        "catalogue",
+        "catalog",
         "vod.shows_by_category",
         boolean(true),
         key("Split the full series list into its categories."),
     ),
     // default: ours
     vod(
-        "catalogue",
+        "catalog",
         "vod.card_style",
         choice(&CARD_STYLE, "poster"),
         key("Shape of movie and series tiles."),
     ),
     // default: ours
     vod(
-        "catalogue",
+        "catalog",
         "vod.sort",
         choice(&VOD_SORT, "playlist_order"),
         key("Order of movies and series; a playlist may override it."),
@@ -321,7 +321,7 @@ mod tests {
             ),
             (parental("scope", "parental.x", ty, "S."), Section::Parental),
             (remote("timing", "remote.x", ty, "S."), Section::Remote),
-            (vod("catalogue", "vod.x", ty, "S."), Section::Vod),
+            (vod("catalog", "vod.x", ty, "S."), Section::Vod),
         ];
         for (s, section) in built {
             assert_eq!(s.section, section);
@@ -338,7 +338,7 @@ mod tests {
                 None,
                 Some("scope"),
                 Some("timing"),
-                Some("catalogue")
+                Some("catalog")
             ]
         );
     }

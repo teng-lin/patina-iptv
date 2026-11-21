@@ -44,7 +44,7 @@ impl fmt::Debug for ChannelRow {
             .field("name", &self.name)
             .field("number", &self.number)
             .field("groups", &self.channel.groups)
-            .field("favourite", &self.favorite)
+            .field("favorite", &self.favorite)
             .field("hidden", &self.hidden)
             .field("blocked", &self.blocked)
             .finish_non_exhaustive()

@@ -36,7 +36,7 @@ fn overflowing_episode_ordinals_survive_parsing_as_absent_components() {
         let from = format_xmltv_time(start + index as i64 * 3600);
         let to = format_xmltv_time(start + (index as i64 + 1) * 3600);
         xml.push_str(&format!(
-            r#"<programme channel="synthetic" start="{from}" stop="{to}"><title>Generated programme {index}</title><episode-num system="xmltv_ns">{ordinal}</episode-num></programme>"#,
+            r#"<programme channel="synthetic" start="{from}" stop="{to}"><title>Generated program {index}</title><episode-num system="xmltv_ns">{ordinal}</episode-num></programme>"#,
         ));
     }
     xml.push_str("</tv>");

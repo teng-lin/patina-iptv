@@ -419,7 +419,7 @@ mod tests {
         let xml = format!(
             "<tv><channel id=\"same\"><display-name>Shared</display-name></channel>\
              <programme channel=\"same\" start=\"20270115080000 +0000\" \
-             stop=\"20270115090000 +0000\"><title>{name} programme</title>\
+             stop=\"20270115090000 +0000\"><title>{name} program</title>\
              <desc>{name} description</desc></programme></tv>"
         );
         let xml = parse_xmltv(xml.as_bytes(), ParseOptions::default()).unwrap();
@@ -611,8 +611,8 @@ mod tests {
         let a = all.program_at(0, minute);
         let b = all.program_at(1, minute);
         assert_eq!(a, b);
-        assert_eq!(all.title(0, a), "Alpha programme");
-        assert_eq!(all.title(1, b), "Beta programme");
+        assert_eq!(all.title(0, a), "Alpha program");
+        assert_eq!(all.title(1, b), "Beta program");
         assert_eq!(all.description(1, b).as_deref(), Some("Beta description"));
         let clock = crate::playback::Clock {
             now: t + 7200,
