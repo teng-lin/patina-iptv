@@ -254,6 +254,8 @@ pub struct TuiPlayer {
     child: Option<Child>,
     mpv_ipc_dir: Option<TempDir>,
     mpv_ipc_path: Option<PathBuf>,
+    pending_mpv_pause: Option<bool>,
+    pending_mpv_mute: Option<bool>,
     reader_thread: Option<JoinHandle<()>>,
     last_area: (u16, u16),
     is_fullscreen: bool,
@@ -273,6 +275,8 @@ impl TuiPlayer {
             child: None,
             mpv_ipc_dir: None,
             mpv_ipc_path: None,
+            pending_mpv_pause: None,
+            pending_mpv_mute: None,
             reader_thread: None,
             last_area: (80, 24),
             is_fullscreen: false,
@@ -291,6 +295,8 @@ impl TuiPlayer {
         self.relay = None;
         self.mpv_ipc_path = None;
         self.mpv_ipc_dir = None;
+        self.pending_mpv_pause = None;
+        self.pending_mpv_mute = None;
         if let Ok(mut f) = self.frame.lock() {
             *f = None;
         }
@@ -311,6 +317,8 @@ impl TuiPlayer {
             self.relay = None;
             self.mpv_ipc_path = None;
             self.mpv_ipc_dir = None;
+            self.pending_mpv_pause = None;
+            self.pending_mpv_mute = None;
         }
     }
 
@@ -341,8 +349,10 @@ impl TuiPlayer {
         match self.mode {
             VideoMode::None => {}
             VideoMode::Popup => {
-                if !self.send_mpv_property("pause", self.paused) {
-                    log::warn!("patina-tui: mpv IPC unavailable for pause toggle");
+                if self.send_mpv_property("pause", self.paused) {
+                    self.pending_mpv_pause = None;
+                } else {
+                    self.pending_mpv_pause = Some(self.paused);
                 }
             }
             VideoMode::Kitty | VideoMode::Inline => {
@@ -363,9 +373,29 @@ impl TuiPlayer {
         }
     }
 
-    fn apply_mute(&self) {
+    fn apply_mute(&mut self) {
         if self.mode == VideoMode::Popup && self.child.is_some() {
-            let _ = self.send_mpv_property("mute", self.muted);
+            if self.send_mpv_property("mute", self.muted) {
+                self.pending_mpv_mute = None;
+            } else {
+                self.pending_mpv_mute = Some(self.muted);
+            }
+        }
+    }
+
+    fn flush_pending_mpv_props(&mut self) {
+        if self.mode != VideoMode::Popup || self.child.is_none() {
+            return;
+        }
+        if let Some(paused) = self.pending_mpv_pause
+            && self.send_mpv_property("pause", paused)
+        {
+            self.pending_mpv_pause = None;
+        }
+        if let Some(muted) = self.pending_mpv_mute
+            && self.send_mpv_property("mute", muted)
+        {
+            self.pending_mpv_mute = None;
         }
     }
 
@@ -523,6 +553,7 @@ impl Drop for TuiPlayer {
 impl NativeComponent for TuiPlayer {
     fn render(&mut self, area: Rect, buffer: &mut Buffer) {
         self.reap_child();
+        self.flush_pending_mpv_props();
         if area.width == 0 || area.height == 0 {
             self.kitty.active.store(false, Ordering::Relaxed);
             return;
@@ -695,6 +726,7 @@ impl NativeComponent for TuiPlayer {
             if mute_changed {
                 self.apply_mute();
             }
+            self.flush_pending_mpv_props();
         }
     }
 
