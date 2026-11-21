@@ -25,13 +25,24 @@ def validate_source_identities(packaged, source):
     if missing:
         raise SystemExit("Regenerate tools/ci/package.Cargo.lock; missing or mismatched source dependencies: " + ", ".join(missing))
 
+# Workspace binaries built in CI that are not packaged into NSH runners, and
+# transitive feature-unified deps only pulled in by those unpackaged members
+# (`iptv-tui` -> `nsh-platform-tui` -> `nsh-base` enables `time/local-offset`).
+UNPACKAGED_MEMBERS = {"iptv-tui"}
+UNPACKAGED_FEATURE_DEPS = {"num_threads"}
+
+
 def main():
     root = Path(__file__).resolve().parents[2]
     packaged = tomllib.loads((root / "tools/ci/package.Cargo.lock").read_text())["package"]
     validate_references(packaged)
     metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--locked", "--format-version", "1"], cwd=root))
     nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
-    pending = list(metadata["workspace_members"])
+    packages_by_id = {p["id"]: p for p in metadata["packages"]}
+    pending = [
+        member for member in metadata["workspace_members"]
+        if packages_by_id[member]["name"] not in UNPACKAGED_MEMBERS
+    ]
     reachable = set()
     while pending:
         node = pending.pop()
@@ -41,7 +52,11 @@ def main():
         for dependency in nodes[node]["deps"]:
             if any(kind["kind"] != "dev" for kind in dependency["dep_kinds"]):
                 pending.append(dependency["pkg"])
-    needed = {(p["name"], p["version"], p["source"]) for p in metadata["packages"] if p["id"] in reachable}
+    needed = {
+        (p["name"], p["version"], p["source"])
+        for p in metadata["packages"]
+        if p["id"] in reachable and p["name"] not in UNPACKAGED_FEATURE_DEPS
+    }
     source = [p for p in tomllib.loads((root / "Cargo.lock").read_text())["package"]
               if (p["name"], p["version"], p.get("source")) in needed]
     validate_source_identities(packaged, source)

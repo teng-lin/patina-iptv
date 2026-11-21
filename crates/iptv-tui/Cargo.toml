@@ -1,0 +1,38 @@
+[package]
+name = "iptv-tui"
+description = "Optional terminal host for Patina IPTV using nsh-platform-tui (built in CI, not packaged for release)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "patina-tui"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+iptv-app = { path = "../iptv-app" }
+iptv-library.workspace = true
+iptv-net.workspace = true
+iptv-player-mpv.workspace = true
+iptv-providers.workspace = true
+iptv-settings.workspace = true
+iptv-store-sqlite.workspace = true
+nsh-core.workspace = true
+nsh-platform-tui.workspace = true
+ratatui-core = { version = "0.1.2", features = ["std", "layout-cache", "underline-color"] }
+ratatui-crossterm = "0.1.2"
+crossterm = "0.29.0"
+base64 = "0.22"
+flate2 = "1"
+tempfile.workspace = true
+env_logger.workspace = true
+log.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
