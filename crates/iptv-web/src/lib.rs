@@ -33,6 +33,31 @@ mod exec;
 mod host;
 mod store;
 
+/// The adapters an application on the real runtime builds its ports from
+/// (`iptv-app`'s web host): the host's fetch, its timer and clock, and the
+/// executor polled after every delivery.
+pub mod adapters {
+    use std::future::Future;
+    use std::time::Duration;
+
+    pub use crate::exec::{HostBody, HostFetch};
+
+    /// Runs `task` from the executor's next poll on.
+    pub fn spawn(task: impl Future<Output = ()> + 'static) {
+        crate::exec::spawn(task);
+    }
+
+    /// Ends after `duration`, on the host's timer.
+    pub async fn sleep(duration: Duration) {
+        crate::exec::sleep_while(duration, || true).await;
+    }
+
+    /// The host's monotonic clock.
+    pub fn monotonic() -> Duration {
+        Duration::from_secs_f64((crate::host::host().monotonic_ms() / 1000.0).max(0.0))
+    }
+}
+
 #[cfg(test)]
 mod tests;
 

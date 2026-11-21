@@ -268,12 +268,18 @@ pub(crate) fn check_destination(request: &HttpRequest) -> Result<(), FetchError>
 
 /// [`Fetch`] through the JavaScript host.
 #[derive(Clone)]
-pub(crate) struct HostFetch {
+pub struct HostFetch {
     started_ms: f64,
 }
 
+impl Default for HostFetch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HostFetch {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             started_ms: host().monotonic_ms(),
         }
@@ -384,7 +390,7 @@ pub(crate) async fn sleep_while(duration: Duration, keep: impl Fn() -> bool) {
 }
 
 /// The body of a streamed response, read chunk by chunk from the host.
-pub(crate) struct HostBody {
+pub struct HostBody {
     id: u32,
     done: Rc<Cell<bool>>,
 }

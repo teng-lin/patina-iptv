@@ -9,8 +9,17 @@
 //!
 //! - `native`: the desktops, the iPad and Android, over `iptv-net`,
 //!   threads, the OS key stores and the OS schedulers.
+//! - `web`: a browser TV, over `iptv-web`'s adapters and the cooperative
+//!   executor.
+#[cfg(not(target_family = "wasm"))]
 mod native;
+#[cfg(not(target_family = "wasm"))]
 pub(crate) use native::*;
+
+#[cfg(target_family = "wasm")]
+mod web;
+#[cfg(target_family = "wasm")]
+pub(crate) use web::*;
 
 use iptv_core::capabilities::Platform;
 
@@ -32,5 +41,8 @@ pub(crate) const WINDOWS: bool = on(Platform::Windows);
 /// The host's public entry points, re-exported at the crate root (a
 /// platform's native components).
 pub mod exports {
+    #[cfg(not(target_family = "wasm"))]
     pub use super::native::exports::*;
+    #[cfg(target_family = "wasm")]
+    pub use super::web::exports::*;
 }

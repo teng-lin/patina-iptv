@@ -2371,6 +2371,7 @@ dependencies = [
  "iptv-search",
  "iptv-settings",
  "iptv-store-sqlite",
+ "iptv-web",
  "jni 0.21.1",
  "keyring",
  "libc",
