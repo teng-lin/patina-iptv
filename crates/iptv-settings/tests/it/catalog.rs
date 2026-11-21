@@ -217,6 +217,7 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
             GL,
             "",
         ),
+        ("player.sound_follows_tile", boolean(false), GL, ""),
         // Playback.
         (
             "playback.video_decoder",

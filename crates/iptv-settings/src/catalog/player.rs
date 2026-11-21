@@ -141,6 +141,14 @@ pub static PLAYER: &[Setting] = &[
         choice(&PIP_ON_LEAVE, "auto"),
         key("Keep a channel playing full screen in a small window when you leave the app."),
     ),
+    // default: ours (#179: off, the heard tile changes only by Listen to
+    // this, iptv-core multiview)
+    player(
+        "multiview",
+        "player.sound_follows_tile",
+        boolean(false),
+        key("In multiview, hear the tile you select instead of choosing Listen to this."),
+    ),
 ];
 
 pub static PLAYBACK: &[Setting] = &[

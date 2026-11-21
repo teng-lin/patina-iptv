@@ -191,3 +191,106 @@ fn presentation_changes_keep_the_heard_tile_by_identity() {
     mv.remove_tile(0);
     assert_eq!(heard(&mv), 11);
 }
+
+/// "Sound follows the selected tile" on (#179): tiles 10 to 13 (the grid
+/// 10 11 / 12 13), the focus on 13, the sound still on 10.
+fn following() -> Multiview<u32> {
+    let mut mv = Multiview::open(10, DESKTOP);
+    for channel in 11..=13 {
+        add(&mut mv, channel);
+    }
+    mv.set_sound_follows_focus(true);
+    mv
+}
+
+#[test]
+fn with_the_sound_following_focus_each_focus_move_takes_it() {
+    let mut mv = following();
+    assert!(mv.sound_follows_focus());
+    assert_eq!(mv.active().channel, 13);
+    assert_eq!(heard(&mv), 10, "turning it on moves nothing by itself");
+    // The arrows; one that moves no focus moves no sound.
+    mv.key(Key::Right, ok);
+    assert_eq!(heard(&mv), 10);
+    for (key, channel) in [
+        (Key::Left, 12),
+        (Key::Up, 10),
+        (Key::Right, 11),
+        (Key::Down, 13),
+    ] {
+        mv.key(key, ok);
+        assert_eq!(heard(&mv), channel, "{key:?}");
+    }
+    assert_eq!(mv.audible_surface(), 3);
+    // A tap on another tile; opening the active one's menu and moving in
+    // it change nothing.
+    mv.tap(1, ok);
+    assert_eq!(heard(&mv), 11);
+    mv.tap(1, ok);
+    assert!(mv.dialog().is_some());
+    assert!(!items(&mv).contains(&TileAction::Listen), "it is heard");
+    mv.key(Key::Down, ok);
+    mv.key(Key::Back, ok);
+    assert_eq!(heard(&mv), 11);
+    // Listen to this still works where the focus is not.
+    mv.listen(0);
+    assert_eq!(heard(&mv), 10);
+    // Replacing a tile's channel: the tile is focused, so heard.
+    assert_eq!(
+        choose(&mut mv, 3, TileAction::Replace),
+        Outcome::PickChannel
+    );
+    mv.picked(20);
+    assert_eq!((mv.active().channel, heard(&mv)), (20, 20));
+    // Picking a channel already on a tile focuses it, so it is heard.
+    mv.tap(0, ok);
+    assert!(mv.remove_tile(3));
+    assert_eq!(mv.add(), Outcome::PickChannel);
+    mv.picked(11);
+    assert_eq!((mv.active().channel, heard(&mv)), (11, 11));
+    // Adding a tile focuses it, so it is heard.
+    add(&mut mv, 14);
+    assert_eq!((mv.active().channel, heard(&mv)), (14, 14));
+    // Turned off again: focus moves leave the sound where it is.
+    mv.set_sound_follows_focus(false);
+    mv.tap(0, ok);
+    mv.key(Key::Right, ok);
+    assert_eq!(heard(&mv), 14);
+}
+
+#[test]
+fn with_the_sound_following_focus_the_hand_back_rules_hold() {
+    let mut mv = following();
+    mv.tap(1, ok);
+    assert_eq!(heard(&mv), 11);
+    // Enlarging and reducing, also another tile (which focuses it), keep
+    // the heard tile.
+    mv.toggle_enlarge(2);
+    assert_eq!(mv.active().channel, 12);
+    assert_eq!(heard(&mv), 11, "enlarging keeps the sound");
+    mv.toggle_enlarge(2);
+    assert_eq!(heard(&mv), 11, "reducing too");
+    mv.key(Key::LongOk, ok);
+    mv.key(Key::LongOk, ok);
+    assert_eq!(heard(&mv), 11);
+    // A detour of tile 3 (trading surfaces with tile 0): heard full
+    // screen meanwhile; back on the grid the heard tile is heard again,
+    // though the detour focused tile 3.
+    assert_eq!(mv.full_screen(3), Outcome::FullScreen);
+    assert_eq!(mv.audible_surface(), 0);
+    assert_eq!(mv.key(Key::Left, ok), Outcome::Stay);
+    mv.resume();
+    assert_eq!(mv.active().channel, 13);
+    assert_eq!(heard(&mv), 11);
+    assert_eq!(mv.audible_surface(), 1);
+    // Removing the heard tile hands the sound back to the one heard
+    // before it (10), wherever the focus lands.
+    mv.tap(0, ok);
+    mv.tap(1, ok);
+    assert_eq!(heard(&mv), 11);
+    assert!(mv.remove_tile(1));
+    assert_eq!(heard(&mv), 10);
+    // Removing another tile keeps it.
+    assert!(mv.remove_tile(1));
+    assert_eq!(heard(&mv), 10);
+}

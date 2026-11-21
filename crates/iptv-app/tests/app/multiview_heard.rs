@@ -9,6 +9,11 @@
 //! windows (one compact), exactly one heard, each showing it, Listen to
 //! this in any of them, and closing the heard one handing it back.
 //!
+//! With the optional "Sound follows the selected tile" on (#179), each
+//! focus move in multiview takes the sound instead, while the detour,
+//! enlarging, reducing and removing keep the rules above; its settings
+//! row works by remote, keyboard, tap and click, and is saved.
+//!
 //! Synthetic data only: the generated desktop fixture of
 //! `desktop_workflows`.
 
@@ -223,6 +228,204 @@ fn multiview_focus_never_moves_the_sound_and_listen_to_this_does() {
     step(app.press_key("enter"));
     step(app.wait_for_gone(MENU, Duration::from_secs(2)));
     only_heard(app, &seen, 2, 1, "the remote's Listen to this");
+    badges(app, 2, 3);
+}
+
+/// Plays Desk 03 full screen and opens multiview with Desk 05 and Desk 07
+/// added (surfaces 0, 1 and 2).
+fn three_tiles(app: &mut Headless) {
+    step(app.press(&format!("id:guide-ui >> text:{}", channel(3))));
+    step(
+        app.wait_until("Desk 03 plays", Duration::from_secs(5), |_| {
+            iptv_app::player_has_source(0)
+        }),
+    );
+    show_controls(app, "id:app-ui >> label:Multiview");
+    step(app.press("id:app-ui >> label:Multiview"));
+    pick(app, 5);
+    menu(app, 5, "Add screen");
+    pick(app, 7);
+    step(
+        app.wait_until("three tiles play", Duration::from_secs(5), |_| {
+            (0..3).all(iptv_app::player_has_source)
+        }),
+    );
+}
+
+/// Tile `n`'s pointer chrome button `what` ("Enlarge screen", …), reached
+/// by hovering, which focuses nothing.
+fn chrome(app: &mut Headless, n: usize, what: &str) {
+    step(app.hover(&tile(n)));
+    let button = format!("label:{what}: {}", channel(n));
+    step(app.wait_for(&button));
+    step(app.press(&button));
+}
+
+const FOLLOWS: &str = "Sound follows the selected tile";
+
+/// Whether the settings row reads on.
+pub(crate) fn follows_on(app: &Headless) -> bool {
+    app.screen()
+        .accessibility_state(&format!("role:switch[/^{FOLLOWS}/]"))
+        .unwrap()
+        .checked
+        == Some(nsh_core::Checked::True)
+}
+
+/// Waits for the settings file to hold `on`.
+pub(crate) fn saved_follows(app: &mut Headless, path: &std::path::Path, on: bool) {
+    crate::personalization::saved_settings(app, path, |s| {
+        s.get("player.sound_follows_tile") == Ok(iptv_settings::Value::Bool(on))
+    });
+}
+
+/// With the settings screen open on its pages: Playback's rows, then
+/// Down until the row's description (the focused row's) shows; `key`
+/// presses "right" or "down" by the input under test.
+pub(crate) fn to_follows_row(app: &mut Headless, key: impl Fn(&mut Headless, &str)) {
+    step(app.press("text:Playback >> nth=0"));
+    key(app, "right");
+    let help = "text:In multiview, hear the tile you select instead of choosing Listen to this.";
+    for _ in 0..40 {
+        if app.screen().matches(help).unwrap() {
+            break;
+        }
+        key(app, "down");
+        app.idle(Duration::from_millis(20)).unwrap();
+    }
+    step(app.wait_for(help));
+    step(app.wait_for(&format!("text:{FOLLOWS}")));
+}
+
+/// "Sound follows the selected tile" (#179): the settings row, off by
+/// default, is changed by the keyboard's Enter and a click or tap, and
+/// each change is saved (a remote's OK: `tv_remote_journey`). Once on, the
+/// multiview opened next moves the sound with a tap.
+#[test]
+fn the_sound_follows_the_selected_tile_row_works_by_keyboard_and_pointer_and_persists() {
+    let Some(home) = isolated!() else { return };
+    let path = home.data_dir().join("settings.json");
+    let mut fixture = start(home, |_| {});
+    let app = &mut fixture.app;
+    let seen = fixture.seen.clone();
+
+    // The navigation rail's Settings.
+    step(app.press("text:/^☰  /"));
+    step(app.press_key("left"));
+    step(app.press("label:Settings"));
+    step(app.wait_for("id:settings-screen"));
+    // Down to the row by keys; Enter and a click or tap change it.
+    to_follows_row(app, |app, key| step(app.press_key(key)));
+    assert!(!follows_on(app), "off by default");
+    step(app.press_key("enter"));
+    saved_follows(app, &path, true);
+    assert!(follows_on(app), "the keyboard's Enter turns it on");
+    step(app.press(&format!("text:{FOLLOWS}")));
+    saved_follows(app, &path, false);
+    assert!(!follows_on(app), "a click or tap turns it off");
+    step(app.press(&format!("text:{FOLLOWS}")));
+    saved_follows(app, &path, true);
+    assert!(follows_on(app), "and on again");
+    for _ in 0..4 {
+        if !app.screen().matches("id:settings-screen").unwrap() {
+            break;
+        }
+        step(app.back());
+        app.idle(Duration::from_millis(100)).unwrap();
+    }
+    step(app.wait_for_gone("id:settings-screen", Duration::from_secs(2)));
+
+    // The next multiview follows it: adding a tile focuses it, so it is
+    // heard, and a tap moves the sound.
+    three_tiles(app);
+    only_heard(app, &seen, 3, 2, "the tile added last");
+    badges(app, 3, 7);
+    step(app.press(&tile(3)));
+    only_heard(app, &seen, 3, 0, "a tap on Desk 03");
+    badges(app, 3, 3);
+}
+
+/// With "Sound follows the selected tile" on (#179): each focus move (a
+/// tap or click, the arrows, a tile added) takes the sound and the
+/// badges; a menu opened moves nothing; enlarging and reducing (also of
+/// another tile, which takes the focus), a full-screen detour and removing
+/// the heard tile keep the #135 rules, and none of it opens a stream. The
+/// same steps with it off are in
+/// `multiview_focus_never_moves_the_sound_and_listen_to_this_does`.
+#[test]
+fn with_the_sound_following_the_selected_tile_focus_moves_it_and_hand_back_holds() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start(home, |s| {
+        s.set(
+            "player.sound_follows_tile",
+            iptv_settings::Value::Bool(true),
+        )
+        .unwrap();
+    });
+    let app = &mut fixture.app;
+    let seen = fixture.seen.clone();
+
+    three_tiles(app);
+    only_heard(app, &seen, 3, 2, "the tile added last is heard");
+    badges(app, 3, 7);
+    assert!(
+        app.screen()
+            .matches("id:multiview-ui >> role:button[/^Desk 03 · muted$/]")
+            .unwrap(),
+        "a screen reader hears which tiles are muted"
+    );
+    let opened = opens(3);
+
+    // Taps and the arrows (the grid: Desk 03 Desk 05 / Desk 07).
+    step(app.press(&tile(3)));
+    only_heard(app, &seen, 3, 0, "a tap on Desk 03");
+    badges(app, 3, 3);
+    step(app.press(&tile(5)));
+    only_heard(app, &seen, 3, 1, "a tap on Desk 05");
+    badges(app, 3, 5);
+    for (key, surface, n) in [("left", 0, 3), ("right", 1, 5), ("down", 2, 7)] {
+        step(app.press_key(key));
+        only_heard(app, &seen, 3, surface, key);
+        badges(app, 3, n);
+    }
+    // Opening the focused tile's menu moves nothing; being heard, it
+    // offers no Listen to this.
+    assert!(!offers(app, 7, "Listen to this"));
+    only_heard(app, &seen, 3, 2, "a menu opened and closed");
+
+    // Enlarging and reducing Desk 03 by its pointer buttons focuses it
+    // but keeps the sound on Desk 07.
+    chrome(app, 3, "Enlarge screen");
+    only_heard(app, &seen, 3, 2, "another tile enlarged");
+    chrome(app, 3, "Reduce screen");
+    only_heard(app, &seen, 3, 2, "and reduced");
+    badges(app, 3, 7);
+
+    // A detour of the focused Desk 03 (OK, Full screen): heard meanwhile;
+    // back on the grid Desk 07 is heard again.
+    step(app.press_key("enter"));
+    step(app.wait_for(&format!("{MENU} >> text:Full screen")));
+    step(app.press(&format!("{MENU} >> text:Full screen")));
+    step(app.wait_for_gone("id:multiview-tile", Duration::from_secs(2)));
+    only_heard(app, &seen, 3, 0, "the detour's full-screen tile");
+    step(app.back());
+    step(app.wait_for(&tile(7)));
+    only_heard(app, &seen, 3, 2, "back on the grid");
+    badges(app, 3, 7);
+    assert_eq!(opens(3), opened, "none of it opened a stream");
+
+    // Removing the heard Desk 07 (its ✕) hands the sound back to Desk 05,
+    // heard before it, though the focus is on Desk 03.
+    chrome(app, 7, "Remove screen");
+    step(app.wait_for_gone(&tile(7), Duration::from_secs(2)));
+    app.settle();
+    assert_eq!(muted(&seen, 2), [true, false], "the heard tile removed");
+    badges(app, 2, 5);
+    // The next focus move takes it again.
+    step(app.press_key("right"));
+    step(app.press_key("left"));
+    app.settle();
+    assert_eq!(muted(&seen, 2), [false, true], "back to Desk 03");
     badges(app, 2, 3);
 }
 

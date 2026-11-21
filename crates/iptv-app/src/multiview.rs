@@ -5,7 +5,8 @@
 //! state machine is `iptv_core::multiview`; this runs it, starts and stops
 //! the surfaces its tiles name, mutes all but the heard one (which focus
 //! never moves: the tile menu's or the pointer chrome's Listen to this
-//! does, `listen.rs`; #135), places the
+//! does, `listen.rs`; #135; unless `player.sound_follows_tile` is on,
+//! which each step hands the core, #179), places the
 //! tiles ([`tile_rect`]: the core's layout less a gap), and leaves to full
 //! screen. `multiview_view.rs` draws it.
 //!
@@ -335,9 +336,13 @@ pub fn list_closed(ui: Ui) {
 /// does what the step asks.
 fn apply(ui: Ui, f: impl FnOnce(&mut State, &dyn Fn(usize) -> bool) -> Outcome<usize>) {
     let failed = move |surface| crate::player::surface_failed(ui, surface);
+    // Read at each step, so a change in the settings applies at the next
+    // focus move, also in a session already open.
+    let follows = crate::settings::flag(iptv_settings::keys::SOUND_FOLLOWS_TILE);
     let mut step = None;
     ui.multiview.update(|m| {
         if let Some(m) = m.as_mut() {
+            m.set_sound_follows_focus(follows);
             let before = m.assignments();
             let heard = m.audible_surface();
             let outcome = f(m, &failed);

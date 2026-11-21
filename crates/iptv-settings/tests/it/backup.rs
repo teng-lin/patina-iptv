@@ -238,7 +238,7 @@ fn version_1_documents_are_migrated() {
     });
     let (st, report) = load(v1);
     assert_eq!(report.version, 1);
-    assert_eq!(report.migrations, [1, 2, 3]);
+    assert_eq!(report.migrations, [1, 2, 3, 4]);
     assert!(report.unknown.is_empty());
     assert_eq!(st.duration_ms(keys::CONTROLS_PANEL_TIMEOUT, G), 9_000);
     assert!(st.bool(keys::AUTOPLAY, G));
@@ -294,7 +294,7 @@ fn version_2_folds_the_overlay_stay_choice_into_one() {
     })));
 
     let (st, report) = load(v2(json!({"guide.stay_on_guide_overlay": false})));
-    assert_eq!(report.migrations, [2, 3]);
+    assert_eq!(report.migrations, [2, 3, 4]);
     assert!(report.unknown.is_empty(), "the old key is gone, not kept");
     let saved = st.to_json();
     assert!(saved["global"].get("guide.stay_on_guide_overlay").is_none());
@@ -318,7 +318,7 @@ fn version_3_documents_keep_their_choices_in_us_spelling() {
     });
     let (st, report) = load(v3);
     assert_eq!(report.version, 3);
-    assert_eq!(report.migrations, [3]);
+    assert_eq!(report.migrations, [3, 4]);
     assert!(report.unknown.is_empty(), "{:?}", report.unknown);
     // Both settings are global only: the overrides are kept (renamed) but
     // not applied, as for any override at a level a setting does not allow.
@@ -359,6 +359,36 @@ fn version_3_documents_keep_their_choices_in_us_spelling() {
     let (again, report) = load(saved);
     assert!(report.migrations.is_empty() && report.unknown.is_empty());
     assert_eq!(again, st);
+}
+
+/// A document from before "Sound follows the selected tile" (#179) keeps
+/// its choices and loads with it off; choosing it saves version 5.
+#[test]
+fn version_4_documents_load_with_the_sound_not_following_the_tile() {
+    let v4 = json!({
+        "format": FORMAT,
+        "version": 4,
+        "global": {"guide.autoplay": true, "player.info_on_switch": false}
+    });
+    let (mut st, report) = load(v4);
+    assert_eq!(report.version, 4);
+    assert_eq!(report.migrations, [4]);
+    assert!(report.unknown.is_empty() && report.rejected.is_empty());
+    assert!(!st.bool(keys::SOUND_FOLLOWS_TILE, G));
+    assert!(st.bool(keys::AUTOPLAY, G));
+    assert!(!st.bool(keys::INFO_ON_SWITCH, G));
+    let saved = st.to_json();
+    assert_eq!(saved["version"], json!(5));
+    assert!(saved["global"].get("player.sound_follows_tile").is_none());
+    assert!(load(saved).1.is_clean());
+
+    st.set("player.sound_follows_tile", Value::Bool(true))
+        .unwrap();
+    let saved = st.to_json();
+    assert_eq!(saved["global"]["player.sound_follows_tile"], json!(true));
+    let (again, report) = load(saved);
+    assert!(report.is_clean());
+    assert!(again.bool(keys::SOUND_FOLLOWS_TILE, G));
 }
 
 #[test]
@@ -565,7 +595,7 @@ fn migrations_reach_every_layer() {
         "groups": {"pl-1": {"grp-1": {"player.panel_timeout_secs": 6}}}
     });
     let (st, report) = load(v1);
-    assert_eq!(report.migrations, [1, 2, 3]);
+    assert_eq!(report.migrations, [1, 2, 3, 4]);
     // The renamed key is global-only, so the overrides are kept but not
     // applied, under the new name.
     let rejected: Vec<&Entry> = report.rejected.iter().map(|(e, _)| e).collect();

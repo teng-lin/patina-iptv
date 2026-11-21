@@ -1,7 +1,13 @@
 //! Multiview: up to four channels at once, one of them *active* (the
 //! remote's focus is on it) and one *heard* (its sound plays, the others
 //! are muted). Focus never moves the sound (#135): the heard tile changes
-//! only by its menu's Listen to this ([`Multiview::listen`]). Opening
+//! only by its menu's Listen to this ([`Multiview::listen`]), unless the
+//! viewer turned on "Sound follows the selected tile" (#179,
+//! [`Multiview::set_sound_follows_focus`]): then each focus move of the
+//! viewer's (an arrow, a tap on another tile, a channel picked to add or
+//! replace) is a Listen to this on the tile it lands on. Enlarging or
+//! reducing, a detour and a tile removed move the focus by themselves and
+//! keep the rules below either way. Opening
 //! keeps the sound on the channel that was playing (the first tile);
 //! adding or replacing a tile does not take it (a replaced heard tile
 //! stays heard, with its new channel); removing the heard tile hands it
@@ -144,6 +150,8 @@ pub struct Multiview<C> {
     active: usize,
     /// The tile whose sound plays, by [`Tile::id`].
     heard: Heard<u32>,
+    /// Focus moves of the viewer's make the tile heard (#179).
+    sound_follows_focus: bool,
     /// The next tile's id.
     next_id: u32,
     /// The enlarged tile (only with two or more).
@@ -179,6 +187,7 @@ impl<C: Clone + PartialEq> Multiview<C> {
             }],
             active: 0,
             heard: Heard::new(0),
+            sound_follows_focus: false,
             next_id: 1,
             enlarged: None,
             limits,
@@ -250,6 +259,29 @@ impl<C: Clone + PartialEq> Multiview<C> {
         };
         self.dialog = None;
         self.heard.listen(id)
+    }
+
+    /// "Sound follows the selected tile" (#179): from now on, each focus
+    /// move of the viewer's makes the tile it lands on heard (an arrow, a
+    /// tap on another tile, a channel picked to add or replace, or one
+    /// already on a tile). Turning it on moves nothing by itself.
+    pub fn set_sound_follows_focus(&mut self, on: bool) {
+        self.sound_follows_focus = on;
+    }
+
+    pub fn sound_follows_focus(&self) -> bool {
+        self.sound_follows_focus
+    }
+
+    /// The viewer moved the focus to tile `index`; with the sound
+    /// following the focus it is heard too.
+    fn focus(&mut self, index: usize) {
+        self.active = index;
+        if self.sound_follows_focus
+            && let Some(id) = self.tiles.get(index).map(|t| t.id)
+        {
+            self.heard.listen(id);
+        }
     }
 
     pub fn dialog(&self) -> Option<&Dialog> {
@@ -351,7 +383,7 @@ impl<C: Clone + PartialEq> Multiview<C> {
         if let Some((dx, dy)) = way
             && let Some(to) = self.layout().neighbor(self.active, dx, dy)
         {
-            self.active = to;
+            self.focus(to);
         }
         Outcome::Stay
     }
@@ -367,7 +399,7 @@ impl<C: Clone + PartialEq> Multiview<C> {
         if index == self.active {
             self.open_options(index, &failed);
         } else {
-            self.active = index;
+            self.focus(index);
         }
         Outcome::Stay
     }
@@ -438,7 +470,7 @@ impl<C: Clone + PartialEq> Multiview<C> {
             return Outcome::Stay;
         };
         if let Some(at) = self.tiles.iter().position(|t| t.channel == channel) {
-            self.active = at;
+            self.focus(at);
             return Outcome::Stay;
         }
         match pick {
@@ -454,14 +486,14 @@ impl<C: Clone + PartialEq> Multiview<C> {
                     channel,
                     paused: false,
                 });
-                self.active = self.tiles.len() - 1;
+                self.focus(self.tiles.len() - 1);
             }
             Pick::Add => {}
             Pick::Replace(tile) => {
                 if let Some(t) = self.tiles.get_mut(tile) {
                     t.channel = channel;
                     t.paused = false;
-                    self.active = tile;
+                    self.focus(tile);
                 }
             }
         }
