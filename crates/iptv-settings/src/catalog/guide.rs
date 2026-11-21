@@ -71,11 +71,14 @@ pub static EPG: &[Setting] = &[
             "How many days of finished programs stay in the guide (for catch-up and browsing back).",
         ),
     ),
-    // default: ours
+    // default: ours — on, except in browser builds (browser TVs): there the
+    // guide lives in memory and in an IndexedDB quota of about 92 MB, and
+    // descriptions take a real account's database from 23 to 57 MB
+    // (docs/plans/2026-11-21-browser-tv-architecture.md, decision 2).
     epg(
         "storage",
         "epg.store_descriptions",
-        boolean(true),
+        boolean(!cfg!(target_family = "wasm")),
         key("Keep program descriptions; turning this off saves storage on large guides."),
     ),
     // default: declared (06) — partial scan unless a full scan is chosen
