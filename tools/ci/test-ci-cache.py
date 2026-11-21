@@ -199,7 +199,8 @@ class AptInstall(unittest.TestCase):
         self.environment = {
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "FAKE_LOG": str(self.log),
             "PATINA_APT_CONF": str(self.root / "apt.conf"), "PATINA_INITRAMFS_CONF": str(self.initramfs),
-            "PATINA_MAN_DB_TRIGGER": str(self.man_db), "PATINA_APT_ATTEMPT_SECONDS": "7",
+            "PATINA_MAN_DB_TRIGGER": str(self.man_db), "PATINA_APT_INSTALL_SECONDS": "7",
+            "PATINA_APT_REFRESH_SECONDS": "5",
         }
 
     def install(self, restored, fail=""):
@@ -213,19 +214,28 @@ class AptInstall(unittest.TestCase):
         result, calls, raw = self.install("false")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(calls, ["apt-get update -q", "apt-get install -q generated-a generated-b"])
-        self.assertEqual([call for call in raw if call.startswith("bound")], ["bound 7", "bound 7"])
+        self.assertEqual([call for call in raw if call.startswith("bound")], ["bound 5", "bound 7"])
 
     def test_cache_hit_installs_without_contacting_the_mirror(self):
         result, calls, _ = self.install("true")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls, ["apt-get install -q generated-a generated-b"])
+        self.assertEqual(calls, ["apt-get install -q --no-download generated-a generated-b"])
 
     def test_a_failed_or_stalled_install_is_retried_once_with_refreshed_lists(self):
         result, calls, _ = self.install("true", fail="1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("retrying once", result.stdout)
-        self.assertEqual(calls, ["apt-get install -q generated-a generated-b", "dpkg --configure -a",
-                                 "apt-get update -q", "apt-get install -q generated-a generated-b"])
+        self.assertEqual(calls, ["apt-get install -q --no-download generated-a generated-b", "dpkg --configure -a",
+                                 "apt-get update -q", "apt-get install -q --fix-broken generated-a generated-b"])
+
+    def test_the_cache_keeps_no_truncated_downloads(self):
+        partial = self.root / "state/archives/partial"
+        partial.mkdir(parents=True)
+        (partial / "generated.deb").write_text("truncated")
+        result, _, _ = self.install("false")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(partial.is_dir())
+        self.assertEqual(list(partial.iterdir()), [])
 
     def test_a_second_failure_fails_the_step(self):
         result, calls, _ = self.install("false", fail="2 4")
@@ -254,13 +264,42 @@ class AptInstall(unittest.TestCase):
         # Shipping builds (cache: 'false') never install cached packages.
         self.assertEqual(SETUP.count("runner.os == 'Linux' && inputs.cache == 'true'"), 2)
         self.assertNotIn("sudo apt-get", SETUP)
+        self.assertIn("continue-on-error: true", SETUP.split("actions/cache/save", 1)[1].split("- ", 1)[0])
 
     def test_every_setup_step_has_its_own_timeout(self):
         for workflow in sorted((ROOT / ".github/workflows").glob("*.yml")):
             text = workflow.read_text(encoding="utf-8")
-            for step in re.findall(r"(?m)^ *- uses: \./\.github/actions/setup\n.*", text):
-                with self.subTest(workflow=workflow.name):
-                    self.assertRegex(step, r"\n *timeout-minutes: \d+$")
+            for step in steps(text):
+                if re.search(r"(?m)^\s*(- )?uses: ['\"]?\./\.github/actions/setup['\"]?\s*$", step):
+                    with self.subTest(workflow=workflow.name):
+                        self.assertRegex(step, r"(?m)^\s*(- )?timeout-minutes: \d+\s*$")
+
+    def test_step_scan_finds_keys_in_any_order(self):
+        found = steps("    steps:\n      - name: generated\n        uses: ./.github/actions/setup\n"
+                      "        with:\n          cache: 'true'\n        timeout-minutes: 9\n      - run: generated\n")
+        self.assertEqual(len(found), 2)
+        self.assertIn("timeout-minutes: 9", found[0])
+        self.assertNotIn("run: generated", found[0])
+
+
+def steps(text):
+    """Each workflow step's lines, whatever order its keys are written in."""
+    found, current, indent = [], None, None
+    for line in text.splitlines():
+        match = re.match(r"( *)- ", line)
+        stripped = len(line) - len(line.lstrip(" "))
+        if match and (indent is None or len(match[1]) == indent):
+            if current is not None:
+                found.append("\n".join(current))
+            current, indent = [line], len(match[1])
+        elif current is not None and line.strip() and stripped <= indent:
+            found.append("\n".join(current))
+            current, indent = None, None
+        elif current is not None:
+            current.append(line)
+    if current is not None:
+        found.append("\n".join(current))
+    return found
 
 
 if __name__ == "__main__":

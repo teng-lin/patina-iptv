@@ -46,8 +46,8 @@ runs:
           pkg-config clang cmake ninja-build ffmpeg libpipewire-0.3-0t64 libva-drm2
           ${{ inputs.apt-packages }}
       run: |
-        read -ra requested <<< "$APT_PACKAGES"
-        packages=$(printf '%s\n' "${requested[@]}" | sort -u | paste -sd ' ' -)
+        # One package per line, whatever block style the caller used.
+        packages=$(tr -s '[:space:]' '\n' <<< "$APT_PACKAGES" | sed '/^$/d' | sort -u | paste -sd ' ' -)
         identity=$({ echo "$packages"; cat tools/ci/apt-install.sh; } | sha256sum | cut -c1-16)
         image="${ImageOS:-$(. /etc/os-release && echo "$ID$VERSION_ID")}-${ImageVersion:-unversioned}"
         {
@@ -78,9 +78,11 @@ runs:
           brew install mpv pkg-config ffmpeg
         fi
     # Saved here rather than in a post step, so the cache holds exactly this
-    # install, not whatever the job's later steps leave behind.
+    # install, not whatever the job's later steps leave behind. The packages
+    # are installed by now, so a cache service outage must not fail the job.
     - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       if: runner.os == 'Linux' && inputs.cache == 'true' && steps.apt-cache.outputs.cache-hit != 'true'
+      continue-on-error: true
       with:
         path: ${{ steps.apt.outputs.state }}
         key: ${{ steps.apt.outputs.key }}

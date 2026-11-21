@@ -165,21 +165,24 @@ not steady-state measurements.
 ## Runner setup and re-runs
 
 Hosted runner setup must fail fast, not consume a job's whole timeout (#159).
-`.github/actions/setup` installs Linux packages through `tools/ci/apt-install.sh`:
-each apt call is bounded to five minutes and a failed or stalled install is
-retried once with refreshed lists, so a stalled Ubuntu mirror fails the step in
-about ten minutes. apt itself retries downloads and gives up on a connection
-that sends nothing for 30 seconds. The script skips the image's initramfs and
+`.github/actions/setup` installs Linux packages through `tools/ci/apt-install.sh`.
+Each package install is bounded to four minutes, and each list refresh or dpkg
+repair to 90 seconds. A failed or stalled install is repaired and retried once
+with refreshed lists, so a stalled Ubuntu mirror fails the step within about
+twelve minutes. apt itself retries downloads and gives up on a connection that
+sends nothing for 30 seconds. The script skips the image's initramfs and
 man-db rebuilds, which GTK's udev/systemd upgrade otherwise triggers. Every
 workflow step using the setup action has its own `timeout-minutes`, and a job
 needing further Linux packages names them in the action's `apt-packages`
-input rather than running its own `apt-get install`.
+input, or calls the script, rather than running its own `apt-get install`.
 
 Package lists and downloaded `.deb` files are cached under a key naming the
 runner image (`ImageOS`/`ImageVersion`), the architecture, the package list and
-the install script, so most runs install without contacting the mirror. A new
-runner image or package list misses once and saves its own entry; any branch may
-save it because it is small and exact. Shipping builds (`cache: 'false'`) never
+the install script, so most runs install without contacting the mirror; a gap
+in a restored cache goes straight to the refreshed retry. A new runner image or
+package list misses once and saves its own entry of a few hundred megabytes.
+Unlike the gigabyte Cargo caches, any branch may save one, because the key is
+exact and master's entry serves every later PR on that image. Shipping builds (`cache: 'false'`) never
 use it and install the mirror's current packages. Recommended packages are kept:
 Linux packaging bundles runtime modules and copyright files from the build host.
 
