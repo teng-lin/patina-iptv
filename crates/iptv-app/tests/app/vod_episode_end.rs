@@ -215,31 +215,9 @@ fn watch(home: crate::isolated::Home, at: At, autoplay: bool, lock: Lock) -> Run
     }
 }
 
-/// The player plays the episode a moment, then reports its last frame
-/// and its end. (Ended the instant its stream opened, the first stream's
-/// runtime transport can still be settling on a slow host, and the next
-/// one waits for it.)
+/// The player reports the playing episode's last frame, then its end.
 fn end(run: &mut Run) {
     let token = run.props.lock().unwrap()["source"]["token"].clone();
-    for (name, data) in [
-        ("state", json!({"state": "ready"})),
-        (
-            "timeline",
-            json!({"token": token, "seekId": 0, "ms": 60_000, "durationMs": 120_000, "seekable": true}),
-        ),
-    ] {
-        run.app.engine().control().dispatch_event(
-            run.surface,
-            EventKind::NativeEvent,
-            EventPayload::Native {
-                name: name.into(),
-                data,
-            },
-        );
-        run.app.settle();
-    }
-    std::thread::sleep(Duration::from_secs(2));
-    run.app.settle();
     for (name, data) in [
         (
             "timeline",
@@ -322,7 +300,9 @@ fn full_screen_with_autoplay_plays_the_next_episode_full_screen() {
     let Some(home) = isolated!() else { return };
     let mut run = watch(home, At::FullScreen, true, Lock::None);
     end(&mut run);
-    plays(&mut run.app, &run.props, "102");
+    // OK shows what plays: the next episode.
+    step(run.app.press_key("enter"));
+    step(run.app.wait_for("text:/Generated Second/"));
     assert!(!run.app.shows("Ready for the next episode"));
     assert!(
         !run.app.screen().matches("id:vod-screen").unwrap(),
