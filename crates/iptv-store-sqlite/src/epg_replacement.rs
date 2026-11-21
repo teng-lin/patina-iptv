@@ -3,7 +3,6 @@
 
 use std::borrow::{BorrowMut, Cow};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 
 use iptv_import::EpgImport;
 use rusqlite::params;
@@ -77,9 +76,10 @@ const DELETE_REST: [(&str, &str); 3] = [
 /// continued later ([`Self::step`]), or to completion ([`Self::finish`]):
 /// the resumable form of [`Store::replace_epg`]. See `replacement.rs`.
 ///
-/// The stage stays attached until the job ends; keep it alive until then.
-/// `S` is the store it writes, borrowed or owned (a browser publish copy);
-/// [`Self::into_store`] gives an owned one back.
+/// The job holds its stage (borrowed, [`Self::new`], or owned,
+/// [`Self::with_stage`]) until it ends. `S` is the store it writes,
+/// borrowed or owned (a browser publish copy); [`Self::into_store`] gives an
+/// owned one back.
 pub struct EpgReplacement<'a, S: BorrowMut<Store>> {
     store: Option<S>,
     source: SourceId,
@@ -88,7 +88,9 @@ pub struct EpgReplacement<'a, S: BorrowMut<Store>> {
     match_fingerprint: u64,
     /// The staged schedule of each binding's EPG channel.
     staged: Vec<Option<StagedChannel>>,
-    stage_path: PathBuf,
+    /// Held until the job ends: nothing else can write it, or drop it,
+    /// while it is attached.
+    stage: StageHold<'a>,
     attached: bool,
     /// Foreign keys and the page cache were changed for the copy.
     tuned: bool,
@@ -97,8 +99,8 @@ pub struct EpgReplacement<'a, S: BorrowMut<Store>> {
     now: i64,
     counts: EpgCounts,
     known: HashSet<u32>,
-    /// EPG channel -> row id.
-    channels: HashMap<(u32, String), i64>,
+    /// Feed -> EPG channel -> row id.
+    channels: HashMap<u32, HashMap<String, i64>>,
     /// Per feed: channels and programs written.
     per_feed: HashMap<u32, (u64, u64)>,
     ends_at: Option<i64>,
@@ -120,17 +122,54 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
     pub fn new(
         store: S,
         source: SourceId,
-        stage: &mut EpgStage,
+        stage: &'a mut EpgStage,
         import: Cow<'a, EpgImport>,
         feeds: impl Into<Cow<'a, [EpgFeedMeta]>>,
         match_fingerprint: u64,
     ) -> Result<Self> {
-        stage.flush()?;
-        let feeds = feeds.into();
+        Self::holding(
+            store,
+            source,
+            StageHold::Borrowed(stage),
+            import,
+            feeds.into(),
+            match_fingerprint,
+        )
+    }
+
+    /// [`Self::new`] owning its stage, for a job kept between event-loop
+    /// turns (the browser's slices); the stage goes with the job.
+    pub fn with_stage(
+        store: S,
+        source: SourceId,
+        stage: EpgStage,
+        import: Cow<'a, EpgImport>,
+        feeds: impl Into<Cow<'a, [EpgFeedMeta]>>,
+        match_fingerprint: u64,
+    ) -> Result<Self> {
+        Self::holding(
+            store,
+            source,
+            StageHold::Owned(Box::new(stage)),
+            import,
+            feeds.into(),
+            match_fingerprint,
+        )
+    }
+
+    fn holding(
+        store: S,
+        source: SourceId,
+        mut stage: StageHold<'a>,
+        import: Cow<'a, EpgImport>,
+        feeds: Cow<'a, [EpgFeedMeta]>,
+        match_fingerprint: u64,
+    ) -> Result<Self> {
+        stage.get_mut().flush()?;
         let staged = import
             .bindings
             .iter()
-            .map(|(_, epg)| stage.channel(epg.source, &epg.epg_id))
+            .map(|(_, epg)| stage.get().channel(epg.source, &epg.epg_id))
             .collect();
         let known = feeds.iter().map(|f| f.config.id.0).collect();
         Ok(Self {
@@ -140,7 +179,7 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
             feeds,
             match_fingerprint,
             staged,
-            stage_path: stage.path().to_owned(),
+            stage,
             attached: false,
             tuned: false,
             phase: Phase::Begin,
@@ -195,7 +234,7 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
         }
         match self.advance(&mut meter) {
             Ok(Step::Done(counts)) => {
-                self.end()?;
+                replacement::after_commit(self.end())?;
                 Ok(Step::Done(counts))
             }
             Ok(Step::Pending) => Ok(Step::Pending),
@@ -262,7 +301,7 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
 
     fn begin(&mut self) -> Result<()> {
         let source = self.source;
-        let path = self.stage_path.clone();
+        let path = self.stage.get().path().to_owned();
         let store = self.store();
         store.attach_staging_database(&path, "epg_stage")?;
         self.attached = true;
@@ -518,7 +557,9 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
                     ),
                 );
                 self.channels
-                    .insert((feed, epg.epg_id.clone()), copy.channel);
+                    .entry(feed)
+                    .or_default()
+                    .insert(epg.epg_id.clone(), copy.channel);
                 copy.channel
             }
             None => {
@@ -527,7 +568,11 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
                     self.phase = next;
                     return Ok(());
                 }
-                match self.channels.get(&(feed, epg.epg_id.clone())) {
+                match self
+                    .channels
+                    .get(&feed)
+                    .and_then(|ids| ids.get(epg.epg_id.as_str()))
+                {
                     Some(&id) => id,
                     None => {
                         conn.prepare_cached(
@@ -568,7 +613,10 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
                                     feed,
                                     (n, d, last),
                                 );
-                                self.channels.insert((feed, epg.epg_id.clone()), id);
+                                self.channels
+                                    .entry(feed)
+                                    .or_default()
+                                    .insert(epg.epg_id.clone(), id);
                                 id
                             }
                         }
@@ -708,4 +756,26 @@ fn record_channel(
     let entry = per_feed.entry(feed).or_default();
     entry.0 += 1;
     entry.1 += programs;
+}
+
+/// The stage a job publishes from, borrowed or owned.
+enum StageHold<'a> {
+    Borrowed(&'a mut EpgStage),
+    Owned(Box<EpgStage>),
+}
+
+impl StageHold<'_> {
+    fn get(&self) -> &EpgStage {
+        match self {
+            Self::Borrowed(stage) => stage,
+            Self::Owned(stage) => stage,
+        }
+    }
+
+    fn get_mut(&mut self) -> &mut EpgStage {
+        match self {
+            Self::Borrowed(stage) => stage,
+            Self::Owned(stage) => stage,
+        }
+    }
 }
