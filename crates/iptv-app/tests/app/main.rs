@@ -86,6 +86,7 @@ mod tv_shared_controls;
 mod type_drift;
 mod vod_empty_compact;
 mod vod_episode_end;
+mod vod_finished_back;
 mod vod_library;
 
 mod store_latency;
