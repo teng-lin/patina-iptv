@@ -10,8 +10,9 @@ use std::{
 };
 use tokio::sync::Semaphore;
 
-use crate::runtime::network::Client;
+use crate::runtime::network::{Client, Network};
 use iptv_import::Fetch;
+use std::sync::Arc;
 
 const IMAGE_BYTES: u64 = 4 << 20;
 const CACHE_BYTES: usize = 8 << 20;
@@ -107,11 +108,12 @@ fn config() -> crate::runtime::network::NetworkConfig {
 }
 
 /// One client for every artwork download, made by the runtime's network
-/// port on the UI thread at the first download.
-fn client() -> Option<Client> {
+/// port on the network executor at the first download (building one sets
+/// up TLS, which must not hold the UI thread).
+fn client(network: &dyn Network) -> Option<Client> {
     static CLIENT: OnceLock<Option<Client>> = OnceLock::new();
     CLIENT
-        .get_or_init(|| crate::runtime().network_client(&config()).ok())
+        .get_or_init(|| network.client(&config()).ok())
         .clone()
 }
 
@@ -119,7 +121,7 @@ fn client() -> Option<Client> {
 /// be had), from the cache or downloaded on the shared runtime. `None`
 /// when `wanted` was dropped (its view shows something else) before its
 /// turn came.
-async fn fetch(client: Option<Client>, url: String, wanted: Reply) -> Option<String> {
+async fn fetch(network: Arc<dyn Network>, url: String, wanted: Reply) -> Option<String> {
     let _turn = permits().acquire().await.ok()?;
     if wanted.is_canceled() {
         return None;
@@ -128,8 +130,8 @@ async fn fetch(client: Option<Client>, url: String, wanted: Reply) -> Option<Str
         let _ = wanted.send(value.clone());
         return Some(value);
     }
-    let value = match &client {
-        Some(net) => download(net, &url).await,
+    let value = match client(&*network) {
+        Some(net) => download(&net, &url).await,
         None => None,
     }
     .unwrap_or_else(crate::grid::no_logo);
@@ -174,7 +176,8 @@ pub(crate) fn source(url: impl Fn() -> String + 'static) -> impl Fn() -> String 
         // Detached: the download fills the cache even if this view moves
         // on meanwhile; dropping `rx` (the effect's next run ends this
         // task) only skips a download that has not started.
-        drop(crate::runtime().spawn_network(fetch(client(), url, tx)));
+        let owner = crate::runtime();
+        drop(owner.spawn_network(fetch(owner.network(), url, tx)));
         drop(spawn(async move {
             if let Ok(value) = rx.await
                 && generation.get_untracked() == current
@@ -188,6 +191,24 @@ pub(crate) fn source(url: impl Fn() -> String + 'static) -> impl Fn() -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A network port that makes no client (the queued-cache tests never
+    /// download).
+    fn refusing() -> Arc<dyn Network> {
+        struct Refusing;
+        impl Network for Refusing {
+            fn client(
+                &self,
+                _: &crate::runtime::network::NetworkConfig,
+            ) -> Result<Client, iptv_import::FetchError> {
+                Err(iptv_import::FetchError::new(
+                    iptv_import::FetchErrorKind::Unsupported,
+                    "synthetic",
+                ))
+            }
+        }
+        Arc::new(Refusing)
+    }
 
     /// A native client for `config`, as the runtime's network port makes it.
     fn client_with(config: crate::runtime::network::NetworkConfig) -> Client {
@@ -370,7 +391,7 @@ mod tests {
             let value = "data:image/png;base64,synthetic".to_owned();
             let permits = permits().acquire_many(PARALLEL as u32).await.unwrap();
             let (sender, mut receiver) = oneshot::channel();
-            let mut waiting = std::pin::pin!(fetch(None, url.clone(), sender));
+            let mut waiting = std::pin::pin!(fetch(refusing(), url.clone(), sender));
             assert!(
                 std::future::poll_fn(|cx| std::task::Poll::Ready(waiting.as_mut().poll(cx)))
                     .await
@@ -393,7 +414,7 @@ mod tests {
             let url = "http://art.example.test/cancelled-cache-marker".to_owned();
             let permits = permits().acquire_many(PARALLEL as u32).await.unwrap();
             let (sender, receiver) = oneshot::channel();
-            let mut waiting = std::pin::pin!(fetch(None, url.clone(), sender));
+            let mut waiting = std::pin::pin!(fetch(refusing(), url.clone(), sender));
             assert!(
                 std::future::poll_fn(|cx| std::task::Poll::Ready(waiting.as_mut().poll(cx)))
                     .await

@@ -119,13 +119,10 @@ impl Runtime {
         self.services().has_workers()
     }
 
-    /// A client of this owner's network port for `config` (artwork, which
-    /// sets its own limits).
-    pub fn network_client(
-        &self,
-        config: &crate::network::NetworkConfig,
-    ) -> Result<crate::network::Client, iptv_import::FetchError> {
-        self.services().ports().network.client(config)
+    /// This owner's network port (artwork makes its own client with its own
+    /// limits, off the UI thread).
+    pub fn network(&self) -> std::sync::Arc<dyn crate::network::Network> {
+        self.services().ports().network.clone()
     }
 
     /// Runs `future` on this owner's network runtime (link resolves,
