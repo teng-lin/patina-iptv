@@ -656,7 +656,7 @@ mod tests {
 
 mod store_service;
 
-mod executor;
+pub mod execution;
 
 pub(crate) mod file_writer;
 

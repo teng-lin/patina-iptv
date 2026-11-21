@@ -113,10 +113,10 @@ impl Runtime {
 
     /// Runs `future` on this owner's network runtime (link resolves,
     /// artwork); await the handle for its output.
-    pub fn spawn_network<F>(&self, future: F) -> tokio::task::JoinHandle<F::Output>
+    pub fn spawn_network<F>(&self, future: F) -> crate::execution::Join<F::Output>
     where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
+        F: Future + crate::MaybeSend + 'static,
+        F::Output: crate::MaybeSend + 'static,
     {
         self.services().spawn(future)
     }

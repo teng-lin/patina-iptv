@@ -549,7 +549,15 @@ fn send(owner: &super::Runtime, write: Write) {
             let unsaved = unsaved(owner);
             // The writer belongs to this owner's application epoch.
             let services = owner.services();
-            std::thread::spawn(move || write_all(&services, rx, unsaved));
+            let execution = services.ports().execution.clone();
+            if let Err(error) = execution.worker(
+                "iptv-favorites".into(),
+                Box::new(move || write_all(&services, rx, unsaved)),
+            ) {
+                // The receiver is gone with the body: every send below
+                // reports that the writer stopped.
+                log::error!("iptv favorites: cannot start the writer: {error}");
+            }
             tx
         });
         if tx.send(write).is_err() {

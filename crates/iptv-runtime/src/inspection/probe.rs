@@ -708,7 +708,7 @@ fn await_worker<T: Send + 'static>(
     services: Services,
     control: InspectionControl,
     deadline: Instant,
-    task: tokio::task::JoinHandle<InspectionResult<T>>,
+    task: crate::execution::Join<InspectionResult<T>>,
     cancel: CancelToken,
     guard: CallGuard,
 ) -> impl Future<Output = InspectionResult<T>> + use<T> {
@@ -736,7 +736,7 @@ fn admitted_worker<T: Send + 'static, Permit: Send + 'static>(
     workers: &Arc<Workers>,
     admission: Option<Permit>,
     operation: impl FnOnce() -> InspectionResult<T> + Send + 'static,
-) -> tokio::task::JoinHandle<InspectionResult<T>> {
+) -> crate::execution::Join<InspectionResult<T>> {
     match workers.enter() {
         Some(completion) => {
             let work = WorkerOperation {

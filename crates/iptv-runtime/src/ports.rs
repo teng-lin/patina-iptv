@@ -48,27 +48,33 @@ pub struct Ports {
     pub startup_mark: fn(&'static str, String),
     /// Makes the network clients of imports, browsing and link resolves.
     pub network: Arc<dyn crate::network::Network>,
+    /// Runs store lanes, workers and each owner's tasks.
+    pub execution: Arc<dyn crate::execution::Execution>,
 }
 
 impl Ports {
-    /// The ports of a native host: `iptv-net` for the network.
+    /// The ports of a native host: `iptv-net` for the network, threads and
+    /// Tokio for execution.
     #[cfg(feature = "native")]
     pub fn new(
         directory: PathBuf,
         database_key: impl Fn(&Path) -> Result<DatabaseKey, StoreError> + Send + Sync + 'static,
     ) -> Self {
-        Self::with_network(
+        Self::with_adapters(
             directory,
             database_key,
             Arc::new(crate::native::network::NativeNetwork),
+            Arc::new(crate::native::execution::NativeExecution),
         )
     }
 
-    /// The ports of a host that supplies its own network adapter.
-    pub fn with_network(
+    /// The ports of a host that supplies its own network and execution
+    /// (a browser host: its `fetch` adapter and [`crate::execution::Cooperative`]).
+    pub fn with_adapters(
         directory: PathBuf,
         database_key: impl Fn(&Path) -> Result<DatabaseKey, StoreError> + Send + Sync + 'static,
         network: Arc<dyn crate::network::Network>,
+        execution: Arc<dyn crate::execution::Execution>,
     ) -> Self {
         Self {
             directory,
@@ -78,6 +84,7 @@ impl Ports {
             exclude_from_backup: |_| Ok(()),
             startup_mark: |_, _| {},
             network,
+            execution,
         }
     }
 

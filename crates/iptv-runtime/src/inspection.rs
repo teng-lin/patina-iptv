@@ -59,7 +59,8 @@ pub(crate) async fn guarded<T>(
         }
         Poll::Pending
     });
-    let result = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), race)
+    let result = services
+        .timeout_at(deadline, race)
         .await
         .unwrap_or(Err(InspectionError::Deadline));
     if !services.is_current() {

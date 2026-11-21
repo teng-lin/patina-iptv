@@ -224,12 +224,13 @@ impl Client {
         &self,
         request: HttpRequest,
     ) -> Result<StreamingResponse<Body>, FetchError> {
-        let deadline = tokio::time::Instant::now()
+        let deadline = std::time::Instant::now()
             + request
                 .timeout
                 .unwrap_or(self.net.config().request_timeout)
                 .min(self.net.config().request_timeout);
-        tokio::time::timeout_at(deadline, self.fetch_stream_inner(request, deadline))
+        self.services
+            .timeout_at(deadline, self.fetch_stream_inner(request, deadline))
             .await
             .map_err(|_| {
                 FetchError::new(FetchErrorKind::Deadline, "total document deadline exceeded")
@@ -238,7 +239,7 @@ impl Client {
     async fn fetch_stream_inner(
         &self,
         mut request: HttpRequest,
-        deadline: tokio::time::Instant,
+        deadline: std::time::Instant,
     ) -> Result<StreamingResponse<Body>, FetchError> {
         let path = iptv_providers::content_url::local_path(&request.url).map_err(|_| failure())?;
         if let Some(path) = path {
@@ -272,11 +273,12 @@ impl Client {
                         reader: Some(reader),
                         remaining,
                         deadline,
+                        services: self.services.clone(),
                     },
                 });
             }
         }
-        request.timeout = Some(deadline.saturating_duration_since(tokio::time::Instant::now()));
+        request.timeout = Some(deadline.saturating_duration_since(std::time::Instant::now()));
         let response = self.net.fetch_stream(request).await?;
         Ok(StreamingResponse {
             status: response.status,
@@ -304,7 +306,9 @@ pub(crate) enum Body {
     Private {
         reader: Option<PrivateFileReader>,
         remaining: u64,
-        deadline: tokio::time::Instant,
+        deadline: std::time::Instant,
+        /// Reads run on the owner's blocking side, within its timer.
+        services: super::store_service::Services,
     },
 }
 impl BodyStream for Body {
@@ -315,26 +319,31 @@ impl BodyStream for Body {
                 reader,
                 remaining,
                 deadline,
+                services,
             } => {
                 let Some(mut owned) = reader.take() else {
                     return Ok(None);
                 };
-                let (owned, result) = tokio::time::timeout_at(
-                    *deadline,
-                    tokio::task::spawn_blocking(move || {
-                        let mut bytes = vec![0; 64 * 1024];
-                        let result = owned.read(&mut bytes).map(|count| {
-                            bytes.truncate(count);
-                            (count > 0).then_some(bytes)
-                        });
-                        (owned, result)
-                    }),
-                )
-                .await
-                .map_err(|_| {
-                    FetchError::new(FetchErrorKind::Deadline, "total document deadline exceeded")
-                })?
-                .map_err(|_| failure())?;
+                let (owned, result) = services
+                    .timeout_at(
+                        *deadline,
+                        services.spawn_blocking(move || {
+                            let mut bytes = vec![0; 64 * 1024];
+                            let result = owned.read(&mut bytes).map(|count| {
+                                bytes.truncate(count);
+                                (count > 0).then_some(bytes)
+                            });
+                            (owned, result)
+                        }),
+                    )
+                    .await
+                    .map_err(|_| {
+                        FetchError::new(
+                            FetchErrorKind::Deadline,
+                            "total document deadline exceeded",
+                        )
+                    })?
+                    .map_err(|_| failure())?;
                 let chunk = result.map_err(|_| failure())?;
                 if let Some(bytes) = &chunk {
                     *remaining = remaining.checked_sub(bytes.len() as u64).ok_or_else(|| {

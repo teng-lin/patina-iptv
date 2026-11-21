@@ -111,7 +111,7 @@ fn start(
     job: Job,
     cancel: &CancelToken,
 ) -> (
-    tokio::task::JoinHandle<()>,
+    crate::execution::Join<()>,
     tokio::sync::mpsc::UnboundedReceiver<Msg>,
 ) {
     let services = owner.services();

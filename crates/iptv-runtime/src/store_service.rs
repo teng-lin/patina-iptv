@@ -1,6 +1,7 @@
-//! The app's two store connections, each on its own long-lived worker
-//! thread. UI callers await replies; import workers may wait, but cannot
-//! open competing app connections.
+//! The app's two store connections, each on its own lane of the owner's
+//! execution port (natively a long-lived thread; see
+//! [`crate::execution`]). UI callers await replies; import workers may
+//! wait, but cannot open competing app connections.
 //!
 //! Every owner ([`Service`]) has its own pair; work reaches them through the
 //! [`Services`] handle its owner gave out, never through a process-wide or
@@ -24,10 +25,11 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::Path;
+#[cfg(feature = "test-support")]
+use std::sync::mpsc;
 use std::sync::{
     Arc, Mutex, OnceLock,
     atomic::{AtomicU64, Ordering},
-    mpsc,
 };
 use std::thread::ThreadId;
 use std::time::{Duration, Instant};
@@ -130,14 +132,28 @@ impl crate::Runtime {
 
 type Job = Box<dyn FnOnce(&mut Connection) + Send>;
 
-/// One connection's worker: a thread that owns the connection and runs
-/// jobs in order.
+/// One connection's worker: a lane of the owner's execution port (natively
+/// a thread) that runs jobs in order, each with the connection.
 struct Lane {
     name: &'static str,
-    /// The job queue and its thread: a job may not queue on its own lane
-    /// and wait for itself.
-    jobs: OnceLock<(mpsc::Sender<Job>, ThreadId)>,
+    /// The execution lane, started on first use: a job may not queue on
+    /// its own lane and wait for itself.
+    jobs: OnceLock<Box<dyn crate::execution::Lane>>,
+    execution: Arc<dyn crate::execution::Execution>,
+    /// The lane's connection; only its jobs, one at a time, lock it.
+    connection: Arc<Mutex<Connection>>,
     metrics: Arc<Mutex<QueueMetrics>>,
+}
+impl Lane {
+    fn new(name: &'static str, execution: Arc<dyn crate::execution::Execution>) -> Self {
+        Self {
+            name,
+            jobs: OnceLock::new(),
+            execution,
+            connection: Arc::default(),
+            metrics: Arc::default(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -178,8 +194,8 @@ impl Epochs {
     }
 }
 
-/// The native services of one application owner: its two store lanes, file
-/// writer, network executor, refresh pool, settings and platform ports.
+/// The services of one application owner: its two store lanes, file
+/// writer, task executor, refresh pool, settings and platform ports.
 /// Nothing here is process-wide: a second owner has its own.
 pub(crate) struct Service {
     ports: crate::Ports,
@@ -187,7 +203,8 @@ pub(crate) struct Service {
     reader: Lane,
     analysis: Lane,
     epochs: Epochs,
-    executor: super::executor::Executor,
+    /// The owner's task executor from its execution port, made on first use.
+    tasks: OnceLock<Box<dyn crate::execution::Tasks>>,
     files: super::file_writer::Files,
     pool: OnceLock<super::workers::Pool>,
     settings: super::settings::Shared,
@@ -202,26 +219,15 @@ pub(crate) struct Service {
 }
 impl Service {
     pub(crate) fn new(ports: crate::Ports) -> Self {
+        let execution = ports.execution.clone();
         Self {
+            writer: Lane::new("iptv-store", execution.clone()),
+            reader: Lane::new("iptv-store-read", execution.clone()),
+            analysis: Lane::new("iptv-store-analysis", execution.clone()),
+            files: super::file_writer::Files::new(execution),
             ports,
-            writer: Lane {
-                name: "iptv-store",
-                jobs: OnceLock::new(),
-                metrics: Arc::default(),
-            },
-            reader: Lane {
-                name: "iptv-store-read",
-                jobs: OnceLock::new(),
-                metrics: Arc::default(),
-            },
-            analysis: Lane {
-                name: "iptv-store-analysis",
-                jobs: OnceLock::new(),
-                metrics: Arc::default(),
-            },
             epochs: Epochs::default(),
-            executor: Default::default(),
-            files: Default::default(),
+            tasks: OnceLock::new(),
             pool: OnceLock::new(),
             settings: Default::default(),
             ui_thread: OnceLock::new(),
@@ -267,6 +273,10 @@ impl Service {
 
     pub(crate) fn files(&self) -> &super::file_writer::Files {
         &self.files
+    }
+
+    fn tasks(&self) -> &dyn crate::execution::Tasks {
+        &**self.tasks.get_or_init(|| self.ports.execution.tasks())
     }
 
     fn open_store(&self) -> Result<Store, StoreError> {
@@ -423,30 +433,40 @@ impl Services {
             .client(&super::settings::network_config(&self.settings()))
     }
 
-    /// Runs `future` on the owner's network runtime; await the handle for
+    /// Runs `future` on the owner's task executor; await the handle for
     /// its output. Dropping the handle detaches the task (cancel it with its
     /// `CancelToken`).
-    pub(crate) fn spawn<F>(&self, future: F) -> tokio::task::JoinHandle<F::Output>
+    pub(crate) fn spawn<F>(&self, future: F) -> crate::execution::Join<F::Output>
     where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
+        F: Future + crate::MaybeSend + 'static,
+        F::Output: crate::MaybeSend + 'static,
     {
-        self.service.executor.spawn(future)
+        crate::execution::spawn(self.service.tasks(), future)
     }
 
-    /// Runs CPU-bound `work` on the network runtime's blocking threads
-    /// (building a large schedule); await the handle for its output.
+    /// Runs CPU-bound `work` on the task executor's blocking side (building
+    /// a large schedule); await the handle for its output.
     pub(crate) fn spawn_blocking<R: Send + 'static>(
         &self,
         work: impl FnOnce() -> R + Send + 'static,
-    ) -> tokio::task::JoinHandle<R> {
-        self.service.executor.spawn_blocking(work)
+    ) -> crate::execution::Join<R> {
+        crate::execution::spawn_blocking(self.service.tasks(), work)
     }
 
     /// Drive a non-Send import on its bounded blocking worker, sharing the
     /// IO executor.
     pub(crate) fn block_on<F: Future>(&self, future: F) -> F::Output {
-        self.service.executor.block_on(future)
+        crate::execution::block_on(self.service.tasks(), future)
+    }
+
+    /// `future`, unless `deadline` passes first on the owner's timer.
+    pub(crate) async fn timeout_at<F: Future>(
+        &self,
+        deadline: Instant,
+        future: F,
+    ) -> Result<F::Output, crate::execution::Elapsed> {
+        let limit = deadline.saturating_duration_since(Instant::now());
+        crate::execution::timeout(self.service.tasks(), limit, future).await
     }
 
     /// Queues refresh `work` on the owner's bounded pool; false when it is
@@ -459,7 +479,7 @@ impl Services {
         let accepted = self.clone();
         self.service
             .pool
-            .get_or_init(super::workers::Pool::standard)
+            .get_or_init(|| super::workers::Pool::standard(&*self.service.ports.execution))
             .submit(
                 visible,
                 Box::new(move || {
@@ -590,14 +610,10 @@ impl Services {
     ) -> Result<R, StoreError> {
         self.service.assert_off_ui_thread("blocking store request");
         let epoch = self.affinity()?;
-        let (sender, receiver) = mpsc::sync_channel(1);
         let owner = self.service.clone();
-        self.service.writer.queue(Box::new(move |connection| {
-            let _ = sender.send(owner.write(epoch, connection, operation));
-        }))?;
-        receiver
-            .recv()
-            .map_err(|_| StoreError::Unavailable("store reply lost"))?
+        self.service
+            .writer
+            .wait(move |connection| owner.write(epoch, connection, operation))?
     }
 
     /// For import/background workers only: a read of the last commit that runs
@@ -608,16 +624,16 @@ impl Services {
     ) -> Result<R, StoreError> {
         self.service.assert_off_ui_thread("blocking store read");
         let epoch = self.affinity()?;
-        let (sender, receiver) = mpsc::sync_channel(1);
         let owner = self.service.clone();
-        self.service.reader.queue(Box::new(move |connection| {
-            let _ = sender.send(owner.read(epoch, connection, operation));
-        }))?;
         #[cfg(feature = "test-support")]
-        self.service.reads.fetch_add(1, Ordering::Relaxed);
-        receiver
-            .recv()
-            .map_err(|_| StoreError::Unavailable("store reply lost"))?
+        let reads = self.service.clone();
+        self.service.reader.wait_counted(
+            move |connection| owner.read(epoch, connection, operation),
+            move || {
+                #[cfg(feature = "test-support")]
+                reads.reads.fetch_add(1, Ordering::Relaxed);
+            },
+        )?
     }
 
     /// Occupies the writer for `duration` after the work queued before it.
@@ -702,14 +718,9 @@ impl Service {
     /// (the key and the migration stay there). Runs on the reader's thread,
     /// which may wait for the writer; the writer never waits for the reader.
     fn open_reader(self: &Arc<Self>, epoch: u64) -> Result<Store, StoreError> {
-        let (sender, receiver) = mpsc::sync_channel(1);
         let owner = self.clone();
-        self.writer.queue(Box::new(move |connection| {
-            let _ = sender.send(owner.write(epoch, connection, |store| store.open_reader()));
-        }))?;
-        receiver
-            .recv()
-            .map_err(|_| StoreError::Unavailable("store reply lost"))?
+        self.writer
+            .wait(move |connection| owner.write(epoch, connection, |store| store.open_reader()))?
     }
 }
 
@@ -734,35 +745,71 @@ fn with_epoch<R>(
 }
 
 impl Lane {
-    fn sender(&self) -> Result<mpsc::Sender<Job>, StoreError> {
-        let (sender, thread) = self.jobs.get_or_init(|| {
-            let (sender, receiver) = mpsc::channel::<Job>();
-            let thread = std::thread::Builder::new()
-                .name(self.name.into())
-                .spawn(move || {
-                    let mut connection = Connection::default();
-                    while let Ok(job) = receiver.recv() {
-                        run_job(&mut connection, job);
-                    }
-                })
-                .expect("start store service");
-            (sender, thread.thread().id())
-        });
-        if *thread == std::thread::current().id() {
+    fn lane(&self) -> Result<&dyn crate::execution::Lane, StoreError> {
+        let lane = self
+            .jobs
+            .get_or_init(|| self.execution.lane(self.name).expect("start store service"));
+        if lane.is_current() {
             return Err(StoreError::Unavailable("recursive store request"));
         }
-        Ok(sender.clone())
+        Ok(&**lane)
+    }
+
+    /// Wraps `job` with its queue ticket and the lane's connection.
+    fn job(&self, job: Job) -> crate::execution::Job {
+        let ticket = QueueTicket::new(self.metrics.clone());
+        let connection = self.connection.clone();
+        Box::new(move || {
+            ticket.start();
+            let mut connection = connection
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            run_job(&mut connection, job);
+        })
     }
 
     fn queue(&self, job: Job) -> Result<(), StoreError> {
-        let sender = self.sender()?;
-        let ticket = QueueTicket::new(self.metrics.clone());
-        sender
-            .send(Box::new(move |connection| {
-                ticket.start();
-                job(connection);
-            }))
-            .map_err(|_| StoreError::Unavailable("store worker stopped"))
+        let lane = self.lane()?;
+        if lane.push(self.job(job)) {
+            Ok(())
+        } else {
+            Err(StoreError::Unavailable("store worker stopped"))
+        }
+    }
+
+    /// Runs `operation` after everything queued before it and waits for its
+    /// reply (workers only; a cooperative lane runs its queue inline).
+    fn wait<R: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&mut Connection) -> R + Send + 'static,
+    ) -> Result<R, StoreError> {
+        self.wait_counted(operation, || {})
+    }
+
+    /// [`Lane::wait`], calling `queued` once the request is queued.
+    fn wait_counted<R: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&mut Connection) -> R + Send + 'static,
+        queued: impl FnOnce(),
+    ) -> Result<R, StoreError> {
+        let lane = self.lane()?;
+        let reply = Arc::new(Mutex::new(None));
+        let slot = reply.clone();
+        let job = self.job(Box::new(move |connection| {
+            let result = operation(connection);
+            *slot
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(result);
+        }));
+        queued();
+        if !lane.run(job, None) {
+            return Err(StoreError::Unavailable("store reply lost"));
+        }
+        reply
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+            .ok_or(StoreError::Unavailable("store reply lost"))
     }
 
     fn skipped_read(&self) {
@@ -792,20 +839,13 @@ impl Lane {
         limit: std::time::Duration,
         job: impl FnOnce(&mut Connection) + Send + 'static,
     ) -> bool {
-        if self.jobs.get().is_none() {
+        let Some(lane) = self.jobs.get() else {
             return true;
-        }
-        let (done, reply) = mpsc::channel();
-        if self
-            .queue(Box::new(move |connection| {
-                job(connection);
-                let _ = done.send(());
-            }))
-            .is_err()
-        {
+        };
+        if lane.is_current() {
             return false;
         }
-        reply.recv_timeout(limit).is_ok()
+        lane.run(self.job(Box::new(job)), Some(limit))
     }
 }
 
@@ -965,18 +1005,27 @@ mod tests {
         assert!(owner.drain_on_shutdown());
     }
 
+    /// A lane whose worker has stopped.
+    struct Stopped;
+    impl crate::execution::Lane for Stopped {
+        fn push(&self, _: crate::execution::Job) -> bool {
+            false
+        }
+        fn run(&self, _: crate::execution::Job, _: Option<std::time::Duration>) -> bool {
+            false
+        }
+        fn is_current(&self) -> bool {
+            false
+        }
+    }
+
     #[test]
     fn failed_lane_send_reclaims_its_queue_ticket() {
-        let (sender, receiver) = std::sync::mpsc::channel();
-        drop(receiver);
-        let other = std::thread::spawn(|| std::thread::current().id())
-            .join()
-            .unwrap();
-        let lane = super::Lane {
-            name: "synthetic-disconnected",
-            jobs: std::sync::OnceLock::from((sender, other)),
-            metrics: Arc::default(),
-        };
+        let lane = super::Lane::new(
+            "synthetic-disconnected",
+            Arc::new(crate::native::execution::NativeExecution),
+        );
+        assert!(lane.jobs.set(Box::new(Stopped)).is_ok());
         assert!(
             lane.queue(Box::new(|_| panic!("disconnected work")))
                 .is_err()

@@ -397,7 +397,13 @@ mod persistence_tests {
     use super::*;
     /// What a restart reads, with no write queued.
     fn read_file(path: &Path) -> Settings {
-        super::read_file(&Default::default(), path).0
+        super::read_file(
+            &crate::file_writer::Files::new(std::sync::Arc::new(
+                crate::native::execution::NativeExecution,
+            )),
+            path,
+        )
+        .0
     }
     /// What the background writer does with a settings save.
     fn write_file(path: &Path, settings: &Settings) -> Result<(), WriteError> {
