@@ -5,7 +5,7 @@ use iptv_store_sqlite::{SourcePolicy, Store};
 fn policy_and_group_edits_survive_refresh_restart_and_are_source_scoped() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("test.db");
-    let mut s = Store::open(&path).unwrap();
+    let mut s = common::open(&path);
     let src = s.add_source(&m3u_source("One")).unwrap();
     let other = s.add_source(&m3u_source("Two")).unwrap();
     let cat = catalog(8, 2, XT_PASSWORD);
@@ -23,7 +23,7 @@ fn policy_and_group_edits_survive_refresh_restart_and_are_source_scoped() {
     s.move_group(src, &group(1).id, 0).unwrap();
     replace(&mut s, src, &cat);
     drop(s);
-    let mut s = Store::open(&path).unwrap();
+    let mut s = common::open(&path);
     assert_eq!(s.source_policy(src).unwrap(), p);
     assert_eq!(s.source_policy(other).unwrap(), SourcePolicy::default());
     let groups = s.library_groups(src).unwrap();
@@ -438,12 +438,13 @@ fn generated_other_blocks_only_channels_without_a_primary_live_group() {
 }
 
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "needs a second connection")]
 fn renaming_a_custom_group_clears_its_legacy_name_and_keeps_its_visibility() {
     use iptv_providers::GroupId;
 
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("synthetic.sqlite");
-    let mut store = Store::open(&path).unwrap();
+    let mut store = common::open(&path);
     let source = store.add_source(&m3u_source("Generated")).unwrap();
     let group = store
         .create_custom_group(source, "Generated group")

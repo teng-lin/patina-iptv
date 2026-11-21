@@ -35,7 +35,9 @@ use std::sync::mpsc;
 
 use iptv_epg::{FeedId, IngestReport, ProgramData, ScheduleRules, StoreOptions, UnixTime};
 use iptv_import::{GuideSink, SinkError};
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::Connection;
+#[cfg(not(target_family = "wasm"))]
+use rusqlite::OpenFlags;
 
 use crate::error::{Result, StoreError};
 use writer::{Batch, Cmd, Writer};
@@ -157,9 +159,23 @@ impl EpgStage {
         dir.join(name)
     }
 
-    /// A new stage at `path` (an existing file there is replaced).
+    /// A new stage at `path` (an existing file there is replaced). The
+    /// browser has no files: [`Self::create_in_store`] makes the stage among
+    /// a browser store's memory files there, and this refuses.
     pub fn create(path: impl Into<PathBuf>) -> Result<Self> {
-        let path = path.into();
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = path.into();
+            Err(StoreError::Unavailable(
+                "the browser build stages through its store (create_in_store)",
+            ))
+        }
+        #[cfg(not(target_family = "wasm"))]
+        Self::create_file(path.into())
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    fn create_file(path: PathBuf) -> Result<Self> {
         remove(&path);
         let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
             | OpenFlags::SQLITE_OPEN_CREATE

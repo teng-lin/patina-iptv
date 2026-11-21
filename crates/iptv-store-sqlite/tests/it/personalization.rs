@@ -21,7 +21,7 @@ fn names(s: &Store, source: iptv_store_sqlite::SourceId, scope: ChannelScope) ->
 fn bulk_copy_move_is_atomic_deduplicated_source_scoped_and_keeps_channels() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("test.sqlite");
-    let mut s = Store::open(&path).unwrap();
+    let mut s = common::open(&path);
     let src = s.add_source(&m3u_source("Generated")).unwrap();
     let other = s.add_source(&m3u_source("Other")).unwrap();
     let cat = catalog(6, 2, XT_PASSWORD);
@@ -88,7 +88,7 @@ fn bulk_copy_move_is_atomic_deduplicated_source_scoped_and_keeps_channels() {
     s.move_in_custom_group(b, &id(2), 0).unwrap();
     s.rename_custom_group(b, "Renamed").unwrap();
     drop(s);
-    let mut s = Store::open(&path).unwrap();
+    let mut s = common::open(&path);
     assert_eq!(names(&s, src, ChannelScope::Custom(b)), ids(&[2, 0]));
     replace(&mut s, src, &cat);
     assert_eq!(names(&s, src, ChannelScope::Custom(b)), ids(&[2, 0]));

@@ -63,7 +63,18 @@ const STAGED_CHANNELS: &str = "SELECT source_id,id,provider_id,name,number,logo,
      FROM channels ORDER BY position";
 
 impl CatalogStage {
+    /// A plain stage file in `dir`. The browser has no files: there a stage
+    /// is made through its store ([`Self::create_in_with`] with
+    /// `Store::open_staging_connection`), and this refuses.
     pub fn create_in(dir: impl AsRef<Path>) -> Result<Self> {
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = dir;
+            Err(StoreError::Unavailable(
+                "the browser build stages through its store (create_in_with)",
+            ))
+        }
+        #[cfg(not(target_family = "wasm"))]
         Self::create_in_with(dir, |path| Ok(Connection::open(path)?))
     }
     /// The connection factory may apply the live store's encryption key.

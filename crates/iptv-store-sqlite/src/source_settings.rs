@@ -128,12 +128,11 @@ pub(crate) fn forget_active(conn: &rusqlite::Connection, id: SourceId) -> Result
 
 #[cfg(test)]
 mod combined_tests {
-    use super::*;
     #[test]
     fn aggregation_preference_and_resume_key_survive_reopen() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("store.sqlite");
-        let mut store = Store::open(&path).unwrap();
+        let mut store = crate::test_open(&path);
         assert!(!store.all_playlists().unwrap());
         assert!(store.collapsed_playlists().unwrap().is_empty());
         store.set_collapsed_playlists(&[2, 9]).unwrap();
@@ -143,7 +142,7 @@ mod combined_tests {
             .set_combined_last_channel("source:2:synthetic-channel")
             .unwrap();
         drop(store);
-        let mut store = Store::open(&path).unwrap();
+        let mut store = crate::test_open(&path);
         assert!(store.all_playlists().unwrap());
         assert_eq!(store.collapsed_playlists().unwrap(), [2, 9]);
         assert_eq!(

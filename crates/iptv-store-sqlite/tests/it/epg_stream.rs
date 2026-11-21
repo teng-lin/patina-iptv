@@ -77,7 +77,7 @@ fn in_memory(
 /// A store with one source, in its own directory (the stage goes there).
 fn store() -> (Store, iptv_store_sqlite::SourceId, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let mut store = Store::open(dir.path().join("iptv.sqlite")).unwrap();
+    let mut store = common::open(dir.path().join("iptv.sqlite"));
     let source = store.add_source(&common::m3u_source("Synthetic")).unwrap();
     (store, source, dir)
 }
@@ -291,7 +291,7 @@ fn check_equivalent(store_opts: StoreOptions) {
     );
 
     let (mut store, source, dir) = store();
-    let mut stage = EpgStage::create_in(dir.path()).unwrap();
+    let mut stage = EpgStage::create_in_store(&store, dir.path()).unwrap();
     let epg = block_on(import_epg(
         &fetch,
         &configs,
@@ -415,7 +415,7 @@ fn import_into(
     progress: &mut impl ProgressSink,
     cancel: &CancelToken,
 ) -> Result<(), ImportError> {
-    let mut stage = EpgStage::create_in(dir).unwrap();
+    let mut stage = EpgStage::create_in_store(store, dir).unwrap();
     let epg = block_on(import_epg(
         fetch,
         configs,
@@ -452,7 +452,6 @@ fn stage_files(dir: &std::path::Path) -> Vec<String> {
 }
 
 #[test]
-#[cfg_attr(target_family = "wasm", ignore = "needs a file system")]
 fn a_canceled_or_failed_download_keeps_the_stored_guide() {
     let shape = |from, days| GenShape {
         channels: 40,
@@ -505,6 +504,7 @@ fn a_canceled_or_failed_download_keeps_the_stored_guide() {
     assert!(staged_some);
     assert_eq!(titles(&store, source, &chans), before);
     assert_eq!(store.epg_guide(source).unwrap(), state);
+    #[cfg(not(target_family = "wasm"))]
     assert_eq!(stage_files(dir.path()), Vec::<String>::new());
 
     // A connection dropped mid-way: that feed fails, so does the import.
@@ -523,6 +523,7 @@ fn a_canceled_or_failed_download_keeps_the_stored_guide() {
     );
     assert!(matches!(err, Err(ImportError::Network { .. })), "{err:?}");
     assert_eq!(titles(&store, source, &chans), before);
+    #[cfg(not(target_family = "wasm"))]
     assert_eq!(stage_files(dir.path()), Vec::<String>::new());
 }
 
@@ -573,6 +574,7 @@ fn a_failed_feed_is_left_out_and_the_others_are_stored() {
 }
 
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "needs a second connection")]
 fn the_store_stays_writable_while_a_guide_downloads() {
     let chans = stream_support::generated_playlist(20);
     let fetch = Feeds::new().serve(

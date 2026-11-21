@@ -87,19 +87,19 @@ fn fts_is_diacritics_insensitive() {
 }
 
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "needs a second connection")]
 fn index_is_rebuilt_when_missing_and_dropped_with_the_source() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("s.db");
     let src;
     {
-        let mut s = Store::open_with(
+        let mut s = common::open_with(
             &path,
             &OpenOptions {
                 prefer_fts: false,
                 ..Default::default()
             },
-        )
-        .unwrap();
+        );
         src = s.add_source(&xtream_source("Xt")).unwrap();
         let (groups, channels) = named(&["Alpha One", "Beta Two"]);
         s.replace_catalog(src, &groups, &channels, &[], &[])
@@ -109,7 +109,7 @@ fn index_is_rebuilt_when_missing_and_dropped_with_the_source() {
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute_batch("DROP TABLE channel_fts").unwrap();
     }
-    let mut s = Store::open(&path).unwrap();
+    let mut s = common::open(&path);
     assert_eq!(
         names(&s.search_channels(Some(src), "beta", 5).unwrap()),
         ["Beta Two"]

@@ -241,6 +241,16 @@ impl Store {
         Self::open_with(path, &OpenOptions::default())
     }
 
+    /// The browser has no files: use [`Store::open_browser`] (`BrowserFiles`)
+    /// there; this refuses rather than opening an unpersisted file.
+    #[cfg(target_family = "wasm")]
+    pub fn open_with(_path: impl AsRef<Path>, _options: &OpenOptions) -> Result<Self> {
+        Err(StoreError::Unavailable(
+            "the browser build opens stores with open_browser",
+        ))
+    }
+
+    #[cfg(not(target_family = "wasm"))]
     pub fn open_with(path: impl AsRef<Path>, options: &OpenOptions) -> Result<Self> {
         let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
             | OpenFlags::SQLITE_OPEN_CREATE
@@ -383,3 +393,27 @@ impl Store {
 
 mod private_file;
 pub use private_file::PrivateFileReader;
+
+/// The store at `path` in unit tests: a file natively; in the browser build
+/// the memory files kept for `path` on this test thread, so a reopen finds
+/// the same database.
+#[cfg(test)]
+pub(crate) fn test_open(path: &Path) -> Store {
+    #[cfg(not(target_family = "wasm"))]
+    return Store::open(path).unwrap();
+    #[cfg(target_family = "wasm")]
+    {
+        thread_local! {
+            static FILES: std::cell::RefCell<std::collections::HashMap<std::path::PathBuf, BrowserFiles>> =
+                Default::default();
+        }
+        let files = FILES.with(|files| {
+            files
+                .borrow_mut()
+                .entry(path.to_owned())
+                .or_insert_with(|| BrowserFiles::new().unwrap())
+                .clone()
+        });
+        Store::open_browser(&files).unwrap()
+    }
+}

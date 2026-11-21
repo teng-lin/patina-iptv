@@ -1224,12 +1224,12 @@ mod tests {
     fn durable_inverse_survives_restart_but_restore_invalidates_authority() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("synthetic.sqlite");
-        let mut store = Store::open(&path).unwrap();
+        let mut store = crate::test_open(&path);
         let id = source(&mut store);
         let preview = batch(&store, id);
         committed(store.apply_guide_repair("p1", "digest", &preview).unwrap());
         drop(store);
-        let mut store = Store::open(&path).unwrap();
+        let mut store = crate::test_open(&path);
         assert!(committed(store.undo_guide_repair("p1").unwrap()).undone);
         let preview = batch(&store, id);
         committed(store.apply_guide_repair("p2", "digest", &preview).unwrap());
