@@ -350,7 +350,12 @@ impl Service {
         self.epochs.close_admission(epoch);
         #[cfg(feature = "test-support")]
         self.hooks.admission_closed();
-        if self.writer.jobs.get().is_none() {
+        // Natively a reader opens only through the writer; where lanes share
+        // the writer's connection, a read alone may have opened it.
+        if [&self.writer, &self.reader, &self.analysis]
+            .iter()
+            .all(|lane| lane.jobs.get().is_none())
+        {
             self.epochs.close(epoch);
             after_writer();
             #[cfg(feature = "test-support")]
@@ -373,6 +378,10 @@ impl Service {
             // FIFO barrier still retires the connection held by preceding work.
             *connection = Connection::default();
         });
+        if self.writer.jobs.get().is_none() {
+            // Shared lanes that only read: no writer job closes the epoch.
+            self.epochs.close(epoch);
+        }
         // Queued writes have acknowledged before transient read/probe cancellation.
         after_writer();
         let reader = self.reader.barrier(limit, |connection| {
@@ -1110,6 +1119,30 @@ mod tests {
             Some("synthetic-shared")
         );
         assert!(owner.drain_on_shutdown());
+    }
+
+    #[test]
+    fn closing_shared_lanes_closes_a_connection_only_a_read_opened() {
+        let directory = tempfile::tempdir().unwrap();
+        let ports = crate::Ports::with_adapters(
+            directory.path().to_owned(),
+            |_| Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x74; 32])),
+            Arc::new(crate::native::network::NativeNetwork),
+            Arc::new(crate::execution::Cooperative::new(Arc::new(Unpolled))),
+        );
+        let owner = Arc::new(Service::new(ports));
+        owner.epochs.begin();
+        owner
+            .accept()
+            .blocking_read(|store| store.combined_last_channel())
+            .unwrap();
+        assert!(owner.writer.jobs.get().is_none());
+        assert!(owner.drain_on_shutdown());
+        assert!(owner.writer.connection.lock().unwrap().store.is_none());
+        assert!(
+            !owner.accept().is_current(),
+            "the closed owner accepts nothing"
+        );
     }
 
     #[test]
