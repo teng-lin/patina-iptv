@@ -98,7 +98,8 @@ def fields(data):
         offset = 4
         pcr = None
         if p[3] & 0x20:
-            pcr = p[6] << 25 | p[7] << 17 | p[8] << 9 | p[9] << 1 | p[10] >> 7
+            if p[4] and p[5] & 0x10:
+                pcr = p[6] << 25 | p[7] << 17 | p[8] << 9 | p[9] << 1 | p[10] >> 7
             offset += 1 + p[4]
         pes = p[offset:]
         pts = dts = None
@@ -141,6 +142,14 @@ class Timestamps(unittest.TestCase):
             # Payloads past the timestamp fields are untouched.
             self.assertEqual(shifted[start + 40:start + 188], data[start + 40:start + 188])
 
+    def test_adaptation_only_packets_repeat_the_moved_counter(self):
+        # Such a packet carries the counter of the PID's last payload packet.
+        stuffing = bytearray(packet(VIDEO, 5, pcr=(1800, 0)))
+        stuffing[3] = 0x20 | 5
+        stuffing[4] = 183
+        shifted = mock.shift_ts(packet(VIDEO, 5, pts=9000) + bytes(stuffing), 0, {VIDEO: 3})
+        self.assertEqual([counter for _, counter, *_ in fields(shifted)], [8, 8])
+
     def test_timestamps_wrap_at_33_bits(self):
         data = packet(VIDEO, 0, pts=(1 << 33) - 10, dts=(1 << 33) - 20, pcr=((1 << 33) - 30, 0))
         self.assertEqual(fields(mock.shift_ts(data, 100, {}))[0][2:], (90, 80, 70))
@@ -150,6 +159,12 @@ class Timestamps(unittest.TestCase):
             mock.shift_ts(b"\x47" * 100, 0, {})
         with self.assertRaises(ValueError):
             mock.shift_ts(b"\x00" * 188, 0, {})
+        # A PES start whose timestamps do not fit after a long adaptation field.
+        crowded = bytearray(packet(VIDEO, 0, pts=9000, dts=5400))
+        crowded[3] |= 0x20
+        crowded[4:] = bytes([170]) + bytes(170) + crowded[4:17]
+        with self.assertRaises(ValueError):
+            mock.shift_ts(bytes(crowded), 0, {})
 
 
 class Lengths(unittest.TestCase):
@@ -257,6 +272,12 @@ class LoopingLive(unittest.TestCase):
                 mock.Loop(text, self.read, window=4)
         with self.assertRaises(ValueError):
             mock.Loop(manifest(3), self.read, window=0)
+        with self.assertRaises(ValueError):
+            mock.Loop(manifest(3), lambda name: segment(int(name[3:6]))[:-1], window=4)
+
+    def test_a_sequence_has_one_name(self):
+        self.assertIsNone(mock.LIVE_SEGMENT.fullmatch("live-03.ts"))
+        self.assertEqual(mock.LIVE_SEGMENT.fullmatch("live-0.ts").group(1), "0")
 
     def test_audio_that_outlasts_the_video_lengthens_the_period(self):
         # 48 kHz AAC frames (1920 ticks) cover 6.016 s; the video ends at 6 s.
@@ -370,10 +391,13 @@ class EncodedMedia(unittest.TestCase):
             ], check=True)
             loop = mock.Loop((out / "index.m3u8").read_text(), lambda name: (out / name).read_bytes(), window=3)
             (out / "joined.ts").write_bytes(b"".join(loop.segment(n, 10**9) for n in range(9)))
-            probe = subprocess.run([
+            joined = (out / "joined.ts").read_bytes()
+            result = subprocess.run([
                 "ffprobe", "-v", "error", "-show_entries", "packet=stream_index,dts",
                 "-of", "csv=p=0", str(out / "joined.ts"),
-            ], check=True, capture_output=True, text=True).stdout
+            ], check=True, capture_output=True, text=True)
+            self.assertEqual(result.stderr, "", "the demuxer reports no errors")
+            probe = result.stdout
         last = {}
         count = 0
         for line in probe.split():
@@ -385,8 +409,18 @@ class EncodedMedia(unittest.TestCase):
             last[stream] = dts
             count += 1
         self.assertGreater(count, 600)
-        # Three repeats of 6 s: the last video packet is about 18 s in.
-        self.assertGreater(max(last.values()) - 126_000, 17 * TICKS)
+        # The encoder's continuity counters and PCR run on through each wrap too.
+        counters, clocks = {}, []
+        for pid, counter, _, _, pcr in fields(joined):
+            if pid in counters:
+                self.assertEqual(counter, (counters[pid] + 1) % 16, f"PID {pid:#x} counter")
+            counters[pid] = counter
+            if pcr is not None:
+                clocks.append(pcr)
+        self.assertTrue(clocks and all(b > a for a, b in zip(clocks, clocks[1:])), "PCR rises")
+        # Three repeats of 6 s: both streams' last packets are about 18 s in.
+        self.assertEqual(len(last), 2)
+        self.assertGreater(min(last.values()) - 126_000, 17 * TICKS)
 
 
 if __name__ == "__main__":

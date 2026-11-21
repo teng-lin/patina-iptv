@@ -42,7 +42,7 @@ TS_PACKET = 188
 TICKS = 90_000  # MPEG-TS timestamps count a 90 kHz clock.
 WRAP = 1 << 33  # PTS, DTS and the PCR base are 33-bit counters.
 SEGMENT = re.compile(r"seg[0-9]+\.ts")
-LIVE_SEGMENT = re.compile(r"live-([0-9]+)\.ts")
+LIVE_SEGMENT = re.compile(r"live-(0|[1-9][0-9]*)\.ts")
 # PES stream IDs whose header has no PTS/DTS fields (ISO/IEC 13818-1 2.4.3.7).
 NO_TIMESTAMPS = {0xBC, 0xBE, 0xBF, 0xF0, 0xF1, 0xF2, 0xF8, 0xFF}
 
@@ -80,7 +80,9 @@ def shift_ts(data, ticks, counters):
         pid = (packet[1] & 0x1F) << 8 | packet[2]
         control = packet[3] >> 4 & 0x03
         offset = 4
-        if control & 0x01:
+        if control and pid != 0x1FFF:
+            # A packet without payload repeats the counter of the PID's last
+            # payload packet, so it moves with it.
             packet[3] = (packet[3] & 0xF0) | ((packet[3] + counters.get(pid, 0)) & 0x0F)
         if control & 0x02:
             length = packet[4]
@@ -94,15 +96,20 @@ def shift_ts(data, ticks, counters):
                 pcr[3] = base >> 1 & 0xFF
                 pcr[4] = (base & 0x01) << 7 | (pcr[4] & 0x7F)
             offset += 1 + length
-        if not (control & 0x01 and packet[1] & 0x40) or offset + 14 > TS_PACKET:
+        if not (control & 0x01 and packet[1] & 0x40):
             continue
         pes = packet[offset:]
-        if pes[:3] != b"\x00\x00\x01" or pes[3] in NO_TIMESTAMPS or pes[6] >> 6 != 0x02:
+        if pes[:3] != b"\x00\x00\x01" or len(pes) < 4 or pes[3] in NO_TIMESTAMPS:
+            continue
+        if len(pes) < 9 or pes[6] >> 6 != 0x02:
             continue
         flags = pes[7] >> 6
+        if len(pes) < (19 if flags == 0x03 else 14 if flags else 9):
+            # Its timestamps would stay where they were and go back.
+            raise ValueError("a PES header that does not fit its packet")
         if flags & 0x02:
             write_timestamp(pes[9:14], (read_timestamp(pes[9:14]) + ticks) % WRAP)
-        if flags == 0x03 and offset + 19 <= TS_PACKET:
+        if flags == 0x03:
             write_timestamp(pes[14:19], (read_timestamp(pes[14:19]) + ticks) % WRAP)
     return bytes(out)
 
@@ -222,7 +229,11 @@ class Loop:
             raise ValueError("expected generated segments and a target duration")
         media = Media()
         for name in self.names:
-            media.add(read_segment(name))
+            data = read_segment(name)
+            # Every repeat after the first is rewritten: refuse media that
+            # could not be, before serving any of it.
+            shift_ts(data, 0, {})
+            media.add(data)
         # Repeat k is moved on by k periods. A period as long as the longest
         # stream keeps every stream rising: when the audio outlasts the
         # video by part of a frame, the video has that much of a gap at the
@@ -230,7 +241,9 @@ class Loop:
         # difference longer, so the clock and the media keep step.
         extra = max(media.length() - sum(self.durations), 0)
         self.durations[-1] += extra
-        self.target = max(self.target, round(self.durations[-1] / TICKS))
+        # Each EXTINF rounded to the nearest second may not exceed it
+        # (RFC 8216 4.3.3.1); halves round up, unlike round().
+        self.target = max(self.target, math.floor(self.durations[-1] / TICKS + 0.5))
         self.ends = list(itertools.accumulate(self.durations))
         self.period = self.ends[-1]
         self.counts = media.counts
