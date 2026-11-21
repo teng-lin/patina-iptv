@@ -221,8 +221,9 @@ pub enum Msg {
     /// loaded after the playlist was reported.
     Guide(Box<Imported>),
     /// What the store has, with only the first screen's programmes
-    /// (`opening.rs`); a `Guide` follows.
-    FirstScreen(Box<Imported>, opening::Held),
+    /// (`opening.rs`); a `Guide` follows. The window read waits until the
+    /// [`opening::Shown`] is dropped.
+    FirstScreen(Box<Imported>, opening::Held, opening::Shown),
 }
 
 #[derive(Clone, Copy)]
