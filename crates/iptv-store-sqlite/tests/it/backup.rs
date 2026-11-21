@@ -291,3 +291,184 @@ fn restore_keeps_explicit_lan_guides_and_derived_xtream_guides() {
         );
     }
 }
+
+/// Stores a guide whose programs (with descriptions) run from an hour ago
+/// for three days, bound to playlist channel `k1`, fetched at `now`.
+fn stored_guide(store: &mut Store, source: iptv_store_sqlite::SourceId, now: i64) {
+    use iptv_epg::{
+        ChannelKey, EpgRef, FeedId, GuideStore, MatchKind, SourceBuilder, StoreOptions,
+        XmltvProgram,
+    };
+    const H: i64 = 3600;
+    let mut feed = SourceBuilder::new(FeedId(1), 0, StoreOptions::default(), now);
+    for hour in -1..72 {
+        let start = now + hour * H;
+        feed.push_program(XmltvProgram {
+            channel: "generated.example".into(),
+            start,
+            stop: Some(start + H),
+            title: format!("Generated program {hour}"),
+            desc: Some("A generated description that takes some room. ".repeat(8)),
+            ..XmltvProgram::default()
+        });
+    }
+    let mut guide = GuideStore::new();
+    guide.replace_source(feed.finish());
+    guide.set_matches(
+        [(
+            ChannelKey::from("k1"),
+            vec![EpgRef {
+                source: FeedId(1),
+                epg_id: "generated.example".into(),
+                kind: MatchKind::TvgId,
+            }],
+        )]
+        .into_iter()
+        .collect(),
+    );
+    let meta = iptv_store_sqlite::EpgFeedMeta {
+        config: iptv_import::EpgSourceConfig::new(
+            FeedId(1),
+            SecretUrl::new("http://epg.example.com/generated.xml"),
+        ),
+        fetched_at: now,
+        etag: None,
+        last_modified: None,
+        bytes: 1,
+    };
+    crate::staged::replace_epg(store, source, &guide, &[meta], 7).unwrap();
+}
+
+fn rows(db: &Connection, table: &str) -> i64 {
+    db.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+        .unwrap()
+}
+
+#[test]
+fn snapshot_drops_downloaded_programs_but_keeps_guide_setup_and_reads_as_never_downloaded() {
+    use iptv_import::{Decision, RefreshPolicy, RefreshReason, Trigger, decide};
+    use iptv_store_sqlite::GuideSource;
+    let dir = tempfile::tempdir().unwrap();
+    let live = dir.path().join("live.sqlite");
+    let archive = dir.path().join("archive.sqlite");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let mut store = Store::open(&live).unwrap();
+    let id = store.add_source(&m3u_source("Generated playlist")).unwrap();
+    store
+        .set_guide_sources(
+            id,
+            &[GuideSource {
+                feed: iptv_epg::FeedId(1),
+                provider_index: None,
+                url: SecretUrl::new("http://epg.example.com/generated.xml"),
+                name: Some("Generated guide".into()),
+                enabled: true,
+                shift_minutes: 30,
+            }],
+        )
+        .unwrap();
+    stored_guide(&mut store, id, now);
+    Connection::open(&live)
+        .unwrap()
+        .execute(
+            "INSERT INTO guide_repair_commits (id, source_id, source_incarnation, created_at,
+                 expires_at, payload)
+             VALUES ('generated-repair', ?1, 'generated', ?2, ?3, '{}')",
+            rusqlite::params![id.0, now, now + 86_400],
+        )
+        .unwrap();
+    let before = store.epg_guide(id).unwrap().unwrap();
+    assert!(before.replaced_at.is_some_and(|at| at >= now));
+    // A full copy (the live file after a checkpoint) for the size comparison.
+    let full = dir.path().join("full.sqlite");
+    Connection::open(&live)
+        .unwrap()
+        .execute("VACUUM INTO ?1", [full.to_str().unwrap()])
+        .unwrap();
+    store.snapshot_to(&archive).unwrap();
+    Store::validate_snapshot(&archive).unwrap();
+
+    let db = Connection::open(&archive).unwrap();
+    let live_db = Connection::open(&live).unwrap();
+    assert_eq!(rows(&db, "epg_programs"), 0);
+    assert_eq!(rows(&db, "epg_descriptions"), 0);
+    assert_eq!(rows(&live_db, "epg_programs"), 73, "the live guide stays");
+    assert_eq!(rows(&live_db, "epg_descriptions"), 73);
+    for table in [
+        "guide_sources",
+        "guide_feed_incarnations",
+        "guide_repair_commits",
+        "epg_guides",
+        "epg_feeds",
+        "epg_channels",
+        "epg_bindings",
+        "epg_feed_channels",
+        "epg_feed_results",
+        "store_meta",
+    ] {
+        assert_eq!(rows(&db, table), rows(&live_db, table), "{table}");
+    }
+    for table in [
+        "guide_sources",
+        "guide_feed_incarnations",
+        "guide_repair_commits",
+        "epg_bindings",
+    ] {
+        assert_eq!(rows(&db, table), 1, "{table}");
+    }
+    drop((db, live_db));
+
+    let restored = Store::open(&archive).unwrap();
+    assert_eq!(
+        restored.guide_sources(id).unwrap(),
+        store.guide_sources(id).unwrap()
+    );
+    let guide = restored.epg_guide(id).unwrap().unwrap();
+    assert_eq!((guide.replaced_at, guide.ends_at), (None, None));
+    assert_eq!(guide.attempted_at, None);
+    assert_eq!(guide.match_fingerprint, before.match_fingerprint);
+    assert_eq!(guide.feeds, before.feeds, "the feeds' settings stay");
+    // Downloaded again at the first start, even with updates only on request.
+    let manual_only = RefreshPolicy {
+        interval: None,
+        on_start: false,
+        ..RefreshPolicy::default()
+    };
+    for (policy, state) in [(RefreshPolicy::default(), &before), (manual_only, &before)] {
+        assert!(matches!(
+            decide(
+                &policy,
+                Trigger::Startup,
+                &state.configs(),
+                7,
+                Some(&state.refresh_state()),
+                now
+            ),
+            Decision::Keep { .. }
+        ));
+    }
+    for policy in [RefreshPolicy::default(), manual_only] {
+        assert_eq!(
+            decide(
+                &policy,
+                Trigger::Startup,
+                &guide.configs(),
+                7,
+                Some(&guide.refresh_state()),
+                now
+            ),
+            Decision::Refresh(RefreshReason::NeverFetched)
+        );
+    }
+    // The programs' pages leave the file, not only their rows.
+    let size = |path: &std::path::Path| std::fs::metadata(path).unwrap().len();
+    assert!(
+        size(&archive) < size(&full),
+        "{} >= {}",
+        size(&archive),
+        size(&full)
+    );
+}

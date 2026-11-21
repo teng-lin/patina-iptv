@@ -58,6 +58,9 @@ catalog or playlist persistence. Backup passphrases remain a separate feature.
 Backups need the same care as the
 provider credentials they contain. Losing the OS credential store makes its existing
 encrypted catalog inaccessible; a portable backup can be restored on a new installation.
+A portable backup leaves out the downloaded guide's programs and descriptions, which
+the restored app downloads again; the guide sources, channel matches and repairs stay.
+The snapshot is vacuumed, so the removed rows leave no free pages behind in the archive.
 
 `Store::open` remains an explicit plaintext API for synthetic fixtures and portable
 backup validation. Production entry points use `open_encrypted`. Headless app tests

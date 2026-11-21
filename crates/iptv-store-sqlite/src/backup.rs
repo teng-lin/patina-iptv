@@ -46,9 +46,19 @@ fn archived_relative(local: &Path, root: &Path) -> Result<PathBuf> {
     Ok(PathBuf::from(relative))
 }
 
+/// What [`Store::snapshot_to`] leaves out of the guide: the programs and
+/// descriptions, and the download state that would call them current.
+const STRIP_DOWNLOADED_GUIDE: &str = "
+    DELETE FROM epg_descriptions;
+    DELETE FROM epg_programs;
+    UPDATE epg_guides SET replaced_at = NULL, attempted_at = NULL,
+        last_error_kind = NULL, ends_at = NULL;
+";
+
 impl Store {
-    /// Writes a complete, consistent snapshot to a new private file. Existing
-    /// files are never replaced. The destination has no dependency on the live
+    /// Writes a complete, consistent snapshot to a new private file, without
+    /// host-local recordings or downloaded guide programs. Existing files are
+    /// never replaced. The destination has no dependency on the live
     /// database's WAL or on any still-open connection.
     pub fn snapshot_to(&self, path: &Path) -> Result<()> {
         let mut options = OpenOptions::new();
@@ -109,8 +119,18 @@ impl Store {
             destination.pragma_update(None, "foreign_keys", true)?;
             destination.execute("DELETE FROM recording_rules", [])?;
             destination.execute("DELETE FROM recording_jobs", [])?;
+            // Downloaded programs are a cache the restored app downloads
+            // again; they are most of a large library. What the user set up
+            // stays: guide sources, matches, repairs, every feed's channel
+            // list. The guides then read as never downloaded, so the first
+            // start after a restore fetches them (iptv_import::decide:
+            // NeverFetched) rather than keep an empty guide as fresh.
+            destination.execute_batch(STRIP_DOWNLOADED_GUIDE)?;
             // A standalone file, even when the source uses WAL.
             destination.pragma_update(None, "journal_mode", "DELETE")?;
+            // Deleted pages would otherwise keep both the size and the
+            // removed rows' bytes in the archive.
+            destination.execute_batch("VACUUM")?;
             drop(destination);
             Self::validate_snapshot(path)
         })();
