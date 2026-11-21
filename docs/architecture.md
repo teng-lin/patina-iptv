@@ -51,10 +51,11 @@ down: a crate may depend on crates in its own layer or below, never above.
 | Web application | `iptv-web` | The portable crates and a JavaScript host. No NSH, no Tokio, no native adapters. |
 
 `tools/check.sh` builds every portable crate for `wasm32-unknown-unknown`.
-That build is what keeps platform code out of them. It also lints the
-runtime without its `native` feature and the shell for wasm32, the browser
-build of the application stack
-([browser TV plan](plans/2026-11-21-browser-tv-architecture.md)).
+That build is what keeps platform code out of them. For the browser build of
+the application stack ([browser TV plan](plans/2026-11-21-browser-tv-architecture.md))
+it also runs the runtime's unit tests without its `native` feature and lints
+iptv-web's adapters for wasm32; the runtime's and the shell's own wasm32
+checks need the store crate's browser build.
 
 The shell's platform code lives in `iptv-app/src/host`: `host/native`
 (desktops, iPad, Android: key stores, private directories, OS recording
