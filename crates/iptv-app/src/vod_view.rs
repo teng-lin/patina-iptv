@@ -517,6 +517,7 @@ fn play_authorized(ui: Ui, details: Details, key: Key, restart: bool, full_scree
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
         let result = owner.vod_play(details, key, restart).await;
+        eprintln!("DEBUG187 resolved: ok={} gen={} now={}", result.is_ok(), generation, ui.vod.with_untracked(|s| s.generation));
         // An episode that ended, its next one not played in the preview
         // after all, stops as with autoplay off.
         let not_played = move || {
@@ -851,6 +852,7 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
         let autoplay = crate::settings::flag(iptv_settings::keys::VOD_AUTOPLAY_NEXT_EPISODE);
         let (key, season) = (next.key.clone(), next.season);
         // The screen never changes on its own (#187).
+        eprintln!("DEBUG187 ended: mode={:?} top={:?} autoplay={autoplay} gen={}", ui.mode.get_untracked(), ui.top_overlay(), ui.vod.with_untracked(|s| s.generation));
         match where_watched(ui, &details.item.key) {
             Watched::FullScreen | Watched::Details if autoplay => {
                 autoplay_next(ui, p.key, details, key, season)
@@ -946,6 +948,7 @@ fn autoplay_next(ui: Ui, ended: Key, details: Details, key: Key, season: u32) {
                 .parental_check(&iptv_runtime::vod::target(&key))
                 .await
                 .is_ok();
+        eprintln!("DEBUG187 checked: allowed={allowed} chosen={} gen={} mode={:?} top={:?}", chosen(), ui.vod.with_untracked(|s| s.generation), ui.mode.get_untracked(), ui.top_overlay());
         if chosen() {
             return;
         }
