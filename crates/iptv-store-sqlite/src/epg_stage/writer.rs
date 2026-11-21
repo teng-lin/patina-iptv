@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Sender;
 
 use iptv_epg::{IngestReport, ProgramData, ScheduleRules, Settled, UnixTime};
 use rusqlite::{Connection, params};
@@ -116,29 +116,47 @@ pub(super) enum Cmd {
     Sync(Sender<Result<()>>),
 }
 
-/// The writer loop; ends when the stage is dropped. After a failed write
-/// it sets `failed`, writes nothing more and answers the next request with
-/// the error.
-pub(super) fn run(conn: Connection, rx: Receiver<Cmd>, failed: Arc<AtomicBool>) {
-    let mut error: Option<StoreError> = None;
-    let fail = |e: StoreError, error: &mut Option<StoreError>| {
-        failed.store(true, Ordering::Relaxed);
-        error.get_or_insert(e);
-    };
-    let take = |error: &mut Option<StoreError>| match error.take() {
-        Some(e) => Err(e),
-        None if failed.load(Ordering::Relaxed) => {
-            Err(StoreError::InvalidData("guide stage failed earlier".into()))
+/// The writer's state: its connection and the first error of a failed
+/// write. After a failed write it sets `failed`, writes nothing more and
+/// answers the next request with the error.
+pub(super) struct Writer {
+    conn: Connection,
+    failed: Arc<AtomicBool>,
+    error: Option<StoreError>,
+}
+
+impl Writer {
+    pub fn new(conn: Connection, failed: Arc<AtomicBool>) -> Self {
+        Self {
+            conn,
+            failed,
+            error: None,
         }
-        None => Ok(()),
-    };
-    for cmd in rx {
+    }
+
+    fn fail(&mut self, e: StoreError) {
+        self.failed.store(true, Ordering::Relaxed);
+        self.error.get_or_insert(e);
+    }
+
+    fn take(&mut self) -> Result<()> {
+        match self.error.take() {
+            Some(e) => Err(e),
+            None if self.failed.load(Ordering::Relaxed) => {
+                Err(StoreError::InvalidData("guide stage failed earlier".into()))
+            }
+            None => Ok(()),
+        }
+    }
+
+    /// Carries out one command, on whichever thread owns the writer.
+    pub fn handle(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::Write(batch) => {
-                if !failed.load(Ordering::Relaxed)
-                    && let Err(e) = write(&conn, &batch)
+                if !self.failed.load(Ordering::Relaxed)
+                    && let Err(e) = write(&self.conn, &batch)
                 {
-                    fail(e, &mut error);
+                    self.fail(e);
                 }
             }
             Cmd::Settle {
@@ -146,15 +164,17 @@ pub(super) fn run(conn: Connection, rx: Receiver<Cmd>, failed: Arc<AtomicBool>) 
                 rules,
                 reply,
             } => {
-                let r = take(&mut error).and_then(|()| settle(&conn, channels, rules));
+                let r = self
+                    .take()
+                    .and_then(|()| settle(&self.conn, channels, rules));
                 if r.is_err() {
-                    failed.store(true, Ordering::Relaxed);
+                    self.failed.store(true, Ordering::Relaxed);
                 }
                 let _ = reply.send(r);
             }
             Cmd::Delete { first, end, reply } => {
-                let r = take(&mut error).and_then(|()| {
-                    conn.execute(
+                let r = self.take().and_then(|()| {
+                    self.conn.execute(
                         "DELETE FROM programs WHERE ch >= ?1 AND ch < ?2",
                         params![first, end],
                     )?;
@@ -163,9 +183,16 @@ pub(super) fn run(conn: Connection, rx: Receiver<Cmd>, failed: Arc<AtomicBool>) 
                 let _ = reply.send(r);
             }
             Cmd::Sync(reply) => {
-                let _ = reply.send(take(&mut error));
+                let _ = reply.send(self.take());
             }
         }
+    }
+}
+
+/// The writer thread's loop; ends when the stage is dropped.
+pub(super) fn run(mut writer: Writer, rx: std::sync::mpsc::Receiver<Cmd>) {
+    for cmd in rx {
+        writer.handle(cmd);
     }
 }
 

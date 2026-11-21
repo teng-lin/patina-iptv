@@ -28,15 +28,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender};
-use std::thread::JoinHandle;
+use std::sync::mpsc;
 
 use iptv_epg::{FeedId, IngestReport, ProgramData, ScheduleRules, StoreOptions, UnixTime};
 use iptv_import::{GuideSink, SinkError};
 use rusqlite::{Connection, OpenFlags};
 
 use crate::error::{Result, StoreError};
-use writer::{Batch, Cmd};
+use writer::{Batch, Cmd, Writer};
 
 /// Page cache of the stage connection.
 const CACHE_KIB: i64 = 4096;
@@ -93,12 +92,20 @@ struct Loaded {
     end: i64,
 }
 
+/// Where the stage's commands go.
+enum Lane {
+    /// The writer's own thread, behind a bounded queue.
+    Thread {
+        tx: mpsc::SyncSender<Cmd>,
+        thread: std::thread::JoinHandle<()>,
+    },
+}
+
 /// A guide download staged on disk; see the module docs. Implements
 /// [`GuideSink`]. Dropping it deletes the file.
 pub struct EpgStage {
     path: PathBuf,
-    tx: Option<SyncSender<Cmd>>,
-    thread: Option<JoinHandle<()>>,
+    lane: Option<Lane>,
     /// The writer failed; the next request returns its error.
     failed: Arc<AtomicBool>,
     batch: Batch,
@@ -164,19 +171,19 @@ impl EpgStage {
             remove(&path);
             return Err(e);
         }
-        let (tx, rx): (SyncSender<Cmd>, Receiver<Cmd>) = mpsc::sync_channel(IN_FLIGHT);
         let failed = Arc::new(AtomicBool::new(false));
-        let thread = {
-            let failed = failed.clone();
-            std::thread::Builder::new()
+        let writer = Writer::new(conn, failed.clone());
+        let lane = {
+            let (tx, rx) = mpsc::sync_channel(IN_FLIGHT);
+            let thread = std::thread::Builder::new()
                 .name("epg-stage".into())
-                .spawn(move || writer::run(conn, rx, failed))
-                .map_err(|e| StoreError::InvalidData(format!("guide stage thread: {e}")))?
+                .spawn(move || writer::run(writer, rx))
+                .map_err(|e| StoreError::InvalidData(format!("guide stage thread: {e}")))?;
+            Lane::Thread { tx, thread }
         };
         Ok(Self {
             path,
-            tx: Some(tx),
-            thread: Some(thread),
+            lane: Some(lane),
             failed,
             batch: Batch::default(),
             current: None,
@@ -208,10 +215,10 @@ impl EpgStage {
     }
 
     fn send(&self, cmd: Cmd) -> Result<()> {
-        self.tx
-            .as_ref()
-            .and_then(|tx| tx.send(cmd).ok())
-            .ok_or_else(|| StoreError::InvalidData("guide stage writer stopped".into()))
+        let stopped = || StoreError::InvalidData("guide stage writer stopped".into());
+        match self.lane.as_ref().ok_or_else(stopped)? {
+            Lane::Thread { tx, .. } => tx.send(cmd).map_err(|_| stopped()),
+        }
     }
 
     /// Sends `cmd` built around a reply channel and waits for the answer.
@@ -329,8 +336,8 @@ impl EpgStage {
 impl Drop for EpgStage {
     fn drop(&mut self) {
         // Ends the writer, which closes the connection.
-        self.tx = None;
-        if let Some(thread) = self.thread.take() {
+        if let Some(Lane::Thread { tx, thread }) = self.lane.take() {
+            drop(tx);
             let _ = thread.join();
         }
         remove(&self.path);
