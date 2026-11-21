@@ -11,7 +11,8 @@
 //! startup source read), `last channel resolved` (its stream known from
 //! the stored catalog), `channels read`, `first screen read` and `guide
 //! window read` (on the import thread; the window is read once `first
-//! screen shown`, the first screen's schedule on screen), `guide shown`
+//! screen shown`, the first screen's schedule on screen, which a combined
+//! guide of several playlists does not mark), `guide shown`
 //! (the schedule swapped in on the UI thread, at a cold start the first
 //! screen's), `guide frame` (the next display frame after it), `live input
 //! ready` (a shared live stream's first packets from the provider, with how

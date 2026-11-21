@@ -74,6 +74,10 @@ is below 1.0, a minor release may change behaviour.
 
 ### Fixed
 
+- Cold start: the guide's first screen (the channels around the last one
+  watched) shows as soon as it is read from the store, instead of only
+  after the whole guide window was read, about half a second later with
+  7,000 channels on an emulator (#160).
 - iPad: a mostly sideways diagonal swipe in the guide, up to about 1.5
   across for every 1 down, now pans the timeline instead of scrolling the
   channels. Taps that wobble sideways by less than 10 points still play.
