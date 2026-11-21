@@ -13,6 +13,17 @@ use std::{
     task::{Context, Poll, Wake},
 };
 
+/// Length of the one generated program every fixture uses.
+const FIXTURE_SPAN: i64 = 7200;
+/// The current UTC hour: where a fixture's program and windows start. Fixtures
+/// follow the real clock because the runtime imports guides against it and
+/// drops programs that ended more than `epg.keep_past` (a week by default)
+/// ago, so a fixed epoch expires. Each [`Fixture`] reads it once, so all of its
+/// times agree even across an hour boundary.
+fn current_hour() -> i64 {
+    let now = crate::imports::now_unix();
+    now - now.rem_euclid(3600)
+}
 struct Unpark(std::thread::Thread);
 impl Wake for Unpark {
     fn wake(self: Arc<Self>) {
@@ -23,6 +34,8 @@ struct Fixture {
     dir: tempfile::TempDir,
     owner: Rc<Runtime>,
     source: SourceId,
+    /// Start of the generated program ([`current_hour`]).
+    start: i64,
     tasks: Rc<RefCell<VecDeque<LocalTask>>>,
     delays: Rc<RefCell<Vec<futures_channel::oneshot::Sender<()>>>>,
 }
@@ -93,6 +106,7 @@ impl Fixture {
             dir,
             owner,
             source,
+            start: current_hour(),
             tasks,
             delays,
         }
@@ -104,6 +118,13 @@ impl Fixture {
         )
         .unwrap()
     }
+    /// The generated program's whole span.
+    fn window(&self) -> TimeWindow {
+        TimeWindow {
+            from: self.start,
+            to: self.start + FIXTURE_SPAN,
+        }
+    }
     fn request(&self, key: &str, target: Target) -> Request {
         Request::mapping(
             ChannelRef {
@@ -111,10 +132,7 @@ impl Fixture {
                 content: ContentId::from_stored(key),
             },
             target,
-            TimeWindow {
-                from: 1_794_657_600,
-                to: 1_794_664_800,
-            },
+            self.window(),
         )
     }
     fn drive<F: Future>(&self, future: F) -> F::Output {
@@ -644,12 +662,25 @@ mod staged {
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     };
 
-    const XML: &str = r#"<tv>
+    /// Two synthetic channels, each with the fixture's two-hour program.
+    fn xml(start: i64) -> String {
+        let (start, stop) = xmltv_times(start);
+        format!(
+            r#"<tv>
       <channel id="amber.main"><display-name>Synthetic Amber</display-name></channel>
       <channel id="birch.main"><display-name>Synthetic Birch</display-name></channel>
-      <programme channel="amber.main" start="20261114120000 +0000" stop="20261114140000 +0000"><title>Synthetic Segment 01</title></programme>
-      <programme channel="birch.main" start="20261114120000 +0000" stop="20261114140000 +0000"><title>Synthetic Segment 02</title></programme>
-    </tv>"#;
+      <programme channel="amber.main" start="{start}" stop="{stop}"><title>Synthetic Segment 01</title></programme>
+      <programme channel="birch.main" start="{start}" stop="{stop}"><title>Synthetic Segment 02</title></programme>
+    </tv>"#
+        )
+    }
+    /// The fixture program's `start` and `stop` in XMLTV form.
+    fn xmltv_times(start: i64) -> (String, String) {
+        (
+            iptv_epg::format_xmltv_time(start),
+            iptv_epg::format_xmltv_time(start + FIXTURE_SPAN),
+        )
+    }
     struct Mock {
         address: std::net::SocketAddr,
         stop: Arc<AtomicBool>,
@@ -657,8 +688,8 @@ mod staged {
         thread: Option<std::thread::JoinHandle<()>>,
     }
     impl Mock {
-        fn new() -> Self {
-            Self::with_xml(XML.to_owned())
+        fn new(start: i64) -> Self {
+            Self::with_xml(xml(start))
         }
         fn with_xml(xml: String) -> Self {
             let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -750,10 +781,7 @@ mod staged {
                 name: Some("Synthetic inspected guide".into()),
             }],
             feed_order: None,
-            window: TimeWindow {
-                from: 1_794_657_600,
-                to: 1_794_664_800,
-            },
+            window: fixture.window(),
         };
         (request, summary.evidence)
     }
@@ -771,7 +799,7 @@ mod staged {
                 )),
             )
             .unwrap();
-        let server = Mock::new();
+        let server = Mock::new(fixture.start);
         let (request, _) = proposal(&fixture, &server);
         assert!(matches!(
             fixture.drive(
@@ -803,7 +831,7 @@ mod staged {
     #[test]
     fn staged_add_allocates_durable_feed_at_commit_and_reports_indirect_effects() {
         let fixture = Fixture::new();
-        let server = Mock::new();
+        let server = Mock::new(fixture.start);
         let (request, _) = proposal(&fixture, &server);
         let window = request.window;
         let plan = fixture.preview(request);
@@ -906,6 +934,7 @@ mod staged {
     fn one_stage_repairs_500_channels_with_one_bounded_evidence_batch() {
         let fixture = Fixture::new();
         let mut generated = Vec::new();
+        let (start, stop) = xmltv_times(fixture.start);
         let mut xml = String::from("<tv>");
         for index in 0..500 {
             let mut row = channels().remove(0);
@@ -914,7 +943,7 @@ mod staged {
             row.epg_id = Some(format!("synthetic.{index:03}"));
             xml.push_str(&format!(
                 "<channel id=\"synthetic.{index:03}\"><display-name>Synthetic {index:03}</display-name></channel>\
-                <programme channel=\"synthetic.{index:03}\" start=\"20261114120000 +0000\" stop=\"20261114140000 +0000\">\
+                <programme channel=\"synthetic.{index:03}\" start=\"{start}\" stop=\"{stop}\">\
                 <title>Synthetic segment {index:03}</title></programme>"
             ));
             generated.push(row);
@@ -977,7 +1006,7 @@ mod staged {
     #[test]
     fn evicted_stage_cannot_be_applied_and_never_adds_a_live_feed() {
         let fixture = Fixture::new();
-        let server = Mock::new();
+        let server = Mock::new(fixture.start);
         let (request, _) = proposal(&fixture, &server);
         let plan = fixture.preview(request);
         // Rotate the disposable cache: evidence is evicted, while the runtime
@@ -1245,8 +1274,8 @@ fn indirect_preview_uses_actual_low_feed_binding_when_high_feed_only_lists_chann
                 .program(
                     "amber.main",
                     &ProgramData {
-                        start: 1_794_657_600,
-                        stop: Some(1_794_664_800),
+                        start: fixture.start,
+                        stop: Some(fixture.start + FIXTURE_SPAN),
                         title: "Synthetic lower priority program",
                         ..Default::default()
                     },
@@ -1282,7 +1311,7 @@ fn indirect_preview_uses_actual_low_feed_binding_when_high_feed_only_lists_chann
         .iter()
         .map(|config| EpgFeedMeta {
             config: EpgSourceConfig::new(config.feed, config.url.clone()),
-            fetched_at: 1_794_657_600,
+            fetched_at: fixture.start,
             etag: None,
             last_modified: None,
             bytes: 10,
@@ -1315,10 +1344,7 @@ fn indirect_preview_uses_actual_low_feed_binding_when_high_feed_only_lists_chann
     let verified = fixture
         .drive(fixture.owner.verify_guide_repair(
             saved.commit.id,
-            TimeWindow {
-                from: 1_794_657_600,
-                to: 1_794_664_800,
-            },
+            fixture.window(),
             InspectionControl::default(),
         ))
         .unwrap();
@@ -1405,7 +1431,7 @@ fn repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive(
         .unwrap();
 }
 
-fn retained_guide(directory: &std::path::Path, source: SourceId, title: &str) {
+fn retained_guide(directory: &std::path::Path, source: SourceId, start: i64, title: &str) {
     use iptv_epg::{ChannelKey, FeedId, MatchKind, ProgramData, StoreOptions};
     use iptv_import::{EpgImport, EpgSourceConfig, GuideSink, ListedChannel};
     use iptv_store_sqlite::{EpgFeedMeta, EpgStage, GuideSource};
@@ -1433,8 +1459,8 @@ fn retained_guide(directory: &std::path::Path, source: SourceId, title: &str) {
         .program(
             "amber.main",
             &ProgramData {
-                start: 1_794_657_600,
-                stop: Some(1_794_664_800),
+                start,
+                stop: Some(start + FIXTURE_SPAN),
                 title,
                 ..Default::default()
             },
@@ -1466,7 +1492,7 @@ fn retained_guide(directory: &std::path::Path, source: SourceId, title: &str) {
             &import,
             &[EpgFeedMeta {
                 config: EpgSourceConfig::new(config.feed, config.url),
-                fetched_at: 1_794_657_600,
+                fetched_at: start,
                 etag: None,
                 last_modified: None,
                 bytes: 10,
@@ -1490,6 +1516,7 @@ fn held_verification_cannot_certify_later_programs_with_unchanged_mapping_and_co
     retained_guide(
         fixture.dir.path(),
         fixture.source,
+        fixture.start,
         "Synthetic first observation",
     );
     let request = fixture.request("amber", Target::Automatic);
@@ -1519,9 +1546,10 @@ fn held_verification_cannot_certify_later_programs_with_unchanged_mapping_and_co
     });
     let path = fixture.dir.path().to_owned();
     let source = fixture.source;
+    let start = fixture.start;
     let worker = std::thread::spawn(move || {
         ready.recv_timeout(Duration::from_secs(5)).unwrap();
-        retained_guide(&path, source, "Synthetic refreshed observation");
+        retained_guide(&path, source, start, "Synthetic refreshed observation");
         release.send(()).unwrap();
     });
     let result = fixture.drive(verification).unwrap();
@@ -1752,6 +1780,7 @@ fn automatic_verification_waits_for_full_projection_after_no_guide_undo() {
     retained_guide(
         fixture.dir.path(),
         fixture.source,
+        fixture.start,
         "Synthetic automatic before",
     );
     let request = fixture.request("amber", Target::NoGuide);
@@ -1804,6 +1833,7 @@ fn automatic_verification_waits_for_full_projection_after_no_guide_undo() {
     retained_guide(
         fixture.dir.path(),
         fixture.source,
+        fixture.start,
         "Synthetic automatic restored",
     );
     let settled = fixture
@@ -1820,7 +1850,12 @@ fn automatic_verification_waits_for_full_projection_after_no_guide_undo() {
 #[test]
 fn automatic_verification_rejects_stale_binding_and_partial_fingerprint_renewal() {
     let fixture = Fixture::new();
-    retained_guide(fixture.dir.path(), fixture.source, "Synthetic old catalog");
+    retained_guide(
+        fixture.dir.path(),
+        fixture.source,
+        fixture.start,
+        "Synthetic old catalog",
+    );
     let mut changed = channels();
     changed[0].epg_id = Some("amber.other".into());
     fixture
@@ -1871,6 +1906,7 @@ fn feed_only_verification_requires_current_full_projection_configuration() {
     retained_guide(
         fixture.dir.path(),
         fixture.source,
+        fixture.start,
         "Synthetic cached enabled feed",
     );
     let original = fixture.store().guide_sources(fixture.source).unwrap();
@@ -1926,6 +1962,7 @@ fn held_verification_detects_catalog_change_without_mapping_or_config_edit() {
     retained_guide(
         fixture.dir.path(),
         fixture.source,
+        fixture.start,
         "Synthetic before catalog change",
     );
     let request = fixture.request("amber", Target::Automatic);
