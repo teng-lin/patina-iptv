@@ -895,6 +895,10 @@ fn load_authorized(
     authority: Option<iptv_guide::playback::ResolutionAuthority>,
 ) {
     let stream = ui.player.stream(surface);
+    eprintln!(
+        "DEBUG187 load {surface} session {session} now {}",
+        stream.health.with_untracked(|h| h.session())
+    );
     if stream.health.with_untracked(|h| h.session()) != session {
         return; // the viewer moved on
     }
@@ -986,11 +990,13 @@ fn load_authorized(
                 None
             }
         });
+        eprintln!("DEBUG187 preparing {surface} session {session}");
         let prepared = owner.prepare_independent_source(surface, provider, source, authority);
         crate::data::spawn_in_app(async move {
             let source = match prepared.await {
                 Ok(source) => source,
                 Err(error) => {
+                    eprintln!("DEBUG187 prepare failed {surface}");
                     if !fail_capacity(ui, surface, session, &error)
                         && stream.health.with_untracked(|health| health.session()) == session
                     {
@@ -999,9 +1005,11 @@ fn load_authorized(
                     return;
                 }
             };
+            eprintln!("DEBUG187 prepared {surface} session {session}");
             if let Some(authority) = vod_authority
                 && !authority.await
             {
+                eprintln!("DEBUG187 authority refused {surface}");
                 if stream.health.with_untracked(|health| health.session()) == session {
                     stop_surface(ui, surface);
                 }
@@ -1014,6 +1022,11 @@ fn load_authorized(
 
 fn publish_source(ui: Ui, surface: usize, session: u64, source: PlaySource) {
     let stream = ui.player.stream(surface);
+    eprintln!(
+        "DEBUG187 publish {surface} session {session} now {} url {}",
+        stream.health.with_untracked(|h| h.session()),
+        source.url
+    );
     if stream.health.with_untracked(|h| h.session()) != session {
         return;
     }
