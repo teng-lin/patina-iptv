@@ -126,7 +126,7 @@ pub fn back(ui: Ui) -> bool {
     if closed {
         crate::runtime().vod_discovery_cancel();
     } else if refresh {
-        reload(ui, false);
+        load(ui, false, true);
     }
     true
 }
@@ -135,7 +135,20 @@ pub fn back(ui: Ui) -> bool {
 /// title), or (`append`) the page after the titles shown, which stay with
 /// the focus.
 fn reload(ui: Ui, append: bool) {
-    let (query, shelf, generation, offset, anchor) = edit(ui, |s| {
+    load(ui, append, false);
+}
+
+/// [`reload`]; with `keep`, a catalogue read again from its top reads at
+/// least as many titles as it had loaded, so a title focused pages down
+/// keeps the focus by identity (a shelf always reads the window around
+/// its focused title).
+fn load(ui: Ui, append: bool, keep: bool) {
+    let (query, shelf, generation, offset, anchor, through) = edit(ui, |s| {
+        let through = if keep && !append && !s.is_shelf() {
+            s.end
+        } else {
+            0
+        };
         let offset = if append {
             s.begin_more()
         } else {
@@ -149,7 +162,14 @@ fn reload(ui: Ui, append: bool) {
         } else {
             s.shelf.and(s.focused.clone())
         };
-        (s.query.clone(), s.shelf, s.generation, offset, anchor)
+        (
+            s.query.clone(),
+            s.shelf,
+            s.generation,
+            offset,
+            anchor,
+            through,
+        )
     });
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
@@ -172,6 +192,18 @@ fn reload(ui: Ui, append: bool) {
                 .vod_discovery(DiscoveryQuery::after(shelf, offset as usize))
                 .await
                 .map(|page| (page, None)),
+            (None, _) if through > 0 => owner.vod_catalogue_through(query, through).await.map(
+                |(cards, more, sources, categories)| {
+                    (
+                        DiscoveryPage {
+                            cards,
+                            more,
+                            start: 0,
+                        },
+                        Some((sources, categories)),
+                    )
+                },
+            ),
             (None, _) => owner.vod_catalogue(query, offset).await.map(
                 |(cards, more, sources, categories)| {
                     (
