@@ -78,6 +78,9 @@ pub(crate) struct StagedChannel {
     pub kept: u64,
     /// Latest kept stop.
     pub last_stop: Option<UnixTime>,
+    /// Some staged program of it has a description: without one, a sliced
+    /// copy skips the description pass.
+    pub described: bool,
 }
 
 /// The feed being received.
@@ -85,8 +88,9 @@ struct Current {
     feed: FeedId,
     rules: ScheduleRules,
     descriptions: bool,
-    /// EPG channel id -> (stage channel id, programs admitted).
-    channels: HashMap<Box<str>, (i64, u64)>,
+    /// EPG channel id -> (stage channel id, programs admitted, any of them
+    /// described).
+    channels: HashMap<Box<str>, (i64, u64, bool)>,
     first: i64,
     report: IngestReport,
 }
@@ -294,15 +298,17 @@ impl EpgStage {
             return Ok(());
         }
         let p = p.as_stored(cur.descriptions);
+        let described = p.desc.is_some();
         let ch = match cur.channels.get_mut(channel) {
-            Some((ch, admitted)) => {
+            Some((ch, admitted, any)) => {
                 *admitted += 1;
+                *any |= described;
                 *ch
             }
             None => {
                 let ch = self.next_channel;
                 self.next_channel += 1;
-                cur.channels.insert(channel.into(), (ch, 1));
+                cur.channels.insert(channel.into(), (ch, 1, described));
                 ch
             }
         };
@@ -318,19 +324,28 @@ impl EpgStage {
         let Some(mut cur) = self.current.take() else {
             return Err(StoreError::InvalidData("no guide feed started".into()));
         };
+        let mut described = std::collections::HashSet::new();
         let mut channels: Vec<_> = cur
             .channels
             .drain()
-            .map(|(id, (ch, admitted))| (id, ch, admitted))
+            .map(|(id, (ch, admitted, any))| {
+                if any {
+                    described.insert(ch);
+                }
+                (id, ch, admitted)
+            })
             .collect();
         // In stage order: one pass through the file.
         channels.sort_by_key(|&(_, ch, _)| ch);
         let rules = cur.rules;
-        let (staged, settled) = self.request(|reply| Cmd::Settle {
+        let (mut staged, settled) = self.request(|reply| Cmd::Settle {
             channels,
             rules,
             reply,
         })?;
+        for channel in staged.values_mut() {
+            channel.described = described.contains(&channel.id);
+        }
         let r = &mut cur.report;
         r.kept += settled.kept;
         r.channels_with_programs += settled.channels_with_programs;

@@ -23,10 +23,11 @@ enum Phase {
     DeleteFeedRows {
         table: usize,
     },
-    /// The old channels' descriptions, then programs, channel by channel
-    /// (by `epg_channels.id` after `after`).
+    /// The old channels' descriptions, then programs, channel by channel,
+    /// in the order of the index on (source_id, feed_id, epg_channel), after
+    /// the channel whose row id is `after`.
     DeleteSchedules {
-        after: i64,
+        after: Option<i64>,
         current: Option<i64>,
         programs: bool,
     },
@@ -61,6 +62,22 @@ struct Transfer {
     programs_copied: u64,
     descriptions_copied: u64,
 }
+
+/// The first of a source's EPG channels, and the one after channel `?2`, in
+/// the order of the unique index on (source_id, feed_id, epg_channel).
+const FIRST_CHANNEL: &str = "SELECT id FROM epg_channels WHERE source_id = ?1
+     ORDER BY feed_id, epg_channel LIMIT 1";
+///
+/// A row-value comparison `(feed_id, epg_channel) > (?, ?)` would seek only
+/// on feed_id and read the feed's earlier channels, so the next channel is
+/// the next one of the same feed, else the first of a later feed: two
+/// seeks.
+const NEXT_CHANNEL: &str = "SELECT coalesce(
+         (SELECT n.id FROM epg_channels n WHERE n.source_id = ?1 AND n.feed_id = c.feed_id
+              AND n.epg_channel > c.epg_channel ORDER BY n.epg_channel LIMIT 1),
+         (SELECT n.id FROM epg_channels n WHERE n.source_id = ?1 AND n.feed_id > c.feed_id
+              ORDER BY n.feed_id, n.epg_channel LIMIT 1))
+     FROM epg_channels c WHERE c.id = ?2";
 
 const DELETE_FEED_ROWS: [(&str, &str); 2] = [
     ("epg_feed_results", "source_id, feed_id"),
@@ -210,7 +227,10 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
     }
 
     /// Writes until about `rows` rows are written (at least one), then
-    /// stops between statements with the transaction still open.
+    /// stops between statements with the transaction still open. On a
+    /// browser publish copy the step commits instead: its rows stay in the
+    /// copy until the copy is discarded, and if the job then ends without
+    /// its last commit the copy is never swapped in.
     pub fn step(&mut self, rows: u32) -> Result<Step<EpgCounts>> {
         self.run(Meter::rows(rows))
     }
@@ -235,7 +255,9 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
     }
 
     /// The store back: after the commit, or abandoning (rolling back) an
-    /// unfinished replacement.
+    /// unfinished replacement. A browser publish copy keeps the slices it
+    /// committed, so an unfinished job leaves it unpublishable: discard it
+    /// (`abandon_publish`) and begin a new publish.
     pub fn into_store(mut self) -> S {
         let _ = self.end();
         self.store
@@ -398,7 +420,7 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
                 Phase::DeleteFeedRows { table: table + 1 }
             } else {
                 Phase::DeleteSchedules {
-                    after: i64::MIN,
+                    after: None,
                     current: None,
                     programs: false,
                 }
@@ -410,24 +432,29 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
     fn delete_schedules(
         &mut self,
         meter: &mut Meter,
-        after: i64,
+        after: Option<i64>,
         current: Option<i64>,
         programs: bool,
     ) -> Result<()> {
         let source = self.source.0;
         let conn = &self.store().conn;
         let Some(channel) = current else {
-            let next: Option<i64> = conn
-                .prepare_cached(
-                    "SELECT id FROM epg_channels WHERE +source_id = ?1 AND id > ?2
-                     ORDER BY id LIMIT 1",
-                )?
-                .query_row(params![source, after], |r| r.get(0))
-                .map(Some)
-                .or_else(|e| match e {
-                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                    e => Err(e),
-                })?;
+            // A seek on the source's channels in the unique index, never a
+            // walk past another source's rows; each visit costs a row.
+            let next = match after {
+                None => conn
+                    .prepare_cached(FIRST_CHANNEL)?
+                    .query_row(params![source], |r| r.get::<_, Option<i64>>(0)),
+                Some(after) => conn
+                    .prepare_cached(NEXT_CHANNEL)?
+                    .query_row(params![source, after], |r| r.get::<_, Option<i64>>(0)),
+            };
+            let next: Option<i64> = match next {
+                Ok(id) => id,
+                Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                Err(e) => return Err(e.into()),
+            };
+            meter.spend(1);
             self.phase = match next {
                 Some(channel) => Phase::DeleteSchedules {
                     after,
@@ -455,7 +482,7 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
         if n == 0 {
             self.phase = if programs {
                 Phase::DeleteSchedules {
-                    after: channel,
+                    after: Some(channel),
                     current: None,
                     programs: false,
                 }
@@ -752,7 +779,8 @@ fn copy_slice(
     };
     drop(end);
     let Some(last) = last else {
-        if copy.descriptions {
+        // A schedule without staged descriptions needs no description pass.
+        if copy.descriptions || !copy.staged.described {
             copy.finished = true;
         } else {
             copy.descriptions = true;
@@ -881,9 +909,39 @@ mod tests {
                 .unwrap();
             rows.map(Result::unwrap).collect::<Vec<_>>().join("; ")
         };
+        let end = plan(&slice_end_sql(true));
+        assert!(end.contains("ch=? AND start>?"), "{end}");
+        // The next old channel to clear: a seek in the source's part of the
+        // unique index, not a walk over every source's channels.
+        for sql in [FIRST_CHANNEL, NEXT_CHANNEL] {
+            let next = plan(sql);
+            assert!(
+                next.contains("INDEX sqlite_autoindex_epg_channels_1 (source_id=?"),
+                "{next}"
+            );
+            assert!(!next.contains("SCAN epg_channels"), "{next}");
+            if sql == NEXT_CHANNEL {
+                assert!(next.contains("epg_channel>?"), "{next}");
+            }
+        }
+        // Measured, not only planned: finding the next of 5,000 channels of one
+        // feed reads a few index entries, not the feed's earlier channels.
+        store
+            .conn
+            .execute_batch(
+                "PRAGMA foreign_keys = OFF;
+                 WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000)
+                 INSERT INTO epg_channels (source_id, feed_id, epg_channel)
+                 SELECT 1, 1, printf('c%05d', i) FROM n;",
+            )
+            .unwrap();
+        let mut next = store.conn.prepare(NEXT_CHANNEL).unwrap();
+        let id: Option<i64> = next.query_row(params![1, 4000], |r| r.get(0)).unwrap();
+        let id = id.unwrap();
+        assert_eq!(id, 4001);
+        let steps = next.get_status(rusqlite::StatementStatus::VmStep);
+        assert!(steps < 200, "{steps} VM steps");
         for descriptions in [false, true] {
-            let end = plan(&slice_end_sql(true));
-            assert!(end.contains("ch=? AND start>?"), "{end}");
             let insert = plan(&slice_insert_sql(descriptions, true));
             assert!(insert.contains("ch=? AND start>? AND start<?"), "{insert}");
         }

@@ -659,7 +659,10 @@ impl BrowserFiles {
     /// stops working, so a late chunk of it cannot enter this one. `size`
     /// must be a whole number of SQLite pages (512 bytes or more each) and
     /// at most [`MAX_DATABASE_BYTES`]. Refused while a take of the
-    /// database's chunks is out ([`ChangedChunks`]): settle it first.
+    /// database's chunks is out ([`ChangedChunks`]): settle it first. A
+    /// refused call leaves the earlier restore and its token as they were.
+    /// Opening the store spends the token, also when the open (or a
+    /// migration) fails: restore again from the start then.
     pub fn restore_size(&self, size: u64) -> Result<RestoreToken> {
         if self.database_is_open() {
             return Err(unavailable("the browser database is open"));
@@ -706,17 +709,12 @@ impl BrowserFiles {
     /// restore began or the store opened). `bytes` is the whole chunk:
     /// [`CHUNK_BYTES`], or the rest of the file for the last one.
     pub fn restore_chunk(&self, restore: RestoreToken, index: u32, bytes: &[u8]) -> Result<()> {
-        if self.database_is_open() {
-            return Err(unavailable("the browser database is open"));
-        }
-        if self.has_publish_copy() {
-            return Err(unavailable("a publish copy of the database exists"));
-        }
+        // The token is the guard: opening the store ends it, and an open
+        // database, a publish copy or a take only exist after an open.
         let file = self
             .database()
             .ok_or_else(|| unavailable("restore_size comes before restore_chunk"))?;
         let mut file = lock(&file);
-        // A take only exists of an opened database, whose restore is over.
         if file.restore != Some(restore.0) {
             return Err(unavailable("this restore was superseded or has opened"));
         }

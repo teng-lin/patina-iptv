@@ -272,6 +272,7 @@ fn settle(conn: &Connection, channels: FeedChannels, rules: ScheduleRules) -> Re
                 id: ch,
                 kept,
                 last_stop,
+                described: false,
             };
             staged.insert(epg_id, channel);
         }

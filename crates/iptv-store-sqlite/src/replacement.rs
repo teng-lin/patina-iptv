@@ -198,22 +198,47 @@ pub(crate) fn delete_some(
     Ok(conn.prepare_cached(&sql)?.execute(all.as_slice())?)
 }
 
-/// The last rowid of the next slice of at most `limit` channels of
-/// `source` after rowid `after`, in rowid order; `None` when none is left.
-/// `+source_id` keeps SQLite on the table's rowid order, so the slices
-/// walk the table once instead of rescanning an index.
+/// A channel's place in `channels_by_position` (source_id, position):
+/// its position and rowid.
+pub(crate) type ChannelCursor = (i64, i64);
+
+/// The source's channels after `after` in `channels_by_position` order:
+/// a seek on that index, so a slice never visits another source's rows.
+pub(crate) fn channels_after(column: &str, after: Option<ChannelCursor>) -> String {
+    let lower = if after.is_some() {
+        format!(" AND ({column}position, {column}rowid) > (?3, ?4)")
+    } else {
+        String::new()
+    };
+    format!("{column}source_id = ?1{lower}")
+}
+
+/// The last channel of the next slice of at most `limit` channels of
+/// `source` after `after`; `None` when none is left.
 pub(crate) fn channel_slice_end(
     conn: &Connection,
     source: i64,
-    after: i64,
+    after: Option<ChannelCursor>,
     limit: i64,
-) -> Result<Option<i64>> {
-    Ok(conn
-        .prepare_cached(
-            "SELECT max(rowid) FROM (SELECT rowid FROM channels
-             WHERE +source_id = ?1 AND rowid > ?2 ORDER BY rowid LIMIT ?3)",
-        )?
-        .query_row(rusqlite::params![source, after, limit], |r| r.get(0))?)
+) -> Result<Option<ChannelCursor>> {
+    let filter = channels_after("", after);
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT position, rowid FROM (SELECT position, rowid FROM channels
+         WHERE {filter} ORDER BY position, rowid LIMIT ?2)
+         ORDER BY position DESC, rowid DESC LIMIT 1"
+    ))?;
+    let row = |r: &rusqlite::Row<'_>| Ok((r.get(0)?, r.get(1)?));
+    let found = match after {
+        None => stmt.query_row(rusqlite::params![source, limit], row),
+        Some((position, rowid)) => {
+            stmt.query_row(rusqlite::params![source, limit, position, rowid], row)
+        }
+    };
+    match found {
+        Ok(end) => Ok(Some(end)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
 }
 
 #[cfg(test)]

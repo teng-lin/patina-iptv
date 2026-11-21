@@ -10,7 +10,9 @@ use rusqlite::types::Value;
 
 use crate::catalog::{self, DELETE_CATALOG};
 use crate::catalog_stage::{CatalogStage, STAGE_TABLES};
-use crate::replacement::{self, Meter, Progress, Step, channel_slice_end, delete_some};
+use crate::replacement::{
+    self, ChannelCursor, Meter, Progress, Step, channel_slice_end, delete_some,
+};
 use crate::sources::{self, CatalogCounts, OnDemandErrors};
 use crate::{GuideSource, Result, SourceId, Store, StoreError, search};
 
@@ -97,7 +99,7 @@ enum Phase {
     Begin,
     /// Search index rows of the old channels, by channel rowid.
     Forget {
-        after: i64,
+        after: Option<ChannelCursor>,
     },
     /// `DELETE_CATALOG[table]`.
     Delete {
@@ -113,7 +115,7 @@ enum Phase {
         after: Option<Vec<Value>>,
     },
     Index {
-        after: i64,
+        after: Option<ChannelCursor>,
     },
     Commit,
 }
@@ -224,7 +226,10 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
     }
 
     /// Writes until about `rows` rows are written (at least one), then
-    /// stops between statements with the transaction still open.
+    /// stops between statements with the transaction still open. On a
+    /// browser publish copy the step commits instead: its rows stay in the
+    /// copy until the copy is discarded, and if the job then ends without
+    /// its last commit the copy is never swapped in.
     pub fn step(&mut self, rows: u32) -> Result<Step<CatalogPublished>> {
         self.run(Meter::rows(rows))
     }
@@ -249,7 +254,9 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
     }
 
     /// The store back: after the commit, or abandoning (rolling back) an
-    /// unfinished replacement.
+    /// unfinished replacement. A browser publish copy keeps the slices it
+    /// committed, so an unfinished job leaves it unpublishable: discard it
+    /// (`abandon_publish`) and begin a new publish.
     pub fn into_store(mut self) -> S {
         self.abort();
         self.store
@@ -402,17 +409,17 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
             self.guides = guides;
         }
         self.phase = if self.fts {
-            Phase::Forget { after: i64::MIN }
+            Phase::Forget { after: None }
         } else {
             Phase::Delete { table: 0 }
         };
         Ok(())
     }
 
-    fn forget(&mut self, meter: &mut Meter, after: i64) -> Result<()> {
+    fn forget(&mut self, meter: &mut Meter, after: Option<ChannelCursor>) -> Result<()> {
         let source = self.source;
         let conn = &self.store().conn;
-        if meter.unlimited() && after == i64::MIN {
+        if meter.unlimited() && after.is_none() {
             search::forget_source(conn, true, source)?;
             self.phase = Phase::Delete { table: 0 };
             return Ok(());
@@ -421,7 +428,7 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
             Some(last) => {
                 let n = search::forget_channels(conn, source, after, last)?;
                 meter.spend(n.max(1));
-                self.phase = Phase::Forget { after: last };
+                self.phase = Phase::Forget { after: Some(last) };
             }
             None => self.phase = Phase::Delete { table: 0 },
         }
@@ -481,7 +488,7 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
                     after: None,
                 }
             } else if store.fts_index {
-                Phase::Index { after: i64::MIN }
+                Phase::Index { after: None }
             } else {
                 Phase::Commit
             }
@@ -604,10 +611,10 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
         Ok(())
     }
 
-    fn index(&mut self, meter: &mut Meter, after: i64) -> Result<()> {
+    fn index(&mut self, meter: &mut Meter, after: Option<ChannelCursor>) -> Result<()> {
         let source = self.source;
         let conn = &self.store().conn;
-        if meter.unlimited() && after == i64::MIN {
+        if meter.unlimited() && after.is_none() {
             search::index_source(conn, true, source)?;
             self.phase = Phase::Commit;
             return Ok(());
@@ -616,7 +623,7 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
             Some(last) => {
                 let n = search::index_channels(conn, source, after, last)?;
                 meter.spend(n.max(1));
-                self.phase = Phase::Index { after: last };
+                self.phase = Phase::Index { after: Some(last) };
             }
             None => self.phase = Phase::Commit,
         }

@@ -774,8 +774,6 @@ macro_rules! step_until {
     }};
 }
 
-const MIN: &str = "-9223372036854775808";
-
 /// A phase to finish from: its name and how to recognize it.
 type Phase = (&'static str, fn(&str) -> bool);
 
@@ -787,8 +785,12 @@ fn finish_resumes_from_inside_every_phase() {
     let new = full_catalog(300, "New");
     let rows_phases: [Phase; 3] = [
         ("memberships", |p| p.contains("member: Some")),
-        ("index", |p| p.starts_with("Index") && !p.contains(MIN)),
-        ("forget", |p| p.starts_with("Forget") && !p.contains(MIN)),
+        ("index", |p| {
+            p.starts_with("Index") && p.contains("after: Some")
+        }),
+        ("forget", |p| {
+            p.starts_with("Forget") && p.contains("after: Some")
+        }),
     ];
     let (mut expected, source) = prepared(true);
     expected
@@ -825,7 +827,9 @@ fn finish_resumes_from_inside_every_phase() {
         ("table copy", |p| {
             p.starts_with("Insert") && p.contains("after: Some")
         }),
-        ("index", |p| p.starts_with("Index") && !p.contains(MIN)),
+        ("index", |p| {
+            p.starts_with("Index") && p.contains("after: Some")
+        }),
     ];
     for (name, reached) in stage_phases {
         let (mut store, source) = prepared(true);
@@ -993,8 +997,12 @@ fn jobs_on_a_publish_copy_resume_from_every_phase() {
     let new = full_catalog(300, "New");
     let rows_phases: [Phase; 3] = [
         ("memberships", |p| p.contains("member: Some")),
-        ("index", |p| p.starts_with("Index") && !p.contains(MIN)),
-        ("forget", |p| p.starts_with("Forget") && !p.contains(MIN)),
+        ("index", |p| {
+            p.starts_with("Index") && p.contains("after: Some")
+        }),
+        ("forget", |p| {
+            p.starts_with("Forget") && p.contains("after: Some")
+        }),
     ];
     let (mut expected, source) = prepared(true);
     expected
@@ -1033,7 +1041,9 @@ fn jobs_on_a_publish_copy_resume_from_every_phase() {
         ("table copy", |p| {
             p.starts_with("Insert") && p.contains("after: Some")
         }),
-        ("index", |p| p.starts_with("Index") && !p.contains(MIN)),
+        ("index", |p| {
+            p.starts_with("Index") && p.contains("after: Some")
+        }),
     ];
     for (name, reached) in stage_phases {
         for finish in [true, false] {
@@ -1168,59 +1178,137 @@ fn an_unfinished_job_on_a_copy_cannot_be_published_by_a_later_one() {
     }
 }
 
-/// With descriptions off, the description pass of a schedule copy still
-/// walks the program keys in bounded slices, each step paying for the keys
-/// it covered, instead of scanning the whole schedule for described rows in
-/// one step.
+/// A schedule copy's description pass: skipped for a channel without
+/// staged descriptions (the browser's default), and in bounded slices of
+/// program keys, each step paying for the keys it covered, when
+/// descriptions are sparse (instead of one step scanning the schedule for
+/// the few described rows).
 #[test]
-fn a_schedule_without_descriptions_is_still_copied_in_bounded_slices() {
-    let (mut store, source) = store();
-    store.set_guide_sources(source, &guide_sources()).unwrap();
-    let mut stage = EpgStage::create_in_store(&store, stages()).unwrap();
-    let opts = StoreOptions {
-        store_descriptions: false,
-        past_days_to_keep: None,
-    };
-    stage.begin_feed(FeedId(1), 1, opts, NOW).unwrap();
-    for p in 0..700 {
-        let program = ProgramData {
-            start: NOW + p * 1800,
-            stop: Some(NOW + (p + 1) * 1800),
-            title: "Synthetic",
-            ..ProgramData::default()
+fn description_passes_are_skipped_or_bounded() {
+    for sparse in [false, true] {
+        let (mut store, source) = store();
+        store.set_guide_sources(source, &guide_sources()).unwrap();
+        let mut stage = EpgStage::create_in_store(&store, stages()).unwrap();
+        let opts = StoreOptions {
+            store_descriptions: sparse,
+            past_days_to_keep: None,
         };
-        stage.program("only.example", &program).unwrap();
-    }
-    stage.finish_feed().unwrap();
-    let import = EpgImport {
-        bindings: vec![(
-            iptv_epg::ChannelKey("k".into()),
-            iptv_epg::EpgRef {
-                source: FeedId(1),
-                epg_id: "only.example".into(),
-                kind: MatchKind::TvgId,
-            },
-        )],
-        ..EpgImport::default()
-    };
-    let mut job = EpgReplacement::new(
-        &mut store,
-        source,
-        &mut stage,
-        Cow::Borrowed(&import),
-        feeds(),
-        2,
-    )
-    .unwrap();
-    let mut description_steps = 0;
-    loop {
-        let describing = job.phase().contains("descriptions: true");
-        let step = job.step(7).unwrap();
-        description_steps += usize::from(describing);
-        if let Step::Done(counts) = step {
-            assert_eq!((counts.programs, counts.descriptions), (700, 0));
-            break;
+        stage.begin_feed(FeedId(1), 1, opts, NOW).unwrap();
+        for p in 0..700 {
+            let program = ProgramData {
+                start: NOW + p * 1800,
+                stop: Some(NOW + (p + 1) * 1800),
+                title: "Synthetic",
+                desc: (p == 350).then_some("The one described program"),
+                ..ProgramData::default()
+            };
+            stage.program("only.example", &program).unwrap();
+        }
+        stage.finish_feed().unwrap();
+        let import = EpgImport {
+            bindings: vec![(
+                iptv_epg::ChannelKey("k".into()),
+                iptv_epg::EpgRef {
+                    source: FeedId(1),
+                    epg_id: "only.example".into(),
+                    kind: MatchKind::TvgId,
+                },
+            )],
+            ..EpgImport::default()
+        };
+        let mut job = EpgReplacement::new(
+            &mut store,
+            source,
+            &mut stage,
+            Cow::Borrowed(&import),
+            feeds(),
+            2,
+        )
+        .unwrap();
+        let mut description_steps = 0;
+        loop {
+            let describing = job.phase().contains("descriptions: true");
+            let step = job.step(7).unwrap();
+            description_steps += usize::from(describing);
+            if let Step::Done(counts) = step {
+                assert_eq!(
+                    (counts.programs, counts.descriptions),
+                    (700, u64::from(sparse))
+                );
+                break;
+            }
+        }
+        if sparse {
+            assert!(description_steps >= 90, "sparse: {description_steps} steps");
+        } else {
+            assert_eq!(description_steps, 0, "no descriptions: no pass");
         }
     }
-    assert!(description_steps >= 90, "{description_steps} steps");
+}
+
+/// A catalog slice over the search index seeks the source's channels in
+/// `channels_by_position` (it never walks another source's rows).
+#[test]
+fn catalog_index_slices_seek_the_source_s_channels() {
+    let (store, _) = store();
+    for after in [None, Some((0, 0))] {
+        let filter = super::channels_after("", after);
+        let sql = format!(
+            "SELECT position, rowid FROM channels WHERE {filter} ORDER BY position, rowid LIMIT ?2"
+        );
+        let mut stmt = store
+            .conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap();
+        let n = stmt.parameter_count();
+        let plan: Vec<String> = stmt
+            .query_map(
+                rusqlite::params_from_iter(std::iter::repeat_n(0i64, n)),
+                |r| r.get(3),
+            )
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        let plan = plan.join("; ");
+        assert!(
+            plan.contains("USING") && plan.contains("channels_by_position"),
+            "{plan}"
+        );
+        assert!(plan.contains("source_id=?"), "{plan}");
+    }
+    // Measured: the slice after channel 4,000 of a source reads a few index
+    // entries, not the earlier channels nor another source's.
+    store
+        .conn
+        .execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000)
+             INSERT INTO channels (source_id, id, position, name, group_ids, stream)
+             SELECT s, printf('c%d', i), i, 'Synthetic', '[]', '{}'
+             FROM n, (SELECT 1 AS s UNION ALL SELECT 2);",
+        )
+        .unwrap();
+    let rowid: i64 = store
+        .conn
+        .query_row(
+            "SELECT rowid FROM channels WHERE source_id = 2 AND position = 4000",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let filter = super::channels_after("", Some((4000, rowid)));
+    let mut stmt = store
+        .conn
+        .prepare(&format!(
+            "SELECT position FROM channels WHERE {filter} ORDER BY position, rowid LIMIT ?2"
+        ))
+        .unwrap();
+    let positions: Vec<i64> = stmt
+        .query_map(rusqlite::params![2, 3, 4000, rowid], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(positions, [4001, 4002, 4003]);
+    let steps = stmt.get_status(rusqlite::StatementStatus::VmStep);
+    assert!(steps < 200, "{steps} VM steps");
 }
