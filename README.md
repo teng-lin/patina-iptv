@@ -75,7 +75,8 @@ custom groups and history.
   and a live language picker; [coverage and translation guide](docs/localization.md).
 - **Private by default:** the local catalog, including credentials, is
   encrypted with SQLCipher; HTTPS is the default transport. Whole-app
-  backup and restore to a `.patinabackup` file.
+  backup and restore to a `.patinabackup` file. Backups keep the TV guide's
+  setup but not its downloaded programs, which download again after a restore.
 
 ## Install
 

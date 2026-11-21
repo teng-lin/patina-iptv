@@ -32,6 +32,12 @@ is below 1.0, a minor release may change behavior.
 
 ### Changed
 
+- Whole-app backups no longer include the downloaded TV guide: its programs
+  and descriptions, which can be most of a backup's size. Guide sources,
+  channel matches, guide repairs and local guide files are still backed up.
+  After a restore the app downloads the guide again at its first start
+  instead of showing an empty guide. Backups made before still restore with
+  their guide.
 - Multiview and desktop player windows: the viewer chooses which player is
   heard, and focus never moves the sound (#135). A tile's menu, its pointer
   chrome, a window's play bar and a compact picture-in-picture window's

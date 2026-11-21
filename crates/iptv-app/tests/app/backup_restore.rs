@@ -1,4 +1,6 @@
 //! Synthetic whole-app export, schedule/cancel and next-launch restore.
+//! The backup keeps the guide's setup and local file, not its downloaded
+//! programs: the restored app downloads the guide again at its first start.
 use super::personalization::step;
 use crate::headless::Headless;
 use iptv_providers::{
@@ -6,7 +8,7 @@ use iptv_providers::{
     model::{M3uSourceConfig, Source, SourceConfig},
 };
 use iptv_settings::{Settings, Target, Value, keys};
-use iptv_store_sqlite::{ChannelQuery, OrderScope, SourcePolicy};
+use iptv_store_sqlite::{ChannelQuery, GuideSource, OrderScope, SourceId, SourcePolicy, Store};
 use nsh_core::{Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
 use nsh_testing::DialogAnswer;
@@ -75,6 +77,13 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
             "Channel Two"
         );
         assert!(!root.with_extension("restore-pending").exists());
+        assert_eq!(
+            store.guide_sources(source).unwrap()[0].name.as_deref(),
+            Some("Generated local guide")
+        );
+        drop(store);
+        // The restored library had no programs: these are downloaded again.
+        wait_for_guide(&mut app, &root.join("iptv.sqlite"), source);
         let (settings, report) =
             Settings::from_json(&std::fs::read_to_string(root.join("settings.json")).unwrap())
                 .unwrap();
@@ -90,6 +99,15 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
     let playlist = root.join("playlists/generated/list.m3u");
     let text = "#EXTM3U\n#EXTINF:-1 group-title=\"Generated\",Channel One\nhttp://example.test/one\n#EXTINF:-1 group-title=\"Generated\",Channel Two\nhttp://example.test/two\n";
     std::fs::write(&playlist, text).unwrap();
+    let guide = root.join("playlists/generated/guide.xml");
+    std::fs::write(
+        &guide,
+        crate::support::guide(
+            crate::support::now(),
+            &[("one.example", "Channel One", "Generated guide program")],
+        ),
+    )
+    .unwrap();
     let mut initial = Settings::new();
     initial
         .set("general.language", Value::text(&language_tag()))
@@ -120,6 +138,19 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
     store
         .replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
         .unwrap();
+    store
+        .set_guide_sources(
+            source,
+            &[GuideSource {
+                feed: iptv_epg::FeedId(1001),
+                provider_index: None,
+                url: SecretUrl::new(guide.to_string_lossy()),
+                name: Some("Generated local guide".into()),
+                enabled: true,
+                shift_minutes: 0,
+            }],
+        )
+        .unwrap();
     let favorite = parsed.channels.items[1].id.clone();
     store.set_favorite(source, &favorite, true).unwrap();
     store
@@ -132,6 +163,8 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
     drop(store);
     let mut app = start_app();
     step(app.wait_for_within("text:★ Channel Two", Duration::from_secs(20)));
+    // A first start downloads the guide, which the backup then leaves out.
+    wait_for_guide(&mut app, &path, source);
     step(app.press("text:/^☰  /"));
     step(app.press_key("right"));
     step(app.press_key("m"));
@@ -154,6 +187,14 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
     step(app.wait_for(&message("Scheduled for next launch")));
     let pending = root.with_extension("restore-pending");
     assert!(pending.exists());
+    {
+        let staged = crate::isolated::open_database(pending.join("iptv.sqlite")).unwrap();
+        let guide = staged.epg_guide(source).unwrap().unwrap();
+        assert_eq!(guide.replaced_at, None, "staged as never downloaded");
+        assert!(guide.bound_channels > 0, "the channel matches stay");
+        assert_eq!(programs(&staged, source), 0);
+        assert!(programs(&crate::isolated::open_database(&path).unwrap(), source) > 0);
+    }
     // The running library remains editable until restart.
     crate::isolated::open_database(&path)
         .unwrap()
@@ -201,6 +242,44 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
     let mut changed = Settings::new();
     changed.set("general.language", Value::text("de")).unwrap();
     std::fs::write(root.join("settings.json"), changed.to_json_string()).unwrap();
+}
+
+/// The source's stored programs within a day of now.
+fn programs(store: &Store, source: SourceId) -> usize {
+    let now = crate::support::now();
+    let (from, to) = (now - 86_400, now + 86_400);
+    let guide = store
+        .load_epg(
+            source,
+            &iptv_store_sqlite::EpgWindow {
+                from,
+                to,
+                keys: None,
+                descriptions: false,
+            },
+        )
+        .unwrap();
+    guide
+        .bindings()
+        .map(|(key, _)| guide.programs(key, from, to).count())
+        .sum()
+}
+
+/// Waits until `source`'s guide was downloaded and stored.
+fn wait_for_guide(app: &mut Headless, path: &std::path::Path, source: SourceId) {
+    step(crate::isolated::wait_outside(
+        app,
+        "the guide download",
+        Duration::from_secs(20),
+        || {
+            let store = crate::isolated::open_database(path).unwrap();
+            store
+                .epg_guide(source)
+                .unwrap()
+                .is_some_and(|guide| guide.replaced_at.is_some())
+                && programs(&store, source) > 0
+        },
+    ));
 }
 
 fn language_tag() -> String {

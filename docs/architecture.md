@@ -161,6 +161,8 @@ calls the experimental `iptv-runtime` recording service. SQLite stores durable,
 source-scoped intent without resolved stream URLs. A scheduler conditionally
 claims the saved time window, so cancellation or editing invalidates an old
 read. Jobs are host-local and are removed from portable snapshots/restores.
+Snapshots also drop downloaded guide programs and mark each stored guide as
+never downloaded, so the restored app fetches the guide at its first start.
 
 Recorders write MPEG-TS independently of rendered players, using the playback
 relay for every upstream request and adaptive child. The runtime reserves
