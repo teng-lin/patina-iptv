@@ -28,6 +28,8 @@ thread_local! {
     static WOKEN: Cell<bool> = const { Cell::new(false) };
     /// A wake-up poll is already asked of the host.
     static SCHEDULED: Cell<bool> = const { Cell::new(false) };
+    /// A delivery is being applied: the export that applies it polls next.
+    static DELIVERING: Cell<bool> = const { Cell::new(false) };
     static SLOTS: RefCell<HashMap<u32, Slot>> = RefCell::new(HashMap::new());
     static NEXT_ID: Cell<u32> = const { Cell::new(1) };
 }
@@ -48,7 +50,9 @@ impl std::task::Wake for Wake {
 
 fn woken() {
     WOKEN.with(|w| w.set(true));
-    if !POLLING.with(Cell::get) {
+    // A poll follows a delivery (the export polls after it) and ends one:
+    // only a wake from elsewhere asks the host for one.
+    if !POLLING.with(Cell::get) && !DELIVERING.with(Cell::get) {
         schedule();
     }
 }
@@ -153,7 +157,9 @@ fn deliver<R>(id: u32, f: impl FnOnce(&mut Slot) -> R) -> Option<R> {
         Some((result, slot.waker.take()))
     })?;
     if let Some(waker) = waker {
+        let was = DELIVERING.with(|d| d.replace(true));
         waker.wake();
+        DELIVERING.with(|d| d.set(was));
     }
     Some(result)
 }
@@ -500,7 +506,11 @@ impl Fetch for HostFetch {
 pub(crate) async fn sleep_while(duration: Duration, keep: impl Fn() -> bool) {
     let pending = Pending::new(next_id(), false);
     let id = pending.id;
-    host().sleep(id, duration.as_secs_f64() * 1000.0);
+    // setTimeout holds a signed 32-bit count of milliseconds.
+    host().sleep(
+        id,
+        (duration.as_secs_f64() * 1000.0).min(f64::from(i32::MAX)),
+    );
     std::future::poll_fn(|cx| {
         register(id, cx);
         if !keep() || with_slot(id, |s| s.woke).unwrap_or(true) {

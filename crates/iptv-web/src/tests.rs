@@ -762,3 +762,30 @@ fn a_chosen_address_may_not_redirect_to_a_private_origin() {
         std::task::Poll::Ready(Ok(_))
     ));
 }
+
+#[test]
+fn a_delivery_asks_for_no_extra_poll() {
+    use iptv_import::Fetch;
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    let fetch = crate::exec::HostFetch::new();
+    crate::exec::spawn(async move {
+        let _ = fetch
+            .fetch_stream(iptv_providers::HttpRequest::get(
+                "https://example.test/list.m3u",
+            ))
+            .await;
+    });
+    crate::exec::poll();
+    let timers = fake.timers.borrow().len();
+    let id = fake.requests.borrow()[0].0;
+    // As an export does: deliver, then poll.
+    crate::exec::deliver_status(id, 200, None);
+    crate::exec::poll();
+    assert_eq!(
+        fake.timers.borrow().len(),
+        timers,
+        "the export's own poll suffices"
+    );
+    assert_eq!(crate::exec::pending_tasks(), 0);
+}

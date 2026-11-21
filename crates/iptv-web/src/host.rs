@@ -20,7 +20,10 @@ pub(crate) trait Host {
     fn fetch_next(&self, id: u32);
     /// The body of `id` is no longer wanted.
     fn fetch_close(&self, id: u32);
-    /// Calls `on_wake(id)` after `ms` milliseconds.
+    /// Calls `on_wake(id)` after `ms` milliseconds (at most `i32::MAX`).
+    /// There is no cancel: a wait that ended early (a deadline met, a task
+    /// dropped) frees its slot, and the later `on_wake` for that id finds
+    /// none and is ignored.
     fn sleep(&self, id: u32, ms: f64);
     /// Reads `key` from the app's storage: `on_stored(id, len)` with the
     /// value in the input buffer, or `on_missing(id)`.
