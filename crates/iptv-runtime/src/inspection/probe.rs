@@ -1,5 +1,6 @@
 //! Disposable encrypted snapshots with leases that pin evidence during repair.
 use super::{InspectionControl, guarded};
+use crate::time::Instant;
 use crate::{Runtime, store_service::Services};
 use iptv_epg::{FeedId, ParseOptions, StrictXmltvParser, TimePolicy, XmltvItem};
 use iptv_import::{BodyStream, CancelToken, Fetch};
@@ -16,7 +17,7 @@ use std::{
         Arc, Condvar, Mutex,
         atomic::{AtomicU64, AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 pub const PROBE_BYTES: u64 = 32 << 20;
@@ -428,27 +429,33 @@ impl ProbeLease {
         check(&self.0.services, cancel, deadline)?;
         self.check()?;
         let mut stage = storage(InspectionStage::open(&self.0.path, &self.0.key))?;
-        let result = stage.bounded(cancel.clone(), deadline, |stage| {
-            let mut channels = Vec::new();
-            let mut after = String::new();
-            loop {
-                check(&self.0.services, cancel, deadline).map_err(|_| {
-                    iptv_store_sqlite::StoreError::Unavailable("probe channel inspection stopped")
-                })?;
-                let page = stage.channels(&after, "", MAX_PAGE)?;
-                if page.is_empty() {
-                    break;
+        let result = stage.bounded(
+            cancel.clone(),
+            crate::time::store_deadline(deadline),
+            |stage| {
+                let mut channels = Vec::new();
+                let mut after = String::new();
+                loop {
+                    check(&self.0.services, cancel, deadline).map_err(|_| {
+                        iptv_store_sqlite::StoreError::Unavailable(
+                            "probe channel inspection stopped",
+                        )
+                    })?;
+                    let page = stage.channels(&after, "", MAX_PAGE)?;
+                    if page.is_empty() {
+                        break;
+                    }
+                    after = page.last().expect("nonempty page").id.clone();
+                    channels.extend(page);
+                    if channels.len() > 100_000 {
+                        return Err(iptv_store_sqlite::StoreError::Unavailable(
+                            "probe channel limit exceeded",
+                        ));
+                    }
                 }
-                after = page.last().expect("nonempty page").id.clone();
-                channels.extend(page);
-                if channels.len() > 100_000 {
-                    return Err(iptv_store_sqlite::StoreError::Unavailable(
-                        "probe channel limit exceeded",
-                    ));
-                }
-            }
-            Ok(channels)
-        });
+                Ok(channels)
+            },
+        );
         check(&self.0.services, cancel, deadline)?;
         storage(result)
     }
@@ -494,24 +501,29 @@ impl ProbeLease {
         let incarnation = self.0.evidence.incarnation.clone();
         let query_cancel = cancel.clone();
         let current = self.0.services.analyze(move |store| {
-            store.inspection_read(query_cancel, deadline, |store| {
-                store
-                    .read_snapshot(|store| {
-                        if store.source(source)?.is_none() || !store.source_policy(source)?.enabled
-                        {
-                            return Ok(false);
-                        }
-                        Ok(store.source_incarnation(source)? == source_incarnation
-                            && match feed {
-                                Some(feed) => {
-                                    store.feed_incarnation(source, feed)?.as_ref()
-                                        == Some(&incarnation)
-                                }
-                                None => true,
-                            })
-                    })
-                    .map(Ok)
-            })
+            store.inspection_read(
+                query_cancel,
+                crate::time::store_deadline(deadline),
+                |store| {
+                    store
+                        .read_snapshot(|store| {
+                            if store.source(source)?.is_none()
+                                || !store.source_policy(source)?.enabled
+                            {
+                                return Ok(false);
+                            }
+                            Ok(store.source_incarnation(source)? == source_incarnation
+                                && match feed {
+                                    Some(feed) => {
+                                        store.feed_incarnation(source, feed)?.as_ref()
+                                            == Some(&incarnation)
+                                    }
+                                    None => true,
+                                })
+                        })
+                        .map(Ok)
+                },
+            )
         });
         let control = InspectionControl {
             cancel: cancel.clone(),
@@ -562,18 +574,22 @@ impl ProbeLease {
         }
         let mut stage = storage(InspectionStage::open(&self.0.path, &self.0.key))?;
         let mut failure = None;
-        let result = stage.bounded(cancel.clone(), deadline, |stage| {
-            self.integrity(stage, cancel, deadline).map_err(|error| {
-                failure = Some(error);
-                iptv_store_sqlite::StoreError::Unavailable("probe integrity failed")
-            })?;
-            for candidate in candidates {
-                if !stage.has_channel(&candidate.epg_channel)? {
-                    return Ok(false);
+        let result = stage.bounded(
+            cancel.clone(),
+            crate::time::store_deadline(deadline),
+            |stage| {
+                self.integrity(stage, cancel, deadline).map_err(|error| {
+                    failure = Some(error);
+                    iptv_store_sqlite::StoreError::Unavailable("probe integrity failed")
+                })?;
+                for candidate in candidates {
+                    if !stage.has_channel(&candidate.epg_channel)? {
+                        return Ok(false);
+                    }
                 }
-            }
-            Ok(true)
-        });
+                Ok(true)
+            },
+        );
         check(&self.0.services, cancel, deadline)?;
         if !storage(result).map_err(|error| failure.unwrap_or(error))? {
             return Err(InspectionError::StaleEvidence);
@@ -1065,16 +1081,17 @@ impl Runtime {
                 return Err(InspectionError::StaleCursor);
             }
             let mut stage = storage(InspectionStage::open(&lease.0.path, &lease.0.key))?;
-            let mut channels =
-                storage(
-                    stage.bounded(worker_control.cancel.clone(), deadline, |stage| {
-                        stage.channels(
-                            after.as_ref().map(|c| c.after[0].as_str()).unwrap_or(""),
-                            &text,
-                            limit + 1,
-                        )
-                    }),
-                )?;
+            let mut channels = storage(stage.bounded(
+                worker_control.cancel.clone(),
+                crate::time::store_deadline(deadline),
+                |stage| {
+                    stage.channels(
+                        after.as_ref().map(|c| c.after[0].as_str()).unwrap_or(""),
+                        &text,
+                        limit + 1,
+                    )
+                },
+            ))?;
             check(&lease.0.services, &worker_control.cancel, deadline)?;
             let more = channels.len() > limit as usize;
             channels.truncate(limit as usize);

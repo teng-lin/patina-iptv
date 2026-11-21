@@ -224,6 +224,34 @@ fn platform_cfg_lives_in_the_host_modules() {
 }
 
 #[test]
+fn only_native_hosts_read_the_standard_clocks() {
+    // std's clocks panic in a browser build: screens use NSH's Instant and
+    // the host's wall clock (`crate::host::since_epoch`).
+    let (root, files) = app_sources();
+    for file in files {
+        let name = file
+            .strip_prefix(&root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        if name == "host/native.rs" || name.starts_with("host/native/") {
+            continue;
+        }
+        let code = code(&file);
+        for clock in ["std::time::Instant", "SystemTime", "UNIX_EPOCH"] {
+            assert!(
+                !code.contains(clock),
+                "{name} reads {clock}; use nsh_core::time::Instant or crate::host::since_epoch"
+            );
+        }
+        for (at, _) in code.match_indices("std::time::{") {
+            let group = &code[at..at + code[at..].find('}').unwrap_or(0)];
+            assert!(!group.contains("Instant"), "{name} imports std's Instant");
+        }
+    }
+}
+
+#[test]
 fn declarations_include_macro_and_local_statics_but_not_lifetimes() {
     assert_eq!(
         statics("thread_local! { static STATE: Cell<u32> = x; }"),

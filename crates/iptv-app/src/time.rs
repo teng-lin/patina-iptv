@@ -13,8 +13,9 @@
 
 pub(crate) use crate::host::offset_minutes;
 use crate::host::reload_time_zone;
+use nsh_core::time::Instant;
 use std::cell::Cell;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use iptv_core::guide;
 use nsh_core::prelude::*;
@@ -28,9 +29,7 @@ thread_local! {
 
 /// Unix seconds now.
 pub fn wall_unix() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64)
+    crate::host::since_epoch().map_or(0, |d| d.as_secs() as i64)
 }
 
 /// The current schedule was just shown.

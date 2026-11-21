@@ -561,8 +561,9 @@ fn restore_crash_child() {
 
 #[test]
 fn process_death_at_each_restore_swap_boundary_preserves_the_committed_snapshot() {
+    use crate::time::Instant;
     use std::process::Command;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
     for boundary in ["validated", "previous", "installed", "synced"] {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("live");

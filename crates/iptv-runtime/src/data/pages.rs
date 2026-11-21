@@ -83,7 +83,7 @@ fn loader(
         let Some(owner) = owner.upgrade() else {
             return;
         };
-        let started = std::time::Instant::now();
+        let started = crate::time::Instant::now();
         let read = crate::commands::guide_page(&owner, source, incarnation.clone(), request);
         owner.spawn({
             let owner = owner.clone();

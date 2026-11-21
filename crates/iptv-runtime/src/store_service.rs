@@ -22,6 +22,7 @@
 //! The reader's connection is made by the writer ([`Store::open_reader`]):
 //! the platform key is fetched, and the file migrated, only there.
 
+use crate::time::Instant;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::Path;
@@ -32,7 +33,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 use std::thread::ThreadId;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures_channel::oneshot;
 use iptv_import::CancelToken;
@@ -43,7 +44,7 @@ use iptv_store_sqlite::{Store, StoreError};
 #[derive(Default)]
 struct Connection {
     store: Option<Store>,
-    retry_open_at: Option<std::time::Instant>,
+    retry_open_at: Option<crate::time::Instant>,
 }
 
 /// Numeric-only observations for one store lane; no query, path or provider data.
@@ -872,7 +873,7 @@ fn with_store<R>(
     if connection.store.is_none() {
         if connection
             .retry_open_at
-            .is_some_and(|at| std::time::Instant::now() < at)
+            .is_some_and(|at| crate::time::Instant::now() < at)
         {
             return Err(StoreError::Unavailable(
                 "credential storage is temporarily unavailable",
@@ -885,7 +886,7 @@ fn with_store<R>(
             }
             Err(error) => {
                 connection.retry_open_at =
-                    Some(std::time::Instant::now() + std::time::Duration::from_secs(1));
+                    Some(crate::time::Instant::now() + std::time::Duration::from_secs(1));
                 return Err(error);
             }
         }

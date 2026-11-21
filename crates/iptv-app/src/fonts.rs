@@ -80,7 +80,7 @@ pub const FILES: [(&str, &[u8]); 3] = [
 /// each one twice on the UI thread (for its family name, then to register
 /// it), about 0.7 s of a cold start on a 32-bit TV box.
 pub fn register() {
-    let started = std::time::Instant::now();
+    let started = nsh_core::time::Instant::now();
     let (tx, rx) = futures_channel::oneshot::channel();
     let unpacking = crate::host::background("iptv-fonts", move || {
         let unpacked: Vec<_> = FILES

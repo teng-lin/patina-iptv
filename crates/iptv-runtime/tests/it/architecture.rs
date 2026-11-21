@@ -93,6 +93,8 @@ const STATICS: &[(&str, &str)] = &[
     ("backup.rs", "STARTED"),
     // The operating-system lock this process holds on each storage root.
     ("backup/instance.rs", "HELD"),
+    // A browser host's clocks (no OS clock there), installed once.
+    ("time.rs", "CLOCK"),
     // Unique unopened directories of unit-test owners (`cfg(test)`).
     ("ports.rs", "NEXT"),
     // Startup marks seen by one opening unit test (`cfg(test)`): the mark
@@ -383,12 +385,21 @@ fn only_native_modules_name_the_native_adapter_or_start_threads() {
         "new_multi_thread",
         "new_current_thread",
         "Handle::current",
+        // The clocks: std's panic in a browser build (`time.rs` holds them).
+        "std::time::Instant",
+        "SystemTime",
+        "UNIX_EPOCH",
+        "tokio::time",
     ];
     let sources = runtime_sources();
     let tests = test_modules(&sources);
     for (name, code) in &sources {
         // Unit-test files carry their test fixtures (threads included).
-        if native_only(name) || tests.contains(name) || name.ends_with("tests.rs") {
+        if native_only(name)
+            || tests.contains(name)
+            || name.ends_with("tests.rs")
+            || name == "time.rs"
+        {
             continue;
         }
         let code = shipped(code);
@@ -399,7 +410,7 @@ fn only_native_modules_name_the_native_adapter_or_start_threads() {
         for thread in THREADS {
             assert!(
                 !code.contains(thread),
-                "{name} uses {thread} outside the native modules; use the execution port"
+                "{name} uses {thread} outside the native modules; use the execution port or crate::time"
             );
         }
     }

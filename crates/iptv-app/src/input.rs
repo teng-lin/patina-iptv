@@ -515,7 +515,7 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     if phase != Phase::Up {
         keep_controls(ui);
     }
-    let t = std::time::Instant::now();
+    let t = nsh_core::time::Instant::now();
     let here = surface(&ui);
     let ctx = here.0;
     let (decision, deadline) = {

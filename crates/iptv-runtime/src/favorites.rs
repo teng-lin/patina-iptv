@@ -599,15 +599,15 @@ pub fn flush_on_shutdown(owner: &super::Runtime) -> bool {
         .favorite_writer
         .with(|writer| writer.borrow_mut().take());
     let Some(writer) = writer else { return true };
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = crate::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let (tx, rx) = mpsc::channel();
         if writer.send(Write::Shutdown(tx)).is_err() {
             return false;
         }
-        match rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())) {
+        match rx.recv_timeout(deadline.saturating_duration_since(crate::time::Instant::now())) {
             Ok(true) => return true,
-            Ok(false) if std::time::Instant::now() < deadline => {
+            Ok(false) if crate::time::Instant::now() < deadline => {
                 // A busy database retains the head edit. Keep the engine alive
                 // for bounded retries instead of treating a failed attempt as
                 // a completed shutdown barrier.

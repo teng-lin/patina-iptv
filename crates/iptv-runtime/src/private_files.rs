@@ -224,7 +224,7 @@ impl Client {
         &self,
         request: HttpRequest,
     ) -> Result<StreamingResponse<Body>, FetchError> {
-        let deadline = std::time::Instant::now()
+        let deadline = crate::time::Instant::now()
             + request
                 .timeout
                 .unwrap_or(self.net.config().request_timeout)
@@ -239,7 +239,7 @@ impl Client {
     async fn fetch_stream_inner(
         &self,
         mut request: HttpRequest,
-        deadline: std::time::Instant,
+        deadline: crate::time::Instant,
     ) -> Result<StreamingResponse<Body>, FetchError> {
         let path = iptv_providers::content_url::local_path(&request.url).map_err(|_| failure())?;
         if let Some(path) = path {
@@ -278,7 +278,7 @@ impl Client {
                 });
             }
         }
-        request.timeout = Some(deadline.saturating_duration_since(std::time::Instant::now()));
+        request.timeout = Some(deadline.saturating_duration_since(crate::time::Instant::now()));
         let response = self.net.fetch_stream(request).await?;
         Ok(StreamingResponse {
             status: response.status,
@@ -306,7 +306,7 @@ pub(crate) enum Body {
     Private {
         reader: Option<PrivateFileReader>,
         remaining: u64,
-        deadline: std::time::Instant,
+        deadline: crate::time::Instant,
         /// Reads run on the owner's blocking side, within its timer.
         services: super::store_service::Services,
     },

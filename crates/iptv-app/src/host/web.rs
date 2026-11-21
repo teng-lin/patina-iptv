@@ -36,8 +36,13 @@ pub(crate) const PLATFORM: iptv_core::capabilities::Platform =
 /// The name the store's memory files are kept under.
 const DIRECTORY: &str = "/patina";
 
-/// The runtime's ports on a browser TV.
+/// The runtime's ports on a browser TV. The runtime reads the host's
+/// clocks too: the Worker has no other.
 pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
+    crate::runtime::time::install(crate::runtime::time::Clock {
+        monotonic: iptv_web::adapters::monotonic,
+        wall: iptv_web::adapters::wall,
+    });
     let mut ports = crate::runtime::Ports::with_adapters(
         directory,
         |_| {
@@ -129,6 +134,11 @@ pub(crate) fn initialize() -> std::io::Result<PathBuf> {
 
 /// The page's lifecycle does not flush yet (step 2).
 pub(crate) fn flush_on_host_stop(_owner: crate::runtime::HostHandle) {}
+
+/// Time since the Unix epoch on the host's wall clock.
+pub(crate) fn since_epoch() -> Option<Duration> {
+    Some(iptv_web::adapters::wall())
+}
 
 /// UTC until the host reports the device's offset.
 pub(crate) fn offset_minutes(_unix: i64) -> i32 {

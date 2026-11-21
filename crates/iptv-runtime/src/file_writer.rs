@@ -17,12 +17,13 @@
 //!
 //! Logs name neither paths nor content.
 
+use crate::time::Instant;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures_channel::oneshot;
 

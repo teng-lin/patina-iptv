@@ -45,6 +45,8 @@ const SHELL_MAY_NAME: &[&str] = &[
     "settings",
     // Private-directory protection, before any owner exists.
     "storage",
+    // The browser host installs its clocks (the Worker has no other).
+    "time",
     // The guide status and the lines of the guide sources screen.
     "stored",
 ];

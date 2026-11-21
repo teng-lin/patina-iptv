@@ -69,7 +69,7 @@ pub use crate::imports::{Job, Purpose, Update};
 pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
     combined::reset_single(owner);
     library::reset_imports(owner);
-    let started = std::time::Instant::now();
+    let started = crate::time::Instant::now();
     let startup = crate::commands::startup_library(owner);
     owner.spawn({
         let owner = owner.clone();
@@ -468,7 +468,7 @@ async fn show_part(
     }
     stored::note_shown(owner, Some(imported.source));
     let channels = imported.channels.len();
-    let started = std::time::Instant::now();
+    let started = crate::time::Instant::now();
     let Imported {
         groups,
         channels: catalog,

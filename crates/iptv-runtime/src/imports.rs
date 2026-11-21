@@ -19,7 +19,6 @@ use iptv_store_sqlite::{
     CatalogCounts, CatalogStage, EpgStage, GuideSource, ImportErrorKind, SourceId, Store,
     StoreError,
 };
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::UnboundedSender as Sender;
 #[cfg(all(test, feature = "test-support"))]
 mod recovery_tests;
@@ -234,9 +233,7 @@ pub enum GuideRead {
 }
 
 pub fn now_unix() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64)
+    crate::time::since_epoch().as_secs() as i64
 }
 
 /// The import itself, on its own thread with a small tokio runtime.

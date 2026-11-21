@@ -67,9 +67,7 @@ fn apply_policy(state: &mut State, new: Policy) {
     }
 }
 fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
+    crate::time::since_epoch()
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX)

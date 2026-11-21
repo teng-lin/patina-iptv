@@ -24,8 +24,9 @@ mod words;
 
 pub use view::layer;
 
+use nsh_core::time::Instant;
 use std::cell::Cell;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use iptv_nav::Action;
 use iptv_settings::schema::ValueType;

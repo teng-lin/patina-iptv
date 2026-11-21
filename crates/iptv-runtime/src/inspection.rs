@@ -2,6 +2,7 @@
 //! All expensive reads run on a bounded analysis lane; probes use the owner's
 //! bounded worker pool and existing transport policy. No browser state is read.
 mod probe;
+use crate::time::Instant;
 use crate::{Runtime, store_service::Services};
 use iptv_import::CancelToken;
 pub use iptv_library::inspection::*;
@@ -11,7 +12,7 @@ use std::{
     future::{Future, poll_fn},
     pin::pin,
     task::Poll,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 pub const QUERY_DEADLINE: Duration = Duration::from_secs(3);
@@ -97,7 +98,7 @@ where
             {
                 store.inspection_read_observed(
                     token,
-                    deadline,
+                    crate::time::store_deadline(deadline),
                     move || {
                         if let Some(mut hook) = scan.take() {
                             hook();
@@ -108,7 +109,7 @@ where
             }
             #[cfg(not(feature = "test-support"))]
             {
-                store.inspection_read(token, deadline, operation)
+                store.inspection_read(token, crate::time::store_deadline(deadline), operation)
             }
         })),
         None => Box::pin(async { Ok(Err(InspectionError::Busy)) }),

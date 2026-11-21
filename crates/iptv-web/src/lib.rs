@@ -56,6 +56,11 @@ pub mod adapters {
     pub fn monotonic() -> Duration {
         Duration::from_secs_f64((crate::host::host().monotonic_ms() / 1000.0).max(0.0))
     }
+
+    /// The host's wall clock: time since the Unix epoch.
+    pub fn wall() -> Duration {
+        Duration::from_secs_f64((crate::host::host().wall_ms() / 1000.0).max(0.0))
+    }
 }
 
 #[cfg(test)]

@@ -49,6 +49,13 @@ pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     ports
 }
 
+/// Time since the Unix epoch on the system clock; `None` before it.
+pub(crate) fn since_epoch() -> Option<std::time::Duration> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+}
+
 /// An image's size from its header (NSH's decoders' own probe).
 pub(crate) fn image_extent(bytes: &[u8]) -> super::Extent {
     use nsh_core::image::Natural;

@@ -878,7 +878,7 @@ async fn stalker_episodes(
     parent_cmd: Option<&str>,
     cancel: &iptv_import::CancelToken,
 ) -> Result<Vec<(iptv_providers::model::Episode, StreamLocator, Option<u32>)>, Error> {
-    let started = std::time::Instant::now();
+    let started = crate::time::Instant::now();
     let mut requests = 0;
     let mut out = Vec::new();
     let native = parent_cmd.is_none();

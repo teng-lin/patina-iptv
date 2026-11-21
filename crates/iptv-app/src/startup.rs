@@ -23,8 +23,9 @@
 //! and `video rendered` (a current-source native renderer submission where supported,
 //! never display presentation/scanout).
 
+use nsh_core::time::Instant;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// The phases marked so far.
 static MARKED: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());

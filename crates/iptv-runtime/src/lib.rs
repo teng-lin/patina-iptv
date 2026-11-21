@@ -298,7 +298,7 @@ impl Runtime {
         self.inspection.renew();
     }
     pub fn drain_services(&self) -> bool {
-        let deadline = std::time::Instant::now() + self.store.drain_limit();
+        let deadline = crate::time::Instant::now() + self.store.drain_limit();
         self.inspection.close_workers();
         self.parental_lock();
         if !self.recordings_detached.replace(true) {
@@ -314,7 +314,7 @@ impl Runtime {
             .drain_on_shutdown_with(|| self.inspection.cancel_requests());
         let probes_drained = self
             .inspection
-            .drain_workers(deadline.saturating_duration_since(std::time::Instant::now()));
+            .drain_workers(deadline.saturating_duration_since(crate::time::Instant::now()));
         // Detached local tasks can retain this Runtime after the root closes.
         // Retire services now, rather than waiting for its last Rc to drop.
         self.store.retire();
@@ -709,6 +709,7 @@ pub mod network;
 mod ports;
 pub use ports::{MaybeSend, MaybeSync, Ports};
 pub mod storage;
+pub mod time;
 
 #[cfg(test)]
 impl Default for Runtime {

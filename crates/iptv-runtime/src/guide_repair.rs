@@ -4,6 +4,7 @@ mod publication;
 #[cfg(test)]
 mod tests;
 mod write;
+use crate::time::Instant;
 use crate::{
     Runtime,
     inspection::{InspectionControl, ProbeLease},
@@ -17,7 +18,7 @@ use std::{
     collections::{HashMap, HashSet},
     future::Future,
     rc::Rc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 const MAX_PLANS: usize = 32;
