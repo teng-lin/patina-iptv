@@ -504,8 +504,9 @@ fn play_key(ui: Ui, details: Details, key: Key, restart: bool) {
 
 /// Plays `key` full screen, or (`full_screen` false) in the preview behind
 /// the details, which stay open (#187). `after`: the episode that ended,
-/// when this autoplays the next one; the viewer stopping it or playing
-/// something else meanwhile cancels it.
+/// when this autoplays the next one. That needs the viewer still where
+/// they watched it, with nothing else playing; else the ended episode
+/// stops, the next one up next.
 fn play_authorized(
     ui: Ui,
     details: Details,
@@ -523,29 +524,38 @@ fn play_authorized(
         restart,
         incarnation: details.incarnation.clone(),
     };
+    let series = details.item.key.clone();
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
         let result = owner.vod_play(details, key, restart).await;
-        // An episode that ended, its next one not played in the preview
-        // after all, stops as with autoplay off.
-        let not_played = move || {
-            if !full_screen {
-                stop_ended(ui);
+        // The episode that ended, its next one not played after all.
+        let not_played = {
+            let after = after.clone();
+            move || {
+                if let Some(ended) = &after {
+                    stop_ended(ui, ended);
+                }
             }
         };
         if ui.vod.with_untracked(|s| s.generation != generation) {
             not_played();
             return;
         }
-        if after.is_some_and(|ended| {
-            !ui.player
-                .vod
-                .with_untracked(|p| p.as_ref().is_some_and(|(p, _)| p.key == ended))
-        }) {
-            ui.vod.update(|s| s.busy = false);
-            return;
-        }
         ui.vod.update(|s| s.busy = false);
+        if let Some(ended) = &after {
+            let held = ui
+                .player
+                .vod
+                .with_untracked(|p| p.as_ref().is_some_and(|(p, _)| &p.key == ended));
+            let there = matches!(
+                (where_watched(ui, &series), full_screen),
+                (Watched::FullScreen, true) | (Watched::Details, false)
+            );
+            if !held || !there {
+                not_played();
+                return;
+            }
+        }
         match result {
             Ok((playing, source)) => {
                 if !owner.reserve_viewing(0, iptv_library::SourceId(playing.key.source)) {
@@ -585,12 +595,12 @@ fn play_authorized(
     });
 }
 
-/// Nothing plays any more if what played has ended.
-fn stop_ended(ui: Ui) {
+/// Nothing plays any more if the player holds `ended`, ended.
+fn stop_ended(ui: Ui, ended: &Key) {
     if ui
         .player
         .vod
-        .with_untracked(|p| p.as_ref().is_some_and(|(p, _)| p.ended))
+        .with_untracked(|p| p.as_ref().is_some_and(|(p, _)| p.ended && &p.key == ended))
     {
         crate::player_keys::stopped(ui);
     }
