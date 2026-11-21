@@ -109,7 +109,6 @@ pub(super) struct Passthrough {
     closing: AtomicBool,
     closed: AtomicBool,
     changed: tokio::sync::Notify,
-    executor: tokio::runtime::Handle,
 }
 impl Transport {
     fn passthrough(
@@ -127,7 +126,6 @@ impl Transport {
             closing: AtomicBool::new(false),
             closed: AtomicBool::new(false),
             changed: tokio::sync::Notify::new(),
-            executor: tokio::runtime::Handle::current(),
         })))
     }
     fn url(&self) -> &str {
@@ -167,8 +165,12 @@ impl Transport {
                     input.closing.store(true, Ordering::Release);
                     let closing = input.clone();
                     // Closure remains owned even if this retirement waiter is
-                    // canceled by UI teardown or another replacement.
-                    input.executor.spawn(async move {
+                    // canceled by UI teardown or another replacement. It runs
+                    // on the executor retiring it: the one the relay was made
+                    // on can be gone by now (a recording host restarted with
+                    // new services drops the old ones' executor and its
+                    // tasks), and this wait would then never end.
+                    tokio::spawn(async move {
                         relay.shutdown().await;
                         closing.closed.store(true, Ordering::Release);
                         closing.changed.notify_waiters();

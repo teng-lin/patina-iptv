@@ -117,6 +117,10 @@ is below 1.0, a minor release may change behavior.
 
 ### Fixed
 
+- Movies and Shows: a title that follows another (the next episode, or
+  another title chosen) no longer stays on "Loading…" when the recording
+  host restarted while the earlier one played. Retiring the earlier
+  title's stream waited forever on the stopped host's executor (#187).
 - Movies and Shows: Back to a title beyond the first screenful of the list
   (from its details, or from the title playing full screen) now scrolls the
   list to that title, shown and selected, instead of showing the top of the

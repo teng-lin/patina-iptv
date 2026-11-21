@@ -300,6 +300,7 @@ fn full_screen_with_autoplay_plays_the_next_episode_full_screen() {
     let Some(home) = isolated!() else { return };
     let mut run = watch(home, At::FullScreen, true, Lock::None);
     end(&mut run);
+    plays(&mut run.app, &run.props, "102");
     // OK shows what plays: the next episode.
     step(run.app.press_key("enter"));
     step(run.app.wait_for("text:/Generated Second/"));
