@@ -539,12 +539,14 @@ pub(crate) fn watch_time(owner: &super::Runtime, source: SourceId, key: String, 
 
 fn send(owner: &super::Runtime, write: Write) {
     let counted = !matches!(write, Write::Barrier(_) | Write::Shutdown(_));
-    if counted {
-        unsaved(owner).fetch_add(1, Ordering::AcqRel);
+    if !owner.services().has_workers() {
+        // No writer can run here: the change stays in memory, unsaved, and
+        // reads do not wait for it (a barrier answers false).
+        return;
     }
     owner.favorite_writer.with(|w| {
         let mut w = w.borrow_mut();
-        let tx = w.get_or_insert_with(|| {
+        if w.is_none() {
             let (tx, rx) = mpsc::channel();
             let unsaved = unsaved(owner);
             // The writer belongs to this owner's application epoch.
@@ -554,12 +556,17 @@ fn send(owner: &super::Runtime, write: Write) {
                 "iptv-favorites".into(),
                 Box::new(move || write_all(&services, rx, unsaved)),
             ) {
-                // The receiver is gone with the body: every send below
-                // reports that the writer stopped.
+                // Nothing is cached or counted: the next change tries again,
+                // and reads do not wait for a write no writer has.
                 log::error!("iptv favorites: cannot start the writer: {error}");
+                return;
             }
-            tx
-        });
+            *w = Some(tx);
+        }
+        let tx = w.as_ref().expect("the writer was started");
+        if counted {
+            unsaved(owner).fetch_add(1, Ordering::AcqRel);
+        }
         if tx.send(write).is_err() {
             log::warn!("iptv favorites: the writer stopped");
         }
@@ -1323,6 +1330,40 @@ mod vod_availability_tests {
             .with(|state| state.borrow_mut().any_vod = true);
         owner.services().block_on(refresh_vod_availability(&owner));
         assert!(owner.favorites.with(|s| s.borrow().any_vod));
+        assert!(owner.drain_services());
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod start_tests {
+    use super::*;
+    use crate::execution::{Execution, Job, Lane, Tasks};
+
+    /// Native lanes and tasks whose workers cannot start (a thread-spawn
+    /// failure).
+    struct NoThreads;
+    impl Execution for NoThreads {
+        fn lane(&self, name: &'static str) -> std::io::Result<Box<dyn Lane>> {
+            crate::native::execution::NativeExecution.lane(name)
+        }
+        fn worker(&self, _: String, _: Job) -> std::io::Result<()> {
+            Err(std::io::Error::other("synthetic: no threads left"))
+        }
+        fn tasks(&self) -> Box<dyn Tasks> {
+            crate::native::execution::NativeExecution.tasks()
+        }
+    }
+
+    #[test]
+    fn a_writer_that_cannot_start_is_not_kept_and_its_writes_are_not_owed() {
+        let mut ports = crate::Ports::for_tests();
+        ports.execution = std::sync::Arc::new(NoThreads);
+        let owner = crate::Runtime::new(ports);
+        owner.start_services();
+        watch_time(&owner, SourceId(1), "synthetic-channel".into(), 1_000);
+        watch_time(&owner, SourceId(1), "synthetic-channel".into(), 1_000);
+        assert_eq!(unsaved(&owner).load(Ordering::Acquire), 0);
+        assert!(owner.favorite_writer.with(|w| w.borrow().is_none()));
         assert!(owner.drain_services());
     }
 }

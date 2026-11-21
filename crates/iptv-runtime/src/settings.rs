@@ -289,6 +289,11 @@ fn apply(
     }
     let revision = owner.settings_changed.get() + 1;
     owner.settings_changed.set(revision);
+    if !services.has_workers() {
+        // No file writer runs here (a browser host keeps its files through
+        // a port still to come): the settings apply for this session.
+        return Ok(());
+    }
     let saved = services
         .files()
         .write(path(services.directory()), json.into_bytes());
@@ -509,5 +514,43 @@ mod persistence_tests {
         assert_eq!(read_file(&dir), Settings::new());
         assert!(dir.exists());
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod host_tests {
+    use super::*;
+
+    struct Unpolled;
+    impl crate::execution::CooperativeHost for Unpolled {
+        fn spawn(&self, _: crate::execution::Task) {}
+        fn delay(&self, _: std::time::Duration) -> crate::execution::Task {
+            Box::pin(std::future::pending())
+        }
+        fn now(&self) -> std::time::Duration {
+            std::time::Duration::ZERO
+        }
+    }
+
+    #[test]
+    fn without_a_file_writer_settings_apply_for_the_session() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut ports = crate::Ports::for_tests();
+        ports.directory = directory.path().to_owned();
+        ports.execution = Arc::new(crate::execution::Cooperative::new(Arc::new(Unpolled)));
+        let owner = std::rc::Rc::new(crate::Runtime::new(ports));
+        owner.start_services();
+        owner.load_settings();
+        owner
+            .set_setting(
+                keys::USER_AGENT.as_str(),
+                Value::Text("SyntheticAgent/2".into()),
+            )
+            .unwrap();
+        assert_eq!(
+            owner.settings().text(keys::USER_AGENT, &Target::Global),
+            "SyntheticAgent/2"
+        );
+        assert!(!path(directory.path()).exists());
     }
 }
