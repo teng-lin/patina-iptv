@@ -9,7 +9,9 @@ own IPTV playlists feel at home. Pick up a remote, tap the screen, or
 reach for your mouse and keyboard.
 
 For Android TV, Android tablets, Linux, macOS, Windows (experimental) and
-iPad. Built in Rust with [Native Shell (NSH)](https://github.com/longbridge/nsh).
+iPad, and Live TV on Samsung Tizen TVs (experimental, see
+[hosts/tizen](hosts/tizen/README.md)). Built in Rust with
+[Native Shell (NSH)](https://github.com/longbridge/nsh).
 
 Inspired by TiviMate’s TV guide experience, Patina is an independent
 project with its own design, code and artwork, and no affiliation with

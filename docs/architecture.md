@@ -10,13 +10,13 @@ For task-to-owner links and targeted checks, use the
 
 ## Crates and the direction of dependencies
 
-The workspace has fifteen crates. Dependencies only point
+The workspace has sixteen crates. Dependencies only point
 down: a crate may depend on crates in its own layer or below, never above.
 
 ```text
-  Shell            iptv-app
-                      │
-  Application      iptv-runtime
+  Shell            iptv-app                  hosts/tizen (JavaScript)
+                      │                          │
+  Application      iptv-runtime              iptv-web (WebAssembly)
                       │
   Native adapters  iptv-net        iptv-store-sqlite  iptv-player-mpv
                       │                   │
@@ -39,6 +39,7 @@ down: a crate may depend on crates in its own layer or below, never above.
 | `iptv-player-mpv` | `iptv-core`, `iptv-net`, platform NSH components |
 | `iptv-runtime` | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-library`, `iptv-net`, `iptv-providers`, `iptv-search`, `iptv-settings`, `iptv-store-sqlite` |
 | `iptv-app` | portable crates, `iptv-runtime`, `iptv-net`, `iptv-player-mpv`, NSH |
+| `iptv-web` | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-providers` |
 
 | Layer | Crates | May use |
 | --- | --- | --- |
@@ -47,9 +48,19 @@ down: a crate may depend on crates in its own layer or below, never above.
 | Native application | `iptv-runtime` | Native services, Tokio, filesystem I/O and adapter value types. No NSH. Host JNI and credential brokers stay in the shell. |
 | Player adapter | `iptv-player-mpv` | NSH native components, platform APIs, libmpv. The Android build contains only the wire contract and track parser. |
 | Shell | `iptv-app` | NSH, the adapters, platform APIs. |
+| Web application | `iptv-web` | The portable crates and a JavaScript host. No NSH, no Tokio, no native adapters. |
 
 `tools/check.sh` builds every portable crate for `wasm32-unknown-unknown`.
 That build is what keeps platform code out of them.
+
+`iptv-web` is the application layer for TV web runtimes, where NSH's web
+runtime cannot run (Samsung Tizen; see [hosts/tizen](../hosts/tizen/README.md)).
+It runs the portable import, guide and list models in WebAssembly inside a
+Web Worker: its `Fetch` adapter hands each request to the worker's
+JavaScript, and a small executor polls the import after every delivery. The
+page renders the views it emits, sends remote keys and plays streams with
+the TV's native player. Its stored guide is an `iptv-epg` snapshot
+(`GuideStore::to_snapshot`) rather than the SQLite store.
 
 `iptv-sqlcipher-init` is the narrow native FFI boundary for the pinned database
 library. It completes SQLite core initialization, invokes SQLCipher's idempotent
