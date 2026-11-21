@@ -38,23 +38,23 @@ fn the_threshold_follows_one_finger_and_a_still_cancel_is_no_drag() {
     t.up(1);
     // Cancelled still: no drag; cancelled after moving: a drag.
     t.down(1, 0.0, 0.0);
-    assert!(!t.cancelled(1, 0.0, 1.0));
+    assert!(!t.canceled(1, 0.0, 1.0));
     t.down(1, 0.0, 0.0);
     assert!(!t.moved(1, 0.0, 6.0));
-    assert!(t.cancelled(1, 0.0, 6.0), "a scroll view took it after 6 dp");
+    assert!(t.canceled(1, 0.0, 6.0), "a scroll view took it after 6 dp");
     // A fast drag cancelled before any move arrived that far: the
     // cancel's own position counts.
     t.down(1, 0.0, 0.0);
     assert!(!t.moved(1, 0.0, 2.0));
-    assert!(t.cancelled(1, 0.0, 9.0));
+    assert!(t.canceled(1, 0.0, 9.0));
     // Another finger's cancel is not the followed one's.
     t.down(1, 0.0, 0.0);
-    assert!(!t.cancelled(2, 0.0, 40.0));
+    assert!(!t.canceled(2, 0.0, 40.0));
     t.up(1);
     // Already reported crossing: the cancel is not a second drag.
     t.down(1, 0.0, 0.0);
     assert!(t.moved(1, 0.0, 12.0));
-    assert!(!t.cancelled(1, 0.0, 12.0));
+    assert!(!t.canceled(1, 0.0, 12.0));
 }
 
 #[test]
@@ -283,8 +283,8 @@ fn a_fling_travels_like_a_native_lists() {
     let dp = (t.rest() - start) * PPM;
     assert!((dp - 1200.0).abs() < 1.0, "{dp} dp");
     while t.step(FRAME, PPM) {}
-    let travelled = (t.view() - start) * PPM;
-    assert!((travelled - 1200.0).abs() < 25.0, "{travelled} dp");
+    let traveled = (t.view() - start) * PPM;
+    assert!((traveled - 1200.0).abs() < 25.0, "{traveled} dp");
     // A drag follows the finger 1:1: 120 dp is 15 minutes at 8 dp/min.
     t.grab();
     let from = t.view();

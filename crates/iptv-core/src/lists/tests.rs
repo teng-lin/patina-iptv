@@ -77,7 +77,7 @@ fn view(catalog: &Rc<dyn Schedule>, list: ChannelList) -> ListView {
 }
 
 #[test]
-fn the_groups_column_starts_with_favourites_recent_and_all() {
+fn the_groups_column_starts_with_favorites_recent_and_all() {
     let c = Catalog::small();
     assert_eq!(entry_count(&c), 6);
     let names: Vec<String> = (0..entry_count(&c)).map(|e| entry_name(e, &c)).collect();
@@ -117,7 +117,7 @@ fn a_group_lists_only_its_channels_and_all_follows_the_playlist() {
 }
 
 #[test]
-fn favourites_and_recent_lists_keep_their_order() {
+fn favorites_and_recent_lists_keep_their_order() {
     let c = Catalog::small();
     let fav = ChannelList::build(FAVORITES, &c, &[7, 1, 99], &[]);
     assert_eq!(fav.channels(), &[7, 1], "out-of-range channels are dropped");

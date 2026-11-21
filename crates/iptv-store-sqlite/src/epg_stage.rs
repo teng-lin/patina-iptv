@@ -31,7 +31,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread::JoinHandle;
 
-use iptv_epg::{FeedId, IngestReport, ProgrammeData, ScheduleRules, StoreOptions, UnixTime};
+use iptv_epg::{FeedId, IngestReport, ProgramData, ScheduleRules, StoreOptions, UnixTime};
 use iptv_import::{GuideSink, SinkError};
 use rusqlite::{Connection, OpenFlags};
 
@@ -238,7 +238,7 @@ impl EpgStage {
         self.request(Cmd::Sync)
     }
 
-    fn programme_inner(&mut self, channel: &str, p: &ProgrammeData<'_>) -> Result<()> {
+    fn program_inner(&mut self, channel: &str, p: &ProgramData<'_>) -> Result<()> {
         if self.failed.load(Ordering::Relaxed) {
             return self.request(Cmd::Sync);
         }
@@ -288,7 +288,7 @@ impl EpgStage {
         })?;
         let r = &mut cur.report;
         r.kept += settled.kept;
-        r.channels_with_programmes += settled.channels_with_programmes;
+        r.channels_with_programs += settled.channels_with_programs;
         r.dropped_bad_duration += settled.dropped_bad_duration;
         r.dropped_no_stop += settled.dropped_no_stop;
         r.dropped_retention += settled.dropped_retention;
@@ -367,12 +367,12 @@ impl GuideSink for EpgStage {
         Ok(())
     }
 
-    fn programme(
+    fn program(
         &mut self,
         channel: &str,
-        p: &ProgrammeData<'_>,
+        p: &ProgramData<'_>,
     ) -> std::result::Result<(), SinkError> {
-        self.programme_inner(channel, p).map_err(sink_error)
+        self.program_inner(channel, p).map_err(sink_error)
     }
 
     fn finish_feed(&mut self) -> std::result::Result<IngestReport, SinkError> {
@@ -383,7 +383,7 @@ impl GuideSink for EpgStage {
         self.discard_inner().map_err(sink_error)
     }
 
-    fn has_programmes(&self, feed: FeedId, epg_id: &str) -> bool {
+    fn has_programs(&self, feed: FeedId, epg_id: &str) -> bool {
         self.channel(feed, epg_id).is_some_and(|c| c.kept > 0)
     }
 }

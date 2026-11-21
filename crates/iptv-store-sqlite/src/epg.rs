@@ -186,7 +186,7 @@ pub struct EpgCounts {
     pub feeds: u64,
     pub channels: u64,
     pub bindings: u64,
-    pub programmes: u64,
+    pub programs: u64,
     pub descriptions: u64,
     /// Bound playlist channels whose feed was not in `feeds` (not stored).
     pub skipped_bindings: u64,
@@ -312,7 +312,7 @@ fn insert_feed_channels(
 /// statement that may abort half-way needs a statement journal, which
 /// copies every page of `epg_programs_by_stop` it touches first (3-4x
 /// slower, and temporary files).
-fn copy_programmes(conn: &Connection, channel: i64, stage: i64) -> Result<(u64, u64)> {
+fn copy_programs(conn: &Connection, channel: i64, stage: i64) -> Result<(u64, u64)> {
     let n = conn
         .prepare_cached(
             "INSERT OR FAIL INTO main.epg_programs (channel_id, start, stop, title, sub_title,
@@ -365,7 +365,7 @@ impl Store {
         self.attach_staging_database(stage.path(), "epg_stage")?;
         // Every row references a row written just before it in the same
         // transaction: consistent by construction. Off for the copy's sake
-        // (`copy_programmes`); it cannot change inside a transaction. A
+        // (`copy_programs`); it cannot change inside a transaction. A
         // larger page cache holds more of `epg_programs_by_stop`, which
         // every channel's programmes sweep (a third faster).
         let replaced = self
@@ -456,13 +456,13 @@ impl Store {
                     let id = tx.last_insert_rowid();
                     let (n, d, last) = match stage.channel(epg.source, &epg.epg_id) {
                         Some(staged) => {
-                            let (n, d) = copy_programmes(&tx, id, staged.id)?;
+                            let (n, d) = copy_programs(&tx, id, staged.id)?;
                             (n, d, staged.last_stop)
                         }
                         None => (0, 0, None),
                     };
                     counts.channels += 1;
-                    counts.programmes += n;
+                    counts.programs += n;
                     counts.descriptions += d;
                     ends_at = ends_at.max(last);
                     let feed = per_feed.entry(epg.source.0).or_default();
@@ -479,11 +479,11 @@ impl Store {
             .execute(params![source.0, key.as_str(), id, kind_slug(epg.kind)])?;
             counts.bindings += 1;
         }
-        for (feed, (channels, programmes)) in per_feed {
+        for (feed, (channels, programs)) in per_feed {
             tx.execute(
                 "UPDATE epg_feeds SET channel_count = ?3, program_count = ?4
                  WHERE source_id = ?1 AND feed_id = ?2",
-                params![source.0, feed, channels as i64, programmes as i64],
+                params![source.0, feed, channels as i64, programs as i64],
             )?;
         }
         tx.execute(
@@ -633,7 +633,7 @@ impl Store {
             builders.insert(id, b);
         }
         drop(rows);
-        crate::epg_window::read_programmes(&self.conn, &bindings, &mut builders, window)?;
+        crate::epg_window::read_programs(&self.conn, &bindings, &mut builders, window)?;
         let mut guide = GuideStore::new();
         for (_, b) in builders {
             guide.replace_source(b.finish());

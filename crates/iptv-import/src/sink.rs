@@ -6,8 +6,7 @@
 use std::fmt;
 
 use iptv_epg::{
-    EpgSource, FeedId, GuideStore, IngestReport, ProgrammeData, SourceBuilder, StoreOptions,
-    UnixTime,
+    EpgSource, FeedId, GuideStore, IngestReport, ProgramData, SourceBuilder, StoreOptions, UnixTime,
 };
 
 use crate::epg::EpgImport;
@@ -45,8 +44,8 @@ pub trait GuideSink {
     ) -> Result<(), SinkError>;
 
     /// One programme of EPG channel `channel` of the current feed, as
-    /// parsed ([`ProgrammeData::from_xmltv`]).
-    fn programme(&mut self, channel: &str, p: &ProgrammeData<'_>) -> Result<(), SinkError>;
+    /// parsed ([`ProgramData::from_xmltv`]).
+    fn program(&mut self, channel: &str, p: &ProgramData<'_>) -> Result<(), SinkError>;
 
     /// The current feed loaded: settle its schedules. It replaces an
     /// earlier feed with the same id. Returns its counters.
@@ -57,7 +56,7 @@ pub trait GuideSink {
 
     /// After [`Self::finish_feed`]: whether EPG channel `epg_id` of `feed`
     /// kept at least one programme.
-    fn has_programmes(&self, feed: FeedId, epg_id: &str) -> bool;
+    fn has_programs(&self, feed: FeedId, epg_id: &str) -> bool;
 }
 
 /// Keeps the guide in memory ([`SourceBuilder`] per feed), for tests,
@@ -104,7 +103,7 @@ impl GuideSink for MemoryGuide {
         Ok(())
     }
 
-    fn programme(&mut self, channel: &str, p: &ProgrammeData<'_>) -> Result<(), SinkError> {
+    fn program(&mut self, channel: &str, p: &ProgramData<'_>) -> Result<(), SinkError> {
         match self.building.as_mut() {
             Some(b) => {
                 b.push_data(channel, p);
@@ -131,7 +130,7 @@ impl GuideSink for MemoryGuide {
         Ok(())
     }
 
-    fn has_programmes(&self, feed: FeedId, epg_id: &str) -> bool {
+    fn has_programs(&self, feed: FeedId, epg_id: &str) -> bool {
         self.sources
             .iter()
             .find(|s| s.id() == feed)

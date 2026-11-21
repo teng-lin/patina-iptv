@@ -107,7 +107,7 @@ def write_playlist(path, args, base):
 def write_guide(path, args, now):
     start = (now - args.days_back * 86400) // 3600 * 3600
     end = now + args.days_ahead * 86400
-    programmes = 0
+    programs = 0
     with gzip.open(path, "wt", encoding="utf-8", compresslevel=6, newline="\n") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
         f.write('<tv generator-info-name="iptv-rs synthetic fixtures">\n')
@@ -134,9 +134,9 @@ def write_guide(path, args, now):
                 )
                 t += length
                 episode += 1
-                programmes += 1
+                programs += 1
         f.write("</tv>\n")
-    return programmes
+    return programs
 
 
 def main():
@@ -160,16 +160,16 @@ def main():
     os.makedirs(os.path.join(args.out, "logos"), exist_ok=True)
     for gi in range(args.groups):
         rng = random.Random(args.seed + gi)
-        colour = (rng.randrange(40, 230), rng.randrange(40, 230), rng.randrange(40, 230))
+        color = (rng.randrange(40, 230), rng.randrange(40, 230), rng.randrange(40, 230))
         with open(os.path.join(args.out, "logos", f"g{gi:02d}.png"), "wb") as f:
-            f.write(png(colour))
+            f.write(png(color))
     playlist = os.path.join(args.out, "playlist.m3u")
     guide = os.path.join(args.out, "guide.xml.gz")
     write_playlist(playlist, args, base)
-    programmes = write_guide(guide, args, now)
+    programs = write_guide(guide, args, now)
     print(
         f"{playlist}: {args.channels} channels in {args.groups} groups\n"
-        f"{guide}: {programmes} programmes, {os.path.getsize(guide) // 1024} KiB\n"
+        f"{guide}: {programs} programmes, {os.path.getsize(guide) // 1024} KiB\n"
         f"playlist URL: {base}/iptv/playlist.m3u",
         file=sys.stderr,
     )

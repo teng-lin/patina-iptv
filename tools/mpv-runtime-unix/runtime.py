@@ -335,8 +335,8 @@ def validate_build(platform, build):
     if not smoke.is_file() or not all(f"PASS {name}" in smoke.read_text(encoding="utf-8")
                                        for name in ("generated.ts", "generated.m3u8")):
         errors.append("No passing build-time playback smoke test (logs/smoke.txt)")
-    licence = re.search(r'^#define FFMPEG_LICENSE "([^"]*)"', (logs / "ffmpeg-config.h").read_text(encoding="utf-8"), re.MULTILINE)
-    if not licence or licence[1] != "LGPL version 2.1 or later":
+    license = re.search(r'^#define FFMPEG_LICENSE "([^"]*)"', (logs / "ffmpeg-config.h").read_text(encoding="utf-8"), re.MULTILINE)
+    if not license or license[1] != "LGPL version 2.1 or later":
         errors.append(f"FFmpeg licence is {licence[1] if licence else 'missing'}, expected LGPL version 2.1 or later")
     for component, headers in (("ffmpeg", ["ffmpeg-config.h", "ffmpeg-config_components.h"]), ("mpv", ["mpv-config.h"])):
         defines = config_defines(*((logs / name).read_text(encoding="utf-8") for name in headers))

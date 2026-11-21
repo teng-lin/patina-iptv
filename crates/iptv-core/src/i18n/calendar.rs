@@ -219,7 +219,7 @@ mod tests {
     /// A language added to the catalogue without a calendar would show
     /// English dates without a sign.
     #[test]
-    fn every_catalogue_language_has_a_complete_calendar() {
+    fn every_catalog_language_has_a_complete_calendar() {
         for language in LANGUAGES {
             let tag = language.tag;
             let calendar = calendar(tag).unwrap_or_else(|| panic!("no calendar for {tag}"));

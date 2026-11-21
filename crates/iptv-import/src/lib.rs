@@ -45,7 +45,7 @@ mod sink;
 mod stalker;
 mod xtream;
 
-pub use cancel::{CancelToken, Cancelled};
+pub use cancel::{CancelToken, Canceled};
 pub use catalog::{Catalog, CatalogWarning, ImportOptions, ImportStats, SourceMeta};
 pub use catalog_sink::{CatalogRow, CatalogSink};
 pub use epg::{
@@ -69,7 +69,7 @@ use iptv_providers::model::SourceConfig;
 /// Imports one configured source.
 ///
 /// Network work happens only through `fetch`; `progress` receives events on
-/// the calling task; `cancel` aborts with [`ImportError::Cancelled`].
+/// the calling task; `cancel` aborts with [`ImportError::Canceled`].
 pub async fn import_source<F: Fetch, P: ProgressSink>(
     fetch: &F,
     config: &SourceConfig,

@@ -7,7 +7,7 @@
 //! own in `tests/`.
 
 mod backup;
-mod catalogue;
+mod catalog;
 mod schema;
 mod screen;
 mod store;

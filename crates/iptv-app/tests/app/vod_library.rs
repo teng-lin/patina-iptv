@@ -37,13 +37,13 @@ fn back_from_player(app: &mut Headless, idiom: nsh_core::platform::Idiom) {
         nsh_core::platform::Idiom::Desktop => step(app.press_key("backspace")),
         _ if bar => {
             let back = app.screen().id("id:play-bar-back").unwrap();
-            let labelled = |label: &str| {
+            let labeled = |label: &str| {
                 let screen = app.screen();
                 (0..screen.count(&format!("label:{label}")).unwrap())
                     .any(|at| screen.id(&format!("label:{label} >> nth={at}")) == Ok(back))
             };
             assert!(
-                labelled("Movies") || labelled("Shows"),
+                labeled("Movies") || labeled("Shows"),
                 "the ‹ reads Movies or Shows"
             );
             step(app.press("id:play-bar-back"));
@@ -1639,7 +1639,7 @@ fn exercise_admission(
 }
 
 #[test]
-fn movies_and_shows_stay_visible_with_an_empty_catalogue_on_desktop_and_tv() {
+fn movies_and_shows_stay_visible_with_an_empty_catalog_on_desktop_and_tv() {
     let Some(home) = isolated!() else { return };
     let mut settings = iptv_settings::Settings::new();
     settings
@@ -1968,7 +1968,7 @@ fn desktop_retries_a_failed_import_and_refreshes_an_empty_one() {
 /// A provider whose movie list fails while its live channels import: the
 /// refresh keeps the channels, and Movies offers Retry, not an empty list.
 #[test]
-fn a_movie_list_that_failed_offers_retry_not_an_empty_catalogue() {
+fn a_movie_list_that_failed_offers_retry_not_an_empty_catalog() {
     let Some(home) = isolated!() else { return };
     let provider = provider(false, true);
     provider.lock().unwrap().failing_movies = true;
@@ -1992,7 +1992,7 @@ fn a_movie_list_that_failed_offers_retry_not_an_empty_catalogue() {
 /// The catalogue reads every enabled playlist, so its empty state does too:
 /// an M3U playlist on screen does not hide another playlist's import switch.
 #[test]
-fn the_empty_state_covers_every_playlist_the_catalogue_reads() {
+fn the_empty_state_covers_every_playlist_the_catalog_reads() {
     let Some(home) = isolated!() else { return };
     let base = provider_server(provider(false, true));
     let (path, _) = provider_playlist(&home, &base, false);

@@ -100,7 +100,7 @@ pub struct CandidateRef {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProgrammeInfo {
+pub struct ProgramInfo {
     pub channel: ChannelRef,
     pub candidate: CandidateRef,
     pub source_incarnation: String,
@@ -114,7 +114,7 @@ pub struct ProgrammeInfo {
 
 /// A sample belongs to an XMLTV candidate, which may have no catalogue channel.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CandidateProgramme {
+pub struct CandidateProgram {
     pub candidate: CandidateRef,
     pub source_incarnation: String,
     pub evidence_revision: String,
@@ -186,7 +186,7 @@ pub struct ProbeEvidence {
 pub struct ProbeSummary {
     pub evidence: ProbeEvidence,
     pub channels: u64,
-    pub programmes: u64,
+    pub programs: u64,
     pub bytes: u64,
     pub warnings: u64,
 }
@@ -201,7 +201,7 @@ pub enum InspectionError {
     PermissionDenied,
     StaleCursor,
     StaleEvidence,
-    Cancelled,
+    Canceled,
     Deadline,
     Busy,
     Storage,

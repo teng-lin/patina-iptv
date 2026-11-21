@@ -16,9 +16,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::catalogue;
+use crate::catalog;
 use crate::error::SettingsError;
-use crate::keys::{BindingsKey, BoolKey, ColourKey, DurationKey, EnumKey, IntKey, TextKey};
+use crate::keys::{BindingsKey, BoolKey, ColorKey, DurationKey, EnumKey, IntKey, TextKey};
 use crate::schema::{Effect, Section, Setting, Test, When};
 use crate::scope::Target;
 use crate::validate;
@@ -56,7 +56,7 @@ pub struct Settings {
 }
 
 fn lookup(key: &str) -> Result<&'static Setting, SettingsError> {
-    catalogue::setting(key).ok_or_else(|| SettingsError::UnknownKey(key.to_owned()))
+    catalog::setting(key).ok_or_else(|| SettingsError::UnknownKey(key.to_owned()))
 }
 
 impl Settings {
@@ -188,7 +188,7 @@ impl Settings {
 
     /// Resets every setting of `section` everywhere.
     pub fn reset_section(&mut self, section: Section) -> Vec<Change> {
-        catalogue::section(section)
+        catalog::section(section)
             .iter()
             .flat_map(|s| self.reset_setting(s))
             .collect()
@@ -197,7 +197,7 @@ impl Settings {
     /// Resets every setting everywhere and drops everything preserved from
     /// backups (unknown keys and members included).
     pub fn reset_all(&mut self) -> Vec<Change> {
-        let changes = catalogue::settings()
+        let changes = catalog::settings()
             .flat_map(|s| self.reset_setting(s))
             .collect();
         self.layers.clear();
@@ -261,7 +261,7 @@ impl Settings {
             Test::IsTrue => value == Ok(Value::Bool(true)),
             Test::EnumIn(variants) => matches!(
                 &value,
-                Ok(Value::Enum(v) | Value::Colour(v)) if variants.contains(&v.as_str())
+                Ok(Value::Enum(v) | Value::Color(v)) if variants.contains(&v.as_str())
             ),
             Test::NotEmpty => matches!(&value, Ok(Value::Text(t)) if !t.is_empty()),
         }
@@ -303,14 +303,14 @@ impl Settings {
     }
 
     /// The palette key, as the schema's `'static` string.
-    pub fn colour(&self, key: ColourKey, at: &Target) -> &'static str {
+    pub fn color(&self, key: ColorKey, at: &Target) -> &'static str {
         self.interned(key.0, at)
     }
 
     fn interned(&self, key: &'static str, at: &Target) -> &'static str {
         let s = lookup(key).unwrap_or_else(|e| panic!("typed settings key: {e}"));
         match (s.ty.choices(), self.resolve(s, at)) {
-            (Some(c), Value::Enum(v) | Value::Colour(v)) => {
+            (Some(c), Value::Enum(v) | Value::Color(v)) => {
                 c.intern(&v).expect("stored variants are validated")
             }
             (_, v) => mismatch(key, &v),

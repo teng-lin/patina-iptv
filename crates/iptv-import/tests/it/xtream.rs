@@ -340,7 +340,7 @@ fn cancel_while_a_list_is_loading() {
         &mut NoProgress,
         &cancel,
     ));
-    assert_eq!(err.unwrap_err(), ImportError::Cancelled);
+    assert_eq!(err.unwrap_err(), ImportError::Canceled);
 }
 
 #[test]

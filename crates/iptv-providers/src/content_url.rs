@@ -182,7 +182,7 @@ mod tests {
     }
 
     #[test]
-    fn special_purpose_ranges_are_not_public_and_their_neighbours_are() {
+    fn special_purpose_ranges_are_not_public_and_their_neighbors_are() {
         for ip in [
             // IPv4: protocol assignments, documentation, 6to4 relay anycast,
             // benchmarking.

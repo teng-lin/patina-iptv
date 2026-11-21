@@ -206,7 +206,7 @@ fn a_store_read_does_not_wait_for_a_busy_writer() {
 }
 
 #[test]
-fn root_shutdown_drains_a_favourite_write_that_is_waiting_for_sqlite() {
+fn root_shutdown_drains_a_favorite_write_that_is_waiting_for_sqlite() {
     use crate::personalization::{menu, start};
     let Some(home) = isolated!() else { return };
     let mut fixture = start(home, iptv_settings::Settings::new(), false);
@@ -227,7 +227,7 @@ fn root_shutdown_drains_a_favourite_write_that_is_waiting_for_sqlite() {
         .load_channels(
             source,
             &iptv_store_sqlite::ChannelQuery {
-                favourites_only: true,
+                favorites_only: true,
                 ..Default::default()
             },
         )

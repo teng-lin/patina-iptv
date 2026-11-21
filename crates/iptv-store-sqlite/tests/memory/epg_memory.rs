@@ -52,7 +52,7 @@ fn schedule(shape: Shape, store: GuideStore) -> EpgSchedule {
 }
 
 struct Report {
-    programmes: u64,
+    programs: u64,
     live: usize,
     peak: usize,
 }
@@ -60,19 +60,19 @@ struct Report {
 /// The import path as the app runs it today: everything in memory, with
 /// descriptions.
 fn in_memory_import(shape: Shape) -> Report {
-    let ((sched, programmes), live, peak) = measure(|| {
-        let (guide, programmes) = epg_synth::import(shape, StoreOptions::default());
-        (schedule(shape, guide), programmes)
+    let ((sched, programs), live, peak) = measure(|| {
+        let (guide, programs) = epg_synth::import(shape, StoreOptions::default());
+        (schedule(shape, guide), programs)
     });
     eprintln!(
-        "epg memory {}ch: in-memory import of {programmes} programmes: live {:.1} MiB, peak {:.1} MiB (store estimate {:.1} MiB)",
+        "epg memory {}ch: in-memory import of {programs} programmes: live {:.1} MiB, peak {:.1} MiB (store estimate {:.1} MiB)",
         shape.channels,
         mib(live),
         mib(peak),
         mib(sched.store().heap_bytes()),
     );
     Report {
-        programmes,
+        programs,
         live,
         peak,
     }
@@ -104,7 +104,7 @@ fn stored_load(shape: Shape) -> (Report, Report) {
             ),
         })
         .unwrap();
-    let (guide, programmes) = epg_synth::import(shape, StoreOptions::default());
+    let (guide, programs) = epg_synth::import(shape, StoreOptions::default());
     let feeds = [EpgFeedMeta {
         config: EpgSourceConfig::new(
             iptv_epg::FeedId(1),
@@ -118,7 +118,7 @@ fn stored_load(shape: Shape) -> (Report, Report) {
     let started = Instant::now();
     let counts = staged::replace_epg(&mut store, source, &guide, &feeds, 0).unwrap();
     let replaced_in = started.elapsed();
-    assert_eq!(counts.programmes, programmes);
+    assert_eq!(counts.programs, programs);
     drop(guide);
     let size = std::fs::metadata(dir.path().join("guide.sqlite")).map_or(0, |m| m.len());
 
@@ -150,14 +150,14 @@ fn stored_load(shape: Shape) -> (Report, Report) {
             mib(sqlite_heap()),
         );
         out.push(Report {
-            programmes: loaded as u64,
+            programs: loaded as u64,
             live,
             peak,
         });
         drop(sched);
     }
     eprintln!(
-        "epg memory {}ch: replace {programmes} programmes in {:.2} s, file {:.1} MiB",
+        "epg memory {}ch: replace {programs} programmes in {:.2} s, file {:.1} MiB",
         shape.channels,
         replaced_in.as_secs_f64(),
         size as f64 / f64::from(1 << 20),
@@ -170,10 +170,10 @@ fn stored_load(shape: Shape) -> (Report, Report) {
 fn thousand_channel_guide() {
     crate::isolated("epg_memory::thousand_channel_guide", || {
         let r = in_memory_import(Shape::THOUSAND);
-        assert!(r.programmes > 80_000, "{}", r.programmes);
+        assert!(r.programs > 80_000, "{}", r.programs);
         assert!(r.peak >= r.live);
         let (window, all) = stored_load(Shape::THOUSAND);
-        assert_eq!(all.programmes, r.programmes);
+        assert_eq!(all.programs, r.programs);
         // Budgets (measured: ~2-3 MiB live): the stored guide without
         // descriptions stays far below the in-memory import.
         assert!(window.live < 5 << 20, "{}", window.live);
@@ -196,7 +196,7 @@ fn thousand_channel_guide() {
 fn default_fixture_guide() {
     crate::isolated("epg_memory::default_fixture_guide", || {
         let r = in_memory_import(Shape::DEFAULT_FIXTURE);
-        assert!(r.programmes > 1_000_000, "{}", r.programmes);
+        assert!(r.programs > 1_000_000, "{}", r.programs);
         let (window, _) = stored_load(Shape::DEFAULT_FIXTURE);
         assert!(window.live < 40 << 20, "{}", window.live);
     });

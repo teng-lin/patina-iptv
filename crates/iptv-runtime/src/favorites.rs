@@ -1,5 +1,5 @@
 //! Favourite and recently watched channels, kept by channel key per source
-//! in the store (its `favourites` and `watch_history` tables), so they
+//! in the store (its `favorites` and `watch_history` tables), so they
 //! survive refreshes and restarts. `Ui::favorites` holds their catalog
 //! channels on screen (stars, search ranking); the Favourites and Recently
 //! watched lists are built from here (`lists.rs`).
@@ -126,12 +126,12 @@ pub(crate) enum Write {
     SaveOrder(Box<dyn FnOnce(bool) + Send>),
     Barrier(futures_channel::oneshot::Sender<bool>),
     Shutdown(mpsc::Sender<bool>),
-    MoveFavourite {
+    MoveFavorite {
         source: SourceId,
         key: String,
         index: usize,
     },
-    Favourite {
+    Favorite {
         source: SourceId,
         key: String,
         on: bool,
@@ -151,12 +151,12 @@ pub(crate) enum Write {
 #[derive(Clone)]
 enum PendingWrite {
     ClearHistory,
-    MoveFavourite {
+    MoveFavorite {
         source: SourceId,
         key: String,
         index: usize,
     },
-    Favourite {
+    Favorite {
         source: SourceId,
         key: String,
         on: bool,
@@ -234,7 +234,7 @@ pub async fn prepare_source(
         } else {
             any_enabled_vod(store).ok()
         };
-        let keys = store.favourite_keys(id)?;
+        let keys = store.favorite_keys(id)?;
         let recent = store.recent(Some(id), Some(ContentKind::Live), RECENT_LIMIT as u32)?;
         Ok(((has_vod, any_vod), keys, recent))
     })
@@ -297,7 +297,7 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
                     Ok(available) => has_vod |= available,
                     Err(_) => availability_known = false,
                 }
-                favorites.push((source.id, store.favourite_keys(source.id)?));
+                favorites.push((source.id, store.favorite_keys(source.id)?));
             }
         }
         Ok((
@@ -501,7 +501,7 @@ fn set_key(owner: &super::Runtime, key: &str, on: bool) {
         }
     });
     if let Some((source, key)) = source {
-        send(owner, Write::Favourite { source, key, on });
+        send(owner, Write::Favorite { source, key, on });
     }
 }
 
@@ -619,11 +619,11 @@ fn write_all(
         let operation = write.clone();
         let result = services.blocking(move |store| match operation {
             PendingWrite::ClearHistory => store.clear_history(None).map(|_| ()),
-            PendingWrite::MoveFavourite { source, key, index } => store
-                .move_favourite(source, &ContentId::from_stored(key), index)
+            PendingWrite::MoveFavorite { source, key, index } => store
+                .move_favorite(source, &ContentId::from_stored(key), index)
                 .map(|_| ()),
-            PendingWrite::Favourite { source, key, on } => {
-                store.set_favourite(source, &ContentId::from_stored(key), on)
+            PendingWrite::Favorite { source, key, on } => {
+                store.set_favorite(source, &ContentId::from_stored(key), on)
             }
             PendingWrite::WatchTime {
                 source,
@@ -681,12 +681,12 @@ fn write_all_with(rx: Receiver<Write>, mut persist: impl FnMut(&PendingWrite) ->
                 Write::Shutdown(done) => Some(Box::new(move |saved| {
                     let _ = done.send(saved);
                 })),
-                Write::MoveFavourite { source, key, index } => {
-                    pending.push_back(PendingWrite::MoveFavourite { source, key, index });
+                Write::MoveFavorite { source, key, index } => {
+                    pending.push_back(PendingWrite::MoveFavorite { source, key, index });
                     None
                 }
-                Write::Favourite { source, key, on } => {
-                    pending.push_back(PendingWrite::Favourite { source, key, on });
+                Write::Favorite { source, key, on } => {
+                    pending.push_back(PendingWrite::Favorite { source, key, on });
                     None
                 }
                 Write::WatchTime {
@@ -752,7 +752,7 @@ pub fn reorder(owner: &super::Runtime, key: &str, index: usize) {
             return None;
         }
         let write = move_write(&s, key, index, |key| s.index.get(key).is_some());
-        if let Some(Write::MoveFavourite { source, key, index }) = &write
+        if let Some(Write::MoveFavorite { source, key, index }) = &write
             && let Some(pending) = s
                 .pending_order
                 .upgrade()
@@ -801,8 +801,7 @@ pub(crate) async fn save_order(
         owner,
         Write::SaveOrder(Box::new(move |prior_saved| {
             let result = if prior_saved {
-                services
-                    .blocking(move |store| store.save_favourite_order(source, &original, &order))
+                services.blocking(move |store| store.save_favorite_order(source, &original, &order))
             } else {
                 Err(StoreError::Unavailable(
                     "recent favourite edits are not saved",
@@ -890,7 +889,7 @@ fn move_write(
             })
             .count()
     };
-    Some(Write::MoveFavourite {
+    Some(Write::MoveFavorite {
         source,
         key: local,
         index,
@@ -905,7 +904,7 @@ mod reorder_tests {
     fn moved(state: &mut State, key: &str, index: usize) -> Option<(SourceId, String, usize)> {
         assert!(state.favorites.move_key(key, index));
         match move_write(state, key, index, |_| true)? {
-            Write::MoveFavourite { source, key, index } => Some((source, key, index)),
+            Write::MoveFavorite { source, key, index } => Some((source, key, index)),
             _ => unreachable!(),
         }
     }
@@ -956,7 +955,7 @@ mod reorder_tests {
     }
 
     #[test]
-    fn all_playlists_save_the_place_among_the_owning_playlists_favourites() {
+    fn all_playlists_save_the_place_among_the_owning_playlists_favorites() {
         let key = |source, key: &str| qualified_key(source, key);
         let mut state = State {
             source: None,
@@ -1000,7 +999,7 @@ mod reorder_tests {
     }
 
     #[test]
-    fn a_favourite_of_no_shown_playlist_is_not_written() {
+    fn a_favorite_of_no_shown_playlist_is_not_written() {
         let stray = qualified_key(9, "gone");
         let mut state = State {
             source: None,
@@ -1022,13 +1021,13 @@ mod writer_tests {
     #[test]
     fn failed_changes_retry_in_order_before_a_barrier_can_succeed() {
         let (tx, rx) = mpsc::channel();
-        tx.send(Write::Favourite {
+        tx.send(Write::Favorite {
             source: SourceId(1),
             key: "generated-a".into(),
             on: true,
         })
         .unwrap();
-        tx.send(Write::MoveFavourite {
+        tx.send(Write::MoveFavorite {
             source: SourceId(1),
             key: "generated-a".into(),
             index: 0,
@@ -1057,11 +1056,11 @@ mod writer_tests {
             persisted.push(match write {
                 PendingWrite::WatchTime { .. } => "duration",
                 PendingWrite::ClearHistory => "clear",
-                PendingWrite::Favourite { on, .. } => {
+                PendingWrite::Favorite { on, .. } => {
                     assert!(*on);
                     "favorite"
                 }
-                PendingWrite::MoveFavourite { index, .. } => {
+                PendingWrite::MoveFavorite { index, .. } => {
                     assert_eq!(*index, 0);
                     "order"
                 }
@@ -1105,7 +1104,7 @@ mod writer_tests {
     #[test]
     fn repeated_flushes_cannot_clear_a_persistent_failure() {
         let (tx, rx) = mpsc::channel();
-        tx.send(Write::Favourite {
+        tx.send(Write::Favorite {
             source: SourceId(1),
             key: "generated".into(),
             on: false,

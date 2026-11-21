@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 
-use iptv_epg::{IngestReport, ProgrammeData, ScheduleRules, Settled, UnixTime};
+use iptv_epg::{IngestReport, ProgramData, ScheduleRules, Settled, UnixTime};
 use rusqlite::{Connection, params};
 
 use super::StagedChannel;
@@ -58,9 +58,9 @@ impl Batch {
         self.text.len()
     }
 
-    /// Adds `p` (already [`ProgrammeData::as_stored`]) for stage channel
+    /// Adds `p` (already [`ProgramData::as_stored`]) for stage channel
     /// `ch`.
-    pub fn push(&mut self, ch: i64, p: &ProgrammeData<'_>) {
+    pub fn push(&mut self, ch: i64, p: &ProgramData<'_>) {
         let mut span = |t: Option<&str>| {
             t.map(|t| {
                 let at = self.text.len() as u32;

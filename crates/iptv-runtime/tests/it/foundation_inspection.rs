@@ -5,7 +5,7 @@ use crate::support;
 
 use iptv_epg::{
     ChannelKey, EpgRef, FeedId, GuideStore, MatchKind, SourceBuilder, StoreOptions, XmltvChannel,
-    XmltvProgramme,
+    XmltvProgram,
 };
 use iptv_import::{EpgImport, EpgSourceConfig, GuideSink, ListedChannel};
 use iptv_library::inspection::*;
@@ -25,7 +25,7 @@ const FEED: FeedId = FeedId(1);
 struct Fixture {
     store: Store,
     sources: [SourceId; 2],
-    catalogue: common::Catalog,
+    catalog: common::Catalog,
     owner: Rc<Runtime>,
     _directory: tempfile::TempDir,
 }
@@ -40,7 +40,7 @@ impl Fixture {
         store.set_clock(|| NOW);
         let sources = ["Synthetic source A", "Synthetic source B"]
             .map(|name| store.add_source(&common::m3u_source(name)).unwrap());
-        let mut catalogue = common::catalog(4, 1, "synthetic-fixture-key");
+        let mut catalog = common::catalog(4, 1, "synthetic-fixture-key");
         for (i, name) in [
             "Synthetic Amber",
             "Synthetic Amber +1",
@@ -50,14 +50,14 @@ impl Fixture {
         .into_iter()
         .enumerate()
         {
-            let channel = &mut catalogue.channels[i];
+            let channel = &mut catalog.channels[i];
             channel.id = ContentId::from_stored(format!("synthetic-{i:02}"));
             channel.name = name.into();
             channel.epg_name = None;
             channel.epg_id = Some(format!("synthetic.{i}"));
         }
         for (source, label) in sources.into_iter().zip(["A", "B"]) {
-            common::replace(&mut store, source, &catalogue);
+            common::replace(&mut store, source, &catalog);
             store.set_guide_sources(source, &[feed()]).unwrap();
             install_guide(&mut store, source, label, false);
         }
@@ -70,14 +70,14 @@ impl Fixture {
             _directory: directory,
             store,
             sources,
-            catalogue,
+            catalog,
             owner,
         }
     }
     fn channel(&self, source: SourceId, i: usize) -> ChannelRef {
         ChannelRef {
             source,
-            content: self.catalogue.channels[i].id.clone(),
+            content: self.catalog.channels[i].id.clone(),
         }
     }
     fn channels(&self, source: SourceId) -> Page<ChannelInfo> {
@@ -126,12 +126,12 @@ fn install_guide(store: &mut Store, source: SourceId, label: &str, ambiguous: bo
             .into_iter()
             .enumerate()
         {
-            builder.push_programme(XmltvProgramme {
+            builder.push_program(XmltvProgram {
                 channel: id.into(),
                 start: NOW + from + shift,
                 stop: Some(NOW + to + shift),
                 title: format!("Synthetic {label} Segment {:02}", i + 1),
-                ..XmltvProgramme::default()
+                ..XmltvProgram::default()
             });
         }
     }
@@ -175,8 +175,8 @@ fn install_guide(store: &mut Store, source: SourceId, label: &str, ambiguous: bo
             .unwrap();
         for (_, binding) in &bindings {
             if let Some(schedule) = src.schedule(&binding.epg_id) {
-                for programme in schedule.iter() {
-                    stage.programme(&binding.epg_id, &programme.data()).unwrap();
+                for program in schedule.iter() {
+                    stage.program(&binding.epg_id, &program.data()).unwrap();
                 }
             }
         }
@@ -223,16 +223,16 @@ fn source_queries_leave_shown_schedule_browser_and_player_events_untouched() {
         0,
         "read query emitted a presentation/player event"
     );
-    let programmes = block_on(f.owner.query_programmes(
+    let programs = block_on(f.owner.query_programs(
         Query::source(b),
         window(),
         Some(f.channel(b, 0)),
         InspectionControl::default(),
     ))
     .unwrap();
-    assert_eq!(programmes.items.len(), 3);
+    assert_eq!(programs.items.len(), 3);
     assert!(
-        programmes
+        programs
             .items
             .iter()
             .all(|p| p.channel.source == b && p.title.starts_with("Synthetic B"))
@@ -333,8 +333,8 @@ fn semantic_channel_pages_survive_physical_reimport_and_reordering() {
     .unwrap();
     let mut actual = vec![first.items[0].key.content.clone()];
     query.cursor = first.next;
-    f.catalogue.channels.reverse();
-    common::replace(&mut f.store, source, &f.catalogue);
+    f.catalog.channels.reverse();
+    common::replace(&mut f.store, source, &f.catalog);
     while query.cursor.is_some() {
         let page = block_on(
             f.owner
@@ -344,13 +344,13 @@ fn semantic_channel_pages_survive_physical_reimport_and_reordering() {
         actual.extend(page.items.into_iter().map(|c| c.key.content));
         query.cursor = page.next;
     }
-    let mut expected: Vec<_> = f.catalogue.channels.iter().map(|c| c.id.clone()).collect();
+    let mut expected: Vec<_> = f.catalog.channels.iter().map(|c| c.id.clone()).collect();
     expected.sort();
     assert_eq!(actual, expected);
 }
 
 #[test]
-fn cursors_refuse_other_owner_scope_filter_window_and_changed_catalogue() {
+fn cursors_refuse_other_owner_scope_filter_window_and_changed_catalog() {
     let mut f = Fixture::new();
     let [a, b] = f.sources;
     let mut query = Query::source(a);
@@ -405,8 +405,8 @@ fn cursors_refuse_other_owner_scope_filter_window_and_changed_catalogue() {
         )),
         Err(InspectionError::StaleCursor)
     );
-    f.catalogue.channels[3].name = "Synthetic changed catalogue".into();
-    common::replace(&mut f.store, a, &f.catalogue);
+    f.catalog.channels[3].name = "Synthetic changed catalogue".into();
+    common::replace(&mut f.store, a, &f.catalog);
     assert_eq!(
         block_on(f.owner.query_channels(query, InspectionControl::default())),
         Err(InspectionError::StaleCursor)
@@ -419,17 +419,17 @@ fn a_channel_filter_with_multiple_sources_uses_the_complete_identity() {
     let [a, b] = f.sources;
     let mut query = Query::source(a);
     query.scope = SourceScope::Selected(vec![a, b]);
-    let programmes = block_on(f.owner.query_programmes(
+    let programs = block_on(f.owner.query_programs(
         query,
         window(),
         Some(f.channel(a, 0)),
         InspectionControl::default(),
     ))
     .unwrap();
-    assert_eq!(programmes.items.len(), 3);
-    assert!(programmes.items.iter().all(|p| p.channel.source == a));
+    assert_eq!(programs.items.len(), 3);
+    assert!(programs.items.iter().all(|p| p.channel.source == a));
     assert!(
-        programmes
+        programs
             .items
             .iter()
             .all(|p| p.title.starts_with("Synthetic A"))
@@ -437,13 +437,13 @@ fn a_channel_filter_with_multiple_sources_uses_the_complete_identity() {
 }
 
 #[test]
-fn pre_cancelled_and_expired_queries_do_not_poison_the_reader() {
+fn pre_canceled_and_expired_queries_do_not_poison_the_reader() {
     let f = Fixture::new();
     let control = InspectionControl::default();
     control.cancel.cancel();
     assert_eq!(
         block_on(f.owner.query_channels(Query::source(f.sources[0]), control)),
-        Err(InspectionError::Cancelled)
+        Err(InspectionError::Canceled)
     );
     let expired = InspectionControl {
         timeout: Duration::ZERO,
@@ -531,7 +531,7 @@ fn hidden_content_and_blocked_access_have_different_query_semantics() {
 }
 
 #[test]
-fn overlapping_stored_programmes_count_separately_from_union_coverage() {
+fn overlapping_stored_programs_count_separately_from_union_coverage() {
     let f = Fixture::new();
     let source = f.sources[0];
     // Model a retained/legacy cache with overlapping physical programme rows.
@@ -623,7 +623,7 @@ fn audit_distinguishes_coverage_partial_stale_unmatched_disabled_and_input_failu
 }
 
 #[test]
-fn candidates_keep_ambiguous_and_timeshift_alternatives_and_half_open_programmes() {
+fn candidates_keep_ambiguous_and_timeshift_alternatives_and_half_open_programs() {
     let mut f = Fixture::new();
     let a = f.sources[0];
     install_guide(&mut f.store, a, "A", true);
@@ -655,7 +655,7 @@ fn candidates_keep_ambiguous_and_timeshift_alternatives_and_half_open_programmes
     ))
     .unwrap();
     assert_eq!(audit.items[0].diagnosis, Diagnosis::Ambiguous);
-    let programme = block_on(f.owner.query_programmes(
+    let program = block_on(f.owner.query_programs(
         Query::source(a),
         TimeWindow {
             from: NOW + HOUR / 2,
@@ -665,8 +665,8 @@ fn candidates_keep_ambiguous_and_timeshift_alternatives_and_half_open_programmes
         InspectionControl::default(),
     ))
     .unwrap();
-    assert_eq!(programme.items.len(), 1);
-    assert_eq!(programme.items[0].title, "Synthetic A Segment 02");
+    assert_eq!(program.items.len(), 1);
+    assert_eq!(program.items[0].title, "Synthetic A Segment 02");
     let mut config = feed();
     config.url = SecretUrl::new("https://synthetic.invalid/replaced.xml");
     f.store.set_guide_sources(a, &[config]).unwrap();
@@ -688,7 +688,7 @@ fn completing_one_query_does_not_cancel_a_shared_callers_control() {
         .query_channels(Query::source(f.sources[1]), control.clone());
     assert_eq!(block_on(first).unwrap().items.len(), 4);
     assert!(
-        !control.cancel.is_cancelled(),
+        !control.cancel.is_canceled(),
         "successful completion cancelled the caller's token"
     );
     assert_eq!(block_on(second).unwrap().items.len(), 4);
@@ -855,7 +855,7 @@ fn inspection_filters_modern_and_legacy_blocks_before_limit_and_honors_policy_of
             Err(InspectionError::PermissionDenied)
         );
         assert_eq!(
-            block_on(f.owner.query_programmes(
+            block_on(f.owner.query_programs(
                 Query::source(source),
                 window(),
                 Some(key.clone()),
@@ -864,7 +864,7 @@ fn inspection_filters_modern_and_legacy_blocks_before_limit_and_honors_policy_of
             Err(InspectionError::PermissionDenied)
         );
     }
-    let programmes = block_on(f.owner.query_programmes(
+    let programs = block_on(f.owner.query_programs(
         Query::source(source),
         window(),
         None,
@@ -872,10 +872,10 @@ fn inspection_filters_modern_and_legacy_blocks_before_limit_and_honors_policy_of
     ))
     .unwrap();
     assert!(
-        programmes
+        programs
             .items
             .iter()
-            .all(|programme| programme.channel.content.as_str() == "synthetic-01")
+            .all(|program| program.channel.content.as_str() == "synthetic-01")
     );
     let audit = block_on(f.owner.epg_audit(
         Query::source(source),
@@ -921,15 +921,15 @@ fn inspection_adult_and_custom_group_access_matches_exact_source_grants() {
     use iptv_core::parental::{ContentKind, Pin, Target};
     let mut f = Fixture::new();
     let source = f.sources[0];
-    f.catalogue.groups[0].adult = true;
-    common::replace(&mut f.store, source, &f.catalogue);
+    f.catalog.groups[0].adult = true;
+    common::replace(&mut f.store, source, &f.catalog);
     install_guide(&mut f.store, source, "A", false);
     protect_live(&f);
     assert!(f.channels(source).items.is_empty());
     let group = Target {
         source: source.0,
         kind: ContentKind::Group,
-        id: f.catalogue.groups[0].id.as_str().into(),
+        id: f.catalog.groups[0].id.as_str().into(),
     };
     block_on(
         f.owner
@@ -949,7 +949,7 @@ fn inspection_adult_and_custom_group_access_matches_exact_source_grants() {
         .unwrap();
     for channel in [1, 2] {
         f.store
-            .add_to_custom_group(custom, &f.catalogue.channels[channel].id)
+            .add_to_custom_group(custom, &f.catalog.channels[channel].id)
             .unwrap();
     }
     let target = Target {
@@ -959,7 +959,7 @@ fn inspection_adult_and_custom_group_access_matches_exact_source_grants() {
     };
     f.store.set_parental_blocked(&target, true).unwrap();
     f.store
-        .set_blocked(source, &f.catalogue.channels[2].id, true)
+        .set_blocked(source, &f.catalog.channels[2].id, true)
         .unwrap();
     block_on(f.owner.parental_refresh()).unwrap();
     assert_eq!(
@@ -1066,7 +1066,7 @@ fn inspection_final_publication_rechecks_relock_even_for_an_empty_known_channel_
         )
         .unwrap();
         if empty_window {
-            let read = f.owner.query_programmes(
+            let read = f.owner.query_programs(
                 Query::source(source),
                 TimeWindow {
                     from: NOW + 20 * HOUR,
@@ -1106,7 +1106,7 @@ fn unprotected_inspection_survives_zapping_but_not_policy_revision_changes() {
     let mut f = Fixture::new();
     let source = f.sources[0];
     f.store
-        .set_blocked(source, &f.catalogue.channels[0].id, true)
+        .set_blocked(source, &f.catalog.channels[0].id, true)
         .unwrap();
     protect_live(&f);
     let public = f.channel(source, 3);

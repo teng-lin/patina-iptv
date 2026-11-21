@@ -374,7 +374,7 @@ fn channels() -> String {
 /// A refresh replaces one whose guide download is still running, then
 /// fails with no guide stored: neither sets the next check itself.
 #[test]
-fn a_failed_refresh_over_a_cancelled_guide_download_keeps_the_guide_timer() {
+fn a_failed_refresh_over_a_canceled_guide_download_keeps_the_guide_timer() {
     let Some(home) = isolated!() else { return };
     let mut s = Scenario::start(&home, true, false);
     s.delete_guide_data();
@@ -577,7 +577,7 @@ fn a_refused_update_says_so_and_keeps_the_guide_timer() {
 /// answer for it: the check stays, at its own time, and nothing else is
 /// made up once it ran.
 #[test]
-fn manual_guide_updates_keep_the_backoff_that_refused_work_cancelled() {
+fn manual_guide_updates_keep_the_backoff_that_refused_work_canceled() {
     let Some(home) = isolated!() else { return };
     let mut s = Scenario::start(&home, false, false);
     s.delete_guide_data();

@@ -43,7 +43,7 @@ fn logo_in(schedule: &dyn iptv_core::guide::Schedule, channel: usize) -> Option<
 }
 
 /// The programme on screen: live now, or the replayed one.
-fn programme(ui: Ui) -> (usize, Program) {
+fn program(ui: Ui) -> (usize, Program) {
     ui.guide_data();
     let channel = ui.playing.get().unwrap_or(0);
     let minute = match ui.playback.get() {
@@ -63,7 +63,7 @@ fn progress(ui: Ui) -> f32 {
             0.0
         };
     }
-    let (_, p) = programme(ui);
+    let (_, p) = program(ui);
     let now = ui.focus.with(|f| f.now);
     if p.airing(now) == Airing::Live {
         p.progress(now)
@@ -101,7 +101,7 @@ fn ends(ui: Ui) -> (String, String) {
             )
         }
         _ => {
-            let (_, p) = programme(ui);
+            let (_, p) = program(ui);
             let at = ui.focus.with(|f| f.now);
             let left =
                 minutes_left(crate::i18n::language(), p.start, p.end, at).unwrap_or_default();
@@ -176,8 +176,8 @@ fn number_and_name(ui: Ui, channel: usize) -> String {
 }
 
 pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> impl IntoElement {
-    let channel = move || programme(ui).0;
-    let now = move || programme(ui).1;
+    let channel = move || program(ui).0;
+    let now = move || program(ui).1;
     let next = move || crate::schedule().program_at(channel(), now().end);
     let format = move || {
         let main = ui.player.main();
@@ -283,7 +283,7 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
 /// The channel-change banner: number and name, the programme on now, its
 /// progress and minutes left, in one compact panel.
 pub(super) fn banner(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> impl IntoElement {
-    let channel = move || programme(ui).0;
+    let channel = move || program(ui).0;
     view()
         .test_id("player-banner")
         .gap(px(6.0))
@@ -307,7 +307,7 @@ pub(super) fn banner(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> impl 
                     text(move || {
                         crate::schedule().title_in(
                             channel(),
-                            programme(ui).1,
+                            program(ui).1,
                             crate::i18n::language(),
                         )
                     })

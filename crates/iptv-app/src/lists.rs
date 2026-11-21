@@ -616,7 +616,7 @@ mod identity_tests {
     }
 
     #[test]
-    fn a_catalogue_bookmark_retains_rail_action_identity_as_vod_rows_change() {
+    fn a_catalog_bookmark_retains_rail_action_identity_as_vod_rows_change() {
         for item in [RailItem::Recordings, RailItem::Settings, RailItem::Movies] {
             let before: Rc<dyn Schedule> = Rc::new(catalog(&[("Generated", &["a", "b"])]));
             let mut focus = Focus::at(0);

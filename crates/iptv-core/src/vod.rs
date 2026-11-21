@@ -303,7 +303,7 @@ pub enum Control {
     Sort,
     Continue,
     #[default]
-    Catalogue,
+    Catalog,
     Play,
     Restart,
     Seasons,
@@ -493,7 +493,7 @@ impl Screen {
         if self.one_pane() {
             if self.empty_action().is_some() {
                 self.categories_open = false;
-                self.control = Control::Catalogue;
+                self.control = Control::Catalog;
             } else {
                 self.focus_rail();
             }
@@ -528,7 +528,7 @@ impl Screen {
             self.control,
             Control::Category | Control::Continue | Control::Source
         );
-        let on_action = self.control == Control::Catalogue
+        let on_action = self.control == Control::Catalog
             && !self.is_shelf()
             && self.details.is_none()
             && self.cards.is_empty();
@@ -538,7 +538,7 @@ impl Screen {
             if on_categories {
                 if action && !self.left_action {
                     self.categories_open = false;
-                    self.control = Control::Catalogue;
+                    self.control = Control::Catalog;
                 } else {
                     self.focus_rail();
                 }
@@ -576,7 +576,7 @@ impl Screen {
             // Onto the titles, or an action already on screen: the remote
             // enters it on purpose.
             self.left_action = false;
-            Control::Catalogue
+            Control::Catalog
         };
     }
     /// Opens the search field (OK on Search). A wait left by closing it
@@ -588,7 +588,7 @@ impl Screen {
     }
     /// Enters the titles from the categories (OK on a category). An empty
     /// screen without an action has nothing to enter: the remote stays.
-    pub fn enter_catalogue(&mut self) {
+    pub fn enter_catalog(&mut self) {
         if !self.empty_without_action() {
             self.browse_horizontal(1);
         }
@@ -629,7 +629,7 @@ impl Screen {
         if moved && self.control == Control::Retry {
             self.left_action = true;
         }
-        if moved && self.control == Control::Catalogue {
+        if moved && self.control == Control::Catalog {
             if self.one_pane() {
                 // A later failed read's Retry must not arm it either.
                 self.focus_rail();
@@ -662,7 +662,7 @@ impl Screen {
             .then_some(self.library)
     }
     /// The one action of the empty catalogue, if it offers one. The
-    /// remote reaches it where the titles would be ([`Control::Catalogue`]).
+    /// remote reaches it where the titles would be ([`Control::Catalog`]).
     pub fn empty_action(&self) -> Option<EmptyAction> {
         self.empty_state().and_then(VodState::action)
     }
@@ -784,7 +784,7 @@ impl Screen {
             self.control = if self.details.is_some() {
                 Control::Play
             } else {
-                Control::Catalogue
+                Control::Catalog
             };
         }
     }
@@ -856,7 +856,7 @@ impl Screen {
         self.details = None;
         self.episode = None;
         self.retry = None;
-        self.control = Control::Catalogue;
+        self.control = Control::Catalog;
     }
     /// Whether Play resumes: a movie's own saved point, or the chosen
     /// episode's. A series' own record (the episode watched last) does not
@@ -898,7 +898,7 @@ impl Screen {
             out.extend([Control::Block, Control::Seasons, Control::Episodes]);
         } else if self.is_shelf() {
             if !self.cards.is_empty() {
-                out.push(Control::Catalogue);
+                out.push(Control::Catalog);
             }
         } else {
             out.extend([
@@ -909,7 +909,7 @@ impl Screen {
                 Control::Continue,
             ]);
             if !self.cards.is_empty() || self.empty_action().is_some() {
-                out.push(Control::Catalogue);
+                out.push(Control::Catalog);
             }
         }
         out
@@ -957,7 +957,7 @@ impl Screen {
             && self.control == Control::Search
             && (!self.cards.is_empty() || (self.empty_action().is_some() && !self.left_action))
         {
-            self.control = Control::Catalogue;
+            self.control = Control::Catalog;
         }
         self.settle_panes();
         true
@@ -983,7 +983,7 @@ impl Screen {
     /// there is one it now sees, so the "sent off" mark is spent. A move
     /// that leaves the focus where it was keeps it.
     fn entered_from(&mut self, before: Control) {
-        if before != self.control && self.control == Control::Catalogue {
+        if before != self.control && self.control == Control::Catalog {
             self.left_action = false;
         }
     }
@@ -1008,13 +1008,13 @@ impl Screen {
                 self.control = Control::Search;
             } else if step > 0 {
                 self.categories_open = false;
-                self.control = Control::Catalogue;
+                self.control = Control::Catalog;
             } else {
                 self.control = Control::Navigation;
             }
             return;
         }
-        if self.control != Control::Catalogue {
+        if self.control != Control::Catalog {
             let mut controls = vec![Control::Search, Control::Sort];
             if self.retry.is_some() {
                 controls.insert(0, Control::Retry);
@@ -1101,7 +1101,7 @@ impl Screen {
                 self.control = Control::Category;
                 return true;
             }
-            Control::Catalogue => {
+            Control::Catalog => {
                 let at = self.focused_index().unwrap_or(0);
                 let columns = self.columns.max(1);
                 if step < 0 && at < columns {
@@ -1118,7 +1118,7 @@ impl Screen {
             }
             // Nothing to reach below the toolbar on an empty screen without
             // an action.
-            _ if step > 0 && !self.empty_without_action() => self.control = Control::Catalogue,
+            _ if step > 0 && !self.empty_without_action() => self.control = Control::Catalog,
             _ => {}
         }
         false
@@ -1209,7 +1209,7 @@ impl Screen {
         if controls.is_empty() {
             // An empty successful shelf has no arrow-focus target. Keep its
             // neutral content anchor; Back remains available in the shell.
-            self.control = Control::Catalogue;
+            self.control = Control::Catalog;
             return;
         }
         let at = controls
@@ -1220,7 +1220,7 @@ impl Screen {
                 // from the content, not from a hidden control.
                 controls
                     .iter()
-                    .position(|c| matches!(c, Control::Catalogue | Control::Play))
+                    .position(|c| matches!(c, Control::Catalog | Control::Play))
             });
         let Some(at) = at else {
             // An empty catalogue has no content anchor. Enter its visible
@@ -1327,7 +1327,7 @@ impl Screen {
         self.error = None;
         self.retry = None;
         if self.control == Control::Retry {
-            self.control = Control::Catalogue;
+            self.control = Control::Catalog;
         }
         if !self.is_shelf() && self.details.is_none() {
             if self.search_open {
@@ -1472,7 +1472,7 @@ mod tests {
         assert_eq!(s.control, Control::Seasons);
     }
     #[test]
-    fn revoked_metadata_is_removed_from_the_preview_and_catalogue() {
+    fn revoked_metadata_is_removed_from_the_preview_and_catalog() {
         let mut s = Screen::default();
         let g = s.begin(Kind::Movie);
         let mut item = card("a");
@@ -1525,7 +1525,7 @@ mod tests {
         );
         s.columns = 5;
         s.focused = Some(card("15").key);
-        s.control = Control::Catalogue;
+        s.control = Control::Catalog;
         s.browse_vertical(1);
         assert_eq!(s.focused, Some(card("15").key));
         s.begin_more();
@@ -1693,7 +1693,7 @@ mod tests {
         let g = s.begin_shelf(Shelf::RecentlyAdded);
         assert!(s.controls().is_empty());
         s.move_control(-1);
-        assert_eq!(s.control, Control::Catalogue, "no hidden toolbar to reach");
+        assert_eq!(s.control, Control::Catalog, "no hidden toolbar to reach");
         s.fail("On-demand library could not be loaded", Operation::List);
         assert!(!s.busy);
         assert_eq!(s.control, Control::Retry, "OK repeats the failed load");
@@ -1701,26 +1701,26 @@ mod tests {
         assert_eq!(s.retry_operation(), Some(Operation::List));
         let g2 = s.reload();
         assert!(g2 != g && s.error.is_none() && s.retry.is_none());
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         s.publish(g2, vec![keyed(1, Kind::Movie, "a")], false, false);
-        assert_eq!(s.controls(), vec![Control::Catalogue]);
+        assert_eq!(s.controls(), vec![Control::Catalog]);
         // An error over a list keeps the focus on the titles.
         s.fail(
             "Details unavailable; refresh the playlist and try again",
             Operation::Details(keyed(1, Kind::Movie, "a").key),
         );
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         s.move_control(-1);
         assert_eq!(s.control, Control::Retry);
         s.move_control(1);
         assert_eq!(
             s.control,
-            Control::Catalogue,
+            Control::Catalog,
             "populated cards remain reachable"
         );
         s.move_control(-1);
         s.back();
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         assert!(!s.open, "Back from the list closes the shelf");
     }
     #[test]
@@ -1732,12 +1732,12 @@ mod tests {
             assert!(screen.controls().is_empty());
             for delta in [-1, 1] {
                 screen.move_control(delta);
-                assert_eq!(screen.control, Control::Catalogue);
+                assert_eq!(screen.control, Control::Catalog);
                 assert!(screen.focused.is_none());
             }
             screen.fail("On-demand library could not be loaded", Operation::List);
             assert_eq!(screen.controls(), [Control::Retry]);
-            for stale in [Control::Retry, Control::Catalogue] {
+            for stale in [Control::Retry, Control::Catalog] {
                 for delta in [-1, 1] {
                     screen.control = stale;
                     screen.move_control(delta);
@@ -1792,10 +1792,10 @@ mod tests {
         assert_eq!(s.control, Control::Play);
         assert!(s.controls().contains(&Control::Seasons));
         s.back();
-        s.control = Control::Catalogue;
+        s.control = Control::Catalog;
         assert!(s.open && s.details.is_none() && s.is_shelf());
         assert_eq!(s.focused, Some(cards[1].key.clone()));
-        assert_eq!(s.controls(), vec![Control::Catalogue]);
+        assert_eq!(s.controls(), vec![Control::Catalog]);
     }
     fn numbered(count: usize) -> Vec<Card> {
         (0..count)
@@ -1931,11 +1931,7 @@ mod tests {
         );
         assert_eq!(s.cards.len(), 40, "loaded pages stay");
         assert_eq!(s.focused, focused);
-        assert_eq!(
-            s.control,
-            Control::Catalogue,
-            "the focus stays on the titles"
-        );
+        assert_eq!(s.control, Control::Catalog, "the focus stays on the titles");
         assert!(s.has_more);
         assert_eq!(s.retry_operation(), Some(Operation::More { offset: 40 }));
         // Retry reads the same next page and appends it.
@@ -2041,7 +2037,7 @@ mod tests {
             "nothing from the new playlist is shown"
         );
         assert_eq!(s.episode, None);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         assert_eq!(
             s.focused,
             Some(details.item.key.clone()),
@@ -2207,13 +2203,13 @@ mod tests {
         assert!(s.resumes());
     }
     #[test]
-    fn an_empty_catalogue_enters_the_visible_toolbar_without_skipping_controls() {
+    fn an_empty_catalog_enters_the_visible_toolbar_without_skipping_controls() {
         for kind in [Kind::Movie, Kind::Series] {
             let mut screen = Screen::default();
             let generation = screen.begin(kind);
             screen.publish(generation, Vec::new(), false, false);
             for (delta, expected) in [(-1, Control::Continue), (1, Control::Search)] {
-                screen.control = Control::Catalogue;
+                screen.control = Control::Catalog;
                 screen.move_control(delta);
                 assert_eq!(screen.control, expected, "{kind:?}, direction {delta}");
             }
@@ -2226,7 +2222,7 @@ mod tests {
         }
     }
     #[test]
-    fn an_empty_unfiltered_catalogue_offers_its_one_action_where_titles_would_be() {
+    fn an_empty_unfiltered_catalog_offers_its_one_action_where_titles_would_be() {
         let mut s = Screen::default();
         s.set_library(VodState::Failed {
             source: 7,
@@ -2240,7 +2236,7 @@ mod tests {
         );
         s.publish(generation, Vec::new(), false, false);
         assert_eq!(s.empty_action(), Some(EmptyAction::Retry(7)));
-        assert!(s.controls().contains(&Control::Catalogue));
+        assert!(s.controls().contains(&Control::Catalog));
         // A search or filter that finds nothing is not the library's state.
         s.query.text = "generated".into();
         assert_eq!(s.empty_state(), None);
@@ -2253,7 +2249,7 @@ mod tests {
             s.library = state;
             assert_eq!(s.empty_state(), Some(state));
             assert_eq!(s.empty_action(), None);
-            assert!(!s.controls().contains(&Control::Catalogue));
+            assert!(!s.controls().contains(&Control::Catalog));
         }
         // A failed load shows Retry for the load, not the library's action.
         s.library = VodState::NoEligibleSource;
@@ -2277,7 +2273,7 @@ mod tests {
         let generation = s.begin(Kind::Movie);
         s.publish(generation, Vec::new(), false, false);
         s.browse_horizontal(1);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         assert_eq!(s.empty_action(), Some(EmptyAction::Retry(1)));
         // Retrying it: nothing offered meanwhile, the remote goes to the
         // categories (#146).
@@ -2286,11 +2282,11 @@ mod tests {
         // The same playlist, now empty: Right reaches its Refresh.
         s.set_library(VodState::Empty { source: 1 });
         s.browse_horizontal(1);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         assert_eq!(s.empty_action(), Some(EmptyAction::Refresh(1)));
         // Still offered by the same playlist: the remote stays.
         s.set_library(VodState::Empty { source: 1 });
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         // Another playlist's failure takes the screen: the remote leaves.
         s.set_library(failed(2));
         assert_eq!(s.control, Control::Category);
@@ -2307,11 +2303,11 @@ mod tests {
         shelf.publish(generation, Vec::new(), false, false);
         shelf.set_library(failed(1));
         shelf.set_library(failed(2));
-        assert_eq!(shelf.control, Control::Catalogue);
+        assert_eq!(shelf.control, Control::Catalog);
         assert!(!shelf.categories_open);
     }
     #[test]
-    fn a_compact_empty_catalogue_is_one_pane_between_the_rail_and_its_action() {
+    fn a_compact_empty_catalog_is_one_pane_between_the_rail_and_its_action() {
         let mut s = Screen::default();
         s.set_compact(true);
         s.set_library(VodState::NoEligibleSource);
@@ -2323,7 +2319,7 @@ mod tests {
         // with the remote on the action and the rail beside it.
         assert!(s.one_pane());
         assert!(!s.shows_categories() && s.shows_navigation());
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         assert_eq!(s.empty_action(), Some(EmptyAction::AddPlaylist));
         // Left reaches the rail, Right the action again; the categories
         // never come back.
@@ -2331,11 +2327,11 @@ mod tests {
         assert_eq!(s.control, Control::Navigation);
         assert!(!s.shows_categories() && s.shows_navigation());
         s.browse_horizontal(1);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         // Choosing this destination again goes to its action.
         s.control = Control::Navigation;
         s.open_categories();
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         // Back: the rail, then closed.
         s.back();
         assert!(s.open);
@@ -2354,7 +2350,7 @@ mod tests {
         assert_eq!(s.control, Control::Category);
         assert!(s.shows_categories());
         s.set_compact(true);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         assert!(!s.shows_categories());
         // Titles: the categories stay a pane of their own.
         let generation = s.begin(Kind::Movie);
@@ -2382,7 +2378,7 @@ mod tests {
         assert_eq!(s.control, Control::Category);
         // Back to the rail, then wider.
         s.set_compact(true);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         s.back();
         assert_eq!(s.control, Control::Navigation);
         s.set_compact(false);
@@ -2418,7 +2414,7 @@ mod tests {
         });
         let generation = s.begin(Kind::Movie);
         s.publish(generation, Vec::new(), false, false);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         assert_eq!(s.empty_action(), Some(EmptyAction::Retry(1)));
         // A read is pending when the action moves to playlist 2: the
         // remote leaves, and the empty page does not put it back on 2's
@@ -2432,7 +2428,7 @@ mod tests {
         assert!(s.shows_navigation());
         // Right from the rail, the action now shown, reaches it.
         s.browse_horizontal(1);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         assert_eq!(s.empty_action(), Some(EmptyAction::PlaylistSettings(2)));
         // Shown: an action that moves again sends it to the rail.
         s.set_library(VodState::Empty { source: 3 });
@@ -2446,14 +2442,14 @@ mod tests {
         s.set_library(VodState::Empty { source: 1 });
         let generation = s.begin(Kind::Movie);
         s.publish(generation, Vec::new(), false, false);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         // Refresh now: the import runs, the action goes.
         s.set_library(VodState::Importing);
         assert_eq!(s.empty_action(), None);
         assert_eq!(s.control, Control::Navigation);
         assert!(s.shows_navigation());
         // The same while a read is pending: settled when it arrives.
-        s.control = Control::Catalogue;
+        s.control = Control::Catalog;
         let generation = s.reload();
         s.publish(generation, Vec::new(), false, false);
         assert_eq!(s.control, Control::Navigation);
@@ -2470,7 +2466,7 @@ mod tests {
             let generation = s.begin(Kind::Movie);
             s.publish(generation, Vec::new(), false, false);
             s.browse_horizontal(1);
-            assert_eq!(s.control, Control::Catalogue);
+            assert_eq!(s.control, Control::Catalog);
             // The action moves to playlist 2 during a read, which fails.
             s.reload();
             s.set_library(VodState::ImportsDisabled { source: 2 });
@@ -2479,14 +2475,14 @@ mod tests {
             // Retry puts the remote where the titles would be; the empty
             // page then shows playlist 2's action, which it never saw.
             let generation = s.reload();
-            assert_eq!(s.control, Control::Catalogue);
+            assert_eq!(s.control, Control::Catalog);
             s.publish(generation, Vec::new(), false, false);
             assert_eq!(s.empty_action(), Some(EmptyAction::PlaylistSettings(2)));
-            assert_ne!(s.control, Control::Catalogue, "compact: {compact}");
+            assert_ne!(s.control, Control::Catalog, "compact: {compact}");
             assert!(s.shows_navigation() || s.shows_categories());
             // Moving there on purpose reaches it.
             s.browse_horizontal(1);
-            assert_eq!(s.control, Control::Catalogue);
+            assert_eq!(s.control, Control::Catalog);
         }
     }
     #[test]
@@ -2512,7 +2508,7 @@ mod tests {
         // With an action, Right reaches the action as before.
         s.set_library(VodState::NoEligibleSource);
         s.browse_horizontal(1);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
     }
     #[test]
     fn a_target_change_on_retry_never_arms_the_new_action() {
@@ -2536,7 +2532,7 @@ mod tests {
             let generation = s.reload();
             s.publish(generation, Vec::new(), false, false);
             assert_eq!(s.empty_action(), Some(EmptyAction::PlaylistSettings(2)));
-            assert_ne!(s.control, Control::Catalogue, "compact: {compact}");
+            assert_ne!(s.control, Control::Catalog, "compact: {compact}");
         }
     }
     #[test]
@@ -2553,11 +2549,11 @@ mod tests {
         // categories; OK there enters 2's shown action.
         s.set_library(VodState::ImportsDisabled { source: 2 });
         assert_eq!(s.control, Control::Category);
-        s.enter_catalogue();
-        assert_eq!(s.control, Control::Catalogue);
+        s.enter_catalog();
+        assert_eq!(s.control, Control::Catalog);
         // Compact afterwards keeps it there.
         s.set_compact(true);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
     }
     #[test]
     fn closing_search_in_a_compact_import_keeps_the_remote_on_search() {
@@ -2579,7 +2575,7 @@ mod tests {
         s.set_library(VodState::NoEligibleSource);
         s.search_open = true;
         s.close_search();
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
     }
     #[test]
     fn a_compact_move_to_the_rail_survives_a_failed_read_and_retry() {
@@ -2591,7 +2587,7 @@ mod tests {
         });
         let generation = s.begin(Kind::Movie);
         s.publish(generation, Vec::new(), false, false);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         // Loaded and shown: the action moves to playlist 2, the remote to
         // the rail. The next read fails; Retry, then an empty page.
         s.set_library(VodState::ImportsDisabled { source: 2 });
@@ -2599,12 +2595,12 @@ mod tests {
         s.reload();
         s.fail("generated failure", Operation::List);
         let generation = s.reload();
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         s.publish(generation, Vec::new(), false, false);
-        assert_ne!(s.control, Control::Catalogue);
+        assert_ne!(s.control, Control::Catalog);
         // Right from the rail selects the shown action.
         s.browse_horizontal(1);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         assert_eq!(s.empty_action(), Some(EmptyAction::PlaylistSettings(2)));
     }
     #[test]
@@ -2628,7 +2624,7 @@ mod tests {
             assert_eq!(s.control, Control::Retry);
             let generation = s.reload();
             s.publish(generation, Vec::new(), false, false);
-            assert_ne!(s.control, Control::Catalogue, "compact: {compact}");
+            assert_ne!(s.control, Control::Catalog, "compact: {compact}");
         }
     }
     #[test]
@@ -2639,17 +2635,17 @@ mod tests {
         let generation = s.begin(Kind::Movie);
         s.publish(generation, Vec::new(), false, false);
         s.browse_horizontal(1);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         assert!(!s.shows_categories());
         s.set_library(VodState::Importing);
         assert_eq!(s.empty_action(), None);
         assert_eq!(s.control, Control::Category);
         assert!(s.shows_categories() && s.shows_navigation());
         // The same when the read showing it arrives later.
-        s.control = Control::Catalogue;
+        s.control = Control::Catalog;
         s.categories_open = false;
         let generation = s.reload();
-        assert_eq!(s.control, Control::Catalogue, "loading: left alone");
+        assert_eq!(s.control, Control::Catalog, "loading: left alone");
         s.publish(generation, Vec::new(), false, false);
         assert_eq!(s.control, Control::Category);
         assert!(s.shows_categories());
@@ -2657,7 +2653,7 @@ mod tests {
         s.set_library(VodState::Empty { source: 1 });
         assert_eq!(s.control, Control::Category);
         s.browse_horizontal(1);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         assert_eq!(s.empty_action(), Some(EmptyAction::Refresh(1)));
         // It ends with titles: the remote stays on the categories shown
         // with them, and Right enters the posters.
@@ -2668,7 +2664,7 @@ mod tests {
         assert_eq!(s.control, Control::Category);
         assert!(s.shows_categories());
         s.browse_horizontal(1);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         assert_eq!(s.focused, Some(card("a").key));
     }
     #[test]
@@ -2680,7 +2676,7 @@ mod tests {
             s.publish(generation, Vec::new(), false, false);
             assert_eq!(s.control, Control::Category, "{state:?}");
             // OK on a category has nothing to enter.
-            s.enter_catalogue();
+            s.enter_catalog();
             assert_eq!(s.control, Control::Category, "{state:?}");
             // Right: the toolbar, not the empty pane.
             s.browse_horizontal(1);
@@ -2706,17 +2702,17 @@ mod tests {
             s.set_library(VodState::NoEligibleSource);
             assert_eq!(s.control, Control::Category, "{state:?}");
             s.browse_horizontal(1);
-            assert_eq!(s.control, Control::Catalogue, "{state:?}");
+            assert_eq!(s.control, Control::Catalog, "{state:?}");
             s.control = Control::Search;
             s.browse_vertical(1);
-            assert_eq!(s.control, Control::Catalogue, "{state:?}");
+            assert_eq!(s.control, Control::Catalog, "{state:?}");
             s.control = Control::Search;
             s.search_open = true;
             s.close_search();
-            assert_eq!(s.control, Control::Catalogue, "{state:?}");
+            assert_eq!(s.control, Control::Catalog, "{state:?}");
             s.control = Control::Category;
-            s.enter_catalogue();
-            assert_eq!(s.control, Control::Catalogue, "{state:?}");
+            s.enter_catalog();
+            assert_eq!(s.control, Control::Catalog, "{state:?}");
         }
         // A search or filter that finds nothing keeps its routes.
         let mut s = Screen::default();
@@ -2725,19 +2721,19 @@ mod tests {
         s.query.text = "generated".into();
         s.publish(generation, Vec::new(), false, false);
         s.browse_horizontal(1);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         // Titles: Right enters them, Left from Search stays.
         let mut s = Screen::default();
         s.set_library(VodState::Importing);
         let generation = s.begin(Kind::Movie);
         s.publish(generation, vec![card("a")], false, false);
         s.browse_horizontal(1);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         s.control = Control::Search;
         s.browse_horizontal(-1);
         assert_eq!(s.control, Control::Search);
         s.browse_vertical(1);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
     }
     #[test]
     fn a_wide_remote_sent_off_an_action_stays_off_through_an_import() {
@@ -2762,7 +2758,7 @@ mod tests {
         assert_eq!(s.control, Control::Category);
         // Right reaches it on purpose.
         s.browse_horizontal(1);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         assert_eq!(s.empty_action(), Some(EmptyAction::PlaylistSettings(2)));
     }
     #[test]
@@ -2778,7 +2774,7 @@ mod tests {
         let generation = s.begin(Kind::Movie);
         s.publish(generation, Vec::new(), false, false);
         s.browse_horizontal(1);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         s.set_library(VodState::Importing);
         assert_eq!(s.control, Control::Category);
         s.set_library(VodState::ImportsDisabled { source: 2 });
@@ -2795,9 +2791,9 @@ mod tests {
         s.browse_horizontal(1);
         assert_eq!(s.control, Control::Category);
         s.browse_horizontal(1);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         s.set_compact(true);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
     }
     #[test]
     fn closing_search_during_a_pending_read_waits_on_search() {
@@ -2833,7 +2829,7 @@ mod tests {
             s.close_search();
             assert_eq!(s.control, Control::Search, "compact: {compact}");
             s.publish(generation, vec![card("a")], false, false);
-            assert_eq!(s.control, Control::Catalogue, "compact: {compact}");
+            assert_eq!(s.control, Control::Catalog, "compact: {compact}");
             // A reply with an action: the remote goes to it.
             s.set_library(VodState::NoEligibleSource);
             s.control = Control::Search;
@@ -2841,7 +2837,7 @@ mod tests {
             let generation = s.reload();
             s.close_search();
             s.publish(generation, Vec::new(), false, false);
-            assert_eq!(s.control, Control::Catalogue, "compact: {compact}");
+            assert_eq!(s.control, Control::Catalog, "compact: {compact}");
             // Moved elsewhere meanwhile: the reply leaves it there.
             s.control = Control::Search;
             s.search_open = true;
@@ -2868,7 +2864,7 @@ mod tests {
         assert_eq!(s.control, Control::Search);
         let generation = s.reload();
         s.publish(generation, vec![card("b")], false, false);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         assert_eq!(s.focused, Some(card("b").key));
     }
     #[test]
@@ -2922,14 +2918,14 @@ mod tests {
         s.control = Control::Search;
         s.open_search();
         s.close_search();
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         // Entered on purpose: a resize or the next read keeps it there.
         s.set_compact(true);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         s.set_compact(false);
         let generation = s.reload();
         s.publish(generation, Vec::new(), false, false);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         assert_eq!(s.empty_action(), Some(EmptyAction::PlaylistSettings(2)));
         // Sent off again, then Search closed while a read is pending: the
         // reply shows the action, and the remote waits on Search rather
@@ -2945,12 +2941,12 @@ mod tests {
         assert_eq!(s.control, Control::Search);
         // Down from there enters it on purpose.
         s.browse_vertical(1);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
         s.set_compact(true);
-        assert_eq!(s.control, Control::Catalogue);
+        assert_eq!(s.control, Control::Catalog);
     }
     #[test]
-    fn the_catalogue_keeps_its_toolbar() {
+    fn the_catalog_keeps_its_toolbar() {
         let mut s = Screen::default();
         let generation = s.begin(Kind::Series);
         assert!(!s.is_shelf());
@@ -2970,7 +2966,7 @@ mod tests {
             false,
             false,
         );
-        assert!(s.controls().contains(&Control::Catalogue));
+        assert!(s.controls().contains(&Control::Catalog));
     }
     #[test]
     fn series_resume_keeps_the_last_watched_episode_and_advances_after_completion() {

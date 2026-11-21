@@ -292,7 +292,7 @@ pub fn enforce(ui: Ui) {
         ui.vod.update(|s| {
             s.details = None;
             s.episode = None;
-            s.control = iptv_core::vod::Control::Catalogue;
+            s.control = iptv_core::vod::Control::Catalog;
         });
     }
 

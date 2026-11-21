@@ -114,7 +114,7 @@ fn deleting_a_source_takes_its_data_and_leaves_the_others() {
             .channel
             .id
             .clone();
-        s.set_favourite(id, &first, true).unwrap();
+        s.set_favorite(id, &first, true).unwrap();
     }
     assert!(s.delete_source(a).unwrap());
     assert_eq!(s.source(a).unwrap(), None);
@@ -131,10 +131,10 @@ fn deleting_a_source_takes_its_data_and_leaves_the_others() {
         s.load_channels(b, &ChannelQuery::default()).unwrap().len(),
         4
     );
-    let favourites = ChannelQuery {
-        favourites_only: true,
+    let favorites = ChannelQuery {
+        favorites_only: true,
         ..ChannelQuery::default()
     };
-    assert_eq!(s.load_channels(b, &favourites).unwrap().len(), 1);
+    assert_eq!(s.load_channels(b, &favorites).unwrap().len(), 1);
     assert_eq!(s.guide_sources(b).unwrap(), guides());
 }

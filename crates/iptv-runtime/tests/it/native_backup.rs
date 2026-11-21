@@ -50,7 +50,7 @@ fn seed(owner: &Runtime, name: &str) -> (SourceId, PathBuf) {
         .replace_catalog(id, &parsed.groups, &parsed.channels.items, &[], &[])
         .unwrap();
     store
-        .set_favourite(id, &parsed.channels.items[0].id, true)
+        .set_favorite(id, &parsed.channels.items[0].id, true)
         .unwrap();
     (id, PathBuf::from(document))
 }
@@ -172,7 +172,7 @@ fn native_backup_round_trip_reencrypts_documents_and_preserves_other_owner_event
     );
     let channels = store.load_channels(source, &Default::default()).unwrap();
     assert_eq!(channels[0].name, "Generated backed up channel");
-    assert!(store.is_favourite(source, &channels[0].channel.id).unwrap());
+    assert!(store.is_favorite(source, &channels[0].channel.id).unwrap());
     let SourceConfig::M3u(config) = store.source(source).unwrap().unwrap().source.config else {
         unreachable!()
     };

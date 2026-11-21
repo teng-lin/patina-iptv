@@ -54,8 +54,8 @@ impl Runtime {
             ));
         }
         if timing.is_some_and(|timing| {
-            timing.programme_start < 0
-                || timing.programme_end <= timing.programme_start
+            timing.program_start < 0
+                || timing.program_end <= timing.program_start
                 || timing.lead_seconds > 3600
                 || timing.trail_seconds > 3600
         }) {
@@ -64,11 +64,11 @@ impl Runtime {
         let mut nominal = request.clone();
         if let Some(timing) = timing {
             nominal.start = timing
-                .programme_start
+                .program_start
                 .saturating_sub(i64::from(timing.lead_seconds))
                 .max(0);
             nominal.end = timing
-                .programme_end
+                .program_end
                 .saturating_add(i64::from(timing.trail_seconds));
         }
         nominal.validate(now()).map_err(Error::unavailable)?;
@@ -84,7 +84,7 @@ impl Runtime {
         };
         let occurrence_start = if repeat == Repeat::Series {
             let first_start = if let Some(timing) = timing {
-                timing.programme_start
+                timing.program_start
             } else {
                 // Older API callers still get a stable identity for a currently
                 // airing episode whose record-now capture begins at `now`.

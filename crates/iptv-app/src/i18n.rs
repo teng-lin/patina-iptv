@@ -158,7 +158,7 @@ mod tests {
 
     #[test]
     fn every_settings_help_message_has_real_locale_cells_without_copied_english_phrases() {
-        use iptv_settings::catalogue;
+        use iptv_settings::catalog;
         let words = |text: &str| {
             text.split(|c: char| !c.is_ascii_alphabetic())
                 .filter(|part| !part.is_empty())
@@ -173,9 +173,9 @@ mod tests {
                     (cells.next().unwrap(), cells.collect::<Vec<_>>())
                 })
                 .collect();
-        for source in catalogue::settings()
+        for source in catalog::settings()
             .map(|setting| setting.summary)
-            .chain(catalogue::commands().map(|command| command.summary))
+            .chain(catalog::commands().map(|command| command.summary))
         {
             let cells = rows
                 .get(source)
@@ -290,7 +290,7 @@ mod tests {
     /// screen reader speaks the interface language. A name that only
     /// reached `tr` without a row would stay English without a sign.
     #[test]
-    fn accessibility_labels_are_in_the_catalogue() {
+    fn accessibility_labels_are_in_the_catalog() {
         use iptv_core::i18n::{LANGUAGES, resolve, translate};
         const LABELS: [&str; 29] = [
             // The play bar.
@@ -342,8 +342,8 @@ mod tests {
     }
 
     #[test]
-    fn picker_and_catalogue_languages_match() {
-        let choices = iptv_settings::catalogue::choices::LANGUAGE.variants;
+    fn picker_and_catalog_languages_match() {
+        let choices = iptv_settings::catalog::choices::LANGUAGE.variants;
         assert_eq!(choices[0], "system");
         assert_eq!(
             &choices[1..],

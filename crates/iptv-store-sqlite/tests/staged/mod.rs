@@ -32,7 +32,7 @@ pub fn stage(guide: &GuideStore) -> (EpgStage, EpgImport, tempfile::TempDir) {
                 continue;
             }
             for p in src.schedule(&epg.epg_id).into_iter().flat_map(|s| s.iter()) {
-                stage.programme(&epg.epg_id, &p.data()).unwrap();
+                stage.program(&epg.epg_id, &p.data()).unwrap();
             }
         }
         stage.finish_feed().unwrap();

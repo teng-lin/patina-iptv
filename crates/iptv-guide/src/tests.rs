@@ -56,9 +56,9 @@ fn store_from(
         .into_iter()
         .for_each(|c| builder.push_channel(c));
     parsed
-        .programmes
+        .programs
         .into_iter()
-        .for_each(|p| builder.push_programme(p));
+        .for_each(|p| builder.push_program(p));
     let source = builder.finish();
     let mut index = MatchIndex::new();
     index.add_source(source.id(), source.priority(), source.channels());
@@ -94,7 +94,7 @@ fn schedule() -> EpgSchedule {
 }
 
 #[test]
-fn a_programme_starting_mid_minute_owns_that_minute() {
+fn a_program_starting_mid_minute_owns_that_minute() {
     // "Second" starts 30 s into minute 30: the minute rounds down to it.
     let p = |from: i64, to: i64, title: &str| {
         format!(
@@ -132,7 +132,7 @@ fn a_programme_starting_mid_minute_owns_that_minute() {
 }
 
 #[test]
-fn real_programmes_map_to_guide_minutes_with_titles_and_descriptions() {
+fn real_programs_map_to_guide_minutes_with_titles_and_descriptions() {
     let s = schedule();
     let p = s.program_at(0, 0);
     assert_eq!(
@@ -169,7 +169,7 @@ fn descriptions_left_out_of_memory_come_from_the_lookup() {
 }
 
 #[test]
-fn gaps_are_filled_with_slots_clipped_to_neighbours() {
+fn gaps_are_filled_with_slots_clipped_to_neighbors() {
     let s = schedule();
     let gap = s.program_at(0, 70);
     assert_eq!(
@@ -186,7 +186,7 @@ fn gaps_are_filled_with_slots_clipped_to_neighbours() {
 }
 
 #[test]
-fn programmes_in_a_window_are_contiguous() {
+fn programs_in_a_window_are_contiguous() {
     let s = schedule();
     for ch in 0..2 {
         let ps = s.programs_between(ch, -30, 150);
@@ -377,16 +377,16 @@ fn titles_stored_with_superscript_badges_show_them_as_words() {
     // A guide stored before import folded badges: the title still carries
     // "ᴸᶦᵛᵉ", which the guide, header, info card and play bar show as text.
     let mut parsed = parse_xmltv(xmltv().as_bytes(), ParseOptions::default()).expect("parses");
-    parsed.programmes[0].title = "Alpha Newsᴸᶦᵛᵉ".to_owned();
+    parsed.programs[0].title = "Alpha Newsᴸᶦᵛᵉ".to_owned();
     let mut builder = SourceBuilder::new(FeedId(1), 0, StoreOptions::default(), NOW);
     parsed
         .channels
         .into_iter()
         .for_each(|c| builder.push_channel(c));
     parsed
-        .programmes
+        .programs
         .into_iter()
-        .for_each(|p| builder.push_programme(p));
+        .for_each(|p| builder.push_program(p));
     let source = builder.finish();
     let a = ChannelKey::new("a");
     let mut index = MatchIndex::new();
@@ -598,7 +598,7 @@ fn a_repeated_group_id_keeps_keys_names_and_starts_together() {
 
 /// A schedule prepared on another thread is the one organised in place.
 #[test]
-fn a_prepared_schedule_crosses_threads_and_matches_one_organised_in_place() {
+fn a_prepared_schedule_crosses_threads_and_matches_one_organized_in_place() {
     use super::Organization;
     fn send<T: Send>(value: T) -> T {
         value

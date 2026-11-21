@@ -130,7 +130,7 @@ pub fn launch_prepared(
         )
         .unwrap();
     for c in &m.channels.items {
-        store.set_favourite(source, &c.id, true).unwrap();
+        store.set_favorite(source, &c.id, true).unwrap();
     }
     drop(store);
     prepare(&path, source);

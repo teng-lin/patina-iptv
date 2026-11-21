@@ -12,7 +12,7 @@ fn status(value: &str) -> Status {
         "completed" => Status::Completed,
         "partial" => Status::Partial,
         // Schema 25 rewrote the stored 'cancelled'; the CHECK admits no other.
-        "canceled" => Status::Cancelled,
+        "canceled" => Status::Canceled,
         "missed" => Status::Missed,
         _ => Status::Failed,
     }
@@ -24,7 +24,7 @@ fn stored(value: Status) -> &'static str {
         Status::Completed => "completed",
         Status::Partial => "partial",
         Status::Failed => "failed",
-        Status::Cancelled => "canceled",
+        Status::Canceled => "canceled",
         Status::Missed => "missed",
     }
 }

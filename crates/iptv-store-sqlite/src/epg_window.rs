@@ -9,7 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use iptv_epg::{ProgrammeData, SettledBuilder};
+use iptv_epg::{ProgramData, SettledBuilder};
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, Row, params};
 
@@ -54,7 +54,7 @@ fn desc_parts(descriptions: bool) -> (&'static str, &'static str) {
 /// Reads `window`'s programmes of the channels `bindings` bind into
 /// `builders` (by feed; a feed without one is skipped), each EPG channel
 /// once.
-pub(crate) fn read_programmes(
+pub(crate) fn read_programs(
     conn: &Connection,
     bindings: &[Binding],
     builders: &mut HashMap<u32, SettledBuilder>,
@@ -73,15 +73,15 @@ pub(crate) fn read_programmes(
         builder.channel(&b.epg_channel);
         let mut rows = stmt.query(params![b.channel, window.from, window.to])?;
         while let Some(r) = rows.next()? {
-            builder.push(&programme(r)?);
+            builder.push(&program(r)?);
         }
     }
     Ok(())
 }
 
 /// A row's programme (columns as [`COLUMNS`], then the description).
-fn programme<'r>(r: &'r Row<'_>) -> Result<ProgrammeData<'r>> {
-    Ok(ProgrammeData {
+fn program<'r>(r: &'r Row<'_>) -> Result<ProgramData<'r>> {
+    Ok(ProgramData {
         start: r.get(0)?,
         stop: Some(r.get(1)?),
         title: text(r, 2)?.unwrap_or_default(),

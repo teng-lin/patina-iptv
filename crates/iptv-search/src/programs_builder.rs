@@ -1,4 +1,4 @@
-//! A [`ProgrammeIndex`] from programmes read one at a time (a stored
+//! A [`ProgramIndex`] from programmes read one at a time (a stored
 //! guide's titles streamed from disk) instead of a [`iptv_epg::GuideStore`]
 //! held in memory.
 
@@ -6,21 +6,21 @@ use std::collections::HashMap;
 
 use iptv_epg::UnixTime;
 
-use crate::programmes::ProgrammeIndex;
+use crate::programs::ProgramIndex;
 
-/// Collects programmes for a [`ProgrammeIndex`].
+/// Collects programmes for a [`ProgramIndex`].
 ///
 /// ```
-/// use iptv_search::{ProgrammeIndexBuilder, ProgrammeSearchOptions};
-/// let mut b = ProgrammeIndexBuilder::new(2);
+/// use iptv_search::{ProgramIndexBuilder, ProgramSearchOptions};
+/// let mut b = ProgramIndexBuilder::new(2);
 /// b.push(1, 1000, 4600, "Evening News");
 /// let index = b.finish();
-/// let opts = ProgrammeSearchOptions { include_past_without_catchup: true, ..Default::default() };
-/// let hits = index.search_programmes("news", 2000, opts);
+/// let opts = ProgramSearchOptions { include_past_without_catchup: true, ..Default::default() };
+/// let hits = index.search_programs("news", 2000, opts);
 /// assert_eq!((hits[0].channel, hits[0].start), (1, 1000));
 /// ```
 #[derive(Default)]
-pub struct ProgrammeIndexBuilder {
+pub struct ProgramIndexBuilder {
     channels: usize,
     identities: Vec<crate::ChannelId>,
     ids: HashMap<Box<str>, u32>,
@@ -28,12 +28,12 @@ pub struct ProgrammeIndexBuilder {
     raw: Vec<(u32, u32, i64, i64)>,
 }
 
-impl ProgrammeIndexBuilder {
+impl ProgramIndexBuilder {
     /// For `channels` channels (indexes `0..channels`). Initial identities are
     /// anonymous and scoped to this builder/index; supply real content IDs with
     /// [`Self::set_identity`] to retain focus across rebuilt indexes.
     pub fn new(channels: usize) -> Self {
-        ProgrammeIndexBuilder {
+        ProgramIndexBuilder {
             channels,
             identities: (0..channels)
                 .map(|_| crate::ChannelId::anonymous())
@@ -76,12 +76,12 @@ impl ProgrammeIndexBuilder {
         self.raw.is_empty()
     }
 
-    pub fn finish(self) -> ProgrammeIndex {
+    pub fn finish(self) -> ProgramIndex {
         let mut titles = vec![""; self.ids.len()];
         for (title, &id) in &self.ids {
             titles[id as usize] = title;
         }
-        ProgrammeIndex::assemble(&titles, &self.raw, self.identities)
+        ProgramIndex::assemble(&titles, &self.raw, self.identities)
     }
 }
 
@@ -92,26 +92,26 @@ mod tests {
     };
 
     use super::*;
-    use crate::ProgrammeSearchOptions;
+    use crate::ProgramSearchOptions;
 
     #[test]
     fn compressed_titles_keep_source_incarnations_and_allow_memory_qualification() {
         let first = crate::ChannelId::in_source(1, "generated-first", "shared-key");
         let second = crate::ChannelId::in_source(2, "generated-second", "shared-key");
-        let mut builder = ProgrammeIndexBuilder::new(2);
+        let mut builder = ProgramIndexBuilder::new(2);
         builder.set_identity(0, first.clone());
         builder.set_identity(1, second.clone());
         for channel in 0..2 {
             builder.push(channel, 1000, 4600, "Generated bulletin");
         }
         let mut index = builder.finish();
-        let hits = index.search_programmes("bulletin", 2000, Default::default());
+        let hits = index.search_programs("bulletin", 2000, Default::default());
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].identity, first);
         assert_eq!(hits[1].identity, second);
         let recreated = crate::ChannelId::in_source(1, "generated-recreated", "shared-key");
         index.set_identity(0, recreated.clone());
-        let qualified = index.search_programmes("bulletin", 2000, Default::default());
+        let qualified = index.search_programs("bulletin", 2000, Default::default());
         assert_eq!(qualified[0].identity, recreated);
         assert_ne!(qualified[0].identity, hits[0].identity);
         assert_eq!(qualified[1].identity, hits[1].identity);
@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     fn invalid_or_unrepresentable_intervals_are_skipped_without_corrupting_hits() {
-        let mut b = ProgrammeIndexBuilder::new(1);
+        let mut b = ProgramIndexBuilder::new(1);
         b.push(0, i64::MIN, i64::MAX, "Invalid span");
         b.push(0, 0, 10, "Synthetic news");
         b.push(
@@ -130,15 +130,15 @@ mod tests {
         );
         let index = b.finish();
         assert_eq!(index.program_count(), 1);
-        let opts = ProgrammeSearchOptions {
+        let opts = ProgramSearchOptions {
             include_past_without_catchup: true,
             ..Default::default()
         };
-        let hits = index.search_programmes("synthetic", 5, opts);
+        let hits = index.search_programs("synthetic", 5, opts);
         assert_eq!(hits.len(), 1);
         assert_eq!((hits[0].start, hits[0].end), (0, 10));
         for now in [i64::MIN, i64::MAX] {
-            let _ = index.search_programmes("synthetic", now, opts);
+            let _ = index.search_programs("synthetic", now, opts);
         }
     }
 
@@ -151,13 +151,13 @@ mod tests {
             (1, 2500, 9000, "Morning News"),
         ];
         let mut b = SourceBuilder::new(FeedId(1), 0, StoreOptions::default(), 0);
-        let mut built = ProgrammeIndexBuilder::new(2);
+        let mut built = ProgramIndexBuilder::new(2);
         built.set_identity(0, crate::ChannelId::new(None, "a"));
         built.set_identity(1, crate::ChannelId::new(None, "b"));
         for (ch, start, stop, title) in rows {
             b.push_data(
                 &format!("e{ch}"),
-                &iptv_epg::ProgrammeData {
+                &iptv_epg::ProgramData {
                     start,
                     stop: Some(stop),
                     title,
@@ -184,18 +184,18 @@ mod tests {
             })
             .collect();
         store.set_matches(matches);
-        let from_store = ProgrammeIndex::build(&store, &keys);
+        let from_store = ProgramIndex::build(&store, &keys);
         let built = built.finish();
         assert_eq!(built.program_count(), from_store.program_count());
         assert_eq!(built.title_count(), from_store.title_count());
-        let opts = ProgrammeSearchOptions {
+        let opts = ProgramSearchOptions {
             include_past_without_catchup: true,
             ..Default::default()
         };
         for q in ["news", "morning", "cook", "noon"] {
             assert_eq!(
-                built.search_programmes(q, 2200, opts),
-                from_store.search_programmes(q, 2200, opts),
+                built.search_programs(q, 2200, opts),
+                from_store.search_programs(q, 2200, opts),
                 "{q}"
             );
         }

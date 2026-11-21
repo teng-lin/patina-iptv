@@ -31,7 +31,7 @@ fn the_guide_uses_independent_favorite_and_provider_group_orders() {
                 .load_channels(
                     f.source,
                     &ChannelQuery {
-                        favourites_only: true,
+                        favorites_only: true,
                         ..Default::default()
                     },
                 )

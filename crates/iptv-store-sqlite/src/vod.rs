@@ -10,7 +10,7 @@ use rusqlite::{OptionalExtension, params};
 /// source lists both as a series and as an embedded movie-catalogue series
 /// is the series row. `added` is the provider's added time for movies and
 /// last-modified time for series; never the release year.
-macro_rules! catalogue_items {
+macro_rules! catalog_items {
     () => {
         "WITH items AS (SELECT v.source_id,v.id,CASE WHEN v.is_series=1 THEN 'series' ELSE 'movie' \
 END kind,v.name,v.group_ids,v.poster,v.plot,v.year,v.rating_x10 rating,v.duration_secs,v.added FROM \
@@ -147,9 +147,9 @@ WHERE m.source_id=?2 AND m.kind=?3 AND m.id=?4"
 /// so it is linear in the library's size. The runtime therefore reads it
 /// on the store's analysis lane, never on the reader that serves guide
 /// pages, and cancels it when the shelf closes or a newer page is asked
-/// for ([`Store::vod_discovery_cancellable`]).
+/// for ([`Store::vod_discovery_cancelable`]).
 const RECENTLY_ADDED_SQL: &str = concat!(
-    catalogue_items!(),
+    catalog_items!(),
     " SELECT ",
     card_columns!(),
     " FROM items v JOIN sources s ON s.id=v.source_id LEFT JOIN source_policy p ON \
@@ -166,7 +166,7 @@ OFFSET ?2"
 /// Linear in the library like the page itself, so it runs where the page
 /// does.
 const RECENTLY_ADDED_RANK_SQL: &str = concat!(
-    catalogue_items!(),
+    catalog_items!(),
     ", r AS (SELECT v.source_id,v.kind,v.id,v.name,CASE WHEN v.added>0 THEN v.added END added FROM \
 items v JOIN sources s ON s.id=v.source_id LEFT JOIN source_policy p ON p.source_id=s.id WHERE \
 COALESCE(p.enabled,1)=1) SELECT (SELECT COUNT(*) FROM r o WHERE (o.added IS NOT NULL AND m.added IS \
@@ -318,7 +318,7 @@ v.is_series=1))) ORDER BY g.name COLLATE NOCASE,g.source_id,g.id LIMIT 2000")?;
         };
         let sql = format!(
             concat!(
-                catalogue_items!(),
+                catalog_items!(),
                 " SELECT ",
                 card_columns!(),
                 " FROM items v JOIN sources s ON s.id=v.source_id LEFT JOIN source_policy p ON \
@@ -404,14 +404,14 @@ x WHERE x.value=?4))) AND instr(lower(v.name),lower(?5))>0 AND (?6=0 OR (",
         self.read_snapshot(read)
     }
     /// [`Store::vod_discovery_around`] that `cancel` stops
-    /// ([`Store::vod_cancellable`]).
-    pub fn vod_discovery_around_cancellable(
+    /// ([`Store::vod_cancelable`]).
+    pub fn vod_discovery_around_cancelable(
         &mut self,
         shelf: Shelf,
         key: &Key,
         cancel: &iptv_import::CancelToken,
     ) -> Result<DiscoveryPage> {
-        self.vod_cancellable(cancel, |store| store.vod_discovery_around(shelf, key))
+        self.vod_cancelable(cancel, |store| store.vod_discovery_around(shelf, key))
     }
     /// How many titles precede `key` on `shelf` in its current order (see
     /// [`Store::vod_discovery`]); `None` when the shelf does not list it (a
@@ -438,32 +438,32 @@ x WHERE x.value=?4))) AND instr(lower(v.name),lower(?5))>0 AND (?6=0 OR (",
     /// Runs `read` so that cancelling `cancel` (the shelf closed, a newer
     /// page was asked for, the application closed) stops its SQLite work
     /// within a bounded number of steps instead of finishing a long sort.
-    pub fn vod_cancellable<T>(
+    pub fn vod_cancelable<T>(
         &mut self,
         cancel: &iptv_import::CancelToken,
         read: impl FnOnce(&Self) -> Result<T>,
     ) -> Result<T> {
-        let cancelled = || StoreError::Unavailable("On-demand read cancelled");
-        if cancel.is_cancelled() {
-            return Err(cancelled());
+        let canceled = || StoreError::Unavailable("On-demand read cancelled");
+        if cancel.is_canceled() {
+            return Err(canceled());
         }
         let flag = cancel.clone();
         self.conn
-            .progress_handler(1000, Some(move || flag.is_cancelled()))?;
+            .progress_handler(1000, Some(move || flag.is_canceled()))?;
         let result = read(self);
         self.conn.progress_handler(0, None::<fn() -> bool>)?;
-        if cancel.is_cancelled() {
-            return Err(cancelled());
+        if cancel.is_canceled() {
+            return Err(canceled());
         }
         result
     }
-    /// [`Store::vod_discovery`] that `cancel` stops ([`Store::vod_cancellable`]).
-    pub fn vod_discovery_cancellable(
+    /// [`Store::vod_discovery`] that `cancel` stops ([`Store::vod_cancelable`]).
+    pub fn vod_discovery_cancelable(
         &mut self,
         query: DiscoveryQuery,
         cancel: &iptv_import::CancelToken,
     ) -> Result<DiscoveryPage> {
-        self.vod_cancellable(cancel, |store| store.vod_discovery(query))
+        self.vod_cancelable(cancel, |store| store.vod_discovery(query))
     }
     /// Returns only current, enabled source data; locator never crosses the UI boundary.
     pub fn vod_episode_numbers(&self, key: &Key) -> Result<Vec<u32>> {
@@ -1058,7 +1058,7 @@ mod tests {
         );
     }
     #[test]
-    fn a_series_in_both_catalogues_is_listed_once() {
+    fn a_series_in_both_catalogs_is_listed_once() {
         let (mut store, [a, _], mut movies, series) = generated_sources();
         let mut embedded = generated_movie("generated-voyage", "Generated Voyage", Some(1), None);
         embedded.is_series = true;
@@ -1082,7 +1082,7 @@ mod tests {
         );
     }
     #[test]
-    fn on_demand_kinds_follow_the_catalogue_and_errors_clear_on_success() {
+    fn on_demand_kinds_follow_the_catalog_and_errors_clear_on_success() {
         let (mut store, [a, b], _, _) = generated_sources();
         let mut embedded = generated_movie("generated-voyage", "Generated Voyage", Some(1), None);
         embedded.is_series = true;
@@ -1496,7 +1496,7 @@ mod tests {
         for which in [Shelf::ContinueWatching, Shelf::RecentlyAdded] {
             assert!(
                 store
-                    .vod_discovery_around_cancellable(which, &deep, &cancel)
+                    .vod_discovery_around_cancelable(which, &deep, &cancel)
                     .is_err(),
                 "{which:?}"
             );
@@ -1504,7 +1504,7 @@ mod tests {
         let live = iptv_import::CancelToken::new();
         assert_eq!(
             store
-                .vod_discovery_around_cancellable(Shelf::RecentlyAdded, &deep, &live)
+                .vod_discovery_around_cancelable(Shelf::RecentlyAdded, &deep, &live)
                 .unwrap()
                 .start,
             store
@@ -1617,7 +1617,7 @@ mod tests {
         (store, sources)
     }
     #[test]
-    fn continue_watching_reads_titles_by_key_not_by_scanning_catalogues() {
+    fn continue_watching_reads_titles_by_key_not_by_scanning_catalogs() {
         let (store, _) = large_library(200);
         let lines = plan(&store, CONTINUE_WATCHING_SQL, params![41, 0, 5_000]);
         assert!(
@@ -1680,12 +1680,12 @@ mod tests {
         assert!(linear(&rank), "{rank:#?}");
         let first = DiscoveryQuery::first(Shelf::RecentlyAdded);
         let cancel = iptv_import::CancelToken::new();
-        let page = store.vod_discovery_cancellable(first, &cancel).unwrap();
+        let page = store.vod_discovery_cancelable(first, &cancel).unwrap();
         assert_eq!(page.cards.len(), iptv_core::vod::DISCOVERY_PAGE as usize);
         assert!(page.more);
         // Cancelled before it starts: no SQLite work at all.
         cancel.cancel();
-        assert!(store.vod_discovery_cancellable(first, &cancel).is_err());
+        assert!(store.vod_discovery_cancelable(first, &cancel).is_err());
         // Cancelled while it ran (the shelf closed meanwhile): its result is
         // not reported as current. While it runs, the installed progress
         // handler is what interrupts SQLite's sort.
@@ -1693,7 +1693,7 @@ mod tests {
         let steps = Arc::new(AtomicUsize::new(0));
         let counted = steps.clone();
         let stopper = cancel.clone();
-        let result = store.vod_cancellable(&cancel, move |store| {
+        let result = store.vod_cancelable(&cancel, move |store| {
             // Installing a second handler would replace the cancelling one,
             // so the read cancels its own token from its row callback.
             store

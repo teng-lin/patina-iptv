@@ -651,7 +651,7 @@ mod tests {
     }
 
     #[test]
-    fn show_channel_focuses_its_live_programme() {
+    fn show_channel_focuses_its_live_program() {
         // A real guide shown 53 minutes after its epoch, browsing the past.
         let mut f = Focus::at(53);
         f.apply(Move::Left, &S);
@@ -792,7 +792,7 @@ mod tests {
     }
 
     #[test]
-    fn a_replay_row_enters_the_past_and_left_right_step_programmes() {
+    fn a_replay_row_enters_the_past_and_left_right_step_programs() {
         let mut f = Focus {
             channel: 4,
             ..Focus::default()
@@ -925,7 +925,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tick_moves_a_focus_on_now_onto_the_next_live_programme() {
+    fn a_tick_moves_a_focus_on_now_onto_the_next_live_program() {
         let mut f = Focus::at(0);
         let live = f.program(&S);
         assert!(!f.tick(0, &S), "same minute");

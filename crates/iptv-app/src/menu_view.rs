@@ -237,8 +237,8 @@ pub fn perform(ui: Ui, item: MenuItem) {
             }
         }
         MenuItem::Record => crate::recordings_view::record_origin(ui, origin),
-        MenuItem::CustomRecording => crate::recordings_view::programme(ui, origin, true),
-        MenuItem::ScheduleRecording => crate::recordings_view::schedule_programme(ui, origin),
+        MenuItem::CustomRecording => crate::recordings_view::program(ui, origin, true),
+        MenuItem::ScheduleRecording => crate::recordings_view::schedule_program(ui, origin),
         // Details replaces the menu; Back from it returns to the guide.
         MenuItem::Description => ui.description.set(Some(origin)),
         MenuItem::WatchInNewWindow => {
@@ -248,7 +248,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
             close(ui);
             let schedule = crate::schedule();
             let now = ui.focus.with_untracked(|focus| focus.now);
-            let program = origin_programme(&*schedule, origin);
+            let program = origin_program(&*schedule, origin);
             if program.start != origin.program_start
                 || !program.can_replay(now, schedule.catchup_days(origin.channel))
                 || !crate::player::allow_guide_channel(origin.channel)
@@ -506,7 +506,7 @@ fn heading_text(ui: Ui, heading: Heading) -> String {
     };
     match heading {
         Heading::Program => {
-            let p = origin_programme(&*crate::schedule(), origin);
+            let p = origin_program(&*crate::schedule(), origin);
             format!(
                 "{} · {}–{}",
                 title(origin.channel, p),
@@ -664,10 +664,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .child(description(ui))
 }
 
-fn origin_programme(
-    schedule: &dyn crate::guide::Schedule,
-    origin: Origin,
-) -> crate::guide::Program {
+fn origin_program(schedule: &dyn crate::guide::Schedule, origin: Origin) -> crate::guide::Program {
     let minute = schedule
         .listing_start(origin.channel)
         .map_or(origin.program_start, |start| {
@@ -683,12 +680,9 @@ fn description(ui: Ui) -> impl IntoElement {
     let shown = move || ui.description.get().is_some();
     let program = move || {
         ui.guide_data();
-        ui.description.get().map(|origin| {
-            (
-                origin.channel,
-                origin_programme(&*crate::schedule(), origin),
-            )
-        })
+        ui.description
+            .get()
+            .map(|origin| (origin.channel, origin_program(&*crate::schedule(), origin)))
     };
     view()
         .absolute()
@@ -741,11 +735,11 @@ fn description(ui: Ui) -> impl IntoElement {
                 .child(
                     text(move || {
                         program()
-                            .and_then(|(channel, programme)| {
-                                crate::header::programme_description(
+                            .and_then(|(channel, program)| {
+                                crate::header::program_description(
                                     &*crate::schedule(),
                                     channel,
-                                    programme,
+                                    program,
                                 )
                             })
                             .unwrap_or_default()
@@ -771,7 +765,7 @@ fn description(ui: Ui) -> impl IntoElement {
                             || true,
                             move || {
                                 if let Some(origin) = ui.description.get_untracked() {
-                                    crate::recordings_view::programme(ui, origin, false);
+                                    crate::recordings_view::program(ui, origin, false);
                                 }
                             },
                         )

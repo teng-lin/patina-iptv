@@ -15,7 +15,7 @@ fn problem(kind: ImportErrorKind) -> ImportProblem {
         | ImportErrorKind::AuthFailed
         | ImportErrorKind::Blocked => ImportProblem::Access,
         ImportErrorKind::InvalidBody => ImportProblem::Format,
-        ImportErrorKind::Cancelled => ImportProblem::Stopped,
+        ImportErrorKind::Canceled => ImportProblem::Stopped,
         _ => ImportProblem::Other,
     }
 }
@@ -193,7 +193,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> impl IntoElement {
                         button(
                             ui,
                             size,
-                            Control::Catalogue,
+                            Control::Catalog,
                             move || action().map_or("", label),
                             move || run(ui),
                         )

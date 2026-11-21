@@ -150,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    fn left_walks_back_from_a_later_programme_to_the_live_one() {
+    fn left_walks_back_from_a_later_program_to_the_live_one() {
         // Right steps later. Left walks through each programme in reverse,
         // including those before now even without catch-up.
         for channel in [1, 3, 15, 77] {

@@ -109,9 +109,9 @@ fn favorites_group_and_playlist_orders_are_independent_and_survive_reimport() {
     let id = |i: usize| cat.channels[i].id.clone();
     let group = cat.groups[0].id.clone();
     for i in [0, 2, 4] {
-        s.set_favourite(src, &id(i), true).unwrap();
+        s.set_favorite(src, &id(i), true).unwrap();
     }
-    s.move_favourite(src, &id(4), 0).unwrap();
+    s.move_favorite(src, &id(4), 0).unwrap();
     s.move_channel(src, &OrderScope::Group(group.clone()), &id(2), 0)
         .unwrap();
     s.move_channel(src, &OrderScope::All, &id(5), 0).unwrap();
@@ -120,7 +120,7 @@ fn favorites_group_and_playlist_orders_are_independent_and_survive_reimport() {
             s.load_channels(
                 src,
                 &ChannelQuery {
-                    favourites_only: true,
+                    favorites_only: true,
                     ..Default::default()
                 }
             )

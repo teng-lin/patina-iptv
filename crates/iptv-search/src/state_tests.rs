@@ -12,8 +12,8 @@ fn ch(channel: usize) -> ChannelHit {
     }
 }
 
-fn pr(channel: usize, start: UnixTime) -> ProgrammeHit {
-    ProgrammeHit {
+fn pr(channel: usize, start: UnixTime) -> ProgramHit {
+    ProgramHit {
         identity: crate::ChannelId::new(None, format!("synthetic-{channel}")),
         channel,
         start,
@@ -31,7 +31,7 @@ fn typed(q: &str) -> SearchState {
     s
 }
 
-const P: fn(usize, UnixTime) -> ResultId = |channel, start| ResultId::Programme {
+const P: fn(usize, UnixTime) -> ResultId = |channel, start| ResultId::Program {
     channel: crate::ChannelId::new(None, format!("synthetic-{channel}")),
     start,
 };
@@ -273,7 +273,7 @@ fn keyboard_hidden_by_the_platform_keeps_the_screen() {
 }
 
 #[test]
-fn catalogue_reordering_preserves_semantic_focus_and_play_identity() {
+fn catalog_reordering_preserves_semantic_focus_and_play_identity() {
     let mut state = typed("synthetic");
     let first = ch(3);
     let id = ResultId::Channel(first.identity.clone());
@@ -287,7 +287,7 @@ fn catalogue_reordering_preserves_semantic_focus_and_play_identity() {
 }
 
 #[test]
-fn programme_fallback_stays_on_the_semantic_channel_after_positions_change() {
+fn program_fallback_stays_on_the_semantic_channel_after_positions_change() {
     let mut state = typed("synthetic");
     let original = pr(3, 100);
     state.set_results("synthetic", Vec::new(), vec![original.clone()]);
@@ -300,13 +300,13 @@ fn programme_fallback_stays_on_the_semantic_channel_after_positions_change() {
 }
 
 #[test]
-fn programme_fallback_never_follows_a_recreated_source_with_the_same_content_key() {
+fn program_fallback_never_follows_a_recreated_source_with_the_same_content_key() {
     let mut state = typed("synthetic");
     let old_channel = crate::ChannelId::in_source(1, "generated-original", "shared-provider-key");
     let mut original = pr(3, 100);
     original.identity = old_channel.clone();
     state.set_results("synthetic", Vec::new(), vec![original.clone()]);
-    state.apply(Pick(Focus::Result(ResultId::Programme {
+    state.apply(Pick(Focus::Result(ResultId::Program {
         channel: old_channel.clone(),
         start: 100,
     })));
@@ -316,13 +316,13 @@ fn programme_fallback_never_follows_a_recreated_source_with_the_same_content_key
     state.set_results("synthetic", Vec::new(), vec![pr(0, 200), refreshed]);
     assert_eq!(
         state.focus(),
-        &Focus::Result(ResultId::Programme {
+        &Focus::Result(ResultId::Program {
             channel: old_channel,
             start: 200
         })
     );
     let first = pr(0, 300);
-    let first_id = ResultId::Programme {
+    let first_id = ResultId::Program {
         channel: first.identity.clone(),
         start: first.start,
     };

@@ -489,7 +489,7 @@ impl iptv_import::CatalogSink for SeriesSink {
 }
 
 #[test]
-fn native_series_stream_into_private_sink_without_retaining_catalogue_rows() {
+fn native_series_stream_into_private_sink_without_retaining_catalog_rows() {
     let fetch = native_series_fetch(200, 200);
     let mut sink = SeriesSink::default();
     let catalog = block_on(iptv_import::import_source_into(

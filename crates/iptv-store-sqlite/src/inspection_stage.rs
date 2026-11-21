@@ -114,7 +114,7 @@ impl InspectionStage {
     ) -> Result<T> {
         self.conn.progress_handler(
             1000,
-            Some(move || cancel.is_cancelled() || std::time::Instant::now() >= deadline),
+            Some(move || cancel.is_canceled() || std::time::Instant::now() >= deadline),
         )?;
         let result = operation(self);
         self.conn.progress_handler(0, None::<fn() -> bool>)?;

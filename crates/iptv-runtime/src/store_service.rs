@@ -374,7 +374,7 @@ impl Services {
     }
 
     fn affinity(&self) -> Result<u64, StoreError> {
-        if !self.closed.is_cancelled() && self.service.epochs.permits(self.epoch) {
+        if !self.closed.is_canceled() && self.service.epochs.permits(self.epoch) {
             Ok(self.epoch)
         } else {
             Err(stale())
@@ -387,7 +387,7 @@ impl Services {
     }
 
     pub(crate) fn closed(&self) -> impl Future<Output = ()> + '_ {
-        self.closed.cancelled()
+        self.closed.canceled()
     }
 
     pub(crate) fn directory(&self) -> &Path {

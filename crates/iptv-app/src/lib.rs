@@ -1117,7 +1117,7 @@ fn pointer_moved(ui: Ui, e: &MouseEvent) {
     // Anywhere else (the guide, lists, Recordings), a mouse that really
     // moved after keys switches to Pointer, so the ⋯ controls show: no
     // focus moves and no playback is scheduled or cancelled.
-    if desktop::pointer_travelled(ui.player_surface, x, y) {
+    if desktop::pointer_traveled(ui.player_surface, x, y) {
         pointer_input(ui);
     }
     if ui.mode.get_untracked() != ViewMode::Fullscreen

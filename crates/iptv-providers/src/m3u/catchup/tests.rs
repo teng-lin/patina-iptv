@@ -138,7 +138,7 @@ fn header_catchup_defaults_apply() {
 }
 
 #[test]
-fn rejects_future_programmes_and_positions() {
+fn rejects_future_programs_and_positions() {
     let ch = channel(
         r#"catchup="shift" catchup-days="1""#,
         "http://l.example.com/x",
@@ -146,7 +146,7 @@ fn rejects_future_programmes_and_positions() {
     let at = |start, end, now| CatchupRequest::new(start, end, now);
     assert_eq!(
         build_catchup_url(&ch, at(2_000, 3_000, 1_999)),
-        Err(CatchupError::FutureProgramme)
+        Err(CatchupError::FutureProgram)
     );
     // On air: playable from its start, but not seeking past now.
     assert!(build_catchup_url(&ch, at(2_000, 3_000, 2_500)).is_ok());
@@ -160,7 +160,7 @@ fn rejects_future_programmes_and_positions() {
     );
     assert_eq!(
         build_catchup_url(&ch, seek(600)),
-        Err(CatchupError::FutureProgramme)
+        Err(CatchupError::FutureProgram)
     );
 }
 
@@ -336,7 +336,7 @@ fn default_with_a_relative_source_appends_it() {
 }
 
 #[test]
-fn flussonic_on_air_and_short_programmes() {
+fn flussonic_on_air_and_short_programs() {
     let hls = channel(
         r#"catchup="flussonic" catchup-days="1""#,
         "http://f.example.com/chan/index.m3u8?token=a~b",
@@ -434,7 +434,7 @@ fn live_url_placeholders_are_expanded() {
 }
 
 #[test]
-fn catchup_correction_shifts_programme_times() {
+fn catchup_correction_shifts_program_times() {
     // −1.5 h: the guide is 90 minutes ahead of the archive.
     let text = "#EXTM3U catchup-correction=\"-1.5\"\n\
         #EXTINF:-1 catchup=\"default\" catchup-days=\"1\" catchup-source=\"http://arc.example.com/{utc}/{utcend}/{H}{M}/{lutc}/{offset}\",A\nhttp://l.example.com/a\n\
@@ -452,7 +452,7 @@ fn catchup_correction_shifts_programme_times() {
     let late = CatchupRequest::new(1_700_000_000, 1_700_003_600, 1_700_001_000);
     assert_eq!(
         build_catchup_url(&items[1], late),
-        Err(CatchupError::FutureProgramme)
+        Err(CatchupError::FutureProgram)
     );
 }
 

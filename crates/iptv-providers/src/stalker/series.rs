@@ -149,17 +149,17 @@ mod tests {
 }
 
 #[cfg(test)]
-mod catalogue_tests {
+mod catalog_tests {
     use super::*;
     #[test]
-    fn embedded_catalogue_numbers_survive_normalization() {
+    fn embedded_catalog_numbers_survive_normalization() {
         let parsed=crate::stalker::parse_vod_page(&HttpResponse::ok(r#"{"js":{"data":[{"id":"7","name":"Generated serial","cmd":"/media/generated","series":[1,"3",0]}]}}"#)).unwrap();
         let item = &parsed.items.items[0];
         assert!(item.is_series);
         assert_eq!(item.episode_numbers, vec![1, 3]);
     }
     #[test]
-    fn native_series_catalogue_needs_no_playback_command() {
+    fn native_series_catalog_needs_no_playback_command() {
         let parsed = crate::stalker::parse_series_page(&HttpResponse::ok(
             r#"{"js":{"data":[{"id":"9","name":"Generated native serial","category_id":"3"}]}}"#,
         ))

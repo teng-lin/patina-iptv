@@ -49,7 +49,7 @@ impl fmt::Display for Step {
 pub enum FailureKind {
     /// The source settings are unusable.
     Config,
-    Cancelled,
+    Canceled,
     /// No usable response (DNS, refused, TLS, timeout, interrupted).
     Network,
     /// The server answered with an error status or a portal error.
@@ -107,7 +107,7 @@ pub enum ImportError {
         error: LimitExceeded,
     },
     InvalidConfig(String),
-    Cancelled,
+    Canceled,
     Network {
         step: Step,
         error: FetchError,
@@ -142,7 +142,7 @@ impl ImportError {
     pub fn kind(&self) -> FailureKind {
         match self {
             Self::InvalidConfig(_) => FailureKind::Config,
-            Self::Cancelled => FailureKind::Cancelled,
+            Self::Canceled => FailureKind::Canceled,
             Self::Network { .. } => FailureKind::Network,
             Self::HttpStatus { .. } | Self::Portal { .. } => FailureKind::Server,
             Self::Auth { .. } => FailureKind::Auth,
@@ -155,7 +155,7 @@ impl ImportError {
     /// The step that failed, when there is one.
     pub fn step(&self) -> Option<Step> {
         match self {
-            Self::InvalidConfig(_) | Self::Cancelled | Self::Storage(_) => None,
+            Self::InvalidConfig(_) | Self::Canceled | Self::Storage(_) => None,
             Self::Limit { step, .. }
             | Self::Network { step, .. }
             | Self::HttpStatus { step, .. }
@@ -237,7 +237,7 @@ impl ImportError {
     pub(crate) fn is_fatal(&self) -> bool {
         matches!(
             self,
-            Self::Cancelled
+            Self::Canceled
                 | Self::InvalidConfig(_)
                 | Self::Limit { .. }
                 | Self::Network {
@@ -260,7 +260,7 @@ impl fmt::Display for ImportError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidConfig(why) => write!(f, "invalid source settings: {why}"),
-            Self::Cancelled => f.write_str("import cancelled"),
+            Self::Canceled => f.write_str("import cancelled"),
             Self::Limit { step, error } => write!(f, "{step}: {error}"),
             Self::Network { step, error } => write!(f, "{step}: {error}"),
             Self::HttpStatus { step, status } => write!(f, "{step}: server answered HTTP {status}"),
@@ -325,7 +325,7 @@ impl From<FailureKind> for iptv_library::ImportErrorKind {
     fn from(kind: FailureKind) -> Self {
         match kind {
             FailureKind::Config => Self::InvalidConfig,
-            FailureKind::Cancelled => Self::Cancelled,
+            FailureKind::Canceled => Self::Canceled,
             FailureKind::Network => Self::Network,
             FailureKind::Server => Self::HttpStatus,
             FailureKind::Auth => Self::AuthFailed,

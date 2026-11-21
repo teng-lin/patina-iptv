@@ -100,7 +100,7 @@ impl Screen {
         self.view.list().channels().to_vec()
     }
 
-    fn toggle_favourite(&mut self, channel: usize) {
+    fn toggle_favorite(&mut self, channel: usize) {
         let key = self.catalog.channel_key(channel).unwrap();
         let on = !self.favorites.contains(&key);
         self.favorites.set(&key, on);
@@ -233,7 +233,7 @@ fn back_walks_hint_guide_groups_rail_then_leaves() {
 }
 
 #[test]
-fn back_on_a_future_programme_returns_to_now_first() {
+fn back_on_a_future_program_returns_to_now_first() {
     let mut s = Screen::new();
     s.mv(Move::Right);
     s.mv(Move::Right);
@@ -245,7 +245,7 @@ fn back_on_a_future_programme_returns_to_now_first() {
 }
 
 #[test]
-fn without_back_to_now_back_on_a_past_or_future_programme_opens_the_groups() {
+fn without_back_to_now_back_on_a_past_or_future_program_opens_the_groups() {
     let mut s = Screen::new();
     s.back_to_now = false;
     s.mv(Move::Right);
@@ -451,7 +451,7 @@ fn a_tap_on_a_group_selects_and_filters_it() {
 }
 
 #[test]
-fn an_empty_favourites_list_cannot_be_entered() {
+fn an_empty_favorites_list_cannot_be_entered() {
     let mut s = Screen::new();
     s.focus.open_groups();
     s.focus.group = FAVORITES + 1;
@@ -463,11 +463,11 @@ fn an_empty_favourites_list_cannot_be_entered() {
 }
 
 #[test]
-fn favourites_list_membership_follows_the_favourites() {
+fn favorites_list_membership_follows_the_favorites() {
     let mut s = Screen::new();
-    s.toggle_favourite(7);
-    s.toggle_favourite(3);
-    s.toggle_favourite(5);
+    s.toggle_favorite(7);
+    s.toggle_favorite(3);
+    s.toggle_favorite(5);
     s.focus.open_groups();
     s.focus.group = FAVORITES + 1;
     s.mv(Move::Up);
@@ -476,14 +476,14 @@ fn favourites_list_membership_follows_the_favourites() {
     s.mv(Move::Down); // on 3
     assert_eq!(s.channel(), Some(3));
     // Removing the channel above the focus keeps the focus on its channel.
-    s.toggle_favourite(7);
+    s.toggle_favorite(7);
     assert_eq!(s.shown(), [3, 5]);
     assert_eq!((s.channel(), s.focus.channel), (Some(3), 0));
     // Removing the focused channel moves to the nearest row.
-    s.toggle_favourite(3);
+    s.toggle_favorite(3);
     assert_eq!(s.channel(), Some(5));
     // Removing the last one hands the focus back to the groups.
-    s.toggle_favourite(5);
+    s.toggle_favorite(5);
     assert!(s.shown().is_empty());
     assert_eq!(s.focus.pane, Pane::Groups);
     let index = KeyIndex::build(&*s.catalog);
@@ -657,8 +657,8 @@ fn preview_focus_keeps_the_guide_anchor_and_returns_the_existing_player() {
 fn up_to_preview_restores_each_browse_origin_without_changing_content() {
     for pane in [Pane::Guide, Pane::Groups, Pane::Rail] {
         let mut screen = Screen::new();
-        screen.toggle_favourite(0);
-        screen.toggle_favourite(1);
+        screen.toggle_favorite(0);
+        screen.toggle_favorite(1);
         screen.focus.pane = pane;
         screen.focus.rail = RailItem::Search;
         if pane == Pane::Groups {
@@ -690,7 +690,7 @@ fn up_to_preview_restores_each_browse_origin_without_changing_content() {
 }
 
 #[test]
-fn empty_favourites_can_focus_an_existing_player_and_return_to_their_group() {
+fn empty_favorites_can_focus_an_existing_player_and_return_to_their_group() {
     let mut screen = Screen::new();
     screen.focus.pane = Pane::Groups;
     screen.focus.group = FAVORITES;

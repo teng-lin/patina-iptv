@@ -20,7 +20,7 @@ const GENRES: [&str; 5] = ["News", "Film", "Sport", "Kids", "Documentary"];
 /// Writes the synthetic document piecewise into `emit`.
 fn generate(channels: usize, mut emit: impl FnMut(&[u8])) -> u64 {
     let mut buf = String::with_capacity(2 * CHUNK);
-    let mut programmes = 0u64;
+    let mut programs = 0u64;
     let mut flush = |buf: &mut String, force: bool| {
         if force || buf.len() >= CHUNK {
             emit(buf.as_bytes());
@@ -67,7 +67,7 @@ fn generate(channels: usize, mut emit: impl FnMut(&[u8])) -> u64 {
                     // capture variables by itself.
                     c = c,
                 );
-                programmes += 1;
+                programs += 1;
                 t = stop;
                 i += 1;
                 flush(&mut buf, false);
@@ -76,7 +76,7 @@ fn generate(channels: usize, mut emit: impl FnMut(&[u8])) -> u64 {
     }
     buf.push_str("</tv>\n");
     flush(&mut buf, true);
-    programmes
+    programs
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn two_thousand_channels_for_seven_days() {
 
     assert_eq!(stats.warnings, ParseWarnings::default());
     assert_eq!(stats.channels, CHANNELS as u64);
-    assert_eq!(stats.programmes, generated);
+    assert_eq!(stats.programs, generated);
     assert_eq!(src.program_count() as u64, generated);
     assert_eq!(src.report().overlaps_trimmed, 0);
     // Bounded: one chunk plus at most one element, whatever the input size.
@@ -142,7 +142,7 @@ fn two_thousand_channels_for_seven_days() {
     assert!(nn.iter().all(|n| n.now.is_some() && n.next.is_some()));
     let mut cells = 0;
     for k in keys.iter().take(12) {
-        cells += store.programmes(k, now, now + 3 * 3600).count();
+        cells += store.programs(k, now, now + 3 * 3600).count();
     }
     assert!(cells >= 12 * 2);
     let queried_in = querying.elapsed();
@@ -186,12 +186,12 @@ fn gzip_large_input_in_small_chunks() {
     for chunk in gz.chunks(4096) {
         parser
             .feed(chunk, &mut |item| {
-                count += u64::from(matches!(item, XmltvItem::Programme(_)))
+                count += u64::from(matches!(item, XmltvItem::Program(_)))
             })
             .unwrap();
     }
     let stats = parser.finish(&mut |_| {}).unwrap();
-    assert_eq!((count, stats.programmes), (generated, generated));
+    assert_eq!((count, stats.programs), (generated, generated));
     assert_eq!(stats.warnings, ParseWarnings::default());
     // A gzip slice inflates to more than its size, but stays small.
     assert!(

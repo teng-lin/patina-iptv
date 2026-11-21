@@ -135,7 +135,7 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(runtime.check_features("linux", "ffmpeg", configured),
                          ["CONFIG_PATINA_RELAY_GUARD_V1_PROTOCOL: expected 1, got missing"])
 
-    def test_licence_switches_must_be_off(self):
+    def test_license_switches_must_be_off(self):
         on = runtime.config_defines(defines(FFMPEG_ON, runtime.REQUIRED_OFF["ffmpeg"]))
         self.assertEqual(runtime.check_features("linux", "ffmpeg", on), [])
         gpl = runtime.config_defines(defines(FFMPEG_ON + ["CONFIG_GPL"], ["CONFIG_VERSION3", "CONFIG_NONFREE"]))

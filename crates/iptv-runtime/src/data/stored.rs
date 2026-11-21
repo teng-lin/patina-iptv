@@ -164,7 +164,7 @@ pub fn update_now(owner: &Rc<crate::Runtime>, done: impl FnOnce() + 'static) -> 
 
 /// Work cancelled by a guide action, until its writer guards unwind.
 pub(crate) struct Superseded {
-    pub cancelled: Option<super::library::ImportCompletion>,
+    pub canceled: Option<super::library::ImportCompletion>,
     pub read: Option<GuideWork>,
 }
 impl Superseded {
@@ -185,7 +185,7 @@ impl Superseded {
 pub(crate) fn supersede(owner: &Rc<crate::Runtime>, source: SourceId) -> Superseded {
     crate::stored::next_guide_edit(owner, source);
     Superseded {
-        cancelled: super::library::supersede_import(owner, source),
+        canceled: super::library::supersede_import(owner, source),
         read: owner.interrupt_guide_read(source),
     }
 }

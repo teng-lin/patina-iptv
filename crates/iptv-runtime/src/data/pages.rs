@@ -724,7 +724,7 @@ mod tests {
     }
 
     #[test]
-    fn the_guide_goes_back_to_its_first_programme_stored() {
+    fn the_guide_goes_back_to_its_first_program_stored() {
         let w = window(NOW, 7);
         // Two days stored of the seven kept: back to the first programme.
         let first = NOW - 2 * DAY + 600;

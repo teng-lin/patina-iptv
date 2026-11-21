@@ -41,7 +41,7 @@ pub fn stored_failure(kind: ImportErrorKind) -> &'static str {
         ImportErrorKind::AccountRejected => tr("the provider refused the login"),
         ImportErrorKind::AuthFailed => tr("the portal ended the session"),
         ImportErrorKind::Blocked => tr("the portal does not accept this device"),
-        ImportErrorKind::Cancelled => tr("it was stopped"),
+        ImportErrorKind::Canceled => tr("it was stopped"),
         _ => tr("something went wrong"),
     }
 }
@@ -56,7 +56,7 @@ pub fn failure(failure: ImportFailure) -> &'static str {
         FailureKind::EmptyPlaylist => tr("the playlist had nothing to watch in it"),
         FailureKind::Unsupported => tr("the server is not a service of this type"),
         FailureKind::Busy => tr("too many playlists are updating; try again shortly"),
-        FailureKind::Cancelled => tr("it was stopped"),
+        FailureKind::Canceled => tr("it was stopped"),
     }
 }
 
@@ -396,7 +396,7 @@ mod tests {
             K::AccountRejected,
             K::AuthFailed,
             K::Blocked,
-            K::Cancelled,
+            K::Canceled,
             K::Other,
         ]
         .into_iter()
@@ -414,7 +414,7 @@ mod tests {
             FailureKind::Parse,
             FailureKind::EmptyPlaylist,
             FailureKind::Unsupported,
-            FailureKind::Cancelled,
+            FailureKind::Canceled,
         ]
         .into_iter()
         .map(|k| failure(ImportFailure::new(k)))
@@ -596,7 +596,7 @@ mod tests {
             K::AccountRejected,
             K::AuthFailed,
             K::Blocked,
-            K::Cancelled,
+            K::Canceled,
             K::Other,
         ];
         let session = [
@@ -607,7 +607,7 @@ mod tests {
             FailureKind::EmptyPlaylist,
             FailureKind::Unsupported,
             FailureKind::Busy,
-            FailureKind::Cancelled,
+            FailureKind::Canceled,
         ];
         let told = || -> Vec<&'static str> {
             let stored = stored.iter().map(|kind| stored_failure(*kind));

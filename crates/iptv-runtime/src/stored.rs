@@ -409,7 +409,7 @@ pub(crate) fn replace(
             "iptv data: stored the guide of source {}: {} channels, {} programmes ({pruned} old ones pruned)",
             source.0,
             counts.bindings,
-            counts.programmes
+            counts.programs
         );
         Ok(counts)
     })
@@ -431,7 +431,7 @@ impl Stops {
     }
 
     pub(crate) fn superseded(&self) -> bool {
-        self.0.iter().any(CancelToken::is_cancelled)
+        self.0.iter().any(CancelToken::is_canceled)
     }
 }
 
@@ -545,10 +545,10 @@ pub(crate) async fn download_now(
                         resume: false,
                     })));
                 }
-                Err(ImportError::Cancelled) => {}
+                Err(ImportError::Canceled) => {}
                 // Superseded as it failed: the failure is not the guide's
                 // state any more (the guide may just have been deleted).
-                Err(_) if cancel.is_cancelled() => {}
+                Err(_) if cancel.is_canceled() => {}
                 Err(e) => {
                     log::warn!("iptv data: guide: {e}");
                     record_failure(services, source, &e, &guides, &[cancel]);
@@ -564,7 +564,7 @@ pub(crate) async fn download_now(
 pub fn error_kind(error: &ImportError) -> ImportErrorKind {
     match error {
         ImportError::InvalidConfig(_) => ImportErrorKind::InvalidConfig,
-        ImportError::Cancelled => ImportErrorKind::Cancelled,
+        ImportError::Canceled => ImportErrorKind::Canceled,
         ImportError::Network { .. } => ImportErrorKind::Network,
         ImportError::HttpStatus { .. } => ImportErrorKind::HttpStatus,
         ImportError::Auth { .. } => ImportErrorKind::AccountRejected,
@@ -804,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    fn guide_edits_debounce_within_a_source_without_cancelling_other_sources() {
+    fn guide_edits_debounce_within_a_source_without_canceling_other_sources() {
         let owner = super::super::Runtime::default();
         let a = SourceId(9001);
         let b = SourceId(9002);
@@ -1119,7 +1119,7 @@ mod tests {
                 ImportError::InvalidConfig("no link".into()),
                 ImportErrorKind::InvalidConfig,
             ),
-            (ImportError::Cancelled, ImportErrorKind::Cancelled),
+            (ImportError::Canceled, ImportErrorKind::Canceled),
             (
                 ImportError::Network {
                     step: Step::Playlist,

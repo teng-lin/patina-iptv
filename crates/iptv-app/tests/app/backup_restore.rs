@@ -121,7 +121,7 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
         .replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
         .unwrap();
     let favorite = parsed.channels.items[1].id.clone();
-    store.set_favourite(source, &favorite, true).unwrap();
+    store.set_favorite(source, &favorite, true).unwrap();
     store
         .move_channel(source, &OrderScope::All, &favorite, 0)
         .unwrap();
@@ -210,9 +210,9 @@ fn language_tag() -> String {
 fn word(source: &str) -> String {
     // The existing restore confirmation composes its heading with a question
     // mark rather than storing a separate catalogue key.
-    if !iptv_core::i18n::is_catalogued(source)
+    if !iptv_core::i18n::is_cataloged(source)
         && let Some(base) = source.strip_suffix('?')
-        && iptv_core::i18n::is_catalogued(base)
+        && iptv_core::i18n::is_cataloged(base)
     {
         return format!("{}?", word(base));
     }

@@ -304,7 +304,7 @@ impl State {
     }
     fn is_stopping(&self) -> bool {
         let execution = self.execution();
-        execution.started && execution.shutdown.is_cancelled() && !self.lock().stopped
+        execution.started && execution.shutdown.is_canceled() && !self.lock().stopped
     }
     fn publish_schedule(&self, services: &Services, revision: u64, force: bool) -> bool {
         // The common poll must not wait for an unchanged, slow OS permission
@@ -330,7 +330,7 @@ impl State {
             let execution = self.execution();
             (
                 execution.generation,
-                execution.started && execution.shutdown.is_cancelled(),
+                execution.started && execution.shutdown.is_canceled(),
             )
         };
         let (next, active) = {
@@ -765,7 +765,7 @@ impl Runtime {
                 store.transition_recording(
                     id,
                     Status::Scheduled,
-                    Status::Cancelled,
+                    Status::Canceled,
                     0,
                     "Canceled",
                 )?;
@@ -1155,14 +1155,14 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
     state.lock().finalization_errors.clear();
     let mut retry = Duration::from_millis(250);
     loop {
-        if !services.is_current() || shutdown.is_cancelled() {
+        if !services.is_current() || shutdown.is_canceled() {
             return;
         }
         if recover(&services).await.is_ok() && refresh_accounts(&services, &state).await.is_ok() {
             break;
         }
         tokio::select! {
-            _ = shutdown.cancelled() => return,
+            _ = shutdown.canceled() => return,
             _ = tokio::time::sleep(retry) => {},
         }
         retry = (retry * 2).min(Duration::from_secs(5));
@@ -1172,7 +1172,7 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
     loop {
         while tasks.try_join_next().is_some() {}
         state.retire_unused().await;
-        if !services.is_current() || shutdown.is_cancelled() {
+        if !services.is_current() || shutdown.is_canceled() {
             shutdown.cancel();
             while tasks.join_next().await.is_some() {}
             state.retire_unused().await;
@@ -1328,7 +1328,7 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
             });
         }
         tokio::select! {
-            _ = shutdown.cancelled() => {},
+            _ = shutdown.canceled() => {},
             _ = tokio::time::sleep(Duration::from_secs(1)) => {},
         }
     }
@@ -1588,8 +1588,8 @@ async fn record(
     let remaining = job.request.end.saturating_sub(now()).max(0) as u64;
     let outcome = tokio::select! {
         biased;
-        _ = shutdown.cancelled() => Err("Interrupted when the app closed"),
-        _ = stop.cancelled() => Ok("Stopped by you"),
+        _ = shutdown.canceled() => Err("Interrupted when the app closed"),
+        _ = stop.canceled() => Ok("Stopped by you"),
         _ = async {
             let limit = tokio::time::Instant::now() + Duration::from_secs(remaining);
             while now() < job.request.end && tokio::time::Instant::now() < limit {
@@ -1610,7 +1610,7 @@ async fn record(
         }
         None => Err("Recording storage unavailable"),
     };
-    if shutdown.is_cancelled() && state.background() && job.request.end > now() {
+    if shutdown.is_canceled() && state.background() && job.request.end > now() {
         let bytes = std::fs::symlink_metadata(&partial).map_or(0, |m| m.len() / 188 * 188);
         if matches!(
             transition(

@@ -143,7 +143,7 @@ pub fn watch_drags<E: Interactive>(list: E, ui: Ui) -> E {
                 // (Android intercepts a drag past its own slop, at the
                 // list's end too): a drag as well. A still finger's cancel
                 // (a dialog, the system) is none.
-                nsh_core::TouchPhase::Cancel => watch.with(|w| w.cancelled(id, x, y)),
+                nsh_core::TouchPhase::Cancel => watch.with(|w| w.canceled(id, x, y)),
                 nsh_core::TouchPhase::End => {
                     watch.with(|w| w.up(id));
                     false

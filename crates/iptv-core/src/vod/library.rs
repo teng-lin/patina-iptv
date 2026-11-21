@@ -52,7 +52,7 @@ impl From<FailureKind> for ImportProblem {
             FailureKind::Busy => Self::Busy,
             FailureKind::Auth => Self::Access,
             FailureKind::Parse | FailureKind::Unsupported => Self::Format,
-            FailureKind::Cancelled => Self::Stopped,
+            FailureKind::Canceled => Self::Stopped,
             FailureKind::Storage | FailureKind::EmptyPlaylist => Self::Other,
         }
     }
@@ -258,7 +258,7 @@ mod tests {
             ImportProblem::Access
         );
         assert_eq!(
-            ImportProblem::from(FailureKind::Cancelled),
+            ImportProblem::from(FailureKind::Canceled),
             ImportProblem::Stopped
         );
         assert_eq!(ImportProblem::from(FailureKind::Busy), ImportProblem::Busy);

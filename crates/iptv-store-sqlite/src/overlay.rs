@@ -16,7 +16,7 @@ use crate::order::move_to;
 use crate::sources::ensure_source;
 use crate::{SourceId, Store, search};
 
-fn favourite_ids(conn: &Connection, source: SourceId) -> Result<Vec<String>> {
+fn favorite_ids(conn: &Connection, source: SourceId) -> Result<Vec<String>> {
     let mut stmt = conn.prepare_cached(
         "SELECT channel_id FROM favorites WHERE source_id = ?1 ORDER BY position",
     )?;
@@ -25,7 +25,7 @@ fn favourite_ids(conn: &Connection, source: SourceId) -> Result<Vec<String>> {
         .collect::<rusqlite::Result<_>>()?)
 }
 
-fn write_favourite_order(conn: &Connection, source: SourceId, keys: &[String]) -> Result<()> {
+fn write_favorite_order(conn: &Connection, source: SourceId, keys: &[String]) -> Result<()> {
     let mut stmt = conn.prepare_cached(
         "UPDATE favorites SET position = ?3 WHERE source_id = ?1 AND channel_id = ?2",
     )?;
@@ -105,9 +105,9 @@ impl EpgOverride {
 pub struct OrphanedOverlay {
     pub source_id: SourceId,
     pub channel_id: ContentId,
-    pub favourite: bool,
+    pub favorite: bool,
     /// Name, number, hidden, blocked or EPG override.
-    pub customised: bool,
+    pub customized: bool,
     /// Has a place in a manual order.
     pub ordered: bool,
     /// Member of at least one custom group.
@@ -205,12 +205,12 @@ impl Store {
     }
 
     /// All saved favourites in order, including channels absent from the latest import.
-    pub fn favourite_keys(&self, source: SourceId) -> Result<Vec<String>> {
-        favourite_ids(&self.conn, source)
+    pub fn favorite_keys(&self, source: SourceId) -> Result<Vec<String>> {
+        favorite_ids(&self.conn, source)
     }
 
     /// Adds to (at the end) or removes from favourites. Idempotent.
-    pub fn set_favourite(&mut self, source: SourceId, id: &ContentId, on: bool) -> Result<()> {
+    pub fn set_favorite(&mut self, source: SourceId, id: &ContentId, on: bool) -> Result<()> {
         let now = self.now();
         let tx = self
             .conn
@@ -234,13 +234,13 @@ impl Store {
     }
 
     /// Flips the favourite flag; returns the new state.
-    pub fn toggle_favourite(&mut self, source: SourceId, id: &ContentId) -> Result<bool> {
-        let on = !self.is_favourite(source, id)?;
-        self.set_favourite(source, id, on)?;
+    pub fn toggle_favorite(&mut self, source: SourceId, id: &ContentId) -> Result<bool> {
+        let on = !self.is_favorite(source, id)?;
+        self.set_favorite(source, id, on)?;
         Ok(on)
     }
 
-    pub fn is_favourite(&self, source: SourceId, id: &ContentId) -> Result<bool> {
+    pub fn is_favorite(&self, source: SourceId, id: &ContentId) -> Result<bool> {
         Ok(self.conn.query_row(
             "SELECT EXISTS (SELECT 1 FROM favorites WHERE source_id = ?1 AND channel_id = ?2)",
             params![source.0, id.as_str()],
@@ -251,7 +251,7 @@ impl Store {
     /// Moves a favourite to `index` in the favourites list as shown (present
     /// channels, hidden ones included). Returns `false` if it is not a
     /// favourite.
-    pub fn move_favourite(
+    pub fn move_favorite(
         &mut self,
         source: SourceId,
         id: &ContentId,
@@ -260,18 +260,18 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let mut list = favourite_ids(&tx, source)?;
+        let mut list = favorite_ids(&tx, source)?;
         let present = present_ids(&tx, source)?;
         if !move_to(&mut list, &present, id.as_str(), index) {
             return Ok(false);
         }
-        write_favourite_order(&tx, source, &list)?;
+        write_favorite_order(&tx, source, &list)?;
         tx.commit()?;
         Ok(true)
     }
 
     /// Commits an order for the favourites in the current catalog.
-    pub fn save_favourite_order(
+    pub fn save_favorite_order(
         &mut self,
         source: SourceId,
         original: &[String],
@@ -281,7 +281,7 @@ impl Store {
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         ensure_source(&tx, source)?;
-        let list = favourite_ids(&tx, source)?;
+        let list = favorite_ids(&tx, source)?;
         let present = present_ids(&tx, source)?;
         let expected = list.iter().filter(|id| present.contains(*id));
         if !expected.eq(original.iter())
@@ -294,7 +294,7 @@ impl Store {
         }
         let mut favorites = iptv_core::favorites::Favorites::from_keys(list);
         favorites.apply_order(order);
-        write_favourite_order(&tx, source, favorites.keys())?;
+        write_favorite_order(&tx, source, favorites.keys())?;
         tx.commit()?;
         Ok(())
     }
@@ -399,8 +399,8 @@ impl Store {
             Ok(OrphanedOverlay {
                 source_id: SourceId(r.get(0)?),
                 channel_id: ContentId::from_stored(r.get::<_, String>(1)?),
-                favourite: r.get(2)?,
-                customised: r.get(3)?,
+                favorite: r.get(2)?,
+                customized: r.get(3)?,
                 ordered: r.get(4)?,
                 in_custom_group: r.get(5)?,
             })

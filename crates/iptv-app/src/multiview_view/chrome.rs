@@ -120,8 +120,8 @@ pub fn toolbar(ui: Ui) -> impl IntoElement {
 fn under_toolbar(tile: (f32, f32, f32, f32), buttons_w: f32, width: f32) -> bool {
     let right = tile.0 + tile.2 - INSET;
     let left = right - buttons_w;
-    let centre = width / 2.0;
-    tile.1 + INSET < TOOLBAR_H && left < centre + TOOLBAR_HALF_W && right > centre - TOOLBAR_HALF_W
+    let center = width / 2.0;
+    tile.1 + INSET < TOOLBAR_H && left < center + TOOLBAR_HALF_W && right > center - TOOLBAR_HALF_W
 }
 
 /// Tile `index`'s enlarge (or reduce) and remove buttons, with two or

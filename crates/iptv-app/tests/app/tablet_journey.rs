@@ -208,9 +208,9 @@ fn show_bar(app: &mut Headless) {
 fn back_says(app: &Headless, label: &str) {
     let screen = app.screen();
     let back = screen.id("id:play-bar-back").unwrap();
-    let labelled = screen.count(&format!("label:{label}")).unwrap();
+    let labeled = screen.count(&format!("label:{label}")).unwrap();
     assert!(
-        (0..labelled).any(|at| screen.id(&format!("label:{label} >> nth={at}")) == Ok(back)),
+        (0..labeled).any(|at| screen.id(&format!("label:{label} >> nth={at}")) == Ok(back)),
         "the ‹ reads {label}"
     );
 }
@@ -273,7 +273,7 @@ fn playlist(guide: &str) -> String {
 }
 
 #[test]
-fn touch_alone_plays_a_channel_and_a_past_programme_and_returns() {
+fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
     let Some(home) = isolated!() else { return };
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)

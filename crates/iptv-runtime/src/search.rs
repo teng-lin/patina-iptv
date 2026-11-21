@@ -2,7 +2,7 @@
 use iptv_core::guide::Schedule;
 use iptv_epg::{ChannelKey, UnixTime};
 use iptv_library::SourceId;
-use iptv_search::{ChannelIndex, ProgrammeIndex, ProgrammeIndexBuilder};
+use iptv_search::{ChannelIndex, ProgramIndex, ProgramIndexBuilder};
 use iptv_store_sqlite::StoreError;
 use std::cell::{Cell, RefCell};
 
@@ -21,20 +21,20 @@ struct Indexes {
     pub channels: ChannelIndex,
     /// Every day the store keeps; dropped when the screen closes (it is
     /// about the size of a week's guide).
-    pub programmes: Option<ProgrammeIndex>,
+    pub programs: Option<ProgramIndex>,
     /// The `data_version` whose programme index is being built.
     pub building: Option<u64>,
 }
 
-fn programmes_native(
+fn programs_native(
     services: &super::store_service::Services,
     sources: Vec<(SourceId, String, Vec<ChannelKey>, usize)>,
     rows: usize,
     from: UnixTime,
-) -> impl std::future::Future<Output = Result<ProgrammeIndex, StoreError>> + use<> {
+) -> impl std::future::Future<Output = Result<ProgramIndex, StoreError>> + use<> {
     services.read(move |store| {
         store.read_snapshot(|store| {
-            let mut builder = ProgrammeIndexBuilder::new(rows);
+            let mut builder = ProgramIndexBuilder::new(rows);
             for (source, incarnation, keys, offset) in sources {
                 if store.source_incarnation(source)? != incarnation {
                     return Err(StoreError::Unavailable(
@@ -104,7 +104,7 @@ impl crate::Runtime {
         *self.search.indexes.borrow_mut() = Indexes {
             version: Some(version),
             channels,
-            programmes: None,
+            programs: None,
             building: None,
         };
     }
@@ -179,26 +179,26 @@ impl crate::Runtime {
             .then_some(channel)
     }
 
-    pub fn has_programme_index(&self) -> bool {
-        self.search.indexes.borrow().programmes.is_some()
+    pub fn has_program_index(&self) -> bool {
+        self.search.indexes.borrow().programs.is_some()
     }
-    pub fn begin_programme_index(&self, version: u64) -> bool {
+    pub fn begin_program_index(&self, version: u64) -> bool {
         let mut indexes = self.search.indexes.borrow_mut();
-        let wanted = indexes.version == Some(version) && indexes.programmes.is_none();
+        let wanted = indexes.version == Some(version) && indexes.programs.is_none();
         wanted && indexes.building.replace(version) != Some(version)
     }
-    pub fn finish_programme_index(&self, version: u64) -> bool {
+    pub fn finish_program_index(&self, version: u64) -> bool {
         let mut indexes = self.search.indexes.borrow_mut();
         if indexes.building == Some(version) {
             indexes.building = None;
         }
         indexes.version == Some(version)
     }
-    pub fn install_programme_index(&self, index: ProgrammeIndex) {
-        self.search.indexes.borrow_mut().programmes = Some(index);
+    pub fn install_program_index(&self, index: ProgramIndex) {
+        self.search.indexes.borrow_mut().programs = Some(index);
     }
-    pub fn release_programme_index(&self) {
-        self.search.indexes.borrow_mut().programmes = None;
+    pub fn release_program_index(&self) {
+        self.search.indexes.borrow_mut().programs = None;
     }
     pub fn search_channels(
         &self,
@@ -212,17 +212,17 @@ impl crate::Runtime {
             .channels
             .search_channels(query, favorites, options)
     }
-    pub fn search_programmes(
+    pub fn search_programs(
         &self,
         query: &str,
         now: UnixTime,
         schedule: &dyn Schedule,
-        options: iptv_search::ProgrammeSearchOptions<'_>,
-    ) -> Vec<iptv_search::ProgrammeHit> {
+        options: iptv_search::ProgramSearchOptions<'_>,
+    ) -> Vec<iptv_search::ProgramHit> {
         self.search
             .indexes
             .borrow()
-            .programmes
+            .programs
             .as_ref()
             .map_or_else(Vec::new, |index| {
                 // Options refer to current schedule rows, while the index can
@@ -243,24 +243,24 @@ impl crate::Runtime {
                         options.catchup_days.map_or(0, |window| window(current))
                     })
                 };
-                let favourites = resolved
+                let favorites = resolved
                     .iter()
                     .enumerate()
                     .filter_map(|(row, current)| {
                         current
                             .filter(|current| {
-                                options.favourites.is_some_and(|set| set.contains(current))
+                                options.favorites.is_some_and(|set| set.contains(current))
                             })
                             .map(|_| row)
                     })
                     .collect();
-                let hits = index.search_programmes(
+                let hits = index.search_programs(
                     query,
                     now,
-                    iptv_search::ProgrammeSearchOptions {
+                    iptv_search::ProgramSearchOptions {
                         visible: Some(&visible),
                         catchup_days: Some(&days),
-                        favourites: Some(&favourites),
+                        favorites: Some(&favorites),
                         ..options
                     },
                 );
@@ -279,15 +279,15 @@ impl crate::Runtime {
     /// an index of `rows` channels (the search screen's programme search).
     /// Each source includes the incarnation captured from the accepting schedule;
     /// queued work cannot adopt another source that reused its numeric id.
-    pub fn read_programme_index(
+    pub fn read_program_index(
         &self,
         sources: Vec<(SourceId, String, Vec<ChannelKey>, usize)>,
         rows: usize,
         from: UnixTime,
-    ) -> impl std::future::Future<Output = Result<ProgrammeIndex, crate::Error>> + use<> {
+    ) -> impl std::future::Future<Output = Result<ProgramIndex, crate::Error>> + use<> {
         let services = self.services();
         async move {
-            programmes_native(&services, sources, rows, from)
+            programs_native(&services, sources, rows, from)
                 .await
                 .map_err(crate::Error::from)
         }
@@ -463,35 +463,35 @@ mod identity_tests {
     }
 
     #[test]
-    fn failed_programme_build_completion_allows_retry_without_accepting_stale_versions() {
+    fn failed_program_build_completion_allows_retry_without_accepting_stale_versions() {
         let owner = crate::Runtime::default();
         let guide = schedule(1, "generated-original", &["A"]);
         owner.shown.set(Some(SourceId(1)));
         owner.prepare_search_channels(1, &*guide);
-        assert!(owner.begin_programme_index(1));
-        assert!(!owner.begin_programme_index(1));
-        assert!(owner.finish_programme_index(1));
+        assert!(owner.begin_program_index(1));
+        assert!(!owner.begin_program_index(1));
+        assert!(owner.finish_program_index(1));
         assert!(
-            !owner.has_programme_index(),
+            !owner.has_program_index(),
             "failed reads do not cache an empty success"
         );
-        assert!(owner.begin_programme_index(1), "a later reopen can retry");
+        assert!(owner.begin_program_index(1), "a later reopen can retry");
         owner.prepare_search_channels(2, &*guide);
-        assert!(owner.begin_programme_index(2));
-        assert!(!owner.finish_programme_index(1));
+        assert!(owner.begin_program_index(2));
+        assert!(!owner.finish_program_index(1));
         assert!(
-            !owner.begin_programme_index(2),
+            !owner.begin_program_index(2),
             "an old completion cannot clear the current build"
         );
     }
 
     #[test]
-    fn programme_visibility_archive_and_limit_use_resolved_rows() {
+    fn program_visibility_archive_and_limit_use_resolved_rows() {
         let owner = crate::Runtime::default();
         owner.shown.set(Some(SourceId(1)));
         let before = schedule(1, "generated-original", &["A", "B"]);
         owner.prepare_search_channels(1, &*before);
-        let mut builder = ProgrammeIndexBuilder::new(2);
+        let mut builder = ProgramIndexBuilder::new(2);
         for channel in 0..2 {
             builder.set_identity(
                 channel,
@@ -499,15 +499,15 @@ mod identity_tests {
             );
             builder.push(channel, 1000, 4600, "Generated bulletin");
         }
-        owner.install_programme_index(builder.finish());
+        owner.install_program_index(builder.finish());
         let reordered = schedule(1, "generated-original", &["B", "A"]);
         let visible = |channel| channel == 1;
         let archive = |channel| if channel == 1 { 7 } else { 0 };
-        let hits = owner.search_programmes(
+        let hits = owner.search_programs(
             "bulletin",
             5000,
             &*reordered,
-            iptv_search::ProgrammeSearchOptions {
+            iptv_search::ProgramSearchOptions {
                 visible: Some(&visible),
                 catchup_days: Some(&archive),
                 limit: 1,
@@ -522,11 +522,11 @@ mod identity_tests {
             owner.search_channel_identity(&*before, 0).unwrap()
         );
         let removed = schedule(1, "generated-original", &["B"]);
-        let hits = owner.search_programmes(
+        let hits = owner.search_programs(
             "bulletin",
             2000,
             &*removed,
-            iptv_search::ProgrammeSearchOptions {
+            iptv_search::ProgramSearchOptions {
                 limit: 1,
                 ..Default::default()
             },
@@ -544,7 +544,7 @@ mod identity_tests {
     }
 
     #[tokio::test]
-    async fn queued_programme_reads_reject_recreated_and_reconfigured_sources() {
+    async fn queued_program_reads_reject_recreated_and_reconfigured_sources() {
         let directory = tempfile::tempdir().unwrap();
         let owner = crate::Runtime::new(crate::Ports::new(directory.path().into(), |_| {
             Ok(crate::model::DatabaseKey::from_bytes([0x53; 32]))
@@ -565,7 +565,7 @@ mod identity_tests {
             .unwrap();
         let keys = vec![ChannelKey::new("generated-shared-provider-key")];
         let old_read =
-            owner.read_programme_index(vec![(id, incarnation.clone(), keys.clone(), 0)], 1, 0);
+            owner.read_program_index(vec![(id, incarnation.clone(), keys.clone(), 0)], 1, 0);
         let recreated = source.clone();
         let (replacement, new_incarnation) = owner
             .services()
@@ -581,12 +581,12 @@ mod identity_tests {
         assert!(old_read.await.is_err());
         assert!(
             owner
-                .read_programme_index(vec![(id, new_incarnation.clone(), keys.clone(), 0)], 1, 0)
+                .read_program_index(vec![(id, new_incarnation.clone(), keys.clone(), 0)], 1, 0)
                 .await
                 .is_ok()
         );
         let prior_configuration_read =
-            owner.read_programme_index(vec![(id, new_incarnation.clone(), keys.clone(), 0)], 1, 0);
+            owner.read_program_index(vec![(id, new_incarnation.clone(), keys.clone(), 0)], 1, 0);
         let mut edited = source;
         edited.config = config(2);
         let latest = owner
@@ -601,7 +601,7 @@ mod identity_tests {
         assert!(prior_configuration_read.await.is_err());
         assert!(
             owner
-                .read_programme_index(vec![(id, latest, keys, 0)], 1, 0)
+                .read_program_index(vec![(id, latest, keys, 0)], 1, 0)
                 .await
                 .is_ok()
         );

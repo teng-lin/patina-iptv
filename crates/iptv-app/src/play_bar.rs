@@ -355,7 +355,7 @@ fn bar_now(ui: Ui) -> impl IntoElement {
                         .items_center()
                         .gap(px(GROUP_GAP))
                         .child(left(ui))
-                        .child(centre(ui))
+                        .child(center(ui))
                         .child(right(ui)),
                 )
                 .child(progress::line(ui)),
@@ -437,7 +437,7 @@ fn control_label(control: Control) -> &'static str {
         Control::PlayPause => crate::i18n::key("Play or pause"),
         Control::Forward => crate::i18n::key("Fast-forward"),
         Control::Record => crate::i18n::key("Record"),
-        Control::Favourite => crate::i18n::key("Favourite"),
+        Control::Favorite => crate::i18n::key("Favourite"),
         Control::Tracks => crate::i18n::key("Subtitles and tracks"),
         Control::Details => crate::i18n::key("Programme details"),
         Control::Picture => crate::i18n::key("Picture size"),
@@ -456,7 +456,7 @@ fn control_id(control: Control) -> &'static str {
         Control::PlayPause => "play-bar-play-pause",
         Control::Forward => "play-bar-forward",
         Control::Record => "play-bar-record",
-        Control::Favourite => "play-bar-favourite",
+        Control::Favorite => "play-bar-favourite",
         Control::Tracks => "play-bar-tracks",
         Control::Details => "play-bar-details",
         Control::Picture => "play-bar-picture",
@@ -480,7 +480,7 @@ fn enabled(ui: Ui, control: Control) -> bool {
             matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::seekable(ui)
         }
         Control::Record => crate::player_panels::enabled(ui, iptv_core::panels::Control::Record),
-        Control::Favourite | Control::Details => ui.playing.get().is_some(),
+        Control::Favorite | Control::Details => ui.playing.get().is_some(),
         Control::Tracks => tracks(ui).is_some(),
         Control::Multiview => crate::capabilities::multiview(ui).available(),
         Control::Pip => crate::pip::can_enter(ui),
@@ -514,7 +514,7 @@ fn activate(
         }
         Control::PlayPause => crate::player::toggle_pause(ui),
         Control::Record => crate::recordings_view::toggle_current(ui),
-        Control::Favourite => {
+        Control::Favorite => {
             if let Some(ch) = ui.playing.get_untracked() {
                 crate::favorites::toggle(ui, ch);
             }
@@ -614,7 +614,7 @@ pub fn key(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> bool {
                     Control::PlayPause,
                     Control::Forward,
                     Control::Record,
-                    Control::Favourite,
+                    Control::Favorite,
                     Control::Tracks,
                     Control::Details,
                     Control::Picture,
@@ -796,7 +796,7 @@ fn volume(ui: Ui) -> impl IntoElement {
 }
 
 /// Rewind, play/pause, fast-forward.
-fn centre(ui: Ui) -> impl IntoElement {
+fn center(ui: Ui) -> impl IntoElement {
     let size = target();
     view()
         .flex_shrink_0()
@@ -834,7 +834,7 @@ fn right_width(ui: Ui, size: f32) -> f32 {
 fn right(ui: Ui) -> impl IntoElement {
     let icon_window = nsh_core::element::desktop::current_window();
     let size = target();
-    let favourite = move || {
+    let favorite = move || {
         ui.playing
             .get()
             .is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)))
@@ -859,9 +859,9 @@ fn right(ui: Ui) -> impl IntoElement {
         .child(button(ui, Control::Record, || Icon::Record, size))
         .child(button(
             ui,
-            Control::Favourite,
+            Control::Favorite,
             move || {
-                if favourite() {
+                if favorite() {
                     Icon::StarFilled
                 } else {
                     Icon::Star
@@ -926,7 +926,7 @@ fn details(ui: Ui) {
         crate::menu_view::close(ui);
         return;
     }
-    let (channel, p) = untracked(|| progress::programme(ui));
+    let (channel, p) = untracked(|| progress::program(ui));
     crate::recordings_view::remember(
         ui,
         Origin {

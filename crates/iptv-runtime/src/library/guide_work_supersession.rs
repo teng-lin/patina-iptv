@@ -23,7 +23,7 @@ fn only_newer_work_takes_the_next_guide_check_over() {
         let fetching = work();
         library::track_import(&runtime, source, &fetching);
         assert!(library::supersede_import(&runtime, source).is_none());
-        assert!(fetching.guide.is_cancelled() && !fetching.cancel.is_cancelled());
+        assert!(fetching.guide.is_canceled() && !fetching.cancel.is_canceled());
         assert!(!fetching.superseded.get());
         assert!(!library::import_is_current(&runtime, source, &fetching));
 
@@ -31,9 +31,9 @@ fn only_newer_work_takes_the_next_guide_check_over() {
         let downloading = work();
         downloading.playlist_done();
         library::track_import(&runtime, source, &downloading);
-        let cancelled = library::supersede_import(&runtime, source).expect("the cancelled work");
-        assert!(Rc::ptr_eq(&cancelled, &downloading));
-        assert!(downloading.cancel.is_cancelled() && !downloading.superseded.get());
+        let canceled = library::supersede_import(&runtime, source).expect("the cancelled work");
+        assert!(Rc::ptr_eq(&canceled, &downloading));
+        assert!(downloading.cancel.is_canceled() && !downloading.superseded.get());
 
         // Newer work: an update asked for, another import over a tracked
         // one, an import that replaces a running one.
@@ -46,7 +46,7 @@ fn only_newer_work_takes_the_next_guide_check_over() {
         library::track_import(&runtime, source, &newer);
         assert!(older.superseded.get() && !newer.superseded.get());
         library::replace_running(&runtime, source);
-        assert!(newer.superseded.get() && newer.guide.is_cancelled());
+        assert!(newer.superseded.get() && newer.guide.is_canceled());
 
         // A playlist that is being deleted or switched off: its work is
         // cancelled, but nothing replaces it. When the deletion fails the
@@ -54,7 +54,7 @@ fn only_newer_work_takes_the_next_guide_check_over() {
         let deleted = work();
         library::track_import(&runtime, source, &deleted);
         library::cancel_running(&runtime, source);
-        assert!(deleted.guide.is_cancelled() && !deleted.superseded.get());
+        assert!(deleted.guide.is_canceled() && !deleted.superseded.get());
         assert!(!library::import_is_current(&runtime, source, &deleted));
 
         // An Add learns its source after a job of that source has come and

@@ -11,7 +11,7 @@
 //! `search.include_past_without_catchup`; with `search.show_history` off
 //! the screen opens without the recent searches (they are still kept).
 //! Programmes are searched over every day the store keeps
-//! (`programme_index.rs`), not only the guide days held in memory.
+//! (`program_index.rs`), not only the guide days held in memory.
 //! Wording is iptv-rs's own.
 //!
 //! Multiview's Search and add opens the screen to pick (`pick.rs`): over
@@ -27,15 +27,15 @@ use iptv_epg::UnixTime;
 use iptv_guide::EpgSchedule;
 use iptv_nav::Action;
 use iptv_search::{
-    ChannelSearchOptions, Focus, Phase, ProgrammeHit, ProgrammeSearchOptions, ResultId,
-    SearchAction, SearchEffect, SearchHistory, SearchState, Tab,
+    ChannelSearchOptions, Focus, Phase, ProgramHit, ProgramSearchOptions, ResultId, SearchAction,
+    SearchEffect, SearchHistory, SearchState, Tab,
 };
 use iptv_settings::{Settings, Target, keys};
 use nsh_base::input;
 use nsh_core::prelude::*;
 
 mod pick;
-mod programme_index;
+mod program_index;
 mod view;
 
 pub use pick::open_to_pick;
@@ -51,7 +51,7 @@ const LEGACY_HISTORY_FILE: &str = "search-history.json";
 
 /// Whether programme search can run on the current guide data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Programmes {
+pub enum ProgramSearch {
     /// No readable EPG behind the current schedule.
     Unavailable,
     Building,
@@ -64,7 +64,7 @@ pub struct Screen {
     pub state: SearchState,
     /// A result is playing full screen; the screen returns when it ends.
     pub suspended: bool,
-    pub programmes: Programmes,
+    pub programs: ProgramSearch,
     /// Picking a channel for multiview (Search and add).
     pub pick: bool,
 }
@@ -92,7 +92,7 @@ enum Outcome {
 /// The `search.*` settings the screen follows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Options {
-    favourites_first: bool,
+    favorites_first: bool,
     include_past_without_catchup: bool,
     /// Come back to the results after watching one.
     stay: bool,
@@ -102,7 +102,7 @@ struct Options {
 fn options(s: &Settings) -> Options {
     let at = &Target::Global;
     Options {
-        favourites_first: s.bool(keys::SEARCH_FAVORITES_FIRST, at),
+        favorites_first: s.bool(keys::SEARCH_FAVORITES_FIRST, at),
         include_past_without_catchup: s.bool(keys::SEARCH_INCLUDE_PAST_WITHOUT_CATCHUP, at),
         stay: s.bool(keys::SEARCH_STAY, at),
         show_history: s.bool(keys::SEARCH_SHOW_HISTORY, at),
@@ -132,14 +132,14 @@ fn resolve_result_channel(
     (!schedule.channel_hidden(channel)).then_some(channel)
 }
 
-fn outcome(id: &ResultId, hit: Option<&ProgrammeHit>, channel: Option<usize>) -> Outcome {
+fn outcome(id: &ResultId, hit: Option<&ProgramHit>, channel: Option<usize>) -> Outcome {
     let Some(channel) = channel else {
         return Outcome::Nothing;
     };
     match (id, hit) {
         (ResultId::Channel(_), _) => Outcome::Live(channel),
-        (ResultId::Programme { .. }, None) => Outcome::Nothing,
-        (ResultId::Programme { start, .. }, Some(h)) => match h.airing {
+        (ResultId::Program { .. }, None) => Outcome::Nothing,
+        (ResultId::Program { start, .. }, Some(h)) => match h.airing {
             Airing::Live => Outcome::Live(channel),
             Airing::Ended if h.catchup => Outcome::CatchUp {
                 channel,
@@ -188,7 +188,7 @@ fn display_minute(t: UnixTime, epoch: UnixTime) -> i32 {
 }
 
 /// The airing and replay marker of a programme result.
-fn badge(hit: &ProgrammeHit) -> String {
+fn badge(hit: &ProgramHit) -> String {
     let when = match hit.airing {
         Airing::Live => tr("On now"),
         Airing::Upcoming => tr("Later"),
@@ -201,18 +201,18 @@ fn badge(hit: &ProgrammeHit) -> String {
     }
 }
 
-fn tab_label(tab: Tab, count: usize, programmes: Programmes) -> String {
+fn tab_label(tab: Tab, count: usize, programs: ProgramSearch) -> String {
     // A full list may have been cut at the limit: not a total.
     let count = if count >= LIMIT {
         format!("{LIMIT}+")
     } else {
         count.to_string()
     };
-    match (tab, programmes) {
+    match (tab, programs) {
         (Tab::Channels, _) => trf("Channels · {count}", &[("count", (&count).into())]),
-        (Tab::Programs, Programmes::Unavailable) => tr("Programmes · no guide data").to_owned(),
-        (Tab::Programs, Programmes::Building) => tr("Programmes · …").to_owned(),
-        (Tab::Programs, Programmes::Ready) => {
+        (Tab::Programs, ProgramSearch::Unavailable) => tr("Programmes · no guide data").to_owned(),
+        (Tab::Programs, ProgramSearch::Building) => tr("Programmes · …").to_owned(),
+        (Tab::Programs, ProgramSearch::Ready) => {
             trf("Programmes · {count}", &[("count", (&count).into())])
         }
     }
@@ -312,10 +312,10 @@ fn save_history(ui: Ui) {
     });
 }
 
-fn set_programmes(ui: Ui, status: Programmes) {
+fn set_programs(ui: Ui, status: ProgramSearch) {
     ui.search.update(|s| {
         if let Some(s) = s {
-            s.programmes = status;
+            s.programs = status;
         }
     });
 }
@@ -333,27 +333,27 @@ fn prepare(ui: Ui) {
             .and_then(|s| s.downcast_ref::<iptv_guide::combined::CombinedSchedule>())
             .is_none()
     {
-        set_programmes(ui, Programmes::Unavailable);
+        set_programs(ui, ProgramSearch::Unavailable);
         return;
     }
-    if crate::runtime().has_programme_index() {
-        set_programmes(ui, Programmes::Ready);
+    if crate::runtime().has_program_index() {
+        set_programs(ui, ProgramSearch::Ready);
         return;
     }
-    set_programmes(ui, Programmes::Building);
+    set_programs(ui, ProgramSearch::Building);
     // Under the app's owner: a timer dies with its owner, and multiview's
     // Search and add opens the screen from a menu item that goes as it
     // closes. A timer that finds the index built does nothing.
     crate::data::spawn_in_app(async move {
         timer(Duration::from_millis(30)).await;
-        let wanted = crate::runtime().begin_programme_index(version);
+        let wanted = crate::runtime().begin_program_index(version);
         let schedule = crate::schedule();
         if !wanted {
             return;
         }
         let t = Instant::now();
-        programme_index::build(&*schedule, schedule.channel_count(), move |index| {
-            let current = crate::runtime().finish_programme_index(version);
+        program_index::build(&*schedule, schedule.channel_count(), move |index| {
+            let current = crate::runtime().finish_program_index(version);
             if !current || ui.search.with_untracked(Option::is_none) {
                 return;
             }
@@ -361,7 +361,7 @@ fn prepare(ui: Ui) {
                 Ok(index) => index,
                 Err(error) => {
                     log::warn!("iptv search: guide titles: {error}");
-                    set_programmes(ui, Programmes::Unavailable);
+                    set_programs(ui, ProgramSearch::Unavailable);
                     search_again(ui);
                     return;
                 }
@@ -371,8 +371,8 @@ fn prepare(ui: Ui) {
                 index.program_count(),
                 t.elapsed().as_millis()
             );
-            crate::runtime().install_programme_index(index);
-            set_programmes(ui, Programmes::Ready);
+            crate::runtime().install_program_index(index);
+            set_programs(ui, ProgramSearch::Ready);
             search_again(ui);
         });
     });
@@ -380,30 +380,30 @@ fn prepare(ui: Ui) {
 
 /// Runs both searches for `query` now and hands the results to the state.
 fn run_search(ui: Ui, query: &str) {
-    let favourites = ui.app.favorites.get_untracked();
+    let favorites = ui.app.favorites.get_untracked();
     let schedule = crate::schedule();
     let days = |c: usize| schedule.catchup_days(c);
     let visible = |c: usize| !schedule.channel_hidden(c);
     let options = options(&crate::settings::get());
     let mut channels = crate::runtime().search_channels(
         query,
-        &favourites,
+        &favorites,
         ChannelSearchOptions {
-            favourites_first: options.favourites_first,
+            favorites_first: options.favorites_first,
             limit: LIMIT,
         },
     );
-    let opts = ProgrammeSearchOptions {
+    let opts = ProgramSearchOptions {
         visible: Some(&visible),
         include_past_without_catchup: options.include_past_without_catchup,
         catchup_days: Some(&days),
-        favourites: Some(&favourites),
-        favourites_first: options.favourites_first,
+        favorites: Some(&favorites),
+        favorites_first: options.favorites_first,
         limit: LIMIT,
         ..Default::default()
     };
-    let mut programmes =
-        crate::runtime().search_programmes(query, crate::time::wall_unix(), &*schedule, opts);
+    let mut programs =
+        crate::runtime().search_programs(query, crate::time::wall_unix(), &*schedule, opts);
     channels.retain_mut(|hit| {
         let Some(channel) = resolve_result_channel(&crate::runtime(), &hit.identity, &*schedule)
         else {
@@ -412,7 +412,7 @@ fn run_search(ui: Ui, query: &str) {
         hit.channel = channel;
         true
     });
-    programmes.retain_mut(|hit| {
+    programs.retain_mut(|hit| {
         let Some(channel) = resolve_result_channel(&crate::runtime(), &hit.identity, &*schedule)
         else {
             return false;
@@ -422,7 +422,7 @@ fn run_search(ui: Ui, query: &str) {
     });
     ui.search.update(|s| {
         if let Some(s) = s {
-            s.state.set_results(query, channels, programmes);
+            s.state.set_results(query, channels, programs);
         }
     });
 }
@@ -472,7 +472,7 @@ pub fn open(ui: Ui) {
                     SearchHistory::default()
                 }),
                 suspended: false,
-                programmes: Programmes::Building,
+                programs: ProgramSearch::Building,
                 pick: false,
             }));
             prepare(ui);
@@ -491,7 +491,7 @@ pub fn close(ui: Ui) {
         crate::multiview::list_closed(ui);
     }
     save_history(ui);
-    crate::runtime().release_programme_index();
+    crate::runtime().release_program_index();
     ui.search.set(None);
     crate::input::dismiss_keyboard();
 }
@@ -547,10 +547,10 @@ fn choose(ui: Ui, id: ResultId) {
     let hit = ui.search.with_untracked(|s| {
         s.as_ref().and_then(|s| {
             s.state
-                .programmes()
+                .programs()
                 .iter()
                 .find(|h| {
-                    ResultId::Programme {
+                    ResultId::Program {
                         channel: h.identity.clone(),
                         start: h.start,
                     } == id
@@ -600,8 +600,8 @@ mod tests {
     use super::*;
     use iptv_search::MatchQuality;
 
-    fn hit(airing: Airing, catchup: bool) -> ProgrammeHit {
-        ProgrammeHit {
+    fn hit(airing: Airing, catchup: bool) -> ProgramHit {
+        ProgramHit {
             identity: iptv_search::ChannelId::new(None, "synthetic-3"),
             channel: 3,
             start: 1_000,
@@ -614,7 +614,7 @@ mod tests {
     }
 
     fn p() -> ResultId {
-        ResultId::Programme {
+        ResultId::Program {
             channel: iptv_search::ChannelId::new(None, "synthetic-3"),
             start: 1_000,
         }
@@ -624,7 +624,7 @@ mod tests {
     fn options_follow_the_search_settings() {
         let mut s = Settings::new();
         let defaults = Options {
-            favourites_first: true,
+            favorites_first: true,
             include_past_without_catchup: false,
             stay: false,
             show_history: true,
@@ -644,7 +644,7 @@ mod tests {
         assert_eq!(
             options(&s),
             Options {
-                favourites_first: false,
+                favorites_first: false,
                 include_past_without_catchup: true,
                 stay: true,
                 show_history: false,
@@ -769,24 +769,24 @@ mod tests {
         assert_eq!(badge(&hit(Airing::Ended, false)), "Earlier · no replay");
         assert_eq!(badge(&hit(Airing::Upcoming, false)), "Later");
         assert_eq!(
-            tab_label(Tab::Channels, 3, Programmes::Unavailable),
+            tab_label(Tab::Channels, 3, ProgramSearch::Unavailable),
             "Channels · 3"
         );
         assert_eq!(
-            tab_label(Tab::Programs, 0, Programmes::Unavailable),
+            tab_label(Tab::Programs, 0, ProgramSearch::Unavailable),
             "Programmes · no guide data"
         );
         assert_eq!(
-            tab_label(Tab::Programs, 0, Programmes::Building),
+            tab_label(Tab::Programs, 0, ProgramSearch::Building),
             "Programmes · …"
         );
         assert_eq!(
-            tab_label(Tab::Programs, 12, Programmes::Ready),
+            tab_label(Tab::Programs, 12, ProgramSearch::Ready),
             "Programmes · 12"
         );
         // A list cut at the limit is not a total.
         assert_eq!(
-            tab_label(Tab::Programs, LIMIT, Programmes::Ready),
+            tab_label(Tab::Programs, LIMIT, ProgramSearch::Ready),
             format!("Programmes · {LIMIT}+")
         );
     }

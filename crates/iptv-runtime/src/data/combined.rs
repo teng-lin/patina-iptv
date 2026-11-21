@@ -420,7 +420,7 @@ pub(crate) async fn organization_changed(
         parts
             .borrow()
             .get(&source)
-            .is_some_and(|s| s.same_catalogue(&schedule))
+            .is_some_and(|s| s.same_catalog(&schedule))
     });
     if !current || !owner.organization_edit_current(source, ticket) {
         return false;

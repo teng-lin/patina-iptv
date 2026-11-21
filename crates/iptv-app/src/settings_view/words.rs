@@ -521,7 +521,7 @@ pub fn value(setting: &Setting, value: &Value) -> String {
             zero(setting.key).unwrap_or_default().to_owned()
         }
         Value::Int(n) | Value::Duration(n) => amount(&setting.ty, *n),
-        Value::Enum(v) | Value::Colour(v) => setting
+        Value::Enum(v) | Value::Color(v) => setting
             .ty
             .choices()
             .map(|c| choice(c.family, v))
@@ -546,7 +546,7 @@ pub fn value(setting: &Setting, value: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use iptv_settings::catalogue;
+    use iptv_settings::catalog;
 
     use super::*;
 
@@ -558,7 +558,7 @@ mod tests {
                 assert!(!heading(sec, Some(sub)).is_empty(), "{sec:?}.{sub}");
             }
         }
-        for s in catalogue::settings() {
+        for s in catalog::settings() {
             assert!(!label(s.key).is_empty(), "{}", s.key);
             if let Some(choices) = s.ty.choices() {
                 for v in choices.variants {
@@ -566,14 +566,14 @@ mod tests {
                 }
             }
         }
-        for c in catalogue::commands() {
+        for c in catalog::commands() {
             assert!(!label(c.key).is_empty(), "{}", c.key);
         }
     }
 
     #[test]
     fn values_read_in_their_units() {
-        let read = |key: &str, v: Value| value(catalogue::setting(key).unwrap(), &v);
+        let read = |key: &str, v: Value| value(catalog::setting(key).unwrap(), &v);
         assert_eq!(read("general.resume_last_channel", Value::Bool(true)), "On");
         assert_eq!(
             read("epg.update_interval", Value::Duration(0)),
@@ -593,7 +593,7 @@ mod tests {
         assert_eq!(read("catchup.start_offset", Value::secs(75)), "+0:01:15");
         assert_eq!(read("appearance.ui_transparency", Value::Int(20)), "20 %");
         assert_eq!(
-            read("appearance.accent", Value::colour("blue_gray")),
+            read("appearance.accent", Value::color("blue_gray")),
             "Blue gray"
         );
         assert_eq!(

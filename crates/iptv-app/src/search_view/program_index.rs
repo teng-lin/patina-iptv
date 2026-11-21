@@ -9,13 +9,13 @@ use std::time::Instant;
 use iptv_core::guide::Schedule;
 use iptv_epg::{ChannelKey, DAY, UnixTime};
 use iptv_guide::{EpgSchedule, combined::CombinedSchedule};
-use iptv_search::ProgrammeIndex;
+use iptv_search::ProgramIndex;
 
 /// Builds the index of `epg`'s channels (by row), completing on the UI thread.
 pub fn build(
     schedule: &dyn Schedule,
     rows: usize,
-    done: impl FnOnce(Result<ProgrammeIndex, crate::runtime::Error>) + 'static,
+    done: impl FnOnce(Result<ProgramIndex, crate::runtime::Error>) + 'static,
 ) {
     let mut sources: Vec<(
         crate::runtime::model::SourceId,
@@ -64,7 +64,7 @@ pub fn build(
             .shown_source()
             .filter(|_| epg.loaded_from().is_some())
         else {
-            let mut index = ProgrammeIndex::build(epg.store(), &keys);
+            let mut index = ProgramIndex::build(epg.store(), &keys);
             for channel in 0..rows {
                 if let Some(identity) = crate::runtime().search_channel_identity(schedule, channel)
                 {
@@ -94,7 +94,7 @@ pub fn build(
     let from: UnixTime =
         crate::time::wall_unix().saturating_sub(i64::from(keep).saturating_mul(DAY));
     let started = Instant::now();
-    let read = crate::runtime().read_programme_index(sources, rows, from);
+    let read = crate::runtime().read_program_index(sources, rows, from);
     crate::data::spawn_in_app(async move {
         match read.await {
             Ok(index) => {

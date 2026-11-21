@@ -44,7 +44,7 @@ fn reader_sees_the_last_commit_while_a_write_is_pending() {
     assert_eq!(reader.load_channels(src, &all).unwrap().len(), 10);
     // Writes wait for the lock, then fail as busy instead of hanging.
     let id = catalog(1, 1, XT_PASSWORD).channels[0].id.clone();
-    match reader.set_favourite(src, &id, true) {
+    match reader.set_favorite(src, &id, true) {
         Err(StoreError::Sqlite(rusqlite::Error::SqliteFailure(e, _))) => {
             assert_eq!(e.code, rusqlite::ErrorCode::DatabaseBusy);
         }
@@ -98,7 +98,7 @@ fn a_reader_reads_during_a_held_write_and_cannot_write() {
     refused(reader.mark_private_documents_unsealed());
     let mut reader = reader;
     let id = catalog(1, 1, XT_PASSWORD).channels[0].id.clone();
-    refused(reader.set_favourite(src, &id, true));
+    refused(reader.set_favorite(src, &id, true));
 
     // It sees what the writer commits afterwards.
     replace(&mut writer, src, &catalog(4, 1, XT_PASSWORD));
@@ -257,7 +257,7 @@ fn held_mutation_writer(
 }
 
 #[test]
-fn recording_favourite_and_custom_order_mutations_wait_for_the_other_writer() {
+fn recording_favorite_and_custom_order_mutations_wait_for_the_other_writer() {
     use iptv_core::recording::{JobId, Request};
     use iptv_store_sqlite::{ChannelOrder, ChannelScope, MoveTarget};
 
@@ -267,16 +267,16 @@ fn recording_favourite_and_custom_order_mutations_wait_for_the_other_writer() {
     let source = writer
         .add_source(&m3u_source("Synthetic mutations"))
         .unwrap();
-    let catalogue = catalog(3, 3, XT_PASSWORD);
-    replace(&mut writer, source, &catalogue);
-    let first = &catalogue.channels[0].id;
-    let second = &catalogue.channels[1].id;
-    writer.set_favourite(source, first, true).unwrap();
-    writer.set_favourite(source, second, true).unwrap();
+    let catalog = catalog(3, 3, XT_PASSWORD);
+    replace(&mut writer, source, &catalog);
+    let first = &catalog.channels[0].id;
+    let second = &catalog.channels[1].id;
+    writer.set_favorite(source, first, true).unwrap();
+    writer.set_favorite(source, second, true).unwrap();
     let group = writer
         .create_custom_group(source, "Synthetic custom")
         .unwrap();
-    for channel in &catalogue.channels {
+    for channel in &catalog.channels {
         writer.add_to_custom_group(group, &channel.id).unwrap();
     }
     let mut mutation = Store::open(&path).unwrap();
@@ -300,22 +300,22 @@ fn recording_favourite_and_custom_order_mutations_wait_for_the_other_writer() {
     assert_eq!(scheduled.unwrap(), JobId(101));
 
     let other = hold(&path);
-    let moved = mutation.move_favourite(source, first, 1);
+    let moved = mutation.move_favorite(source, first, 1);
     other.join().unwrap();
     assert!(moved.unwrap());
-    let favourites = mutation
+    let favorites = mutation
         .load_channels(
             source,
             &ChannelQuery {
                 scope: ChannelScope::All,
-                favourites_only: true,
+                favorites_only: true,
                 order: ChannelOrder::Effective,
                 ..Default::default()
             },
         )
         .unwrap();
-    assert_eq!(&favourites[0].channel.id, second);
-    assert_eq!(&favourites[1].channel.id, first);
+    assert_eq!(&favorites[0].channel.id, second);
+    assert_eq!(&favorites[1].channel.id, first);
 
     let other = hold(&path);
     let moved = mutation.move_in_custom_group_to(group, first, MoveTarget::Step(1));
@@ -343,8 +343,8 @@ fn group_move_reads_the_order_after_a_competing_commit() {
     let path = dir.path().join("synthetic-group-order.db");
     let mut writer = Store::open(&path).unwrap();
     let source = writer.add_source(&m3u_source("Synthetic groups")).unwrap();
-    let catalogue = catalog(3, 3, XT_PASSWORD);
-    replace(&mut writer, source, &catalogue);
+    let catalog = catalog(3, 3, XT_PASSWORD);
+    replace(&mut writer, source, &catalog);
     let groups: Vec<_> = writer
         .library_groups(source)
         .unwrap()
@@ -390,11 +390,11 @@ fn concurrent_identical_recording_requests_commit_one_job() {
     let source = setup
         .add_source(&m3u_source("Synthetic recordings"))
         .unwrap();
-    let catalogue = catalog(1, 1, XT_PASSWORD);
-    replace(&mut setup, source, &catalogue);
+    let catalog = catalog(1, 1, XT_PASSWORD);
+    replace(&mut setup, source, &catalog);
     let request = Request {
         source: source.0,
-        channel: catalogue.channels[0].id.as_str().into(),
+        channel: catalog.channels[0].id.as_str().into(),
         channel_name: "Synthetic channel".into(),
         title: "Synthetic programme".into(),
         start: 1_800_000_000,

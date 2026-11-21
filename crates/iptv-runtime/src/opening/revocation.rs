@@ -1,6 +1,6 @@
 //! Real-store ordering checks; the held continuation belongs to this opening.
 use super::*;
-use iptv_epg::{EpgRef, MatchKind, SourceBuilder, StoreOptions, XmltvProgramme};
+use iptv_epg::{EpgRef, MatchKind, SourceBuilder, StoreOptions, XmltvProgram};
 use iptv_import::{EpgSourceConfig, GuideSink};
 use iptv_providers::SecretUrl;
 use iptv_store_sqlite::{DatabaseKey, EpgFeedMeta, SourcePolicy, Store};
@@ -50,12 +50,12 @@ fn fixture() -> (tempfile::TempDir, Rc<crate::Runtime>, Job, ChannelKey) {
 fn guide(key: &ChannelKey, title: &str) -> (GuideStore, EpgFeedMeta) {
     let feed = iptv_epg::FeedId(1);
     let mut builder = SourceBuilder::new(feed, 0, StoreOptions::default(), NOW);
-    builder.push_programme(XmltvProgramme {
+    builder.push_program(XmltvProgram {
         channel: "generated".into(),
         start: NOW,
         stop: Some(NOW + 3600),
         title: title.into(),
-        ..XmltvProgramme::default()
+        ..XmltvProgram::default()
     });
     let mut guide = GuideStore::new();
     guide.replace_source(builder.finish());
@@ -93,7 +93,7 @@ fn staged_guide(
         .begin_feed(meta.config.id, 0, StoreOptions::default(), NOW)
         .unwrap();
     stage
-        .programme("generated", &guide.programme_at(key, NOW).unwrap().data())
+        .program("generated", &guide.program_at(key, NOW).unwrap().data())
         .unwrap();
     stage.finish_feed().unwrap();
     let import = iptv_import::EpgImport {
@@ -137,7 +137,7 @@ async fn title(
     services
         .call(move |store| {
             let guide = store.load_epg(source, &EpgWindow::from(NOW, 1))?;
-            Ok(guide.programme_at(&key, NOW).map(|p| p.title().to_owned()))
+            Ok(guide.program_at(&key, NOW).map(|p| p.title().to_owned()))
         })
         .await
         .unwrap()
@@ -184,10 +184,10 @@ fn revoked_cached_metadata_cannot_discard_a_newer_guide() {
                 // Test each accepting token independently while metadata is held.
                 if cancel_all {
                     cancel.cancel();
-                    assert!(!work.guide.is_cancelled());
+                    assert!(!work.guide.is_canceled());
                 } else {
                     crate::library::revoke_import_handoff(&owner, source);
-                    assert!(work.guide.is_cancelled() && !cancel.is_cancelled());
+                    assert!(work.guide.is_canceled() && !cancel.is_canceled());
                 }
                 let channel = key.clone();
                 services

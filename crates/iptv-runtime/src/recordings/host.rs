@@ -90,7 +90,7 @@ impl State {
         // and its writer/reader handles have been released.
         let mut execution = self.execution();
         if execution.started && !self.lock().stopped {
-            return !execution.shutdown.is_cancelled();
+            return !execution.shutdown.is_canceled();
         }
         let mut host = self
             .host

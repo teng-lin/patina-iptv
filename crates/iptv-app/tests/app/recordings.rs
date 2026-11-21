@@ -21,7 +21,7 @@ fn recording_capture_failures_have_translations() {
         Failure::Limit,
         Failure::Gap,
     ] {
-        assert!(iptv_core::i18n::is_catalogued(failure.message()));
+        assert!(iptv_core::i18n::is_cataloged(failure.message()));
     }
 }
 
@@ -283,7 +283,7 @@ fn desktop_schedules_cancels_and_confirms_deletion() {
     exercise(home, Idiom::Desktop);
 }
 
-fn future_programme(home: crate::isolated::Home, idiom: Idiom) {
+fn future_program(home: crate::isolated::Home, idiom: Idiom) {
     let (mut app, path, source, expected) =
         fixture(&home, idiom, "https://example.test/generated.ts", true);
     step(app.wait_for("text:Generated future programme"));
@@ -360,19 +360,19 @@ fn future_programme(home: crate::isolated::Home, idiom: Idiom) {
 }
 
 #[test]
-fn right_click_on_a_future_programme_schedules_without_a_form() {
+fn right_click_on_a_future_program_schedules_without_a_form() {
     let Some(home) = isolated!() else { return };
-    future_programme(home, Idiom::Desktop);
+    future_program(home, Idiom::Desktop);
 }
 
 #[test]
-fn long_press_on_a_future_programme_schedules_without_a_form() {
+fn long_press_on_a_future_program_schedules_without_a_form() {
     let Some(home) = isolated!() else { return };
-    future_programme(home, Idiom::Pad);
+    future_program(home, Idiom::Pad);
 }
 
 #[test]
-fn long_press_on_a_current_programme_offers_record_without_starting_playback() {
+fn long_press_on_a_current_program_offers_record_without_starting_playback() {
     let Some(home) = isolated!() else { return };
     let (mut app, _, _, _) = fixture(&home, Idiom::Pad, "https://example.test/generated.ts", true);
     step(app.wait_for("text:Generated live programme"));
@@ -581,7 +581,7 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
     assert_eq!(jobs.len(), 1);
     assert!(matches!(
         jobs[0].status,
-        iptv_core::recording::Status::Completed | iptv_core::recording::Status::Cancelled
+        iptv_core::recording::Status::Completed | iptv_core::recording::Status::Canceled
     ));
     assert!(!app.screen().matches("id:recordings-screen").unwrap());
     assert_eq!(iptv_app::player_opens(0), opens);

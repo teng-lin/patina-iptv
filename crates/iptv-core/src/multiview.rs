@@ -289,7 +289,7 @@ impl<C: Clone + PartialEq> Multiview<C> {
             Key::Back => return self.leave(self.active),
         };
         if let Some((dx, dy)) = way
-            && let Some(to) = self.layout().neighbour(self.active, dx, dy)
+            && let Some(to) = self.layout().neighbor(self.active, dx, dy)
         {
             self.active = to;
         }

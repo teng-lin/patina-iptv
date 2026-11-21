@@ -12,7 +12,7 @@ fn sample() -> Settings {
     st.set("guide.autoplay", Value::Bool(true)).unwrap();
     st.set("history.recent_count", Value::Int(15)).unwrap();
     st.set("epg.time_offset", Value::ms(-30 * 60_000)).unwrap();
-    st.set("appearance.accent", Value::colour("teal")).unwrap();
+    st.set("appearance.accent", Value::color("teal")).unwrap();
     st.set("appearance.font_size", Value::choice("large"))
         .unwrap();
     st.set("logos.folder", Value::text("/storage/logos"))
@@ -70,7 +70,7 @@ fn round_trip_preserves_every_value_type_and_level() {
 }
 
 #[test]
-fn serialisation_is_stable_and_minimal() {
+fn serialization_is_stable_and_minimal() {
     let st = sample();
     let text = st.to_json_string();
     assert_eq!(text, st.clone().to_json_string());
@@ -331,8 +331,8 @@ fn version_3_documents_keep_their_choices_in_us_spelling() {
         ]
     );
     assert_eq!(st.get("guide.show_programs").unwrap(), Value::Bool(false));
-    assert_eq!(st.colour(keys::ACCENT, G), "blue_gray");
-    assert_eq!(st.colour(keys::BACKGROUND, G), "dark_gray");
+    assert_eq!(st.color(keys::ACCENT, G), "blue_gray");
+    assert_eq!(st.color(keys::BACKGROUND, G), "dark_gray");
     assert_eq!(
         st.get("guide.now_highlight_style").unwrap(),
         Value::Enum("color".into())

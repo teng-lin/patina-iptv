@@ -343,8 +343,8 @@ impl Store {
         mut progress: impl FnMut() + Send + 'static,
         operation: impl FnOnce(&Self) -> crate::Result<InspectionResult<T>>,
     ) -> crate::Result<InspectionResult<T>> {
-        if cancel.is_cancelled() {
-            return Ok(Err(InspectionError::Cancelled));
+        if cancel.is_canceled() {
+            return Ok(Err(InspectionError::Canceled));
         }
         if Instant::now() >= deadline {
             return Ok(Err(InspectionError::Deadline));
@@ -353,17 +353,17 @@ impl Store {
         self.conn.progress_handler(
             1000,
             Some(move || {
-                if flag.is_cancelled() || Instant::now() >= deadline {
+                if flag.is_canceled() || Instant::now() >= deadline {
                     return true;
                 }
                 progress();
-                flag.is_cancelled() || Instant::now() >= deadline
+                flag.is_canceled() || Instant::now() >= deadline
             }),
         )?;
         let result = operation(self);
         self.conn.progress_handler(0, None::<fn() -> bool>)?;
-        if cancel.is_cancelled() {
-            return Ok(Err(InspectionError::Cancelled));
+        if cancel.is_canceled() {
+            return Ok(Err(InspectionError::Canceled));
         }
         if Instant::now() >= deadline {
             return Ok(Err(InspectionError::Deadline));
@@ -471,12 +471,12 @@ impl Store {
         })))
     }
 
-    pub fn inspection_programmes(
+    pub fn inspection_programs(
         &self,
         query: &Query,
         window: TimeWindow,
         channel: Option<&ChannelRef>,
-    ) -> Result<Page<ProgrammeInfo>> {
+    ) -> Result<Page<ProgramInfo>> {
         if !window.valid() {
             return Ok(Err(InspectionError::InvalidRequest));
         }
@@ -558,7 +558,7 @@ impl Store {
                 });
                 if beyond && items.len() <= query.limit as usize {
                     let _ = cursor_key;
-                    items.push(ProgrammeInfo {
+                    items.push(ProgramInfo {
                         channel: ChannelRef {
                             source: *source,
                             content: ContentId::from_stored(key),

@@ -130,7 +130,7 @@ fn wait_for_cancel(stream: &mut TcpStream, budget: Duration) -> bool {
 }
 
 #[test]
-fn a_mock_read_timeout_does_not_mean_the_application_cancelled() {
+fn a_mock_read_timeout_does_not_mean_the_application_canceled() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
     let (mut server, _) = listener.accept().unwrap();

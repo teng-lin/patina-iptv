@@ -58,7 +58,7 @@ fn finish(ui: Ui, id: u64, result: InspectionResult<()>) {
     });
 }
 fn current(ui: Ui, id: u64, control: &InspectionControl) -> bool {
-    !control.cancel.is_cancelled() && state(ui, |s| s.request == id).unwrap_or(false)
+    !control.cancel.is_canceled() && state(ui, |s| s.request == id).unwrap_or(false)
 }
 
 pub fn open(ui: Ui, source: SourceId) {
@@ -160,8 +160,8 @@ fn candidates(ui: Ui, subject: ChannelRef, next: bool) {
             Ok(page) => {
                 let mut query = Query::source(screen.source);
                 query.limit = 5;
-                let programmes = crate::runtime()
-                    .query_programmes(query, screen.window, Some(subject.clone()), control.clone())
+                let programs = crate::runtime()
+                    .query_programs(query, screen.window, Some(subject.clone()), control.clone())
                     .await;
                 if !current(ui, id, &control) {
                     return;
@@ -171,12 +171,12 @@ fn candidates(ui: Ui, subject: ChannelRef, next: bool) {
                     s.subject = Some(subject);
                     s.candidates = page.items;
                     s.next = page.next;
-                    s.current = programmes
+                    s.current = programs
                         .as_ref()
                         .map(|p| p.items.clone())
                         .unwrap_or_default();
                 });
-                finish(ui, id, programmes.map(|_| ()));
+                finish(ui, id, programs.map(|_| ()));
             }
             Err(error) => finish(ui, id, Err(error)),
         }
@@ -300,13 +300,13 @@ fn samples(ui: Ui, candidate: CandidateRef) {
             return;
         }
         match result {
-            Ok(programmes) => {
+            Ok(programs) => {
                 update(ui, |s| {
                     s.retained_stage = Some(stage.clone());
                     s.stage = Some(stage);
                     s.samples_back = screen.mode;
                     s.enter(Mode::Samples);
-                    s.samples = programmes;
+                    s.samples = programs;
                     s.selected = Some(selected);
                     s.next = None;
                 });
@@ -433,7 +433,7 @@ fn evidence(value: Evidence) -> &'static str {
 }
 pub(crate) fn error_text(error: InspectionError) -> &'static str {
     match error {
-        InspectionError::Cancelled => tr("Canceled"),
+        InspectionError::Canceled => tr("Canceled"),
         InspectionError::Deadline => tr("The request timed out"),
         InspectionError::PermissionDenied => tr("Channel is blocked"),
         InspectionError::StaleCursor | InspectionError::StaleEvidence => {

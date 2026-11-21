@@ -465,7 +465,7 @@ fn poster(
     let focused = move || {
         card().is_some_and(|c| {
             ui.vod
-                .with(|s| s.control == Control::Catalogue && s.focused.as_ref() == Some(&c.key))
+                .with(|s| s.control == Control::Catalog && s.focused.as_ref() == Some(&c.key))
         })
     };
     view()
@@ -694,7 +694,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         cleanup(move || on_drop.cancel());
         crate::data::spawn_in_app(async move {
             timer(std::time::Duration::from_millis(250)).await;
-            if cancel.is_cancelled()
+            if cancel.is_canceled()
                 || !ui.vod.with_untracked(|s| {
                     s.open
                         && s.details.is_none()

@@ -23,7 +23,7 @@ pub fn open_to_pick(ui: Ui) {
     ui.search.set(Some(Screen {
         state: SearchState::new(history),
         suspended: false,
-        programmes: Programmes::Building,
+        programs: ProgramSearch::Building,
         pick: true,
     }));
     prepare(ui);
@@ -112,7 +112,7 @@ mod identity_tests {
             .find(|hit| hit.identity.source == Some(1))
             .unwrap();
         let channel = ResultId::Channel(hit.identity.clone());
-        let programme = ResultId::Programme {
+        let program = ResultId::Program {
             channel: hit.identity,
             start: 1_800_000_000,
         };
@@ -123,7 +123,7 @@ mod identity_tests {
             ],
             1_800_000_000,
         );
-        for id in [&channel, &programme] {
+        for id in [&channel, &program] {
             assert_eq!(
                 resolve_result_channel(&owner, id.channel(), &shifted),
                 Some(2)
@@ -144,7 +144,7 @@ mod identity_tests {
             ],
             1_800_000_000,
         );
-        for id in [&channel, &programme] {
+        for id in [&channel, &program] {
             assert_eq!(
                 resolve_result_channel(&owner, id.channel(), &recreated),
                 None,

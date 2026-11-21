@@ -16,7 +16,7 @@ pub struct XmltvChannel {
 /// A `<programme>` element. Times already include the source's
 /// [`crate::TimePolicy`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct XmltvProgramme {
+pub struct XmltvProgram {
     /// The `channel` attribute (an EPG channel id).
     pub channel: String,
     pub start: UnixTime,
@@ -95,7 +95,7 @@ pub struct Rating {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum XmltvItem {
     Channel(XmltvChannel),
-    Programme(XmltvProgramme),
+    Program(XmltvProgram),
 }
 
 #[cfg(test)]

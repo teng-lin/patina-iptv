@@ -135,7 +135,7 @@ pub fn failure_of(error: &ImportError) -> ImportFailure {
         ImportError::HttpStatus { .. } if error.is_transient() => FailureKind::Network,
         ImportError::HttpStatus { .. } => FailureKind::Parse,
         _ => match error.kind() {
-            Kind::Cancelled => FailureKind::Cancelled,
+            Kind::Canceled => FailureKind::Canceled,
             // A portal error (`js.error`) is the server's trouble too.
             // The device could not keep it (disk full): as when the
             // playlist cannot be saved.
@@ -303,7 +303,7 @@ mod tests {
     #[test]
     fn failure_kinds_map_to_the_wizards() {
         use FailureKind::*;
-        assert_eq!(kind(ImportError::Cancelled), Cancelled);
+        assert_eq!(kind(ImportError::Canceled), Canceled);
         assert_eq!(kind(net(Step::Playlist)), Network);
         let status = |status| ImportError::HttpStatus {
             step: Step::Playlist,

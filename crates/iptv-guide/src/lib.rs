@@ -331,7 +331,7 @@ impl EpgSchedule {
     }
 
     /// Cheap immutable input for preparing an edit on a blocking worker.
-    pub fn same_catalogue(&self, other: &Self) -> bool {
+    pub fn same_catalog(&self, other: &Self) -> bool {
         std::sync::Arc::ptr_eq(&self.channels, &other.channels)
     }
     pub fn organization_builder(&self) -> OrganizationBuilder {
@@ -528,7 +528,7 @@ impl EpgSchedule {
         let t = self.probe(program);
         let (desc, start) = self
             .channel_store(Some(key), t, |s| {
-                let p = s.programme_at(key, t)?;
+                let p = s.program_at(key, t)?;
                 Some((p.desc().map(str::to_owned), p.start()))
             })
             .flatten()?;
@@ -563,7 +563,7 @@ impl EpgSchedule {
         let mut end = slot_start + SLOT;
         if let Some(key) = key {
             if let Some(prev_end) = store
-                .programmes(key, slot_start, t + 1)
+                .programs(key, slot_start, t + 1)
                 .map(|p| p.stop())
                 .filter(|&s| s <= t)
                 .max()
@@ -852,7 +852,7 @@ impl Schedule for EpgSchedule {
             self.store
                 .schedule(key)
                 .and_then(|schedule| schedule.get(0))
-                .map(|programme| programme.start())
+                .map(|program| program.start())
         };
         start.map(|start| self.minute(start))
     }
@@ -901,7 +901,7 @@ impl Schedule for EpgSchedule {
         let t = self.unix(minute) + 59;
         let key = self.key(channel);
         let found = self
-            .channel_store(key, t, |s| match key.and_then(|k| s.programme_at(k, t)) {
+            .channel_store(key, t, |s| match key.and_then(|k| s.program_at(k, t)) {
                 Some(p) => (p.start(), p.stop()),
                 None => Self::gap(s, key, t),
             })
@@ -1124,7 +1124,7 @@ impl Schedule for EpgSchedule {
         };
         let t = self.probe(program);
         let found = self.channel_store(Some(key), t, |s| {
-            s.programme_at(key, t)
+            s.program_at(key, t)
                 .filter(|p| self.minute(p.start()) == program.start)
                 // A guide stored before badges were folded at import.
                 .map(|p| iptv_epg::fold_superscripts(p.title()).into_owned())

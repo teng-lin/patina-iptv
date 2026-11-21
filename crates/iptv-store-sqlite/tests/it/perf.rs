@@ -43,7 +43,7 @@ fn replace_50k_channel_catalog() {
     // A realistic amount of customisation.
     timed("1000 favourites + 500 renames + 500 hides", || {
         for i in 0..1000 {
-            s.set_favourite(src, &first.channels[i * 37].id, true)
+            s.set_favorite(src, &first.channels[i * 37].id, true)
                 .unwrap();
         }
         for i in 0..500 {
@@ -104,7 +104,7 @@ fn replace_50k_channel_catalog() {
         s.load_channels(
             src,
             &ChannelQuery {
-                favourites_only: true,
+                favorites_only: true,
                 ..Default::default()
             },
         )

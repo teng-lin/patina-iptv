@@ -241,7 +241,7 @@ mod tests {
     const FUTURE: Program = Program { start: 60, end: 90 };
 
     #[test]
-    fn programme_actions_follow_the_observed_matrix() {
+    fn program_actions_follow_the_observed_matrix() {
         assert_eq!(
             program_actions(LIVE, 3, 0),
             [
@@ -297,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn programmes_older_than_the_archive_lose_playback() {
+    fn programs_older_than_the_archive_lose_playback() {
         let old = Program {
             start: -4 * DAY,
             end: -4 * DAY + 30,

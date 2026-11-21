@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use iptv_core::guide::Schedule;
 use iptv_epg::{
-    ChannelKey, DAY, EpgRef, FeedId, GuideStore, MatchKind, ProgrammeData, SourceBuilder,
+    ChannelKey, DAY, EpgRef, FeedId, GuideStore, MatchKind, ProgramData, SourceBuilder,
     StoreOptions,
 };
 
@@ -31,7 +31,7 @@ fn store_between(from: i64, to: i64) -> GuideStore {
         if start < to && start + LEN > from {
             b.push_data(
                 "a.test",
-                &ProgrammeData {
+                &ProgramData {
                     start,
                     stop: Some(start + LEN),
                     title,
@@ -101,7 +101,7 @@ fn only_the_first_screen_is_held_and_nothing_is_asked_for() {
 }
 
 #[test]
-fn a_programme_across_the_first_screens_end_is_held_whole() {
+fn a_program_across_the_first_screens_end_is_held_whole() {
     let (s, _) = first_screen();
     // The programme airing at the held end reaches past it.
     let across = (TO - FIRST) / LEN;

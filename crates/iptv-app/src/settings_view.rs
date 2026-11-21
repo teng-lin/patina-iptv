@@ -528,7 +528,7 @@ fn second_press(asked: Option<Instant>, now: Instant, window: Duration) -> bool 
 
 #[cfg(test)]
 mod tests {
-    use iptv_settings::catalogue;
+    use iptv_settings::catalog;
 
     use super::*;
 
@@ -571,7 +571,7 @@ mod tests {
             }
         }
         for key in ["playlists.manage", "general.about"] {
-            assert!(catalogue::command(key).is_some(), "{key}");
+            assert!(catalog::command(key).is_some(), "{key}");
         }
         for p in PAGES {
             assert!(!words::page(p.key).is_empty(), "{}", p.key);
@@ -585,7 +585,7 @@ mod tests {
     fn no_wired_setting_is_switched_off_by_another() {
         use iptv_settings::schema::Effect as DependencyEffect;
         for key in crate::settings::WIRED {
-            let s = catalogue::setting(key).unwrap();
+            let s = catalog::setting(key).unwrap();
             assert!(
                 s.depends
                     .iter()

@@ -401,8 +401,8 @@ async fn series_padding_is_applied_once_and_raw_occurrence_cancellation_survives
             request.clone(),
             Repeat::Series,
             Some(RecurrenceTiming {
-                programme_start: start,
-                programme_end: end,
+                program_start: start,
+                program_end: end,
                 lead_seconds: 300,
                 trail_seconds: 600,
             }),
@@ -475,8 +475,8 @@ async fn current_daily_and_weekly_captures_keep_the_nominal_clock_and_duration()
                 request,
                 repeat,
                 Some(RecurrenceTiming {
-                    programme_start: start,
-                    programme_end: end,
+                    program_start: start,
+                    program_end: end,
                     lead_seconds: 300,
                     trail_seconds: 600,
                 }),
@@ -762,7 +762,7 @@ pub(super) async fn until(owner: &Runtime, id: JobId, accept: impl Fn(&Job) -> b
 }
 
 #[tokio::test]
-async fn intent_is_idempotent_editable_and_cancelled_before_it_starts() {
+async fn intent_is_idempotent_editable_and_canceled_before_it_starts() {
     let directory = tempfile::tempdir().unwrap();
     let owner = owner(&directory.path().join("catalog"));
     let mut request = seed(&owner, "https://example.test/generated.ts").await;
@@ -771,7 +771,7 @@ async fn intent_is_idempotent_editable_and_cancelled_before_it_starts() {
     request.end += 60;
     owner.update_recording(id, request).await.unwrap();
     owner.stop_recording(id).await.unwrap();
-    until(&owner, id, |j| j.status == Status::Cancelled).await;
+    until(&owner, id, |j| j.status == Status::Canceled).await;
     assert!(owner.recording_file(id).await.is_err());
     owner.delete_recording(id).await.unwrap();
     assert!(owner.recording_jobs().await.unwrap().is_empty());
@@ -831,7 +831,7 @@ async fn record_stop_play_and_delete_preserve_real_media_and_its_lease() {
 }
 
 #[tokio::test]
-async fn startup_retries_a_transient_catalogue_failure_without_restarting_the_app() {
+async fn startup_retries_a_transient_catalog_failure_without_restarting_the_app() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("catalog");
     let owner = owner(&root);

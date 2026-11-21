@@ -187,7 +187,7 @@ mod tests {
     /// may carry, and each required form is selected by some count: a
     /// required form no count selects would be dead text in every row.
     #[test]
-    fn every_catalogue_language_has_rules_and_forms_that_agree() {
+    fn every_catalog_language_has_rules_and_forms_that_agree() {
         for language in crate::i18n::LANGUAGES {
             let forms = forms(language.tag)
                 .unwrap_or_else(|| panic!("no plural forms for {}", language.tag));

@@ -175,10 +175,10 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
         settled.with(|p| {
             let (_, _, _, ch, p) = (*p)?;
             let schedule = crate::schedule();
-            programme_description(&*schedule, ch, p)
+            program_description(&*schedule, ch, p)
         })
     });
-    let favourite = move || {
+    let favorite = move || {
         program
             .with(|p| p.map(|p| p.3))
             .is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)))
@@ -220,7 +220,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                     .text_color(rgb(WHITE)),
                 )
                 .child(
-                    text(move || if favourite() { "★" } else { "" })
+                    text(move || if favorite() { "★" } else { "" })
                         .text_size(move || size.text_px(HEADER_TITLE * 0.8))
                         .text_color(move || rgb(ui.app.theme.with(|t| t.accent.light))),
                 )
@@ -620,31 +620,30 @@ mod tests {
 }
 
 /// Description lookup shared by the header and selected-programme Details.
-pub(crate) fn programme_description(
+pub(crate) fn program_description(
     schedule: &dyn crate::guide::Schedule,
     channel: usize,
-    programme: Program,
+    program: Program,
 ) -> Option<String> {
     if let Some(combined) = schedule
         .as_any()
         .and_then(|schedule| schedule.downcast_ref::<iptv_guide::combined::CombinedSchedule>())
     {
-        combined.description(channel, programme)
+        combined.description(channel, program)
     } else {
         schedule
             .as_any()
             .and_then(|schedule| schedule.downcast_ref::<iptv_guide::EpgSchedule>())
-            .and_then(|schedule| schedule.description(channel, programme))
+            .and_then(|schedule| schedule.description(channel, program))
     }
 }
 
 #[cfg(test)]
 mod description_regressions {
-    use super::programme_description;
+    use super::program_description;
     use iptv_core::guide::Schedule;
     use iptv_epg::{
-        ChannelKey, EpgRef, FeedId, GuideStore, MatchKind, ProgrammeData, SourceBuilder,
-        StoreOptions,
+        ChannelKey, EpgRef, FeedId, GuideStore, MatchKind, ProgramData, SourceBuilder, StoreOptions,
     };
     use iptv_guide::{
         EpgSchedule, GuideChannel,
@@ -665,7 +664,7 @@ mod description_regressions {
         );
         builder.push_data(
             "synthetic-epg",
-            &ProgrammeData {
+            &ProgramData {
                 start: 1_800_000_000 - 1800,
                 stop: Some(1_800_000_000 + 1800),
                 title: "Synthetic selected programme",
@@ -698,13 +697,13 @@ mod description_regressions {
         )
     }
     #[test]
-    fn descriptions_follow_selected_source_programme_and_empty_data() {
+    fn descriptions_follow_selected_source_program_and_empty_data() {
         let now = 1_800_000_000;
         let first = Rc::new(schedule(now, Some("Synthetic amber description")));
         let second = Rc::new(schedule(now + 3600, Some("Synthetic birch description")));
         let selected = first.program_at(0, 0);
         assert_eq!(
-            programme_description(&*first, 0, selected).as_deref(),
+            program_description(&*first, 0, selected).as_deref(),
             Some("Synthetic amber description")
         );
         let combined = CombinedSchedule::new(
@@ -727,16 +726,12 @@ mod description_regressions {
             (1, "Synthetic birch description"),
         ] {
             assert_eq!(
-                programme_description(&combined, channel, combined.program_at(channel, 0))
-                    .as_deref(),
+                program_description(&combined, channel, combined.program_at(channel, 0)).as_deref(),
                 Some(expected)
             );
         }
         let empty = schedule(now, None);
-        assert_eq!(
-            programme_description(&empty, 0, empty.program_at(0, 0)),
-            None
-        );
-        assert_eq!(programme_description(&empty, 9, selected), None);
+        assert_eq!(program_description(&empty, 0, empty.program_at(0, 0)), None);
+        assert_eq!(program_description(&empty, 9, selected), None);
     }
 }

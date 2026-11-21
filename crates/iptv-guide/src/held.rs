@@ -54,7 +54,7 @@ impl EpgSchedule {
         t: UnixTime,
     ) -> Option<(UnixTime, UnixTime)> {
         let (_, to) = self.held?;
-        let p = self.store.programme_at(key?, t).filter(|_| t >= to)?;
+        let p = self.store.program_at(key?, t).filter(|_| t >= to)?;
         Some((p.start(), p.stop()))
     }
 
@@ -70,7 +70,7 @@ impl EpgSchedule {
         let mut start = slot;
         if let (Some((_, to)), Some(key)) = (self.held, key)
             && t >= to
-            && let Some(p) = self.store.programme_at(key, to - 1)
+            && let Some(p) = self.store.program_at(key, to - 1)
             && p.stop() <= t
         {
             start = start.max(p.stop());

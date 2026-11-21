@@ -126,7 +126,7 @@ pub fn reserve_viewing(_ui: Ui, surface: usize, channel: usize, live: bool) -> b
     }
     true
 }
-pub fn badge(ui: Ui, channel: usize, programme: crate::guide::Program) -> &'static str {
+pub fn badge(ui: Ui, channel: usize, program: crate::guide::Program) -> &'static str {
     if ui.recordings.with(|s| s.jobs.is_empty()) {
         return "";
     }
@@ -138,8 +138,8 @@ pub fn badge(ui: Ui, channel: usize, programme: crate::guide::Program) -> &'stat
         return "";
     };
     let (start, end) = (
-        crate::guide::unix_of(&*schedule, programme.start),
-        crate::guide::unix_of(&*schedule, programme.end),
+        crate::guide::unix_of(&*schedule, program.start),
+        crate::guide::unix_of(&*schedule, program.end),
     );
     ui.recordings.with(|s| {
         s.jobs
@@ -178,8 +178,8 @@ pub fn current(ui: Ui) {
     let selected = crate::schedule().program_at(channel, origin.program_start);
     match selected.airing(crate::time::now_minute()) {
         crate::guide::Airing::Live => record_origin(ui, origin),
-        crate::guide::Airing::Upcoming => schedule_programme(ui, origin),
-        crate::guide::Airing::Ended => programme(ui, origin, false),
+        crate::guide::Airing::Upcoming => schedule_program(ui, origin),
+        crate::guide::Airing::Ended => program(ui, origin, false),
     }
 }
 
@@ -296,14 +296,14 @@ fn request(origin: Origin) -> Option<Request> {
     let (source, channel) = schedule
         .channel_key(origin.channel)
         .and_then(|key| crate::data::combined::owner(&crate::runtime(), &key))?;
-    let programme = schedule.program_at(origin.channel, origin.program_start);
+    let program = schedule.program_at(origin.channel, origin.program_start);
     Some(Request {
         source: source.0,
         channel,
         channel_name: crate::channel_name(origin.channel),
-        title: schedule.title_in(origin.channel, programme, crate::i18n::language()),
-        start: crate::guide::unix_of(&*schedule, programme.start).max(crate::time::wall_unix()),
-        end: crate::guide::unix_of(&*schedule, programme.end),
+        title: schedule.title_in(origin.channel, program, crate::i18n::language()),
+        start: crate::guide::unix_of(&*schedule, program.start).max(crate::time::wall_unix()),
+        end: crate::guide::unix_of(&*schedule, program.end),
     })
 }
 pub fn remember(ui: Ui, origin: Origin) {
@@ -311,11 +311,11 @@ pub fn remember(ui: Ui, origin: Origin) {
     ui.recordings.update(|s| s.context = context);
 }
 /// EPG scheduling needs no manual date/time form: retain the selected occurrence.
-pub fn schedule_programme(ui: Ui, origin: Origin) {
+pub fn schedule_program(ui: Ui, origin: Origin) {
     if ui.recordings.with_untracked(|s| s.busy) {
         return;
     }
-    if !prepare_programme(ui, origin, false) {
+    if !prepare_program(ui, origin, false) {
         return;
     }
     let draft = ui.recordings.with_untracked(|s| s.draft.clone());
@@ -324,10 +324,10 @@ pub fn schedule_programme(ui: Ui, origin: Origin) {
         ui.recordings.update(|s| s.draft = None);
     }
 }
-pub fn programme(ui: Ui, origin: Origin, custom: bool) {
-    prepare_programme(ui, origin, custom);
+pub fn program(ui: Ui, origin: Origin, custom: bool) {
+    prepare_program(ui, origin, custom);
 }
-fn prepare_programme(ui: Ui, origin: Origin, custom: bool) -> bool {
+fn prepare_program(ui: Ui, origin: Origin, custom: bool) -> bool {
     if ui.recordings.with_untracked(|s| s.busy) {
         return false;
     }
@@ -349,14 +349,14 @@ fn prepare_programme(ui: Ui, origin: Origin, custom: bool) -> bool {
         request.start = crate::time::wall_unix();
         request.end = request.start + 3600;
     }
-    let programme = if custom {
+    let program = if custom {
         None
     } else {
         let schedule = crate::schedule();
-        let programme = schedule.program_at(origin.channel, origin.program_start);
+        let program = schedule.program_at(origin.channel, origin.program_start);
         Some((
-            crate::guide::unix_of(&*schedule, programme.start),
-            crate::guide::unix_of(&*schedule, programme.end),
+            crate::guide::unix_of(&*schedule, program.start),
+            crate::guide::unix_of(&*schedule, program.end),
         ))
     };
     ui.menu.set(None);
@@ -381,8 +381,8 @@ fn prepare_programme(ui: Ui, origin: Origin, custom: bool) -> bool {
             s.draft = None;
         } else {
             let mut draft = Draft::new(request);
-            draft.programme_start = programme.map(|(start, _)| start);
-            draft.programme_end = programme.map(|(_, end)| end);
+            draft.program_start = program.map(|(start, _)| start);
+            draft.program_end = program.map(|(_, end)| end);
             s.draft = Some(draft);
         }
     });
@@ -427,10 +427,8 @@ fn save_allowed(ui: Ui, draft: Draft) {
                         draft.repeat,
                         (draft.repeat != iptv_core::recording::Repeat::Once).then_some(
                             iptv_core::recording::RecurrenceTiming {
-                                programme_start: draft
-                                    .programme_start
-                                    .unwrap_or(draft.request.start),
-                                programme_end: draft.programme_end.unwrap_or(draft.request.end),
+                                program_start: draft.program_start.unwrap_or(draft.request.start),
+                                program_end: draft.program_end.unwrap_or(draft.request.end),
                                 lead_seconds: draft.lead_minutes.clamp(0, 60) as u32 * 60,
                                 trail_seconds: draft.trail_minutes.clamp(0, 60) as u32 * 60,
                             },
@@ -474,7 +472,7 @@ fn save_allowed(ui: Ui, draft: Draft) {
                     s.error = Some(
                         error
                             .unavailable_reason()
-                            .filter(|reason| iptv_core::i18n::is_catalogued(reason))
+                            .filter(|reason| iptv_core::i18n::is_cataloged(reason))
                             .unwrap_or("Recording action failed")
                             .into(),
                     )
@@ -1031,7 +1029,7 @@ fn recording_list(ui: Ui, size: Scale) -> impl IntoElement {
 fn translated_reason(message: &str) -> &str {
     if message.is_empty() {
         ""
-    } else if iptv_core::i18n::is_catalogued(message) {
+    } else if iptv_core::i18n::is_cataloged(message) {
         tr(message)
     } else {
         tr("Recording action failed")

@@ -12,11 +12,11 @@
 //! - every distinct word: its text (a sorted `Box<str>`, 16 bytes + text),
 //!   a 4-byte offset and 4 bytes per title containing it.
 //!
-//! For the synthetic 2,000 channels × 7 days of the `programme_bench`
+//! For the synthetic 2,000 channels × 7 days of the `program_bench`
 //! example (312,000 programmes, 84,000 distinct titles, 12,000 words) that
 //! is about 9 MiB, close to the store itself; the occurrences (3.6 MiB) and
 //! the title text copied from the store (about 2.5 MiB) dominate.
-//! [`ProgrammeIndex::heap_bytes`] reports the actual figure. Times are
+//! [`ProgramIndex::heap_bytes`] reports the actual figure. Times are
 //! absolute, so the index stays valid as `now` moves; rebuild it when the
 //! store changes.
 //!
@@ -52,7 +52,7 @@ pub enum GroupBy {
 }
 
 #[derive(Clone, Copy)]
-pub struct ProgrammeSearchOptions<'a> {
+pub struct ProgramSearchOptions<'a> {
     /// Visibility is applied before ranking/limiting, preserving catalog indices.
     pub visible: Option<&'a dyn Fn(usize) -> bool>,
     /// Past programmes are dropped unless the channel's archive still has
@@ -66,23 +66,23 @@ pub struct ProgrammeSearchOptions<'a> {
     pub look_back: i64,
     pub look_ahead: i64,
     pub group_by: GroupBy,
-    /// Results on these channels first (only with `favourites_first`).
-    pub favourites: Option<&'a BTreeSet<usize>>,
-    pub favourites_first: bool,
+    /// Results on these channels first (only with `favorites_first`).
+    pub favorites: Option<&'a BTreeSet<usize>>,
+    pub favorites_first: bool,
     pub limit: usize,
 }
 
-impl Default for ProgrammeSearchOptions<'_> {
+impl Default for ProgramSearchOptions<'_> {
     fn default() -> Self {
-        ProgrammeSearchOptions {
+        ProgramSearchOptions {
             visible: None,
             include_past_without_catchup: false,
             catchup_days: None,
             look_back: 7 * DAY,
             look_ahead: 3 * DAY,
             group_by: GroupBy::Relevance,
-            favourites: None,
-            favourites_first: false,
+            favorites: None,
+            favorites_first: false,
             limit: 200,
         }
     }
@@ -90,7 +90,7 @@ impl Default for ProgrammeSearchOptions<'_> {
 
 /// One programme result.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProgrammeHit {
+pub struct ProgramHit {
     pub identity: crate::ChannelId,
     pub channel: usize,
     pub start: UnixTime,
@@ -113,7 +113,7 @@ struct Occ {
 
 /// Searchable programme titles of a [`GuideStore`], by channel index.
 #[derive(Clone, Debug, Default)]
-pub struct ProgrammeIndex {
+pub struct ProgramIndex {
     base: i64,
     channels: usize,
     identities: Vec<crate::ChannelId>,
@@ -143,7 +143,7 @@ fn offsets_from_counts(counts: &[u32]) -> Vec<u32> {
     off
 }
 
-impl ProgrammeIndex {
+impl ProgramIndex {
     /// Indexes every programme the store holds for `channels` (channel
     /// index = position; unbound keys simply have no programmes).
     pub fn build<'k>(
@@ -172,7 +172,7 @@ impl ProgrammeIndex {
     }
 
     /// The index of `raw` (title id, channel, start, stop) with the titles
-    /// by id (`ProgrammeIndexBuilder` collects them from elsewhere).
+    /// by id (`ProgramIndexBuilder` collects them from elsewhere).
     pub(crate) fn assemble(
         titles: &[&str],
         raw: &[(u32, u32, i64, i64)],
@@ -272,7 +272,7 @@ impl ProgrammeIndex {
             *i += 1;
         }
 
-        ProgrammeIndex {
+        ProgramIndex {
             base,
             channels: identities.len(),
             identities,
@@ -408,12 +408,12 @@ impl ProgrammeIndex {
 
     /// Programmes whose title matches `query` (see [`GroupBy`] for the
     /// order), at most `opts.limit`.
-    pub fn search_programmes(
+    pub fn search_programs(
         &self,
         query: &str,
         now: UnixTime,
-        opts: ProgrammeSearchOptions<'_>,
-    ) -> Vec<ProgrammeHit> {
+        opts: ProgramSearchOptions<'_>,
+    ) -> Vec<ProgramHit> {
         let q = Query::parse(query);
         if q.is_empty() || opts.limit == 0 || self.occ.is_empty() {
             return Vec::new();
@@ -460,7 +460,7 @@ impl ProgrammeIndex {
                         continue;
                     }
                     let fav =
-                        opts.favourites_first && opts.favourites.is_some_and(|f| f.contains(&ch));
+                        opts.favorites_first && opts.favorites.is_some_and(|f| f.contains(&ch));
                     cands.push(Cand {
                         fav,
                         score,
@@ -479,7 +479,7 @@ impl ProgrammeIndex {
         let cands = order(cands, opts.group_by, opts.limit);
         cands
             .into_iter()
-            .map(|c| ProgrammeHit {
+            .map(|c| ProgramHit {
                 identity: self.identities[c.channel as usize].clone(),
                 channel: c.channel as usize,
                 start: c.start,
@@ -552,5 +552,5 @@ fn order(mut c: Vec<Cand>, group_by: GroupBy, limit: usize) -> Vec<Cand> {
 }
 
 #[cfg(test)]
-#[path = "programmes_tests.rs"]
+#[path = "programs_tests.rs"]
 mod tests;

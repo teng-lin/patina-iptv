@@ -9,8 +9,8 @@ fn live_group_steps_and_ends_do_not_cross_invisible_movie_groups() {
     let source = store
         .add_source(&m3u_source("Generated mixed groups"))
         .unwrap();
-    let catalogue = catalog(6, 3, XT_PASSWORD);
-    replace(&mut store, source, &catalogue);
+    let catalog = catalog(6, 3, XT_PASSWORD);
+    replace(&mut store, source, &catalog);
     let all = store.library_groups(source).unwrap();
     let movies: Vec<_> = all
         .iter()

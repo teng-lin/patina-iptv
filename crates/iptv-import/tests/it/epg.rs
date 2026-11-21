@@ -106,9 +106,9 @@ fn header_url_tvg_guide_matches_by_tvg_id() {
     assert_eq!(guide.bound_count(), 200);
     assert_eq!(epg.listed(FeedId(1)).len(), 200);
     let stats = epg.sources[0].result.as_ref().unwrap();
-    assert_eq!(stats.parse.programmes, 200 * 9 * 24);
+    assert_eq!(stats.parse.programs, 200 * 9 * 24);
     assert_eq!(stats.skipped, 0);
-    let now = guide.programme_at(&key(&chans[7]), NOW + 60).unwrap();
+    let now = guide.program_at(&key(&chans[7]), NOW + 60).unwrap();
     assert_eq!(now.start(), NOW);
     assert_eq!(now.title(), format!("Show 7-{}", 7 * 24));
     assert!(
@@ -237,7 +237,7 @@ fn no_sources_is_an_empty_guide_not_an_error() {
 }
 
 #[test]
-fn retention_drops_old_programmes() {
+fn retention_drops_old_programs() {
     let chans = channels(2);
     let body = synth::xmltv(
         &synth::m3u_epg_channels(2),
@@ -254,7 +254,7 @@ fn retention_drops_old_programmes() {
     let ingest = epg.sources[0].result.as_ref().unwrap().ingest;
     assert_eq!(ingest.kept, 2 * 48);
     assert!(ingest.dropped_retention > 0);
-    let p = guide.programme_at(&key(&chans[0]), NOW).unwrap();
+    let p = guide.program_at(&key(&chans[0]), NOW).unwrap();
     assert_eq!(p.desc(), None);
 }
 
@@ -278,7 +278,7 @@ fn cancellation_stops_the_guide() {
         &mut on,
         &cancel,
     );
-    assert_eq!(err.err().expect("an error"), ImportError::Cancelled);
+    assert_eq!(err.err().expect("an error"), ImportError::Canceled);
 
     let cancel = CancelToken::new();
     let c = cancel.clone();
@@ -291,7 +291,7 @@ fn cancellation_stops_the_guide() {
         &mut NoProgress,
         &cancel,
     );
-    assert_eq!(err.err().expect("an error"), ImportError::Cancelled);
+    assert_eq!(err.err().expect("an error"), ImportError::Canceled);
 }
 
 #[test]
@@ -312,15 +312,15 @@ fn source_user_agent_is_sent() {
 }
 
 #[test]
-fn programmes_of_channels_nothing_can_match_are_not_kept() {
+fn programs_of_channels_nothing_can_match_are_not_kept() {
     // The feed lists 10 channels; the playlist has the first 3.
     let chans = channels(3);
     let body = synth::xmltv(&synth::m3u_epg_channels(10), NOW - HOUR, NOW + HOUR, HOUR);
     let (epg, guide) = run(&FakeFetch::body(body), &[source(1, "/g.xml")], &chans).unwrap();
     let stats = epg.sources[0].result.as_ref().unwrap();
-    assert_eq!(stats.parse.programmes, 20);
+    assert_eq!(stats.parse.programs, 20);
     assert_eq!(stats.skipped, 14);
-    assert_eq!(stats.ingest.programmes_in, 6);
+    assert_eq!(stats.ingest.programs_in, 6);
     assert_eq!(stats.ingest.kept, 6);
     assert_eq!(guide.bound_count(), 3);
     // The feed's channel list is complete (for choosing a guide by hand).
@@ -331,7 +331,7 @@ fn programmes_of_channels_nothing_can_match_are_not_kept() {
 }
 
 #[test]
-fn a_channel_declared_after_its_programmes_still_binds() {
+fn a_channel_declared_after_its_programs_still_binds() {
     let chans = channels(2);
     let full = synth::xmltv(&synth::m3u_epg_channels(2), NOW - HOUR, NOW + HOUR, HOUR);
     // Move the first <channel> after the programmes.
@@ -341,7 +341,7 @@ fn a_channel_declared_after_its_programmes_still_binds() {
         .replace("</tv>", &format!("{first}\n</tv>"));
     let (epg, guide) = run(&FakeFetch::body(body), &[source(1, "/g.xml")], &chans).unwrap();
     assert_eq!(epg.bound_count(), 2);
-    let p = guide.programme_at(&key(&chans[0]), NOW).unwrap();
+    let p = guide.program_at(&key(&chans[0]), NOW).unwrap();
     assert_eq!(p.title(), "Show 0-1");
 }
 
@@ -351,7 +351,7 @@ struct Recording {
     inner: MemoryGuide,
     calls: Vec<String>,
     fail_after: Option<usize>,
-    programmes: usize,
+    programs: usize,
 }
 
 impl iptv_import::GuideSink for Recording {
@@ -366,16 +366,16 @@ impl iptv_import::GuideSink for Recording {
         self.inner.begin_feed(feed, priority, store, now)
     }
 
-    fn programme(
+    fn program(
         &mut self,
         channel: &str,
-        p: &iptv_epg::ProgrammeData<'_>,
+        p: &iptv_epg::ProgramData<'_>,
     ) -> Result<(), iptv_import::SinkError> {
-        self.programmes += 1;
-        if self.fail_after.is_some_and(|n| self.programmes > n) {
+        self.programs += 1;
+        if self.fail_after.is_some_and(|n| self.programs > n) {
             return Err(iptv_import::SinkError("disk full".into()));
         }
-        self.inner.programme(channel, p)
+        self.inner.program(channel, p)
     }
 
     fn finish_feed(&mut self) -> Result<iptv_epg::IngestReport, iptv_import::SinkError> {
@@ -388,8 +388,8 @@ impl iptv_import::GuideSink for Recording {
         self.inner.discard_feed()
     }
 
-    fn has_programmes(&self, feed: FeedId, epg_id: &str) -> bool {
-        self.inner.has_programmes(feed, epg_id)
+    fn has_programs(&self, feed: FeedId, epg_id: &str) -> bool {
+        self.inner.has_programs(feed, epg_id)
     }
 }
 
@@ -622,7 +622,7 @@ fn refusals_bad_content_and_budgets_are_not_retried() {
 }
 
 #[test]
-fn cancelling_during_a_wait_ends_the_import() {
+fn canceling_during_a_wait_ends_the_import() {
     let chans = channels(2);
     let fetch = FakeFetch::new(|_, _| common::connect_error());
     let cancel = CancelToken::new();
@@ -635,7 +635,7 @@ fn cancelling_during_a_wait_ends_the_import() {
         &mut NoProgress,
         &cancel,
     );
-    assert_eq!(err.err().expect("an error"), ImportError::Cancelled);
+    assert_eq!(err.err().expect("an error"), ImportError::Canceled);
     assert_eq!(fetch.requests().len(), 1);
     assert_eq!(*fetch.slept.borrow(), secs(&[2]));
 }

@@ -5,7 +5,7 @@
 //! - [`schema`]: what a setting is — stable key, section/subsection, value
 //!   type with its default, [`Scope`], [`Flags`], dependencies, and
 //!   i18n label keys derived from the key.
-//! - [`catalogue`]: every setting and command of iptv-rs, plus the UI
+//! - [`catalog`]: every setting and command of iptv-rs, plus the UI
 //!   [`tree`](catalogue::tree).
 //! - [`Settings`]: the store — validated, scoped (group → playlist →
 //!   global → default) reads and writes, resets, change lists.
@@ -39,7 +39,7 @@
 //! ```
 
 pub mod backup;
-pub mod catalogue;
+pub mod catalog;
 mod error;
 pub mod keys;
 pub mod schema;

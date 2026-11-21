@@ -159,16 +159,16 @@ impl LiveInput {
         };
         tokio::spawn(async move {
             let mut state = CaptureState::default();
-            let cancelled_preparation = async {
-                prepare_cancel.cancelled().await;
+            let canceled_preparation = async {
+                prepare_cancel.canceled().await;
                 if prepared.load(Ordering::Acquire) {
                     std::future::pending::<()>().await;
                 }
             };
             let outcome = tokio::select! {
                 biased;
-                _ = ending.cancelled() => Err(Failure::Network),
-                _ = cancelled_preparation => Err(Failure::Network),
+                _ = ending.canceled() => Err(Failure::Network),
+                _ = canceled_preparation => Err(Failure::Network),
                 result = recording::receive(&client, &relay, &mut sink, &mut state) => result,
             };
             let failure = outcome.err().unwrap_or(Failure::Network);

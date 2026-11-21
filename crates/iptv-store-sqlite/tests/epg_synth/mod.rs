@@ -106,7 +106,7 @@ pub fn generate(shape: Shape, mut emit: impl FnMut(&[u8])) -> u64 {
     }
     let start = (NOW - shape.days_back * DAY) / 3600 * 3600;
     let end = NOW + shape.days_ahead * DAY;
-    let mut programmes = 0;
+    let mut programs = 0;
     for n in 0..shape.channels {
         let mut rng = Rng(0x9e37_79b9_7f4a_7c15 ^ (n as u64 + 1).wrapping_mul(1_000_003));
         let mut t = start - LENGTHS_MIN[rng.below(10)] * 60 / 2;
@@ -127,13 +127,13 @@ pub fn generate(shape: Shape, mut emit: impl FnMut(&[u8])) -> u64 {
             );
             t += len;
             episode += 1;
-            programmes += 1;
+            programs += 1;
             flush(&mut buf, false);
         }
     }
     buf.push_str("</tv>\n");
     flush(&mut buf, true);
-    programmes
+    programs
 }
 
 /// What `import_epg` does for one source: chunked parse into a
@@ -144,7 +144,7 @@ pub fn import(shape: Shape, store: StoreOptions) -> (GuideStore, u64) {
         ..ParseOptions::default()
     });
     let mut builder = SourceBuilder::new(FeedId(1), 0, store, NOW);
-    let programmes = generate(shape, |chunk| {
+    let programs = generate(shape, |chunk| {
         parser.feed(chunk, &mut |item| builder.push(item)).unwrap();
     });
     parser.finish(&mut |item| builder.push(item)).unwrap();
@@ -169,5 +169,5 @@ pub fn import(shape: Shape, store: StoreOptions) -> (GuideStore, u64) {
         &Overrides::new(),
     );
     guide.set_matches(matched.matches);
-    (guide, programmes)
+    (guide, programs)
 }

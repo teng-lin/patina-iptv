@@ -9,8 +9,7 @@ use std::collections::{HashMap, HashSet};
 
 use iptv_epg::{
     ChannelKey, DAY, FeedId, GuideStore, MatchIndex, MatchReport, Override, Overrides,
-    ParseOptions, PlaylistChannel, ProgrammeData, SourceBuilder, StoreOptions, UnixTime,
-    parse_xmltv,
+    ParseOptions, PlaylistChannel, ProgramData, SourceBuilder, StoreOptions, UnixTime, parse_xmltv,
 };
 use iptv_import::{
     CancelToken, EpgSourceConfig, ImportError, NoProgress, Progress, ProgressSink, import_epg,
@@ -56,10 +55,7 @@ fn in_memory(
         let parsed = parse_xmltv(body.as_bytes(), opts).unwrap();
         let mut b = SourceBuilder::new(cfg.id, cfg.priority, cfg.store, NOW);
         parsed.channels.into_iter().for_each(|c| b.push_channel(c));
-        parsed
-            .programmes
-            .into_iter()
-            .for_each(|p| b.push_programme(p));
+        parsed.programs.into_iter().for_each(|p| b.push_program(p));
         let src = b.finish();
         index.add_source(cfg.id, cfg.priority, src.channels());
         guide.replace_source(src);
@@ -93,7 +89,7 @@ const EVERYTHING: EpgWindow<'static> = EpgWindow {
     descriptions: true,
 };
 
-fn rows(guide: &GuideStore, key: &ChannelKey) -> Vec<ProgrammeData<'static>> {
+fn rows(guide: &GuideStore, key: &ChannelKey) -> Vec<ProgramData<'static>> {
     // Owned copies with 'static strings for comparison.
     let leak = |s: &str| -> &'static str { Box::leak(s.to_owned().into_boxed_str()) };
     let opt = |s: Option<&str>| s.map(leak);
@@ -103,7 +99,7 @@ fn rows(guide: &GuideStore, key: &ChannelKey) -> Vec<ProgrammeData<'static>> {
         .flat_map(|s| s.iter())
         .map(|p| {
             let d = p.data();
-            ProgrammeData {
+            ProgramData {
                 title: leak(d.title),
                 sub_title: opt(d.sub_title),
                 desc: opt(d.desc),
@@ -165,7 +161,7 @@ fn feed_one() -> String {
             (4, 11) => p.stop = Some(start - HOUR),
             _ => {}
         }
-        els.push(El::Programme(p));
+        els.push(El::Program(p));
     }
     // Same start: the longest stays; equal ones: the first; a missing
     // stop is shortest.
@@ -175,32 +171,27 @@ fn feed_one() -> String {
         ("Long too", Some(NOW + 2 * HOUR)),
         ("Open", None),
     ] {
-        els.push(El::Programme(prog("a1", NOW, stop, title)));
+        els.push(El::Program(prog("a1", NOW, stop, title)));
     }
-    els.push(El::Programme(prog("a5", NOW + HOUR / 4, None, "Open")));
+    els.push(El::Program(prog("a5", NOW + HOUR / 4, None, "Open")));
     // Reverse document order.
     for h in (0..24).rev() {
         let start = NOW + 3 * DAY + h * HOUR;
-        els.push(El::Programme(Prog {
+        els.push(El::Program(Prog {
             desc: Some("Late night."),
             ..prog("a6", start, Some(start + HOUR), "Reversed")
         }));
     }
     for h in 0..6 {
         let start = NOW + h * HOUR;
-        els.push(El::Programme(prog(
-            "late",
-            start,
-            Some(start + HOUR),
-            "Late",
-        )));
-        els.push(El::Programme(prog(
+        els.push(El::Program(prog("late", start, Some(start + HOUR), "Late")));
+        els.push(El::Program(prog(
             "hidden",
             start,
             Some(start + HOUR),
             "Hidden",
         )));
-        els.push(El::Programme(prog(
+        els.push(El::Program(prog(
             "u3",
             start,
             Some(start + HOUR),
@@ -227,7 +218,7 @@ fn feed_two() -> String {
         let start = NOW - DAY + h as i64 * HOUR;
         for (b, id) in ids.iter().enumerate() {
             if b != 3 {
-                els.push(El::Programme(Prog {
+                els.push(El::Program(Prog {
                     desc: Some("From the second feed."),
                     ..prog(id, start, Some(start + HOUR), title)
                 }));
@@ -377,14 +368,11 @@ fn check_equivalent(store_opts: StoreOptions) {
     assert_eq!(stored.ends_at, ends_at);
     assert_eq!(stored.feeds.len(), 2);
     for f in &stored.feeds {
-        let (chans, programmes) = &per_feed[&f.meta.config.id];
+        let (chans, programs) = &per_feed[&f.meta.config.id];
         assert_eq!(f.channel_count, chans.len() as u64);
-        assert_eq!(f.program_count, *programmes);
+        assert_eq!(f.program_count, *programs);
     }
-    assert_eq!(
-        counts.programmes,
-        per_feed.values().map(|f| f.1).sum::<u64>()
-    );
+    assert_eq!(counts.programs, per_feed.values().map(|f| f.1).sum::<u64>());
     // Every channel the feeds list, bound or not, for choosing by hand
     // (plus feed 1's undeclared channel an override bound).
     let listed = store.guide_channels(source).unwrap();
@@ -464,7 +452,7 @@ fn stage_files(dir: &std::path::Path) -> Vec<String> {
 }
 
 #[test]
-fn a_cancelled_or_failed_download_keeps_the_stored_guide() {
+fn a_canceled_or_failed_download_keeps_the_stored_guide() {
     let shape = |from, days| GenShape {
         channels: 40,
         days,
@@ -512,7 +500,7 @@ fn a_cancelled_or_failed_download_keeps_the_stored_guide() {
         &mut progress,
         &cancel,
     );
-    assert_eq!(err, Err(ImportError::Cancelled));
+    assert_eq!(err, Err(ImportError::Canceled));
     assert!(staged_some);
     assert_eq!(titles(&store, source, &chans), before);
     assert_eq!(store.epg_guide(source).unwrap(), state);

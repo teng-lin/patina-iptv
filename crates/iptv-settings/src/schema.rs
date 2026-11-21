@@ -1,7 +1,7 @@
 //! The schema model: what a setting *is*, independent of any stored value.
 //!
 //! Every setting is one [`Setting`] row in a static table (see
-//! [`crate::catalogue`]). Storage, backup, the settings UI and validation
+//! [`crate::catalog`]). Storage, backup, the settings UI and validation
 //! all read that table; nothing else declares settings.
 //!
 //! Label keys are i18n keys derived from stable keys, never display text:
@@ -213,7 +213,7 @@ pub enum ValueType {
     },
     /// A colour bundle chosen by stable name (the palette's values live in
     /// the app's theme); rendered as swatches.
-    Colour {
+    Color {
         palette: &'static Choices,
         default: &'static str,
     },
@@ -232,7 +232,7 @@ impl ValueType {
             ValueType::Duration { .. } => "duration",
             ValueType::Enum { .. } => "enum",
             ValueType::Text { .. } => "text",
-            ValueType::Colour { .. } => "colour",
+            ValueType::Color { .. } => "colour",
             ValueType::KeyBindings { .. } => "key_bindings",
         }
     }
@@ -244,7 +244,7 @@ impl ValueType {
             ValueType::Text {
                 kind: TextKind::Locale,
                 ..
-            } => Some(&crate::catalogue::choices::LANGUAGE),
+            } => Some(&crate::catalog::choices::LANGUAGE),
             _ => self.choices(),
         }
     }
@@ -253,7 +253,7 @@ impl ValueType {
     pub const fn choices(&self) -> Option<&'static Choices> {
         match self {
             ValueType::Enum { choices, .. } => Some(choices),
-            ValueType::Colour { palette, .. } => Some(palette),
+            ValueType::Color { palette, .. } => Some(palette),
             _ => None,
         }
     }
@@ -391,7 +391,7 @@ impl Setting {
             ValueType::Duration { default_ms, .. } => Value::Duration(default_ms),
             ValueType::Enum { default, .. } => Value::Enum(default.to_owned()),
             ValueType::Text { default, .. } => Value::Text(default.to_owned()),
-            ValueType::Colour { default, .. } => Value::Colour(default.to_owned()),
+            ValueType::Color { default, .. } => Value::Color(default.to_owned()),
             ValueType::KeyBindings { .. } => Value::KeyBindings(Vec::new()),
         }
     }
@@ -513,8 +513,8 @@ pub const fn text(kind: TextKind, max_len: usize, default: &'static str) -> Valu
     }
 }
 
-pub const fn colour(palette: &'static Choices, default: &'static str) -> ValueType {
-    ValueType::Colour { palette, default }
+pub const fn color(palette: &'static Choices, default: &'static str) -> ValueType {
+    ValueType::Color { palette, default }
 }
 
 pub const fn bindings(max_len: usize) -> ValueType {

@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use iptv_core::guide::{Focus, Program, Schedule};
 use iptv_epg::{
-    ChannelKey, DAY, EpgRef, FeedId, GuideStore, MatchKind, ProgrammeData, SourceBuilder,
+    ChannelKey, DAY, EpgRef, FeedId, GuideStore, MatchKind, ProgramData, SourceBuilder,
     StoreOptions,
 };
 
@@ -28,7 +28,7 @@ fn store_between(from: i64, to: i64) -> GuideStore {
         if start < to && start + LEN > from {
             b.push_data(
                 "a.test",
-                &ProgrammeData {
+                &ProgramData {
                     start,
                     stop: Some(start + LEN),
                     title,
@@ -144,7 +144,7 @@ fn an_older_day_loads_on_demand_and_then_shows() {
 }
 
 #[test]
-fn programmes_across_the_window_edge_read_the_same_from_both_sides() {
+fn programs_across_the_window_edge_read_the_same_from_both_sides() {
     let (s, requests) = paged(NOW - 7 * DAY);
     let edge = NOW - DAY;
     // The programme airing at the edge started before it.
@@ -261,7 +261,7 @@ fn without_pages_the_store_is_the_whole_guide() {
 }
 
 #[test]
-fn the_guide_browses_from_the_oldest_day_kept_to_past_its_last_programme() {
+fn the_guide_browses_from_the_oldest_day_kept_to_past_its_last_program() {
     let (s, _) = paged(NOW - 3 * DAY);
     let now = minute_of(&s, NOW);
     // The synthetic guide ends a day (and ten minutes) after now.
@@ -351,7 +351,7 @@ fn retained_coverage_is_per_channel_and_inspectable_before_a_page_is_loaded() {
     let mut builder = SourceBuilder::new(FeedId(1), 0, StoreOptions::default(), NOW);
     builder.push_data(
         "a.test",
-        &ProgrammeData {
+        &ProgramData {
             start,
             stop: Some(cutoff + 15 * 60),
             title: "Generated overlap",

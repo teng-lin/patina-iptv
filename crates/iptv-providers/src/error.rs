@@ -161,7 +161,7 @@ pub enum CatchupError {
     /// (not HTTP for `shift`, not Flussonic or Xtream-shaped, not a URL).
     MalformedUrl,
     /// The requested position has not been broadcast yet.
-    FutureProgramme,
+    FutureProgram,
     /// The requested position is older than the archive window or past the
     /// programme's end.
     OutsideArchive,
@@ -173,7 +173,7 @@ impl fmt::Display for CatchupError {
             Self::MissingTemplate => "the channel's catch-up needs a source it does not declare",
             Self::Unsupported => "catch-up is not available for this channel",
             Self::MalformedUrl => "the stream URL does not fit the channel's catch-up type",
-            Self::FutureProgramme => "the programme has not been broadcast yet",
+            Self::FutureProgram => "the programme has not been broadcast yet",
             Self::OutsideArchive => "the programme is outside the archive window",
         })
     }

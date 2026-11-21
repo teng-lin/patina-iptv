@@ -10,7 +10,7 @@ use std::{
 use support::block_on;
 
 #[test]
-fn display_snapshot_and_catalogue_do_not_queue_behind_a_busy_writer() {
+fn display_snapshot_and_catalog_do_not_queue_behind_a_busy_writer() {
     let directory = tempfile::tempdir().unwrap();
     let owner = Rc::new(Runtime::new(Ports::new(
         directory.path().to_owned(),

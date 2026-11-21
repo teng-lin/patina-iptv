@@ -12,7 +12,7 @@ fn incomplete_and_failed_steps_preserve_saved_rows_and_overlays() {
     store
         .replace_catalog(source, &[], std::slice::from_ref(&old), &[], &[])
         .unwrap();
-    store.set_favourite(source, &old.id, true).unwrap();
+    store.set_favorite(source, &old.id, true).unwrap();
     let mut incomplete = CatalogStage::create_in(dir.path()).unwrap();
     incomplete
         .push(CatalogRow::Channel(common::m3u_channel(
@@ -60,7 +60,7 @@ fn incomplete_and_failed_steps_preserve_saved_rows_and_overlays() {
         .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].channel, old);
-    assert!(rows[0].favourite);
+    assert!(rows[0].favorite);
     assert_eq!(
         std::fs::read_dir(dir.path())
             .unwrap()

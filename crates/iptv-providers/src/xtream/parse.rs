@@ -21,7 +21,7 @@ use crate::http::{HttpResponse, json_body};
 use crate::id::{ContentId, GroupId};
 use crate::lenient::{Obj, list_items, rating_x10, year_from};
 use crate::model::{
-    CatchUp, CatchUpKind, Channel, ContentKind, Episode, Group, Import, Programme, Season, Series,
+    CatchUp, CatchUpKind, Channel, ContentKind, Episode, Group, Import, Program, Season, Series,
     SeriesDetails, SourceKind, StreamLocator, VodItem, WarningLocation,
 };
 
@@ -512,7 +512,7 @@ pub fn parse_vod_info(response: &HttpResponse, vod_id: u64) -> Result<VodDetails
 pub fn parse_epg(
     response: &HttpResponse,
     server_offset_minutes: i32,
-) -> Result<Import<Programme>, ProviderError> {
+) -> Result<Import<Program>, ProviderError> {
     let body = json_body(response)?;
     let listings = match &body {
         Value::Object(map) => map
@@ -554,7 +554,7 @@ pub fn parse_epg(
             out.skip(WarningLocation::Index(i), "programme ends before it starts");
             continue;
         }
-        out.items.push(Programme {
+        out.items.push(Program {
             epg_id: o.text("epg_id").or_else(|| o.text("channel_id")),
             title: o.str("title").map(decode).unwrap_or_default(),
             description: o.str("description").map(decode).filter(|d| !d.is_empty()),

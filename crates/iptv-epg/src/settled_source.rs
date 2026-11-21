@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use crate::intern::Interner;
 use crate::matching::FeedId;
-use crate::store::{EpgSource, IngestReport, ProgrammeData, Schedule, Slot, intern_programme};
+use crate::store::{EpgSource, IngestReport, ProgramData, Schedule, Slot, intern_program};
 
 /// Builds an [`EpgSource`] one channel at a time from settled programmes.
 ///
@@ -22,7 +22,7 @@ use crate::store::{EpgSource, IngestReport, ProgrammeData, Schedule, Slot, inter
 /// let mut b = SettledBuilder::new(FeedId(1), 10, false);
 /// b.channel("one.example");
 /// for (start, stop, title) in [(1000, 2000, "News"), (2000, 2600, "Weather")] {
-///     b.push(&ProgrammeData { start, stop: Some(stop), title, ..Default::default() });
+///     b.push(&ProgramData { start, stop: Some(stop), title, ..Default::default() });
 /// }
 /// let src = b.finish();
 /// let p = src.schedule("one.example").unwrap().at(2100).unwrap();
@@ -76,9 +76,9 @@ impl SettledBuilder {
     /// settled after the ones before it (no stop, not after its start,
     /// starting before the previous one ends, or beyond the compact
     /// slot's range) is dropped and counted; returns whether it was kept.
-    pub fn push(&mut self, p: &ProgrammeData<'_>) -> bool {
+    pub fn push(&mut self, p: &ProgramData<'_>) -> bool {
         let r = &mut self.report;
-        r.programmes_in += 1;
+        r.programs_in += 1;
         let Some(at) = self.current else {
             r.dropped_no_stop += 1;
             return false;
@@ -107,10 +107,10 @@ impl SettledBuilder {
             return false;
         };
         let (title, extra) =
-            intern_programme(&mut self.strings, &mut self.extras, p, self.descriptions);
+            intern_program(&mut self.strings, &mut self.extras, p, self.descriptions);
         if sched.slots.is_empty() {
             sched.base = base;
-            r.channels_with_programmes += 1;
+            r.channels_with_programs += 1;
         }
         sched.slots.push(Slot {
             start,
@@ -149,8 +149,8 @@ mod tests {
     use super::*;
     use crate::store::{SourceBuilder, StoreOptions};
 
-    fn data(start: i64, stop: i64, title: &str) -> ProgrammeData<'_> {
-        ProgrammeData {
+    fn data(start: i64, stop: i64, title: &str) -> ProgramData<'_> {
+        ProgramData {
             start,
             stop: Some(stop),
             title,
@@ -218,10 +218,7 @@ mod tests {
         assert_eq!(x.at(1000).unwrap().desc(), Some("About it"));
         assert_eq!(src.schedule("y").unwrap().at(550).unwrap().title(), "Y");
         let r = src.report();
-        assert_eq!(
-            (r.programmes_in, r.kept, r.channels_with_programmes),
-            (7, 4, 2)
-        );
+        assert_eq!((r.programs_in, r.kept, r.channels_with_programs), (7, 4, 2));
         assert_eq!((r.dropped_duplicate, r.dropped_bad_duration), (1, 1));
     }
 }

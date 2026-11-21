@@ -146,9 +146,9 @@ async fn check_m3u_guide(server: TestServer) {
     let guide = sink.into_guide(&epg);
     assert_eq!(guide.bound_count(), CHANNELS);
     let stats = epg.sources[0].result.as_ref().unwrap();
-    assert_eq!(stats.parse.programmes, (CHANNELS * 9 * 12) as u64);
+    assert_eq!(stats.parse.programs, (CHANNELS * 9 * 12) as u64);
     let key = ChannelKey::new(catalog.channels[3].id.as_str());
-    let now = guide.programme_at(&key, NOW + 1).unwrap();
+    let now = guide.program_at(&key, NOW + 1).unwrap();
     assert_eq!((now.start(), now.stop()), (NOW, NOW + 2 * HOUR));
     assert!(phases.contains(&Phase::Matching));
 
@@ -341,7 +341,7 @@ async fn spawned_import_is_send_and_cancels_mid_download() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(result.unwrap_err(), ImportError::Cancelled);
+    assert_eq!(result.unwrap_err(), ImportError::Canceled);
     assert!(
         started.elapsed() < Duration::from_secs(1),
         "cancel does not wait for the body"

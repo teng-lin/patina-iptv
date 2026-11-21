@@ -7,26 +7,26 @@ use iptv_epg::*;
 const H: i64 = 3600;
 const T0: i64 = 1_772_323_200; // 2026-03-01T00:00:00Z
 
-fn prog(channel: &str, start: i64, stop: Option<i64>, title: &str) -> XmltvProgramme {
-    XmltvProgramme {
+fn prog(channel: &str, start: i64, stop: Option<i64>, title: &str) -> XmltvProgram {
+    XmltvProgram {
         channel: channel.into(),
         start,
         stop,
         title: title.into(),
-        ..XmltvProgramme::default()
+        ..XmltvProgram::default()
     }
 }
 
 fn build(
     id: u32,
     priority: i32,
-    progs: Vec<XmltvProgramme>,
+    progs: Vec<XmltvProgram>,
     opts: StoreOptions,
     now: i64,
 ) -> EpgSource {
     let mut b = SourceBuilder::new(FeedId(id), priority, opts, now);
     for p in progs {
-        b.push_programme(p);
+        b.push_program(p);
     }
     b.finish()
 }
@@ -37,7 +37,7 @@ fn titles(s: ScheduleRef<'_>) -> Vec<(i64, i64, String)> {
         .collect()
 }
 
-fn messy() -> Vec<XmltvProgramme> {
+fn messy() -> Vec<XmltvProgram> {
     vec![
         prog("c", T0 + 2 * H, Some(T0 + 3 * H), "C"),
         prog("c", T0, Some(T0 + H), "A short dup"),
@@ -72,7 +72,7 @@ fn schedules_are_sorted_non_overlapping_and_deterministic() {
         ]
     );
     let r = src.report();
-    assert_eq!(r.programmes_in, 10);
+    assert_eq!(r.programs_in, 10);
     assert_eq!(r.kept, 5);
     assert_eq!(r.dropped_bad_duration, 2);
     assert_eq!(r.dropped_duplicate, 2);
@@ -97,7 +97,7 @@ fn schedules_are_sorted_non_overlapping_and_deterministic() {
 fn queries_respect_half_open_intervals_and_gaps() {
     let src = build(1, 0, messy(), StoreOptions::default(), T0);
     let s = src.schedule("c").unwrap();
-    let title = |p: Option<ProgrammeRef>| p.map(|p| p.title().to_string());
+    let title = |p: Option<ProgramRef>| p.map(|p| p.title().to_string());
     assert_eq!(title(s.at(T0 - 1)), None);
     assert_eq!(title(s.at(T0)).as_deref(), Some("A long"));
     assert_eq!(title(s.at(T0 + 2 * H - 1)).as_deref(), Some("B overlaps C"));
@@ -133,7 +133,7 @@ fn queries_respect_half_open_intervals_and_gaps() {
 }
 
 #[test]
-fn retention_drops_old_programmes_at_ingest_and_prune() {
+fn retention_drops_old_programs_at_ingest_and_prune() {
     let progs: Vec<_> = (0..10)
         .map(|d| {
             prog(
@@ -226,7 +226,7 @@ fn descriptions_and_extras() {
 /// What a stored guide does: read every field back as plain values and
 /// rebuild an equal source from them.
 #[test]
-fn programme_data_round_trips() {
+fn program_data_round_trips() {
     let mut p = prog("c", T0, Some(T0 + H), "Full");
     p.desc = Some("About it".into());
     p.sub_title = Some("Part one".into());
@@ -243,7 +243,7 @@ fn programme_data_round_trips() {
     }];
     let plain = prog("c", T0 + H, Some(T0 + 2 * H), "Plain");
     let src = build(1, 0, vec![p, plain], StoreOptions::default(), T0);
-    let rows: Vec<ProgrammeData<'_>> = src
+    let rows: Vec<ProgramData<'_>> = src
         .schedule("c")
         .unwrap()
         .iter()
@@ -259,7 +259,7 @@ fn programme_data_round_trips() {
         b.push_data("c", r);
     }
     let again = b.finish();
-    let back: Vec<ProgrammeData<'_>> = again
+    let back: Vec<ProgramData<'_>> = again
         .schedule("c")
         .unwrap()
         .iter()
@@ -282,7 +282,7 @@ fn programme_data_round_trips() {
     let first = lean.schedule("c").unwrap().get(0).unwrap().data();
     assert_eq!(first.desc, None);
     assert_eq!(
-        ProgrammeData {
+        ProgramData {
             desc: rows[0].desc,
             ..first
         },
@@ -351,7 +351,7 @@ fn higher_priority_source_with_data_wins_per_channel() {
             ("kz", &[(7, "z")]),
         ],
     );
-    let at = |s: &GuideStore, k: &str| s.programme_at(&k.into(), T0).map(|p| p.title().to_string());
+    let at = |s: &GuideStore, k: &str| s.program_at(&k.into(), T0).map(|p| p.title().to_string());
     assert_eq!(at(&store, "ka").as_deref(), Some("high a"));
     // The high source has no "b": fall back to the low one.
     assert_eq!(at(&store, "kb").as_deref(), Some("low b"));
@@ -404,7 +404,7 @@ fn now_next_batch_keeps_input_order() {
     bind_all(&mut store, &[("ka", &[(1, "a")]), ("kb", &[(1, "b")])]);
     let keys: Vec<ChannelKey> = ["kb", "none", "ka"].into_iter().map(Into::into).collect();
     let nn = store.now_next(&keys, T0 + 10);
-    fn show<'a>(p: Option<ProgrammeRef<'a>>) -> Option<&'a str> {
+    fn show<'a>(p: Option<ProgramRef<'a>>) -> Option<&'a str> {
         p.map(|p| p.title())
     }
     assert_eq!(nn.len(), 3);
@@ -415,11 +415,11 @@ fn now_next_batch_keeps_input_order() {
         (Some("a1"), Some("a2"))
     );
     let window: Vec<_> = store
-        .programmes(&"ka".into(), T0 + H / 2, T0 + 3 * H)
+        .programs(&"ka".into(), T0 + H / 2, T0 + 3 * H)
         .map(|p| p.title())
         .collect();
     assert_eq!(window, ["a1", "a2"]);
-    assert_eq!(store.programmes(&"none".into(), T0, T0 + H).count(), 0);
+    assert_eq!(store.programs(&"none".into(), T0, T0 + H).count(), 0);
 }
 
 #[test]
@@ -448,7 +448,7 @@ fn parse_match_store_end_to_end() {
         parser.feed(chunk, &mut |item| builder.push(item)).unwrap();
     }
     let stats = parser.finish(&mut |item| builder.push(item)).unwrap();
-    assert_eq!((stats.channels, stats.programmes), (2, 3));
+    assert_eq!((stats.channels, stats.programs), (2, 3));
     let src = builder.finish();
 
     let mut index = MatchIndex::new();

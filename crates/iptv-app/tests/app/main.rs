@@ -26,7 +26,7 @@ mod support;
 mod accessibility_visibility;
 mod architecture;
 mod backup_restore;
-mod catalogue_lint;
+mod catalog_lint;
 mod cold_start;
 mod cold_start_slow_provider;
 mod combined_playlists;

@@ -109,7 +109,7 @@ pub fn revoke_import_handoff(owner: &super::Runtime, source: SourceId) {
 pub fn supersede_import(owner: &super::Runtime, source: SourceId) -> Option<ImportCompletion> {
     let pending = pending_import(owner, source);
     revoke_import_handoff(owner, source);
-    pending.filter(|job| job.cancel.is_cancelled())
+    pending.filter(|job| job.cancel.is_canceled())
 }
 /// [`supersede_import`] by newer work for `source` (an update asked for):
 /// the replaced work leaves the next guide check to it

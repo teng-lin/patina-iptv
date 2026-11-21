@@ -18,7 +18,7 @@ pub struct EnumKey(pub(crate) &'static str);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TextKey(pub(crate) &'static str);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ColourKey(pub(crate) &'static str);
+pub struct ColorKey(pub(crate) &'static str);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BindingsKey(pub(crate) &'static str);
 
@@ -42,8 +42,8 @@ pub const AUTOPLAY: BoolKey = BoolKey("guide.autoplay");
 pub const BROWSE_MODE: EnumKey = EnumKey("guide.browse_mode");
 
 // Appearance (iptv-app theme).
-pub const ACCENT: ColourKey = ColourKey("appearance.accent");
-pub const BACKGROUND: ColourKey = ColourKey("appearance.background");
+pub const ACCENT: ColorKey = ColorKey("appearance.accent");
+pub const BACKGROUND: ColorKey = ColorKey("appearance.background");
 pub const FONT_SIZE: EnumKey = EnumKey("appearance.font_size");
 
 // Organisation.
@@ -172,7 +172,7 @@ pub const GUIDE_SHOW_LOGOS: BoolKey = BoolKey("guide.show_logos");
 impl BoolKey {
     /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
-        let setting = crate::catalogue::setting(key)
+        let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
         let found = setting.ty.type_name();
         if found != "bool" {
@@ -192,7 +192,7 @@ impl BoolKey {
 impl IntKey {
     /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
-        let setting = crate::catalogue::setting(key)
+        let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
         let found = setting.ty.type_name();
         if found != "integer" {
@@ -212,7 +212,7 @@ impl IntKey {
 impl DurationKey {
     /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
-        let setting = crate::catalogue::setting(key)
+        let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
         let found = setting.ty.type_name();
         if found != "duration" {
@@ -232,7 +232,7 @@ impl DurationKey {
 impl EnumKey {
     /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
-        let setting = crate::catalogue::setting(key)
+        let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
         let found = setting.ty.type_name();
         if found != "enum" {
@@ -252,7 +252,7 @@ impl EnumKey {
 impl TextKey {
     /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
-        let setting = crate::catalogue::setting(key)
+        let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
         let found = setting.ty.type_name();
         if found != "text" {
@@ -269,10 +269,10 @@ impl TextKey {
     }
 }
 
-impl ColourKey {
+impl ColorKey {
     /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
-        let setting = crate::catalogue::setting(key)
+        let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
         let found = setting.ty.type_name();
         if found != "colour" {
@@ -292,7 +292,7 @@ impl ColourKey {
 impl BindingsKey {
     /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
-        let setting = crate::catalogue::setting(key)
+        let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
         let found = setting.ty.type_name();
         if found != "key_bindings" {

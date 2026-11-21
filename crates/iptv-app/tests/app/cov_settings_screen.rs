@@ -76,7 +76,7 @@ fn saved(app: &mut Headless, home: &Path, want: &str) {
 }
 
 #[test]
-fn menus_favourites_and_settings() {
+fn menus_favorites_and_settings() {
     let Some(home) = isolated!() else { return };
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -115,7 +115,7 @@ fn menus_favourites_and_settings() {
     step(app.wait_for_within("text:Golden Engine", IMPORT));
 
     menu(&mut app);
-    favourites(&mut app);
+    favorites(&mut app);
     settings(&mut app, home.path());
     leaving(&mut app);
 
@@ -232,7 +232,7 @@ fn menu(app: &mut Headless) {
 /// The favourites editor's title (empty while it is closed).
 const EDITOR: &str = "text:/^Favourites · /";
 
-fn favourites(app: &mut Headless) {
+fn favorites(app: &mut Headless) {
     // Opened on the list on screen: one of two starred (Channel One).
     open_menu(app);
     step(app.press("text:Manage favourites…"));

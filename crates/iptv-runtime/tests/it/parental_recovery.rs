@@ -29,11 +29,11 @@ fn recovery_rotates_the_code_preserves_blocks_and_revokes_previous_content_grant
     let source = store
         .add_source(&common::m3u_source("Generated recovery source"))
         .unwrap();
-    let catalogue = common::catalog(2, 2, common::XT_PASSWORD);
-    common::replace(&mut store, source, &catalogue);
+    let catalog = common::catalog(2, 2, common::XT_PASSWORD);
+    common::replace(&mut store, source, &catalog);
     drop(store);
     let runtime = owner(directory.path());
-    let target = Target::live(source.0, catalogue.channels[0].id.as_str());
+    let target = Target::live(source.0, catalog.channels[0].id.as_str());
     assert_eq!(
         block_on(runtime.parental_recover_pin(
             zeroize::Zeroizing::new("generated-no-code".into()),

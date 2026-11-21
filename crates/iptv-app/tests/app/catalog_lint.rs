@@ -20,7 +20,7 @@
 //!    items", &[("cnt", …)])` would show `{count}` as written.
 //! 5. **A user-facing literal that goes around the catalogue.** Any other
 //!    literal that reads as text for a person must be in
-//!    `catalogue_allowlist.txt`: under `[untranslated]` when it is shown
+//!    `catalog_allowlist.txt`: under `[untranslated]` when it is shown
 //!    and not translated yet, under `[not-shown]` when it never reaches the
 //!    screen (a log line, an internal reason, markup, a font name).
 //!
@@ -67,7 +67,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use iptv_core::i18n::is_catalogued;
+use iptv_core::i18n::is_cataloged;
 
 /// How many `[untranslated]` entries there are. Lower it with the list;
 /// it is never raised.
@@ -1201,10 +1201,10 @@ fn reads_as_text(text: &str, shown: bool) -> bool {
         return false;
     }
     let mut letters = plain.chars();
-    let capitalised = letters.next().is_some_and(char::is_uppercase)
+    let capitalized = letters.next().is_some_and(char::is_uppercase)
         && letters.next().is_some_and(char::is_lowercase);
     let spaced = plain.split_whitespace().count() > 1;
-    capitalised || spaced || shown
+    capitalized || spaced || shown
 }
 
 /// What the lint decided about a literal.
@@ -1334,7 +1334,7 @@ struct Allowlist {
 }
 
 fn allowlist() -> Allowlist {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/app/catalogue_allowlist.txt");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/app/catalog_allowlist.txt");
     let text = std::fs::read_to_string(&path).unwrap();
     let mut list = Allowlist {
         untranslated: BTreeSet::new(),
@@ -1391,14 +1391,14 @@ fn unescaped(text: &str) -> String {
 
 /// A message without a row stays English in every language.
 #[test]
-fn every_message_has_a_catalogue_row() {
+fn every_message_has_a_catalog_row() {
     let mut missing = Vec::new();
     let mut messages = 0;
     for (file, literals) in read_sources() {
         for (literal, verdict) in literals {
             if verdict == Verdict::Message {
                 messages += 1;
-                if !is_catalogued(&literal.text) {
+                if !is_cataloged(&literal.text) {
                     missing.push(format!("{file}: {:?}", literal.text));
                 }
             }
@@ -1483,7 +1483,7 @@ fn a_literal_message_is_given_the_values_it_places() {
 /// Text that goes around the catalogue is listed, and the list of what is
 /// not translated yet only shrinks.
 #[test]
-fn text_outside_the_catalogue_is_listed_and_the_list_only_shrinks() {
+fn text_outside_the_catalog_is_listed_and_the_list_only_shrinks() {
     let list = allowlist();
     let mut bypasses = BTreeSet::new();
     for (file, literals) in read_sources() {
@@ -1503,7 +1503,7 @@ fn text_outside_the_catalogue_is_listed_and_the_list_only_shrinks() {
         unlisted.is_empty(),
         "{} literals read as text and are not messages. Pass each through `tr` or `trf` with a \
          row in messages.tsv; if it never reaches the screen, add its line under [not-shown] in \
-         tests/app/catalogue_allowlist.txt:\n{}",
+         tests/app/catalog_allowlist.txt:\n{}",
         unlisted.len(),
         unlisted.join("\n")
     );
@@ -1516,7 +1516,7 @@ fn text_outside_the_catalogue_is_listed_and_the_list_only_shrinks() {
         .collect();
     assert!(
         stale.is_empty(),
-        "{} entries of tests/app/catalogue_allowlist.txt match no literal any more; remove \
+        "{} entries of tests/app/catalog_allowlist.txt match no literal any more; remove \
          them (and lower UNTRANSLATED):\n{}",
         stale.len(),
         stale.join("\n")
@@ -2300,7 +2300,7 @@ fn extracted_runtime_messages_and_shell_failures_remain_checked() {
         "fn f() { emit(RuntimeEvent::Notify(\"Synthetic uncatalogued guide failure\")); }",
     );
     assert_eq!(messages, ["Synthetic uncatalogued guide failure"]);
-    assert!(!is_catalogued(&messages[0]));
+    assert!(!is_cataloged(&messages[0]));
     assert!(carried.is_empty() && unproven.is_empty());
     // The moved data path rejects a missing catalogue row as before.
     let file = "iptv-runtime/src/backup.rs";
@@ -2310,7 +2310,7 @@ fn extracted_runtime_messages_and_shell_failures_remain_checked() {
     )
     .remove(0);
     assert_eq!(verdict(file, &literal), Verdict::Message);
-    assert!(!is_catalogued(&literal.text));
+    assert!(!is_cataloged(&literal.text));
     // Runtime notices retain the dynamic-call and wrapper rules, too.
     let (messages, carried, unproven) = followed(
         file,
@@ -2357,7 +2357,7 @@ fn print_the_literals_the_allowlist_would_need() {
 }
 
 /// Prints the messages with no catalogue row, one per line, for the
-/// translators: as above, with `catalogue_lint::print_the_messages`.
+/// translators: as above, with `catalog_lint::print_the_messages`.
 #[test]
 #[ignore = "a tool, not a check"]
 fn print_the_messages_without_a_row() {
@@ -2365,7 +2365,7 @@ fn print_the_messages_without_a_row() {
     for (_, literals) in read_sources() {
         for (literal, verdict) in literals {
             if verdict == Verdict::Message
-                && !is_catalogued(&literal.text)
+                && !is_cataloged(&literal.text)
                 && seen.insert(literal.text.clone())
             {
                 println!("{}", escaped(&literal.text));

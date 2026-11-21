@@ -12,7 +12,7 @@ pub enum Value {
     Enum(String),
     Text(String),
     /// A palette key.
-    Colour(String),
+    Color(String),
     KeyBindings(Vec<KeyBinding>),
 }
 
@@ -25,8 +25,8 @@ impl Value {
         Value::Text(text.to_owned())
     }
 
-    pub fn colour(name: &str) -> Value {
-        Value::Colour(name.to_owned())
+    pub fn color(name: &str) -> Value {
+        Value::Color(name.to_owned())
     }
 
     pub const fn ms(ms: i64) -> Value {
@@ -44,7 +44,7 @@ impl Value {
             Value::Duration(_) => "duration",
             Value::Enum(_) => "enum",
             Value::Text(_) => "text",
-            Value::Colour(_) => "colour",
+            Value::Color(_) => "colour",
             Value::KeyBindings(_) => "key_bindings",
         }
     }

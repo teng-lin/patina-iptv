@@ -281,7 +281,7 @@ pub struct SeriesDetails {
 /// One programme from a provider EPG call (Xtream `get_short_epg` /
 /// `get_simple_data_table`). XMLTV is a separate crate.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Programme {
+pub struct Program {
     pub epg_id: Option<String>,
     pub title: String,
     pub description: Option<String>,

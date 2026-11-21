@@ -48,7 +48,7 @@ impl ScheduleRules {
     }
 
     /// Whether a programme arriving with `start`/`stop` is kept for now;
-    /// a dropped one is counted in `report` (`programmes_in` counts every
+    /// a dropped one is counted in `report` (`programs_in` counts every
     /// call).
     pub fn admit(
         &self,
@@ -56,7 +56,7 @@ impl ScheduleRules {
         stop: Option<UnixTime>,
         report: &mut IngestReport,
     ) -> bool {
-        report.programmes_in += 1;
+        report.programs_in += 1;
         let Some(stop) = stop else {
             return true;
         };
@@ -81,7 +81,7 @@ impl ScheduleRules {
     /// Settles one channel. `rows`: its admitted programmes as `(start,
     /// stop)`, sorted by start, one per start ([`Self::replaces`] chose
     /// it). `out` hears each row's fate by index; `report` counts trims,
-    /// drops, `kept` and `channels_with_programmes`.
+    /// drops, `kept` and `channels_with_programs`.
     pub fn settle(
         &self,
         rows: &[(UnixTime, Option<UnixTime>)],
@@ -124,7 +124,7 @@ impl ScheduleRules {
             out(i, fate);
         }
         report.kept += kept;
-        report.channels_with_programmes += u64::from(kept > 0);
+        report.channels_with_programs += u64::from(kept > 0);
     }
 }
 
@@ -180,7 +180,7 @@ mod tests {
             ),
             (3, 1, 1, 1)
         );
-        assert_eq!(r.channels_with_programmes, 1);
+        assert_eq!(r.channels_with_programs, 1);
     }
 
     #[test]
@@ -190,7 +190,7 @@ mod tests {
         assert!(rules.admit(10, None, &mut r));
         assert!(!rules.admit(10, Some(10), &mut r));
         assert!(rules.admit(10, Some(11), &mut r));
-        assert_eq!((r.programmes_in, r.dropped_bad_duration), (3, 1));
+        assert_eq!((r.programs_in, r.dropped_bad_duration), (3, 1));
         assert!(ScheduleRules::replaces(Some(5), None));
         assert!(!ScheduleRules::replaces(None, Some(5)));
         assert!(!ScheduleRules::replaces(Some(5), Some(5)));

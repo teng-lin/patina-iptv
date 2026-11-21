@@ -427,8 +427,8 @@ mod tests {
         for c in xml.channels {
             builder.push_channel(c);
         }
-        for p in xml.programmes {
-            builder.push_programme(p);
+        for p in xml.programs {
+            builder.push_program(p);
         }
         let feed = builder.finish();
         let mut index = MatchIndex::new();
@@ -605,7 +605,7 @@ mod tests {
             ParseOptions::default(),
         )
         .unwrap()
-        .programmes[0]
+        .programs[0]
             .start;
         let minute = ((t - NOW) / 60) as i32;
         let a = all.program_at(0, minute);

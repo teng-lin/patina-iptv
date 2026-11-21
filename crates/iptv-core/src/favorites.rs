@@ -196,7 +196,7 @@ mod tests {
     }
 
     #[test]
-    fn favourites_keep_their_order_and_survive_a_reordered_catalog() {
+    fn favorites_keep_their_order_and_survive_a_reordered_catalog() {
         let mut f = Favorites::default();
         assert!(f.set(&key(40), true));
         assert!(f.set(&key(7), true));
@@ -218,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn stored_favourites_drop_duplicates() {
+    fn stored_favorites_drop_duplicates() {
         let f = Favorites::from_keys([key(1), key(2), key(1)]);
         assert_eq!(f.keys(), &[key(1), key(2)]);
     }

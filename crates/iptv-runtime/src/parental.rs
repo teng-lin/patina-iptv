@@ -911,7 +911,7 @@ mod source_tests {
         }
     }
     #[tokio::test(flavor = "current_thread")]
-    async fn targeted_checks_keep_unrelated_catalogue_memberships_out_of_the_read() {
+    async fn targeted_checks_keep_unrelated_catalog_memberships_out_of_the_read() {
         let directory = tempfile::tempdir().unwrap();
         let owner = std::rc::Rc::new(Runtime::new(crate::Ports::new(
             directory.path().to_owned(),

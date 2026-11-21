@@ -111,7 +111,7 @@ fn seed(root: &Path, name: &str) {
         .replace_catalog(id, &parsed.groups, &parsed.channels.items, &[], &[])
         .unwrap();
     let key = &parsed.channels.items[1].id;
-    store.set_favourite(id, key, true).unwrap();
+    store.set_favorite(id, key, true).unwrap();
     store.move_channel(id, &OrderScope::All, key, 0).unwrap();
     let group = store
         .create_custom_group(id, "Generated personal group")
@@ -149,7 +149,7 @@ fn whole_app_round_trip_rebases_local_files_and_activates_only_on_restart() {
     let id = store.active_source().unwrap().unwrap();
     let channels = store.load_channels(id, &ChannelQuery::default()).unwrap();
     assert_eq!(channels[0].name, "Channel Two");
-    assert!(store.is_favourite(id, &channels[0].channel.id).unwrap());
+    assert!(store.is_favorite(id, &channels[0].channel.id).unwrap());
     assert_eq!(
         store.custom_groups(id).unwrap()[0].name,
         "Generated personal group"
@@ -679,7 +679,7 @@ fn a_backup_from_before_us_spelling_restores_favorites_and_settings() {
         .load_channels(
             iptv_store_sqlite::SourceId(1),
             &ChannelQuery {
-                favourites_only: true,
+                favorites_only: true,
                 ..Default::default()
             },
         )
@@ -696,7 +696,7 @@ fn a_backup_from_before_us_spelling_restores_favorites_and_settings() {
     assert!(report.unknown.is_empty() && report.rejected.is_empty());
     let global = &iptv_settings::Target::Global;
     assert_eq!(
-        restored.colour(iptv_settings::keys::ACCENT, global),
+        restored.color(iptv_settings::keys::ACCENT, global),
         "blue_gray"
     );
     assert_eq!(

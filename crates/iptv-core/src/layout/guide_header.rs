@@ -297,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn the_shortcuts_go_below_where_the_programme_has_no_room() {
+    fn the_shortcuts_go_below_where_the_program_has_no_room() {
         // Compact windows, then medium ones too narrow for three columns:
         // a 560-point desktop window and a portrait tablet.
         for (w, h, scale) in [
@@ -389,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn the_header_keeps_the_programmes_title_and_times_whole() {
+    fn the_header_keeps_the_programs_title_and_times_whole() {
         // An iPad's Split View and Stage Manager windows at the largest
         // standard text and at Accessibility Extra Large (AX3).
         for (w, h, font) in [

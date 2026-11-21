@@ -21,7 +21,7 @@ pub enum Control {
     PlayPause,
     Forward,
     Record,
-    Favourite,
+    Favorite,
     Tracks,
     Details,
     Picture,
@@ -256,8 +256,8 @@ mod tests {
         let mut bar = PlayBar::default();
         bar.remote(0);
         assert_eq!(bar.focus, Some(PlayPause));
-        bar.move_focus(1, &[Mute, PlayPause, Favourite, Guide], 100);
-        assert_eq!(bar.focus, Some(Favourite));
+        bar.move_focus(1, &[Mute, PlayPause, Favorite, Guide], 100);
+        assert_eq!(bar.focus, Some(Favorite));
         // Favourite disappears: recover from transport, not its old index.
         bar.move_focus(1, &[Mute, PlayPause, Picture, Guide], 200);
         assert_eq!(bar.focus, Some(Picture));

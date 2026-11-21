@@ -135,7 +135,7 @@ impl Runtime {
             context.update_stalker_session(session.clone());
         }
     }
-    pub async fn vod_catalogue(
+    pub async fn vod_catalog(
         &self,
         query: Query,
         offset: u32,
@@ -148,7 +148,7 @@ impl Runtime {
         ),
         Error,
     > {
-        self.vod_catalogue_pages(query, offset, 1).await
+        self.vod_catalog_pages(query, offset, 1).await
     }
     /// The catalogue from its top, a page at a time until it holds at
     /// least `through` titles (or ends), with its filter choices. A list
@@ -156,7 +156,7 @@ impl Runtime {
     /// the viewer had loaded, so its focused title is found again by
     /// identity however many pages down it was. The pages come from one
     /// read snapshot, so a write between them cannot shift a title out.
-    pub async fn vod_catalogue_through(
+    pub async fn vod_catalog_through(
         &self,
         query: Query,
         through: u32,
@@ -169,9 +169,9 @@ impl Runtime {
         ),
         Error,
     > {
-        self.vod_catalogue_pages(query, 0, through.max(1)).await
+        self.vod_catalog_pages(query, 0, through.max(1)).await
     }
-    async fn vod_catalogue_pages(
+    async fn vod_catalog_pages(
         &self,
         query: Query,
         offset: u32,
@@ -229,7 +229,7 @@ impl Runtime {
         let services = self.services();
         async move {
             let mut page = services
-                .analyze(move |s| s.vod_discovery_cancellable(query, &token))
+                .analyze(move |s| s.vod_discovery_cancelable(query, &token))
                 .await?;
             self.vod_redact_protected(&mut page.cards).await?;
             Ok(page)
@@ -251,7 +251,7 @@ impl Runtime {
         let services = self.services();
         async move {
             let mut page = services
-                .analyze(move |s| s.vod_discovery_around_cancellable(shelf, &key, &token))
+                .analyze(move |s| s.vod_discovery_around_cancelable(shelf, &key, &token))
                 .await?;
             self.vod_redact_protected(&mut page.cards).await?;
             Ok(page)
@@ -325,7 +325,7 @@ impl Runtime {
         retain_playback: bool,
         cancel: iptv_import::CancelToken,
     ) -> Result<Details, Error> {
-        if cancel.is_cancelled() {
+        if cancel.is_canceled() {
             return Err(unavailable());
         }
         self.parental_check(&target(&key))
@@ -369,7 +369,7 @@ impl Runtime {
                 let client =
                     iptv_net::NetClient::new(crate::settings::net_config(&work.settings()))
                         .map_err(|_| unavailable())?;
-                if cancel.is_cancelled() {
+                if cancel.is_canceled() {
                     return Err(unavailable());
                 }
                 let mut episodes = Vec::new();
@@ -559,7 +559,7 @@ url,
                         },
                     ));
                 }
-                if cancel.is_cancelled() {
+                if cancel.is_canceled() {
                     return Err(unavailable());
                 }
                 let keys: Vec<_> = episodes.iter().map(|e| e.key.clone()).collect();
@@ -1225,7 +1225,7 @@ mod tests {
     }
 
     #[test]
-    fn catalogue_authorization_only_loads_the_returned_movie_identities() {
+    fn catalog_authorization_only_loads_the_returned_movie_identities() {
         use iptv_providers::{
             HttpResponse, SecretUrl,
             model::{M3uSourceConfig, Source},
@@ -1286,7 +1286,7 @@ mod tests {
         crate::settings::load(&owner);
         let (cards, _, _, _) = owner
             .services()
-            .block_on(owner.vod_catalogue(Query::default(), 0))
+            .block_on(owner.vod_catalog(Query::default(), 0))
             .unwrap();
         assert_eq!(cards.len(), 2);
         assert!(
@@ -1338,7 +1338,7 @@ mod tests {
     /// guide pages stays free, and closing the shelf cancels a read that
     /// has not finished.
     #[test]
-    fn discovery_leaves_the_guide_reader_free_and_is_cancelled_with_its_shelf() {
+    fn discovery_leaves_the_guide_reader_free_and_is_canceled_with_its_shelf() {
         use iptv_core::vod::{DiscoveryQuery, Shelf};
         use iptv_providers::{
             HttpResponse, SecretUrl,
@@ -1460,7 +1460,7 @@ mod tests {
                 tokio::time::timeout(Duration::from_secs(10), waiting.closed()).await
             });
             finished
-                .send(closed.is_ok() && cancel.is_cancelled())
+                .send(closed.is_ok() && cancel.is_canceled())
                 .unwrap();
             Ok(())
         });

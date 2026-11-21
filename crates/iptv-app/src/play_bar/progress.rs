@@ -13,7 +13,7 @@ use crate::{Playback, Ui, clock, tint};
 const WHITE: u32 = 0xFFFFFF;
 
 /// The programme on screen: live now, or the replayed one.
-pub(super) fn programme(ui: Ui) -> (usize, crate::guide::Program) {
+pub(super) fn program(ui: Ui) -> (usize, crate::guide::Program) {
     ui.app.data_version.get();
     let channel = ui.playing.get().unwrap_or(0);
     let minute = match ui.playback.get() {
@@ -39,7 +39,7 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
             }
         }
         None => {
-            let (_, p) = programme(ui);
+            let (_, p) = program(ui);
             p.progress(ui.focus.with(|f| f.now))
         }
     };
@@ -53,7 +53,7 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
             },
         ),
         None => {
-            let (_, p) = programme(ui);
+            let (_, p) = program(ui);
             (clock(p.start), clock(p.end))
         }
     };

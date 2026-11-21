@@ -119,7 +119,7 @@ fn a_v24_store_keeps_its_data_under_us_spelling() {
     assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
     let jobs = store.recording_jobs().unwrap();
     let canceled = jobs.iter().find(|j| j.id == JobId(43)).unwrap();
-    assert_eq!(canceled.status, Status::Cancelled);
+    assert_eq!(canceled.status, Status::Canceled);
     assert_eq!(canceled.message, "Canceled");
     let completed = jobs.iter().find(|j| j.id == JobId(41)).unwrap();
     assert_eq!(
@@ -132,8 +132,8 @@ fn a_v24_store_keeps_its_data_under_us_spelling() {
     );
     check_recording_completion(&store, 24);
     let status = store.import_status(SRC).unwrap();
-    assert_eq!(status.last_error, Some(ImportErrorKind::Cancelled));
-    assert_eq!(status.series_error, Some(ImportErrorKind::Cancelled));
+    assert_eq!(status.last_error, Some(ImportErrorKind::Canceled));
+    assert_eq!(status.series_error, Some(ImportErrorKind::Canceled));
     assert_eq!(status.movies_error, Some(ImportErrorKind::HttpStatus));
     check_overlays(&store, 24);
     check_guide(&store, 24);
@@ -703,17 +703,17 @@ fn check_overlays(store: &Store, version: u32) {
     let sport = visible.iter().find(|r| r.name == "Fixture Sport").unwrap();
     assert_eq!(sport.number, Some(10));
     assert!(sport.blocked);
-    let favourites = store
+    let favorites = store
         .load_channels(
             SRC,
             &ChannelQuery {
-                favourites_only: true,
+                favorites_only: true,
                 ..Default::default()
             },
         )
         .unwrap();
     assert_eq!(
-        favourites
+        favorites
             .iter()
             .map(|r| r.channel.id.as_str())
             .collect::<Vec<_>>(),
@@ -724,7 +724,7 @@ fn check_overlays(store: &Store, version: u32) {
         .iter()
         .find(|o| o.channel_id == id("xt:live:999"))
         .unwrap();
-    assert!(gone.favourite && gone.customised);
+    assert!(gone.favorite && gone.customized);
     assert_eq!(gone.ordered && gone.in_custom_group, version >= 3);
     assert_eq!(orphans.len(), if version >= 3 { 2 } else { 1 });
     assert_eq!(
@@ -740,7 +740,7 @@ fn check_overlays(store: &Store, version: u32) {
 }
 
 /// Organisation data written by v3 builds.
-fn check_organisation(store: &Store) {
+fn check_organization(store: &Store) {
     let news = store.channel(SRC, &id("xt:live:101")).unwrap().unwrap();
     assert_eq!(
         news.epg_override,
@@ -814,7 +814,7 @@ fn every_historical_version_migrates_with_its_data() {
             check_overlays(&store, v.version);
         }
         if v.version >= 3 {
-            check_organisation(&store);
+            check_organization(&store);
         }
         check_guide(&store, v.version);
         check_settings(&store, v.version);
@@ -830,7 +830,7 @@ fn every_historical_version_migrates_with_its_data() {
             check_overlays(&again, v.version);
         }
         if v.version >= 3 {
-            check_organisation(&again);
+            check_organization(&again);
         }
         check_guide(&again, v.version);
         check_settings(&again, v.version);
@@ -931,12 +931,12 @@ fn check_feed_results(store: &Store, version: u32) {
         assert_eq!((results, other), (vec![], vec![]));
         return;
     }
-    let loaded = |feed, channels, programmes, listed| FeedResult {
+    let loaded = |feed, channels, programs, listed| FeedResult {
         feed: iptv_epg::FeedId(feed),
         attempted_at: 1_700_001_000,
         error: None,
         channel_count: channels,
-        program_count: programmes,
+        program_count: programs,
         listed_count: listed,
     };
     let listed = if version >= 6 { 2 } else { 0 };
@@ -1022,14 +1022,14 @@ fn check_guide(store: &Store, version: u32) {
     assert_eq!(g.bound_count(), 3);
     let news = ChannelKey::new("xt:live:101");
     let titles: Vec<String> = g
-        .programmes(&news, 0, i64::MAX)
+        .programs(&news, 0, i64::MAX)
         .map(|p| p.title().to_owned())
         .collect();
     assert_eq!(
         titles,
         ["Morning Fixture", "Fixture Midday", "Fixture Evening"]
     );
-    let midday = g.programme_at(&news, 1_700_004_000).unwrap();
+    let midday = g.program_at(&news, 1_700_004_000).unwrap();
     assert_eq!(midday.season_episode(), (Some(1), Some(4)));
     assert_eq!(
         (midday.sub_title(), midday.rating()),
@@ -1039,7 +1039,7 @@ fn check_guide(store: &Store, version: u32) {
     // The radio channel shares the news EPG channel (an override).
     let radio = ChannelKey::new("xt:live:103");
     assert_eq!(
-        g.programme_at(&radio, 1_700_000_100).unwrap().title(),
+        g.program_at(&radio, 1_700_000_100).unwrap().title(),
         "Morning Fixture"
     );
     assert_eq!(
@@ -1051,7 +1051,7 @@ fn check_guide(store: &Store, version: u32) {
     );
     let sport = ChannelKey::new("xt:live:102");
     assert_eq!(
-        g.programme_at(&sport, 1_700_000_100).unwrap().icon(),
+        g.program_at(&sport, 1_700_000_100).unwrap().icon(),
         Some("http://img.example.com/m.png")
     );
     // A part of it (the app's narrow window, or an older day paged in):
@@ -1067,12 +1067,12 @@ fn check_guide(store: &Store, version: u32) {
         )
         .unwrap();
     let titles: Vec<String> = part
-        .programmes(&radio, 0, i64::MAX)
+        .programs(&radio, 0, i64::MAX)
         .map(|p| p.title().to_owned())
         .collect();
     assert_eq!(titles, ["Fixture Midday"], "v{version}");
     assert_eq!(
-        part.programme_at(&radio, 1_700_004_000)
+        part.program_at(&radio, 1_700_004_000)
             .unwrap()
             .season_episode(),
         (Some(1), Some(4))
@@ -1092,10 +1092,7 @@ fn tiny_guide() -> (GuideStore, EpgSourceConfig) {
     );
     let parsed = iptv_epg::parse_xmltv(xml.as_bytes(), Default::default()).unwrap();
     parsed.channels.into_iter().for_each(|c| b.push_channel(c));
-    parsed
-        .programmes
-        .into_iter()
-        .for_each(|p| b.push_programme(p));
+    parsed.programs.into_iter().for_each(|p| b.push_program(p));
     let src = b.finish();
     let mut index = MatchIndex::new();
     index.add_source(src.id(), src.priority(), src.channels());
@@ -1133,7 +1130,7 @@ fn first_guide_refresh_after_upgrading() {
             bytes: 10,
         }];
         let counts = staged::replace_epg(&mut store, SRC, &guide, &feeds, 7).unwrap();
-        assert_eq!((counts.channels, counts.programmes), (1, 1));
+        assert_eq!((counts.channels, counts.programs), (1, 1));
         let stored = store.epg_guide(SRC).unwrap().unwrap();
         assert_eq!((stored.feeds.len(), stored.match_fingerprint), (1, Some(7)));
         let g = store
@@ -1145,7 +1142,7 @@ fn first_guide_refresh_after_upgrading() {
             check_overlays(&store, v.version);
         }
         if v.version >= 3 {
-            check_organisation(&store);
+            check_organization(&store);
         }
         if v.version >= 4 {
             // The other source's failed attempt is untouched.
@@ -1217,18 +1214,18 @@ fn check_overlays_after_return(store: &Store) {
     );
     let returned = store.channel(SRC, &id("xt:live:999")).unwrap().unwrap();
     assert_eq!(returned.name, "Gone For Now");
-    assert!(returned.favourite);
-    let favourites = store
+    assert!(returned.favorite);
+    let favorites = store
         .load_channels(
             SRC,
             &ChannelQuery {
-                favourites_only: true,
+                favorites_only: true,
                 ..Default::default()
             },
         )
         .unwrap();
     assert_eq!(
-        favourites
+        favorites
             .iter()
             .map(|r| r.channel.id.as_str())
             .collect::<Vec<_>>(),

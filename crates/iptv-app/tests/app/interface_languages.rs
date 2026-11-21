@@ -42,7 +42,7 @@ impl Words {
     /// As [`Words::t`], with values and counts.
     #[track_caller]
     fn f(self, source: &str, args: &[(&str, Arg<'_>)]) -> String {
-        assert!(i18n::is_catalogued(source), "no row for {source:?}");
+        assert!(i18n::is_cataloged(source), "no row for {source:?}");
         let text = i18n::format(self.0, source, args);
         assert_ne!(
             text,
@@ -176,7 +176,7 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
 /// The playlists screen in German: counts, the organisation screen, a
 /// refresh that fails and an import that fails.
 #[test]
-fn playlists_organisation_and_failures_speak_the_interface_language() {
+fn playlists_organization_and_failures_speak_the_interface_language() {
     let Some(home) = isolated!() else { return };
     let de = Words::of("de");
     let mut fixture = start_in(home, "de", "auto");

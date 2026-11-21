@@ -198,7 +198,7 @@ fn start_import_with(
                 {
                     return;
                 }
-                if cancel.is_cancelled() {
+                if cancel.is_canceled() {
                     return;
                 }
                 let failed = tx.clone();
@@ -687,10 +687,10 @@ fn schedule_check(
         let owner = owner.clone();
         async move {
             let mut elapsed = std::pin::pin!(owner.delay(wait));
-            let mut cancelled = std::pin::pin!(cancel.cancelled());
+            let mut canceled = std::pin::pin!(cancel.canceled());
             let fired = std::future::poll_fn(|cx| {
                 use std::task::Poll;
-                if cancelled.as_mut().poll(cx).is_ready() {
+                if canceled.as_mut().poll(cx).is_ready() {
                     return Poll::Ready(false);
                 }
                 elapsed.as_mut().poll(cx).map(|_| true)

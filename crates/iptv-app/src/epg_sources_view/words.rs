@@ -55,7 +55,7 @@ pub fn failure(kind: ImportErrorKind) -> &'static str {
         ImportErrorKind::HttpStatus => tr("the server turned the request down"),
         ImportErrorKind::InvalidBody => tr("the answer was not guide data"),
         ImportErrorKind::InvalidConfig => tr("the link is incomplete"),
-        ImportErrorKind::Cancelled => tr("it was stopped"),
+        ImportErrorKind::Canceled => tr("it was stopped"),
         _ => tr("something went wrong"),
     }
 }
@@ -254,7 +254,7 @@ mod tests {
             ImportErrorKind::HttpStatus,
             ImportErrorKind::InvalidBody,
             ImportErrorKind::InvalidConfig,
-            ImportErrorKind::Cancelled,
+            ImportErrorKind::Canceled,
             ImportErrorKind::Other,
         ];
         let words: Vec<_> = kinds.into_iter().map(failure).collect();
@@ -366,7 +366,7 @@ mod tests {
             ImportErrorKind::HttpStatus,
             ImportErrorKind::InvalidBody,
             ImportErrorKind::InvalidConfig,
-            ImportErrorKind::Cancelled,
+            ImportErrorKind::Canceled,
             ImportErrorKind::Other,
         ];
         let english = kinds.map(failure);

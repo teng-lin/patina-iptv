@@ -123,7 +123,7 @@ pub enum ImportErrorKind {
     AuthFailed,
     /// Stalker device blocked or bound to another device id.
     Blocked,
-    Cancelled,
+    Canceled,
     Other,
 }
 
@@ -138,7 +138,7 @@ impl ImportErrorKind {
             Self::AccountRejected => "account_rejected",
             Self::AuthFailed => "auth_failed",
             Self::Blocked => "blocked",
-            Self::Cancelled => "canceled",
+            Self::Canceled => "canceled",
             Self::Other => "other",
         }
     }
@@ -147,7 +147,7 @@ impl ImportErrorKind {
     /// `cancelled`, the slug before schema 25, still reads as canceled.
     pub fn from_slug(slug: &str) -> Self {
         if slug == "cancelled" {
-            return Self::Cancelled;
+            return Self::Canceled;
         }
         [
             Self::Network,
@@ -158,7 +158,7 @@ impl ImportErrorKind {
             Self::AccountRejected,
             Self::AuthFailed,
             Self::Blocked,
-            Self::Cancelled,
+            Self::Canceled,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)
@@ -172,15 +172,15 @@ mod import_error_kind_tests {
 
     #[test]
     fn slugs_round_trip_and_the_old_canceled_slug_still_reads() {
-        assert_eq!(ImportErrorKind::Cancelled.slug(), "canceled");
+        assert_eq!(ImportErrorKind::Canceled.slug(), "canceled");
         assert_eq!(
             ImportErrorKind::from_slug("canceled"),
-            ImportErrorKind::Cancelled
+            ImportErrorKind::Canceled
         );
         // Written by builds before schema 25.
         assert_eq!(
             ImportErrorKind::from_slug("cancelled"),
-            ImportErrorKind::Cancelled
+            ImportErrorKind::Canceled
         );
         assert_eq!(ImportErrorKind::from_slug("newer"), ImportErrorKind::Other);
     }

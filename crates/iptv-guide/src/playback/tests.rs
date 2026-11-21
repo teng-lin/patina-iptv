@@ -124,7 +124,7 @@ fn xtream_without_its_account_cannot_play() {
 }
 
 #[test]
-fn xtream_timeshift_uses_the_panel_clock_and_programme_length() {
+fn xtream_timeshift_uses_the_panel_clock_and_program_length() {
     let ch = xtream_channel(42, Some(3));
     let acc = account(r#""m3u8","ts""#);
     let ctx = PlaybackContext::xtream(&creds(None), Some(&acc), StreamFormat::Auto).unwrap();
@@ -176,7 +176,7 @@ fn xtream_archive_bounds() {
         other => panic!("expected no archive, got {other:?}"),
     };
     let ch = xtream_channel(7, Some(2));
-    assert_eq!(no(&ch, NOW + 60, NOW + 120), CatchupError::FutureProgramme);
+    assert_eq!(no(&ch, NOW + 60, NOW + 120), CatchupError::FutureProgram);
     assert_eq!(
         no(&ch, NOW - 3 * 86_400, NOW - 3 * 86_400 + 60),
         CatchupError::OutsideArchive
@@ -222,7 +222,7 @@ fn m3u_headers_combine_playlist_and_channel_values() {
 }
 
 #[test]
-fn m3u_catch_up_from_the_start_of_a_live_programme() {
+fn m3u_catch_up_from_the_start_of_a_live_program() {
     let list = parse_m3u(
         "#EXTM3U\n\
          #EXTINF:-1 catchup=\"shift\" catchup-days=\"3\",Alpha\n\

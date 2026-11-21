@@ -67,7 +67,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             replacement,
         } => {
             let current = crate::schedule();
-            let same_catalogue = schedule
+            let same_catalog = schedule
                 .as_any()
                 .and_then(|s| s.downcast_ref::<iptv_guide::EpgSchedule>())
                 .zip(
@@ -75,8 +75,8 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
                         .as_any()
                         .and_then(|s| s.downcast_ref::<iptv_guide::EpgSchedule>()),
                 )
-                .is_some_and(|(before, now)| before.same_catalogue(now));
-            if same_catalogue && crate::runtime().organization_edit_current(source, ticket) {
+                .is_some_and(|(before, now)| before.same_catalog(now));
+            if same_catalog && crate::runtime().organization_edit_current(source, ticket) {
                 let kept = crate::lists::keep(ui);
                 crate::data::combined::remember_single(
                     &crate::runtime(),

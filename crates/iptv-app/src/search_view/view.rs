@@ -246,7 +246,7 @@ fn tab_button(ui: Ui, tab: Tab, size: Scale) -> impl IntoElement {
     let focused =
         move || selected() && state(ui, |s| *s.state.focus() == Focus::Tabs) == Some(true);
     let label =
-        move || state(ui, |s| tab_label(tab, s.state.count(tab), s.programmes)).unwrap_or_default();
+        move || state(ui, |s| tab_label(tab, s.state.count(tab), s.programs)).unwrap_or_default();
     ui_kit::tab(ui, size, label, selected, focused, move || {
         apply(ui, SearchAction::ShowTab(tab));
     })
@@ -265,15 +265,15 @@ fn status(ui: Ui) -> String {
 }
 
 /// The result at `i` of the shown tab, with its identity.
-fn result_at(ui: Ui, i: usize) -> Option<(ResultId, Option<ProgrammeHit>)> {
+fn result_at(ui: Ui, i: usize) -> Option<(ResultId, Option<ProgramHit>)> {
     state(ui, |s| match s.state.tab() {
         Tab::Channels => s
             .state
             .channels()
             .get(i)
             .map(|h| (ResultId::Channel(h.identity.clone()), None)),
-        Tab::Programs => s.state.programmes().get(i).map(|h| {
-            let id = ResultId::Programme {
+        Tab::Programs => s.state.programs().get(i).map(|h| {
+            let id = ResultId::Program {
                 channel: h.identity.clone(),
                 start: h.start,
             };

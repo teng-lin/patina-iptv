@@ -261,7 +261,7 @@ pub fn palette_key(name: &str) -> String {
 /// The colours chosen in `appearance.*`.
 pub fn theme_of(s: &Settings) -> Theme {
     let at = &Target::Global;
-    let (accent, background) = (s.colour(keys::ACCENT, at), s.colour(keys::BACKGROUND, at));
+    let (accent, background) = (s.color(keys::ACCENT, at), s.color(keys::BACKGROUND, at));
     let fallback = Theme::default();
     Theme {
         accent: ACCENTS
@@ -330,21 +330,21 @@ pub fn bind(ui: Ui) {
 
 #[cfg(test)]
 mod tests {
-    use iptv_settings::catalogue;
+    use iptv_settings::catalog;
 
     use super::*;
 
     #[test]
     fn listed_keys_exist() {
         for key in WIRED.iter().chain(READ_ONLY) {
-            assert!(catalogue::setting(key).is_some(), "{key}");
+            assert!(catalog::setting(key).is_some(), "{key}");
         }
         for key in COMMANDS {
-            assert!(catalogue::command(key).is_some(), "{key}");
+            assert!(catalog::command(key).is_some(), "{key}");
         }
         for key in NOT_OFFERED {
             assert!(
-                catalogue::setting(key).is_some() || catalogue::command(key).is_some(),
+                catalog::setting(key).is_some() || catalog::command(key).is_some(),
                 "{key}"
             );
         }
@@ -386,18 +386,18 @@ mod tests {
     }
 
     #[test]
-    fn colours_follow_the_appearance_settings() {
+    fn colors_follow_the_appearance_settings() {
         let mut s = Settings::new();
         assert_eq!(theme_of(&s), Theme::default());
-        s.set("appearance.accent", Value::colour("red")).unwrap();
-        s.set("appearance.background", Value::colour("blue_gray"))
+        s.set("appearance.accent", Value::color("red")).unwrap();
+        s.set("appearance.background", Value::color("blue_gray"))
             .unwrap();
         let theme = theme_of(&s);
         assert_eq!(theme.accent.name, "Red");
         assert_eq!(theme.background.name, "Blue gray");
         // Every palette key names a bundle.
-        for name in catalogue::choices::ACCENT.variants {
-            s.set("appearance.accent", Value::colour(name)).unwrap();
+        for name in catalog::choices::ACCENT.variants {
+            s.set("appearance.accent", Value::color(name)).unwrap();
             assert_eq!(palette_key(theme_of(&s).accent.name), *name);
         }
     }

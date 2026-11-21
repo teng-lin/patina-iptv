@@ -244,11 +244,11 @@ class Creating(Rehearsal):
         self.assert_refused(self.create(), "not a lightweight tag", world)
 
     def test_longer_tag_with_the_same_start_is_not_taken_for_it(self):
-        neighbour = {f"{REF}0": lightweight(OTHER_SHA)}
-        self.world(refs=dict(neighbour))
+        neighbor = {f"{REF}0": lightweight(OTHER_SHA)}
+        self.world(refs=dict(neighbor))
         result = self.create()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.state()["refs"], {**neighbour, REF: lightweight()})
+        self.assertEqual(self.state()["refs"], {**neighbor, REF: lightweight()})
 
     def test_unknown_commit_is_refused_before_any_write(self):
         self.world(commits=[OTHER_SHA])
@@ -292,7 +292,7 @@ class Creating(Rehearsal):
 
 class CleaningUp(Rehearsal):
     # Other people's tags and releases, which no cleanup of TAG may touch.
-    NEIGHBOURS = {
+    NEIGHBORS = {
         "refs": {"refs/tags/v9.8.7": lightweight(SHA), "refs/tags/rehearsal-1002": lightweight(SHA),
                  f"{REF}0": lightweight(SHA), f"refs/heads/{TAG}": lightweight(SHA)},
         "releases": [release(400, "v9.8.7", draft=False), release(502, "rehearsal-1002"), release(503, "v9.9.0")],
@@ -300,8 +300,8 @@ class CleaningUp(Rehearsal):
 
     def rehearsed(self, tag=None, releases=(release(501),), rules=()):
         """The neighbours, and what a rehearsal leaves: its tag and its draft."""
-        refs = {**self.NEIGHBOURS["refs"], REF: tag or lightweight()}
-        self.world(refs=refs, releases=[*releases, *self.NEIGHBOURS["releases"]], rules=rules)
+        refs = {**self.NEIGHBORS["refs"], REF: tag or lightweight()}
+        self.world(refs=refs, releases=[*releases, *self.NEIGHBORS["releases"]], rules=rules)
         return self.state()
 
     def test_draft_and_tag_are_deleted_and_nothing_else(self):
@@ -313,7 +313,7 @@ class CleaningUp(Rehearsal):
             "GET releases/501", "DELETE releases/501", "GET releases",
             f"GET git/matching-refs/tags/{TAG}", f"DELETE git/refs/tags/{TAG}",
             f"GET git/matching-refs/tags/{TAG}", "GET releases"])
-        self.assertEqual(self.state(), self.NEIGHBOURS)
+        self.assertEqual(self.state(), self.NEIGHBORS)
         self.assertIn(f"verified: no tag or release named {TAG} is left", result.stdout)
 
     def test_tag_of_a_rehearsal_that_never_made_its_draft_is_deleted(self):
@@ -321,7 +321,7 @@ class CleaningUp(Rehearsal):
         result = self.cleanup()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.writes(), [f"DELETE git/refs/tags/{TAG}"])
-        self.assertEqual(self.state(), self.NEIGHBOURS)
+        self.assertEqual(self.state(), self.NEIGHBORS)
         self.assertEqual(self.calls()[-1], "GET releases")
 
     def test_every_draft_of_the_tag_is_deleted(self):
@@ -329,15 +329,15 @@ class CleaningUp(Rehearsal):
         result = self.cleanup()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.writes(), ["DELETE releases/501", "DELETE releases/504", f"DELETE git/refs/tags/{TAG}"])
-        self.assertEqual(self.state(), self.NEIGHBOURS)
+        self.assertEqual(self.state(), self.NEIGHBORS)
 
     def test_rerun_after_a_complete_cleanup_succeeds_without_writing(self):
-        self.world(**self.NEIGHBOURS)
+        self.world(**self.NEIGHBORS)
         result = self.cleanup()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("nothing to clean up", result.stdout)
         self.assertEqual(self.calls(), [f"GET git/matching-refs/tags/{TAG}", "GET releases"])
-        self.assertEqual(self.state(), self.NEIGHBOURS)
+        self.assertEqual(self.state(), self.NEIGHBORS)
 
     def test_rerun_finishes_a_cleanup_whose_tag_deletion_failed(self):
         self.rehearsed(rules=[{"method": "DELETE", "path": "/git/refs/", "times": 1, **OUTAGE}])
@@ -348,7 +348,7 @@ class CleaningUp(Rehearsal):
         self.assertEqual(self.state()["refs"][REF], lightweight())
         second = self.cleanup()
         self.assertEqual(second.returncode, 0, second.stderr)
-        self.assertEqual(self.state(), self.NEIGHBOURS)
+        self.assertEqual(self.state(), self.NEIGHBORS)
 
     def test_failed_draft_deletion_keeps_the_tag_that_proves_ownership(self):
         for name, failure in {"outage": OUTAGE, "token may not write": READ_ONLY_TOKEN}.items():
@@ -361,7 +361,7 @@ class CleaningUp(Rehearsal):
                 self.assertEqual(self.state(), before)
                 rerun = self.cleanup()
                 self.assertEqual(rerun.returncode, 0, rerun.stderr)
-                self.assertEqual(self.state(), self.NEIGHBOURS)
+                self.assertEqual(self.state(), self.NEIGHBORS)
 
     def test_tag_deletion_lost_in_an_outage_is_noticed_by_the_rerun(self):
         self.rehearsed(rules=[{"method": "DELETE", "path": "/git/refs/", "when": "after", "times": 1, **OUTAGE}])
@@ -369,7 +369,7 @@ class CleaningUp(Rehearsal):
         rerun = self.cleanup()
         self.assertEqual(rerun.returncode, 0, rerun.stderr)
         self.assertIn("nothing to clean up", rerun.stdout)
-        self.assertEqual(self.state(), self.NEIGHBOURS)
+        self.assertEqual(self.state(), self.NEIGHBORS)
 
     def test_tag_at_another_commit_is_foreign_and_nothing_is_deleted(self):
         before = self.rehearsed(tag=lightweight(OTHER_SHA))
@@ -396,11 +396,11 @@ class CleaningUp(Rehearsal):
         result = self.cleanup()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.writes(), ["DELETE releases/501", f"DELETE git/refs/tags/{TAG}"])
-        self.assertEqual(self.state()["releases"], [*newer, *self.NEIGHBOURS["releases"]])
+        self.assertEqual(self.state()["releases"], [*newer, *self.NEIGHBORS["releases"]])
 
     def test_release_published_during_the_cleanup_is_not_deleted(self):
         before = self.rehearsed()
-        published = [release(501, draft=False), *self.NEIGHBOURS["releases"]]
+        published = [release(501, draft=False), *self.NEIGHBORS["releases"]]
         self.world(refs=before["refs"], releases=before["releases"],
                    rules=[{"method": "GET", "path": "/releases/501", "set": {"releases": published}}])
         self.assert_refused(self.cleanup(), "release 501 is no longer a draft", {**before, "releases": published})
@@ -431,7 +431,7 @@ class CleaningUp(Rehearsal):
                 self.assertEqual(self.state()["refs"][REF], lightweight())
 
     def test_draft_whose_tag_is_gone_is_left_for_a_person(self):
-        self.world(refs=self.NEIGHBOURS["refs"], releases=[release(501), *self.NEIGHBOURS["releases"]])
+        self.world(refs=self.NEIGHBORS["refs"], releases=[release(501), *self.NEIGHBORS["releases"]])
         before = self.state()
         self.assert_refused(self.cleanup(), "cannot be shown to be this rehearsal's", before)
 

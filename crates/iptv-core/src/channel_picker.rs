@@ -259,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn catalogue_reordering_restores_groups_and_channels_by_key() {
+    fn catalog_reordering_restores_groups_and_channels_by_key() {
         let catalog = Catalog::small();
         let mut picker = picker(&catalog);
         picker.group(FIRST_GROUP + 1, &catalog);

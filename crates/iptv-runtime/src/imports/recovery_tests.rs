@@ -174,7 +174,7 @@ async fn assert_retained(owner: &Runtime, id: SourceId, name: &str) {
 }
 
 #[tokio::test]
-async fn cancellation_during_blocked_body_preserves_catalogue_and_cleans_encrypted_stage() {
+async fn cancellation_during_blocked_body_preserves_catalog_and_cleans_encrypted_stage() {
     let directory = tempfile::tempdir().unwrap();
     let (url, entered, release, server) = server(true);
     let (owner, job) = fixture(directory.path(), &url).await;
@@ -201,7 +201,7 @@ async fn cancellation_during_blocked_body_preserves_catalogue_and_cleans_encrypt
     cancel.cancel();
     // The HTTP fixture stays held until cancellation has actually completed.
     tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
-    assert_eq!(failure(&mut rx), FailureKind::Cancelled);
+    assert_eq!(failure(&mut rx), FailureKind::Canceled);
     assert_retained(&owner, id, "Generated retained source").await;
     assert_clean_stage(directory.path());
     drop(release);
@@ -236,7 +236,7 @@ async fn cancellation_after_staging_cannot_publish_or_mark_a_failed_refresh() {
     cancel.cancel();
     gate.release();
     tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
-    assert_eq!(failure(&mut rx), FailureKind::Cancelled);
+    assert_eq!(failure(&mut rx), FailureKind::Canceled);
     assert_retained(&owner, id, "Generated retained source").await;
     owner
         .services()
@@ -280,7 +280,7 @@ async fn an_old_staged_completion_cannot_replace_a_recreated_source_with_the_sam
         .unwrap();
     gate.release();
     tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
-    assert_eq!(failure(&mut rx), FailureKind::Cancelled);
+    assert_eq!(failure(&mut rx), FailureKind::Canceled);
     assert_retained(&owner, id, "Generated successor source").await;
     assert_clean_stage(directory.path());
     server.join().unwrap();
@@ -298,7 +298,7 @@ async fn an_old_staged_completion_cannot_replace_a_recreated_source_with_the_sam
 }
 
 #[tokio::test]
-async fn a_failed_catalogue_transaction_preserves_source_details_and_survives_restart() {
+async fn a_failed_catalog_transaction_preserves_source_details_and_survives_restart() {
     let directory = tempfile::tempdir().unwrap();
     let (url, _, _, server) = server(false);
     let (owner, mut job) = fixture(directory.path(), &url).await;
@@ -362,7 +362,7 @@ async fn a_queued_refresh_cannot_adopt_configuration_changed_before_it_started()
         .unwrap();
     let (task, mut rx) = start(&owner, job, &CancelToken::new());
     tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
-    assert_eq!(failure(&mut rx), FailureKind::Cancelled);
+    assert_eq!(failure(&mut rx), FailureKind::Canceled);
     assert_eq!(
         listener.accept().unwrap_err().kind(),
         std::io::ErrorKind::WouldBlock
@@ -401,7 +401,7 @@ async fn a_configuration_edit_fences_an_old_stage_without_reusing_the_source_id(
         .unwrap();
     gate.release();
     tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
-    assert_eq!(failure(&mut rx), FailureKind::Cancelled);
+    assert_eq!(failure(&mut rx), FailureKind::Canceled);
     owner
         .services()
         .read(move |store| {
@@ -438,7 +438,7 @@ async fn a_retired_owners_staged_import_cannot_mutate_a_restarted_owners_store()
     assert_retained(&newer, id, "Generated retained source").await;
     gate.release();
     tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
-    assert_eq!(failure(&mut rx), FailureKind::Cancelled);
+    assert_eq!(failure(&mut rx), FailureKind::Canceled);
     assert_retained(&newer, id, "Generated retained source").await;
     assert_clean_stage(directory.path());
     server.join().unwrap();
@@ -528,7 +528,7 @@ async fn added_and_edited_playback_contexts_retain_the_committed_source_authorit
 }
 
 #[tokio::test]
-async fn exhausted_guide_identity_planning_preserves_the_retained_catalogue() {
+async fn exhausted_guide_identity_planning_preserves_the_retained_catalog() {
     const WITH_GUIDE: &str = "#EXTM3U url-tvg=\"https://guide.example.test/new.xml\"\n#EXTINF:-1,Generated incoming\nhttps://media.example.test/incoming.ts\n";
     let directory = tempfile::tempdir().unwrap();
     let (url, _, _, server) = response_server(WITH_GUIDE, false);

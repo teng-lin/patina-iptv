@@ -41,18 +41,18 @@ pub(crate) async fn guarded<T>(
     if !services.is_current() {
         return Err(InspectionError::OwnerClosed);
     }
-    if control.cancel.is_cancelled() {
-        return Err(InspectionError::Cancelled);
+    if control.cancel.is_canceled() {
+        return Err(InspectionError::Canceled);
     }
     let mut work = pin!(future);
-    let mut stop = pin!(control.cancel.cancelled());
+    let mut stop = pin!(control.cancel.canceled());
     let mut closed = pin!(services.closed());
     let race = poll_fn(|cx| {
         if closed.as_mut().poll(cx).is_ready() {
             return Poll::Ready(Err(InspectionError::OwnerClosed));
         }
         if stop.as_mut().poll(cx).is_ready() {
-            return Poll::Ready(Err(InspectionError::Cancelled));
+            return Poll::Ready(Err(InspectionError::Canceled));
         }
         if let Poll::Ready(result) = work.as_mut().poll(cx) {
             return Poll::Ready(result);
@@ -235,13 +235,13 @@ impl Runtime {
             },
         )
     }
-    pub fn query_programmes(
+    pub fn query_programs(
         &self,
         mut request: Query,
         window: TimeWindow,
         channel: Option<ChannelRef>,
         control: InspectionControl,
-    ) -> impl Future<Output = InspectionResult<Page<ProgrammeInfo>>> + use<> {
+    ) -> impl Future<Output = InspectionResult<Page<ProgramInfo>>> + use<> {
         let subject = channel.clone();
         let authorization = self.parental_snapshot();
         let owner = format!(
@@ -259,13 +259,13 @@ impl Runtime {
                     Err(e) => return Ok(Err(e)),
                 };
                 Ok(store
-                    .inspection_programmes(&request, window, channel.as_ref())?
+                    .inspection_programs(&request, window, channel.as_ref())?
                     .map(|p| seal(p, &owner)))
             },
             move |page| {
                 subject
                     .into_iter()
-                    .chain(page.items.iter().map(|programme| programme.channel.clone()))
+                    .chain(page.items.iter().map(|program| program.channel.clone()))
                     .collect()
             },
         )

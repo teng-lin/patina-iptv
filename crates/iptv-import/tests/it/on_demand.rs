@@ -32,7 +32,7 @@ fn session(mode: PortalMode) -> StalkerSession {
 }
 
 #[test]
-fn playback_session_discovery_does_not_download_a_catalogue() {
+fn playback_session_discovery_does_not_download_a_catalog() {
     for simple in [false, true] {
         for metadata_api in [false, true] {
             let sim = Rc::new(StalkerSim {
@@ -109,7 +109,7 @@ fn metadata_cancellation_stops_before_io_and_while_a_request_is_pending() {
             HttpRequest::get("https://metadata.example.test/generated"),
             &token
         )),
-        Err(ImportError::Cancelled)
+        Err(ImportError::Canceled)
     );
     assert!(fetch.requests().is_empty());
     let token = CancelToken::new();
@@ -121,7 +121,7 @@ fn metadata_cancellation_stops_before_io_and_while_a_request_is_pending() {
             HttpRequest::get("https://metadata.example.test/generated"),
             &token
         )),
-        Err(ImportError::Cancelled)
+        Err(ImportError::Canceled)
     );
     assert_eq!(fetch.requests().len(), 1);
 }

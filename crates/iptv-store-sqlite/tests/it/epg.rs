@@ -6,8 +6,8 @@ use crate::staged;
 
 use epg_synth::{NOW, Shape};
 use iptv_epg::{
-    ChannelKey, EpgRef, GuideStore, MatchKind, ProgrammeData, SourceBuilder, StoreOptions,
-    XmltvProgramme,
+    ChannelKey, EpgRef, GuideStore, MatchKind, ProgramData, SourceBuilder, StoreOptions,
+    XmltvProgram,
 };
 use iptv_import::{EpgSourceConfig, FailureKind, GuideState};
 use iptv_providers::SecretUrl;
@@ -44,14 +44,14 @@ fn meta(config: EpgSourceConfig) -> EpgFeedMeta {
     }
 }
 
-fn prog(channel: &str, start: i64, stop: i64, title: &str, desc: Option<&str>) -> XmltvProgramme {
-    XmltvProgramme {
+fn prog(channel: &str, start: i64, stop: i64, title: &str, desc: Option<&str>) -> XmltvProgram {
+    XmltvProgram {
         channel: channel.into(),
         start,
         stop: Some(stop),
         title: title.into(),
         desc: desc.map(str::to_owned),
-        ..XmltvProgramme::default()
+        ..XmltvProgram::default()
     }
 }
 
@@ -62,9 +62,9 @@ fn two_feed_guide(tag: &str) -> GuideStore {
     let mut lo = SourceBuilder::new(iptv_epg::FeedId(2), 1, StoreOptions::default(), NOW);
     for i in -3..6 {
         let t = NOW + i * H;
-        hi.push_programme(prog("x", t, t + H, &format!("{tag} X{i}"), Some("About X")));
-        lo.push_programme(prog("x", t, t + H, "lo X", None));
-        lo.push_programme(prog("y", t, t + 2 * H, &format!("{tag} Y{i}"), None));
+        hi.push_program(prog("x", t, t + H, &format!("{tag} X{i}"), Some("About X")));
+        lo.push_program(prog("x", t, t + H, "lo X", None));
+        lo.push_program(prog("y", t, t + 2 * H, &format!("{tag} Y{i}"), None));
     }
     let mut g = GuideStore::new();
     g.replace_source(hi.finish());
@@ -98,7 +98,7 @@ fn two_feed_guide(tag: &str) -> GuideStore {
 }
 
 fn titles(g: &GuideStore, key: &str, from: i64, to: i64) -> Vec<String> {
-    g.programmes(&key.into(), from, to)
+    g.programs(&key.into(), from, to)
         .map(|p| p.title().to_owned())
         .collect()
 }
@@ -110,7 +110,7 @@ fn replace_then_load_round_trips_bindings_and_priorities() {
     let counts = staged::replace_epg(&mut store, a, &two_feed_guide("v1"), &feeds, 99).unwrap();
     // x from hi (shared by k1 and k3), y from lo: two EPG channels stored.
     assert_eq!((counts.channels, counts.bindings), (2, 3));
-    assert_eq!(counts.programmes, 18);
+    assert_eq!(counts.programs, 18);
     assert_eq!(counts.descriptions, 9);
 
     let g = store.load_epg(a, &EpgWindow::from(NOW, 1)).unwrap();
@@ -119,7 +119,7 @@ fn replace_then_load_round_trips_bindings_and_priorities() {
     assert_eq!(titles(&g, "k3", NOW, NOW + H), ["v1 X0"]);
     assert_eq!(titles(&g, "k2", NOW, NOW + H), ["v1 Y0"]);
     assert_eq!(g.binding(&"k3".into()), Some((iptv_epg::FeedId(1), "x")));
-    assert!(g.programme_at(&"k4".into(), NOW).is_none());
+    assert!(g.program_at(&"k4".into(), NOW).is_none());
 
     let stored = store.epg_guide(a).unwrap().unwrap();
     assert_eq!(stored.replaced_at, Some(NOW));
@@ -163,11 +163,11 @@ fn windows_keys_and_descriptions() {
         )
         .unwrap();
     assert_eq!(g.bound_count(), 1);
-    assert!(g.programme_at(&"k1".into(), NOW).is_none());
+    assert!(g.program_at(&"k1".into(), NOW).is_none());
     assert_eq!(titles(&g, "k2", 0, i64::MAX), ["v1 Y-1", "v1 Y0", "v1 Y1"]);
 
     let lean = store.load_epg(a, &w).unwrap();
-    assert_eq!(lean.programme_at(&"k1".into(), NOW).unwrap().desc(), None);
+    assert_eq!(lean.program_at(&"k1".into(), NOW).unwrap().desc(), None);
     let full = store
         .load_epg(
             a,
@@ -178,7 +178,7 @@ fn windows_keys_and_descriptions() {
         )
         .unwrap();
     assert_eq!(
-        full.programme_at(&"k1".into(), NOW).unwrap().desc(),
+        full.program_at(&"k1".into(), NOW).unwrap().desc(),
         Some("About X")
     );
     assert_eq!(
@@ -352,9 +352,9 @@ fn every_field_survives_the_store() {
     for n in 0..40 {
         let key = epg_synth::key(n);
         let rows = |g: &GuideStore| -> Vec<Row> {
-            g.programmes(&key, i64::MIN, i64::MAX)
+            g.programs(&key, i64::MIN, i64::MAX)
                 .map(|p| {
-                    let d: ProgrammeData<'_> = p.data();
+                    let d: ProgramData<'_> = p.data();
                     (
                         d.start,
                         d.stop.unwrap(),
@@ -367,11 +367,11 @@ fn every_field_survives_the_store() {
         };
         assert_eq!(rows(&back), rows(&guide), "channel {n}");
     }
-    assert!(counts.programmes > 40 * 40);
+    assert!(counts.programs > 40 * 40);
     // Retention: what the window leaves out.
     let recent = store.load_epg(a, &EpgWindow::from(NOW, 0)).unwrap();
     let first = recent
-        .programmes(&epg_synth::key(0), i64::MIN, i64::MAX)
+        .programs(&epg_synth::key(0), i64::MIN, i64::MAX)
         .next()
         .unwrap();
     assert!(first.stop() > NOW && first.start() <= NOW);
@@ -393,7 +393,7 @@ fn feed_rows_never_show_their_url_in_debug() {
 }
 
 #[test]
-fn the_first_programme_stored_bounds_the_guide() {
+fn the_first_program_stored_bounds_the_guide() {
     let (mut store, a, b) = store_with_sources();
     assert_eq!(store.epg_first_start(a).unwrap(), None, "nothing stored");
     let feeds = [meta(config(1, 9)), meta(config(2, 1))];
@@ -427,14 +427,14 @@ fn the_first_programme_stored_bounds_the_guide() {
 }
 
 #[test]
-fn a_window_read_seeks_to_the_programme_reaching_into_it() {
+fn a_window_read_seeks_to_the_program_reaching_into_it() {
     let (mut store, a, _) = store_with_sources();
     let mut b = SourceBuilder::new(iptv_epg::FeedId(1), 0, StoreOptions::default(), NOW);
-    b.push_programme(prog("x", NOW - 50 * H, NOW - 40 * H, "Old", None));
-    b.push_programme(prog("x", NOW - 40 * H, NOW - 30 * H, "Older", None));
+    b.push_program(prog("x", NOW - 50 * H, NOW - 40 * H, "Old", None));
+    b.push_program(prog("x", NOW - 40 * H, NOW - 30 * H, "Older", None));
     // A day and more on air: it started long before the windows below.
-    b.push_programme(prog("x", NOW - 30 * H, NOW + 2 * H, "Long", None));
-    b.push_programme(prog("x", NOW + 2 * H, NOW + 3 * H, "After", None));
+    b.push_program(prog("x", NOW - 30 * H, NOW + 2 * H, "Long", None));
+    b.push_program(prog("x", NOW + 2 * H, NOW + 3 * H, "After", None));
     let mut g = GuideStore::new();
     g.replace_source(b.finish());
     let cand = EpgRef {
@@ -545,14 +545,10 @@ fn nested_epg_snapshots_share_the_caller_and_recover_after_read_errors() {
     assert!(store.epg_guide(source).unwrap().is_some());
     // A subsequent write transaction can start only if both successful and
     // failed owned read snapshots released their transaction guards.
-    let catalogue = common::catalog(1, 1, common::XT_PASSWORD);
-    common::replace(&mut store, source, &catalogue);
+    let catalog = common::catalog(1, 1, common::XT_PASSWORD);
+    common::replace(&mut store, source, &catalog);
     store
-        .set_favourite(source, &catalogue.channels[0].id, true)
+        .set_favorite(source, &catalog.channels[0].id, true)
         .unwrap();
-    assert!(
-        store
-            .is_favourite(source, &catalogue.channels[0].id)
-            .unwrap()
-    );
+    assert!(store.is_favorite(source, &catalog.channels[0].id).unwrap());
 }

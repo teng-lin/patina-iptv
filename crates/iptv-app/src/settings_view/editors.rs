@@ -13,7 +13,7 @@ use iptv_settings::{Setting, Value, ValueType};
 use nsh_core::Checked;
 use nsh_core::prelude::*;
 
-use super::view::swatch_colour;
+use super::view::swatch_color;
 use super::{WHITE, state, update, words};
 use crate::fonts::TITLE;
 use crate::list_rows::{self, Mark, ROW};
@@ -161,7 +161,7 @@ fn choice(ui: Ui) -> impl IntoElement {
         };
         let swatch = move || {
             let s = setting(ui)?;
-            swatch_colour(&s.ty, variant()?)
+            swatch_color(&s.ty, variant()?)
         };
         let label = move || {
             let (Some(s), Some(v)) = (setting(ui), variant()) else {

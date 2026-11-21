@@ -530,13 +530,13 @@ async fn hidden_playlist_mutations_update_shelves_without_republishing_the_guide
             assert_eq!(host.owner.shown_source(), Some(shown));
             assert_eq!(host.has_vod.get(), Some(false));
             assert_eq!(host.any_vod.get(), Some(true));
-            let catalogue = host.owner.schedule();
-            let channel = catalogue.channel_key(0);
+            let catalog = host.owner.schedule();
+            let channel = catalog.channel_key(0);
             let publications = host.publications.get();
             let unchanged = || {
                 assert_eq!(host.owner.shown_source(), Some(shown));
                 assert!(!data::combined::active(&host.owner));
-                assert!(Rc::ptr_eq(&catalogue, &host.owner.schedule()));
+                assert!(Rc::ptr_eq(&catalog, &host.owner.schedule()));
                 assert_eq!(host.owner.schedule().channel_key(0), channel);
                 assert_eq!(host.publications.get(), publications);
                 assert_eq!(host.has_vod.get(), Some(false));

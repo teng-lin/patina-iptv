@@ -27,7 +27,7 @@ mod epg_stream;
 mod guide_assign;
 mod library_preferences;
 mod migrations;
-mod organise;
+mod organize;
 mod overlays;
 mod perf;
 mod personalization;

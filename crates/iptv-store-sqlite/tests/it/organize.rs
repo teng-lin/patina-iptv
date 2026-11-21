@@ -164,7 +164,7 @@ fn custom_groups_crud_membership_and_order() {
     );
 
     s.set_hidden(src, &c(5), true).unwrap();
-    s.set_favourite(src, &c(1), true).unwrap();
+    s.set_favorite(src, &c(1), true).unwrap();
     let visible = ChannelQuery {
         scope: ChannelScope::Custom(evening),
         ..Default::default()
@@ -174,7 +174,7 @@ fn custom_groups_crud_membership_and_order() {
         of(&cat, &[3, 1])
     );
     let favs = ChannelQuery {
-        favourites_only: true,
+        favorites_only: true,
         ..visible
     };
     assert_eq!(ids(&s.load_channels(src, &favs).unwrap()), of(&cat, &[1]));

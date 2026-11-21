@@ -32,7 +32,7 @@ proptest! {
         prop_assert_eq!(iptv_providers::stalker::parse_channel_page(&a).unwrap().items.items,iptv_providers::stalker::parse_channel_page(&b).unwrap().items.items);
     }
     #[test]
-    fn xmltv_and_gzip_chunking_preserve_programmes(count in 0usize..40,chunk in 1usize..89) {
+    fn xmltv_and_gzip_chunking_preserve_programs(count in 0usize..40,chunk in 1usize..89) {
         let mut xml=String::from("<tv><channel id=\"s\"><display-name>Synthetic</display-name></channel>");
         for i in 0..count {
             xml.push_str(&format!(
@@ -48,8 +48,8 @@ proptest! {
             parser.feed(c, &mut |i| out.push(i)).unwrap();
         }
         parser.finish(&mut |i| out.push(i)).unwrap();
-        prop_assert_eq!(out.len(),expected.channels.len()+expected.programmes.len());
-        prop_assert_eq!(iptv_epg::parse_xmltv(&compressed,Default::default()).unwrap().programmes,expected.programmes);
+        prop_assert_eq!(out.len(),expected.channels.len()+expected.programs.len());
+        prop_assert_eq!(iptv_epg::parse_xmltv(&compressed,Default::default()).unwrap().programs,expected.programs);
     }
     #[test]
     fn catchup_unknown_templates_are_preserved(s in "[a-zA-Z0-9_/.-]{0,100}",now in any::<i64>()) {

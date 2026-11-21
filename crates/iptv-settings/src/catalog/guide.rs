@@ -101,14 +101,14 @@ pub static APPEARANCE: &[Setting] = &[
     appearance(
         "colours",
         "appearance.accent",
-        colour(&ACCENT, "blue"),
+        color(&ACCENT, "blue"),
         key("Accent bundle used for focus, selection and progress."),
     ),
     // default: observed (07) — background Dark
     appearance(
         "colours",
         "appearance.background",
-        colour(&BACKGROUND, "dark"),
+        color(&BACKGROUND, "dark"),
         key("Background bundle for panels and windows."),
     ),
     // default: ours

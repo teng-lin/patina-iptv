@@ -70,12 +70,12 @@ class BackupComponent(
         handler.post(launch)
     }
 
-    internal fun complete(id: String, success: Boolean, cancelled: Boolean) {
+    internal fun complete(id: String, success: Boolean, canceled: Boolean) {
         if (!destroyed) {
             nsh.emit("complete", mapOf(
                 "requestId" to id,
                 "success" to success,
-                "cancelled" to cancelled,
+                "cancelled" to canceled,
             ))
         }
     }
@@ -102,7 +102,7 @@ class BackupHost(private val activity: Activity) {
         val archive: File,
         val importing: Boolean,
     ) {
-        val cancelled = AtomicBoolean(false)
+        val canceled = AtomicBoolean(false)
         val ownsArchive = AtomicBoolean(!importing)
     }
 
@@ -136,19 +136,19 @@ class BackupHost(private val activity: Activity) {
             return
         }
         if (operation != "import" && operation != "export") {
-            component.complete(id, success = false, cancelled = false)
+            component.complete(id, success = false, canceled = false)
             return
         }
         val importing = operation == "import"
         val archive = privateArchive(path, importing)
         if (destroyed || archive == null) {
-            component.complete(id, success = false, cancelled = false)
+            component.complete(id, success = false, canceled = false)
             return
         }
         if (active != null) {
             // Never delete the archive of an already active request.
             if (!importing && archive != active?.archive) archive.delete()
-            component.complete(id, success = false, cancelled = false)
+            component.complete(id, success = false, canceled = false)
             return
         }
         val request = Request(component, id, archive, importing)
@@ -162,7 +162,7 @@ class BackupHost(private val activity: Activity) {
                 if (!importing) putExtra(Intent.EXTRA_TITLE, "Patina.patinabackup")
             }, TRANSFER_BACKUP)
         } catch (_: Exception) {
-            finish(request, success = false, cancelled = false)
+            finish(request, success = false, canceled = false)
         }
     }
 
@@ -172,14 +172,14 @@ class BackupHost(private val activity: Activity) {
         val request = active ?: return true
         val uri = data?.data
         if (result != Activity.RESULT_OK || uri == null) {
-            finish(request, success = false, cancelled = result == Activity.RESULT_CANCELED)
+            finish(request, success = false, canceled = result == Activity.RESULT_CANCELED)
             return true
         }
         val resolver = activity.applicationContext.contentResolver
         Thread({
             var success = false
             try {
-                if (request.cancelled.get()) throw java.io.IOException("Cancelled")
+                if (request.canceled.get()) throw java.io.IOException("Cancelled")
                 // Recheck ownership after the chooser. Import requires an
                 // absent file; exclusive creation will never overwrite one.
                 val archive = privateArchive(request.archive.path, request.importing)
@@ -203,7 +203,7 @@ class BackupHost(private val activity: Activity) {
                         output.use { copy(request, input, it) }
                     }
                 }
-                success = !request.cancelled.get()
+                success = !request.canceled.get()
             } catch (_: Exception) {
                 // Provider errors may quote URIs or credentials: never log them.
             } finally {
@@ -212,7 +212,7 @@ class BackupHost(private val activity: Activity) {
                 // A provider may return an existing document for CREATE_DOCUMENT.
                 // Ownership is unknown, so never delete its URI on a failed copy.
                 if (!success || !request.importing) removePrivateArchive(request)
-                handler.post { finish(request, success, request.cancelled.get()) }
+                handler.post { finish(request, success, request.canceled.get()) }
             }
         }, "patina-backup-transfer").start()
         return true
@@ -222,7 +222,7 @@ class BackupHost(private val activity: Activity) {
         val buffer = ByteArray(64 * 1024)
         var total = 0L
         while (true) {
-            if (request.cancelled.get()) throw java.io.IOException("Cancelled")
+            if (request.canceled.get()) throw java.io.IOException("Cancelled")
             val count = input.read(buffer)
             if (count < 0) break
             total += count
@@ -236,19 +236,19 @@ class BackupHost(private val activity: Activity) {
         if (request.ownsArchive.get()) request.archive.delete()
     }
 
-    private fun finish(request: Request, success: Boolean, cancelled: Boolean) {
+    private fun finish(request: Request, success: Boolean, canceled: Boolean) {
         if (active !== request) return
         active = null
-        val wasCancelled = cancelled || request.cancelled.get()
-        val accepted = success && !wasCancelled && !destroyed
+        val wasCanceled = canceled || request.canceled.get()
+        val accepted = success && !wasCanceled && !destroyed
         if (!accepted || !request.importing) removePrivateArchive(request)
-        if (!destroyed) request.component.complete(request.id, accepted, wasCancelled)
+        if (!destroyed) request.component.complete(request.id, accepted, wasCanceled)
     }
 
     internal fun componentDestroyed(component: BackupComponent) {
         val request = active ?: return
         if (request.component !== component) return
-        request.cancelled.set(true)
+        request.canceled.set(true)
         removePrivateArchive(request)
         // Keep the request slot until its chooser/copy returns. Reusing the
         // request code now could deliver the old result to a new transfer.
@@ -257,7 +257,7 @@ class BackupHost(private val activity: Activity) {
     fun destroy() {
         destroyed = true
         active?.let {
-            it.cancelled.set(true)
+            it.canceled.set(true)
             removePrivateArchive(it)
         }
     }

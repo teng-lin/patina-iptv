@@ -34,10 +34,10 @@ pub fn check(setting: &Setting, value: &Value) -> Result<(), SettingsError> {
         ) => check_grid(key, *v, *min_ms, *max_ms, *step_ms),
         (ValueType::Enum { choices, .. }, Value::Enum(v))
         | (
-            ValueType::Colour {
+            ValueType::Color {
                 palette: choices, ..
             },
-            Value::Colour(v),
+            Value::Color(v),
         ) => {
             if choices.contains(v) {
                 Ok(())

@@ -68,7 +68,7 @@ fn import(days: i64) -> (usize, usize, usize, u64) {
     let peak = (PEAK.load(Ordering::Relaxed) - base).max(0) as usize;
     // SAFETY: SQLite memory counters take no pointers and are safe to query here.
     let sqlite = unsafe { rusqlite::ffi::sqlite3_memory_highwater(0) } as usize;
-    (peak, staging, sqlite, counts.programmes)
+    (peak, staging, sqlite, counts.programs)
 }
 
 #[test]

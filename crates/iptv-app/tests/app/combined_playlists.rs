@@ -119,7 +119,7 @@ fn favorite_names(path: &Path, source: SourceId) -> Vec<String> {
         .load_channels(
             source,
             &ChannelQuery {
-                favourites_only: true,
+                favorites_only: true,
                 ..Default::default()
             },
         )

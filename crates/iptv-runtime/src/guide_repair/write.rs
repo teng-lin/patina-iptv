@@ -20,15 +20,15 @@ impl Drop for CancelOnDrop {
 }
 
 pub(super) fn begin(phase: &Phase, child: &CancelToken, deadline: Instant) -> Result<()> {
-    if child.is_cancelled() {
-        return Err(Error::Cancelled);
+    if child.is_canceled() {
+        return Err(Error::Canceled);
     }
     if Instant::now() >= deadline {
         return Err(InspectionError::Deadline.into());
     }
     phase
         .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
-        .map_err(|_| Error::Cancelled)?;
+        .map_err(|_| Error::Canceled)?;
     Ok(())
 }
 
@@ -53,13 +53,13 @@ pub(super) async fn wait(
     } = command;
     let task = services.spawn(async move {
         let mut reply = pin!(reply);
-        let mut cancelled = pin!(control.cancel.cancelled());
+        let mut canceled = pin!(control.cancel.canceled());
         let race = poll_fn(|cx| {
             // A received commit wins over a simultaneous cancellation.
             if let Poll::Ready(value) = reply.as_mut().poll(cx) {
                 return Poll::Ready(Some(value));
             }
-            if cancelled.as_mut().poll(cx).is_ready() {
+            if canceled.as_mut().poll(cx).is_ready() {
                 return Poll::Ready(None);
             }
             Poll::Pending
@@ -82,7 +82,7 @@ pub(super) async fn wait(
                     || phase.load(Ordering::SeqCst) == 3
                 {
                     if stopped.is_ok() {
-                        Err(Error::Cancelled)
+                        Err(Error::Canceled)
                     } else {
                         Err(InspectionError::Deadline.into())
                     }

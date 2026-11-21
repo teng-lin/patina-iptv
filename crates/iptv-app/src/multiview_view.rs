@@ -28,7 +28,7 @@ const PANEL_ALPHA: u8 = 0xE0;
 /// The active tile's outline: thin, light grey; the others keep a clear
 /// one as wide, so no tile's content moves when the sound does.
 const FRAME: f32 = 2.0;
-const FRAME_COLOUR: u32 = 0x9F9F9F;
+const FRAME_COLOR: u32 = 0x9F9F9F;
 /// A held press enlarges a tile after this long, ms.
 const LONG_PRESS_MS: f32 = 800.0;
 
@@ -147,7 +147,7 @@ fn tile(ui: Ui, index: usize) -> impl IntoElement {
         .border(px(FRAME))
         .border_color(move || {
             if active() {
-                rgb(FRAME_COLOUR)
+                rgb(FRAME_COLOR)
             } else {
                 tint(WHITE, 0)
             }

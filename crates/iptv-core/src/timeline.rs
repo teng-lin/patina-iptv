@@ -314,7 +314,7 @@ impl Threshold {
     /// cancel's own position included, and had not yet been reported
     /// crossing). A fast drag a scroll view takes over may be cancelled
     /// before any move reached that far.
-    pub fn cancelled(&mut self, id: u32, x: f32, y: f32) -> bool {
+    pub fn canceled(&mut self, id: u32, x: f32, y: f32) -> bool {
         let Some((fid, fx, fy)) = self.from else {
             return false;
         };

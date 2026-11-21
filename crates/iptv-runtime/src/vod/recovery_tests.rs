@@ -312,7 +312,7 @@ fn repeated_native_pages_stop_when_no_new_episode_identity_was_discovered() {
 }
 
 #[test]
-fn cancelling_a_focused_preview_closes_its_pending_provider_request() {
+fn canceling_a_focused_preview_closes_its_pending_provider_request() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let cancel = iptv_import::CancelToken::new();

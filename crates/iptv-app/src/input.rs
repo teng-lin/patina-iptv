@@ -660,7 +660,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
             && matches!(action, Action::Select | Action::Record)
             && let Some(origin) = ui.description.get_untracked()
         {
-            crate::recordings_view::programme(ui, origin, false);
+            crate::recordings_view::program(ui, origin, false);
             return;
         }
         // Back (or Menu) closes programme details.

@@ -26,7 +26,7 @@ pub struct Rect {
 }
 
 impl Rect {
-    fn centre(self) -> (f32, f32) {
+    fn center(self) -> (f32, f32) {
         (self.x + self.w / 2.0, self.y + self.h / 2.0)
     }
 }
@@ -67,14 +67,14 @@ impl Layout {
     /// 1, one of them zero): of those whose centre lies that way and that
     /// overlap it across, the nearest (the first of equals). Laid out on a
     /// 16:9 area.
-    pub fn neighbour(self, from: usize, dx: i8, dy: i8) -> Option<usize> {
+    pub fn neighbor(self, from: usize, dx: i8, dy: i8) -> Option<usize> {
         let r = self.rect(from, VIDEO);
-        let at = r.centre();
+        let at = r.center();
         (0..self.tiles())
             .filter(|&i| i != from)
             .filter_map(|i| {
                 let o = self.rect(i, VIDEO);
-                let c = o.centre();
+                let c = o.center();
                 let (along, across, overlap) = if dx != 0 {
                     let overlap = (r.y + r.h).min(o.y + o.h) - r.y.max(o.y);
                     ((c.0 - at.0) * f32::from(dx), c.1 - at.1, overlap)

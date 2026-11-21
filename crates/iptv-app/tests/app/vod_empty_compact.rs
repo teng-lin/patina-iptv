@@ -104,7 +104,7 @@ fn close_selector(pseudo: bool) -> String {
     format!("id:vod-screen >> label:{}", t(pseudo, "Close"))
 }
 
-fn empty_catalogue_in_a_small_window(home: crate::isolated::Home, font: &str, pseudo: bool) {
+fn empty_catalog_in_a_small_window(home: crate::isolated::Home, font: &str, pseudo: bool) {
     let mut settings = Settings::new();
     settings.set("guide.autoplay", Value::Bool(false)).unwrap();
     settings
@@ -156,19 +156,19 @@ fn empty_catalogue_in_a_small_window(home: crate::isolated::Home, font: &str, ps
 }
 
 #[test]
-fn the_empty_catalogue_takes_a_small_window_at_medium_text() {
+fn the_empty_catalog_takes_a_small_window_at_medium_text() {
     let Some(home) = isolated!() else { return };
-    empty_catalogue_in_a_small_window(home, "medium", false);
+    empty_catalog_in_a_small_window(home, "medium", false);
 }
 
 #[test]
-fn the_empty_catalogue_takes_a_small_window_at_extra_large_text() {
+fn the_empty_catalog_takes_a_small_window_at_extra_large_text() {
     let Some(home) = isolated!() else { return };
-    empty_catalogue_in_a_small_window(home, "extra_large", false);
+    empty_catalog_in_a_small_window(home, "extra_large", false);
 }
 
 #[test]
-fn the_empty_catalogue_takes_a_small_window_with_long_strings() {
+fn the_empty_catalog_takes_a_small_window_with_long_strings() {
     fn here() {}
     let Some(home) = crate::isolated::run_with_env(
         std::any::type_name_of_val(&here),
@@ -176,5 +176,5 @@ fn the_empty_catalogue_takes_a_small_window_with_long_strings() {
     ) else {
         return;
     };
-    empty_catalogue_in_a_small_window(home, "extra_large", true);
+    empty_catalog_in_a_small_window(home, "extra_large", true);
 }

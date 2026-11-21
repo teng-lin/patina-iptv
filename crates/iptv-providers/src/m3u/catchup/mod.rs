@@ -57,7 +57,7 @@
 //! corrected times. The replay then runs from
 //! `start − buffer_before_secs + offset_secs` to `end + buffer_after_secs`
 //! (the end buffer stops at `now`). A programme that starts after `now`, or
-//! a replay start after `now`, is [`CatchupError::FutureProgramme`] (also
+//! a replay start after `now`, is [`CatchupError::FutureProgram`] (also
 //! for `vod`, which Kodi lets reach future programmes); a replay start past
 //! the replay end, or before the archive window (`catchup-days`, else
 //! [`CatchupRequest::default_window_days`]), is
@@ -230,7 +230,7 @@ fn window<'a>(
         req.now,
     );
     if start > now {
-        return Err(CatchupError::FutureProgramme);
+        return Err(CatchupError::FutureProgram);
     }
     let from = start
         .saturating_sub(i64::from(req.buffer_before_secs))
@@ -239,7 +239,7 @@ fn window<'a>(
         .saturating_add(i64::from(req.buffer_after_secs))
         .min(end.max(now));
     if from > now {
-        return Err(CatchupError::FutureProgramme);
+        return Err(CatchupError::FutureProgram);
     }
     if from > to || from.max(start) < now.saturating_sub(i64::from(days) * 86_400) {
         return Err(CatchupError::OutsideArchive);

@@ -39,7 +39,7 @@ pub fn choose(
                     if stored::restart_update(
                         &owner,
                         source,
-                        superseded.cancelled.clone(),
+                        superseded.canceled.clone(),
                         |_| {},
                     ) =>
                 {

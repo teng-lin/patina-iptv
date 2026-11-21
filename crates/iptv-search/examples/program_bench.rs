@@ -2,7 +2,7 @@
 //! 100 as-you-type queries.
 //!
 //! ```sh
-//! cargo run --release -p iptv-search --example programme_bench [channels] [days]
+//! cargo run --release -p iptv-search --example program_bench [channels] [days]
 //! ```
 //!
 //! Defaults: 2,000 channels, 7 days of programmes (4 back, 3 ahead), titles
@@ -13,9 +13,9 @@ use std::time::Instant;
 
 use iptv_epg::{
     ChannelKey, DAY, EpgRef, FeedId, GuideStore, MatchKind, SourceBuilder, StoreOptions,
-    XmltvProgramme,
+    XmltvProgram,
 };
-use iptv_search::{ProgrammeIndex, ProgrammeSearchOptions};
+use iptv_search::{ProgramIndex, ProgramSearchOptions};
 
 const NOW: i64 = 1_900_000_000;
 const SYL: [&str; 24] = [
@@ -74,7 +74,7 @@ fn main() {
             } else {
                 title(&mut rng, &words)
             };
-            b.push_programme(XmltvProgramme {
+            b.push_program(XmltvProgram {
                 channel: format!("c{ch}.example"),
                 start,
                 stop: Some(start + len),
@@ -105,7 +105,7 @@ fn main() {
     let store_time = t.elapsed();
 
     let t = Instant::now();
-    let idx = ProgrammeIndex::build(&store, &keys);
+    let idx = ProgramIndex::build(&store, &keys);
     let build = t.elapsed();
 
     // As-you-type prefixes of real words, two-word queries, infixes, misses.
@@ -122,7 +122,7 @@ fn main() {
         queries.push(q);
     }
     let catchup = |c: usize| if c.is_multiple_of(2) { 3 } else { 0 };
-    let opts = ProgrammeSearchOptions {
+    let opts = ProgramSearchOptions {
         catchup_days: Some(&catchup),
         ..Default::default()
     };
@@ -131,7 +131,7 @@ fn main() {
     let mut worst = (std::time::Duration::ZERO, String::new());
     for q in &queries {
         let tq = Instant::now();
-        hits += idx.search_programmes(q, NOW, opts).len();
+        hits += idx.search_programs(q, NOW, opts).len();
         let e = tq.elapsed();
         if e > worst.0 {
             worst = (e, q.clone());

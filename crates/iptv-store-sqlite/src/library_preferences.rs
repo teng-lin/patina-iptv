@@ -58,7 +58,7 @@ const BLOCKED_MEMBERS: &str = "SELECT m.channel_id FROM guide_blocks b
      )";
 
 fn ensure_custom_scope(conn: &rusqlite::Connection, source: SourceId, id: i64) -> Result<()> {
-    if crate::organise::group_source(conn, iptv_library::CustomGroupId(id))? != source {
+    if crate::organize::group_source(conn, iptv_library::CustomGroupId(id))? != source {
         return Err(crate::StoreError::CustomGroupNotFound(id));
     }
     Ok(())
@@ -353,7 +353,7 @@ impl Store {
             &crate::ChannelQuery {
                 scope: channel_scope,
                 include_hidden: true,
-                favourites_only: *scope == OrganizationScope::Favorites,
+                favorites_only: *scope == OrganizationScope::Favorites,
                 order,
                 ..Default::default()
             },

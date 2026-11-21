@@ -202,7 +202,7 @@ fn headless_preview_apply_verify_undo_uses_real_domain_services() {
     assert!(
         verified.current_revision && verified.configuration_effective && verified.verified_coverage
     );
-    assert_eq!(verified.programmes_available, 0);
+    assert_eq!(verified.programs_available, 0);
     assert!(verified.identity_unresolved);
     let undo = fixture
         .drive(
@@ -894,7 +894,7 @@ mod staged {
             after.configuration_effective && after.verified_coverage,
             "{after:?}"
         );
-        assert_eq!(after.programmes_available, 1);
+        assert_eq!(after.programs_available, 1);
         assert_eq!(after.covered_seconds, 7200);
         assert_eq!(
             server.requests.load(Ordering::SeqCst),
@@ -1218,7 +1218,7 @@ fn changed_transport_or_disabled_policy_or_new_block_refuses_a_prepared_edit() {
 
 #[test]
 fn indirect_preview_uses_actual_low_feed_binding_when_high_feed_only_lists_channel() {
-    use iptv_epg::{ChannelKey, FeedId, MatchKind, ProgrammeData, StoreOptions};
+    use iptv_epg::{ChannelKey, FeedId, MatchKind, ProgramData, StoreOptions};
     use iptv_import::{EpgImport, EpgSourceConfig, GuideSink, ListedChannel};
     use iptv_store_sqlite::{EpgFeedMeta, EpgStage, GuideSource};
     let fixture = Fixture::new();
@@ -1242,9 +1242,9 @@ fn indirect_preview_uses_actual_low_feed_binding_when_high_feed_only_lists_chann
             .unwrap();
         if id == 2 {
             stage
-                .programme(
+                .program(
                     "amber.main",
-                    &ProgrammeData {
+                    &ProgramData {
                         start: 1_794_657_600,
                         stop: Some(1_794_664_800),
                         title: "Synthetic lower priority programme",
@@ -1406,7 +1406,7 @@ fn repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive(
 }
 
 fn retained_guide(directory: &std::path::Path, source: SourceId, title: &str) {
-    use iptv_epg::{ChannelKey, FeedId, MatchKind, ProgrammeData, StoreOptions};
+    use iptv_epg::{ChannelKey, FeedId, MatchKind, ProgramData, StoreOptions};
     use iptv_import::{EpgImport, EpgSourceConfig, GuideSink, ListedChannel};
     use iptv_store_sqlite::{EpgFeedMeta, EpgStage, GuideSource};
     let mut store = Store::open_encrypted(
@@ -1430,9 +1430,9 @@ fn retained_guide(directory: &std::path::Path, source: SourceId, title: &str) {
         .begin_feed(config.feed, 0, StoreOptions::default(), 0)
         .unwrap();
     stage
-        .programme(
+        .program(
             "amber.main",
-            &ProgrammeData {
+            &ProgramData {
                 start: 1_794_657_600,
                 stop: Some(1_794_664_800),
                 title,
@@ -1485,7 +1485,7 @@ fn retained_guide(directory: &std::path::Path, source: SourceId, title: &str) {
 }
 
 #[test]
-fn held_verification_cannot_certify_later_programmes_with_unchanged_mapping_and_configuration() {
+fn held_verification_cannot_certify_later_programs_with_unchanged_mapping_and_configuration() {
     let fixture = Fixture::new();
     retained_guide(
         fixture.dir.path(),
@@ -1611,7 +1611,7 @@ fn verification_across_inverse(target: Target) {
 }
 
 #[test]
-fn a_verification_accepted_before_cancel_does_not_clear_the_later_cancelled_status() {
+fn a_verification_accepted_before_cancel_does_not_clear_the_later_canceled_status() {
     let fixture = Fixture::new();
     let request = fixture.request("amber", Target::NoGuide);
     let plan = fixture.preview(request.clone());
@@ -1639,7 +1639,7 @@ fn a_verification_accepted_before_cancel_does_not_clear_the_later_cancelled_stat
             )
             .unwrap()
             .phase,
-        OperationPhase::Cancelled
+        OperationPhase::Canceled
     );
     // A new explicit verification after cancellation may describe the actual
     // saved result and is not an old completion clearing a later marker.
@@ -1798,7 +1798,7 @@ fn automatic_verification_waits_for_full_projection_after_no_guide_undo() {
         ))
         .unwrap();
     assert!(!pending.configuration_effective && !pending.verified_coverage);
-    assert_eq!(pending.programmes_available, 0);
+    assert_eq!(pending.programs_available, 0);
     // The injected host keeps the coalesced refresh delayed. A complete normal
     // import installs the automatic projection and provides the missing proof.
     retained_guide(
@@ -1814,7 +1814,7 @@ fn automatic_verification_waits_for_full_projection_after_no_guide_undo() {
         ))
         .unwrap();
     assert!(settled.configuration_effective && settled.verified_coverage);
-    assert_eq!(settled.programmes_available, 1);
+    assert_eq!(settled.programs_available, 1);
 }
 
 #[test]
@@ -1863,7 +1863,7 @@ fn automatic_verification_rejects_stale_binding_and_partial_fingerprint_renewal(
         ))
         .unwrap();
     assert_eq!(
-        result.programmes_available, 1,
+        result.programs_available, 1,
         "old real programmes remain visible"
     );
     assert!(!result.configuration_effective && !result.verified_coverage);
@@ -1925,7 +1925,7 @@ fn feed_only_verification_requires_current_full_projection_configuration() {
 }
 
 #[test]
-fn held_verification_detects_catalogue_change_without_mapping_or_config_edit() {
+fn held_verification_detects_catalog_change_without_mapping_or_config_edit() {
     let fixture = Fixture::new();
     retained_guide(
         fixture.dir.path(),

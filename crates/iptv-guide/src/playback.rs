@@ -443,7 +443,7 @@ fn catch_up(
             }
             let days = i64::from(cu.window_days(DEFAULT_CATCHUP_WINDOW_DAYS));
             if archive.start > clock.now {
-                return no(CatchupError::FutureProgramme);
+                return no(CatchupError::FutureProgram);
             }
             if archive.start < clock.now - days * 86_400 || archive.end <= archive.start {
                 return no(CatchupError::OutsideArchive);

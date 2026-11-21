@@ -228,8 +228,8 @@ fn rows_list(ui: Ui, rows: Memo<Vec<Row>>, size: Scale) -> impl IntoElement {
 }
 
 /// The colour of a palette value, for its swatch.
-pub(super) fn swatch_colour(ty: &ValueType, variant: &str) -> Option<u32> {
-    let ValueType::Colour { palette, .. } = ty else {
+pub(super) fn swatch_color(ty: &ValueType, variant: &str) -> Option<u32> {
+    let ValueType::Color { palette, .. } = ty else {
         return None;
     };
     let key = |name: &str| crate::settings::palette_key(name);
@@ -294,7 +294,7 @@ fn row_view(
             Some(Row::Setting(s)) => {
                 let value = settings.get(s.key).unwrap_or_else(|_| s.default_value());
                 let swatch = match &value {
-                    Value::Colour(v) => swatch_colour(&s.ty, v),
+                    Value::Color(v) => swatch_color(&s.ty, v),
                     _ => None,
                 };
                 (

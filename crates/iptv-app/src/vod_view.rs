@@ -115,7 +115,7 @@ pub fn back(ui: Ui) -> bool {
             && (s.is_shelf() || s.query.continue_watching);
         s.back();
         if had_details {
-            s.control = Control::Catalogue;
+            s.control = Control::Catalog;
         }
         (
             !s.open,
@@ -183,40 +183,41 @@ fn load(ui: Ui, append: bool, keep: Option<u32>) {
         }
         // A shelf reads one bounded page across every playlist; a
         // catalogue also refreshes its filter choices.
-        let result = match (shelf, anchor) {
-            (Some(shelf), Some(key)) => owner
-                .vod_discovery_around(shelf, key)
-                .await
-                .map(|page| (page, None)),
-            (Some(shelf), None) => owner
-                .vod_discovery(DiscoveryQuery::after(shelf, offset as usize))
-                .await
-                .map(|page| (page, None)),
-            (None, _) if through > 0 => owner.vod_catalogue_through(query, through).await.map(
-                |(cards, more, sources, categories)| {
-                    (
-                        DiscoveryPage {
-                            cards,
-                            more,
-                            start: 0,
-                        },
-                        Some((sources, categories)),
-                    )
-                },
-            ),
-            (None, _) => owner.vod_catalogue(query, offset).await.map(
-                |(cards, more, sources, categories)| {
-                    (
-                        DiscoveryPage {
-                            cards,
-                            more,
-                            start: offset,
-                        },
-                        Some((sources, categories)),
-                    )
-                },
-            ),
-        };
+        let result =
+            match (shelf, anchor) {
+                (Some(shelf), Some(key)) => owner
+                    .vod_discovery_around(shelf, key)
+                    .await
+                    .map(|page| (page, None)),
+                (Some(shelf), None) => owner
+                    .vod_discovery(DiscoveryQuery::after(shelf, offset as usize))
+                    .await
+                    .map(|page| (page, None)),
+                (None, _) if through > 0 => owner.vod_catalog_through(query, through).await.map(
+                    |(cards, more, sources, categories)| {
+                        (
+                            DiscoveryPage {
+                                cards,
+                                more,
+                                start: 0,
+                            },
+                            Some((sources, categories)),
+                        )
+                    },
+                ),
+                (None, _) => owner.vod_catalog(query, offset).await.map(
+                    |(cards, more, sources, categories)| {
+                        (
+                            DiscoveryPage {
+                                cards,
+                                more,
+                                start: offset,
+                            },
+                            Some((sources, categories)),
+                        )
+                    },
+                ),
+            };
         ui.vod.update(|s| {
             if s.generation != generation || !s.open {
                 return;
@@ -593,7 +594,7 @@ fn activate(ui: Ui) {
     let control = ui.vod.with_untracked(|s| s.control);
     match control {
         Control::Navigation => browser::activate_navigation(ui),
-        Control::Catalogue => {
+        Control::Catalog => {
             if let Some(key) = ui.vod.with_untracked(|s| s.focused.clone()) {
                 select(ui, key);
             } else {
@@ -606,7 +607,7 @@ fn activate(ui: Ui) {
                 .vod
                 .with_untracked(|s| !s.is_shelf() && s.details.is_none()) =>
         {
-            ui.vod.update(|s| s.enter_catalogue());
+            ui.vod.update(|s| s.enter_catalog());
         }
         Control::Category => cycle_category(ui),
         Control::Sort => {
@@ -652,7 +653,7 @@ pub fn key(ui: Ui, action: Action) {
                 if changed {
                     reload(ui, false);
                 } else if ui.vod.with_untracked(|s| {
-                    s.control == Control::Catalogue
+                    s.control == Control::Catalog
                         && s.has_more
                         && s.focused_index()
                             .is_some_and(|at| at + s.columns.max(1) >= s.cards.len())
@@ -699,7 +700,7 @@ pub fn key(ui: Ui, action: Action) {
         }),
         Action::MoveUp => {
             let at_top = ui.vod.with_untracked(|s| {
-                control == Control::Catalogue
+                control == Control::Catalog
                     && s.cards
                         .first()
                         .is_some_and(|c| Some(&c.key) == s.focused.as_ref())
@@ -711,22 +712,22 @@ pub fn key(ui: Ui, action: Action) {
                 return;
             }
             ui.vod.update(|s| match control {
-                Control::Catalogue if s.cards.is_empty() => s.move_control(-1),
-                Control::Catalogue if at_top => s.move_control(-1),
-                Control::Catalogue => s.move_focus(-1),
+                Control::Catalog if s.cards.is_empty() => s.move_control(-1),
+                Control::Catalog if at_top => s.move_control(-1),
+                Control::Catalog => s.move_focus(-1),
                 Control::Episodes => s.control = Control::Seasons,
                 _ => s.move_control(-1),
             })
         }
         Action::MoveDown => {
             ui.vod.update(|s| match control {
-                Control::Catalogue if s.cards.is_empty() => s.move_control(1),
-                Control::Catalogue => s.move_focus(1),
+                Control::Catalog if s.cards.is_empty() => s.move_control(1),
+                Control::Catalog => s.move_focus(1),
                 Control::Episodes => s.move_control(1),
                 _ => s.move_control(1),
             });
             let more = ui.vod.with_untracked(|s| {
-                s.control == Control::Catalogue
+                s.control == Control::Catalog
                     && s.has_more
                     && s.cards
                         .last()
@@ -914,7 +915,7 @@ fn card_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
         move || {
             card().is_some_and(|c| {
                 ui.vod
-                    .with(|s| s.control == Control::Catalogue && s.focused.as_ref() == Some(&c.key))
+                    .with(|s| s.control == Control::Catalog && s.focused.as_ref() == Some(&c.key))
             })
         },
         move || {
@@ -929,7 +930,7 @@ fn card_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
         ..Default::default()
     })
 }
-fn shelf_catalogue(ui: Ui, size: Scale) -> impl IntoElement {
+fn shelf_catalog(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = element_ref();
     effect(move || {
         let at = ui.vod.with(|s| {
@@ -1345,7 +1346,7 @@ fn library_screen(ui: Ui, size: Scale) -> View {
         move || ui.vod.with(|s| s.details.is_some()),
         move || details(ui, size),
     )
-    .otherwise(move || shelf_catalogue(ui, size));
+    .otherwise(move || shelf_catalog(ui, size));
     ui_kit::screen(ui, size)
         .test_id("vod-screen")
         .accessibility_elements_hidden(move || {

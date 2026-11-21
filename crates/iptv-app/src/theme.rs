@@ -256,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn every_bundle_gives_guide_colours_from_its_own_tones() {
+    fn every_bundle_gives_guide_colors_from_its_own_tones() {
         for accent in ACCENTS {
             for background in BACKGROUNDS {
                 let g = Theme { accent, background }.guide();

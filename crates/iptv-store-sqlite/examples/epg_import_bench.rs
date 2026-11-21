@@ -148,7 +148,7 @@ async fn main() {
     println!(
         "guide: {} channels, {} programmes, {} descriptions; stage file {:.0} MiB",
         counts.bindings,
-        counts.programmes,
+        counts.programs,
         counts.descriptions,
         staged as f64 / f64::from(1 << 20)
     );

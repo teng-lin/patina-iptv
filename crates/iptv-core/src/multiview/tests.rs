@@ -73,7 +73,7 @@ fn the_grid_holds_just_the_tiles() {
 }
 
 #[test]
-fn enlarged_puts_one_big_over_a_centred_strip() {
+fn enlarged_puts_one_big_over_a_centered_strip() {
     let (w, h) = (2560.0, 1600.0);
     let two = |i| px(Layout::Enlarged { tiles: 2, big: 1 }.rect(i, TABLET), w, h);
     let (bx, by, bw, bh) = two(1);

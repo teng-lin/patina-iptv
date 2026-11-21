@@ -41,7 +41,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value as Json};
 
-use crate::catalogue;
+use crate::catalog;
 use crate::error::{LoadError, SettingsError};
 use crate::schema::{Setting, ValueType};
 use crate::scope::Target;
@@ -324,7 +324,7 @@ impl Settings {
                 target: target.clone(),
                 key: key.clone(),
             };
-            let Some(s) = catalogue::setting(key) else {
+            let Some(s) = catalog::setting(key) else {
                 layer.raw.insert(key.clone(), json.clone());
                 report.unknown.push(entry);
                 continue;
@@ -387,7 +387,7 @@ pub(crate) fn value_json(value: &Value) -> Json {
     match value {
         Value::Bool(b) => Json::from(*b),
         Value::Int(n) | Value::Duration(n) => Json::from(*n),
-        Value::Enum(s) | Value::Text(s) | Value::Colour(s) => Json::from(s.as_str()),
+        Value::Enum(s) | Value::Text(s) | Value::Color(s) => Json::from(s.as_str()),
         Value::KeyBindings(list) => Json::Array(list.iter().map(binding_json).collect()),
     }
 }
@@ -410,7 +410,7 @@ fn decode(s: &Setting, json: &Json) -> Decoded {
         (ValueType::Duration { .. }, Json::Number(n)) => n.as_i64().map(Value::Duration),
         (ValueType::Enum { .. }, Json::String(v)) => Some(Value::Enum(v.clone())),
         (ValueType::Text { .. }, Json::String(v)) => Some(Value::Text(v.clone())),
-        (ValueType::Colour { .. }, Json::String(v)) => Some(Value::Colour(v.clone())),
+        (ValueType::Color { .. }, Json::String(v)) => Some(Value::Color(v.clone())),
         (ValueType::KeyBindings { .. }, Json::Array(items)) => items
             .iter()
             .map(binding_from_json)

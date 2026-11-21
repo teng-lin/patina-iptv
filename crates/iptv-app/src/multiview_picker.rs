@@ -432,11 +432,11 @@ fn channel_row(ui: Ui, at: Position, size: Scale, row: Memo<Option<usize>>) -> i
                     };
                     let now = ui.focus.with(|f| f.now);
                     let catalog = catalog(ui);
-                    let programme = catalog.program_at(channel.index, now);
+                    let program = catalog.program_at(channel.index, now);
                     format!(
                         "{}  {}",
-                        clock(programme.start),
-                        catalog.title_in(channel.index, programme, crate::i18n::language())
+                        clock(program.start),
+                        catalog.title_in(channel.index, program, crate::i18n::language())
                     )
                 },
                 CONDENSED,

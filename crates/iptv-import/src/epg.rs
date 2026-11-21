@@ -35,7 +35,7 @@ use std::time::Duration;
 use iptv_core::import_limits::ImportLimits;
 use iptv_epg::{
     ChannelKey, Compression, EpgRef, FeedId, IngestReport, MatchFilter, MatchIndex, MatchReport,
-    Overrides, ParseOptions, ParseStats, PlaylistChannel, ProgrammeData, StoreOptions, TimePolicy,
+    Overrides, ParseOptions, ParseStats, PlaylistChannel, ProgramData, StoreOptions, TimePolicy,
     UnixTime, XmltvChannel, XmltvItem, XmltvParser,
 };
 use iptv_providers::m3u::M3uHeader;
@@ -259,7 +259,7 @@ pub async fn import_epg<F: Fetch, S: GuideSink, P: ProgressSink>(
             // Whatever the attempt stored is incomplete, also before a retry.
             sink.discard_feed().map_err(storage)?;
             // A failed feed leaves the others; these end the import.
-            if matches!(error, ImportError::Cancelled | ImportError::Storage(_)) {
+            if matches!(error, ImportError::Canceled | ImportError::Storage(_)) {
                 return Err(error);
             }
             if retries == GUIDE_RETRIES || !error.retry_now() {
@@ -296,7 +296,7 @@ pub async fn import_epg<F: Fetch, S: GuideSink, P: ProgressSink>(
                 .into_iter()
                 .filter_map(|c| {
                     let r = *rank.get(&c.source)?;
-                    sink.has_programmes(c.source, &c.epg_id).then_some((r, c))
+                    sink.has_programs(c.source, &c.epg_id).then_some((r, c))
                 })
                 .min_by_key(|(r, _)| *r)?;
             Some((key, best.1))
@@ -349,16 +349,14 @@ impl<S: GuideSink> FeedState<'_, S> {
                 }
                 self.channels.push(c);
             }
-            XmltvItem::Programme(p) => {
+            XmltvItem::Program(p) => {
                 // Not declared (yet): kept, it may be declared later.
                 let wanted = self.filter.wants_id(self.feed, &p.channel)
                     || self.wanted.get(&p.channel).copied().unwrap_or(true);
                 if !wanted {
                     self.skipped += 1;
                 } else if self.failed.is_none()
-                    && let Err(e) = self
-                        .sink
-                        .programme(&p.channel, &ProgrammeData::from_xmltv(&p))
+                    && let Err(e) = self.sink.program(&p.channel, &ProgramData::from_xmltv(&p))
                 {
                     self.failed = Some(e);
                 }
@@ -431,7 +429,7 @@ async fn load_source<F: Fetch, S: GuideSink, P: ProgressSink>(
         .finish(&mut |item| state.push(item))
         .map_err(decode)?;
     state.check()?;
-    if parse.channels == 0 && parse.programmes == 0 {
+    if parse.channels == 0 && parse.programs == 0 {
         return Err(if bytes == 0 {
             ImportError::Empty { step }
         } else {
@@ -445,7 +443,7 @@ async fn load_source<F: Fetch, S: GuideSink, P: ProgressSink>(
         bytes,
     };
     let mut p = Progress::phase(Phase::Guide(cfg.id));
-    p.items = stats.parse.programmes;
+    p.items = stats.parse.programs;
     p.bytes = bytes;
     ctx.report(p);
     Ok((state.channels, stats))

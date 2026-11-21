@@ -288,7 +288,7 @@ impl Pan {
         }
     }
 
-    fn cancelled(&self) {
+    fn canceled(&self) {
         self.model.with(Timeline::cancel);
         self.settle();
     }
@@ -324,5 +324,5 @@ pub(crate) fn panning<E: Interactive>(area: E, pan: Pan) -> E {
         .on_responder_grant(move |_: &ResponderEvent| pan.grabbed())
         .on_responder_move(move |e: &ResponderEvent| pan.dragged(&e.gesture))
         .on_responder_release(move |e: &ResponderEvent| pan.released(&e.gesture))
-        .on_responder_terminate(move |_: &ResponderEvent| pan.cancelled())
+        .on_responder_terminate(move |_: &ResponderEvent| pan.canceled())
 }

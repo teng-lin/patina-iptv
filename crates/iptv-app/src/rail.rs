@@ -109,7 +109,7 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
             && index().is_some()
             && ui.focus.with(|f| f.pane == Pane::Rail && f.rail == item)
     };
-    let colour = move || {
+    let color = move || {
         if !item.enabled() {
             tint(WHITE, TEXT_DISABLED_ALPHA / 2)
         } else if focused() {
@@ -161,7 +161,7 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
         .child(
             svg(icon(item))
                 .size(move || px(item_height(ui).min(ICON)))
-                .text_color(colour),
+                .text_color(color),
         )
         .child(
             text(move || label(item))
@@ -169,7 +169,7 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
                 .accessibility_elements_hidden(move || !open())
                 .opacity(move || if open() { 1.0_f32 } else { 0.0 })
                 .text_size(move || px(TEXT_SIZE.min(item_height(ui) * 0.8)))
-                .text_color(colour),
+                .text_color(color),
         )
 }
 

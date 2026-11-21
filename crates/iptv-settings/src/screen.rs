@@ -20,7 +20,7 @@
 //! a text editor (OK keeps a valid text, Back cancels), a command runs
 //! (after a confirmation when the catalogue asks for one).
 
-use crate::catalogue::{self, Command};
+use crate::catalog::{self, Command};
 use crate::schema::{Section, Setting, ValueType};
 use crate::scope::Target;
 use crate::store::Settings;
@@ -147,15 +147,15 @@ impl Ctx<'_> {
 /// subsection get their section's name as heading.
 pub fn rows(page: &Page, ctx: &Ctx) -> Vec<Row> {
     let several = page.parts.len() > 1;
-    let tree = catalogue::tree(false);
+    let tree = catalog::tree(false);
     let mut rows = Vec::new();
     for part in page.parts {
         let section = match part {
             Part::Keys(keys) => {
                 rows.extend(keys.iter().filter_map(|k| {
-                    catalogue::setting(k)
+                    catalog::setting(k)
                         .map(Row::Setting)
-                        .or_else(|| catalogue::command(k).map(Row::Command))
+                        .or_else(|| catalog::command(k).map(Row::Command))
                 }));
                 continue;
             }
@@ -458,7 +458,7 @@ impl Screen {
                     value: Value::Bool(!b),
                 };
             }
-            Value::Enum(v) | Value::Colour(v) => {
+            Value::Enum(v) | Value::Color(v) => {
                 let variants = s.ty.editor_choices().map_or(&[][..], |c| c.variants);
                 let selected = variants.iter().position(|x| *x == v).unwrap_or(0);
                 Some(Editor::Choice {
@@ -570,7 +570,7 @@ impl Screen {
         };
         self.editor = None;
         let value = match setting.ty {
-            ValueType::Colour { .. } => Value::colour(variant),
+            ValueType::Color { .. } => Value::color(variant),
             ValueType::Text { .. } => Value::text(variant),
             _ => Value::choice(variant),
         };
