@@ -23,9 +23,9 @@ fn names(rows: &[ChannelRow]) -> Vec<&str> {
     rows.iter().map(|r| r.name.as_str()).collect()
 }
 
-fn favourites() -> ChannelQuery {
+fn favorites() -> ChannelQuery {
     ChannelQuery {
-        favourites_only: true,
+        favorites_only: true,
         ..Default::default()
     }
 }
@@ -41,8 +41,8 @@ fn everything() -> ChannelQuery {
 fn overlays_survive_a_refresh_that_rotates_url_credentials() {
     let (mut s, src, cat) = setup(10, 2);
     let c = |i: usize| cat.channels[i].id.clone();
-    s.set_favourite(src, &c(4), true).unwrap();
-    s.set_favourite(src, &c(1), true).unwrap();
+    s.set_favorite(src, &c(4), true).unwrap();
+    s.set_favorite(src, &c(1), true).unwrap();
     s.rename_channel(src, &c(2), Some("  My Channel  "))
         .unwrap();
     s.renumber_channel(src, &c(3), Some(500)).unwrap();
@@ -69,7 +69,7 @@ fn overlays_survive_a_refresh_that_rotates_url_credentials() {
         other => panic!("{other:?}"),
     }
     assert_eq!(
-        ids(&s.load_channels(src, &favourites()).unwrap()),
+        ids(&s.load_channels(src, &favorites()).unwrap()),
         [c(4).as_str(), c(1).as_str()]
     );
     assert!(s.orphaned_overlays(None).unwrap().is_empty());
@@ -79,9 +79,9 @@ fn overlays_survive_a_refresh_that_rotates_url_credentials() {
 fn orphaned_overlays_are_kept_reported_and_reapplied() {
     let (mut s, src, cat) = setup(6, 1);
     let gone = cat.channels[2].id.clone();
-    s.set_favourite(src, &cat.channels[0].id, true).unwrap();
-    s.set_favourite(src, &gone, true).unwrap();
-    s.set_favourite(src, &cat.channels[4].id, true).unwrap();
+    s.set_favorite(src, &cat.channels[0].id, true).unwrap();
+    s.set_favorite(src, &gone, true).unwrap();
+    s.set_favorite(src, &cat.channels[4].id, true).unwrap();
     s.rename_channel(src, &gone, Some("Kept Name")).unwrap();
 
     let mut without = catalog(6, 1, XT_PASSWORD);
@@ -91,19 +91,19 @@ fn orphaned_overlays_are_kept_reported_and_reapplied() {
     let orphans = s.orphaned_overlays(Some(src)).unwrap();
     assert_eq!(orphans.len(), 1);
     assert_eq!(orphans[0].channel_id, gone);
-    assert!(orphans[0].favourite && orphans[0].customised);
-    assert_eq!(s.load_channels(src, &favourites()).unwrap().len(), 2);
-    assert_eq!(s.channel_count(src, &favourites()).unwrap(), 2);
+    assert!(orphans[0].favorite && orphans[0].customized);
+    assert_eq!(s.load_channels(src, &favorites()).unwrap().len(), 2);
+    assert_eq!(s.channel_count(src, &favorites()).unwrap(), 2);
 
-    // Reordering while it is gone keeps its slot relative to neighbours.
-    s.move_favourite(src, &cat.channels[4].id, 0).unwrap();
+    // Reordering while it is gone keeps its slot relative to neighbors.
+    s.move_favorite(src, &cat.channels[4].id, 0).unwrap();
 
     replace(&mut s, src, &cat);
     assert!(s.orphaned_overlays(Some(src)).unwrap().is_empty());
     let back = s.channel(src, &gone).unwrap().unwrap();
     assert_eq!(back.name, "Kept Name");
     assert_eq!(
-        ids(&s.load_channels(src, &favourites()).unwrap()),
+        ids(&s.load_channels(src, &favorites()).unwrap()),
         [
             cat.channels[4].id.as_str(),
             cat.channels[0].id.as_str(),
@@ -116,31 +116,31 @@ fn orphaned_overlays_are_kept_reported_and_reapplied() {
     replace(&mut s, src, &cat);
     let back = s.channel(src, &gone).unwrap().unwrap();
     assert_eq!(back.name, "Channel 00002");
-    assert!(!back.favourite);
+    assert!(!back.favorite);
 }
 
 #[test]
-fn favourites_toggle_and_reorder() {
+fn favorites_toggle_and_reorder() {
     let (mut s, src, cat) = setup(5, 1);
     let c = |i: usize| cat.channels[i].id.clone();
-    assert!(s.toggle_favourite(src, &c(3)).unwrap());
-    assert!(s.toggle_favourite(src, &c(0)).unwrap());
-    assert!(s.toggle_favourite(src, &c(2)).unwrap());
-    s.set_favourite(src, &c(3), true).unwrap(); // idempotent, keeps its place
+    assert!(s.toggle_favorite(src, &c(3)).unwrap());
+    assert!(s.toggle_favorite(src, &c(0)).unwrap());
+    assert!(s.toggle_favorite(src, &c(2)).unwrap());
+    s.set_favorite(src, &c(3), true).unwrap(); // idempotent, keeps its place
     assert_eq!(
-        ids(&s.load_channels(src, &favourites()).unwrap()),
+        ids(&s.load_channels(src, &favorites()).unwrap()),
         [c(3).as_str(), c(0).as_str(), c(2).as_str()]
     );
-    assert!(s.move_favourite(src, &c(2), 0).unwrap());
-    assert!(s.move_favourite(src, &c(3), 9).unwrap());
-    assert!(!s.move_favourite(src, &c(4), 0).unwrap());
+    assert!(s.move_favorite(src, &c(2), 0).unwrap());
+    assert!(s.move_favorite(src, &c(3), 9).unwrap());
+    assert!(!s.move_favorite(src, &c(4), 0).unwrap());
     assert_eq!(
-        ids(&s.load_channels(src, &favourites()).unwrap()),
+        ids(&s.load_channels(src, &favorites()).unwrap()),
         [c(2).as_str(), c(0).as_str(), c(3).as_str()]
     );
-    assert!(!s.toggle_favourite(src, &c(0)).unwrap());
-    assert!(!s.is_favourite(src, &c(0)).unwrap());
-    assert_eq!(s.channel_count(src, &favourites()).unwrap(), 2);
+    assert!(!s.toggle_favorite(src, &c(0)).unwrap());
+    assert!(!s.is_favorite(src, &c(0)).unwrap());
+    assert_eq!(s.channel_count(src, &favorites()).unwrap(), 2);
 }
 
 #[test]
@@ -187,7 +187,7 @@ fn filters_orders_and_paging() {
     assert_eq!(by_number[0].number, Some(0));
     assert_eq!(by_number[1].number, Some(2));
 
-    // Group + favourites + paging compose; pages tile the full list.
+    // Group + favorites + paging compose; pages tile the full list.
     let g = ChannelScope::Group(group(1).id);
     let in_group = ChannelQuery {
         scope: g.clone(),
@@ -213,11 +213,11 @@ fn filters_orders_and_paging() {
         );
     }
     assert_eq!(paged, full);
-    s.set_favourite(src, &c(7), true).unwrap();
-    s.set_favourite(src, &c(2), true).unwrap();
+    s.set_favorite(src, &c(7), true).unwrap();
+    s.set_favorite(src, &c(2), true).unwrap();
     let fav_in_group = ChannelQuery {
         scope: g,
-        favourites_only: true,
+        favorites_only: true,
         ..Default::default()
     };
     assert_eq!(
@@ -275,8 +275,8 @@ fn search_uses_custom_and_provider_names() {
 fn overlays_need_an_existing_source_but_not_a_present_channel() {
     let (mut s, src, _) = setup(1, 1);
     let future = ContentId::from_stored("m3u:not-imported-yet");
-    s.set_favourite(src, &future, true).unwrap();
+    s.set_favorite(src, &future, true).unwrap();
     assert_eq!(s.orphaned_overlays(Some(src)).unwrap().len(), 1);
-    assert!(s.set_favourite(SourceId(42), &future, true).is_err());
+    assert!(s.set_favorite(SourceId(42), &future, true).is_err());
     assert!(s.set_hidden(SourceId(42), &future, true).is_err());
 }

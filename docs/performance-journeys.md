@@ -22,7 +22,7 @@ short diagnostic runs retain samples but cannot become valid canonical reports.
 ## Workloads and endpoints
 
 `tools/performance/fixtures.json` versions the generated workload specification;
-its SHA-256 identifies the report's fixture. Programme times are relative to the
+its SHA-256 identifies the report's fixture. Program times are relative to the
 scenario's clock, and local file paths are deliberately excluded from the hash.
 During opt-in counter journeys, the guide minute ticker and periodic recordings-screen
 UI reload are paused, and periodic EPG checks are disabled; the cached cold profile also disables startup playlist
@@ -39,8 +39,8 @@ network stream, credentials, or real media is needed.
 
 | Journey | Fixture/cache state | Measured interval | Deterministic work |
 | --- | --- | --- | --- |
-| `cached-guide` | 2 channels, 144 hour-long programmes; imported SQLite cache, last channel set; new UI root | Immediately before headless root creation to cached current programme mounted, with the existing 500 ms settling interval | Owner's reader-lane jobs; one native source open across startup and guide arrival |
-| `busy-guide` | 10,000 channels, 70,000 day-long programmes; warmed scrolling; SQLite `BEGIN IMMEDIATE`, favourite write queued behind it | 24 Down actions to mounted navigation under the held writer | Reader-lane jobs during the burst; native source opens |
+| `cached-guide` | 2 channels, 144 hour-long programs; imported SQLite cache, last channel set; new UI root | Immediately before headless root creation to cached current program mounted, with the existing 500 ms settling interval | Owner's reader-lane jobs; one native source open across startup and guide arrival |
+| `busy-guide` | 10,000 channels, 70,000 day-long programs; warmed scrolling; SQLite `BEGIN IMMEDIATE`, favorite write queued behind it | 24 Down actions to mounted navigation under the held writer | Reader-lane jobs during the burst; native source opens |
 | `selection` | Actual App, one cached channel, no previous playback; realized persistent native surface; generated 160×90 MPEG2 TS loopback media | Normal Enter handler dispatch on a mounted cached guide to the same root's current-source renderer callback | Same app owner's reader-lane jobs and actual native source opens |
 
 The cold measurement is **headless root startup**, not an OS process launch or
@@ -49,7 +49,7 @@ busy journey reuses the existing isolated writer-contention scenario and its
 deterministic checks. The canonical journey retains its measured maximum key-to-mounted-frame
 as an informational observation; the existing isolated `tools/check.sh` invocation
 continues to enforce its 50 ms limit separately. Guide
-navigation and the pending favourite exercise both UI progress and an actual
+navigation and the pending favorite exercise both UI progress and an actual
 blocked writer. Filtering/read independence remains covered by the existing
 isolated `a_store_read_does_not_wait_for_a_busy_writer` scenario in `tools/check.sh`.
 

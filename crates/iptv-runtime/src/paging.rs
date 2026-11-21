@@ -2,7 +2,7 @@
 use iptv_epg::{DAY, UnixTime};
 use iptv_guide::pages::PagedWindow;
 use iptv_store_sqlite::EpgWindow;
-/// Days of finished programmes held in memory with the guide (at most
+/// Days of finished programs held in memory with the guide (at most
 /// what `epg.keep_past` keeps). Older ones are paged in.
 pub const LOADED_PAST_DAYS: u32 = 1;
 
@@ -25,7 +25,7 @@ pub fn store_window(window: PagedWindow) -> EpgWindow<'static> {
     }
 }
 
-/// [`window`] with its oldest time at the first programme stored (`None`:
+/// [`window`] with its oldest time at the first program stored (`None`:
 /// none is), when that is later than what the store would keep: the guide
 /// can be browsed back to it and no further (`EpgSchedule::browsable`).
 pub fn kept_from(window: PagedWindow, first: Option<UnixTime>, now: UnixTime) -> PagedWindow {

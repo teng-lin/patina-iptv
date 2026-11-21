@@ -1,5 +1,5 @@
 //! How far back a stored guide reaches: the guide can be browsed back to
-//! its earliest programme and no further (older days were never stored or
+//! its earliest program and no further (older days were never stored or
 //! were pruned, `Store::prune_epg`).
 
 use std::collections::HashMap;
@@ -17,12 +17,12 @@ impl Store {
         cutoff: UnixTime,
     ) -> Result<HashMap<ChannelKey, UnixTime>> {
         // Use the same ordered seek as a guide window. The retained first
-        // programme may cross the cutoff, so skip older rows by start before
+        // program may cross the cutoff, so skip older rows by start before
         // checking its end.
         let seek = crate::epg_window::seek("b.epg_channel_id");
         let mut stmt = self.conn.prepare_cached(&format!(
             "SELECT b.channel_key, (
-                 SELECT p.start FROM epg_programmes p
+                 SELECT p.start FROM epg_programs p
                  WHERE p.channel_id = b.epg_channel_id AND p.stop > ?2 AND {seek}
                  ORDER BY p.start LIMIT 1
              ) FROM epg_bindings b WHERE b.source_id = ?1",
@@ -37,14 +37,14 @@ impl Store {
         Ok(starts)
     }
 
-    /// When the earliest stored programme of `source`'s bound channels
+    /// When the earliest stored program of `source`'s bound channels
     /// starts; `None` when none is stored. One index seek per bound EPG
-    /// channel (the programmes' key is `(channel_id, start)`).
+    /// channel (the programs' key is `(channel_id, start)`).
     pub fn epg_first_start(&self, source: SourceId) -> Result<Option<UnixTime>> {
         let first = self
             .conn
             .prepare_cached(
-                "SELECT MIN((SELECT p.start FROM epg_programmes p
+                "SELECT MIN((SELECT p.start FROM epg_programs p
                              WHERE p.channel_id = b.epg_channel_id
                              ORDER BY p.start LIMIT 1))
                  FROM epg_bindings b WHERE b.source_id = ?1",

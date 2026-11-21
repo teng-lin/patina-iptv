@@ -1,4 +1,4 @@
-//! A cold start resuming a live HLS channel from a large stored catalogue
+//! A cold start resuming a live HLS channel from a large stored catalog
 //! while its provider is slow to deliver the live edge's segment: the
 //! stream reaches the player with the segment's first packets, before the
 //! guide window is read, instead of after the whole segment (#153). The
@@ -6,7 +6,7 @@
 //! not opened again. Its first screen is on screen before the window is
 //! read (#160).
 //!
-//! Synthetic data only: generated channels and programmes, and a local
+//! Synthetic data only: generated channels and programs, and a local
 //! server standing in for the provider.
 use crate::headless::Headless;
 use iptv_store_sqlite::ChannelQuery;

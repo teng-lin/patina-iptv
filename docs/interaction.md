@@ -11,14 +11,14 @@ Each rule is marked **Now** (implemented today) or **Planned** (agreed in #86,
 not yet built). Update the mark in the change that delivers it.
 [Verification](#verification) lists the tests that cover the **Now** rules.
 Unmarked statements, such as the principles, are goals that the marked rules
-implement; each section states where current behaviour still falls short.
+implement; each section states where current behavior still falls short.
 
 ## Principles
 
-- **Choosing is watching.** Choosing a channel or a live programme plays it full
+- **Choosing is watching.** Choosing a channel or a live program plays it full
   screen, on every input and in both guide layouts, unless the viewer has chosen
   to keep the guide open.
-- **Layout is appearance, not behaviour.** The guide layout, window size and
+- **Layout is appearance, not behavior.** The guide layout, window size and
   orientation change how content is arranged, never what an action does.
 - **Every way in has a way back the viewer can see or find on the input in
   use**: the Back key on a remote, a visible Back button for touch and pointer.
@@ -61,12 +61,12 @@ watching, Recently added, Recordings, Watchlist, Playlists and Settings.
 
 - **Now:** Live TV is the start screen. With **Play the last channel on start**
   (`general.resume_last_channel`, on by default) the last channel starts full
-  screen over it. When that channel is one of the playlist's favourites and
-  the Favourites category is offered (`channels.show_favorites`, not yet
-  editable in Settings), the guide behind it shows Favourites, so Back lands
+  screen over it. When that channel is one of the playlist's favorites and
+  the Favorites category is offered (`channels.show_favorites`, not yet
+  editable in Settings), the guide behind it shows Favorites, so Back lands
   there with the channel focused; otherwise it shows All channels
   (`iptv_core::lists::resume_entry`). The list is chosen once the channel
-  plays (after its PIN, if it has one); later favourite edits and the
+  plays (after its PIN, if it has one); later favorite edits and the
   viewer's own choices are left alone. Movies and Shows always appear.
   Continue watching and Recently added appear when any enabled playlist has
   movies or series. Watchlist is dimmed until #90 ships.
@@ -80,10 +80,10 @@ In the guide:
 
 | Target | Remote | Touch | Mouse and keyboard | Result |
 |---|---|---|---|---|
-| Channel, or programme on air | OK | Tap | Click or Enter | Plays full screen |
+| Channel, or program on air | OK | Tap | Click or Enter | Plays full screen |
 | Channel already playing live | OK | Tap | Click or Enter | Returns to full screen |
-| Past programme within the channel's archive | OK | Tap | Click or Enter | Replays from the start |
-| Past programme without replay, or upcoming programme | OK | Tap | Click or Enter | Opens its details |
+| Past program within the channel's archive | OK | Tap | Click or Enter | Replays from the start |
+| Past program without replay, or upcoming program | OK | Tap | Click or Enter | Opens its details |
 
 - **Now:** all four rows (`Ui::watch`). Choosing a new live channel waits for
   `guide.switch_delay` before tuning, so that fast choices skip channels; a
@@ -93,7 +93,7 @@ In the guide:
   off by default) keeps the guide open after tuning a live channel, in both
   layouts. A replay and the channel already playing always go full screen.
   `guide.autoplay` tunes the focused channel while browsing, without a choice.
-- **Now:** opening a programme's details or menu never starts playback. A
+- **Now:** opening a program's details or menu never starts playback. A
   long press or right-click moves the focus to what it opens the menu for;
   `guide.autoplay` then holds on that channel, after the menu or its details
   close, until the viewer moves the focus to another channel. A choice still
@@ -108,7 +108,7 @@ In the guide:
   1.5:1 diagonal pans too: NSH's iOS pan gate, `nsh.rev`), and a
   drag released while moving flings on and slows down. A gesture the
   system cancels (a notification shade, a call) stops where it is,
-  without a fling. A drag that started on a channel or a programme, past
+  without a fling. A drag that started on a channel or a program, past
   or upcoming, never chooses it: under the threshold a touch is still a
   tap (`iptv_core::timeline`).
 - **Now:** crossing the drag threshold, in the guide or the channel list,
@@ -121,7 +121,7 @@ In the guide:
   own choice still plays after its switch delay. Scrolling never tunes,
   records or opens a menu or details (`BrowsePlayback::dragged`;
   `tests/app/tablet_gestures.rs`).
-- **Now:** a timeline pan that starts on a channel's programme on air
+- **Now:** a timeline pan that starts on a channel's program on air
   keeps that channel for browse playback while it moves the focus along
   the row (`iptv_core::browse_playback::PanAnchor`, by the channel's
   identity): a choice waiting for its switch delay still plays, and
@@ -140,7 +140,7 @@ Back from full screen returns to where the viewer chose: the guide on the
 chosen channel, Recordings for a recording, a movie's or a show's details,
 or the multiview grid for a tile.
 In the guide the playing stream continues in the preview or behind the guide,
-and focus on a live channel follows the clock to the programme now on air.
+and focus on a live channel follows the clock to the program now on air.
 
 | Input | Way back from full screen |
 |---|---|
@@ -163,7 +163,7 @@ and focus on a live channel follows the clock to the programme now on air.
   shelf the title was chosen from, on that title, and from there to the
   guide, the title playing on in the preview (#147).
 - **Now:** with `guide.back_returns_to_now` (on by default), Back with focus on a
-  past or upcoming programme in the guide first returns to the programmes on
+  past or upcoming program in the guide first returns to the programs on
   air, after any dialog or hint card closes.
 - **Now:** visible Back and Close follow the input mode on hosts with a remote
   Back key: a TV used by touch or a pointer shows them, and a remote key hides
@@ -173,17 +173,17 @@ and focus on a live channel follows the clock to the programme now on air.
 
 ## Secondary actions
 
-Programme and channel menus (favourites, recording, details, replay) need a
+Program and channel menus (favorites, recording, details, replay) need a
 visible entry point for touch and pointer users.
 
 - **Now:** in the guide, the channel list and recordings: Menu on a remote, and
   long OK on Android; M on a keyboard, and Shift+F10 on desktop. Long press and
-  right-click open the same menu on guide programmes and channels, the channel
+  right-click open the same menu on guide programs and channels, the channel
   list and recordings. During playback, Menu and long OK open the playback bar
   instead ([TV controls](tv-controls.md)).
 - **Now:** while touch or a pointer drives the app, a visible "More options"
-  control (⋯) opens the programme and channel menu: in the guide header, after
-  the focused or tapped programme's title, and at the end of each channel list
+  control (⋯) opens the program and channel menu: in the guide header, after
+  the focused or tapped program's title, and at the end of each channel list
   row. The header's ⋯ hides during an inline reorder of channels or groups,
   and the rows' ⋯ while multiview picks a channel (rows have no menu then).
   Keys hide it; they have Menu. Where touch or a pointer is usual, the
@@ -227,36 +227,36 @@ what the content needs at the current text size, not from the device type.
   its own. Tablets, an unfolded phone and TVs rotate freely.
 - **Now:** the guide's header (`iptv_core::layout::GuideHeader`) puts its
   shortcuts (the list on screen, Movies, Shows, Add playlist) on a row of their
-  own under the preview and the focused programme in Compact, and in Medium
-  wherever the programme would have less than its room beside them. The
+  own under the preview and the focused program in Compact, and in Medium
+  wherever the program would have less than its room beside them. The
   preview keeps its place at the top left and shrinks to leave that row room,
   but never below 64 points tall, which keeps the corner ‹ inside it. A short
   window grows the header instead, for the preview and for the focused
-  programme's title and times (wrapped as the column makes them), up to 55%
+  program's title and times (wrapped as the column makes them), up to 55%
   of its height so the rail and the guide keep room, 70% at the accessibility
   text sizes; a window too short for that squeezes them, the description
   giving way first. The
-  programme's times wrap onto a second line rather than clip, and a part
+  program's times wrap onto a second line rather than clip, and a part
   wider than the column (large text in a narrow window) wraps within it; its
   title stays on one line and is truncated. The shortcuts' row scrolls
   sideways where the window is narrower than it. The
   guide's rows already take the full width below the header in every class.
 - **Now:** a Compact window at least 1.6 times as tall as it is wide (a phone
   held upright, a narrow portrait Split View window) stacks the header: the
-  preview spans the window's width inside its margins, the focused programme
-  sits under it, then the shortcuts' row. Beside the programme the preview
+  preview spans the window's width inside its margins, the focused program
+  sits under it, then the shortcuts' row. Beside the program the preview
   would be a thumbnail (132 × 74 points at 412 points wide); stacked it is
   388 × 218. The stacked header keeps the same 55% (70%) limit, and a window
   where it would pass that keeps the other arrangement. A small desktop window
   (400 × 600 is 1.5) and a phone on its side keep the preview beside the
-  programme.
+  program.
 - **Now:** the player's channel list keeps its columns inside the window
   (`iptv_core::layout::ListPanel`): the groups column first, then the list in
   what is left. In the preview layout the video goes beside them only where
   it keeps 160 points of width. A narrower window, a phone held upright for
   one, leaves it full screen under the list, as the overlay layout does.
 - **Now:** in Movies and Shows, details replace the list in every class and
-  the poster grid reflows its columns. In Compact, an empty catalogue (no
+  the poster grid reflows its columns. In Compact, an empty catalog (no
   titles, nothing filtered) is a pane of its own: its message and action take
   the width beside the rail (Close and the destinations), which stays narrow
   even with the remote on it, and the categories, which have nothing to
@@ -282,7 +282,7 @@ what the content needs at the current text size, not from the device type.
 expanding panes, resizing, rotating, entering split screen and switching input
 keep:
 
-- the selected content (channel, programme, title, season, episode) by identity,
+- the selected content (channel, program, title, season, episode) by identity,
   never by row index;
 - filters, sort and the scroll anchor;
 - the playing stream on the same persistent player surface. The player view is
@@ -308,7 +308,7 @@ They issue no playback command of their own.
 
 - **Now:** the first key after touch can move focus to a visible row (see
   [Input modes](#input-modes)). With `guide.autoplay` on, focus that lands on a
-  live programme after a pane closes can tune it.
+  live program after a pane closes can tune it.
 
 ## Which player is heard
 
@@ -411,7 +411,7 @@ muted), as the tile's own pause.
 
 **Now.** Movies and Shows explain why they are empty, with one action that
 fixes it. The state comes from every enabled playlist, the same ones the
-catalogue reads whichever playlist is on screen: each one's type, its own
+catalog reads whichever playlist is on screen: each one's type, its own
 movie and series import setting, a refresh running now, and its last
 import's result, including a movie or series list that failed while its live
 channels imported. When several playlists apply, the first matching row
@@ -422,7 +422,7 @@ below wins, after "some playlist has titles".
 | Import in progress | Importing movies and shows… | None; the list fills when it finishes |
 | Import failed (whole import, or its movie or series list) | Last refresh failed, and why by error kind (no provider text) | Retry: runs that playlist's refresh again |
 | Imports turned off for the source | Movie and series imports are off for this playlist | Playlist settings: opens that playlist's actions at its "Movies and series" switch |
-| Imported, but the catalogue is empty | No movies (or shows) found; refresh the playlist to look for new ones | Refresh now |
+| Imported, but the catalog is empty | No movies (or shows) found; refresh the playlist to look for new ones | Refresh now |
 | No source can provide movies or series (M3U only, or none) | Movies and shows come from Xtream Codes and Stalker playlists; M3U has live channels only | Add playlist |
 
 On a remote the action sits where the titles would be: Right from the
@@ -488,7 +488,7 @@ Unavailable actions say why, using the host's reported capabilities
   [issue #138 iPad validation](validation/issue-138-ipad-layouts.md).
 - Pointer, keyboard and windows on desktops: `desktop_workflows`, and the
   [issue #89 desktop journey](validation/issue-89-desktop-journey.md).
-- Native behaviour on Android TV and tablets: the
+- Native behavior on Android TV and tablets: the
   [disposable Android validation](android-validation.md) on `tv36` and `tab36`.
   Record emulator and physical-device evidence separately, with the build, OS,
   input and viewport, using synthetic data only.

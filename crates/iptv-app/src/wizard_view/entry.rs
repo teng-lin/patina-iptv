@@ -73,7 +73,7 @@ fn button(ui: Ui, size: Scale, label: &'static str, act: fn(Ui)) -> impl IntoEle
 }
 
 /// A sheet's field: the kit's, outlined in the accent on the window's
-/// colour.
+/// color.
 pub(crate) fn sheet_field(ui: Ui, size: Scale) -> Input {
     ui_kit::field(size, input())
         .border_1()

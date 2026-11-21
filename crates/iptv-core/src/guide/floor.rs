@@ -23,7 +23,7 @@ impl Focus {
         floor_of(s, self.channel, self.now)
     }
 
-    /// The previous programme within retained guide coverage.
+    /// The previous program within retained guide coverage.
     pub(crate) fn previous(&self, s: &dyn Schedule) -> Option<Program> {
         let current = self.program(s);
         if current.start <= self.floor(s) {

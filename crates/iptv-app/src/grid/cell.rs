@@ -1,14 +1,14 @@
-//! One programme cell of a guide row: a rounded box at its minutes in the
-//! row's band with its title, coloured by the focus.
+//! One program cell of a guide row: a rounded box at its minutes in the
+//! row's band with its title, colored by the focus.
 //!
 //! Kept cheap for the keys, which move the focus many times a second on a
 //! TV box (`tests/app/guide_scroll_cost.rs`):
 //!
 //! - a cell reads its row's focus only ([`RowFocus`]): a move re-runs the
 //!   cells of the two rows it leaves and enters;
-//! - a slot without a programme is invisible, so the platform does not
+//! - a slot without a program is invisible, so the platform does not
 //!   draw it (a row has [`super::MAX_CELLS`] slots, most rows use a few);
-//! - a past programme the row cannot replay is dimmed by colours mixed
+//! - a past program the row cannot replay is dimmed by colors mixed
 //!   with the window's, as the dimmed group would show on it, rather than
 //!   by the view's opacity, which Android draws through an offscreen layer
 //!   per cell (over full-screen video, where the guide is translucent,
@@ -25,7 +25,7 @@ use crate::theme::{
 };
 use crate::{Ui, ViewMode};
 
-/// What a row's cells read of the focus: the focused programme's start
+/// What a row's cells read of the focus: the focused program's start
 /// when the row has it (`None` otherwise), and whether the row has it.
 #[derive(Clone, Copy)]
 pub(super) struct RowFocus {
@@ -37,19 +37,19 @@ pub(super) struct RowFocus {
 /// How a cell looks, from the focus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Look {
-    /// The focused programme: a light pill, dark title.
+    /// The focused program: a light pill, dark title.
     Focused,
-    /// Another programme of the focused row: a lighter cell, white title.
+    /// Another program of the focused row: a lighter cell, white title.
     Lit,
-    /// Any other row's: the cell colour, grey title.
+    /// Any other row's: the cell color, gray title.
     Rest,
 }
 
-/// A cell's background and title colours (`0xRRGGBBAA`) and opacity, for
-/// `look`, dimmed or not, on the guide's colours `g` (the window colour
+/// A cell's background and title colors (`0xRRGGBBAA`) and opacity, for
+/// `look`, dimmed or not, on the guide's colors `g` (the window color
 /// `window` under them), opaque or over video (`overlay`, the cells' alpha
 /// then).
-pub(super) fn colours(
+pub(super) fn colors(
     look: Look,
     dim: bool,
     g: &GuideColors,
@@ -112,11 +112,11 @@ pub(super) fn cell(
             )
         })
     };
-    // A memo each: the colours below re-run when one changes, not on every
+    // A memo each: the colors below re-run when one changes, not on every
     // change of what they are made from.
     let look = computed(move || match program() {
         // An unused slot never follows focus. Restyling invisible cells on
-        // every row move wastes the same native work as a visible programme.
+        // every row move wastes the same native work as a visible program.
         None => Look::Rest,
         Some(p) if focus.start.get() == Some(p.start) && ui.keys_shown() => Look::Focused,
         _ if focus.lit.get() => Look::Lit,
@@ -129,16 +129,16 @@ pub(super) fn cell(
         }
         _ => false,
     });
-    let colours = computed(move || {
+    let colors = computed(move || {
         let overlay = match ui.mode.get() {
             ViewMode::Overlay => Some(crate::settings::overlay_alpha(&crate::settings::read(ui))),
             ViewMode::Guide | ViewMode::Fullscreen => None,
         };
         let (g, window) = ui.app.theme.with(|t| (t.guide(), t.background.window));
-        colours(look.get(), dim.get(), &g, window, overlay)
+        colors(look.get(), dim.get(), &g, window, overlay)
     });
     let title_text = move || {
-        // Equal programme minutes on new data still re-read the title.
+        // Equal program minutes on new data still re-read the title.
         ui.guide_data();
         match (channel.get(), program()) {
             (Some(ch), Some(p)) => format!(
@@ -153,7 +153,7 @@ pub(super) fn cell(
         Some(p) => focus.selected.get() == Some(p.start),
         None => false,
     };
-    let focus_programme = move |p: Program| {
+    let focus_program = move |p: Program| {
         let view = crate::lists::view(ui);
         let row = at.index();
         if p.end <= floor_of(&view, row, now.get_untracked()) {
@@ -167,12 +167,12 @@ pub(super) fn cell(
             return;
         };
         ui.touched();
-        if focus_programme(p) {
+        if focus_program(p) {
             crate::menu_view::open_focused(ui);
         }
     };
     view()
-        .test_id("guide-programme")
+        .test_id("guide-program")
         .accessible(true)
         .role(AccessibilityRole::Cell)
         .accessibility_state(move || AccessibilityState {
@@ -187,20 +187,20 @@ pub(super) fn cell(
         .h(move || px(size.whole(CELL_H)))
         .left(move || px(geometry().0 + size.of(CELL_GAP) / 2.0))
         .w(move || px((geometry().1 - size.of(CELL_GAP)).max(0.0)))
-        .opacity(move || if empty() { 0.0 } else { colours.get().2 })
+        .opacity(move || if empty() { 0.0 } else { colors.get().2 })
         .style_when(empty, |s| s.invisible())
         .rounded(move || size.px(CELL_RADIUS))
         .px(move || size.px(CELL_INSET))
         .justify_center()
         .overflow_hidden()
-        .bg(move || rgba(colours.get().0))
+        .bg(move || rgba(colors.get().0))
         .on_press(move || {
             let Some(p) = program() else { return };
             ui.touched();
             if super::closed_columns(ui) {
                 return;
             }
-            if focus_programme(p) {
+            if focus_program(p) {
                 ui.watch();
             }
         })
@@ -210,7 +210,7 @@ pub(super) fn cell(
                 .text_overflow(nsh_core::EllipsizeMode::Tail)
                 .font_family(CONDENSED)
                 .text_size(move || size.text_px(CELL_TITLE))
-                .text_color(move || rgba(colours.get().1)),
+                .text_color(move || rgba(colors.get().1)),
         )
 }
 
@@ -229,7 +229,7 @@ mod tests {
         let g = Theme::default().guide();
         for alpha in [51, 128, 204, 255] {
             assert_eq!(
-                colours(Look::Focused, false, &g, g.window, Some(alpha)),
+                colors(Look::Focused, false, &g, g.window, Some(alpha)),
                 (
                     with_alpha(FOCUSED_CELL, 255),
                     with_alpha(FOCUSED_TEXT, 255),
@@ -245,8 +245,8 @@ mod tests {
         let (g, window) = (t.guide(), t.background.window);
         let a = (PAST_DIM * 255.0).round() as u8;
         for look in [Look::Focused, Look::Lit, Look::Rest] {
-            let (cell, title, opacity) = colours(look, false, &g, window, None);
-            let (dim_cell, dim_title, dim_opacity) = colours(look, true, &g, window, None);
+            let (cell, title, opacity) = colors(look, false, &g, window, None);
+            let (dim_cell, dim_title, dim_opacity) = colors(look, true, &g, window, None);
             assert_eq!((opacity, dim_opacity), (1.0, 1.0), "{look:?}: no layer");
             // The group at PAST_DIM over the window: the cell, and the
             // title drawn on the cell.
@@ -255,11 +255,11 @@ mod tests {
             assert_eq!(dim_cell, with_alpha(group_cell, 0xFF), "{look:?}");
             assert_eq!(dim_title, with_alpha(group_title, 0xFF), "{look:?}");
         }
-        // Undimmed: the colours as they were.
-        let rest = colours(Look::Rest, false, &g, window, None);
+        // Undimmed: the colors as they were.
+        let rest = colors(Look::Rest, false, &g, window, None);
         assert_eq!(rest.0, with_alpha(g.cell, 0xFF));
         assert_eq!(rest.1, with_alpha(WHITE, TEXT_SECONDARY_ALPHA));
-        let focused = colours(Look::Focused, false, &g, window, None);
+        let focused = colors(Look::Focused, false, &g, window, None);
         assert_eq!(focused.1, with_alpha(FOCUSED_TEXT, 0xFF));
     }
 
@@ -267,7 +267,7 @@ mod tests {
     fn over_video_a_dimmed_cell_keeps_its_opacity() {
         let t = Theme::default();
         let (g, window) = (t.guide(), t.background.window);
-        let (cell, title, opacity) = colours(Look::Rest, true, &g, window, Some(0xC0));
+        let (cell, title, opacity) = colors(Look::Rest, true, &g, window, Some(0xC0));
         assert_eq!(cell, with_alpha(g.cell, 0xC0));
         assert_eq!(title, with_alpha(WHITE, TEXT_SECONDARY_ALPHA));
         assert_eq!(opacity, PAST_DIM);

@@ -420,7 +420,7 @@ pub(crate) async fn organization_changed(
         parts
             .borrow()
             .get(&source)
-            .is_some_and(|s| s.same_catalogue(&schedule))
+            .is_some_and(|s| s.same_catalog(&schedule))
     });
     if !current || !owner.organization_edit_current(source, ticket) {
         return false;
@@ -465,7 +465,7 @@ pub fn resume(owner: &Rc<crate::Runtime>) {
     });
 }
 
-/// Toggle a parent row without changing the channel catalogue or player surface.
+/// Toggle a parent row without changing the channel catalog or player surface.
 pub fn toggle_playlist(owner: &Rc<crate::Runtime>, group: usize) -> bool {
     let schedule = owner.schedule();
     let Some(all) = schedule

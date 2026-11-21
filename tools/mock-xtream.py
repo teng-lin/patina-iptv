@@ -123,7 +123,7 @@ def short_epg(stream_id, limit, table=False):
         start = now + k * 3600
         rows.append({
             "id": str(k + 100), "epg_id": f"ch{stream_id}.synthetic.example",
-            "title": b64(f"Mock show {stream_id}-{k}"), "description": b64("Invented programme."),
+            "title": b64(f"Mock show {stream_id}-{k}"), "description": b64("Invented program."),
             "start": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(start)),
             "end": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(start + 3600)),
             "start_timestamp": str(start), "stop_timestamp": str(start + 3600),
@@ -218,7 +218,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def redirect(self, n):
         self.send(302, headers=[("Location", f"{ARGS.hls_base}/ch{n % 3}/index.m3u8")])
 
-    def authorised(self, user, password):
+    def authorized(self, user, password):
         return user == ARGS.user and password == ARGS.password
 
     def do_GET(self):
@@ -226,27 +226,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
         q = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
         parts = [p for p in url.path.split("/") if p]
         if url.path.endswith("/player_api.php") or url.path.endswith("/panel_api.php"):
-            if not self.authorised(q.get("username"), q.get("password")):
+            if not self.authorized(q.get("username"), q.get("password")):
                 return self.send(200, b'{"user_info":{"auth":0}}')
             return self.send(200, json.dumps(api(q)).encode())
         if url.path.endswith("/get.php"):
-            if not self.authorised(q.get("username"), q.get("password")):
+            if not self.authorized(q.get("username"), q.get("password")):
                 return self.send(403, b"")
             return self.send(200, m3u_plus().encode(), "audio/x-mpegurl")
         if url.path.endswith("/xmltv.php"):
-            if not self.authorised(q.get("username"), q.get("password")):
+            if not self.authorized(q.get("username"), q.get("password")):
                 return self.send(403, b"")
             path = os.path.join(ROOT, "fixtures", "hls", "iptv", "guide.xml.gz")
             body = open(path, "rb").read() if os.path.exists(path) else small_guide()
             return self.send(200, body, "application/gzip")
         # /live|movie|series/U/P/ID.ext and /timeshift/U/P/MIN/START/ID.ext
         if len(parts) >= 4 and parts[0] in ("live", "movie", "series", "timeshift"):
-            if not self.authorised(parts[1], parts[2]):
+            if not self.authorized(parts[1], parts[2]):
                 return self.send(403, b"")
             stem = parts[-1].split(".")[0]
             return self.redirect(int(stem) if stem.isdigit() else 0)
         if url.path.endswith("/streaming/timeshift.php"):
-            if not self.authorised(q.get("username"), q.get("password")):
+            if not self.authorized(q.get("username"), q.get("password")):
                 return self.send(403, b"")
             return self.redirect(int(q.get("stream", "0") or 0))
         return self.send(404, b"not found", "text/plain")

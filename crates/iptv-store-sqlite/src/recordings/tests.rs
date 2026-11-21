@@ -26,7 +26,7 @@ fn fixture() -> (Store, Request) {
         source: source.0,
         channel: parsed.channels.items[0].id.as_str().into(),
         channel_name: "Generated channel".into(),
-        title: "Generated programme".into(),
+        title: "Generated program".into(),
         start: 1800000000,
         end: 1800003600,
     };
@@ -97,7 +97,7 @@ fn series_occurrences_keep_raw_identity_across_padding_cancellation_and_retry() 
         first
     );
     store
-        .transition_recording(first, Status::Scheduled, Status::Cancelled, 0, "Cancelled")
+        .transition_recording(first, Status::Scheduled, Status::Canceled, 0, "Canceled")
         .unwrap();
     store.remove_recording(first).unwrap();
     assert_eq!(
@@ -115,7 +115,7 @@ fn series_occurrences_keep_raw_identity_across_padding_cancellation_and_retry() 
 }
 
 #[test]
-fn cancelling_recurring_schedules_frees_the_rule_quota_without_deleting_job_history() {
+fn canceling_recurring_schedules_frees_the_rule_quota_without_deleting_job_history() {
     use iptv_core::recording::{Repeat, Rule, RuleId};
     let (mut store, request) = fixture();
     for n in 0..110 {
@@ -138,7 +138,7 @@ fn cancelling_recurring_schedules_frees_the_rule_quota_without_deleting_job_hist
         assert!(store.recording_rules().unwrap().is_empty());
         assert_eq!(
             store.recording_job(job).unwrap().unwrap().status,
-            Status::Cancelled
+            Status::Canceled
         );
     }
     assert_eq!(store.recording_jobs().unwrap().len(), 110);
@@ -217,7 +217,7 @@ fn recurring_requests_with_different_durations_do_not_reuse_the_shorter_rule() {
     }
 }
 #[test]
-fn edited_or_cancelled_intent_invalidates_a_scheduler_claim() {
+fn edited_or_canceled_intent_invalidates_a_scheduler_claim() {
     let (mut store, mut request) = fixture();
     let id = store
         .schedule_recording(JobId(41), &request, request.start - 100)
@@ -408,7 +408,7 @@ fn recurrence_claim_cancel_and_deletion_never_rearm_an_occurrence() {
         None
     );
     store
-        .transition_recording(first, Status::Scheduled, Status::Cancelled, 0, "Cancelled")
+        .transition_recording(first, Status::Scheduled, Status::Canceled, 0, "Canceled")
         .unwrap();
     assert!(store.remove_recording(first).unwrap());
     assert!(
@@ -436,7 +436,7 @@ fn recurrence_claim_cancel_and_deletion_never_rearm_an_occurrence() {
         .unwrap();
     assert_eq!(
         store.recording_job(JobId(104)).unwrap().unwrap().status,
-        Status::Cancelled
+        Status::Canceled
     );
     next.start += 86400;
     next.end += 86400;
@@ -482,7 +482,7 @@ fn stale_recurring_source_has_no_authority_for_a_replacement() {
 }
 
 #[test]
-fn enabling_a_rule_restores_only_future_jobs_cancelled_by_disabling_it() {
+fn enabling_a_rule_restores_only_future_jobs_canceled_by_disabling_it() {
     use iptv_core::recording::{Repeat, Rule, RuleId};
     let (mut store, request) = fixture();
     let rule = Rule {
@@ -517,7 +517,7 @@ fn enabling_a_rule_restores_only_future_jobs_cancelled_by_disabling_it() {
         .unwrap()
         .unwrap();
     store
-        .transition_recording(manual, Status::Scheduled, Status::Cancelled, 0, "Cancelled")
+        .transition_recording(manual, Status::Scheduled, Status::Canceled, 0, "Canceled")
         .unwrap();
     store
         .set_recording_rule_enabled(rule.id, false, request.start - 1)
@@ -529,11 +529,11 @@ fn enabling_a_rule_restores_only_future_jobs_cancelled_by_disabling_it() {
         .unwrap();
     assert_eq!(
         store.recording_job(first).unwrap().unwrap().status,
-        Status::Cancelled
+        Status::Canceled
     );
     assert_eq!(
         store.recording_job(manual).unwrap().unwrap().status,
-        Status::Cancelled
+        Status::Canceled
     );
     assert!(store.recording_job(removed).unwrap().is_none());
     assert!(
@@ -782,7 +782,7 @@ fn newer_state_and_deleted_jobs_supersede_pending_completion() {
                 .transition_recording(
                     job.id,
                     Status::Recording,
-                    Status::Cancelled,
+                    Status::Canceled,
                     0,
                     "Synthetic cancellation"
                 )
@@ -800,7 +800,7 @@ fn newer_state_and_deleted_jobs_supersede_pending_completion() {
         assert!(store.recording_completion(job.id).unwrap().is_none());
         assert_eq!(
             store.recording_job(job.id).unwrap().map(|job| job.status),
-            (!delete).then_some(Status::Cancelled)
+            (!delete).then_some(Status::Canceled)
         );
     }
 }

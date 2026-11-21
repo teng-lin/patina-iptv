@@ -860,7 +860,7 @@ fn screen_title(s: &Open) -> &'static str {
     }
     match &s.kind {
         Kind::Groups => tr("Organize groups"),
-        Kind::Favorites => tr("Order favourites"),
+        Kind::Favorites => tr("Order favorites"),
         Kind::GroupChannels(_) => tr("Organize group channels"),
         Kind::CustomChannels(_) => tr("Order custom-group members"),
         Kind::Channels => tr("Organize channels"),
@@ -876,7 +876,7 @@ fn screen_caption(s: &Open) -> &'static str {
     }
     match &s.kind {
         Kind::Favorites => {
-            tr("Order applies to favourites. Names and visibility apply across this playlist.")
+            tr("Order applies to favorites. Names and visibility apply across this playlist.")
         }
         Kind::GroupChannels(_) => tr("Order applies only to this group. \
                 Names and visibility apply across this playlist."),

@@ -9,8 +9,8 @@ use iptv_library::guide_repair::{
     OperationPhase, Outcome, Preview, Request, Target, Verification,
 };
 use iptv_library::inspection::{
-    Candidate, CandidateProgramme, CandidateRef, ChannelInfo, ChannelRef, Coverage, Cursor,
-    InspectionError, Page, ProbeEvidence, ProbeSummary, ProgrammeInfo, Query, SourceScope,
+    Candidate, CandidateProgram, CandidateRef, ChannelInfo, ChannelRef, Coverage, Cursor,
+    InspectionError, Page, ProbeEvidence, ProbeSummary, ProgramInfo, Query, SourceScope,
     TimeWindow,
 };
 use iptv_library::{Choice, SourceId};
@@ -69,7 +69,7 @@ fn consume(
     };
     inspection::<ChannelInfo, _>(owner.inspect_channel(channel.clone(), control.clone()));
     inspection::<Page<ChannelInfo>, _>(owner.query_channels(query.clone(), control.clone()));
-    inspection::<Page<ProgrammeInfo>, _>(owner.query_programmes(
+    inspection::<Page<ProgramInfo>, _>(owner.query_programs(
         query.clone(),
         window,
         Some(channel.clone()),
@@ -91,7 +91,7 @@ fn consume(
         10,
         control.clone(),
     ));
-    inspection::<Vec<CandidateProgramme>, _>(owner.probe_schedule(
+    inspection::<Vec<CandidateProgram>, _>(owner.probe_schedule(
         evidence.clone(),
         candidate.clone(),
         window,
@@ -144,7 +144,7 @@ fn inspection_error(error: InspectionError) -> &'static str {
         InspectionError::PermissionDenied => "access denied",
         InspectionError::StaleCursor => "stale continuation",
         InspectionError::StaleEvidence => "stale evidence",
-        InspectionError::Cancelled => "cancelled",
+        InspectionError::Canceled => "canceled",
         InspectionError::Deadline => "deadline",
         InspectionError::Busy => "busy",
         InspectionError::Storage => "storage failure",
@@ -168,7 +168,7 @@ fn repair_error(error: RepairError) -> &'static str {
         RepairError::Conflict(_) => "conflict",
         RepairError::Storage => "storage failure",
         RepairError::Busy => "busy",
-        RepairError::Cancelled => "cancelled",
+        RepairError::Canceled => "canceled",
     }
 }
 fn operation_phase(phase: OperationPhase) -> &'static str {
@@ -179,7 +179,7 @@ fn operation_phase(phase: OperationPhase) -> &'static str {
         OperationPhase::Verified => "verified",
         OperationPhase::Failed => "failed",
         OperationPhase::Superseded => "superseded",
-        OperationPhase::Cancelled => "cancelled",
+        OperationPhase::Canceled => "canceled",
     }
 }
 fn effective(value: Effective) -> &'static str {

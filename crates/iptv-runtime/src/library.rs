@@ -102,14 +102,14 @@ pub fn revoke_import_handoff(owner: &super::Runtime, source: SourceId) {
     }
 }
 /// A guide action replaces `source`'s pending work: revokes its handoff
-/// ([`revoke_import_handoff`]) and returns that work when this cancelled
+/// ([`revoke_import_handoff`]) and returns that work when this canceled
 /// it (its guide phase). Such work only has to unwind, which what follows
 /// may wait for; an import still fetching its playlist goes on and is not
 /// returned.
 pub fn supersede_import(owner: &super::Runtime, source: SourceId) -> Option<ImportCompletion> {
     let pending = pending_import(owner, source);
     revoke_import_handoff(owner, source);
-    pending.filter(|job| job.cancel.is_cancelled())
+    pending.filter(|job| job.cancel.is_canceled())
 }
 /// [`supersede_import`] by newer work for `source` (an update asked for):
 /// the replaced work leaves the next guide check to it
@@ -176,7 +176,7 @@ pub(crate) fn playlists_in(store: &Store) -> Result<Vec<Playlist>, StoreError> {
         .map(|s| {
             let guide = store.epg_guide(s.id)?;
             let policy = store.source_policy(s.id)?;
-            // Only enabled playlists reach the catalogue or its empty state.
+            // Only enabled playlists reach the catalog or its empty state.
             let kinds = if policy.enabled {
                 store.on_demand_kinds(s.id)?
             } else {
@@ -276,9 +276,9 @@ pub fn running(owner: &super::Runtime, id: SourceId) -> bool {
 }
 
 /// [`cancel_running`] for a newer import of `id` that starts now: the
-/// cancelled work leaves the next guide check to it
+/// canceled work leaves the next guide check to it
 /// (`ImportWork::superseded`). Not for a playlist that is being deleted or
-/// switched off: when that fails the playlist stays, and its cancelled
+/// switched off: when that fails the playlist stays, and its canceled
 /// work still has to keep its check.
 pub fn replace_running(owner: &super::Runtime, id: SourceId) {
     if let Some(pending) = pending_import(owner, id) {
@@ -291,10 +291,7 @@ pub fn cancel_running(owner: &super::Runtime, id: SourceId) {
     owner.cancel_guide_check(id);
     revoke_import_handoff(owner, id);
     if let Some((_, token)) = owner.imports.with(|r| r.borrow_mut().remove(&id)) {
-        log::info!(
-            "iptv data: cancelling the running import of source {}",
-            id.0
-        );
+        log::info!("iptv data: canceling the running import of source {}", id.0);
         token.cancel();
     }
 }

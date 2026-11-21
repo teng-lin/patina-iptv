@@ -1,7 +1,7 @@
 use super::*;
 use crate::guide::{HISTORY, HORIZON};
 
-/// 8 dp per minute: a 1200 dp programme area shows [`VISIBLE`] minutes.
+/// 8 dp per minute: a 1200 dp program area shows [`VISIBLE`] minutes.
 const PPM: f32 = 8.0;
 const FRAME: f32 = 1.0 / 60.0;
 
@@ -36,25 +36,25 @@ fn the_threshold_follows_one_finger_and_a_still_cancel_is_no_drag() {
     t.up(2);
     assert!(t.moved(1, 112.0, 100.0));
     t.up(1);
-    // Cancelled still: no drag; cancelled after moving: a drag.
+    // Canceled still: no drag; canceled after moving: a drag.
     t.down(1, 0.0, 0.0);
-    assert!(!t.cancelled(1, 0.0, 1.0));
+    assert!(!t.canceled(1, 0.0, 1.0));
     t.down(1, 0.0, 0.0);
     assert!(!t.moved(1, 0.0, 6.0));
-    assert!(t.cancelled(1, 0.0, 6.0), "a scroll view took it after 6 dp");
-    // A fast drag cancelled before any move arrived that far: the
+    assert!(t.canceled(1, 0.0, 6.0), "a scroll view took it after 6 dp");
+    // A fast drag canceled before any move arrived that far: the
     // cancel's own position counts.
     t.down(1, 0.0, 0.0);
     assert!(!t.moved(1, 0.0, 2.0));
-    assert!(t.cancelled(1, 0.0, 9.0));
+    assert!(t.canceled(1, 0.0, 9.0));
     // Another finger's cancel is not the followed one's.
     t.down(1, 0.0, 0.0);
-    assert!(!t.cancelled(2, 0.0, 40.0));
+    assert!(!t.canceled(2, 0.0, 40.0));
     t.up(1);
     // Already reported crossing: the cancel is not a second drag.
     t.down(1, 0.0, 0.0);
     assert!(t.moved(1, 0.0, 12.0));
-    assert!(!t.cancelled(1, 0.0, 12.0));
+    assert!(!t.canceled(1, 0.0, 12.0));
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn a_horizontal_drag_follows_the_finger() {
     let mut t = at_now();
     let from = t.view();
     t.press();
-    // Right shows earlier programmes, by the finger's distance.
+    // Right shows earlier programs, by the finger's distance.
     assert!(t.drag(80.0, 6.0, PPM));
     assert_eq!(t.view(), from - 10.0);
     assert!(t.drag(-40.0, 30.0, PPM), "the lock holds when it turns");
@@ -274,7 +274,7 @@ fn a_grabbed_drag_pans_from_its_first_move() {
 #[test]
 fn a_fling_travels_like_a_native_lists() {
     // Released at 2000 dp/s: 0.6 × 2000 = 1200 dp (it was 2000 / 3.5 ≈
-    // 570 dp), a whole programme area of [`VISIBLE`] minutes here.
+    // 570 dp), a whole program area of [`VISIBLE`] minutes here.
     let mut t = Timeline::new(0, (-3 * 24 * 60, 3 * 24 * 60));
     t.grab();
     t.drag(-1.0, 0.0, PPM);
@@ -283,8 +283,8 @@ fn a_fling_travels_like_a_native_lists() {
     let dp = (t.rest() - start) * PPM;
     assert!((dp - 1200.0).abs() < 1.0, "{dp} dp");
     while t.step(FRAME, PPM) {}
-    let travelled = (t.view() - start) * PPM;
-    assert!((travelled - 1200.0).abs() < 25.0, "{travelled} dp");
+    let traveled = (t.view() - start) * PPM;
+    assert!((traveled - 1200.0).abs() < 25.0, "{traveled} dp");
     // A drag follows the finger 1:1: 120 dp is 15 minutes at 8 dp/min.
     t.grab();
     let from = t.view();

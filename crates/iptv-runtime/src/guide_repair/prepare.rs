@@ -12,8 +12,8 @@ fn storage<T>(result: iptv_store_sqlite::Result<T>) -> Result<T> {
     result.map_err(|_| Error::Storage)
 }
 fn check(cancel: &CancelToken, deadline: Instant) -> Result<()> {
-    if cancel.is_cancelled() {
-        return Err(Error::Cancelled);
+    if cancel.is_canceled() {
+        return Err(Error::Canceled);
     }
     if Instant::now() >= deadline {
         return Err(InspectionError::Deadline.into());
@@ -181,7 +181,7 @@ pub(super) fn prepare(
     }
     let before_channels = channels.clone();
     // Staging supplies all display names and candidates, including entries the
-    // normal filtered import did not retain programmes for.
+    // normal filtered import did not retain programs for.
     for held in leases {
         if let Some(feed) = held.evidence().feed {
             channels.insert(feed, staged_channels[&held.evidence().stage].clone());

@@ -1,6 +1,6 @@
 //! Multiview's tile menu on a TV, run headless with the TV idiom (keys
 //! stand in for the remote): OK opens a panel at the right edge,
-//! vertically centred, 208 dp wide with 40 dp rows, with no backdrop over
+//! vertically centered, 208 dp wide with 40 dp rows, with no backdrop over
 //! the tiles; its items in the reference's order and words, the focus the
 //! light pill with dark text. Pause holds that tile alone (⏸ on it) and
 //! Play resumes it; Search and add opens the search screen over the grid,
@@ -83,7 +83,7 @@ fn labels(app: &Headless) -> Vec<String> {
     items(app).into_iter().map(|(t, _)| t).collect()
 }
 
-fn colour(app: &Headless, label: &str) -> nsh_core::Color {
+fn color(app: &Headless, label: &str) -> nsh_core::Color {
     app.screen()
         .span_style(&format!("{MENU} >> text:{label}"))
         .unwrap()
@@ -306,13 +306,13 @@ fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
         }),
     );
 
-    // OK: the panel at the right edge, centred, with the reference's items.
+    // OK: the panel at the right edge, centered, with the reference's items.
     step(app.press_key("enter"));
     step(app.wait_for(MENU));
     let (x, y, w, h) = panel(&app);
     assert!((w - 208.0).abs() < 0.5, "208 dp wide: {w}");
     assert!((W - (x + w) - 8.0).abs() < 0.5, "8 dp from the edge: {x}");
-    assert!((y + h / 2.0 - H / 2.0).abs() < 1.0, "centred: {y} + {h}");
+    assert!((y + h / 2.0 - H / 2.0).abs() < 1.0, "centered: {y} + {h}");
     assert_eq!(
         labels(&app),
         [
@@ -336,8 +336,8 @@ fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
     // The focus: the light pill's dark text; the others the lists' light.
     let dark = nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff);
     let light = nsh_core::Color((iptv_app::theme::LIST_TEXT << 8) | 0xff);
-    assert_eq!(colour(&app, "Add screen"), dark);
-    assert_eq!(colour(&app, "Pause"), light);
+    assert_eq!(color(&app, "Add screen"), dark);
+    assert_eq!(color(&app, "Pause"), light);
     // No backdrop: the tiles are the only full views under the panel.
     let covering = app
         .screen()
@@ -370,7 +370,7 @@ fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
     for _ in 0..3 {
         step(app.press_key("down"));
     }
-    assert_eq!(colour(&app, "Pause"), dark);
+    assert_eq!(color(&app, "Pause"), dark);
     step(app.press_key("enter"));
     step(gone(&mut app, MENU));
     step(app.wait_for(&format!("{TILE} >> {PAUSED}")));
@@ -485,7 +485,7 @@ fn closing_the_main_window_stops_grid_streams_and_keeps_pending_recordings() {
                 source: source.0,
                 channel: parsed.channels.items[0].id.as_str().into(),
                 channel_name: "Generated One".into(),
-                title: "Generated future programme".into(),
+                title: "Generated future program".into(),
                 start: now + 3600,
                 end: now + 7200,
             },

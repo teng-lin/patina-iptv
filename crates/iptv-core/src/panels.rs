@@ -2,12 +2,12 @@
 //! has focus, and when they hide on their own.
 //!
 //! As observed in the reference UX: OK shows the info card (logo, number
-//! and name, programme, times with one progress line, next programme,
+//! and name, program, times with one progress line, next program,
 //! stream badges) with a row of action cards beneath it; Left/Right move
 //! along the cards, OK presses one, OK with none focused (or Back) hides
 //! them. Long OK or Menu shows the full control strip. A channel change
 //! shows a compact banner that takes no input and hides after a few
-//! seconds. A replayed programme's card shows its seek bar in place of the
+//! seconds. A replayed program's card shows its seek bar in place of the
 //! progress line ([`Line`]): one time line on screen, never two.
 //!
 //! Every input restarts the auto-hide timer. Times are milliseconds on the
@@ -17,7 +17,7 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shown {
     Hidden,
-    /// Channel change feedback: number, name, the programme on now and
+    /// Channel change feedback: number, name, the program on now and
     /// its progress, in one compact panel; no input.
     Banner,
     /// The info card alone (the Info key, a seek in a replay): no input,
@@ -39,7 +39,7 @@ pub enum QuickAction {
     History,
     /// The channel list over the video.
     Channels,
-    /// The playing channel in the favourites, or out of them.
+    /// The playing channel in the favorites, or out of them.
     Favorite,
     /// Several channels at once.
     Multiview,
@@ -99,7 +99,7 @@ pub const CONTROLS: [Control; 15] = [
 /// The one time line a panel shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Line {
-    /// Live: how far the programme on now is.
+    /// Live: how far the program on now is.
     Progress,
     /// A replay: where it plays (or the seek being chosen) along its length.
     Seek,

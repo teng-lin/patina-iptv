@@ -1,13 +1,12 @@
-//! Where [`crate::import_epg`] puts a guide's programmes as they are
+//! Where [`crate::import_epg`] puts a guide's programs as they are
 //! parsed: a [`GuideSink`]. The import keeps only the feeds' channel lists
-//! in memory; the sink holds the programmes (on disk for the app,
+//! in memory; the sink holds the programs (on disk for the app,
 //! `iptv_store_sqlite::EpgStage`; in memory with [`MemoryGuide`]).
 
 use std::fmt;
 
 use iptv_epg::{
-    EpgSource, FeedId, GuideStore, IngestReport, ProgrammeData, SourceBuilder, StoreOptions,
-    UnixTime,
+    EpgSource, FeedId, GuideStore, IngestReport, ProgramData, SourceBuilder, StoreOptions, UnixTime,
 };
 
 use crate::epg::EpgImport;
@@ -26,9 +25,9 @@ impl fmt::Display for SinkError {
 
 impl std::error::Error for SinkError {}
 
-/// Receives one feed at a time: [`Self::begin_feed`], its programmes,
+/// Receives one feed at a time: [`Self::begin_feed`], its programs,
 /// then [`Self::finish_feed`] (it loaded) or [`Self::discard_feed`] (it
-/// failed or the import was cancelled).
+/// failed or the import was canceled).
 ///
 /// A sink applies [`iptv_epg::ScheduleRules`] for the feed's storage
 /// settings (retention, duplicates, overlaps) exactly as
@@ -44,24 +43,24 @@ pub trait GuideSink {
         now: UnixTime,
     ) -> Result<(), SinkError>;
 
-    /// One programme of EPG channel `channel` of the current feed, as
-    /// parsed ([`ProgrammeData::from_xmltv`]).
-    fn programme(&mut self, channel: &str, p: &ProgrammeData<'_>) -> Result<(), SinkError>;
+    /// One program of EPG channel `channel` of the current feed, as
+    /// parsed ([`ProgramData::from_xmltv`]).
+    fn program(&mut self, channel: &str, p: &ProgramData<'_>) -> Result<(), SinkError>;
 
     /// The current feed loaded: settle its schedules. It replaces an
     /// earlier feed with the same id. Returns its counters.
     fn finish_feed(&mut self) -> Result<IngestReport, SinkError>;
 
-    /// The current feed failed: forget its programmes.
+    /// The current feed failed: forget its programs.
     fn discard_feed(&mut self) -> Result<(), SinkError>;
 
     /// After [`Self::finish_feed`]: whether EPG channel `epg_id` of `feed`
-    /// kept at least one programme.
-    fn has_programmes(&self, feed: FeedId, epg_id: &str) -> bool;
+    /// kept at least one program.
+    fn has_programs(&self, feed: FeedId, epg_id: &str) -> bool;
 }
 
 /// Keeps the guide in memory ([`SourceBuilder`] per feed), for tests,
-/// tools and runtimes without a store. Holds every programme the import
+/// tools and runtimes without a store. Holds every program the import
 /// keeps: not for large guides on small devices.
 #[derive(Default)]
 pub struct MemoryGuide {
@@ -104,7 +103,7 @@ impl GuideSink for MemoryGuide {
         Ok(())
     }
 
-    fn programme(&mut self, channel: &str, p: &ProgrammeData<'_>) -> Result<(), SinkError> {
+    fn program(&mut self, channel: &str, p: &ProgramData<'_>) -> Result<(), SinkError> {
         match self.building.as_mut() {
             Some(b) => {
                 b.push_data(channel, p);
@@ -131,7 +130,7 @@ impl GuideSink for MemoryGuide {
         Ok(())
     }
 
-    fn has_programmes(&self, feed: FeedId, epg_id: &str) -> bool {
+    fn has_programs(&self, feed: FeedId, epg_id: &str) -> bool {
         self.sources
             .iter()
             .find(|s| s.id() == feed)

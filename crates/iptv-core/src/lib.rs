@@ -4,7 +4,7 @@
 //! `wasm32-unknown-unknown`.
 //!
 //! Today: the guide's synthetic schedule, the remote/touch focus model and
-//! its columns (rail, groups, lists), favourites, menus, panels, playback.
+//! its columns (rail, groups, lists), favorites, menus, panels, playback.
 
 pub mod browse;
 pub mod browse_playback;

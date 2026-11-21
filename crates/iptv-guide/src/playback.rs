@@ -1,7 +1,7 @@
 //! Stream resolution: a channel's [`StreamLocator`] plus its source's
 //! playback context → the URL and headers the player opens.
 //!
-//! | Locator | Live | Catch-up (from a programme's start) |
+//! | Locator | Live | Catch-up (from a program's start) |
 //! | --- | --- | --- |
 //! | `Url` (M3U, Xtream `direct_source`, static Stalker `cmd`) | the URL, live placeholders expanded | [`build_catchup_url`] (all M3U modes, `xc`) |
 //! | `Xtream` | `/live/U/P/{id}.{ext}`, `ext` from the panel's allowed formats | `/timeshift/…` in the panel's clock |
@@ -28,7 +28,7 @@ use iptv_providers::xtream::{
 };
 
 /// What the source contributes to playback: credentials, the account's
-/// stream format and clock, or the authorised Stalker session.
+/// stream format and clock, or the authorized Stalker session.
 #[derive(Clone, Debug)]
 pub struct PlaybackContext {
     inner: Inner,
@@ -76,7 +76,7 @@ impl SourceAuthority {
 }
 
 /// Original source and channel used by one resolver, retained across provider
-/// I/O and transport retirement. It cannot be rebound to a newer catalogue.
+/// I/O and transport retirement. It cannot be rebound to a newer catalog.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ResolutionAuthority {
     source: std::sync::Arc<SourceAuthority>,
@@ -188,7 +188,7 @@ impl PlaybackContext {
         })
     }
 
-    /// A Stalker portal with the session the import authorised.
+    /// A Stalker portal with the session the import authorized.
     pub fn stalker(session: StalkerSession) -> Self {
         Self {
             inner: Inner::Stalker {
@@ -260,7 +260,7 @@ pub struct Clock {
     pub local_offset_secs: i32,
 }
 
-/// An archived programme to play from its start (Unix seconds).
+/// An archived program to play from its start (Unix seconds).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Archive {
     pub start: i64,
@@ -340,12 +340,12 @@ pub enum Unavailable {
     /// The locator needs the source's account (Xtream credentials, Stalker
     /// session) and the schedule has none.
     NeedsAccount,
-    /// The programme cannot be replayed.
+    /// The program cannot be replayed.
     NoArchive(CatchupError),
 }
 
 /// The URL and headers for `channel`, live or (`archive`) from a
-/// programme's start.
+/// program's start.
 pub fn resolve(
     context: Option<&PlaybackContext>,
     channel: &Channel,
@@ -443,7 +443,7 @@ fn catch_up(
             }
             let days = i64::from(cu.window_days(DEFAULT_CATCHUP_WINDOW_DAYS));
             if archive.start > clock.now {
-                return no(CatchupError::FutureProgramme);
+                return no(CatchupError::FutureProgram);
             }
             if archive.start < clock.now - days * 86_400 || archive.end <= archive.start {
                 return no(CatchupError::OutsideArchive);

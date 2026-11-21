@@ -1,7 +1,7 @@
 //! A cold start with a stored playlist, headless: the guide's shell comes
 //! first (never the synthetic guide), the last channel opens once, before
 //! the guide is read, and stays open when the guide arrives (its channel
-//! found by key, not opened again); the first screen's programmes, then the
+//! found by key, not opened again); the first screen's programs, then the
 //! whole stored window, reach the guide.
 //!
 //! Synthetic data only.
@@ -54,7 +54,7 @@ impl Component for HeldEarlyApp {
     }
 }
 
-/// Hour-long programmes from a day back to two days ahead: "Now Show" on
+/// Hour-long programs from a day back to two days ahead: "Now Show" on
 /// air now, "Late Show" ten hours on (past the first screen).
 fn guide(now: i64) -> String {
     let mut xml = String::from(
@@ -223,7 +223,7 @@ fn cold_start(home: crate::isolated::Home, hold_preparation: bool) {
             IMPORT,
             || preparation.wait_entered(Duration::ZERO),
         ));
-        // Programme cells only arrive with the catalogue/guide, so this passes
+        // Program cells only arrive with the catalog/guide, so this passes
         // the actual adoption boundary while the first request is still held.
         step(app.wait_for_within("text:Now Show", IMPORT));
         step(app.idle(Duration::from_millis(500)).map(|_| ()));
@@ -253,7 +253,7 @@ fn cold_start(home: crate::isolated::Home, hold_preparation: bool) {
     }
     // The guide arrives (first screen, then the whole window) and the
     // playing channel is found in it: back to the guide shows it, with
-    // programmes past the first screen. Its first screen is on the tree
+    // programs past the first screen. Its first screen is on the tree
     // under the video once "Now Show" is; the whole window follows from
     // the store without a text of its own, so the app is left to finish
     // rendering before the count is read.

@@ -10,7 +10,7 @@
 //!
 //! Steps: open the store (each `open_store` of the app), the active source,
 //! its channels in provider order, the stored guide's state, the first
-//! screen's programmes and the guide window the app holds (an hour-aligned
+//! screen's programs and the guide window the app holds (an hour-aligned
 //! day back to the end), as the app reads them.
 
 use std::path::PathBuf;
@@ -86,9 +86,9 @@ fn main() {
         ..EpgWindow::from(now, 0)
     };
     let guide = store.load_epg(source, &first).expect("first screen");
-    let programmes: usize = guide.sources().iter().map(|s| s.programme_count()).sum();
+    let programs: usize = guide.sources().iter().map(|s| s.program_count()).sum();
     println!(
-        "first screen: {} channels, {programmes} programmes, {} KiB in {:.1} ms",
+        "first screen: {} channels, {programs} programs, {} KiB in {:.1} ms",
         guide.bound_count(),
         guide.heap_bytes() / 1024,
         ms(t)
@@ -100,9 +100,9 @@ fn main() {
         ..EpgWindow::from(now, 0)
     };
     let guide = store.load_epg(source, &window).expect("window");
-    let programmes: usize = guide.sources().iter().map(|s| s.programme_count()).sum();
+    let programs: usize = guide.sources().iter().map(|s| s.program_count()).sum();
     println!(
-        "guide window: {} channels, {programmes} programmes, {} KiB in {:.1} ms",
+        "guide window: {} channels, {programs} programs, {} KiB in {:.1} ms",
         guide.bound_count(),
         guide.heap_bytes() / 1024,
         ms(t)

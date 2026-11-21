@@ -14,7 +14,7 @@ use quick_xml::{
 };
 use reqwest::Url;
 
-/// Refuses a manifest whose bytes a parser that honours the XML declaration
+/// Refuses a manifest whose bytes a parser that honors the XML declaration
 /// could read as another text than this rewriter does: one that is not
 /// valid UTF-8, or that holds a C0 control character other than tab, line
 /// feed and carriage return. XML 1.0 allows none of those, and the escape

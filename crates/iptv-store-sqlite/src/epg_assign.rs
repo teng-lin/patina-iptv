@@ -5,7 +5,7 @@
 //! key across refreshes) that EPG matching applies at the next download.
 //! [`Store::rebind_epg`] applies it to the stored guide at once when that
 //! is possible without a download: turning a channel's guide off, or
-//! pointing it at an EPG channel whose programmes are stored.
+//! pointing it at an EPG channel whose programs are stored.
 
 use iptv_epg::{ChannelKey, MatchKind};
 use iptv_providers::ContentId;
@@ -60,7 +60,7 @@ impl Store {
     pub fn epg_feed_results(&self, source: SourceId) -> Result<Vec<FeedResult>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT r.feed_id, r.attempted_at, r.error_kind, COALESCE(f.channel_count, 0),
-                 COALESCE(f.programme_count, 0),
+                 COALESCE(f.program_count, 0),
                  (SELECT COUNT(*) FROM epg_feed_channels c
                   WHERE c.source_id = r.source_id AND c.feed_id = r.feed_id)
              FROM epg_feed_results r
@@ -75,7 +75,7 @@ impl Store {
                     .get::<_, Option<String>>(2)?
                     .map(|s| ImportErrorKind::from_slug(&s)),
                 channel_count: to_u64(r.get(3)?),
-                programme_count: to_u64(r.get(4)?),
+                program_count: to_u64(r.get(4)?),
                 listed_count: to_u64(r.get(5)?),
             })
         })?;
@@ -156,7 +156,7 @@ impl Store {
 
     /// Points playlist channel `key` of the stored guide at EPG channel
     /// `to` (`None`: no guide), without a download. False (and nothing
-    /// changed) when there is no stored guide or `to`'s programmes are not
+    /// changed) when there is no stored guide or `to`'s programs are not
     /// stored. `match_fingerprint`: the fingerprint of the channels and
     /// overrides the bindings now follow.
     pub fn rebind_epg(

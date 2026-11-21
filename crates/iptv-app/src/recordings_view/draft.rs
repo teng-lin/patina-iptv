@@ -77,16 +77,16 @@ fn begin(ui: Ui, row: usize) {
 }
 
 pub(super) fn cancel_entry(ui: Ui) -> bool {
-    let mut cancelled = false;
+    let mut canceled = false;
     ui.recordings.update(|s| {
         if let Some(d) = &mut s.draft {
-            cancelled = d.entry.take().is_some();
+            canceled = d.entry.take().is_some();
         }
     });
-    if cancelled {
+    if canceled {
         dismiss_keyboard();
     }
-    cancelled
+    canceled
 }
 
 fn commit(ui: Ui) {
@@ -197,7 +197,7 @@ fn row_value(d: &Draft, row: usize) -> String {
                     iptv_core::recording::Repeat::Once => tr("Once"),
                     iptv_core::recording::Repeat::Daily => tr("Every day"),
                     iptv_core::recording::Repeat::Weekly => tr("Every week"),
-                    iptv_core::recording::Repeat::Series => tr("Every matching programme"),
+                    iptv_core::recording::Repeat::Series => tr("Every matching program"),
                 }
                 .into(),
             )],

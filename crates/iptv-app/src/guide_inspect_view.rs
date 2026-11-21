@@ -58,7 +58,7 @@ fn finish(ui: Ui, id: u64, result: InspectionResult<()>) {
     });
 }
 fn current(ui: Ui, id: u64, control: &InspectionControl) -> bool {
-    !control.cancel.is_cancelled() && state(ui, |s| s.request == id).unwrap_or(false)
+    !control.cancel.is_canceled() && state(ui, |s| s.request == id).unwrap_or(false)
 }
 
 pub fn open(ui: Ui, source: SourceId) {
@@ -160,8 +160,8 @@ fn candidates(ui: Ui, subject: ChannelRef, next: bool) {
             Ok(page) => {
                 let mut query = Query::source(screen.source);
                 query.limit = 5;
-                let programmes = crate::runtime()
-                    .query_programmes(query, screen.window, Some(subject.clone()), control.clone())
+                let programs = crate::runtime()
+                    .query_programs(query, screen.window, Some(subject.clone()), control.clone())
                     .await;
                 if !current(ui, id, &control) {
                     return;
@@ -171,12 +171,12 @@ fn candidates(ui: Ui, subject: ChannelRef, next: bool) {
                     s.subject = Some(subject);
                     s.candidates = page.items;
                     s.next = page.next;
-                    s.current = programmes
+                    s.current = programs
                         .as_ref()
                         .map(|p| p.items.clone())
                         .unwrap_or_default();
                 });
-                finish(ui, id, programmes.map(|_| ()));
+                finish(ui, id, programs.map(|_| ()));
             }
             Err(error) => finish(ui, id, Err(error)),
         }
@@ -300,13 +300,13 @@ fn samples(ui: Ui, candidate: CandidateRef) {
             return;
         }
         match result {
-            Ok(programmes) => {
+            Ok(programs) => {
                 update(ui, |s| {
                     s.retained_stage = Some(stage.clone());
                     s.stage = Some(stage);
                     s.samples_back = screen.mode;
                     s.enter(Mode::Samples);
-                    s.samples = programmes;
+                    s.samples = programs;
                     s.selected = Some(selected);
                     s.next = None;
                 });
@@ -415,11 +415,11 @@ fn diagnosis(value: Diagnosis) -> &'static str {
         Diagnosis::Unmatched => tr("No matching guide channel"),
         Diagnosis::MissingMetadata => tr("Missing guide identity metadata"),
         Diagnosis::Ambiguous => tr("Several guide channels match"),
-        Diagnosis::Empty => tr("No programmes in this interval"),
+        Diagnosis::Empty => tr("No programs in this interval"),
         Diagnosis::Stale => tr("Guide data is out of date"),
-        Diagnosis::Partial => tr("Partial programme coverage"),
-        Diagnosis::SuspiciousTiming => tr("Check programme times"),
-        Diagnosis::Covered => tr("Programme coverage available"),
+        Diagnosis::Partial => tr("Partial program coverage"),
+        Diagnosis::SuspiciousTiming => tr("Check program times"),
+        Diagnosis::Covered => tr("Program coverage available"),
     }
 }
 fn evidence(value: Evidence) -> &'static str {
@@ -433,7 +433,7 @@ fn evidence(value: Evidence) -> &'static str {
 }
 pub(crate) fn error_text(error: InspectionError) -> &'static str {
     match error {
-        InspectionError::Cancelled => tr("Cancelled"),
+        InspectionError::Canceled => tr("Canceled"),
         InspectionError::Deadline => tr("The request timed out"),
         InspectionError::PermissionDenied => tr("Channel is blocked"),
         InspectionError::StaleCursor | InspectionError::StaleEvidence => {
@@ -551,7 +551,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     .unwrap_or_default()
                 }))
                 .child(ui_kit::body(size, move || {
-                    tr("Programme coverage does not verify channel identity")
+                    tr("Program coverage does not verify channel identity")
                 }))
                 .child(when(
                     move || state(ui, |s| s.busy).unwrap_or(false),
@@ -629,7 +629,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         state(ui, |s| s.mode == Mode::Samples && s.samples.is_empty())
                             .unwrap_or(false)
                     },
-                    move || ui_kit::body(size, move || tr("No programmes in this interval")),
+                    move || ui_kit::body(size, move || tr("No programs in this interval")),
                 ))
                 .child(when(
                     move || state(ui, |s| s.mode == Mode::Link).unwrap_or(false),

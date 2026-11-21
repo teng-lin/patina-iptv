@@ -81,7 +81,7 @@ fn seed(store: &mut Store, home: &Path, name: &str) -> SourceId {
             "<tv><channel id=\"shared\"><display-name>Shared</display-name></channel>\
              <programme channel=\"shared\" start=\"{}\" stop=\"{}\">\
              <title>{name} bulletin</title>\
-             <desc>{name} synthetic programme details.</desc></programme></tv>",
+             <desc>{name} synthetic program details.</desc></programme></tv>",
             iptv_epg::format_xmltv_time(now - 1800),
             iptv_epg::format_xmltv_time(now + 1800)
         ),
@@ -119,7 +119,7 @@ fn favorite_names(path: &Path, source: SourceId) -> Vec<String> {
         .load_channels(
             source,
             &ChannelQuery {
-                favourites_only: true,
+                favorites_only: true,
                 ..Default::default()
             },
         )
@@ -175,7 +175,7 @@ fn multiview_picker_expansion_preserves_the_guides_category_and_saved_expansion(
     let picker = "id:multiview-picker";
     step(app.wait_for(picker));
     // The picker's expansion is temporary. In particular, folding Alpha must
-    // not remove the guide's selected News category from its own catalogue.
+    // not remove the guide's selected News category from its own catalog.
     step(app.press(&format!("{picker} >> text:▾  Alpha")));
     step(app.wait_for(&format!("{picker} >> text:▸  Alpha")));
     step(app.press(&format!("{picker} >> text:▸  Alpha")));
@@ -184,7 +184,7 @@ fn multiview_picker_expansion_preserves_the_guides_category_and_saved_expansion(
     step(app.wait_for(&format!("{picker} >> text:▸  Alpha")));
     step(app.press(&format!("{picker} >> text:▸  Beta")));
     step(app.wait_for(&format!("{picker} >> text:▾  Beta")));
-    // Give any erroneously queued preference writes or catalogue rebuilds a
+    // Give any erroneously queued preference writes or catalog rebuilds a
     // chance to finish before checking that the stored guide choice is intact.
     step(app.run_for(Duration::from_secs(1)));
     assert_eq!(
@@ -254,8 +254,8 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
     // must not change Alpha's membership.
     step(app.press("text:/^Shared · Beta/"));
     step(app.press_key("m"));
-    step(app.wait_for("text:Add to favourites"));
-    step(app.press("text:Add to favourites"));
+    step(app.wait_for("text:Add to favorites"));
+    step(app.press("text:Add to favorites"));
     step(crate::isolated::wait_outside(
         &mut app,
         "owning source favorite saved",
@@ -298,8 +298,8 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
     step(app.wait_for("text:/Shared · Beta/"));
     step(app.clear("id:search-field"));
     step(app.type_text("id:search-field", "bulletin"));
-    step(app.wait_for("text:/^Programmes/"));
-    step(app.press("text:/^Programmes/"));
+    step(app.wait_for("text:/^Programs/"));
+    step(app.press("text:/^Programs/"));
     step(app.wait_for_within("text:/Alpha bulletin/", Duration::from_secs(10)));
     step(app.wait_for("text:/Beta bulletin/"));
     step(app.press("text:Close"));

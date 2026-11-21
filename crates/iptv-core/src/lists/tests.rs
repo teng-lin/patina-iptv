@@ -77,14 +77,14 @@ fn view(catalog: &Rc<dyn Schedule>, list: ChannelList) -> ListView {
 }
 
 #[test]
-fn the_groups_column_starts_with_favourites_recent_and_all() {
+fn the_groups_column_starts_with_favorites_recent_and_all() {
     let c = Catalog::small();
     assert_eq!(entry_count(&c), 6);
     let names: Vec<String> = (0..entry_count(&c)).map(|e| entry_name(e, &c)).collect();
     assert_eq!(
         names,
         [
-            "Favourites",
+            "Favorites",
             "Recently watched",
             "All channels",
             "News",
@@ -117,7 +117,7 @@ fn a_group_lists_only_its_channels_and_all_follows_the_playlist() {
 }
 
 #[test]
-fn favourites_and_recent_lists_keep_their_order() {
+fn favorites_and_recent_lists_keep_their_order() {
     let c = Catalog::small();
     let fav = ChannelList::build(FAVORITES, &c, &[7, 1, 99], &[]);
     assert_eq!(fav.channels(), &[7, 1], "out-of-range channels are dropped");
@@ -171,7 +171,7 @@ fn a_list_view_reads_the_catalog_channel_behind_each_row() {
     assert_eq!(fav.title(0, fav.program_at(0, 0)), "T7");
     assert_eq!(fav.find_channel("k4"), Some(1));
     assert_eq!(fav.find_channel("k0"), None, "not in this list");
-    assert_eq!(fav.group_name(0), "Favourites");
+    assert_eq!(fav.group_name(0), "Favorites");
     // Rows the list does not have still answer (an empty list's cursor).
     assert_eq!(fav.channel_name(5), "");
     assert_eq!(fav.program_at(5, 75).airing(75), Airing::Live);
@@ -290,7 +290,7 @@ fn a_resumed_hidden_channel_keeps_all_channels() {
         }
     }
     let catalog = Hiding(Catalog::small());
-    // Hidden: no list has its row, favourite or not.
+    // Hidden: no list has its row, favorite or not.
     assert_eq!(resume_entry(1, &catalog, &[1], true), Some(ALL));
     assert_eq!(resume_entry(1, &catalog, &[], true), Some(ALL));
     assert_eq!(ChannelList::build(ALL, &catalog, &[1], &[]).row_of(1), None);

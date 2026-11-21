@@ -143,7 +143,7 @@ pub struct StoredEpgFeed {
     pub meta: EpgFeedMeta,
     /// EPG channels stored (bound ones only).
     pub channel_count: u64,
-    pub programme_count: u64,
+    pub program_count: u64,
 }
 
 /// A playlist source's stored guide (or its failed attempts).
@@ -154,7 +154,7 @@ pub struct StoredGuide {
     pub last_error: Option<ImportErrorKind>,
     pub match_fingerprint: Option<u64>,
     pub bound_channels: u64,
-    /// Latest programme end written.
+    /// Latest program end written.
     pub ends_at: Option<UnixTime>,
     /// Highest priority first.
     pub feeds: Vec<StoredEpgFeed>,
@@ -186,7 +186,7 @@ pub struct EpgCounts {
     pub feeds: u64,
     pub channels: u64,
     pub bindings: u64,
-    pub programmes: u64,
+    pub programs: u64,
     pub descriptions: u64,
     /// Bound playlist channels whose feed was not in `feeds` (not stored).
     pub skipped_bindings: u64,
@@ -195,7 +195,7 @@ pub struct EpgCounts {
 /// What [`Store::load_epg`] reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EpgWindow<'a> {
-    /// Programmes overlapping `[from, to)`.
+    /// Programs overlapping `[from, to)`.
     pub from: UnixTime,
     pub to: UnixTime,
     /// Only these playlist channels; `None`: every bound channel.
@@ -246,7 +246,7 @@ const DELETE_GUIDE: &[&str] = &[
     "DELETE FROM epg_feed_channels WHERE source_id = ?1",
     "DELETE FROM epg_descriptions WHERE channel_id IN
          (SELECT id FROM epg_channels WHERE source_id = ?1)",
-    "DELETE FROM epg_programmes WHERE channel_id IN
+    "DELETE FROM epg_programs WHERE channel_id IN
          (SELECT id FROM epg_channels WHERE source_id = ?1)",
     "DELETE FROM epg_bindings WHERE source_id = ?1",
     "DELETE FROM epg_channels WHERE source_id = ?1",
@@ -306,26 +306,26 @@ fn insert_feed_channels(
 }
 
 /// Copies one staged channel's schedule (`stage`) to store channel
-/// `channel`; returns (programmes, descriptions).
+/// `channel`; returns (programs, descriptions).
 ///
 /// `OR FAIL`, with foreign keys off ([`Store::replace_epg`]): a multi-row
 /// statement that may abort half-way needs a statement journal, which
-/// copies every page of `epg_programmes_by_stop` it touches first (3-4x
+/// copies every page of `epg_programs_by_stop` it touches first (3-4x
 /// slower, and temporary files).
-fn copy_programmes(conn: &Connection, channel: i64, stage: i64) -> Result<(u64, u64)> {
+fn copy_programs(conn: &Connection, channel: i64, stage: i64) -> Result<(u64, u64)> {
     let n = conn
         .prepare_cached(
-            "INSERT OR FAIL INTO main.epg_programmes (channel_id, start, stop, title, sub_title,
+            "INSERT OR FAIL INTO main.epg_programs (channel_id, start, stop, title, sub_title,
                  category, icon, rating, catchup_id, season, episode)
              SELECT ?1, start, stop, title, sub_title, category, icon, rating, catchup_id,
                  season, episode
-             FROM epg_stage.programmes WHERE ch = ?2 ORDER BY start",
+             FROM epg_stage.programs WHERE ch = ?2 ORDER BY start",
         )?
         .execute(params![channel, stage])?;
     let d = conn
         .prepare_cached(
             "INSERT OR FAIL INTO main.epg_descriptions (channel_id, start, description)
-             SELECT ?1, start, description FROM epg_stage.programmes
+             SELECT ?1, start, description FROM epg_stage.programs
              WHERE ch = ?2 AND description IS NOT NULL ORDER BY start",
         )?
         .execute(params![channel, stage])?;
@@ -344,11 +344,11 @@ pub(crate) struct Binding {
 
 impl Store {
     /// Replaces `source`'s stored guide with a downloaded one in one
-    /// transaction: `import` (how it matched) and `stage` (its programmes,
+    /// transaction: `import` (how it matched) and `stage` (its programs,
     /// from the same `iptv_import::import_epg` run).
     ///
     /// Stores every bound EPG channel of the feeds in `feeds` (all of its
-    /// programmes, descriptions apart), the bindings and each feed's
+    /// programs, descriptions apart), the bindings and each feed's
     /// channel list; bindings to a feed missing from `feeds` are skipped
     /// and counted. `match_fingerprint`: `iptv_import::matching_fingerprint`
     /// of the channels and overrides `import` was matched with. Clears a
@@ -365,9 +365,9 @@ impl Store {
         self.attach_staging_database(stage.path(), "epg_stage")?;
         // Every row references a row written just before it in the same
         // transaction: consistent by construction. Off for the copy's sake
-        // (`copy_programmes`); it cannot change inside a transaction. A
-        // larger page cache holds more of `epg_programmes_by_stop`, which
-        // every channel's programmes sweep (a third faster).
+        // (`copy_programs`); it cannot change inside a transaction. A
+        // larger page cache holds more of `epg_programs_by_stop`, which
+        // every channel's programs sweep (a third faster).
         let replaced = self
             .conn
             .pragma_update(None, "foreign_keys", false)
@@ -456,13 +456,13 @@ impl Store {
                     let id = tx.last_insert_rowid();
                     let (n, d, last) = match stage.channel(epg.source, &epg.epg_id) {
                         Some(staged) => {
-                            let (n, d) = copy_programmes(&tx, id, staged.id)?;
+                            let (n, d) = copy_programs(&tx, id, staged.id)?;
                             (n, d, staged.last_stop)
                         }
                         None => (0, 0, None),
                     };
                     counts.channels += 1;
-                    counts.programmes += n;
+                    counts.programs += n;
                     counts.descriptions += d;
                     ends_at = ends_at.max(last);
                     let feed = per_feed.entry(epg.source.0).or_default();
@@ -479,11 +479,11 @@ impl Store {
             .execute(params![source.0, key.as_str(), id, kind_slug(epg.kind)])?;
             counts.bindings += 1;
         }
-        for (feed, (channels, programmes)) in per_feed {
+        for (feed, (channels, programs)) in per_feed {
             tx.execute(
-                "UPDATE epg_feeds SET channel_count = ?3, programme_count = ?4
+                "UPDATE epg_feeds SET channel_count = ?3, program_count = ?4
                  WHERE source_id = ?1 AND feed_id = ?2",
-                params![source.0, feed, channels as i64, programmes as i64],
+                params![source.0, feed, channels as i64, programs as i64],
             )?;
         }
         tx.execute(
@@ -507,7 +507,7 @@ impl Store {
     }
 
     /// Records a failed (or partly failed) guide download. Stored
-    /// programmes stay; the refresh policy backs off.
+    /// programs stay; the refresh policy backs off.
     pub fn record_epg_failure(&mut self, source: SourceId, kind: ImportErrorKind) -> Result<()> {
         ensure_source(&self.conn, source)?;
         let now = self.now();
@@ -553,7 +553,7 @@ impl Store {
         let mut stmt = self.conn.prepare_cached(
             "SELECT feed_id, url, priority, user_agent, assumed_offset_minutes, shift_minutes,
                  store_descriptions, past_days_to_keep, fetched_at, etag, last_modified, bytes,
-                 channel_count, programme_count, content_supplied
+                 channel_count, program_count, content_supplied
              FROM epg_feeds WHERE source_id = ?1 ORDER BY priority DESC, feed_id",
         )?;
         let rows = stmt.query_map([source.0], |r| {
@@ -581,7 +581,7 @@ impl Store {
                     bytes: to_u64(r.get(11)?),
                 },
                 channel_count: to_u64(r.get(12)?),
-                programme_count: to_u64(r.get(13)?),
+                program_count: to_u64(r.get(13)?),
             })
         })?;
         for row in rows {
@@ -633,7 +633,7 @@ impl Store {
             builders.insert(id, b);
         }
         drop(rows);
-        crate::epg_window::read_programmes(&self.conn, &bindings, &mut builders, window)?;
+        crate::epg_window::read_programs(&self.conn, &bindings, &mut builders, window)?;
         let mut guide = GuideStore::new();
         for (_, b) in builders {
             guide.replace_source(b.finish());
@@ -653,7 +653,7 @@ impl Store {
         Ok(guide)
     }
 
-    /// The description of the programme starting at `start` on playlist
+    /// The description of the program starting at `start` on playlist
     /// channel `key`, read on demand.
     pub fn epg_description(
         &self,
@@ -672,7 +672,7 @@ impl Store {
             .optional()?)
     }
 
-    /// Deletes programmes (of every source) that ended at or before
+    /// Deletes programs (of every source) that ended at or before
     /// `before`. Returns how many.
     pub fn prune_epg(&mut self, before: UnixTime) -> Result<u64> {
         let tx = self
@@ -680,10 +680,10 @@ impl Store {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute(
             "DELETE FROM epg_descriptions WHERE (channel_id, start) IN
-                 (SELECT channel_id, start FROM epg_programmes WHERE stop <= ?1)",
+                 (SELECT channel_id, start FROM epg_programs WHERE stop <= ?1)",
             [before],
         )?;
-        let n = tx.execute("DELETE FROM epg_programmes WHERE stop <= ?1", [before])?;
+        let n = tx.execute("DELETE FROM epg_programs WHERE stop <= ?1", [before])?;
         tx.commit()?;
         Ok(n as u64)
     }

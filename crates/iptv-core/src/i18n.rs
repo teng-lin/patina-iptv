@@ -21,7 +21,7 @@ pub struct Language {
     pub name: &'static str,
 }
 
-/// Column order in the UTF-8 catalogue (English is the source column).
+/// Column order in the UTF-8 catalog (English is the source column).
 pub const LANGUAGES: &[Language] = &[
     Language {
         tag: "en",
@@ -43,7 +43,7 @@ pub const LANGUAGES: &[Language] = &[
         tag: "it",
         name: "Italiano",
     },
-    // The Portuguese catalogue uses European Portuguese vocabulary (e.g.
+    // The Portuguese catalog uses European Portuguese vocabulary (e.g.
     // "ecrã", "ficheiro", "definições") and CLDR pt-PT plural rules (zero
     // other, one one, million many). Regional locales like pt-BR resolve
     // to it as the closest match.
@@ -75,7 +75,7 @@ pub const LANGUAGES: &[Language] = &[
 
 /// Resolve regional/script tags, including POSIX locale names. Unsupported
 /// languages fall back to English; Chinese regions select the right script.
-/// The single supported Portuguese catalogue is European (vocabulary and
+/// The single supported Portuguese catalog is European (vocabulary and
 /// pt-PT plural rules); Brazilian locales (`pt-BR`) resolve to it.
 pub fn resolve(preference: &str, system: Option<&str>) -> &'static Language {
     let tag = if preference == "system" {
@@ -104,14 +104,14 @@ pub fn resolve(preference: &str, system: Option<&str>) -> &'static Language {
         .unwrap_or(&LANGUAGES[0])
 }
 
-const CATALOGUE: &str = include_str!("i18n/messages.tsv");
+const CATALOG: &str = include_str!("i18n/messages.tsv");
 
-type Catalogue = std::collections::HashMap<&'static str, Vec<&'static str>>;
-static MESSAGES: std::sync::OnceLock<Catalogue> = std::sync::OnceLock::new();
+type Catalog = std::collections::HashMap<&'static str, Vec<&'static str>>;
+static MESSAGES: std::sync::OnceLock<Catalog> = std::sync::OnceLock::new();
 
-fn messages() -> &'static Catalogue {
+fn messages() -> &'static Catalog {
     MESSAGES.get_or_init(|| {
-        CATALOGUE
+        CATALOG
             .lines()
             .filter(|line| !line.is_empty())
             .map(|line| {
@@ -122,7 +122,7 @@ fn messages() -> &'static Catalogue {
     })
 }
 
-/// The catalogue's text for `source` in `language`: `None` for English
+/// The catalog's text for `source` in `language`: `None` for English
 /// (the source is the text), an unknown message or an unknown language.
 fn find(language: &Language, source: &str) -> Option<&'static str> {
     let column = LANGUAGES.iter().position(|l| l.tag == language.tag)?;
@@ -146,7 +146,7 @@ pub fn translate<'a>(language: &Language, source: &'a str) -> &'a str {
 /// in `language` with `args` filled in and each plural's form chosen by
 /// the count it names.
 ///
-/// A message the catalogue lacks is formatted from its English source by
+/// A message the catalog lacks is formatted from its English source by
 /// English rules, so a count never selects a form the text does not have.
 pub fn format(language: &Language, source: &str, args: &Args<'_>) -> String {
     match find(language, source) {
@@ -155,9 +155,9 @@ pub fn format(language: &Language, source: &str, args: &Args<'_>) -> String {
     }
 }
 
-/// Whether the catalogue has a row for `source`: for the checks that no
+/// Whether the catalog has a row for `source`: for the checks that no
 /// message reaches [`translate`] or [`format()`] without one.
-pub fn is_catalogued(source: &str) -> bool {
+pub fn is_cataloged(source: &str) -> bool {
     messages().contains_key(source)
 }
 
@@ -191,9 +191,9 @@ mod tests {
     }
 
     #[test]
-    fn catalogue_is_complete_unique_and_has_no_blank_translations() {
+    fn catalog_is_complete_unique_and_has_no_blank_translations() {
         let mut seen = std::collections::HashSet::new();
-        for line in CATALOGUE.lines() {
+        for line in CATALOG.lines() {
             let columns: Vec<_> = line.split('\t').collect();
             assert_eq!(columns.len(), LANGUAGES.len(), "{line}");
             assert!(seen.insert(columns[0]), "duplicate: {}", columns[0]);
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn translations_keep_their_placeholders_and_have_their_plural_forms() {
         let mut formatted = 0;
-        for line in CATALOGUE.lines() {
+        for line in CATALOG.lines() {
             let columns: Vec<_> = line.split('\t').collect();
             let source = columns[0];
             if !source.contains(['{', '}']) {
@@ -297,9 +297,9 @@ mod tests {
     }
 
     #[test]
-    fn an_uncatalogued_message_is_formatted_by_english_rules() {
+    fn an_uncataloged_message_is_formatted_by_english_rules() {
         const NEW: &str = "{count, plural, one {# synthetic row} other {# synthetic rows}}";
-        assert!(!is_catalogued(NEW));
+        assert!(!is_cataloged(NEW));
         // 21 is singular in Russian; the English text has no such form.
         let russian = resolve("ru", None);
         assert_eq!(
@@ -310,8 +310,8 @@ mod tests {
             format(russian, NEW, &[("count", 1u32.into())]),
             "1 synthetic row"
         );
-        assert!(is_catalogued("Settings"));
-        assert!(!is_catalogued("Ajustes"), "only the source column is a key");
+        assert!(is_cataloged("Settings"));
+        assert!(!is_cataloged("Ajustes"), "only the source column is a key");
     }
 
     #[test]

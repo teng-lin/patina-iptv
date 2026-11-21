@@ -1,8 +1,8 @@
-//! The navigation rail left of the groups column, on the panel colour: icons while the groups
+//! The navigation rail left of the groups column, on the panel color: icons while the groups
 //! have the focus, icons with labels while it has the focus itself. Items
 //! without a screen in this build are dimmed and never take the focus
 //! (`iptv_core::browse`); the focused one is the light pill the guide's
-//! focused programme is. Left from the groups lands on Search. The icons
+//! focused program is. Left from the groups lands on Search. The icons
 //! are our own simple line drawings.
 
 use crate::i18n::tr;
@@ -66,7 +66,7 @@ fn label(item: RailItem) -> &'static str {
     }
 }
 
-/// A 24-unit line drawing in the text colour.
+/// A 24-unit line drawing in the text color.
 pub(crate) fn icon(item: RailItem) -> ImageSrc {
     let body = match item {
         RailItem::Search => "<circle cx='10.5' cy='10.5' r='6'/><path d='M15 15l5.5 5.5'/>",
@@ -109,7 +109,7 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
             && index().is_some()
             && ui.focus.with(|f| f.pane == Pane::Rail && f.rail == item)
     };
-    let colour = move || {
+    let color = move || {
         if !item.enabled() {
             tint(WHITE, TEXT_DISABLED_ALPHA / 2)
         } else if focused() {
@@ -161,7 +161,7 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
         .child(
             svg(icon(item))
                 .size(move || px(item_height(ui).min(ICON)))
-                .text_color(colour),
+                .text_color(color),
         )
         .child(
             text(move || label(item))
@@ -169,7 +169,7 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
                 .accessibility_elements_hidden(move || !open())
                 .opacity(move || if open() { 1.0_f32 } else { 0.0 })
                 .text_size(move || px(TEXT_SIZE.min(item_height(ui) * 0.8)))
-                .text_color(colour),
+                .text_color(color),
         )
 }
 

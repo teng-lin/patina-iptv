@@ -164,7 +164,7 @@ fn custom_groups_crud_membership_and_order() {
     );
 
     s.set_hidden(src, &c(5), true).unwrap();
-    s.set_favourite(src, &c(1), true).unwrap();
+    s.set_favorite(src, &c(1), true).unwrap();
     let visible = ChannelQuery {
         scope: ChannelScope::Custom(evening),
         ..Default::default()
@@ -174,7 +174,7 @@ fn custom_groups_crud_membership_and_order() {
         of(&cat, &[3, 1])
     );
     let favs = ChannelQuery {
-        favourites_only: true,
+        favorites_only: true,
         ..visible
     };
     assert_eq!(ids(&s.load_channels(src, &favs).unwrap()), of(&cat, &[1]));
@@ -226,7 +226,7 @@ fn epg_override_survives_refresh_and_clears() {
     s.set_epg_override(src, &id, None).unwrap();
     s.set_epg_override(src, &cat.channels[2].id, None).unwrap();
     assert_eq!(s.channel(src, &id).unwrap().unwrap().epg_override, None);
-    // Nothing customised is left, so nothing can become an orphan.
+    // Nothing customized is left, so nothing can become an orphan.
     replace(&mut s, src, &catalog(0, 1, XT_PASSWORD));
     assert!(s.orphaned_overlays(Some(src)).unwrap().is_empty());
 }

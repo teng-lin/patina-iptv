@@ -6,7 +6,7 @@
 //! With none, the add-playlist wizard opens on its empty state (`wizard_view`).
 //! The wizard adds sources
 //! through [`start_import`]. A new source is stored only once its import
-//! succeeded, so a failed or cancelled attempt leaves nothing behind. The
+//! succeeded, so a failed or canceled attempt leaves nothing behind. The
 //! playlists screen switches, refreshes, renames and deletes stored
 //! sources through [`library`].
 //!
@@ -198,7 +198,7 @@ fn start_import_with(
                 {
                     return;
                 }
-                if cancel.is_cancelled() {
+                if cancel.is_canceled() {
                     return;
                 }
                 let failed = tx.clone();
@@ -352,7 +352,7 @@ fn start_import_with(
                 }
             }
             completion.finish();
-            // This job cancelled the source's timer when it started and did
+            // This job canceled the source's timer when it started and did
             // not answer for it: it failed, a guide action revoked its handoff
             // (its NextCheck was dropped), or it could not read the store.
             // Newer work that replaced it answers instead.
@@ -405,7 +405,7 @@ async fn show(
     show_part(owner, imported, generation, resume, None, None).await;
 }
 
-/// [`show`]; with `held`, its guide holds only those programmes (a first
+/// [`show`]; with `held`, its guide holds only those programs (a first
 /// screen, `opening.rs`).
 ///
 /// Shows of one source take turns in the order they began: each has
@@ -414,7 +414,7 @@ async fn show(
 /// `job`, the import that read `imported`: when a guide action revoked it
 /// meanwhile ("Delete stored guide data", a channel's guide chosen), the
 /// guide it read may predate what that action deleted or matched anew.
-/// Its catalogue and playback are still shown, with the guide as stored
+/// Its catalog and playback are still shown, with the guide as stored
 /// now (read after that action's writes) in place of the one it read.
 async fn show_part(
     owner: &std::rc::Rc<crate::Runtime>,
@@ -440,7 +440,7 @@ async fn show_part(
         && !library::import_is_current(owner, imported.source, job)
     {
         let stored = crate::commands::stored_guide(owner, imported.source, imported.now).await;
-        // Unreadable: without programmes rather than with ones that may
+        // Unreadable: without programs rather than with ones that may
         // just have been deleted, until the stored guide can be read.
         imported.guide = stored.unwrap_or_else(|error| {
             log::warn!("iptv data: the stored guide cannot be read: {error}");
@@ -553,7 +553,7 @@ async fn show_part(
     owner.emit(crate::RuntimeEvent::SchedulePresented(vec![
         ("schedule", built),
         ("pages", wrapped),
-        ("favourites", favorites),
+        ("favorites", favorites),
         ("swapped", started.elapsed()),
     ]));
     if first_screen {
@@ -565,7 +565,7 @@ async fn show_part(
 }
 
 /// Another stored source (or none) is about to be shown: what played and
-/// the favourites belong to the old one, and the choice is remembered.
+/// the favorites belong to the old one, and the choice is remembered.
 fn source_changed(owner: &std::rc::Rc<crate::Runtime>, source: Option<SourceId>) {
     log::info!("iptv data: showing source {:?}", source.map(|id| id.0));
     owner.emit(crate::RuntimeEvent::SourceChanged);
@@ -591,7 +591,7 @@ fn show_nothing(owner: &std::rc::Rc<crate::Runtime>) {
     )));
 }
 
-/// Work that cancelled `source`'s guide timer ended without answering for
+/// Work that canceled `source`'s guide timer ended without answering for
 /// it: keeps a check unless one is registered or newer work for the source
 /// will set it. `asked` is the check the work asked for itself before its
 /// handoff was revoked (or the time a guide action gives a check it
@@ -602,7 +602,7 @@ fn show_nothing(owner: &std::rc::Rc<crate::Runtime>) {
 /// suppress its own recovery. With updates on request only
 /// (`epg.update_interval` = 0) the policy is not asked anew, which would
 /// make up a check: only the one it had asked for before this work, and
-/// which this work cancelled, is kept at its own time. The refresh policy
+/// which this work canceled, is kept at its own time. The refresh policy
 /// (`iptv_import::refresh`) sets such checks whatever the interval, for a
 /// download that failed (rule 3, the back-off) or is still due (rule 4: a
 /// guide never fetched or with changed feeds "is not an update").
@@ -697,10 +697,10 @@ fn schedule_check(
         let owner = owner.clone();
         async move {
             let mut elapsed = std::pin::pin!(owner.delay(wait));
-            let mut cancelled = std::pin::pin!(cancel.cancelled());
+            let mut canceled = std::pin::pin!(cancel.canceled());
             let fired = std::future::poll_fn(|cx| {
                 use std::task::Poll;
-                if cancelled.as_mut().poll(cx).is_ready() {
+                if canceled.as_mut().poll(cx).is_ready() {
                     return Poll::Ready(false);
                 }
                 elapsed.as_mut().poll(cx).map(|_| true)

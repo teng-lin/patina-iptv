@@ -25,7 +25,7 @@ to the newest minimum of what it bundles, so an older Mac says the app needs
 a newer macOS rather than failing at launch (a release builds libmpv for an
 older deployment target instead).
 
-Beside each library's licence texts it records where its source comes from
+Beside each library's license texts it records where its source comes from
 (notices/native/sources.json, SOURCE.txt and the installed formulae), and
 fails when a bundled Homebrew keg does not name a checksummed source.
 """
@@ -175,7 +175,7 @@ def glib_source_notices(prefix, destination):
                     target.write_bytes(stream.read())
                 copied += 1
         if not copied:
-            raise ValueError("GLib source has no licence notices")
+            raise ValueError("GLib source has no license notices")
     shutil.copyfile(formula, destination / "source-formula.rb")
     (destination / "source.json").write_text(json.dumps({"url": expected, "sha256": sha_match[1]}, indent=2) + "\n")
 
@@ -267,7 +267,7 @@ def main():
             if prefix.parent.name == "glib":
                 glib_source_notices(prefix, destination)
             else:
-                sys.exit(f"no upstream licence text installed for {prefix.parent.name} {prefix.name}")
+                sys.exit(f"no upstream license text installed for {prefix.parent.name} {prefix.name}")
         for text in texts:
             target = destination / text.relative_to(prefix)
             target.parent.mkdir(parents=True, exist_ok=True)

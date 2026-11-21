@@ -1,7 +1,7 @@
 //! Search and add: multiview's tile menu opens the search screen to pick
 //! a channel for a new tile. The screen shows over the grid without
 //! leaving full screen (leaving it would end multiview); choosing a
-//! channel, or a programme (its channel), hands the channel to multiview
+//! channel, or a program (its channel), hands the channel to multiview
 //! (`multiview::picked`) and closes the screen, so the grid is back with
 //! the new tile. Back (or Close) closes it without one
 //! (`multiview::list_closed`, from [`super::close`]).
@@ -23,7 +23,7 @@ pub fn open_to_pick(ui: Ui) {
     ui.search.set(Some(Screen {
         state: SearchState::new(history),
         suspended: false,
-        programmes: Programmes::Building,
+        programs: ProgramSearch::Building,
         pick: true,
     }));
     prepare(ui);
@@ -112,7 +112,7 @@ mod identity_tests {
             .find(|hit| hit.identity.source == Some(1))
             .unwrap();
         let channel = ResultId::Channel(hit.identity.clone());
-        let programme = ResultId::Programme {
+        let program = ResultId::Program {
             channel: hit.identity,
             start: 1_800_000_000,
         };
@@ -123,7 +123,7 @@ mod identity_tests {
             ],
             1_800_000_000,
         );
-        for id in [&channel, &programme] {
+        for id in [&channel, &program] {
             assert_eq!(
                 resolve_result_channel(&owner, id.channel(), &shifted),
                 Some(2)
@@ -144,7 +144,7 @@ mod identity_tests {
             ],
             1_800_000_000,
         );
-        for id in [&channel, &programme] {
+        for id in [&channel, &program] {
             assert_eq!(
                 resolve_result_channel(&owner, id.channel(), &recreated),
                 None,

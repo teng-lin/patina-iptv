@@ -8,7 +8,7 @@ use crate::lists::tests::Catalog;
 use crate::lists::{ALL, ChannelList, Entry, FAVORITES, FIRST_GROUP, ListView, entry_count};
 
 /// The guide screen as the shell runs it: the focus, the list it shows and
-/// the favourites, with the list rebuilt as the shell rebuilds it.
+/// the favorites, with the list rebuilt as the shell rebuilds it.
 struct Screen {
     catalog: Rc<dyn Schedule>,
     index: KeyIndex,
@@ -100,7 +100,7 @@ impl Screen {
         self.view.list().channels().to_vec()
     }
 
-    fn toggle_favourite(&mut self, channel: usize) {
+    fn toggle_favorite(&mut self, channel: usize) {
         let key = self.catalog.channel_key(channel).unwrap();
         let on = !self.favorites.contains(&key);
         self.favorites.set(&key, on);
@@ -181,7 +181,7 @@ fn moving_over_the_groups_filters_the_guide_live() {
     for _ in 0..10 {
         s.mv(Move::Up);
     }
-    assert_eq!(s.focus.group, FAVORITES, "Favourites is first");
+    assert_eq!(s.focus.group, FAVORITES, "Favorites is first");
     assert!(s.shown().is_empty());
 }
 
@@ -198,7 +198,7 @@ fn ok_chooses_the_group_and_focuses_its_first_channel() {
     assert_eq!(s.view.channel_number(s.focus.channel), 1);
     assert!(s.focus.hint, "the hint card shows");
     assert_eq!(s.focus.program(&s.view).airing(s.focus.now), Airing::Live);
-    // OK again watches the programme.
+    // OK again watches the program.
     assert_eq!(s.ok(), Outcome::Watch);
     assert!(!s.focus.hint, "any key dismisses the hint");
 }
@@ -233,7 +233,7 @@ fn back_walks_hint_guide_groups_rail_then_leaves() {
 }
 
 #[test]
-fn back_on_a_future_programme_returns_to_now_first() {
+fn back_on_a_future_program_returns_to_now_first() {
     let mut s = Screen::new();
     s.mv(Move::Right);
     s.mv(Move::Right);
@@ -245,7 +245,7 @@ fn back_on_a_future_programme_returns_to_now_first() {
 }
 
 #[test]
-fn without_back_to_now_back_on_a_past_or_future_programme_opens_the_groups() {
+fn without_back_to_now_back_on_a_past_or_future_program_opens_the_groups() {
     let mut s = Screen::new();
     s.back_to_now = false;
     s.mv(Move::Right);
@@ -295,7 +295,7 @@ fn the_rail_skips_items_without_a_screen() {
     assert_eq!(s.focus.rail, RailItem::Tv);
     for item in [RailItem::Movies, RailItem::Shows] {
         assert_eq!(s.mv(Move::Down), Outcome::Moved);
-        assert_eq!(s.focus.rail, item, "catalogues are always reachable");
+        assert_eq!(s.focus.rail, item, "catalogs are always reachable");
         assert_eq!(s.ok(), Outcome::Open(item));
     }
     assert_eq!(s.mv(Move::Down), Outcome::Moved);
@@ -347,7 +347,7 @@ fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
         ]
     );
     // A live-only playlist on screen while another enabled playlist has
-    // films: both the discovery shelves and catalogues stay reachable.
+    // films: both the discovery shelves and catalogs stay reachable.
     assert_eq!(
         rail_items(VodAvailability {
             shown: false,
@@ -374,7 +374,7 @@ fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
     assert_eq!(
         f.tap_rail(4, &cols, &SyntheticList),
         Outcome::Open(Continue),
-        "Continue watching remains available after the catalogues"
+        "Continue watching remains available after the catalogs"
     );
     assert_eq!(
         f.tap_rail(5, &cols, &SyntheticList),
@@ -445,13 +445,13 @@ fn a_tap_on_a_group_selects_and_filters_it() {
         Outcome::Moved
     );
     assert_eq!(s.focus.tap_entry(99, &cols), Outcome::None);
-    // A tap on a programme then leaves the columns (the grid's own tap).
+    // A tap on a program then leaves the columns (the grid's own tap).
     s.focus.tap(1, s.focus.now, &s.view);
     assert_eq!((s.focus.pane, s.channel()), (Pane::Guide, Some(6)));
 }
 
 #[test]
-fn an_empty_favourites_list_cannot_be_entered() {
+fn an_empty_favorites_list_cannot_be_entered() {
     let mut s = Screen::new();
     s.focus.open_groups();
     s.focus.group = FAVORITES + 1;
@@ -463,11 +463,11 @@ fn an_empty_favourites_list_cannot_be_entered() {
 }
 
 #[test]
-fn favourites_list_membership_follows_the_favourites() {
+fn favorites_list_membership_follows_the_favorites() {
     let mut s = Screen::new();
-    s.toggle_favourite(7);
-    s.toggle_favourite(3);
-    s.toggle_favourite(5);
+    s.toggle_favorite(7);
+    s.toggle_favorite(3);
+    s.toggle_favorite(5);
     s.focus.open_groups();
     s.focus.group = FAVORITES + 1;
     s.mv(Move::Up);
@@ -476,14 +476,14 @@ fn favourites_list_membership_follows_the_favourites() {
     s.mv(Move::Down); // on 3
     assert_eq!(s.channel(), Some(3));
     // Removing the channel above the focus keeps the focus on its channel.
-    s.toggle_favourite(7);
+    s.toggle_favorite(7);
     assert_eq!(s.shown(), [3, 5]);
     assert_eq!((s.channel(), s.focus.channel), (Some(3), 0));
     // Removing the focused channel moves to the nearest row.
-    s.toggle_favourite(3);
+    s.toggle_favorite(3);
     assert_eq!(s.channel(), Some(5));
     // Removing the last one hands the focus back to the groups.
-    s.toggle_favourite(5);
+    s.toggle_favorite(5);
     assert!(s.shown().is_empty());
     assert_eq!(s.focus.pane, Pane::Groups);
     let index = KeyIndex::build(&*s.catalog);
@@ -538,7 +538,7 @@ fn tab_toggles_between_the_grid_and_the_groups() {
     s.mv(Move::Right);
     let (row, cursor) = (s.focus.channel, s.focus.cursor);
     assert!(s.focus.toggle_groups(&s.view));
-    assert_eq!(s.focus.pane, Pane::Groups, "also off the live programme");
+    assert_eq!(s.focus.pane, Pane::Groups, "also off the live program");
     assert!(s.focus.toggle_groups(&s.view));
     assert_eq!(
         (s.focus.pane, s.focus.channel, s.focus.cursor),
@@ -657,8 +657,8 @@ fn preview_focus_keeps_the_guide_anchor_and_returns_the_existing_player() {
 fn up_to_preview_restores_each_browse_origin_without_changing_content() {
     for pane in [Pane::Guide, Pane::Groups, Pane::Rail] {
         let mut screen = Screen::new();
-        screen.toggle_favourite(0);
-        screen.toggle_favourite(1);
+        screen.toggle_favorite(0);
+        screen.toggle_favorite(1);
         screen.focus.pane = pane;
         screen.focus.rail = RailItem::Search;
         if pane == Pane::Groups {
@@ -690,7 +690,7 @@ fn up_to_preview_restores_each_browse_origin_without_changing_content() {
 }
 
 #[test]
-fn empty_favourites_can_focus_an_existing_player_and_return_to_their_group() {
+fn empty_favorites_can_focus_an_existing_player_and_return_to_their_group() {
     let mut screen = Screen::new();
     screen.focus.pane = Pane::Groups;
     screen.focus.group = FAVORITES;

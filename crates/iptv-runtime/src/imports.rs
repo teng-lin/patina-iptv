@@ -54,7 +54,7 @@ impl std::fmt::Display for PublicationError {
 impl PublicationError {
     fn failure(&self, fallback: FailureKind) -> ImportFailure {
         ImportFailure::new(match self {
-            Self::Superseded | Self::Store(StoreError::SourceNotFound(_)) => FailureKind::Cancelled,
+            Self::Superseded | Self::Store(StoreError::SourceNotFound(_)) => FailureKind::Canceled,
             Self::Store(_) => fallback,
         })
     }
@@ -67,7 +67,7 @@ impl Publication {
         cancel: &CancelToken,
         authorization: &crate::parental::Snapshot,
     ) -> Result<Self, PublicationError> {
-        if cancel.is_cancelled() {
+        if cancel.is_canceled() {
             return Err(PublicationError::Superseded);
         }
         let job = job.clone();
@@ -97,7 +97,7 @@ impl Publication {
     }
 
     fn current(&self, store: &Store) -> Result<bool, StoreError> {
-        if self.cancel.is_cancelled() {
+        if self.cancel.is_canceled() {
             return Ok(false);
         }
         if let Some((id, incarnation, config)) = &self.source {
@@ -220,7 +220,7 @@ pub enum Msg {
     /// What the store has (before the playlist), or the source's guide
     /// loaded after the playlist was reported.
     Guide(Box<Imported>),
-    /// What the store has, with only the first screen's programmes
+    /// What the store has, with only the first screen's programs
     /// (`opening.rs`); a `Guide` follows. The window read waits until the
     /// [`opening::Shown`] is dropped.
     FirstScreen(Box<Imported>, opening::Held, opening::Shown),
@@ -261,7 +261,7 @@ pub(crate) async fn guide_pipeline(
     read: GuideRead,
     cancel: &CancelToken,
 ) {
-    if cancel.is_cancelled() {
+    if cancel.is_canceled() {
         return;
     }
     let now = now_unix();
@@ -320,7 +320,7 @@ pub(crate) async fn guide_pipeline(
                             .await;
                     match result {
                         Ok(import) => {
-                            if cancel.is_cancelled() {
+                            if cancel.is_canceled() {
                                 return;
                             }
                             let guide = keep_guide(
@@ -343,7 +343,7 @@ pub(crate) async fn guide_pipeline(
                             })));
                         }
                         Err(e) => {
-                            if cancel.is_cancelled() {
+                            if cancel.is_canceled() {
                                 return;
                             }
                             log::warn!("iptv data: guide: {e}");
@@ -356,7 +356,7 @@ pub(crate) async fn guide_pipeline(
         }
         Decision::Discard => {
             stored::discard(services, source, &[cancel]);
-            // Its programmes went: the guide on screen shows none.
+            // Its programs went: the guide on screen shows none.
             let _ = tx.send(Msg::Guide(Box::new(Imported {
                 groups,
                 channels: channels.clone(),
@@ -419,7 +419,7 @@ pub(crate) async fn pipeline(
             return fail(error.failure(if services.is_current() {
                 FailureKind::Auth
             } else {
-                FailureKind::Cancelled
+                FailureKind::Canceled
             }));
         }
     };
@@ -482,7 +482,7 @@ pub(crate) async fn pipeline(
             now,
         ) {
             // Revoked while the stored channels were read: no download.
-            Decision::Refresh(_) if revoked.is_cancelled() => {}
+            Decision::Refresh(_) if revoked.is_canceled() => {}
             Decision::Refresh(_) => match NetClient::new(services) {
                 Ok(net) => {
                     match download_guide(
@@ -509,8 +509,8 @@ pub(crate) async fn pipeline(
                                 playback: Streams::Current,
                             })));
                         }
-                        Err(ImportError::Cancelled) => {}
-                        Err(_) if stops.iter().any(|stop| stop.is_cancelled()) => {}
+                        Err(ImportError::Canceled) => {}
+                        Err(_) if stops.iter().any(|stop| stop.is_canceled()) => {}
                         Err(e) => stored::record_failure(services, id, &e, &guides, &stops),
                     }
                 }
@@ -587,7 +587,7 @@ pub(crate) async fn pipeline(
         Err(e) => {
             log::warn!("iptv data: {:?} import failed: {e}", job.source.kind());
             // New details that failed say nothing about the stored ones.
-            if !matches!(e, ImportError::Cancelled) && !job.edit {
+            if !matches!(e, ImportError::Canceled) && !job.edit {
                 record_failure(services, job.stored, stored::error_kind(&e), &publication);
             }
             // The stored guide stays on screen: keep it current.
@@ -675,7 +675,7 @@ pub(crate) async fn pipeline(
                 Err(e) => {
                     log::warn!("iptv data: the typed guide failed: {e}");
                     let mut failure = wizard_map::failure_of(&e);
-                    if failure.kind != FailureKind::Cancelled {
+                    if failure.kind != FailureKind::Canceled {
                         failure.field = Some(Field::EpgUrl);
                     }
                     return fail(failure);
@@ -684,8 +684,8 @@ pub(crate) async fn pipeline(
         }
         None => None,
     };
-    if cancel.is_cancelled() {
-        return fail(ImportFailure::new(FailureKind::Cancelled));
+    if cancel.is_canceled() {
+        return fail(ImportFailure::new(FailureKind::Canceled));
     }
     let _ = tx.send(Msg::Progress(ImportProgress {
         stage: ImportStage::Saving,
@@ -699,8 +699,8 @@ pub(crate) async fn pipeline(
             Ok(saved) => saved,
             Err(e) => {
                 log::warn!("iptv data: store: {e}");
-                if cancel.is_cancelled() || !services.is_current() {
-                    return fail(ImportFailure::new(FailureKind::Cancelled));
+                if cancel.is_canceled() || !services.is_current() {
+                    return fail(ImportFailure::new(FailureKind::Canceled));
                 }
                 return fail(e.failure(FailureKind::Storage));
             }
@@ -755,8 +755,8 @@ pub(crate) async fn pipeline(
             report(stored::load_guide(services, id, now).unwrap_or_default());
             // The guide loads after the channels are on screen, unless a
             // guide action revoked it while the playlist was fetched.
-            let downloaded = if revoked.is_cancelled() {
-                Err(ImportError::Cancelled)
+            let downloaded = if revoked.is_canceled() {
+                Err(ImportError::Canceled)
             } else {
                 download_guide(&net, &guides, matching, now, &mut NoProgress, cancel, None).await
             };
@@ -765,8 +765,8 @@ pub(crate) async fn pipeline(
                     let guide = keep_guide(services, id, import, &guides, matching, now, &stops);
                     let _ = tx.send(Msg::Guide(imported(guide)));
                 }
-                Err(ImportError::Cancelled) => {}
-                Err(_) if stops.iter().any(|stop| stop.is_cancelled()) => {}
+                Err(ImportError::Canceled) => {}
+                Err(_) if stops.iter().any(|stop| stop.is_canceled()) => {}
                 Err(e) => {
                     log::warn!("iptv data: guide: {e}");
                     stored::record_failure(services, id, &e, &guides, &stops);
@@ -799,7 +799,7 @@ pub(crate) fn planned_guides(services: &Services, job: &Job) -> Vec<GuideSource>
     }
 }
 
-/// A downloaded guide not stored yet: how it matched, and its programmes
+/// A downloaded guide not stored yet: how it matched, and its programs
 /// staged in a file next to the store (deleted when this is dropped, so a
 /// guide that is never kept leaves the stored one as it was).
 pub(crate) struct Downloaded {
@@ -826,7 +826,7 @@ pub(crate) fn keep_guide(
 }
 
 /// Downloads `guides` for the catalog's channels with the user's guide
-/// choices, streaming the programmes to a stage file (memory stays small
+/// choices, streaming the programs to a stage file (memory stays small
 /// whatever the guide's size). The guide `must_load` (the one the user
 /// just typed), when given, must load.
 pub(crate) async fn download_guide<P: ProgressSink>(

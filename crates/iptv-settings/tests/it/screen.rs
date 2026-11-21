@@ -286,7 +286,7 @@ fn a_choice_opens_a_list_on_the_current_value() {
 }
 
 #[test]
-fn colours_are_picked_as_colours() {
+fn colors_are_picked_as_colors() {
     let s = Settings::new();
     let mut screen = Screen::new(PAGES, "appearance");
     assert_eq!(screen.tap_row("appearance.accent", &ctx(&s)), Effect::None);
@@ -294,7 +294,7 @@ fn colours_are_picked_as_colours() {
         screen.pick(13),
         Effect::Set {
             key: "appearance.accent",
-            value: Value::colour("red")
+            value: Value::color("red")
         }
     );
 }
@@ -555,7 +555,7 @@ fn headings_are_never_acted_on() {
 
 #[test]
 fn only_numbers_have_a_grid() {
-    let grid_of = |key: &str| grid(&iptv_settings::catalogue::setting(key).unwrap().ty);
+    let grid_of = |key: &str| grid(&iptv_settings::catalog::setting(key).unwrap().ty);
     assert_eq!(grid_of("appearance.ui_transparency"), Some((0, 80, 5)));
     assert_eq!(
         grid_of("epg.time_offset"),
@@ -800,7 +800,7 @@ fn language_picker_keeps_text_storage_cancel_and_focus_identity() {
     }
     let mut screen = Screen::new(PAGES, "general");
     screen.tap_row("general.language", &ctx(&settings));
-    let variants = iptv_settings::catalogue::choices::LANGUAGE.variants;
+    let variants = iptv_settings::catalog::choices::LANGUAGE.variants;
     let french = variants.iter().position(|v| *v == "fr").unwrap();
     assert!(
         matches!(screen.editor(), Some(Editor::Choice { focus, selected, .. }) if *focus == french && *selected == french)

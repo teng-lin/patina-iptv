@@ -70,7 +70,7 @@ pub fn bind(ui: Ui) {
     }
 }
 
-/// Whether the host reports and honours window positions: macOS and
+/// Whether the host reports and honors window positions: macOS and
 /// Windows. GTK 4 tells no position on Linux (X11 or Wayland), where the
 /// window manager or compositor keeps windows on the displays there are.
 const POSITIONS: bool = cfg!(any(target_os = "macos", windows));
@@ -259,31 +259,31 @@ pub fn pointer_moved(x: f32, y: f32, now_ms: u64) -> bool {
 }
 
 /// The mouse is at (`x`, `y`) in window `window` (its player surface: 0 is
-/// the main window): whether it travelled at least [`TRAVEL`] points from
+/// the main window): whether it traveled at least [`TRAVEL`] points from
 /// where it rested. Movement accumulates from that anchor, so a slow mouse
 /// counts too; the anchor moves only once the threshold is crossed. The
 /// first report in a window only records the place, so a resting mouse that
 /// a window reports when it opens or redraws never counts. Each window keeps
 /// its own anchor: their coordinates are their own.
-pub fn pointer_travelled(window: usize, x: f32, y: f32) -> bool {
-    TRAVELLED.with(|anchors| {
+pub fn pointer_traveled(window: usize, x: f32, y: f32) -> bool {
+    TRAVELED.with(|anchors| {
         let mut anchors = anchors.borrow_mut();
         if anchors.len() <= window {
             anchors.resize(window + 1, None);
         }
-        let travelled =
+        let traveled =
             anchors[window].is_some_and(|(ax, ay)| (ax - x).abs() + (ay - y).abs() >= TRAVEL);
-        if travelled || anchors[window].is_none() {
+        if traveled || anchors[window].is_none() {
             anchors[window] = Some((x, y));
         }
-        travelled
+        traveled
     })
 }
 
 /// The mouse entered window `window` at (`x`, `y`): where it rests there
 /// now, so entering is no travel.
 pub fn pointer_entered(window: usize, x: f32, y: f32) {
-    TRAVELLED.with(|anchors| {
+    TRAVELED.with(|anchors| {
         let mut anchors = anchors.borrow_mut();
         if anchors.len() <= window {
             anchors.resize(window + 1, None);
@@ -294,7 +294,7 @@ pub fn pointer_entered(window: usize, x: f32, y: f32) {
 
 /// Window `window` closed: a later window on its surface starts afresh.
 pub fn pointer_forget(window: usize) {
-    TRAVELLED.with(|anchors| {
+    TRAVELED.with(|anchors| {
         if let Some(anchor) = anchors.borrow_mut().get_mut(window) {
             *anchor = None;
         }
@@ -305,7 +305,7 @@ pub fn pointer_forget(window: usize) {
 const TRAVEL: f32 = 4.0;
 
 thread_local! {
-    static TRAVELLED: RefCell<Vec<Option<(f32, f32)>>> = const { RefCell::new(Vec::new()) };
+    static TRAVELED: RefCell<Vec<Option<(f32, f32)>>> = const { RefCell::new(Vec::new()) };
 }
 
 /// How often mouse movement restarts the panels' timer at most.
@@ -348,27 +348,27 @@ mod tests {
 
     #[test]
     fn slow_movement_accumulates_per_window_and_entering_is_no_travel() {
-        use super::{pointer_entered, pointer_forget, pointer_travelled};
+        use super::{pointer_entered, pointer_forget, pointer_traveled};
         // The first report only rests the anchor; the same place is no move.
-        assert!(!pointer_travelled(0, 100.0, 100.0));
-        assert!(!pointer_travelled(0, 100.0, 100.0));
+        assert!(!pointer_traveled(0, 100.0, 100.0));
+        assert!(!pointer_traveled(0, 100.0, 100.0));
         // One point at a time still adds up to the threshold.
-        assert!(!pointer_travelled(0, 101.0, 100.0));
-        assert!(!pointer_travelled(0, 102.0, 100.0));
-        assert!(!pointer_travelled(0, 103.0, 100.0));
-        assert!(pointer_travelled(0, 104.0, 100.0));
+        assert!(!pointer_traveled(0, 101.0, 100.0));
+        assert!(!pointer_traveled(0, 102.0, 100.0));
+        assert!(!pointer_traveled(0, 103.0, 100.0));
+        assert!(pointer_traveled(0, 104.0, 100.0));
         // The anchor moved there.
-        assert!(!pointer_travelled(0, 105.0, 100.0));
+        assert!(!pointer_traveled(0, 105.0, 100.0));
         // Another window's coordinates are its own: no jump between them.
-        assert!(!pointer_travelled(1, 900.0, 600.0));
-        assert!(!pointer_travelled(0, 103.0, 101.0));
+        assert!(!pointer_traveled(1, 900.0, 600.0));
+        assert!(!pointer_traveled(0, 103.0, 101.0));
         // Entering a window rests the anchor where the mouse came in.
         pointer_entered(1, 10.0, 10.0);
-        assert!(!pointer_travelled(1, 11.0, 10.0));
+        assert!(!pointer_traveled(1, 11.0, 10.0));
         // A new window on a closed one's surface starts afresh.
         pointer_forget(1);
-        assert!(!pointer_travelled(1, 500.0, 500.0));
-        assert!(pointer_travelled(1, 510.0, 500.0));
+        assert!(!pointer_traveled(1, 500.0, 500.0));
+        assert!(pointer_traveled(1, 510.0, 500.0));
     }
 
     #[test]

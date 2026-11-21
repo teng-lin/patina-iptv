@@ -39,7 +39,7 @@ struct Pending {
 }
 
 /// A timeline pan's hold on the channel it started from: the pan moves the
-/// guide's focus along the row, off the programme on air, without leaving
+/// guide's focus along the row, off the program on air, without leaving
 /// the channel, so browse playback keeps its target. It holds while the
 /// focus stays where the pan left it, on the same channel (by identity)
 /// and list; any other move of the focus (keys, a tap, another list, a
@@ -54,7 +54,7 @@ pub struct PanAnchor {
 }
 
 impl PanAnchor {
-    /// A pan starts on `channel`'s programme on air, the focus at `focus`.
+    /// A pan starts on `channel`'s program on air, the focus at `focus`.
     pub fn new(channel: String, focus: &crate::guide::Focus) -> Self {
         PanAnchor {
             channel,
@@ -118,7 +118,7 @@ impl BrowsePlayback {
     }
     /// A touch or mouse drag crossed the drag threshold (scrolling the
     /// channels or panning the timeline): a preview autoplay was waiting
-    /// to start is cancelled, and stays cancelled until the focus moves to
+    /// to start is canceled, and stays canceled until the focus moves to
     /// another target. A choice the viewer made (a tap, OK) still plays
     /// after its switch delay: scrolling never tunes, nor un-chooses.
     pub fn dragged(&mut self) {

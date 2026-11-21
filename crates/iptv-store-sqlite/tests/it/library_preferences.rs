@@ -51,7 +51,7 @@ fn bulk_visibility_is_source_scoped_and_retains_names_and_favorites() {
     replace(&mut s, source, &cat);
     let id = cat.channels[0].id.clone();
     s.rename_channel(source, &id, Some("Local title")).unwrap();
-    s.set_favourite(source, &id, true).unwrap();
+    s.set_favorite(source, &id, true).unwrap();
     let ids = cat
         .channels
         .iter()
@@ -69,7 +69,7 @@ fn bulk_visibility_is_source_scoped_and_retains_names_and_favorites() {
     let rows = s.load_channels(source, &ChannelQuery::default()).unwrap();
     assert_eq!(rows.len(), 4);
     assert_eq!(rows[0].name, "Local title");
-    assert!(rows[0].favourite);
+    assert!(rows[0].favorite);
 }
 
 fn live_catalog(channels: usize, groups: usize) -> common::Catalog {

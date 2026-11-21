@@ -3,7 +3,7 @@
 //! here on timers. A live channel retries for as long as it stays selected
 //! (fast, then slowly, then slowly behind the failure card); a retry that
 //! comes due while the Android app is away waits for its return
-//! ([`resume`]); a catch-up programme reopens where it was.
+//! ([`resume`]); a catch-up program reopens where it was.
 
 use std::time::Duration;
 
@@ -76,7 +76,7 @@ pub(super) fn resume(ui: Ui, surface: usize) {
     }
 }
 
-/// A catch-up programme that played reopens where it was, not where it
+/// A catch-up program that played reopens where it was, not where it
 /// was last opened.
 pub(super) fn resume_position(ui: Ui) {
     let Playback::CatchUp { start, offset } = ui.playback.get_untracked() else {

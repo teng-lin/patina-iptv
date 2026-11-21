@@ -1,11 +1,11 @@
 //! The layered key → action map: user overrides, then the context's
 //! defaults, then global defaults. Defaults are iptv-rs's own choices; the
 //! context-specific ones follow the reference UX's documented instructions
-//! (Long OK opens the menu in the guide, Left goes programme → groups →
+//! (Long OK opens the menu in the guide, Left goes program → groups →
 //! search, Long Back returns to the player).
 //!
 //! One model for a TV remote and a desktop keyboard ([`Profile`]): Left
-//! walks back through the programmes a channel can replay and then opens
+//! walks back through the programs a channel can replay and then opens
 //! the groups (`iptv_core::guide::floor`); Hold Left (a remote: it has the
 //! long presses) or Tab (a keyboard) opens them from anywhere in the grid;
 //! Search, `/` and Ctrl + F search. The keyboard's own keys (Home, Tab,
@@ -31,7 +31,7 @@ pub enum Context {
     ChannelList,
     /// Search results and query navigation.
     Search,
-    /// An editing mode (favourites): Up/Down move, OK toggles, Left and
+    /// An editing mode (favorites): Up/Down move, OK toggles, Left and
     /// Right act on the whole group, Back leaves.
     Editor,
     /// A context menu or popover (Up/Down move, OK selects, Back closes;
@@ -89,7 +89,7 @@ pub enum Action {
     ReturnToNow,
     /// The search screen (Search, `/`, Ctrl + F).
     OpenSearch,
-    /// The focused channel's live programme in the default window (Home).
+    /// The focused channel's live program in the default window (Home).
     JumpToNow,
     /// The time column an hour back/forward (Shift + Left/Right).
     HourBack,
@@ -104,7 +104,7 @@ pub enum Action {
     Stop,
     SeekBack,
     SeekForward,
-    /// One step back/forward along a replayed programme's time bar.
+    /// One step back/forward along a replayed program's time bar.
     TimeBarBack,
     TimeBarForward,
     /// Multiview: enlarge the focused tile, or reduce it.

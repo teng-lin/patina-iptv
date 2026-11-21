@@ -48,10 +48,10 @@ fn a_hundred_thousand_channels_find_their_key_and_group() {
     assert_eq!(group_of(&schedule, 100_000), None);
 }
 
-/// Organisation changes the groups (hidden, reordered, custom lists): the
+/// Organization changes the groups (hidden, reordered, custom lists): the
 /// index follows, and agrees with the scan everywhere.
 #[test]
-fn the_group_index_follows_the_organisation_and_agrees_with_the_scan() {
+fn the_group_index_follows_the_organization_and_agrees_with_the_scan() {
     let schedule = grouped(6, 5);
     let agree = |schedule: &EpgSchedule| {
         for channel in 0..schedule.channel_count() {

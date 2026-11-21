@@ -111,7 +111,7 @@ fn seed(root: &Path, name: &str) {
         .replace_catalog(id, &parsed.groups, &parsed.channels.items, &[], &[])
         .unwrap();
     let key = &parsed.channels.items[1].id;
-    store.set_favourite(id, key, true).unwrap();
+    store.set_favorite(id, key, true).unwrap();
     store.move_channel(id, &OrderScope::All, key, 0).unwrap();
     let group = store
         .create_custom_group(id, "Generated personal group")
@@ -149,7 +149,7 @@ fn whole_app_round_trip_rebases_local_files_and_activates_only_on_restart() {
     let id = store.active_source().unwrap().unwrap();
     let channels = store.load_channels(id, &ChannelQuery::default()).unwrap();
     assert_eq!(channels[0].name, "Channel Two");
-    assert!(store.is_favourite(id, &channels[0].channel.id).unwrap());
+    assert!(store.is_favorite(id, &channels[0].channel.id).unwrap());
     assert_eq!(
         store.custom_groups(id).unwrap()[0].name,
         "Generated personal group"
@@ -611,4 +611,130 @@ fn process_death_at_each_restore_swap_boundary_preserves_the_committed_snapshot(
         assert!(!sibling(&root, "restore-pending").exists());
         assert!(!sibling(&root, "restore-previous").exists());
     }
+}
+
+/// A schema-24 library as a build before US spelling (#139) wrote it, from
+/// the store's synthetic historical fixtures.
+fn v24_library(path: &Path) {
+    let fixtures =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../iptv-store-sqlite/tests/fixtures");
+    let fixture = |name: &str| fs::read_to_string(fixtures.join(name)).unwrap();
+    let ledger = tempfile::tempdir().unwrap();
+    let fresh = ledger.path().join("ledger.sqlite");
+    drop(Store::open(&fresh).unwrap());
+    let names: Vec<(u32, String)> = rusqlite::Connection::open(&fresh)
+        .unwrap()
+        .prepare("SELECT version,name FROM schema_migrations WHERE version<=24 ORDER BY version")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    let conn = rusqlite::Connection::open(path).unwrap();
+    conn.execute_batch(&fixture("schema_v24.sql")).unwrap();
+    for (version, name) in names {
+        conn.execute(
+            "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, 0)",
+            rusqlite::params![version, name],
+        )
+        .unwrap();
+    }
+    conn.pragma_update(None, "user_version", 24).unwrap();
+    for seed in 1..=24 {
+        conn.execute_batch(&fixture(&format!("data_v{seed}.sql")))
+            .unwrap();
+    }
+}
+
+#[test]
+fn a_backup_from_before_us_spelling_restores_favorites_and_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("live");
+    seed(&root, "Generated");
+    let old = dir.path().join("v24.sqlite");
+    v24_library(&old);
+    let settings = json!({
+        "format": iptv_settings::backup::FORMAT,
+        "version": 3,
+        "global": {"appearance.accent": "blue_grey", "guide.show_programmes": false}
+    })
+    .to_string();
+    stage(
+        &root,
+        &mut packed(vec![
+            ("iptv.sqlite", fs::read(&old).unwrap()),
+            ("settings.json", settings.into_bytes()),
+        ])
+        .as_slice(),
+    )
+    .unwrap();
+    activate(&root).unwrap();
+
+    let store = Store::open(root.join("iptv.sqlite")).unwrap();
+    assert_eq!(
+        store.schema_version().unwrap(),
+        iptv_store_sqlite::SCHEMA_VERSION
+    );
+    let favorites = store
+        .load_channels(
+            iptv_store_sqlite::SourceId(1),
+            &ChannelQuery {
+                favorites_only: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        favorites
+            .iter()
+            .map(|row| row.channel.id.as_str())
+            .collect::<Vec<_>>(),
+        ["xt:live:102", "xt:live:101"]
+    );
+    let (restored, report) =
+        Settings::from_json(&fs::read_to_string(root.join("settings.json")).unwrap()).unwrap();
+    assert!(report.unknown.is_empty() && report.rejected.is_empty());
+    let global = &iptv_settings::Target::Global;
+    assert_eq!(
+        restored.color(iptv_settings::keys::ACCENT, global),
+        "blue_gray"
+    );
+    assert_eq!(
+        restored.get("guide.show_programs").unwrap(),
+        iptv_settings::Value::Bool(false)
+    );
+}
+
+/// Migrating an older settings document does not relax the other rules: an
+/// unknown key or an invalid value still refuses the restore.
+#[test]
+fn an_older_backup_with_unknown_or_invalid_settings_is_still_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("live");
+    seed(&root, "Generated");
+    let old = dir.path().join("v24.sqlite");
+    v24_library(&old);
+    for global in [
+        json!({"generated.unknown_key": true}),
+        json!({"appearance.accent": "generated-not-a-palette"}),
+    ] {
+        let settings = json!({
+            "format": iptv_settings::backup::FORMAT,
+            "version": 3,
+            "global": global
+        })
+        .to_string();
+        assert!(
+            stage(
+                &root,
+                &mut packed(vec![
+                    ("iptv.sqlite", fs::read(&old).unwrap()),
+                    ("settings.json", settings.into_bytes()),
+                ])
+                .as_slice(),
+            )
+            .is_err()
+        );
+    }
+    assert!(!sibling(&root, "restore-pending").exists());
 }

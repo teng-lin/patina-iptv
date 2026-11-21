@@ -1,4 +1,4 @@
-//! Transport behaviour against a local server.
+//! Transport behavior against a local server.
 
 use crate::support;
 

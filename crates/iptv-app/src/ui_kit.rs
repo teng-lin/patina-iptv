@@ -105,7 +105,7 @@ const WHITE: u32 = 0xFFFFFF;
 /// A button's fill at rest.
 const BUTTON_ALPHA: u8 = RESTING_ALPHA * 2;
 
-/// Secondary text's colour (descriptions, hints, headings).
+/// Secondary text's color (descriptions, hints, headings).
 pub fn secondary() -> Rgba {
     Mark::Plain.secondary()
 }
@@ -132,7 +132,7 @@ pub fn library_title(size: Scale, content: impl IntoReactive<SharedString>) -> T
 }
 
 /// A section's heading ("Recent searches", a settings section): the
-/// lists' heading size, in the secondary colour.
+/// lists' heading size, in the secondary color.
 pub fn heading(size: Scale, content: impl IntoReactive<SharedString>) -> Text {
     styled(size, content, SECTION).text_color(secondary())
 }
@@ -318,7 +318,7 @@ fn reveal_delta(top: f32, height: f32, viewport: f32) -> f32 {
     }
 }
 
-/// A tab or chip (search's Channels and Programmes): the selected one in
+/// A tab or chip (search's Channels and Programs): the selected one in
 /// the accent's light tone on a subtle fill, the focused one the pill.
 pub fn tab(
     ui: Ui,
@@ -449,7 +449,7 @@ pub fn card(ui: Ui, size: Scale, width: f32) -> View {
 }
 
 /// A full-screen screen (search, playlists, guide sources): the window's
-/// colour, the safe area, the margins.
+/// color, the safe area, the margins.
 pub fn screen(ui: Ui, size: Scale) -> View {
     view()
         .absolute()

@@ -28,7 +28,7 @@
 //!   always present; any query on the endpoint URL is dropped.
 //! - Auth failures arrive as HTTP 200 with a bare text body; see
 //!   [`classify_auth_failure`].
-//! - The MAC is the account key: [`MacAddress::parse`] normalises typed input,
+//! - The MAC is the account key: [`MacAddress::parse`] normalizes typed input,
 //!   [`MacAddress::from_stored`] keeps a stored value byte-for-byte.
 
 mod parse;
@@ -75,7 +75,7 @@ const STB_PROFILE: &[(&str, &str)] = &[
 ];
 
 /// Whether the portal enforces the token lifecycle. Mode follows observed
-/// behaviour (discovery), not URL shape; [`is_full_portal_url`] is only a
+/// behavior (discovery), not URL shape; [`is_full_portal_url`] is only a
 /// fallback for configurations saved without a mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PortalMode {

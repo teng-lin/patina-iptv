@@ -251,7 +251,7 @@ fn cancellation_before_during_and_in_flight() {
         &mut NoProgress,
         &cancel,
     ));
-    assert_eq!(err.unwrap_err(), ImportError::Cancelled);
+    assert_eq!(err.unwrap_err(), ImportError::Canceled);
     assert!(fetch.requests().is_empty());
 
     // Between chunks: the progress callback cancels.
@@ -272,7 +272,7 @@ fn cancellation_before_during_and_in_flight() {
         &mut on_progress,
         &cancel,
     ));
-    assert_eq!(err.unwrap_err(), ImportError::Cancelled);
+    assert_eq!(err.unwrap_err(), ImportError::Canceled);
     assert_eq!(seen, 1);
 
     // While the request hangs: another thread cancels and wakes the import.
@@ -286,7 +286,7 @@ fn cancellation_before_during_and_in_flight() {
         &mut NoProgress,
         &cancel,
     ));
-    assert_eq!(err.unwrap_err(), ImportError::Cancelled);
+    assert_eq!(err.unwrap_err(), ImportError::Canceled);
 }
 
 #[test]
@@ -309,7 +309,7 @@ fn text_import_from_memory() {
     cancel.cancel();
     assert_eq!(
         import_m3u_text(text.as_bytes(), &mut NoProgress, &cancel).unwrap_err(),
-        ImportError::Cancelled
+        ImportError::Canceled
     );
     assert_eq!(
         import_m3u_text(b"<html></html>", &mut NoProgress, &CancelToken::new())

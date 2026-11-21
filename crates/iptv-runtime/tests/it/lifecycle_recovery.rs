@@ -167,7 +167,7 @@ fn shutdown_drains_accepted_database_work_even_when_its_reply_is_dropped() {
 }
 
 #[test]
-fn restart_cleans_interrupted_catalogue_work_without_touching_committed_content() {
+fn restart_cleans_interrupted_catalog_work_without_touching_committed_content() {
     let directory = tempfile::tempdir().unwrap();
     let runtime = owner(directory.path());
     support::block_on(commands::remember_combined_channel(

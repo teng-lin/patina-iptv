@@ -11,11 +11,11 @@ pub(super) struct Vars<'a> {
     /// Where it ends (Unix seconds).
     pub to: i64,
     pub now: i64,
-    /// The programme has not ended yet.
+    /// The program has not ended yet.
     pub on_air: bool,
     /// Viewer's UTC offset for date-part placeholders.
     pub local_offset_secs: i32,
-    /// The programme's XMLTV `catchup-id`.
+    /// The program's XMLTV `catchup-id`.
     pub catchup_id: Option<&'a str>,
 }
 

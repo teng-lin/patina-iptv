@@ -65,7 +65,7 @@ impl Store {
             .ok_or(StoreError::SourceNotFound(source))
     }
 
-    /// A restored catalogue cannot carry authority to undo pre-restore edits.
+    /// A restored catalog cannot carry authority to undo pre-restore edits.
     /// Call on the accepted restore before any runtime owner can open it.
     pub fn invalidate_guide_repair_authority(&mut self) -> Result<()> {
         let tx = self.conn.transaction()?;
@@ -215,7 +215,7 @@ mod tests {
         store.set_guide_sources(source, &[config]).unwrap();
         let channel = ContentId::from_stored("synthetic-channel");
         store.set_hidden(source, &channel, true).unwrap();
-        store.set_favourite(source, &channel, true).unwrap();
+        store.set_favorite(source, &channel, true).unwrap();
         assert_eq!(store.guide_revisions(source).unwrap(), revisions);
         assert_eq!(
             store.feed_incarnation(source, FeedId(1)).unwrap(),

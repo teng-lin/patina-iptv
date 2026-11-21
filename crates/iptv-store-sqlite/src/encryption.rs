@@ -382,8 +382,11 @@ mod tests {
             let path = dir.path().join(format!("v{version}.sqlite"));
             let mut conn = Connection::open(&path).unwrap();
             conn.pragma_update(None, "journal_mode", "WAL").unwrap();
-            migrate::migrate_to(&mut conn, version, 0).unwrap();
+            // Seeds 1..=24 are written in the names before schema 25 renamed
+            // tables (US spelling), so they load into a v24 file that is then
+            // upgraded like a user's; newer seeds load after that.
             for seed in 1..=version {
+                migrate::migrate_to(&mut conn, version.min(24).max(seed), 0).unwrap();
                 let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join(format!("tests/fixtures/data_v{seed}.sql"));
                 conn.execute_batch(&std::fs::read_to_string(fixture).unwrap())
@@ -501,9 +504,7 @@ mod tests {
             .unwrap();
         let count: i64 = store
             .conn
-            .query_row("SELECT count(*) FROM stage_test.programmes", [], |r| {
-                r.get(0)
-            })
+            .query_row("SELECT count(*) FROM stage_test.programs", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 0);
         no_plaintext(stage.path());

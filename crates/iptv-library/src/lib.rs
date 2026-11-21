@@ -50,7 +50,7 @@ pub struct GuideSource {
     /// The name the user gave it.
     pub name: Option<String>,
     pub enabled: bool,
-    /// Added to every programme time of the feed (minutes).
+    /// Added to every program time of the feed (minutes).
     pub shift_minutes: i32,
 }
 
@@ -67,9 +67,9 @@ pub struct FeedResult {
     pub attempted_at: UnixTime,
     /// `None`: it loaded.
     pub error: Option<ImportErrorKind>,
-    /// What was stored from it (bound EPG channels and their programmes).
+    /// What was stored from it (bound EPG channels and their programs).
     pub channel_count: u64,
-    pub programme_count: u64,
+    pub program_count: u64,
     /// The channels it lists (0 for a guide stored before schema v6).
     pub listed_count: u64,
 }
@@ -123,7 +123,7 @@ pub enum ImportErrorKind {
     AuthFailed,
     /// Stalker device blocked or bound to another device id.
     Blocked,
-    Cancelled,
+    Canceled,
     Other,
 }
 
@@ -138,13 +138,17 @@ impl ImportErrorKind {
             Self::AccountRejected => "account_rejected",
             Self::AuthFailed => "auth_failed",
             Self::Blocked => "blocked",
-            Self::Cancelled => "cancelled",
+            Self::Canceled => "canceled",
             Self::Other => "other",
         }
     }
 
     /// Unknown slugs (written by a newer build) read as [`Self::Other`].
+    /// `cancelled`, the slug before schema 25, still reads as canceled.
     pub fn from_slug(slug: &str) -> Self {
+        if slug == "cancelled" {
+            return Self::Canceled;
+        }
         [
             Self::Network,
             Self::Timeout,
@@ -154,11 +158,31 @@ impl ImportErrorKind {
             Self::AccountRejected,
             Self::AuthFailed,
             Self::Blocked,
-            Self::Cancelled,
+            Self::Canceled,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)
         .unwrap_or(Self::Other)
+    }
+}
+
+#[cfg(test)]
+mod import_error_kind_tests {
+    use super::ImportErrorKind;
+
+    #[test]
+    fn slugs_round_trip_and_the_old_canceled_slug_still_reads() {
+        assert_eq!(ImportErrorKind::Canceled.slug(), "canceled");
+        assert_eq!(
+            ImportErrorKind::from_slug("canceled"),
+            ImportErrorKind::Canceled
+        );
+        // Written by builds before schema 25.
+        assert_eq!(
+            ImportErrorKind::from_slug("cancelled"),
+            ImportErrorKind::Canceled
+        );
+        assert_eq!(ImportErrorKind::from_slug("newer"), ImportErrorKind::Other);
     }
 }
 
@@ -181,8 +205,8 @@ pub struct Playlist {
     pub kind: SourceKind,
     /// Live channels of the last successful import.
     pub channels: u32,
-    /// Its catalogue has movies, and series (an embedded series of a movie
-    /// list counts as a series, as the catalogue lists it).
+    /// Its catalog has movies, and series (an embedded series of a movie
+    /// list counts as a series, as the catalog lists it).
     pub has_movies: bool,
     pub has_series: bool,
     /// The last successful import could not download its movies, or its
@@ -222,7 +246,7 @@ pub enum Choice {
 }
 
 /// What a channel's guide is now: the saved choice and the guide channel
-/// its stored programmes come from (with how it was matched).
+/// its stored programs come from (with how it was matched).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Current {
     pub choice: Option<Choice>,

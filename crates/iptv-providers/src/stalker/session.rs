@@ -431,7 +431,7 @@ impl StalkerSession {
         ])
     }
 
-    /// Series catalogue or children, preserving opaque movie/season coordinates.
+    /// Series catalog or children, preserving opaque movie/season coordinates.
     pub fn series_page(
         &self,
         movie: &str,

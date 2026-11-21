@@ -1,9 +1,9 @@
-//! Text the user reads goes through the message catalogue
+//! Text the user reads goes through the message catalog
 //! (`crates/iptv-core/src/i18n/messages.tsv`), or is on a list here.
 //!
 //! Five failures, all found by reading the sources:
 //!
-//! 1. **A message with no catalogue row.** A string literal passed to `tr`,
+//! 1. **A message with no catalog row.** A string literal passed to `tr`,
 //!    `trf` or `key` (or to one of the helpers and message types listed
 //!    below, which translate what they are given) must be a row's source
 //!    text. Without a row it would stay English in every language, without
@@ -18,16 +18,16 @@
 //!    `use … tr as t`.
 //! 4. **A literal message and values that disagree.** `trf("{count}
 //!    items", &[("cnt", …)])` would show `{count}` as written.
-//! 5. **A user-facing literal that goes around the catalogue.** Any other
+//! 5. **A user-facing literal that goes around the catalog.** Any other
 //!    literal that reads as text for a person must be in
-//!    `catalogue_allowlist.txt`: under `[untranslated]` when it is shown
+//!    `catalog_allowlist.txt`: under `[untranslated]` when it is shown
 //!    and not translated yet, under `[not-shown]` when it never reaches the
 //!    screen (a log line, an internal reason, markup, a font name).
 //!
 //! `[untranslated]` is what the translation does not reach yet. It may
 //! only shrink: its size is pinned in [`UNTRANSLATED`], and an entry whose
 //! literal is gone from the source fails until it is removed. A new
-//! literal is added to the catalogue, not to the list.
+//! literal is added to the catalog, not to the list.
 //!
 //! What reads as text is a heuristic ([`reads_as_text`]): the lint knows
 //! no types. It errs towards asking: a literal it wrongly takes for text
@@ -67,7 +67,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use iptv_core::i18n::is_catalogued;
+use iptv_core::i18n::is_cataloged;
 
 /// How many `[untranslated]` entries there are. Lower it with the list;
 /// it is never raised.
@@ -81,10 +81,10 @@ const ROOTS: &[&str] = &[
     "iptv-library/src",
     "iptv-runtime/src",
     // What a settings row says under the list when it is focused.
-    "iptv-settings/src/catalogue",
+    "iptv-settings/src/catalog",
 ];
 
-/// The catalogue itself and its formatter: messages about messages.
+/// The catalog itself and its formatter: messages about messages.
 const NOT_READ: &[&str] = &[
     "iptv-core/src/i18n.rs",
     "iptv-core/src/i18n/",
@@ -96,7 +96,7 @@ const NOT_READ: &[&str] = &[
     "iptv-runtime/src/library/guide_work_supersession.rs",
 ];
 
-/// Calls whose literal is a message: it must be a catalogue row.
+/// Calls whose literal is a message: it must be a catalog row.
 /// `translate` and `format` are the core's own (`i18n::format`; the
 /// `format!` macro is another name). What they are given when it is not a
 /// literal is followed by [`uses`].
@@ -158,7 +158,7 @@ const MESSAGE_CALLS_IN: &[(&str, &[&str])] = &[
 /// translated by the shell's `lists::entry_name`.
 const LIST_NAMES: &[(&str, &str)] = &[
     ("iptv-core/src/guide.rs", "All channels"),
-    ("iptv-core/src/lists.rs", "Favourites"),
+    ("iptv-core/src/lists.rs", "Favorites"),
     ("iptv-core/src/lists.rs", "Recently watched"),
     ("iptv-guide/src/combined.rs", "All playlists"),
 ];
@@ -1201,18 +1201,18 @@ fn reads_as_text(text: &str, shown: bool) -> bool {
         return false;
     }
     let mut letters = plain.chars();
-    let capitalised = letters.next().is_some_and(char::is_uppercase)
+    let capitalized = letters.next().is_some_and(char::is_uppercase)
         && letters.next().is_some_and(char::is_lowercase);
     let spaced = plain.split_whitespace().count() > 1;
-    capitalised || spaced || shown
+    capitalized || spaced || shown
 }
 
 /// What the lint decided about a literal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Verdict {
-    /// A message: it needs a catalogue row.
+    /// A message: it needs a catalog row.
     Message,
-    /// Text that goes around the catalogue: it needs an allowlist entry.
+    /// Text that goes around the catalog: it needs an allowlist entry.
     Bypass,
     /// Neither.
     Ignored,
@@ -1334,7 +1334,7 @@ struct Allowlist {
 }
 
 fn allowlist() -> Allowlist {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/app/catalogue_allowlist.txt");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/app/catalog_allowlist.txt");
     let text = std::fs::read_to_string(&path).unwrap();
     let mut list = Allowlist {
         untranslated: BTreeSet::new(),
@@ -1391,14 +1391,14 @@ fn unescaped(text: &str) -> String {
 
 /// A message without a row stays English in every language.
 #[test]
-fn every_message_has_a_catalogue_row() {
+fn every_message_has_a_catalog_row() {
     let mut missing = Vec::new();
     let mut messages = 0;
     for (file, literals) in read_sources() {
         for (literal, verdict) in literals {
             if verdict == Verdict::Message {
                 messages += 1;
-                if !is_catalogued(&literal.text) {
+                if !is_cataloged(&literal.text) {
                     missing.push(format!("{file}: {:?}", literal.text));
                 }
             }
@@ -1480,10 +1480,10 @@ fn a_literal_message_is_given_the_values_it_places() {
     );
 }
 
-/// Text that goes around the catalogue is listed, and the list of what is
+/// Text that goes around the catalog is listed, and the list of what is
 /// not translated yet only shrinks.
 #[test]
-fn text_outside_the_catalogue_is_listed_and_the_list_only_shrinks() {
+fn text_outside_the_catalog_is_listed_and_the_list_only_shrinks() {
     let list = allowlist();
     let mut bypasses = BTreeSet::new();
     for (file, literals) in read_sources() {
@@ -1503,7 +1503,7 @@ fn text_outside_the_catalogue_is_listed_and_the_list_only_shrinks() {
         unlisted.is_empty(),
         "{} literals read as text and are not messages. Pass each through `tr` or `trf` with a \
          row in messages.tsv; if it never reaches the screen, add its line under [not-shown] in \
-         tests/app/catalogue_allowlist.txt:\n{}",
+         tests/app/catalog_allowlist.txt:\n{}",
         unlisted.len(),
         unlisted.join("\n")
     );
@@ -1516,7 +1516,7 @@ fn text_outside_the_catalogue_is_listed_and_the_list_only_shrinks() {
         .collect();
     assert!(
         stale.is_empty(),
-        "{} entries of tests/app/catalogue_allowlist.txt match no literal any more; remove \
+        "{} entries of tests/app/catalog_allowlist.txt match no literal any more; remove \
          them (and lower UNTRANSLATED):\n{}",
         stale.len(),
         stale.join("\n")
@@ -1531,7 +1531,7 @@ fn text_outside_the_catalogue_is_listed_and_the_list_only_shrinks() {
         list.untranslated.len(),
         UNTRANSLATED,
         "[untranslated] may only shrink: translate rather than add; after removing entries, \
-         lower UNTRANSLATED in catalogue_lint.rs to the new size"
+         lower UNTRANSLATED in catalog_lint.rs to the new size"
     );
 }
 
@@ -1619,7 +1619,7 @@ fn the_reader_ends_a_character_at_its_quote_and_a_line_at_its_break() {
     );
 
     // A checkout with `\r\n`: the continued literal is the one the
-    // catalogue has, and a break inside a literal is a `\n`.
+    // catalog has, and a break inside a literal is a `\n`.
     let source = "const NOTE: &str = key(\"A note \\\r\n    on two lines.\");\r\n\
                   fn f() { text(\"Shown\r\nbelow\"); let raw = r#\"Raw\r\ntext\"#; }\r\n";
     let found: Vec<_> = literals("f.rs", source)
@@ -1717,7 +1717,7 @@ fn followed(file: &str, source: &str) -> (Vec<String>, Vec<String>, Vec<String>)
 
 /// A message is followed through whatever wraps it: a parenthesis, a
 /// block, an `if`, a `match`. None of them hides a name from the list of
-/// carriers, or a literal from the catalogue.
+/// carriers, or a literal from the catalog.
 #[test]
 fn a_message_is_followed_through_parentheses_blocks_and_control_flow() {
     let view = "iptv-app/src/some_view.rs";
@@ -1779,7 +1779,7 @@ fn a_message_is_followed_through_parentheses_blocks_and_control_flow() {
             "{source}"
         );
     }
-    // A literal inside a wrapping is a message for the catalogue too.
+    // A literal inside a wrapping is a message for the catalog too.
     let wrapped = literals(
         view,
         "fn f() { tr(if x { (\"ended\") } else { \"begun\" }); }",
@@ -2176,7 +2176,7 @@ fn the_verdicts_tell_messages_from_text_and_from_the_rest() {
         ),
         Verdict::Message
     );
-    // Text anywhere else goes around the catalogue.
+    // Text anywhere else goes around the catalog.
     assert_eq!(
         verdict(view, &literal("Keep it", Some("action"), 2)),
         Verdict::Bypass
@@ -2294,23 +2294,23 @@ fn extracted_runtime_messages_and_shell_failures_remain_checked() {
             "{file}: message is no longer checked: {message}"
         );
     }
-    // Moving orchestration retains the notices as checked catalogue messages.
+    // Moving orchestration retains the notices as checked catalog messages.
     let (messages, carried, unproven) = followed(
         "iptv-runtime/src/data/organization.rs",
-        "fn f() { emit(RuntimeEvent::Notify(\"Synthetic uncatalogued guide failure\")); }",
+        "fn f() { emit(RuntimeEvent::Notify(\"Synthetic uncataloged guide failure\")); }",
     );
-    assert_eq!(messages, ["Synthetic uncatalogued guide failure"]);
-    assert!(!is_catalogued(&messages[0]));
+    assert_eq!(messages, ["Synthetic uncataloged guide failure"]);
+    assert!(!is_cataloged(&messages[0]));
     assert!(carried.is_empty() && unproven.is_empty());
-    // The moved data path rejects a missing catalogue row as before.
+    // The moved data path rejects a missing catalog row as before.
     let file = "iptv-runtime/src/backup.rs";
     let literal = literals(
         file,
-        "fn f() { Err(\"Synthetic uncatalogued backup failure\") }",
+        "fn f() { Err(\"Synthetic uncataloged backup failure\") }",
     )
     .remove(0);
     assert_eq!(verdict(file, &literal), Verdict::Message);
-    assert!(!is_catalogued(&literal.text));
+    assert!(!is_cataloged(&literal.text));
     // Runtime notices retain the dynamic-call and wrapper rules, too.
     let (messages, carried, unproven) = followed(
         file,
@@ -2328,7 +2328,7 @@ fn extracted_runtime_messages_and_shell_failures_remain_checked() {
 
 /// Prints the allowlist the sources need now, for a first list or after a
 /// large change: `cargo test -p iptv-app --features test-support --test
-/// app catalogue_lint::print -- --ignored --nocapture`. Each new line
+/// app catalog_lint::print -- --ignored --nocapture`. Each new line
 /// still has to be sorted under its heading by a person.
 #[test]
 #[ignore = "a tool, not a check"]
@@ -2356,8 +2356,8 @@ fn print_the_literals_the_allowlist_would_need() {
     }
 }
 
-/// Prints the messages with no catalogue row, one per line, for the
-/// translators: as above, with `catalogue_lint::print_the_messages`.
+/// Prints the messages with no catalog row, one per line, for the
+/// translators: as above, with `catalog_lint::print_the_messages`.
 #[test]
 #[ignore = "a tool, not a check"]
 fn print_the_messages_without_a_row() {
@@ -2365,7 +2365,7 @@ fn print_the_messages_without_a_row() {
     for (_, literals) in read_sources() {
         for (literal, verdict) in literals {
             if verdict == Verdict::Message
-                && !is_catalogued(&literal.text)
+                && !is_cataloged(&literal.text)
                 && seen.insert(literal.text.clone())
             {
                 println!("{}", escaped(&literal.text));

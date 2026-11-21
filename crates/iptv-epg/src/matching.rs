@@ -1,7 +1,7 @@
 //! Matching playlist channels to EPG channels.
 //!
 //! Order per source: manual override, then tvg-id (exact, then
-//! case-insensitive), then normalised name (playlist name or tvg-name, then
+//! case-insensitive), then normalized name (playlist name or tvg-name, then
 //! the same with a `UK:`-style tag removed). Each source is matched on its
 //! own; candidates are returned highest priority first so the store can
 //! pick the best source that has data.
@@ -335,7 +335,7 @@ impl MatchIndex {
 /// channel as a feed is read (before its channel list is complete): a
 /// superset of the candidates [`MatchIndex::match_channels`] returns for
 /// the same playlist and overrides. A streaming import keeps only the
-/// programmes of these channels.
+/// programs of these channels.
 ///
 /// A channel is wanted when its id equals a playlist tvg-id (ignoring
 /// case), one of its names (or the name without a `UK:`-style tag) equals
@@ -392,7 +392,7 @@ impl MatchFilter {
     }
 
     /// Whether an override names EPG channel `epg_id` of `source` (an
-    /// override with a source binds to its programmes even when the feed
+    /// override with a source binds to its programs even when the feed
     /// does not declare the channel).
     pub fn wants_id(&self, source: FeedId, epg_id: &str) -> bool {
         !self.overrides.is_empty()

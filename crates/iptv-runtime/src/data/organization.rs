@@ -9,12 +9,12 @@ pub fn revision(owner: &Rc<crate::Runtime>) -> u64 {
 
 use crate::commands::load_organization as load;
 
-/// The schedule of an imported catalog with `source`'s organisation, built
+/// The schedule of an imported catalog with `source`'s organization, built
 /// off the UI thread.
 ///
 /// Measured with a generated 100,000-channel, 1,000-group playlist, both
 /// steps then on the UI thread: grouping the catalog took 70-100 ms and
-/// organising it 50-65 ms on a desktop (release build), and 136-171 ms and
+/// organizing it 50-65 ms on a desktop (release build), and 136-171 ms and
 /// 126-173 ms on the Android TV emulator, twice per cold start (the stored
 /// guide, then the refreshed one). So the data is made on the shared
 /// runtime's blocking threads (`EpgSchedule::prepare`) and only turned into

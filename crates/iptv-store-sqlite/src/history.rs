@@ -1,6 +1,6 @@
 //! Watch history: one row per play, keyed by stable id, kept across
 //! refreshes and pruned to the newest [`HISTORY_LIMIT`] rows per source
-//! (amortised: a source may briefly hold up to [`PRUNE_SLACK`] more).
+//! (amortized: a source may briefly hold up to [`PRUNE_SLACK`] more).
 
 use iptv_providers::ContentId;
 use iptv_providers::model::ContentKind;

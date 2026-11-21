@@ -5,7 +5,7 @@ use crate::time::UnixTime;
 /// A `<channel>` element.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct XmltvChannel {
-    /// The `id` attribute; programmes refer to it.
+    /// The `id` attribute; programs refer to it.
     pub id: String,
     /// Every non-empty `<display-name>`, in document order.
     pub display_names: Vec<String>,
@@ -16,11 +16,11 @@ pub struct XmltvChannel {
 /// A `<programme>` element. Times already include the source's
 /// [`crate::TimePolicy`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct XmltvProgramme {
+pub struct XmltvProgram {
     /// The `channel` attribute (an EPG channel id).
     pub channel: String,
     pub start: UnixTime,
-    /// `None` when absent or unparsable; the store then ends the programme
+    /// `None` when absent or unparsable; the store then ends the program
     /// at the next one's start.
     pub stop: Option<UnixTime>,
     /// First non-empty `<title>`.
@@ -95,7 +95,7 @@ pub struct Rating {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum XmltvItem {
     Channel(XmltvChannel),
-    Programme(XmltvProgramme),
+    Program(XmltvProgram),
 }
 
 #[cfg(test)]

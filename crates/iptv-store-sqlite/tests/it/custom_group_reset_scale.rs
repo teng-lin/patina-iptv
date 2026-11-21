@@ -61,7 +61,7 @@ fn reset_preserves_the_previous_ordering_of_returning_orphans() {
 fn reset_a_hundred_thousand_members_from_a_thousand_groups() {
     let mut store = Store::open_in_memory().unwrap();
     let source = store
-        .add_source(&m3u_source("Generated large catalogue"))
+        .add_source(&m3u_source("Generated large catalog"))
         .unwrap();
     let full = catalog(100_000, 1_000, XT_PASSWORD);
     replace(&mut store, source, &full);

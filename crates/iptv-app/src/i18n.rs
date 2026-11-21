@@ -4,8 +4,8 @@
 //! with named placeholders and counts. A message kept as data and shown
 //! later (an error's text, a notice sent as an event) is marked with
 //! [`key`] where it is written, and translated with [`tr`] where it is
-//! shown. `tests/app/catalogue_lint.rs` checks that every literal in one
-//! of these calls has a catalogue row, and that no user-facing literal
+//! shown. `tests/app/catalog_lint.rs` checks that every literal in one
+//! of these calls has a catalog row, and that no user-facing literal
 //! goes around them.
 use iptv_core::clock::{HourCycle, Style};
 use iptv_core::i18n::{self, Args, Language};
@@ -14,7 +14,7 @@ use iptv_settings::{Target, keys};
 #[cfg(feature = "test-support")]
 mod pseudo;
 
-/// A deliberately expanded fixed catalogue label for synthetic layout scenarios.
+/// A deliberately expanded fixed catalog label for synthetic layout scenarios.
 #[cfg(feature = "test-support")]
 pub fn pseudo_fixed_for_test(source: &str) -> Option<&'static str> {
     pseudo::fixed(source)
@@ -104,7 +104,7 @@ pub fn trf(source: &str, args: &Args<'_>) -> String {
     i18n::format(language(), source, args)
 }
 
-/// Marks `source` as a catalogue message that is translated where it is
+/// Marks `source` as a catalog message that is translated where it is
 /// shown, not here: the text of an error or of a notice that travels as
 /// data. Returns it unchanged.
 pub const fn key(source: &'static str) -> &'static str {
@@ -158,7 +158,7 @@ mod tests {
 
     #[test]
     fn every_settings_help_message_has_real_locale_cells_without_copied_english_phrases() {
-        use iptv_settings::catalogue;
+        use iptv_settings::catalog;
         let words = |text: &str| {
             text.split(|c: char| !c.is_ascii_alphabetic())
                 .filter(|part| !part.is_empty())
@@ -173,9 +173,9 @@ mod tests {
                     (cells.next().unwrap(), cells.collect::<Vec<_>>())
                 })
                 .collect();
-        for source in catalogue::settings()
+        for source in catalog::settings()
             .map(|setting| setting.summary)
-            .chain(catalogue::commands().map(|command| command.summary))
+            .chain(catalog::commands().map(|command| command.summary))
         {
             let cells = rows
                 .get(source)
@@ -286,11 +286,11 @@ mod tests {
     }
 
     /// The names of the controls that show an icon only (`.label(…)`, read
-    /// by VoiceOver and TalkBack): each has a row in the catalogue, so a
+    /// by VoiceOver and TalkBack): each has a row in the catalog, so a
     /// screen reader speaks the interface language. A name that only
     /// reached `tr` without a row would stay English without a sign.
     #[test]
-    fn accessibility_labels_are_in_the_catalogue() {
+    fn accessibility_labels_are_in_the_catalog() {
         use iptv_core::i18n::{LANGUAGES, resolve, translate};
         const LABELS: [&str; 29] = [
             // The play bar.
@@ -299,9 +299,9 @@ mod tests {
             "Rewind",
             "Play or pause",
             "Fast-forward",
-            "Favourite",
+            "Favorite",
             "Subtitles and tracks",
-            "Programme details",
+            "Program details",
             "Picture size",
             "Channel list",
             "Multiview",
@@ -334,7 +334,7 @@ mod tests {
                 .iter()
                 .filter(|language| translate(language, label) != label)
                 .count();
-            assert!(translated > 0, "no catalogue row for {label:?}");
+            assert!(translated > 0, "no catalog row for {label:?}");
         }
         assert_eq!(translate(resolve("es", None), "Volume"), "Volumen");
         assert_eq!(translate(resolve("de", None), "Mute"), "Stumm");
@@ -342,8 +342,8 @@ mod tests {
     }
 
     #[test]
-    fn picker_and_catalogue_languages_match() {
-        let choices = iptv_settings::catalogue::choices::LANGUAGE.variants;
+    fn picker_and_catalog_languages_match() {
+        let choices = iptv_settings::catalog::choices::LANGUAGE.variants;
         assert_eq!(choices[0], "system");
         assert_eq!(
             &choices[1..],

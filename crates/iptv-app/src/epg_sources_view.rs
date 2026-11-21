@@ -9,7 +9,7 @@
 //! OK (or a tap) on a source opens its actions: switch it on or off, move
 //! it up or down, shift its times (Left/Right, or − and +), name it, and
 //! for a source the user added change its link or remove it (after a
-//! confirmation saying its programmes go at the next update; the
+//! confirmation saying its programs go at the next update; the
 //! provider's own guides are switched off instead). Every change is saved
 //! at once (`data::edit_guides`); the guide on screen is checked again a
 //! moment later and downloads what changed.
@@ -350,9 +350,7 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
         (Some(l), _) => words::origin(&l.source),
         (None, Some(Item::Add)) => tr("An XMLTV link (.xml or .xml.gz)").to_owned(),
         (None, Some(Item::Update)) => tr("Downloads every source switched on").to_owned(),
-        (None, Some(Item::Inspect)) => {
-            tr("Compare guide channels and programme samples").to_owned()
-        }
+        (None, Some(Item::Inspect)) => tr("Compare guide channels and program samples").to_owned(),
         _ => String::new(),
     };
     let status = move || match (line(), item(), playlist()) {

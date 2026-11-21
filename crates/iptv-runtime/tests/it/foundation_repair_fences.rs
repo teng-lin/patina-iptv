@@ -223,7 +223,7 @@ impl Drop for Host {
 }
 
 #[test]
-fn an_old_refresh_report_cannot_restore_programmes_after_a_committed_repair() {
+fn an_old_refresh_report_cannot_restore_programs_after_a_committed_repair() {
     repair_during_old_work(true);
 }
 
@@ -249,8 +249,8 @@ fn repair_during_old_work(hold_report: bool) {
         if let RuntimeEvent::ScheduleReady(schedule) = event {
             if schedule.channel_count() == 1 && after.get() {
                 let minute = ((now - schedule.epoch_unix()) / 60) as i32;
-                let programme = schedule.program_at(0, minute);
-                captured.borrow_mut().push(schedule.title(0, programme));
+                let program = schedule.program_at(0, minute);
+                captured.borrow_mut().push(schedule.title(0, program));
             }
             weak.upgrade().unwrap().set_schedule(schedule);
         }
@@ -319,19 +319,19 @@ fn repair_during_old_work(hold_report: bool) {
         .drive(owner.inspect_channel(channel.clone(), InspectionControl::default()))
         .unwrap();
     assert_eq!(current.choice, Choice::NoGuide);
-    let programmes = host
-        .drive(owner.query_programmes(
+    let programs = host
+        .drive(owner.query_programs(
             Query::source(source_id),
             window,
             Some(channel),
             InspectionControl::default(),
         ))
         .unwrap();
-    assert!(programmes.items.is_empty());
+    assert!(programs.items.is_empty());
     if hold_report {
         assert!(
             !seen.borrow().is_empty(),
-            "old catalogue report was actually presented"
+            "old catalog report was actually presented"
         );
     }
     let schedule = owner.schedule();
@@ -404,15 +404,15 @@ fn a_failed_postcommit_refresh_recovers_without_repeating_the_saved_mutation() {
         from: now - 60,
         to: now + 3600,
     };
-    let programmes = host
-        .drive(owner.query_programmes(
+    let programs = host
+        .drive(owner.query_programs(
             Query::source(source),
             initial,
             Some(channel.clone()),
             InspectionControl::default(),
         ))
         .unwrap();
-    let feed = programmes.items[0].candidate.feed;
+    let feed = programs.items[0].candidate.feed;
     let shifted = TimeWindow {
         from: now + 3540,
         to: now + 7200,
@@ -481,7 +481,7 @@ fn a_failed_postcommit_refresh_recovers_without_repeating_the_saved_mutation() {
             && recovered.configuration_effective
             && recovered.verified_coverage
     );
-    assert_eq!(recovered.programmes_available, 1);
+    assert_eq!(recovered.programs_available, 1);
     let recovered_operation = host
         .drive(owner.guide_repair_operation(saved.operation.clone()))
         .unwrap();

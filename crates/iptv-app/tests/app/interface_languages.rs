@@ -3,7 +3,7 @@
 //!
 //! The scenarios after the first start in a language and walk the flows
 //! that are translated in full: what they expect on screen is the
-//! catalogue's text for that language, formatted by the core as the app
+//! catalog's text for that language, formatted by the core as the app
 //! formats it, so a reworded translation does not fail them and a message
 //! that stayed English does.
 use crate::personalization::{self, Fixture, step};
@@ -20,7 +20,7 @@ const CHANNELS: &str = "{count, plural, one {# channel} other {# channels}}";
 /// How long an import or a refresh of a local file may take.
 const IMPORT: Duration = Duration::from_secs(30);
 
-/// The catalogue in one language.
+/// The catalog in one language.
 #[derive(Clone, Copy)]
 struct Words(&'static Language);
 
@@ -42,7 +42,7 @@ impl Words {
     /// As [`Words::t`], with values and counts.
     #[track_caller]
     fn f(self, source: &str, args: &[(&str, Arg<'_>)]) -> String {
-        assert!(i18n::is_catalogued(source), "no row for {source:?}");
+        assert!(i18n::is_cataloged(source), "no row for {source:?}");
         let text = i18n::format(self.0, source, args);
         assert_ne!(
             text,
@@ -173,10 +173,10 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     step(app.wait_for_within("text:★ Local A", Duration::from_secs(5)));
 }
 
-/// The playlists screen in German: counts, the organisation screen, a
+/// The playlists screen in German: counts, the organization screen, a
 /// refresh that fails and an import that fails.
 #[test]
-fn playlists_organisation_and_failures_speak_the_interface_language() {
+fn playlists_organization_and_failures_speak_the_interface_language() {
     let Some(home) = isolated!() else { return };
     let de = Words::of("de");
     let mut fixture = start_in(home, "de", "auto");
@@ -203,7 +203,7 @@ fn playlists_organisation_and_failures_speak_the_interface_language() {
     );
     shown(app, &de.t("Refresh now"));
     shown(app, &de.t("Custom groups"));
-    // Organisation (the seventh action, by remote as it is below the fold).
+    // Organization (the seventh action, by remote as it is below the fold).
     for _ in 0..6 {
         step(app.press_key("down"));
     }
@@ -288,7 +288,7 @@ fn custom_groups_and_guide_assignment_speak_the_interface_language() {
     let app = &mut fixture.app;
     step(app.wait_for(r"text:/^(пн|вт|ср|чт|пт|сб|вс), \d{1,2} \S+  \d\d:\d\d$/"));
     step(app.press_key("m"));
-    shown(app, &ru.t("Manage favourites…"));
+    shown(app, &ru.t("Manage favorites…"));
     press(app, &ru.t("New group…"));
     step(app.wait_for("id:custom-groups-screen"));
     shown(app, &ru.t("Custom groups"));
@@ -348,7 +348,7 @@ fn custom_groups_and_guide_assignment_speak_the_interface_language() {
     step(app.wait_for_gone("id:custom-groups-screen", Duration::from_secs(3)));
     // No guide is stored: the chooser says so instead of opening.
     step(app.press_key("m"));
-    shown(app, &ru.t("Manage favourites…"));
+    shown(app, &ru.t("Manage favorites…"));
     press(app, &ru.t("Choose guide data…"));
     shown(
         app,
@@ -372,7 +372,7 @@ fn backup_remote_keys_and_the_clock_speak_the_interface_language() {
         ),
     );
     step(app.press_key("m"));
-    shown(app, &ja.t("Manage favourites…"));
+    shown(app, &ja.t("Manage favorites…"));
     step(app.press(&format!("text:{} >> nth=1", ja.t("Settings"))));
     shown(app, &ja.t("Back up"));
     // Backing up asks first, in Japanese; the answer here is "Cancel".
@@ -531,7 +531,7 @@ fn custom_recording_menu_uses_the_selected_interface_language() {
     shown(&mut fixture.app, &words.t("Save recording"));
 }
 
-/// Real catalogue bindings with a deliberately doubled/accented test fixture.
+/// Real catalog bindings with a deliberately doubled/accented test fixture.
 /// This checks measured headless layout; native font/AT validation is separate.
 #[test]
 fn pseudolocalized_labels_keep_their_accessible_name_at_large_text_sizes() {

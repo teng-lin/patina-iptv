@@ -11,7 +11,7 @@ tools/mock-server.py serves as /iptv/ (it serves fixtures/hls as its root):
   # desktop:  python3 -I tools/make-iptv-fixtures.py --host 127.0.0.1:8089
 
 Writes playlist.m3u (url-tvg -> guide.xml.gz), guide.xml.gz (now-7d to
-now+2d, variable programme lengths) and logos/gNN.png (one per group).
+now+2d, variable program lengths) and logos/gNN.png (one per group).
 Streams are /ch{N%3}/index.m3u8 from tools/make-hls-fixtures.sh; every
 --catchup-every'th channel declares catchup="default" with an /archive/
 template (the mock server maps /archive/* to /*). Output is deterministic
@@ -55,7 +55,7 @@ LENGTHS = [15, 20, 30, 30, 45, 60, 60, 60, 90, 120]
 
 
 def png(rgb, size=64):
-    """A solid-colour RGB PNG (stdlib only)."""
+    """A solid-color RGB PNG (stdlib only)."""
     row = b"\x00" + bytes(rgb) * size
     raw = zlib.compress(row * size, 9)
 
@@ -107,7 +107,7 @@ def write_playlist(path, args, base):
 def write_guide(path, args, now):
     start = (now - args.days_back * 86400) // 3600 * 3600
     end = now + args.days_ahead * 86400
-    programmes = 0
+    programs = 0
     with gzip.open(path, "wt", encoding="utf-8", compresslevel=6, newline="\n") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
         f.write('<tv generator-info-name="iptv-rs synthetic fixtures">\n')
@@ -134,9 +134,9 @@ def write_guide(path, args, now):
                 )
                 t += length
                 episode += 1
-                programmes += 1
+                programs += 1
         f.write("</tv>\n")
-    return programmes
+    return programs
 
 
 def main():
@@ -150,7 +150,7 @@ def main():
     p.add_argument("--days-ahead", type=int, default=2)
     p.add_argument("--catchup-every", type=int, default=5, help="every Nth channel has catch-up (0 = none)")
     p.add_argument("--seed", type=int, default=1)
-    p.add_argument("--now", type=int, default=None, help="unix time to centre the guide on (default: now)")
+    p.add_argument("--now", type=int, default=None, help="unix time to center the guide on (default: now)")
     args = p.parse_args()
     if args.channels < 1 or args.groups < 1:
         p.error("--channels and --groups must be positive")
@@ -160,16 +160,16 @@ def main():
     os.makedirs(os.path.join(args.out, "logos"), exist_ok=True)
     for gi in range(args.groups):
         rng = random.Random(args.seed + gi)
-        colour = (rng.randrange(40, 230), rng.randrange(40, 230), rng.randrange(40, 230))
+        color = (rng.randrange(40, 230), rng.randrange(40, 230), rng.randrange(40, 230))
         with open(os.path.join(args.out, "logos", f"g{gi:02d}.png"), "wb") as f:
-            f.write(png(colour))
+            f.write(png(color))
     playlist = os.path.join(args.out, "playlist.m3u")
     guide = os.path.join(args.out, "guide.xml.gz")
     write_playlist(playlist, args, base)
-    programmes = write_guide(guide, args, now)
+    programs = write_guide(guide, args, now)
     print(
         f"{playlist}: {args.channels} channels in {args.groups} groups\n"
-        f"{guide}: {programmes} programmes, {os.path.getsize(guide) // 1024} KiB\n"
+        f"{guide}: {programs} programs, {os.path.getsize(guide) // 1024} KiB\n"
         f"playlist URL: {base}/iptv/playlist.m3u",
         file=sys.stderr,
     )

@@ -369,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn a_cancelled_queued_image_does_not_take_the_cached_reply() {
+    fn a_canceled_queued_image_does_not_take_the_cached_reply() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

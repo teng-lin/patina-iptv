@@ -1,6 +1,6 @@
 //! Multiview's affordances over the tiles. A pointer (desktop mouse,
 //! tablet touch; never a TV) gets, while it is active
-//! (`multiview::chrome_shows`): a toolbar at the top centre (Add screen
+//! (`multiview::chrome_shows`): a toolbar at the top center (Add screen
 //! while another fits, else the device's limit; exit multiview) and on
 //! each tile, with two or more, buttons to listen to it (on a tile not
 //! heard), to enlarge or reduce it and to remove it, named as the tile
@@ -20,7 +20,7 @@ use crate::play_bar::icons::{self, Icon};
 use crate::theme::{RADIUS_LARGE, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, channel_name, tint};
 
-/// The toolbar's band at the top centre (px): a tile's buttons keep out
+/// The toolbar's band at the top center (px): a tile's buttons keep out
 /// of it.
 const TOOLBAR_HALF_W: f32 = 200.0;
 const TOOLBAR_H: f32 = 64.0;
@@ -42,7 +42,7 @@ fn panel(ui: Ui) -> Rgba {
 }
 
 /// Add screen (or the device's limit) and Exit multiview, at the top
-/// centre.
+/// center.
 pub fn toolbar(ui: Ui) -> impl IntoElement {
     let shown = computed(move || multiview::chrome_shows(ui));
     let limit = move || with_state(ui, device_limit).flatten();
@@ -121,8 +121,8 @@ pub fn toolbar(ui: Ui) -> impl IntoElement {
 fn under_toolbar(tile: (f32, f32, f32, f32), buttons_w: f32, width: f32) -> bool {
     let right = tile.0 + tile.2 - INSET;
     let left = right - buttons_w;
-    let centre = width / 2.0;
-    tile.1 + INSET < TOOLBAR_H && left < centre + TOOLBAR_HALF_W && right > centre - TOOLBAR_HALF_W
+    let center = width / 2.0;
+    tile.1 + INSET < TOOLBAR_H && left < center + TOOLBAR_HALF_W && right > center - TOOLBAR_HALF_W
 }
 
 /// Tile `index`'s Listen to this (when another tile is heard), enlarge
@@ -216,7 +216,7 @@ pub fn tile_buttons(ui: Ui, index: usize) -> impl IntoElement {
     )
 }
 
-/// The keys' hint at the top centre: OK opens the tile's menu, Back
+/// The keys' hint at the top center: OK opens the tile's menu, Back
 /// watches it full screen. It goes with the first key or after a while.
 pub fn hint(ui: Ui) -> impl IntoElement {
     let shown = move || {
@@ -257,7 +257,7 @@ mod tests {
         // corner lies under the toolbar, the top right tile's does not.
         assert!(under_toolbar((3.0, 3.0, 634.0, 354.0), 78.0, width));
         assert!(!under_toolbar((643.0, 3.0, 634.0, 354.0), 78.0, width));
-        // Side by side, vertically centred: well below it.
+        // Side by side, vertically centered: well below it.
         assert!(!under_toolbar((3.0, 183.0, 634.0, 354.0), 78.0, width));
     }
 }

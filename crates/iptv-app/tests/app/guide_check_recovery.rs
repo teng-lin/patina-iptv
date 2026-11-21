@@ -2,7 +2,7 @@
 //! that ends without scheduling it (`data.rs`, `data/stored.rs`).
 //!
 //! Work on a playlist cancels its guide timer and normally ends by setting
-//! the next one. What it checks: a failed refresh over a cancelled guide
+//! the next one. What it checks: a failed refresh over a canceled guide
 //! download, a refresh whose guide download "Delete stored guide data"
 //! revoked, "Update the guide now" revoked the same way, and a failed
 //! "Add playlist" (which ends the timers of the playlist that stays on
@@ -16,15 +16,15 @@
 //! timer's check comes back quietly a minute later, an update asked for
 //! says so and keeps a check. With guide updates on request only, nothing
 //! is made up, yet the check the refresh policy had set itself (the
-//! back-off after a failed download) survives work that cancelled it and
+//! back-off after a failed download) survives work that canceled it and
 //! then could not run.
 //!
 //! Guide actions and the work they interrupt, in the order that matters:
 //! a refresh that reports its channels after "Delete stored guide data"
-//! does not show the deleted programmes again; neither does a timer's
+//! does not show the deleted programs again; neither does a timer's
 //! download that was under way; and a channel's guide chosen while "Update
 //! the guide now" runs is downloaded by an update of its own, not taken
-//! for the one it cancelled.
+//! for the one it canceled.
 //!
 //! Synthetic data only: a playlist "picked" from a file in the temporary
 //! home or linked from a local mock server, its guide served by another;
@@ -374,7 +374,7 @@ fn channels() -> String {
 /// A refresh replaces one whose guide download is still running, then
 /// fails with no guide stored: neither sets the next check itself.
 #[test]
-fn a_failed_refresh_over_a_cancelled_guide_download_keeps_the_guide_timer() {
+fn a_failed_refresh_over_a_canceled_guide_download_keeps_the_guide_timer() {
     let Some(home) = isolated!() else { return };
     let mut s = Scenario::start(&home, true, false);
     s.delete_guide_data();
@@ -556,7 +556,7 @@ fn a_refused_guide_check_comes_back_quietly() {
 }
 
 /// "Update the guide now" that the workers refuse says so, and the timer
-/// it cancelled is replaced by a check.
+/// it canceled is replaced by a check.
 #[test]
 fn a_refused_update_says_so_and_keeps_the_guide_timer() {
     let Some(home) = isolated!() else { return };
@@ -577,7 +577,7 @@ fn a_refused_update_says_so_and_keeps_the_guide_timer() {
 /// answer for it: the check stays, at its own time, and nothing else is
 /// made up once it ran.
 #[test]
-fn manual_guide_updates_keep_the_backoff_that_refused_work_cancelled() {
+fn manual_guide_updates_keep_the_backoff_that_refused_work_canceled() {
     let Some(home) = isolated!() else { return };
     let mut s = Scenario::start(&home, false, false);
     s.delete_guide_data();
@@ -627,7 +627,7 @@ fn manual_guide_updates_keep_the_backoff_that_refused_work_cancelled() {
 /// A refresh reads its stored guide, then reports its channels with it.
 /// "Delete stored guide data" in between revokes the refresh: its report
 /// still shows the channels, with the guide as stored now, not the
-/// programmes that were just deleted.
+/// programs that were just deleted.
 #[test]
 fn a_refresh_reporting_after_the_guide_was_deleted_does_not_show_it_again() {
     let Some(home) = isolated!() else { return };
@@ -649,7 +649,7 @@ fn a_refresh_reporting_after_the_guide_was_deleted_does_not_show_it_again() {
     s.settle();
     assert!(
         !s.shows("text:/ Now$/"),
-        "the deleted programmes came back with the refresh's report"
+        "the deleted programs came back with the refresh's report"
     );
     assert!(
         store(&s.data).epg_guide(s.source).unwrap().is_none(),
@@ -668,7 +668,7 @@ fn deleting_guide_data_stops_a_guide_check_that_is_downloading() {
     let mut s = Scenario::start(&home, true, false);
     // Changed storage settings: the next check downloads the guide again.
     s.guide_settings();
-    step(s.app.press("text:Keep programme descriptions"));
+    step(s.app.press("text:Keep program descriptions"));
     to_guide(&mut s.app);
     s.server.hold();
     let asked = s.server.requests();
@@ -696,12 +696,12 @@ fn deleting_guide_data_stops_a_guide_check_that_is_downloading() {
 /// A channel's guide is chosen while "Update the guide now" downloads.
 /// The choice cancels that update, which read the store before it; the
 /// download that applies the choice is an update of its own, started once
-/// the cancelled one has unwound, not hours later at the next check.
+/// the canceled one has unwound, not hours later at the next check.
 #[test]
 fn a_guide_chosen_during_an_update_is_downloaded_after_it() {
     let Some(home) = isolated!() else { return };
     let mut s = Scenario::start(&home, true, false);
-    // A choice to go back from: its channel shows no programmes.
+    // A choice to go back from: its channel shows no programs.
     s.choose_guide("No guide data");
     step(s.app.wait_for_within("text:Guide data changed", IMPORT));
     step(s.app.wait_for_gone("text:/^Guide data for /", IMPORT));

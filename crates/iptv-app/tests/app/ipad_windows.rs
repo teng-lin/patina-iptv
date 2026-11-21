@@ -17,7 +17,7 @@
 //! guide's ‹ of an iPad window's controls.
 //!
 //! Synthetic data only: the personalization playlist (M3U), and a
-//! generated on-demand catalogue on a local mock server.
+//! generated on-demand catalog on a local mock server.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -42,7 +42,7 @@ pub(crate) const BAR_CONTROLS: [&str; 12] = [
     "play-bar-play-pause",
     "play-bar-forward",
     "play-bar-record",
-    "play-bar-favourite",
+    "play-bar-favorite",
     "play-bar-tracks",
     "play-bar-details",
     "play-bar-picture",
@@ -149,7 +149,7 @@ pub(crate) fn channel_selected(app: &Headless, name: &str) -> bool {
 
 /// The guide's header in an iPad window: the video under the preview, the
 /// corner ‹ inside it, the shortcuts beside or under it by the policy and
-/// inside the window, the programme's minutes left on screen.
+/// inside the window, the program's minutes left on screen.
 #[track_caller]
 pub(crate) fn header_fits(app: &Headless, player: NodeId, size: (f32, f32), text: f32) {
     header_fits_as(app, player, size, text, policy(size, text));
@@ -248,7 +248,7 @@ pub(crate) fn header_fits_as(
         n.text.as_ref().is_some_and(|t| t.text.text.contains(" – "))
             && n.bounds.origin.x.0 >= details[0] - 0.5
     })
-    .unwrap_or_else(|| panic!("the programme's times shown: {what}"));
+    .unwrap_or_else(|| panic!("the program's times shown: {what}"));
     for (part, b) in [("times", times), ("minutes left", left)] {
         assert!(
             b[1] >= details[1] - 0.5 && b[1] + b[3] <= details[1] + details[3] + 0.5,
@@ -319,7 +319,7 @@ fn ipad_guide_keeps_the_focused_channel_and_the_preview_in_every_window() {
     assert!(channel_selected(app, "Local C"));
     present(app, (375.0, 820.0), TEXT[1]);
     step(app.press("id:guide-header-shortcuts >> text:/^☰  /"));
-    step(app.wait_for("id:guide-groups >> text:Favourites"));
+    step(app.wait_for("id:guide-groups >> text:Favorites"));
     assert_eq!(iptv_app::player_opens(0), opens);
     persistent(app, &lifetime, player);
 }

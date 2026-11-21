@@ -1,4 +1,4 @@
-//! On-demand catalogue and playback. Credentials and ephemeral provider links stay here.
+//! On-demand catalog and playback. Credentials and ephemeral provider links stay here.
 #[cfg(test)]
 mod recovery_tests;
 use crate::{Error, Runtime};
@@ -38,7 +38,7 @@ pub(crate) struct State {
     playback_completion: Mutex<Option<PlaybackCompletion>>,
 }
 impl State {
-    /// A token for a new discovery read, cancelling the one before.
+    /// A token for a new discovery read, canceling the one before.
     fn begin_discovery(&self) -> iptv_import::CancelToken {
         let token = iptv_import::CancelToken::new();
         if let Some(previous) = self
@@ -135,7 +135,7 @@ impl Runtime {
             context.update_stalker_session(session.clone());
         }
     }
-    pub async fn vod_catalogue(
+    pub async fn vod_catalog(
         &self,
         query: Query,
         offset: u32,
@@ -148,15 +148,15 @@ impl Runtime {
         ),
         Error,
     > {
-        self.vod_catalogue_pages(query, offset, 1).await
+        self.vod_catalog_pages(query, offset, 1).await
     }
-    /// The catalogue from its top, a page at a time until it holds at
+    /// The catalog from its top, a page at a time until it holds at
     /// least `through` titles (or ends), with its filter choices. A list
     /// read again after the player (its progress changed) keeps the titles
     /// the viewer had loaded, so its focused title is found again by
     /// identity however many pages down it was. The pages come from one
     /// read snapshot, so a write between them cannot shift a title out.
-    pub async fn vod_catalogue_through(
+    pub async fn vod_catalog_through(
         &self,
         query: Query,
         through: u32,
@@ -169,9 +169,9 @@ impl Runtime {
         ),
         Error,
     > {
-        self.vod_catalogue_pages(query, 0, through.max(1)).await
+        self.vod_catalog_pages(query, 0, through.max(1)).await
     }
-    async fn vod_catalogue_pages(
+    async fn vod_catalog_pages(
         &self,
         query: Query,
         offset: u32,
@@ -216,7 +216,7 @@ impl Runtime {
     /// A newer discovery read, [`Runtime::vod_discovery_cancel`] (the shelf
     /// closed) or closing the application cancels a read still running.
     ///
-    /// Protected titles keep their identity and name, as in the catalogue,
+    /// Protected titles keep their identity and name, as in the catalog,
     /// but lose poster and plot until unlocked; opening or playing one goes
     /// through [`Runtime::vod_details`] and [`Runtime::vod_play`], which
     /// check the parental lock, the source's current incarnation and policy,
@@ -229,7 +229,7 @@ impl Runtime {
         let services = self.services();
         async move {
             let mut page = services
-                .analyze(move |s| s.vod_discovery_cancellable(query, &token))
+                .analyze(move |s| s.vod_discovery_cancelable(query, &token))
                 .await?;
             self.vod_redact_protected(&mut page.cards).await?;
             Ok(page)
@@ -240,7 +240,7 @@ impl Runtime {
     /// ([`iptv_core::vod::DiscoveryQuery::around`]). A reopened shelf
     /// focuses its title again by identity this way, however deep it is.
     /// The place and the page come from one read transaction on the
-    /// analysis lane, cancelled like the shelf's other pages; a failure is
+    /// analysis lane, canceled like the shelf's other pages; a failure is
     /// reported, never mistaken for a title that has gone.
     pub fn vod_discovery_around(
         &self,
@@ -251,7 +251,7 @@ impl Runtime {
         let services = self.services();
         async move {
             let mut page = services
-                .analyze(move |s| s.vod_discovery_around_cancellable(shelf, &key, &token))
+                .analyze(move |s| s.vod_discovery_around_cancelable(shelf, &key, &token))
                 .await?;
             self.vod_redact_protected(&mut page.cards).await?;
             Ok(page)
@@ -325,7 +325,7 @@ impl Runtime {
         retain_playback: bool,
         cancel: iptv_import::CancelToken,
     ) -> Result<Details, Error> {
-        if cancel.is_cancelled() {
+        if cancel.is_canceled() {
             return Err(unavailable());
         }
         self.parental_check(&target(&key))
@@ -369,7 +369,7 @@ impl Runtime {
                 let client =
                     iptv_net::NetClient::new(crate::settings::net_config(&work.settings()))
                         .map_err(|_| unavailable())?;
-                if cancel.is_cancelled() {
+                if cancel.is_canceled() {
                     return Err(unavailable());
                 }
                 let mut episodes = Vec::new();
@@ -425,7 +425,7 @@ impl Runtime {
                             }
                         } else if let Some(StreamLocator::Xtream { stream_id, .. }) = &movie_locator
                         {
-                            // Detail metadata can fail independently of a usable catalogue stream.
+                            // Detail metadata can fail independently of a usable catalog stream.
                             if let Ok(response) = iptv_import::on_demand::detail(
                                 &client,
                                 xt.vod_info(*stream_id),
@@ -559,7 +559,7 @@ url,
                         },
                     ));
                 }
-                if cancel.is_cancelled() {
+                if cancel.is_canceled() {
                     return Err(unavailable());
                 }
                 let keys: Vec<_> = episodes.iter().map(|e| e.key.clone()).collect();
@@ -783,7 +783,7 @@ url,
             .await
             .map_err(|_| unavailable())??;
         // Portal authentication and link creation can outlive a playlist edit,
-        // disable or deletion. The old catalogue's result is no longer authority.
+        // disable or deletion. The old catalog's result is no longer authority.
         if let Some(parent) = &playing.parent {
             self.parental_check(&target(parent))
                 .await
@@ -1225,7 +1225,7 @@ mod tests {
     }
 
     #[test]
-    fn catalogue_authorization_only_loads_the_returned_movie_identities() {
+    fn catalog_authorization_only_loads_the_returned_movie_identities() {
         use iptv_providers::{
             HttpResponse, SecretUrl,
             model::{M3uSourceConfig, Source},
@@ -1240,7 +1240,7 @@ mod tests {
         .unwrap();
         let source = store
             .add_source(&Source {
-                name: "Generated bounded catalogue".into(),
+                name: "Generated bounded catalog".into(),
                 config: SourceConfig::M3u(M3uSourceConfig {
                     location: SecretUrl::new("https://example.test/generated.m3u"),
                     user_agent: None,
@@ -1286,7 +1286,7 @@ mod tests {
         crate::settings::load(&owner);
         let (cards, _, _, _) = owner
             .services()
-            .block_on(owner.vod_catalogue(Query::default(), 0))
+            .block_on(owner.vod_catalog(Query::default(), 0))
             .unwrap();
         assert_eq!(cards.len(), 2);
         assert!(
@@ -1327,7 +1327,7 @@ mod tests {
             .block_on(owner.services().read(|s| s.vod_sources()))
             .unwrap();
         assert_eq!(sources.len(), 1);
-        // The shelf closes before the read ran: it is cancelled, not run.
+        // The shelf closes before the read ran: it is canceled, not run.
         owner.vod_discovery_cancel();
         release.send(()).unwrap();
         assert!(owner.services().block_on(read).is_err());
@@ -1338,7 +1338,7 @@ mod tests {
     /// guide pages stays free, and closing the shelf cancels a read that
     /// has not finished.
     #[test]
-    fn discovery_leaves_the_guide_reader_free_and_is_cancelled_with_its_shelf() {
+    fn discovery_leaves_the_guide_reader_free_and_is_canceled_with_its_shelf() {
         use iptv_core::vod::{DiscoveryQuery, Shelf};
         use iptv_providers::{
             HttpResponse, SecretUrl,
@@ -1408,7 +1408,7 @@ mod tests {
             waits_off_the_guide_reader(&owner, owner.vod_discovery(first));
             waits_off_the_guide_reader(&owner, owner.vod_discovery_around(shelf, older.clone()));
             // Closing before a host polls the future must not start a new,
-            // uncancelled query when the queued task eventually runs.
+            // uncanceled query when the queued task eventually runs.
             let pending = owner.vod_discovery(first);
             owner.vod_discovery_cancel();
             assert!(owner.services().block_on(pending).is_err(), "{shelf:?}");
@@ -1460,7 +1460,7 @@ mod tests {
                 tokio::time::timeout(Duration::from_secs(10), waiting.closed()).await
             });
             finished
-                .send(closed.is_ok() && cancel.is_cancelled())
+                .send(closed.is_ok() && cancel.is_canceled())
                 .unwrap();
             Ok(())
         });

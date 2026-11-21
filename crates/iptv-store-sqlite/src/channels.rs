@@ -26,7 +26,7 @@ pub struct ChannelRow {
     pub number: Option<u32>,
     pub custom_name: Option<String>,
     pub custom_number: Option<u32>,
-    pub favourite: bool,
+    pub favorite: bool,
     pub hidden: bool,
     /// Parental block; the UI asks for the PIN before playing.
     pub blocked: bool,
@@ -44,7 +44,7 @@ impl fmt::Debug for ChannelRow {
             .field("name", &self.name)
             .field("number", &self.number)
             .field("groups", &self.channel.groups)
-            .field("favourite", &self.favourite)
+            .field("favorite", &self.favorite)
             .field("hidden", &self.hidden)
             .field("blocked", &self.blocked)
             .finish_non_exhaustive()
@@ -57,8 +57,8 @@ pub use iptv_library::ChannelScope;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ChannelOrder {
     /// The user's order where they set one, else provider order: the
-    /// manual order of the list (all channels or a group), the favourites
-    /// order for an all-channels favourites list, member order for a custom
+    /// manual order of the list (all channels or a group), the favorites
+    /// order for an all-channels favorites list, member order for a custom
     /// group. Channels without a manual place follow in provider order.
     #[default]
     Effective,
@@ -75,7 +75,7 @@ pub enum ChannelOrder {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ChannelQuery {
     pub scope: ChannelScope,
-    pub favourites_only: bool,
+    pub favorites_only: bool,
     /// Include hidden channels (edit mode).
     pub include_hidden: bool,
     /// Drop blocked channels (they are listed, flagged, by default).
@@ -93,7 +93,7 @@ pub(crate) const ROW_COLUMNS: &str = "c.source_id, c.id, c.provider_id, c.name, 
 
 pub(crate) const OVERLAY_JOINS: &str = "
     LEFT JOIN channel_overlays o ON o.source_id = c.source_id AND o.channel_id = c.id
-    LEFT JOIN favourites f ON f.source_id = c.source_id AND f.channel_id = c.id";
+    LEFT JOIN favorites f ON f.source_id = c.source_id AND f.channel_id = c.id";
 
 pub(crate) fn decode(row: &rusqlite::Row<'_>) -> Result<ChannelRow> {
     let catch_up: Option<String> = row.get(11)?;
@@ -121,7 +121,7 @@ pub(crate) fn decode(row: &rusqlite::Row<'_>) -> Result<ChannelRow> {
         custom_number,
         hidden: row.get(15)?,
         blocked: row.get(16)?,
-        favourite: row.get(17)?,
+        favorite: row.get(17)?,
         epg_override: EpgOverride::from_columns(row.get(18)?, row.get(19)?, row.get(20)?),
         channel,
     })
@@ -160,10 +160,10 @@ fn build(
     let manual =
         matches!(purpose, Purpose::Rows { manual: true }) && q.order == ChannelOrder::Effective;
     let overlay = rows || !q.include_hidden || q.exclude_blocked;
-    let favourites = if q.favourites_only {
-        " JOIN favourites f ON f.source_id = c.source_id AND f.channel_id = c.id"
+    let favorites = if q.favorites_only {
+        " JOIN favorites f ON f.source_id = c.source_id AND f.channel_id = c.id"
     } else if rows {
-        " LEFT JOIN favourites f ON f.source_id = c.source_id AND f.channel_id = c.id"
+        " LEFT JOIN favorites f ON f.source_id = c.source_id AND f.channel_id = c.id"
     } else {
         ""
     };
@@ -189,10 +189,10 @@ fn build(
         "c.position"
     };
     let (mut from, effective) = match &q.scope {
-        // Favourites are few: drive the scan from them, in their order.
-        ChannelScope::All if q.favourites_only => (
+        // Favorites are few: drive the scan from them, in their order.
+        ChannelScope::All if q.favorites_only => (
             format!(
-                "FROM favourites f
+                "FROM favorites f
                  JOIN channels c ON c.source_id = f.source_id AND c.id = f.channel_id{joins}
                  WHERE f.source_id = ?1"
             ),
@@ -200,7 +200,7 @@ fn build(
         ),
         ChannelScope::All => (
             format!(
-                "FROM channels c{joins}{favourites}{} WHERE c.source_id = ?1",
+                "FROM channels c{joins}{favorites}{} WHERE c.source_id = ?1",
                 manual_join("''")
             ),
             by_manual,
@@ -211,7 +211,7 @@ fn build(
                 format!(
                     "FROM channel_groups m
                      JOIN channels c ON c.source_id = m.source_id AND c.id = m.channel_id
-                     {joins}{favourites}{}
+                     {joins}{favorites}{}
                      WHERE m.source_id = ?1 AND m.group_id = ?2",
                     manual_join("?2")
                 ),
@@ -225,7 +225,7 @@ fn build(
                     "FROM custom_group_members cm
                      JOIN custom_groups cg ON cg.id = cm.group_id
                      JOIN channels c ON c.source_id = cg.source_id AND c.id = cm.channel_id
-                     {joins}{favourites}
+                     {joins}{favorites}
                      WHERE cg.source_id = ?1 AND cm.group_id = ?2"
                 ),
                 "cm.position",
@@ -270,7 +270,7 @@ impl Store {
     /// catalog are never returned (see [`Store::orphaned_overlays`]).
     pub fn load_channels(&self, source: SourceId, query: &ChannelQuery) -> Result<Vec<ChannelRow>> {
         let manual = query.order == ChannelOrder::Effective
-            && !(query.favourites_only && query.scope == ChannelScope::All)
+            && !(query.favorites_only && query.scope == ChannelScope::All)
             && self.has_manual_order(source, &query.scope)?;
         let mut args = Vec::new();
         let (from, order) = build(source, query, Purpose::Rows { manual }, &mut args);

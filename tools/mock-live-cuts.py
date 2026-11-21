@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mock live IPTV provider that cuts connections (synthetic data only).
 
-Reproduces two provider behaviours every live player has to survive:
+Reproduces two provider behaviors every live player has to survive:
 
 * Live HLS: /live/<name>.m3u8 answers 302 to a tokenized address
   /t/<token>/<name>.m3u8; reloading the playlist there answers 403 once the

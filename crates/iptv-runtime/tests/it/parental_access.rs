@@ -1,4 +1,4 @@
-//! Synthetic catalogue exercises direct-ID gates independently of shell menus.
+//! Synthetic catalog exercises direct-ID gates independently of shell menus.
 use crate::common;
 use crate::support;
 use iptv_core::parental::{ContentKind, Pin, Target};
@@ -19,12 +19,12 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
     let other = store
         .add_source(&common::m3u_source("Generated separate playlist"))
         .unwrap();
-    let mut catalogue = common::catalog(2, 2, common::XT_PASSWORD);
-    catalogue.groups[0].adult = true;
-    catalogue.groups.last_mut().unwrap().adult = true;
-    catalogue.vod[0].is_series = true;
-    common::replace(&mut store, source, &catalogue);
-    common::replace(&mut store, other, &catalogue);
+    let mut catalog = common::catalog(2, 2, common::XT_PASSWORD);
+    catalog.groups[0].adult = true;
+    catalog.groups.last_mut().unwrap().adult = true;
+    catalog.vod[0].is_series = true;
+    common::replace(&mut store, source, &catalog);
+    common::replace(&mut store, other, &catalog);
     let custom = store
         .create_custom_group(source, "Generated protected collection")
         .unwrap();
@@ -32,7 +32,7 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
         .create_custom_group(source, "Generated destination")
         .unwrap();
     store
-        .add_to_custom_group(custom, &catalogue.channels[1].id)
+        .add_to_custom_group(custom, &catalog.channels[1].id)
         .unwrap();
     let custom_target = Target {
         source: source.0,
@@ -41,13 +41,13 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
     };
     assert!(
         store
-            .parental_ancestors(&Target::live(source.0, catalogue.channels[1].id.as_str()))
+            .parental_ancestors(&Target::live(source.0, catalog.channels[1].id.as_str()))
             .unwrap()
             .contains(&custom_target)
     );
     assert!(
         store.parental_memberships().unwrap()
-            [&Target::live(source.0, catalogue.channels[1].id.as_str())]
+            [&Target::live(source.0, catalog.channels[1].id.as_str())]
             .contains(&custom_target)
     );
     drop(store);
@@ -61,7 +61,7 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
     let recovery =
         support::block_on(owner.parental_change_pin(None, Pin::parse("2468").unwrap())).unwrap();
     assert_eq!(recovery.len(), 32);
-    let disabled_future = commands::channel(&owner, source, catalogue.channels[0].id.clone());
+    let disabled_future = commands::channel(&owner, source, catalog.channels[0].id.clone());
     owner
         .set_setting("parental.live_enabled", Value::Bool(true))
         .unwrap();
@@ -74,12 +74,12 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
             Value::Enum("blocked_content_and_settings".into()),
         )
         .unwrap();
-    let channel = Target::live(source.0, catalogue.channels[0].id.as_str());
-    let public = Target::live(source.0, catalogue.channels[1].id.as_str());
+    let channel = Target::live(source.0, catalog.channels[0].id.as_str());
+    let public = Target::live(source.0, catalog.channels[1].id.as_str());
     let movie = Target {
         source: source.0,
         kind: ContentKind::Movie,
-        id: catalogue.vod[0].id.as_str().into(),
+        id: catalog.vod[0].id.as_str().into(),
     };
     support::block_on(owner.parental_set_blocked(movie.clone(), true)).unwrap();
     owner.parental_lock();
@@ -106,7 +106,7 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
         source: source.0,
         channel: channel.id.clone(),
         channel_name: "Generated channel".into(),
-        title: "Generated programme".into(),
+        title: "Generated program".into(),
         start: now + 3600,
         end: now + 7200,
     };
@@ -118,7 +118,7 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
         support::block_on(commands::channel(
             &owner,
             source,
-            catalogue.channels[0].id.clone()
+            catalog.channels[0].id.clone()
         ))
         .unwrap()
         .is_none()
@@ -140,18 +140,18 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
         support::block_on(commands::channel(
             &owner,
             source,
-            catalogue.channels[0].id.clone()
+            catalog.channels[0].id.clone()
         ))
         .unwrap()
         .is_some()
     );
-    let pending = commands::channel(&owner, source, catalogue.channels[0].id.clone());
+    let pending = commands::channel(&owner, source, catalog.channels[0].id.clone());
     owner.parental_lock();
     assert!(
         support::block_on(pending).unwrap().is_none(),
         "locking revokes a previously constructed command future"
     );
-    assert!(!owner.parental_allowed(&Target::live(other.0, catalogue.channels[0].id.as_str())));
+    assert!(!owner.parental_allowed(&Target::live(other.0, catalog.channels[0].id.as_str())));
     assert!(!owner.parental_settings_allowed());
     owner.parental_unblocked_channel_played();
     assert!(support::block_on(owner.parental_check(&channel)).is_err());
@@ -161,7 +161,7 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
     let group = Target {
         source: source.0,
         kind: ContentKind::Group,
-        id: catalogue.groups[0].id.as_str().into(),
+        id: catalog.groups[0].id.as_str().into(),
     };
     support::block_on(owner.parental_set_blocked(group.clone(), false)).unwrap();
     owner.parental_lock();
@@ -171,7 +171,7 @@ fn channel_category_movie_settings_and_restart_enforce_authority() {
     support::block_on(owner.parental_set_blocked(group, true)).unwrap();
     support::block_on(owner.parental_set_blocked(custom_target.clone(), true)).unwrap();
     owner.parental_lock();
-    let public_id = catalogue.channels[1].id.clone();
+    let public_id = catalog.channels[1].id.clone();
     assert!(support::block_on(owner.parental_check(&public)).is_err());
     assert!(
         support::block_on(commands::remove_custom_members(

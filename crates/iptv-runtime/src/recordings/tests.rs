@@ -114,7 +114,7 @@ fn a_queued_registration_cannot_outlive_its_application_owner() {
     static CALLS: AtomicUsize = AtomicUsize::new(0);
     let directory = tempfile::tempdir().unwrap();
     let mut ports = crate::Ports::new(directory.path().to_owned(), |_| {
-        panic!("a wake report must not open the catalogue")
+        panic!("a wake report must not open the catalog")
     });
     ports.recording_schedule = |_, _| {
         CALLS.fetch_add(1, Ordering::SeqCst);
@@ -147,7 +147,7 @@ fn a_registration_spanning_native_restart_cannot_publish_the_old_report() {
     }
     let directory = tempfile::tempdir().unwrap();
     let mut ports = crate::Ports::new(directory.path().to_owned(), |_| {
-        panic!("a wake report must not open the catalogue")
+        panic!("a wake report must not open the catalog")
     });
     ports.recording_schedule = register;
     let owner = Runtime::new(ports);
@@ -177,7 +177,7 @@ async fn foreground_refresh_preserves_the_native_series_deadline_and_newer_inten
     }
     let directory = tempfile::tempdir().unwrap();
     let mut ports = crate::Ports::new(directory.path().to_owned(), |_| {
-        panic!("wake refresh must not open the catalogue")
+        panic!("wake refresh must not open the catalog")
     });
     ports.recording_schedule = register;
     let owner = Runtime::new(ports);
@@ -191,7 +191,7 @@ async fn foreground_refresh_preserves_the_native_series_deadline_and_newer_inten
             source: 1,
             channel: "generated".into(),
             channel_name: "Generated channel".into(),
-            title: "Generated programme".into(),
+            title: "Generated program".into(),
             start: at + 86400,
             end: at + 86460,
         },
@@ -293,7 +293,7 @@ pub(super) async fn seed(owner: &Runtime, url: &str) -> Request {
                 source: source.0,
                 channel: channels[0].id.as_str().into(),
                 channel_name: "Generated channel".into(),
-                title: "Generated programme".into(),
+                title: "Generated program".into(),
                 start: now() + 3600,
                 end: now() + 7200,
             })
@@ -379,7 +379,7 @@ fn seed_series_guide(owner: &Runtime, request: &Request, start: i64, end: i64) {
     raw.execute("INSERT INTO epg_bindings(source_id,channel_key,epg_channel_id,match_kind) VALUES(?1,?2,1,'tvg-id')", rusqlite::params![request.source, request.channel]).unwrap();
     for offset in [0, 86400] {
         raw.execute(
-            "INSERT INTO epg_programmes(channel_id,start,stop,title) VALUES(1,?1,?2,?3)",
+            "INSERT INTO epg_programs(channel_id,start,stop,title) VALUES(1,?1,?2,?3)",
             rusqlite::params![start + offset, end + offset, request.title],
         )
         .unwrap();
@@ -401,8 +401,8 @@ async fn series_padding_is_applied_once_and_raw_occurrence_cancellation_survives
             request.clone(),
             Repeat::Series,
             Some(RecurrenceTiming {
-                programme_start: start,
-                programme_end: end,
+                program_start: start,
+                program_end: end,
                 lead_seconds: 300,
                 trail_seconds: 600,
             }),
@@ -475,8 +475,8 @@ async fn current_daily_and_weekly_captures_keep_the_nominal_clock_and_duration()
                 request,
                 repeat,
                 Some(RecurrenceTiming {
-                    programme_start: start,
-                    programme_end: end,
+                    program_start: start,
+                    program_end: end,
                     lead_seconds: 300,
                     trail_seconds: 600,
                 }),
@@ -762,7 +762,7 @@ pub(super) async fn until(owner: &Runtime, id: JobId, accept: impl Fn(&Job) -> b
 }
 
 #[tokio::test]
-async fn intent_is_idempotent_editable_and_cancelled_before_it_starts() {
+async fn intent_is_idempotent_editable_and_canceled_before_it_starts() {
     let directory = tempfile::tempdir().unwrap();
     let owner = owner(&directory.path().join("catalog"));
     let mut request = seed(&owner, "https://example.test/generated.ts").await;
@@ -771,7 +771,7 @@ async fn intent_is_idempotent_editable_and_cancelled_before_it_starts() {
     request.end += 60;
     owner.update_recording(id, request).await.unwrap();
     owner.stop_recording(id).await.unwrap();
-    until(&owner, id, |j| j.status == Status::Cancelled).await;
+    until(&owner, id, |j| j.status == Status::Canceled).await;
     assert!(owner.recording_file(id).await.is_err());
     owner.delete_recording(id).await.unwrap();
     assert!(owner.recording_jobs().await.unwrap().is_empty());
@@ -831,7 +831,7 @@ async fn record_stop_play_and_delete_preserve_real_media_and_its_lease() {
 }
 
 #[tokio::test]
-async fn startup_retries_a_transient_catalogue_failure_without_restarting_the_app() {
+async fn startup_retries_a_transient_catalog_failure_without_restarting_the_app() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("catalog");
     let owner = owner(&root);

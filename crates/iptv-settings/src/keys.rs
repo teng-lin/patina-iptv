@@ -18,7 +18,7 @@ pub struct EnumKey(pub(crate) &'static str);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TextKey(pub(crate) &'static str);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ColourKey(pub(crate) &'static str);
+pub struct ColorKey(pub(crate) &'static str);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BindingsKey(pub(crate) &'static str);
 
@@ -42,11 +42,11 @@ pub const AUTOPLAY: BoolKey = BoolKey("guide.autoplay");
 pub const BROWSE_MODE: EnumKey = EnumKey("guide.browse_mode");
 
 // Appearance (iptv-app theme).
-pub const ACCENT: ColourKey = ColourKey("appearance.accent");
-pub const BACKGROUND: ColourKey = ColourKey("appearance.background");
+pub const ACCENT: ColorKey = ColorKey("appearance.accent");
+pub const BACKGROUND: ColorKey = ColorKey("appearance.background");
 pub const FONT_SIZE: EnumKey = EnumKey("appearance.font_size");
 
-// Organisation.
+// Organization.
 pub const CHANNEL_SORT: EnumKey = EnumKey("channels.channel_sort");
 pub const GROUP_SORT: EnumKey = EnumKey("channels.group_sort");
 pub const RECENT_COUNT: IntKey = IntKey("history.recent_count");
@@ -69,7 +69,7 @@ pub const CONFIRM_EXIT_WINDOW: DurationKey = DurationKey("general.confirm_exit_w
 // Appearance over video.
 pub const UI_TRANSPARENCY: IntKey = IntKey("appearance.ui_transparency");
 
-// Guide and player behaviour.
+// Guide and player behavior.
 pub const BACK_RETURNS_TO_NOW: BoolKey = BoolKey("guide.back_returns_to_now");
 pub const INFO_ON_SWITCH: BoolKey = BoolKey("player.info_on_switch");
 pub const PIP_ON_LEAVE: EnumKey = EnumKey("player.pip_on_leave");
@@ -101,8 +101,8 @@ pub const ALL: &[(&str, &str)] = &[
     (FULLSCREEN_TIMEOUT.0, "duration"),
     (AUTOPLAY.0, "bool"),
     (BROWSE_MODE.0, "enum"),
-    (ACCENT.0, "colour"),
-    (BACKGROUND.0, "colour"),
+    (ACCENT.0, "color"),
+    (BACKGROUND.0, "color"),
     (FONT_SIZE.0, "enum"),
     (CHANNEL_SORT.0, "enum"),
     (GROUP_SORT.0, "enum"),
@@ -170,9 +170,9 @@ pub const VOD_AUTOPLAY_NEXT_EPISODE: BoolKey = BoolKey("vod.autoplay_next_episod
 pub const GUIDE_SHOW_LOGOS: BoolKey = BoolKey("guide.show_logos");
 
 impl BoolKey {
-    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    /// Resolve a catalog key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
-        let setting = crate::catalogue::setting(key)
+        let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
         let found = setting.ty.type_name();
         if found != "bool" {
@@ -190,9 +190,9 @@ impl BoolKey {
 }
 
 impl IntKey {
-    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    /// Resolve a catalog key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
-        let setting = crate::catalogue::setting(key)
+        let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
         let found = setting.ty.type_name();
         if found != "integer" {
@@ -210,9 +210,9 @@ impl IntKey {
 }
 
 impl DurationKey {
-    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    /// Resolve a catalog key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
-        let setting = crate::catalogue::setting(key)
+        let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
         let found = setting.ty.type_name();
         if found != "duration" {
@@ -230,9 +230,9 @@ impl DurationKey {
 }
 
 impl EnumKey {
-    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    /// Resolve a catalog key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
-        let setting = crate::catalogue::setting(key)
+        let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
         let found = setting.ty.type_name();
         if found != "enum" {
@@ -250,9 +250,9 @@ impl EnumKey {
 }
 
 impl TextKey {
-    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    /// Resolve a catalog key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
-        let setting = crate::catalogue::setting(key)
+        let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
         let found = setting.ty.type_name();
         if found != "text" {
@@ -269,16 +269,16 @@ impl TextKey {
     }
 }
 
-impl ColourKey {
-    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+impl ColorKey {
+    /// Resolve a catalog key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
-        let setting = crate::catalogue::setting(key)
+        let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
         let found = setting.ty.type_name();
-        if found != "colour" {
+        if found != "color" {
             return Err(crate::SettingsError::TypeMismatch {
                 key,
-                expected: "colour",
+                expected: "color",
                 found,
             });
         }
@@ -290,9 +290,9 @@ impl ColourKey {
 }
 
 impl BindingsKey {
-    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    /// Resolve a catalog key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
-        let setting = crate::catalogue::setting(key)
+        let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
         let found = setting.ty.type_name();
         if found != "key_bindings" {

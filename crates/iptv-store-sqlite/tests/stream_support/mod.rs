@@ -108,7 +108,7 @@ impl Fetch for Feeds {
 /// One element of a hand-written guide.
 pub enum El<'a> {
     Channel(&'a str, &'a [&'a str]),
-    Programme(Prog<'a>),
+    Program(Prog<'a>),
 }
 
 #[derive(Clone, Copy, Default)]
@@ -150,7 +150,7 @@ pub fn xmltv(elements: &[El<'_>]) -> String {
                 }
                 s.push_str("</channel>\n");
             }
-            El::Programme(p) => {
+            El::Program(p) => {
                 let _ = write!(
                     s,
                     "<programme start=\"{}\" channel=\"{}\"",
@@ -204,7 +204,7 @@ pub fn playlist(entries: &[PlaylistEntry<'_>]) -> Vec<Channel> {
 }
 
 /// A generated guide: `channels` channels (`gen{n}.example`, "Generated
-/// n"), hourly programmes with descriptions over `days` days from `from`.
+/// n"), hourly programs with descriptions over `days` days from `from`.
 #[derive(Clone, Copy, Debug)]
 pub struct GenShape {
     pub channels: usize,
@@ -215,9 +215,9 @@ pub struct GenShape {
 /// Writes a [`GenShape`] guide as it is read (memory: one chunk).
 pub struct Generated {
     shape: GenShape,
-    /// Next channel element, then next programme channel.
+    /// Next channel element, then next program channel.
     channel: usize,
-    programmes: bool,
+    programs: bool,
     done: bool,
 }
 
@@ -226,7 +226,7 @@ impl Generated {
         Self {
             shape,
             channel: 0,
-            programmes: false,
+            programs: false,
             done: false,
         }
     }
@@ -237,12 +237,12 @@ impl Generated {
             return None;
         }
         let mut s = String::with_capacity(70 * 1024);
-        if self.channel == 0 && !self.programmes {
+        if self.channel == 0 && !self.programs {
             s.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<tv>\n");
         }
         while s.len() < 64 * 1024 {
             let n = self.channel;
-            if !self.programmes {
+            if !self.programs {
                 let _ = writeln!(
                     s,
                     "<channel id=\"gen{n}.example\"><display-name>Generated {n}</display-name></channel>"
@@ -264,12 +264,12 @@ impl Generated {
             self.channel += 1;
             if self.channel == self.shape.channels {
                 self.channel = 0;
-                if self.programmes {
+                if self.programs {
                     s.push_str("</tv>\n");
                     self.done = true;
                     break;
                 }
-                self.programmes = true;
+                self.programs = true;
             }
         }
         Some(s.into_bytes())

@@ -29,7 +29,7 @@ fn cached_playlist_still_downloads_its_guide_when_epg_startup_refresh_is_enabled
             "<tv><channel id=\"a.test\"><display-name>Cached A</display-name></channel>\
              <programme channel=\"a.test\" start=\"{}\" stop=\"{}\">\
              <title>Independent guide refresh</title>\
-             <desc>Synthetic test programme.</desc></programme></tv>",
+             <desc>Synthetic test program.</desc></programme></tv>",
             format_xmltv_time(now - 3600),
             format_xmltv_time(now + 3600)
         ),
@@ -81,7 +81,7 @@ fn cached_playlist_still_downloads_its_guide_when_epg_startup_refresh_is_enabled
         .set("epg.update_interval", iptv_settings::Value::Duration(0))
         .unwrap();
     std::fs::write(dir.join("settings.json"), settings.to_json_string()).unwrap();
-    // An invalid current playlist proves the channel catalogue is read from cache.
+    // An invalid current playlist proves the channel catalog is read from cache.
     std::fs::write(&file, "#EXTM3U\n").unwrap();
     let mut app = Headless::start(EngineConfig {
         viewport: Size::new(px(1920.0), px(1080.0)),

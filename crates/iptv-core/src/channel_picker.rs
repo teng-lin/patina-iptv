@@ -1,6 +1,6 @@
 //! A channel picker with independent group selection and scoped search.
 //! Channels and groups retain focus by content identity as filters or the
-//! catalogue change. It never changes the guide's selected list.
+//! catalog change. It never changes the guide's selected list.
 
 use crate::guide::Schedule;
 use crate::lists::{ChannelList, ListId, entry_count};
@@ -259,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn catalogue_reordering_restores_groups_and_channels_by_key() {
+    fn catalog_reordering_restores_groups_and_channels_by_key() {
         let catalog = Catalog::small();
         let mut picker = picker(&catalog);
         picker.group(FIRST_GROUP + 1, &catalog);
@@ -276,7 +276,7 @@ mod tests {
         assert_eq!(
             picker.selected(),
             Some(1),
-            "k4 moved from catalogue index 4 to 1"
+            "k4 moved from catalog index 4 to 1"
         );
         assert_eq!(picker.row(), Some(1));
         let gone = Catalog::new(vec![("News", 3)], vec![0, 1, 2]);

@@ -480,7 +480,7 @@ class PlayerComponent(
             }
         }
 
-    // After `listener` is initialised: build() registers it.
+    // After `listener` is initialized: build() registers it.
     init {
         player = build(context)
         ticker.postDelayed(tick, 1_000)

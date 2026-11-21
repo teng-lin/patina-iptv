@@ -104,16 +104,16 @@ finite inputs used for native validation are throttled at their upstream server.
 A late capture starts at the current cursor, with at most 512 KiB of exact TS
 pre-roll from the most recently received PAT start. That interval is used only
 when its PAT arrived within two seconds of attachment; it can contain a short
-pre-attachment programme interval. It preserves packet ordering and section
+pre-attachment program interval. It preserves packet ordering and section
 continuations. A multi-section PAT/PMT may finish only as live input continues;
 Patina does not synthesize tables or claim readiness from a PAT alone. If no
 bounded recent interval exists, the reader continues at the live edge and receives
-subsequent programme tables naturally.
+subsequent program tables naturally.
 
 Starting or stopping capture never changes the player's source, load token,
 view placement or native surface. Capture uses the existing secure spool writer
 and recording finalization path. Synchronous writes cannot race finalization
-when capture is cancelled. A shared stream ending or skipping before its stop
+when capture is canceled. A shared stream ending or skipping before its stop
 or deadline finalizes retained complete packets as Partial (or Failed with no
 media). It does not silently switch to an independent capture that would consume
 the viewer's only connection; playback can retry a fresh shared input.

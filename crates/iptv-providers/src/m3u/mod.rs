@@ -9,7 +9,7 @@
 //! `#EXTM3U`, invalid UTF-8 (replaced), URLs without `#EXTINF` (plain lists).
 //! An `#EXTINF` without a following URL is skipped with a warning.
 //!
-//! Recognised lines: `#EXTM3U` (header attributes: `url-tvg`/`x-tvg-url`/
+//! Recognized lines: `#EXTM3U` (header attributes: `url-tvg`/`x-tvg-url`/
 //! `tvg-url`, `catchup`, `catchup-days`, `catchup-source`,
 //! `catchup-correction`, `tvg-shift`),
 //! `#EXTINF`, `#EXTGRP`, `#EXTVLCOPT` and `#KODIPROP`. Option lines may come
@@ -510,7 +510,7 @@ fn fallback_name(url: &str) -> String {
 ///
 /// Days come from `catchup-days`, then `timeshift`, then `tvg-rec`. A declared
 /// type or source without days keeps catch-up with an unknown window
-/// (`days: None`, Kodi's behaviour; IPTVnator drops it). Without a type, a
+/// (`days: None`, Kodi's behavior; IPTVnator drops it). Without a type, a
 /// source means `default` (Kodi) and days alone mean `shift` (IPTVnator).
 /// Non-positive or unparsable days count as unknown.
 fn catch_up(

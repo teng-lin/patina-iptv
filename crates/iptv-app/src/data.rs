@@ -58,7 +58,7 @@ pub fn start(ui: Ui) {
                 }
                 if !crate::favorites::flush_on_shutdown() {
                     log::error!(
-                        "iptv persistence: queued favourite changes could not be saved at shutdown"
+                        "iptv persistence: queued favorite changes could not be saved at shutdown"
                     );
                 }
                 if !crate::runtime().drain_services() {

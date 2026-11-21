@@ -1,4 +1,4 @@
-//! How each catalogue language writes a day, a month and a time of day:
+//! How each catalog language writes a day, a month and a time of day:
 //! the names, their order, and the two halves of a 12-hour day. The
 //! patterns follow the Unicode CLDR's abbreviated formats, except English,
 //! which keeps the day before the month as the guide always showed it.
@@ -216,10 +216,10 @@ mod tests {
     use super::*;
     use crate::i18n::{LANGUAGES, message};
 
-    /// A language added to the catalogue without a calendar would show
+    /// A language added to the catalog without a calendar would show
     /// English dates without a sign.
     #[test]
-    fn every_catalogue_language_has_a_complete_calendar() {
+    fn every_catalog_language_has_a_complete_calendar() {
         for language in LANGUAGES {
             let tag = language.tag;
             let calendar = calendar(tag).unwrap_or_else(|| panic!("no calendar for {tag}"));

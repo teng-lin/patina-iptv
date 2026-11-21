@@ -10,7 +10,7 @@
 //!   provider-neutral [`Catalog`]. [`import_m3u_text`] parses a playlist
 //!   already in memory.
 //! - [`import_epg`]: chunked XMLTV download per source with priorities,
-//!   programmes streamed into a [`GuideSink`] as they are parsed (only the
+//!   programs streamed into a [`GuideSink`] as they are parsed (only the
 //!   feeds' channel lists stay in memory), matched against the catalog's
 //!   channels. Each source has its own time and size budget and is tried
 //!   again after a passing failure. [`MemoryGuide`] is an in-memory sink.
@@ -45,7 +45,7 @@ mod sink;
 mod stalker;
 mod xtream;
 
-pub use cancel::{CancelToken, Cancelled};
+pub use cancel::{CancelToken, Canceled};
 pub use catalog::{Catalog, CatalogWarning, ImportOptions, ImportStats, SourceMeta};
 pub use catalog_sink::{CatalogRow, CatalogSink};
 pub use epg::{
@@ -69,7 +69,7 @@ use iptv_providers::model::SourceConfig;
 /// Imports one configured source.
 ///
 /// Network work happens only through `fetch`; `progress` receives events on
-/// the calling task; `cancel` aborts with [`ImportError::Cancelled`].
+/// the calling task; `cancel` aborts with [`ImportError::Canceled`].
 pub async fn import_source<F: Fetch, P: ProgressSink>(
     fetch: &F,
     config: &SourceConfig,

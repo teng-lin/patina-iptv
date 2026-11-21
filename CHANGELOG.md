@@ -3,7 +3,7 @@
 All notable changes to Patina IPTV are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the version
-is below 1.0, a minor release may change behaviour.
+is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
@@ -27,7 +27,7 @@ is below 1.0, a minor release may change behaviour.
   player. A full-screen detour, enlarging, reducing and resizing keep it.
 - Back from a movie or an episode playing full screen now returns to its
   details instead of the guide, on every input (a remote's Back, Escape or
-  Backspace, and the play bar's ‹, now labelled Movies or Shows): a movie
+  Backspace, and the play bar's ‹, now labeled Movies or Shows): a movie
   on Play or Resume, a series with the played episode and its season
   selected. The title plays on, on the same player, and nothing is opened
   again. Back from the details then returns to the list or shelf the title
@@ -38,7 +38,7 @@ is below 1.0, a minor release may change behaviour.
   movie, an episode or a recording now restores the window, as it does for
   live TV, and the next one returns to the details or to Recordings.
 - Phone held upright, and other narrow portrait windows: the guide's header
-  now stacks a preview as wide as the window over the focused programme,
+  now stacks a preview as wide as the window over the focused program,
   instead of a thumbnail beside it. The channel list stays inside a narrow
   window, and where the video has no room beside the list it stays full
   screen under it instead of being laid out past the window's edge. On a
@@ -47,9 +47,9 @@ is below 1.0, a minor release may change behaviour.
   on a line above them. Phones run in landscape for now; portrait will get
   its own design (#168).
 - When Patina plays the last channel on start and that channel is one of the
-  playlist's favourites, Back from full screen now opens the Favourites list
+  playlist's favorites, Back from full screen now opens the Favorites list
   with the channel focused instead of All channels. A channel that is not a
-  favourite of that playlist still returns to All channels.
+  favorite of that playlist still returns to All channels.
 - Desktop: closing the main window while recordings keep Patina running now
   also closes every player window and the picture-in-picture window, as
   quitting does; only the recorder runs on. On macOS and Windows a window
@@ -61,18 +61,24 @@ is below 1.0, a minor release may change behaviour.
   which used to be on by default. If you set either one, upgrading keeps the
   value you chose for the layout you use. If you never changed either
   setting, choosing a channel now closes the guide in the overlay layout too.
-  Turn **Keep the guide after choosing** on to keep the old behaviour.
+  Turn **Keep the guide after choosing** on to keep the old behavior.
   Settings files move to version 3.
 - Empty Movies and Shows screens say why they are empty and offer one action:
   add a playlist, open the playlist's new **Movies and series** switch, retry
   a failed import, or refresh. A movie or series list that fails while live
-  channels import is shown as a failure, not as an empty catalogue.
+  channels import is shown as a failure, not as an empty catalog.
   In a small window the message and its action take the whole width:
   the categories make way, and Close and the rail stay beside it, so
   **Add playlist** can be clicked or tapped at any text size.
 - Catalog schema 24 records movie and series lists that failed to download.
   Downgrading an existing catalog is unsupported; retain a compatible backup
   before upgrading.
+- Catalog schema 25 and settings version 4 store their names in US spelling
+  (#139): favorites, guide programs and canceled recordings and imports keep
+  their data when an existing catalog upgrades or an older backup restores.
+  Settings and backups written before keep loading; a backup made before a
+  settings version change now restores instead of being refused. Downgrading
+  is unsupported; retain a compatible backup before upgrading.
 - Tablets: scrolling the guide's channels or the channel list, or panning its
   timeline, cancels a preview that **Play the focused channel by itself**
   was about to start; a channel you tapped still plays. Panning into another day no
@@ -89,8 +95,8 @@ is below 1.0, a minor release may change behaviour.
   change channel) keeps the call's end from resuming over it.
 - Guide on tablets: a drag at the top of the list, or one a scroll takes
   over, cancels a waiting preview too; and a
-  pan from the programme on air no longer cancels a channel you just
-  tapped or restarts a cancelled preview when you pan back.
+  pan from the program on air no longer cancels a channel you just
+  tapped or restarts a canceled preview when you pan back.
 
 ### Fixed
 
@@ -107,7 +113,7 @@ is below 1.0, a minor release may change behaviour.
   channel, or a menu action that plays, still plays.
 - Windows and iPad: right-clicking a channel's name in the guide (on iPad, a
   mouse's or trackpad's secondary click) now opens the channel's menu, as it
-  does on Linux and macOS. Before, only programmes and the groups columns
+  does on Linux and macOS. Before, only programs and the groups columns
   opened a menu there. The menu offers nothing new on these platforms:
   Watch in new window stays Linux and macOS only.
 - iOS simulator: the package now carries the Keychain entitlements the

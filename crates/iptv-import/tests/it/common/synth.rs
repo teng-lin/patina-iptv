@@ -75,7 +75,7 @@ fn xmltv_time(t: i64) -> String {
     )
 }
 
-/// XMLTV for `channels` (id, display name) with `slot`-second programmes
+/// XMLTV for `channels` (id, display name) with `slot`-second programs
 /// covering `[from, to)`.
 pub fn xmltv(channels: &[(String, String)], from: i64, to: i64, slot: i64) -> String {
     let mut s = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<tv>\n");

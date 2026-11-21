@@ -300,7 +300,7 @@ fn guide_sources(t: &mut T, srv: &Server) {
         assert!(t.shows(&format!("text:{text}")), "{text}");
     }
     assert!(t.shows(&format!(
-        "text:/^2 channels used · 2 programmes · updated {TIME}$/"
+        "text:/^2 channels used · 2 programs · updated {TIME}$/"
     )));
     assert!(t.shows(&format!(
         "text:/^Last update {TIME} · 2 channels with a guide$/"
@@ -451,7 +451,7 @@ fn user_source(t: &mut T, srv: &Server, alt: &str) {
     t.press("text:Remove");
     t.wait("text:Remove “Alt Renamed”?", 2);
     assert!(t.shows(
-        "text:“Alt Renamed” will no longer be downloaded. Its programmes go away at the next guide update."
+        "text:“Alt Renamed” will no longer be downloaded. Its programs go away at the next guide update."
     ));
     t.key("enter");
     t.gone("text:Remove “Alt Renamed”?", 2);
@@ -501,7 +501,7 @@ fn deleting(t: &mut T) {
     t.press("text:Delete");
     t.wait("text:Delete “Linked”?", 2);
     assert!(t.shows(
-        "text:Its 2 channels, its guide and your favourites from it will be gone from the app. The playlist at your provider is not affected."
+        "text:Its 2 channels, its guide and your favorites from it will be gone from the app. The playlist at your provider is not affected."
     ));
     t.press("text:Keep it");
     t.gone("text:Delete “Linked”?", 2);

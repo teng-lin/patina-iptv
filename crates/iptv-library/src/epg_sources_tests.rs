@@ -31,7 +31,7 @@ fn lines(sources: &[GuideSource]) -> Vec<SourceLine> {
                 attempted_at: 0,
                 error: None,
                 channel_count: 1,
-                programme_count: 2,
+                program_count: 2,
                 listed_count: 3,
             }),
         })

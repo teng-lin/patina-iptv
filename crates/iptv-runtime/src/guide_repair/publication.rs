@@ -95,7 +95,7 @@ pub(super) async fn after_commit(
     owner: &Rc<Runtime>,
     commit: Commit,
     edit: u64,
-    cancelled: Option<crate::library::ImportCompletion>,
+    canceled: Option<crate::library::ImportCompletion>,
 ) -> Outcome {
     let id = commit.id.clone();
     let source = commit.source;
@@ -158,7 +158,7 @@ pub(super) async fn after_commit(
                 .is_some_and(|op| {
                     op.commit.revisions == commit.revisions
                         && op.commit.undone == commit.undone
-                        && op.phase != OperationPhase::Cancelled
+                        && op.phase != OperationPhase::Canceled
                 })
         };
         if !current_operation() {
@@ -194,7 +194,7 @@ pub(super) async fn after_commit(
             };
         }
         if still_current && effective != Effective::Installed {
-            schedule(&owner, &commit, cancelled);
+            schedule(&owner, &commit, canceled);
         }
         owner.emit(crate::RuntimeEvent::GuideChanged);
     });
@@ -235,7 +235,7 @@ fn refresh_observed(
             || status.commit.undone != undone
             || matches!(
                 status.phase,
-                OperationPhase::Superseded | OperationPhase::Cancelled
+                OperationPhase::Superseded | OperationPhase::Canceled
             )
         {
             return;
@@ -278,7 +278,7 @@ fn schedule(owner: &Rc<Runtime>, commit: &Commit, after: Option<crate::library::
     owner.clone().spawn(async move {
         // Coalesce consecutive batches before acquiring any network connection.
         owner.delay(Duration::from_secs(2)).await;
-        if cancel.is_cancelled() {
+        if cancel.is_canceled() {
             return;
         }
         if let Some(operation) = owner.repairs.borrow_mut().operations.get_mut(&id) {
@@ -296,7 +296,7 @@ fn schedule(owner: &Rc<Runtime>, commit: &Commit, after: Option<crate::library::
             status.phase = OperationPhase::Failed;
             status.effective = Effective::Failed;
         }
-        if !cancel.is_cancelled() {
+        if !cancel.is_canceled() {
             owner
                 .repairs
                 .borrow_mut()

@@ -21,7 +21,7 @@ class SourceNotices(unittest.TestCase):
         with tarfile.open(fileobj=buffer, mode="w:xz") as archive:
             for name in ["glib-2.90.1/LICENSES/LGPL.txt", "glib-2.90.1/../../LICENSE-escape"]:
                 entry = tarfile.TarInfo(name)
-                data = b"synthetic licence text"
+                data = b"synthetic license text"
                 entry.size = len(data)
                 archive.addfile(entry, io.BytesIO(data))
         payload = buffer.getvalue()
@@ -38,7 +38,7 @@ class SourceNotices(unittest.TestCase):
             destination.mkdir()
             with patch.object(bundle.urllib.request, "urlopen", return_value=io.BytesIO(payload)):
                 bundle.glib_source_notices(prefix, destination)
-            self.assertEqual((destination / "source/LICENSES/LGPL.txt").read_text(), "synthetic licence text")
+            self.assertEqual((destination / "source/LICENSES/LGPL.txt").read_text(), "synthetic license text")
             self.assertFalse((root / "LICENSE-escape").exists())
             self.assertTrue((destination / "source.json").exists())
 

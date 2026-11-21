@@ -37,7 +37,7 @@ pub enum Status {
     Completed,
     Partial,
     Failed,
-    Cancelled,
+    Canceled,
     Missed,
 }
 impl Status {
@@ -51,7 +51,7 @@ impl Status {
             Self::Completed => "Completed",
             Self::Partial => "Partial recording",
             Self::Failed => "Failed",
-            Self::Cancelled => "Cancelled",
+            Self::Canceled => "Canceled",
             Self::Missed => "Missed",
         }
     }
@@ -99,7 +99,7 @@ impl Repeat {
             Self::Once => "Once",
             Self::Daily => "Every day",
             Self::Weekly => "Every week",
-            Self::Series => "Every matching programme",
+            Self::Series => "Every matching program",
         }
     }
     pub fn advance(self, step: i64) -> Self {
@@ -113,11 +113,11 @@ impl Repeat {
 pub struct RuleId(pub i64);
 
 /// A guide occurrence is identified by its original start, independently of
-/// padding or a record-now capture that begins after the programme started.
+/// padding or a record-now capture that begins after the program started.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RecurrenceTiming {
-    pub programme_start: i64,
-    pub programme_end: i64,
+    pub program_start: i64,
+    pub program_end: i64,
     pub lead_seconds: u32,
     pub trail_seconds: u32,
 }
@@ -188,7 +188,7 @@ pub struct Screen {
     pub draft: Option<Draft>,
     pub busy: bool,
     pub read_generation: u64,
-    /// The content selected when an action menu opened; catalogue row indices
+    /// The content selected when an action menu opened; catalog row indices
     /// may change while that menu remains visible.
     pub context: Option<(crate::menu::Origin, Request)>,
 }
@@ -201,8 +201,8 @@ pub struct Draft {
     pub trail_minutes: i64,
     pub editing: Option<JobId>,
     pub repeat: Repeat,
-    pub programme_start: Option<i64>,
-    pub programme_end: Option<i64>,
+    pub program_start: Option<i64>,
+    pub program_end: Option<i64>,
     /// A player action starts immediately without opening the scheduling form.
     pub immediate: bool,
     pub entry: Option<Entry>,
@@ -237,8 +237,8 @@ impl Draft {
             trail_minutes: 0,
             editing: None,
             repeat: Repeat::Once,
-            programme_start: None,
-            programme_end: None,
+            program_start: None,
+            program_end: None,
             immediate: false,
             entry: None,
             options_open: false,
@@ -262,14 +262,14 @@ impl Draft {
                 self.request.start = self.request.start.saturating_add(delta).max(now);
                 self.request.end = self.request.start.saturating_add(duration);
                 // An explicit date/time edit becomes the new nominal window.
-                self.programme_start = None;
-                self.programme_end = None;
+                self.program_start = None;
+                self.program_end = None;
             }
             2 => {
                 let previous = self.request.end;
                 self.request.end = self.request.start
                     + (self.request.end - self.request.start + step * 900).clamp(60, MAX_DURATION);
-                if let Some(end) = self.programme_end.as_mut() {
+                if let Some(end) = self.program_end.as_mut() {
                     *end = end.saturating_add(self.request.end - previous);
                 }
             }
@@ -298,8 +298,8 @@ impl Draft {
             .ok_or("Recording time unavailable")?;
         self.request.start = start;
         self.request.end = end;
-        self.programme_start = None;
-        self.programme_end = None;
+        self.program_start = None;
+        self.program_end = None;
         Ok(())
     }
     /// Exact time/duration entry is shared by remote keyboards and touch.
@@ -358,8 +358,8 @@ impl Draft {
                     .ok_or("Recording time unavailable")?;
                 self.request.start = start;
                 self.request.end = end;
-                self.programme_start = None;
-                self.programme_end = None;
+                self.program_start = None;
+                self.program_end = None;
             }
             EntryField::Name => {
                 let name = entry.text.trim();
@@ -386,8 +386,8 @@ impl Draft {
                     .ok_or("Recording time unavailable")?;
                 self.request.start = start;
                 self.request.end = end;
-                self.programme_start = None;
-                self.programme_end = None;
+                self.program_start = None;
+                self.program_end = None;
             }
             EntryField::Duration => {
                 let duration = clock(&entry.text)
@@ -400,7 +400,7 @@ impl Draft {
                     .start
                     .checked_add(duration)
                     .ok_or("Recording time unavailable")?;
-                if let Some(end) = self.programme_end.as_mut() {
+                if let Some(end) = self.program_end.as_mut() {
                     *end += self.request.end - previous;
                 }
             }
@@ -467,7 +467,7 @@ mod tests {
                 source: 1,
                 channel: "synthetic".into(),
                 channel_name: "Synthetic channel".into(),
-                title: "Generated programme".into(),
+                title: "Generated program".into(),
                 start: 100,
                 end: 200,
             },
@@ -482,7 +482,7 @@ mod tests {
             source: 1,
             channel: "generated".into(),
             channel_name: "Generated".into(),
-            title: "Generated programme".into(),
+            title: "Generated program".into(),
             start: 1000,
             end: 2000,
         });
@@ -507,7 +507,7 @@ mod tests {
             source: 1,
             channel: "generated".into(),
             channel_name: "Generated".into(),
-            title: "Generated programme".into(),
+            title: "Generated program".into(),
             start: 1000,
             end: 2000,
         };
@@ -540,8 +540,8 @@ mod tests {
         request.start = 86400 + 10 * 3600;
         request.end = request.start + 3600;
         let mut draft = Draft::new(request);
-        draft.programme_start = Some(draft.request.start);
-        draft.programme_end = Some(draft.request.end);
+        draft.program_start = Some(draft.request.start);
+        draft.program_end = Some(draft.request.end);
         draft.entry = Some(Entry {
             field: EntryField::Time,
             text: "12:05".into(),
@@ -553,7 +553,7 @@ mod tests {
             .unwrap();
         assert_eq!(draft.request.start, 86400 + 10 * 3600 + 5 * 60);
         assert_eq!(draft.request.end - draft.request.start, 3600);
-        assert_eq!(draft.programme_start, None);
+        assert_eq!(draft.program_start, None);
         draft.entry = Some(Entry {
             field: EntryField::Duration,
             text: "1:10".into(),
@@ -635,7 +635,7 @@ mod tests {
         assert_eq!(rule.local_window(0), None);
     }
     #[test]
-    fn invalid_windows_and_ended_programmes_are_rejected() {
+    fn invalid_windows_and_ended_programs_are_rejected() {
         let mut r = job(1).request;
         assert!(r.validate(150).is_ok());
         assert!(r.validate(200).is_err());

@@ -435,7 +435,7 @@ fn field_row(ui: Ui, size: Scale, field: Field) -> View {
     let mark = move || mark(ui, target);
     let guide = field == Field::EpgUrl;
     let empty_guide = move || guide && value().is_empty();
-    let value_colour = move || {
+    let value_color = move || {
         if value().is_empty() {
             mark().secondary()
         } else {
@@ -491,7 +491,7 @@ fn field_row(ui: Ui, size: Scale, field: Field) -> View {
                 .child(
                     when(empty_guide, move || {
                         ui_kit::body(size, move || words::placeholder(field))
-                            .text_color(value_colour)
+                            .text_color(value_color)
                     })
                     .otherwise(move || {
                         ui_kit::label(size, move || {
@@ -502,7 +502,7 @@ fn field_row(ui: Ui, size: Scale, field: Field) -> View {
                                 shown_value(field, &v)
                             }
                         })
-                        .text_color(value_colour)
+                        .text_color(value_color)
                     }),
                 )
                 .child(

@@ -88,7 +88,7 @@ its credentials at run time from outside the repository and leave no trace in
 files, logs or screenshots. This applies to issues and pull request
 descriptions too.
 
-**Behaviour, not artwork.** Patina follows the behaviour of a reference TV
+**Behavior, not artwork.** Patina follows the behavior of a reference TV
 guide experience, but shares none of its code, artwork, icons, fonts, layouts
 or wording. Do not copy any of those. The palette in
 `crates/iptv-app/src/theme.rs` is Patina's own.
@@ -120,7 +120,7 @@ with `--locked`; a download is checked against a SHA-256.
 - Use the body to say what changed and why, including what you ruled out. A
   reviewer should not need the diff to understand the intent.
 - One logical change per commit. Keep moves and refactors apart from
-  behaviour changes.
+  behavior changes.
 - Add or update tests with the change. A bug fix comes with a test that fails
   without it.
 - Add a line to the Unreleased section of [CHANGELOG.md](CHANGELOG.md) when
@@ -129,7 +129,7 @@ with `--locked`; a download is checked against a SHA-256.
   it; see [Locked package builds](docs/release.md#locked-package-builds).
 
 By contributing you agree that your contribution is licensed under
-[AGPL-3.0-only](LICENSE), the licence of the project.
+[AGPL-3.0-only](LICENSE), the license of the project.
 
 ## Reporting security problems
 
@@ -155,12 +155,12 @@ pass. Restore the device's accessibility settings afterwards.
   content item, including after a list reorder.
 - Set Patina's Appearance → Font size to Extra large. Also try Android's
   largest system font size and record whether it affects the app. Verify
-  settings, backup/restore, organisation, custom groups and guide assignment
+  settings, backup/restore, organization, custom groups and guide assignment
   remain operable, labels do not overlap, and long guide titles ellipsize while
   retaining the full accessible text.
 - For each of `zh`, `zh-Hant`, `ja` and `ko`, select the interface language,
   open the guide and settings, and save a screenshot using synthetic CJK
-  channel and programme names. Check for missing-glyph boxes and clipping.
+  channel and program names. Check for missing-glyph boxes and clipping.
 - Return the interface language and Android font/accessibility settings to
   their initial values. Include any unresolved failures in the PR.
 

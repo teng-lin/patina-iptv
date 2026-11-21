@@ -8,7 +8,7 @@
 //! - **TLS:** rustls with the ring provider and the Mozilla root set
 //!   (webpki-roots), plus optional extra roots. No OpenSSL, no aws-lc, no
 //!   platform verifier, so it cross-compiles for Android with only the NDK
-//!   clang (for ring) and needs no JNI initialisation. User-installed
+//!   clang (for ring) and needs no JNI initialization. User-installed
 //!   Android CAs are therefore not trusted (pass them as extra roots).
 //! - **HTTP:** HTTP/1.1; `gzip`/`deflate` `Content-Encoding` decoded
 //!   transparently (a `.gz` *file* is passed through for the parsers to

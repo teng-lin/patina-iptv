@@ -27,7 +27,7 @@ application and pinned framework SHAs with validation evidence.
 | Parental policy | [portable policy](../crates/iptv-core/src/parental.rs), [runtime admission](../crates/iptv-runtime/src/parental.rs) | [PIN UI](../crates/iptv-app/src/parental_view.rs) | `cargo test -p iptv-core parental`; [runtime parental-access scenarios](../crates/iptv-runtime/tests/it/parental_access.rs) and app parental scenarios; revocation during queued work |
 | Recording lifecycle | [portable model](../crates/iptv-core/src/recording.rs), [runtime](../crates/iptv-runtime/src/recordings.rs), [native ownership](../crates/iptv-runtime/src/recordings/host.rs) | [recording host adapter](../crates/iptv-app/src/recording_host.rs), [Android host](../hosts/android) | [runtime recording recovery](../crates/iptv-runtime/src/recordings/recovery_tests.rs) and app recorder-startup/transport scenarios; device background/resume checks |
 | Playback and native controls | [core playback](../crates/iptv-core/src/playback.rs), [runtime playback](../crates/iptv-runtime/src/playback.rs), [opening](../crates/iptv-runtime/src/opening.rs) | [player adapter](../crates/iptv-player-mpv/src/lib.rs), [persistent surface](../crates/iptv-app/src/video.rs), [Android host](../hosts/android) | `cargo test -p iptv-player-mpv`; app playback/PiP/multiview scenarios; native playback on each changed host |
-| Localization/accessibility | [portable messages](../crates/iptv-core/src/i18n.rs), [contrast policy](../crates/iptv-app/src/theme.rs) | [message adapter](../crates/iptv-app/src/i18n.rs), [assistive-technology checklist](../CONTRIBUTING.md#screen-readers-and-large-text) | core catalogue tests, app catalogue/interface-language/accessibility scenarios; actual assistive-technology checks for host changes |
+| Localization/accessibility | [portable messages](../crates/iptv-core/src/i18n.rs), [contrast policy](../crates/iptv-app/src/theme.rs) | [message adapter](../crates/iptv-app/src/i18n.rs), [assistive-technology checklist](../CONTRIBUTING.md#screen-readers-and-large-text) | core catalog tests, app catalog/interface-language/accessibility scenarios; actual assistive-technology checks for host changes |
 | Release and packaging | [release contract](release.md), [workflow](../.github/workflows/release.yml) | [CI tools](../tools/ci), [Android hosts](../hosts/android) | affected Python/shell/host tests, package smoke and workflow gates from the release contract |
 
 Runtime services have [a declared compatibility boundary](runtime-api-v1.md).
@@ -63,7 +63,7 @@ cargo test -p iptv-app --features test-support --test app recordings_transport
 cargo test -p iptv-app --features test-support --test app tv_player
 cargo test -p iptv-app --features test-support --test app pip_control
 cargo test -p iptv-app --features test-support --test app multiview_menu
-cargo test -p iptv-app --features test-support --test app catalogue_lint
+cargo test -p iptv-app --features test-support --test app catalog_lint
 cargo test -p iptv-app --features test-support --test app interface_languages
 cargo test -p iptv-app --features test-support --test app accessibility_visibility
 python3 tools/ci/test-release-workflow.py
@@ -78,7 +78,7 @@ Examples of impact assessment:
 
 - A settings-only change needs schema/default/serialization checks and the
   affected settings screen. A persisted setting also needs restart and
-  backup/restore coverage; a translated label needs catalogue/layout checks.
+  backup/restore coverage; a translated label needs catalog/layout checks.
 - A persistence change needs real SQLite migrations from historical fixtures,
   repeated startup and failure preservation. Exercise encrypted opens and
   restore when those paths are touched, rather than using SQL mocks alone.

@@ -2,12 +2,12 @@
 //! window). Every tile keeps the video's 16:9 within an area of any
 //! shape; the caller insets each rectangle by its gap.
 //!
-//! - The grid: one tile centred at half the width; two side by side;
+//! - The grid: one tile centered at half the width; two side by side;
 //!   three as two above one; four two by two (five to nine would take
-//!   three columns). A row that is not full is centred, and so is the
+//!   three columns). A row that is not full is centered, and so is the
 //!   whole grid.
-//! - Enlarged: one tile big at the top centre, the others small in a
-//!   centred strip under it (the strip's tiles [`THUMB`] of the big one's
+//! - Enlarged: one tile big at the top center, the others small in a
+//!   centered strip under it (the strip's tiles [`THUMB`] of the big one's
 //!   width); together they fill the height when the width allows.
 
 /// The video's shape, width over height.
@@ -26,7 +26,7 @@ pub struct Rect {
 }
 
 impl Rect {
-    fn centre(self) -> (f32, f32) {
+    fn center(self) -> (f32, f32) {
         (self.x + self.w / 2.0, self.y + self.h / 2.0)
     }
 }
@@ -64,17 +64,17 @@ impl Layout {
     }
 
     /// The tile next to tile `from` in a direction (`dx`, `dy`: −1, 0 or
-    /// 1, one of them zero): of those whose centre lies that way and that
+    /// 1, one of them zero): of those whose center lies that way and that
     /// overlap it across, the nearest (the first of equals). Laid out on a
     /// 16:9 area.
-    pub fn neighbour(self, from: usize, dx: i8, dy: i8) -> Option<usize> {
+    pub fn neighbor(self, from: usize, dx: i8, dy: i8) -> Option<usize> {
         let r = self.rect(from, VIDEO);
-        let at = r.centre();
+        let at = r.center();
         (0..self.tiles())
             .filter(|&i| i != from)
             .filter_map(|i| {
                 let o = self.rect(i, VIDEO);
-                let c = o.centre();
+                let c = o.center();
                 let (along, across, overlap) = if dx != 0 {
                     let overlap = (r.y + r.h).min(o.y + o.h) - r.y.max(o.y);
                     ((c.0 - at.0) * f32::from(dx), c.1 - at.1, overlap)

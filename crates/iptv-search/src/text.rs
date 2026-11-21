@@ -1,4 +1,4 @@
-//! Text folding, query tokenisation and the one matcher every search uses.
+//! Text folding, query tokenization and the one matcher every search uses.
 //!
 //! Folding is iptv-epg's [`normalize_name`] applied word by word: the same
 //! compatibility decomposition, diacritic removal, lowercasing and special

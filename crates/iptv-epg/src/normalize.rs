@@ -1,4 +1,4 @@
-//! Channel-name normalisation for EPG matching.
+//! Channel-name normalization for EPG matching.
 
 use unicode_normalization::UnicodeNormalization;
 use unicode_normalization::char::is_combining_mark;

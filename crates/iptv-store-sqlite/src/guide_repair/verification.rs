@@ -1,4 +1,4 @@
-//! Verification reads actual bindings/programmes, never infers them from commit.
+//! Verification reads actual bindings/programs, never infers them from commit.
 use super::*;
 
 #[derive(Clone, Debug)]
@@ -7,7 +7,7 @@ pub struct RepairVerification {
     pub examined_mapping: u64,
     pub examined_configuration: u64,
     pub channels: usize,
-    pub programmes_available: usize,
+    pub programs_available: usize,
     pub covered_seconds: u64,
     pub configuration_effective: bool,
     pub authorized: bool,
@@ -69,7 +69,7 @@ impl Store {
             .0;
         let mut totals = tx.prepare_cached(
             "SELECT COUNT(*),COALESCE(SUM(
-            MAX(0,MIN(stop,?3)-MAX(start,?2))),0) FROM epg_programmes
+            MAX(0,MIN(stop,?3)-MAX(start,?2))),0) FROM epg_programs
             WHERE channel_id=?1 AND start<?3 AND stop>?2",
         )?;
         let mut binding = tx.prepare_cached(
@@ -151,7 +151,7 @@ impl Store {
             }
         }
         // Feed-only repairs have indirect effects; certify inputs, not invented
-        // programme availability for channels never selected in the batch.
+        // program availability for channels never selected in the batch.
         if rows.is_empty() {
             effective &= inputs_current && bindings_current && automatic_current;
         }
@@ -161,7 +161,7 @@ impl Store {
             examined_mapping,
             examined_configuration,
             channels: rows.len(),
-            programmes_available: available,
+            programs_available: available,
             covered_seconds: covered,
             configuration_effective: effective,
             authorized,
@@ -356,7 +356,7 @@ impl Store {
             JOIN store_meta m ON m.key='inspection.feed.' || g.source_id || '.' || g.feed_id
             WHERE c.source_id=?1 AND m.value=i.incarnation AND f.url=g.url
             AND f.shift_minutes=g.shift_minutes AND g.enabled=1
-            AND EXISTS(SELECT 1 FROM epg_programmes p WHERE p.channel_id=c.id) LIMIT 100001",
+            AND EXISTS(SELECT 1 FROM epg_programs p WHERE p.channel_id=c.id) LIMIT 100001",
         )?;
         let available = statement
             .query_map([source.0], |r| Ok((iptv_epg::FeedId(r.get(0)?), r.get(1)?)))?
@@ -370,7 +370,7 @@ impl Store {
 }
 
 impl Store {
-    /// Semantic programme/binding evidence, stable across physical no-op imports.
+    /// Semantic program/binding evidence, stable across physical no-op imports.
     /// Hash rows incrementally on the bounded analysis connection; no row IDs.
     pub fn guide_repair_coverage_revision(
         &self,
@@ -382,7 +382,7 @@ impl Store {
         let mut digest = Sha256::new();
         digest.update(self.source_incarnation(source)?.as_bytes());
         // Effective automatic proof is part of the examined evidence, including
-        // catalogue changes that leave mapping/configuration revisions intact.
+        // catalog changes that leave mapping/configuration revisions intact.
         let (_, configuration) = revisions(&self.conn, source)?;
         let (current, fingerprint) =
             self.guide_repair_automatic_projection_current(source, configuration)?;
@@ -394,7 +394,7 @@ impl Store {
             m.value,p.start,p.stop,p.title,b.match_kind FROM epg_bindings b
             JOIN epg_channels c ON c.id=b.epg_channel_id
             LEFT JOIN store_meta m ON m.key='inspection.feed.' || c.source_id || '.' || c.feed_id
-            LEFT JOIN epg_programmes p ON p.channel_id=c.id AND p.start<?3 AND p.stop>?2
+            LEFT JOIN epg_programs p ON p.channel_id=c.id AND p.start<?3 AND p.stop>?2
             WHERE b.source_id=?1 ORDER BY b.channel_key,c.feed_id,c.epg_channel,p.start,p.stop,p.title")?;
         let mut rows = statement.query(params![source.0, from, to])?;
         while let Some(row) = rows.next()? {

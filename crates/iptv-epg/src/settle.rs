@@ -1,15 +1,15 @@
-//! The rules that turn one EPG channel's raw programmes into its schedule,
+//! The rules that turn one EPG channel's raw programs into its schedule,
 //! shared by [`crate::SourceBuilder`] (in memory) and stores that stream a
-//! feed to disk, so both keep exactly the same programmes:
+//! feed to disk, so both keep exactly the same programs:
 //!
-//! 1. As each programme arrives ([`ScheduleRules::admit`]): one whose stop
+//! 1. As each program arrives ([`ScheduleRules::admit`]): one whose stop
 //!    is not after its start, or that ended before the retention cutoff, is
 //!    dropped.
-//! 2. Of several programmes with the same start, the longest is kept (a
+//! 2. Of several programs with the same start, the longest is kept (a
 //!    missing stop counts as shortest; equal ones: the first in input),
 //!    see [`ScheduleRules::replaces`].
 //! 3. Per channel, in start order ([`ScheduleRules::settle`]): a missing
-//!    stop becomes the next programme's start, a programme running into the
+//!    stop becomes the next program's start, a program running into the
 //!    next one is cut at the next start; then one still without a stop, one
 //!    that ended before the cutoff, or one that does not fit the compact
 //!    slot (more than ~136 years from the channel's first start or long) is
@@ -18,12 +18,12 @@
 use crate::store::{IngestReport, StoreOptions};
 use crate::time::{DAY, UnixTime};
 
-/// What becomes of one programme when its channel is settled.
+/// What becomes of one program when its channel is settled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Settled {
     /// Kept, ending at `stop`.
     Keep { stop: UnixTime },
-    /// No stop and no following programme.
+    /// No stop and no following program.
     NoStop,
     /// Ended at or before the retention cutoff.
     Retention,
@@ -47,8 +47,8 @@ impl ScheduleRules {
         }
     }
 
-    /// Whether a programme arriving with `start`/`stop` is kept for now;
-    /// a dropped one is counted in `report` (`programmes_in` counts every
+    /// Whether a program arriving with `start`/`stop` is kept for now;
+    /// a dropped one is counted in `report` (`programs_in` counts every
     /// call).
     pub fn admit(
         &self,
@@ -56,7 +56,7 @@ impl ScheduleRules {
         stop: Option<UnixTime>,
         report: &mut IngestReport,
     ) -> bool {
-        report.programmes_in += 1;
+        report.programs_in += 1;
         let Some(stop) = stop else {
             return true;
         };
@@ -71,17 +71,17 @@ impl ScheduleRules {
         }
     }
 
-    /// Whether a programme stopping at `new` replaces an earlier one with
+    /// Whether a program stopping at `new` replaces an earlier one with
     /// the same start stopping at `old` (strictly longer; `None` is
     /// shortest).
     pub fn replaces(new: Option<UnixTime>, old: Option<UnixTime>) -> bool {
         new.unwrap_or(UnixTime::MIN) > old.unwrap_or(UnixTime::MIN)
     }
 
-    /// Settles one channel. `rows`: its admitted programmes as `(start,
+    /// Settles one channel. `rows`: its admitted programs as `(start,
     /// stop)`, sorted by start, one per start ([`Self::replaces`] chose
     /// it). `out` hears each row's fate by index; `report` counts trims,
-    /// drops, `kept` and `channels_with_programmes`.
+    /// drops, `kept` and `channels_with_programs`.
     pub fn settle(
         &self,
         rows: &[(UnixTime, Option<UnixTime>)],
@@ -124,7 +124,7 @@ impl ScheduleRules {
             out(i, fate);
         }
         report.kept += kept;
-        report.channels_with_programmes += u64::from(kept > 0);
+        report.channels_with_programs += u64::from(kept > 0);
     }
 }
 
@@ -180,7 +180,7 @@ mod tests {
             ),
             (3, 1, 1, 1)
         );
-        assert_eq!(r.channels_with_programmes, 1);
+        assert_eq!(r.channels_with_programs, 1);
     }
 
     #[test]
@@ -190,7 +190,7 @@ mod tests {
         assert!(rules.admit(10, None, &mut r));
         assert!(!rules.admit(10, Some(10), &mut r));
         assert!(rules.admit(10, Some(11), &mut r));
-        assert_eq!((r.programmes_in, r.dropped_bad_duration), (3, 1));
+        assert_eq!((r.programs_in, r.dropped_bad_duration), (3, 1));
         assert!(ScheduleRules::replaces(Some(5), None));
         assert!(!ScheduleRules::replaces(None, Some(5)));
         assert!(!ScheduleRules::replaces(Some(5), Some(5)));

@@ -18,29 +18,29 @@ fn combined_refreshes_replace_one_check_without_disturbing_other_sources() {
         let (other_ticket, other_token) = runtime.schedule_guide_check(other, generation).unwrap();
         let first = library::import_completion(CancelToken::new());
         library::track_import(&runtime, source, &first);
-        assert!(original.is_cancelled());
+        assert!(original.is_canceled());
         assert!(!runtime.has_guide_check(source));
         first.finish();
         assert!(library::import_is_current(&runtime, source, &first));
         let (_, first_check) = runtime.schedule_guide_check(source, generation).unwrap();
         let second = library::import_completion(CancelToken::new());
         library::track_import(&runtime, source, &second);
-        assert!(first_check.is_cancelled());
+        assert!(first_check.is_canceled());
         assert!(!library::import_is_current(&runtime, source, &first));
         second.finish();
         let (ticket, check) = runtime.schedule_guide_check(source, generation).unwrap();
         assert!(runtime.guide_check_current(source, ticket));
         assert!(runtime.guide_check_current(other, other_ticket));
-        assert!(!other_token.is_cancelled());
+        assert!(!other_token.is_canceled());
         // A late response from a previous screen cannot cancel the new timer.
         assert!(
             runtime
                 .schedule_guide_check(source, generation.wrapping_sub(1))
                 .is_none()
         );
-        assert!(!check.is_cancelled());
+        assert!(!check.is_canceled());
         runtime.cancel_guide_checks();
-        assert!(check.is_cancelled());
-        assert!(other_token.is_cancelled());
+        assert!(check.is_canceled());
+        assert!(other_token.is_canceled());
     }
 }

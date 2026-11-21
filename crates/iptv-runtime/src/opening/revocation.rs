@@ -1,6 +1,6 @@
 //! Real-store ordering checks; the held continuation belongs to this opening.
 use super::*;
-use iptv_epg::{EpgRef, MatchKind, SourceBuilder, StoreOptions, XmltvProgramme};
+use iptv_epg::{EpgRef, MatchKind, SourceBuilder, StoreOptions, XmltvProgram};
 use iptv_import::{EpgSourceConfig, GuideSink};
 use iptv_providers::SecretUrl;
 use iptv_store_sqlite::{DatabaseKey, EpgFeedMeta, SourcePolicy, Store};
@@ -55,12 +55,12 @@ fn fixture_marking(
 fn guide(key: &ChannelKey, title: &str) -> (GuideStore, EpgFeedMeta) {
     let feed = iptv_epg::FeedId(1);
     let mut builder = SourceBuilder::new(feed, 0, StoreOptions::default(), NOW);
-    builder.push_programme(XmltvProgramme {
+    builder.push_program(XmltvProgram {
         channel: "generated".into(),
         start: NOW,
         stop: Some(NOW + 3600),
         title: title.into(),
-        ..XmltvProgramme::default()
+        ..XmltvProgram::default()
     });
     let mut guide = GuideStore::new();
     guide.replace_source(builder.finish());
@@ -98,7 +98,7 @@ fn staged_guide(
         .begin_feed(meta.config.id, 0, StoreOptions::default(), NOW)
         .unwrap();
     stage
-        .programme("generated", &guide.programme_at(key, NOW).unwrap().data())
+        .program("generated", &guide.program_at(key, NOW).unwrap().data())
         .unwrap();
     stage.finish_feed().unwrap();
     let import = iptv_import::EpgImport {
@@ -142,7 +142,7 @@ async fn title(
     services
         .call(move |store| {
             let guide = store.load_epg(source, &EpgWindow::from(NOW, 1))?;
-            Ok(guide.programme_at(&key, NOW).map(|p| p.title().to_owned()))
+            Ok(guide.program_at(&key, NOW).map(|p| p.title().to_owned()))
         })
         .await
         .unwrap()
@@ -189,15 +189,15 @@ fn revoked_cached_metadata_cannot_discard_a_newer_guide() {
                 // Test each accepting token independently while metadata is held.
                 if cancel_all {
                     cancel.cancel();
-                    assert!(!work.guide.is_cancelled());
+                    assert!(!work.guide.is_canceled());
                 } else {
                     crate::library::revoke_import_handoff(&owner, source);
-                    assert!(work.guide.is_cancelled() && !cancel.is_cancelled());
+                    assert!(work.guide.is_canceled() && !cancel.is_canceled());
                 }
                 let channel = key.clone();
                 services
                     .call(move |store| {
-                        write_guide(store, source, &channel, "Fresh generated programme")
+                        write_guide(store, source, &channel, "Fresh generated program")
                     })
                     .await
                     .unwrap();
@@ -205,7 +205,7 @@ fn revoked_cached_metadata_cannot_discard_a_newer_guide() {
                 let cached = opening.await;
                 assert_eq!(
                     title(&services, source, key.clone()).await.as_deref(),
-                    Some("Fresh generated programme")
+                    Some("Fresh generated program")
                 );
                 assert!(!cached, "a superseded discard is no cached policy answer");
                 drop(tx);
@@ -231,7 +231,7 @@ fn a_superseded_download_cannot_replace_a_newer_guide() {
             let source = job.stored.unwrap();
             let channel = key.clone();
             services
-                .call(move |store| write_guide(store, source, &channel, "New generated programme"))
+                .call(move |store| write_guide(store, source, &channel, "New generated program"))
                 .await
                 .unwrap();
             let channel = key.clone();
@@ -240,11 +240,7 @@ fn a_superseded_download_cannot_replace_a_newer_guide() {
                 move || {
                     let (downloaded, _scratch, meta) = services
                         .blocking(move |store| {
-                            Ok(staged_guide(
-                                store,
-                                &channel,
-                                "Obsolete generated programme",
-                            ))
+                            Ok(staged_guide(store, &channel, "Obsolete generated program"))
                         })
                         .unwrap();
                     let stop = CancelToken::new();
@@ -271,7 +267,7 @@ fn a_superseded_download_cannot_replace_a_newer_guide() {
             std::thread::spawn(worker).join().unwrap();
             assert_eq!(
                 title(&services, source, key).await.as_deref(),
-                Some("New generated programme")
+                Some("New generated program")
             );
         });
         assert!(owner.drain_services());
@@ -286,8 +282,8 @@ fn marked(phase: &str) -> bool {
 }
 
 /// Showing the first screen reads the store on the reader lane (the
-/// library, organisation and favourites): the whole window's read, far
-/// longer on a large catalogue, waits until it is shown instead of
+/// library, organization and favorites): the whole window's read, far
+/// longer on a large catalog, waits until it is shown instead of
 /// queueing those reads behind it (#160).
 #[test]
 fn the_window_read_waits_until_the_first_screen_is_shown() {
@@ -299,7 +295,7 @@ fn the_window_read_waits_until_the_first_screen_is_shown() {
     support::block_on(async {
         let source = job.stored.unwrap();
         services
-            .call(move |store| write_guide(store, source, &key, "Generated programme"))
+            .call(move |store| write_guide(store, source, &key, "Generated program"))
             .await
             .unwrap();
         let cancel = CancelToken::new();

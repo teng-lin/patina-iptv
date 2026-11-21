@@ -121,7 +121,7 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
         .replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
         .unwrap();
     let favorite = parsed.channels.items[1].id.clone();
-    store.set_favourite(source, &favorite, true).unwrap();
+    store.set_favorite(source, &favorite, true).unwrap();
     store
         .move_channel(source, &OrderScope::All, &favorite, 0)
         .unwrap();
@@ -135,12 +135,12 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
     step(app.press("text:/^☰  /"));
     step(app.press_key("right"));
     step(app.press_key("m"));
-    step(app.wait_for(&message("Manage favourites…")));
+    step(app.wait_for(&message("Manage favorites…")));
     step(app.press(&message("Settings >> nth=1")));
     step(app.wait_for(&message("Back up")));
     let archive = home.join("generated.patinabackup");
     step(app.on_pick_save_path(Some(archive.clone())));
-    // Native dialogs default to Cancel: cancelling export creates no archive.
+    // Native dialogs default to Cancel: canceling export creates no archive.
     step(app.press(&message("Back up")));
     assert!(!archive.exists());
     app.on_dialog(|_| DialogAnswer::Press(word("Choose file…")));
@@ -163,7 +163,7 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
     step(app.press(&message("Restore a backup")));
     step(app.press_key("down"));
     step(app.press_key("enter"));
-    step(app.wait_for(&message("Scheduled restore cancelled")));
+    step(app.wait_for(&message("Scheduled restore canceled")));
     step(app.wait_for_gone(
         &message("Scheduled for next launch"),
         Duration::from_secs(3),
@@ -209,10 +209,10 @@ fn language_tag() -> String {
 
 fn word(source: &str) -> String {
     // The existing restore confirmation composes its heading with a question
-    // mark rather than storing a separate catalogue key.
-    if !iptv_core::i18n::is_catalogued(source)
+    // mark rather than storing a separate catalog key.
+    if !iptv_core::i18n::is_cataloged(source)
         && let Some(base) = source.strip_suffix('?')
-        && iptv_core::i18n::is_catalogued(base)
+        && iptv_core::i18n::is_cataloged(base)
     {
         return format!("{}?", word(base));
     }

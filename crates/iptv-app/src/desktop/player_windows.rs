@@ -99,7 +99,7 @@ fn follow_lists(local: Ui) {
             if !std::rc::Rc::ptr_eq(&previous, &next) {
                 let kept = crate::lists::keep_in(local, previous);
                 crate::lists::restore(local, kept);
-                // These open presentations also contain catalogue row indices.
+                // These open presentations also contain catalog row indices.
                 local.menu.set(None);
                 local.description.set(None);
                 local.chooser.set(None);

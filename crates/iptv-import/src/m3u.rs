@@ -21,7 +21,7 @@ use crate::error::{ImportError, ParseProblem, Step};
 use crate::fetch::Fetch;
 use crate::progress::{Phase, Progress, ProgressSink, REPORT_EVERY_BYTES};
 
-/// Leading decoded bytes kept to recognise HTML/JSON bodies.
+/// Leading decoded bytes kept to recognize HTML/JSON bodies.
 const SNIFF: usize = 512;
 
 /// Decodes (optionally gzip) and parses a playlist fed in chunks.

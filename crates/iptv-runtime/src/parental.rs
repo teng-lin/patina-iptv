@@ -233,7 +233,7 @@ impl Runtime {
         Ok(())
     }
     /// Update authorization for a bounded set of content identities. The full
-    /// catalogue snapshot is reserved for boot, catalogue changes and management.
+    /// catalog snapshot is reserved for boot, catalog changes and management.
     pub(crate) async fn parental_refresh_targets(&self, targets: Vec<Target>) -> Result<(), Error> {
         self.refresh_targets(targets, None).await.map(|_| ())
     }
@@ -911,7 +911,7 @@ mod source_tests {
         }
     }
     #[tokio::test(flavor = "current_thread")]
-    async fn targeted_checks_keep_unrelated_catalogue_memberships_out_of_the_read() {
+    async fn targeted_checks_keep_unrelated_catalog_memberships_out_of_the_read() {
         let directory = tempfile::tempdir().unwrap();
         let owner = std::rc::Rc::new(Runtime::new(crate::Ports::new(
             directory.path().to_owned(),

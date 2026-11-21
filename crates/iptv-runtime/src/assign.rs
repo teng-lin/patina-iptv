@@ -5,7 +5,7 @@
 //! (`stored::overrides`).
 //!
 //! It shows at once when the stored guide allows it: no guide, or a guide
-//! channel whose programmes are stored (another playlist channel uses it).
+//! channel whose programs are stored (another playlist channel uses it).
 //! Otherwise (a guide channel nothing used yet, or back to automatic,
 //! which needs the full channel lists) the playlist's guide is downloaded
 //! right away and matched with the choice.

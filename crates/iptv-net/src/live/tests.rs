@@ -436,7 +436,7 @@ async fn capture_reader_itself_retains_incoming_owner_after_live_input_is_droppe
 }
 
 #[tokio::test]
-async fn cancelling_pending_preparation_waits_for_its_upstream_to_close() {
+async fn canceling_pending_preparation_waits_for_its_upstream_to_close() {
     let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .await
         .unwrap();

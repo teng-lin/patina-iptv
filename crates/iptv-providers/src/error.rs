@@ -145,13 +145,13 @@ impl fmt::Display for StalkerError {
 
 impl std::error::Error for StalkerError {}
 
-/// Why no catch-up URL could be built for a programme.
+/// Why no catch-up URL could be built for a program.
 ///
 /// Unit variants only: neither `Debug` nor `Display` can carry a URL, a
 /// template or a credential from the playlist.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CatchupError {
-    /// The mode needs a `catchup-source` (or a programme `catchup-id`) that
+    /// The mode needs a `catchup-source` (or a program `catchup-id`) that
     /// the playlist or the request does not provide.
     MissingTemplate,
     /// The channel has no catch-up, its type has no URL rule here (unknown
@@ -161,9 +161,9 @@ pub enum CatchupError {
     /// (not HTTP for `shift`, not Flussonic or Xtream-shaped, not a URL).
     MalformedUrl,
     /// The requested position has not been broadcast yet.
-    FutureProgramme,
+    FutureProgram,
     /// The requested position is older than the archive window or past the
-    /// programme's end.
+    /// program's end.
     OutsideArchive,
 }
 
@@ -173,8 +173,8 @@ impl fmt::Display for CatchupError {
             Self::MissingTemplate => "the channel's catch-up needs a source it does not declare",
             Self::Unsupported => "catch-up is not available for this channel",
             Self::MalformedUrl => "the stream URL does not fit the channel's catch-up type",
-            Self::FutureProgramme => "the programme has not been broadcast yet",
-            Self::OutsideArchive => "the programme is outside the archive window",
+            Self::FutureProgram => "the program has not been broadcast yet",
+            Self::OutsideArchive => "the program is outside the archive window",
         })
     }
 }

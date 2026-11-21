@@ -34,7 +34,7 @@ example credential or stream address leaks, flaws in catalog encryption,
 unsafe handling of playlists, guides or backups, and weaknesses in the build
 and release pipeline.
 
-Out of scope: the content or behaviour of IPTV providers (Patina ships no
+Out of scope: the content or behavior of IPTV providers (Patina ships no
 channels), and vulnerabilities in bundled third-party libraries that have an
 upstream fix, though we do want to know when a release ships an affected
 version.

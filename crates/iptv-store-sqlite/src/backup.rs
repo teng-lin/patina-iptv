@@ -102,7 +102,7 @@ impl Store {
                     None,
                 )?;
             }
-            // Media and host-local jobs are outside portable catalogue backups.
+            // Media and host-local jobs are outside portable catalog backups.
             destination.execute("DELETE FROM recording_rules", [])?;
             destination.execute("DELETE FROM recording_jobs", [])?;
             // A standalone file, even when the source uses WAL.

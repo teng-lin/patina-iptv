@@ -102,7 +102,7 @@ pub static COMMANDS: &[Command] = &[
         S::General,
         "",
         "general.backup",
-        key("Write settings and customisations to a backup file."),
+        key("Write settings and customizations to a backup file."),
     ),
     Command::new(
         S::General,
@@ -142,7 +142,7 @@ pub static COMMANDS: &[Command] = &[
         S::General,
         "",
         "general.about",
-        key("Version, licences and policies."),
+        key("Version, licenses and policies."),
     ),
     Command::new(
         S::Playlists,
@@ -186,7 +186,7 @@ pub static COMMANDS: &[Command] = &[
         S::Epg,
         "",
         "epg.manage_sources",
-        key("Assign, prioritise and remove guide sources."),
+        key("Assign, prioritize and remove guide sources."),
     ),
     Command::new(
         S::Epg,
@@ -237,7 +237,7 @@ pub static COMMANDS: &[Command] = &[
         S::Remote,
         "mapping",
         "remote.restore_defaults",
-        key("Drop every key customisation."),
+        key("Drop every key customization."),
     )
     .confirm()
     .resets(&["remote.key_overrides"]),

@@ -16,7 +16,7 @@ archive on its download reference, and the toolchain is listed as a build
 input under `formulation`. A source lock is refused: it names what a build may
 download, not what a package bundles.
 
-android-classpath: from the Gradle dependency licence report
+android-classpath: from the Gradle dependency license report
 (hosts/android/app/build/reports/dependency-license/index.json).
 
 Both fail without writing a document when the input is empty, malformed or
@@ -373,7 +373,7 @@ def optional_text(record, key, where):
 
 
 def module_licenses(item, where):
-    """The licence the report names: one per module, or a `moduleLicenses` list."""
+    """The license the report names: one per module, or a `moduleLicenses` list."""
     rows = [item]
     if "moduleLicenses" in item:
         rows = item["moduleLicenses"]
@@ -390,7 +390,7 @@ def module_licenses(item, where):
 def android_classpath_sbom(report, output_path=None, version="0.1.0"):
     """The CycloneDX document of the Android release classpath.
 
-    `report` is the JSON of the Gradle dependency licence report (a path or
+    `report` is the JSON of the Gradle dependency license report (a path or
     its parsed content). Every dependency must be a `group:name` Maven
     coordinate at a fixed version; anything else fails instead of being
     written down as a guess.

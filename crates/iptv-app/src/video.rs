@@ -45,7 +45,7 @@
 //! player, closing its connections, and reopens it when the app comes back
 //! (live at the live edge, catch-up where it was) with no events between:
 //! the app only pauses its stall checks (`player::bind`). Desktop players
-//! play on in a minimised window.
+//! play on in a minimized window.
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

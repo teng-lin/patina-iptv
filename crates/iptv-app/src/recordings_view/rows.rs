@@ -89,7 +89,7 @@ pub(super) fn job_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
                             Some(Status::Recording) => Icon::Record,
                             Some(Status::Scheduled) => Icon::Clock,
                             Some(Status::Completed) => Icon::Check,
-                            Some(Status::Cancelled) => Icon::Close,
+                            Some(Status::Canceled) => Icon::Close,
                             _ => Icon::Warning,
                         })
                     })

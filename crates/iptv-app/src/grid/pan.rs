@@ -1,5 +1,5 @@
 //! The guide's timeline under a finger or a mouse drag: the core's
-//! [`Timeline`] model, shown by sliding the rows' programmes, the ruler's
+//! [`Timeline`] model, shown by sliding the rows' programs, the ruler's
 //! times and the now line with one animated offset, so a pan moves no cell
 //! and rebuilds them only when its [`Band`] moves (`iptv_core::timeline`).
 //!
@@ -13,7 +13,7 @@
 //!
 //! Units: NSH's pan reports the finger's movement and speed in dp (the
 //! Android view divides its pixels by the density, 1.5 on a 1920 × 1200
-//! tablet), the same unit as the programme area's laid-out width, so
+//! tablet), the same unit as the program area's laid-out width, so
 //! `delta / ppm` follows the finger 1:1 and nothing is scaled twice.
 
 use std::time::Instant;
@@ -32,7 +32,7 @@ const FRAME_S: f32 = 1.0 / 60.0;
 pub(crate) struct Pan {
     ui: Ui,
     model: Stored<Timeline>,
-    /// The programme area's width (dp): [`VISIBLE`] minutes span it.
+    /// The program area's width (dp): [`VISIBLE`] minutes span it.
     width: Signal<f32>,
     span: Memo<i32>,
     /// The minutes the rows hold cells for, and the minute a cell's start
@@ -180,7 +180,7 @@ impl Pan {
         self.show();
     }
 
-    /// A pan starts from the focus: a live programme anchors its channel
+    /// A pan starts from the focus: a live program anchors its channel
     /// for browse playback while the pan moves the focus along the row
     /// (`browse_playback::current`); a pan from where an earlier one left
     /// the focus keeps that anchor; any other focus has none.
@@ -288,13 +288,13 @@ impl Pan {
         }
     }
 
-    fn cancelled(&self) {
+    fn canceled(&self) {
         self.model.with(Timeline::cancel);
         self.settle();
     }
 
     /// Straight to now's window (the Now button): the focused channel's
-    /// live programme, as Home.
+    /// live program, as Home.
     pub(crate) fn to_now(self) {
         self.ui.touched();
         self.fling.with(|g| *g += 1);
@@ -303,7 +303,7 @@ impl Pan {
     }
 }
 
-/// The focused row, its programme's start, and whether that airs now.
+/// The focused row, its program's start, and whether that airs now.
 fn focused(ui: Ui) -> (usize, i32, bool) {
     let view = crate::lists::view(ui);
     ui.focus.with_untracked(|f| {
@@ -324,5 +324,5 @@ pub(crate) fn panning<E: Interactive>(area: E, pan: Pan) -> E {
         .on_responder_grant(move |_: &ResponderEvent| pan.grabbed())
         .on_responder_move(move |e: &ResponderEvent| pan.dragged(&e.gesture))
         .on_responder_release(move |e: &ResponderEvent| pan.released(&e.gesture))
-        .on_responder_terminate(move |_: &ResponderEvent| pan.cancelled())
+        .on_responder_terminate(move |_: &ResponderEvent| pan.canceled())
 }

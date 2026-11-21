@@ -108,7 +108,7 @@ pub struct IndirectEffect {
     pub after: Option<Target>,
     /// Schedule shifts and feed changes can affect a binding that retains identity.
     pub timing_changed: bool,
-    /// Metadata predicts candidates; programme availability may change the effective winner.
+    /// Metadata predicts candidates; program availability may change the effective winner.
     pub availability_unknown: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -162,7 +162,7 @@ pub enum OperationPhase {
     Verified,
     Failed,
     Superseded,
-    Cancelled,
+    Canceled,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Outcome {
@@ -192,7 +192,7 @@ pub struct Verification {
     pub current: Revisions,
     pub window: TimeWindow,
     pub channels: usize,
-    pub programmes_available: usize,
+    pub programs_available: usize,
     pub covered_seconds: u64,
     pub identity_unresolved: bool,
     pub current_revision: bool,
@@ -215,7 +215,7 @@ pub enum Error {
     Conflict(Vec<String>),
     Storage,
     Busy,
-    Cancelled,
+    Canceled,
 }
 impl From<InspectionError> for Error {
     fn from(value: InspectionError) -> Self {

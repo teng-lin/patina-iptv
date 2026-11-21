@@ -88,16 +88,16 @@ fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_p
             support::guide(
                 support::now(),
                 &[
-                    ("amber.main", "Synthetic Amber", "Synthetic Main Programme"),
+                    ("amber.main", "Synthetic Amber", "Synthetic Main Program"),
                     (
                         "amber.east",
                         "Synthetic Amber East",
-                        "Synthetic Unmatched Programme",
+                        "Synthetic Unmatched Program",
                     ),
                     (
                         "birch.east",
                         "Synthetic Birch East",
-                        "Synthetic Birch Programme",
+                        "Synthetic Birch Program",
                     ),
                 ],
             ),
@@ -106,11 +106,7 @@ fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_p
             "/extra.xml",
             support::guide(
                 support::now(),
-                &[(
-                    "extra.north",
-                    "Synthetic Extra",
-                    "Synthetic Extra Programme",
-                )],
+                &[("extra.north", "Synthetic Extra", "Synthetic Extra Program")],
             ),
         ),
     ]);
@@ -272,7 +268,7 @@ fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_p
     t.press("text:Synthetic Amber >> nth=0");
     t.wait("text:Synthetic Amber East", 10);
     t.press("text:Synthetic Amber East");
-    t.wait("text:/Synthetic Unmatched Programme/", 10);
+    t.wait("text:/Synthetic Unmatched Program/", 10);
     t.press("text:Add this guide choice");
     t.wait("id:guide-repair-screen", 5);
     t.press("text:Keep selecting channels");
@@ -285,7 +281,7 @@ fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_p
     t.gone("id:guide-inspection-screen >> text:Loading…", 10);
     t.wait("text:Synthetic Birch East", 10);
     t.press("text:Synthetic Birch East");
-    t.wait("text:/Synthetic Birch Programme/", 10);
+    t.wait("text:/Synthetic Birch Program/", 10);
     t.press("text:Add this guide choice");
     t.wait("id:guide-repair-screen", 5);
     t.press("text:Preview guide changes");

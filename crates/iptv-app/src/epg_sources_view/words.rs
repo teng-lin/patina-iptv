@@ -55,7 +55,7 @@ pub fn failure(kind: ImportErrorKind) -> &'static str {
         ImportErrorKind::HttpStatus => tr("the server turned the request down"),
         ImportErrorKind::InvalidBody => tr("the answer was not guide data"),
         ImportErrorKind::InvalidConfig => tr("the link is incomplete"),
-        ImportErrorKind::Cancelled => tr("it was stopped"),
+        ImportErrorKind::Canceled => tr("it was stopped"),
         _ => tr("something went wrong"),
     }
 }
@@ -97,8 +97,8 @@ pub fn status(line: &SourceLine, when: impl Fn(i64) -> String) -> (String, bool)
                     &[("count", state.channel_count.into())],
                 ),
                 trf(
-                    "{count, plural, one {# programme} other {# programmes}}",
-                    &[("count", state.programme_count.into())],
+                    "{count, plural, one {# program} other {# programs}}",
+                    &[("count", state.program_count.into())],
                 ),
                 updated,
             ],
@@ -155,7 +155,7 @@ pub fn sheet(kind: &EditKind) -> (&'static str, &'static str) {
 pub fn remove_consequences(s: &GuideSource) -> String {
     trf(
         "“{name}” will no longer be downloaded. \
-         Its programmes go away at the next guide update.",
+         Its programs go away at the next guide update.",
         &[("name", (&title(s)).into())],
     )
 }
@@ -215,7 +215,7 @@ mod tests {
         assert_eq!(
             remove_consequences(&l.source),
             "“Synthetic Guide” will no longer be downloaded. \
-             Its programmes go away at the next guide update."
+             Its programs go away at the next guide update."
         );
         assert_eq!(shift(30), "Times +0:30 h");
         assert_eq!(act(Act::Switch, &l.source), "Switch off");
@@ -254,7 +254,7 @@ mod tests {
             ImportErrorKind::HttpStatus,
             ImportErrorKind::InvalidBody,
             ImportErrorKind::InvalidConfig,
-            ImportErrorKind::Cancelled,
+            ImportErrorKind::Canceled,
             ImportErrorKind::Other,
         ];
         let words: Vec<_> = kinds.into_iter().map(failure).collect();
@@ -279,13 +279,13 @@ mod tests {
             attempted_at: 0,
             error: None,
             channel_count: 1,
-            programme_count: 240,
+            program_count: 240,
             listed_count: 50,
         };
         assert_eq!(
             status(&line(true, Some(r.clone())), when),
             (
-                "1 channel used · 240 programmes · updated 14:05 · Times −1:30 h".to_owned(),
+                "1 channel used · 240 programs · updated 14:05 · Times −1:30 h".to_owned(),
                 false
             )
         );
@@ -308,7 +308,7 @@ mod tests {
             attempted_at: 0,
             error: None,
             channel_count: 2,
-            programme_count: 240,
+            program_count: 240,
             listed_count: 50,
         };
         let used = line(true, Some(r.clone()));
@@ -366,7 +366,7 @@ mod tests {
             ImportErrorKind::HttpStatus,
             ImportErrorKind::InvalidBody,
             ImportErrorKind::InvalidConfig,
-            ImportErrorKind::Cancelled,
+            ImportErrorKind::Canceled,
             ImportErrorKind::Other,
         ];
         let english = kinds.map(failure);

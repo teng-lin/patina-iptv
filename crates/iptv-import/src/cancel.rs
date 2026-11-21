@@ -15,7 +15,7 @@ use crate::error::ImportError;
 
 #[derive(Default, Debug)]
 struct Inner {
-    cancelled: AtomicBool,
+    canceled: AtomicBool,
     wakers: Mutex<Vec<Option<Waker>>>,
 }
 
@@ -30,7 +30,7 @@ impl CancelToken {
 
     /// Requests cancellation and wakes any import waiting on the network.
     pub fn cancel(&self) {
-        if !self.0.cancelled.swap(true, Ordering::SeqCst) {
+        if !self.0.canceled.swap(true, Ordering::SeqCst) {
             let wakers = std::mem::take(&mut *self.lock());
             for w in wakers.into_iter().flatten() {
                 w.wake();
@@ -38,13 +38,13 @@ impl CancelToken {
         }
     }
 
-    pub fn is_cancelled(&self) -> bool {
-        self.0.cancelled.load(Ordering::SeqCst)
+    pub fn is_canceled(&self) -> bool {
+        self.0.canceled.load(Ordering::SeqCst)
     }
 
     /// Resolves once [`CancelToken::cancel`] is called.
-    pub fn cancelled(&self) -> Cancelled<'_> {
-        Cancelled {
+    pub fn canceled(&self) -> Canceled<'_> {
+        Canceled {
             token: self,
             registration: None,
         }
@@ -55,27 +55,27 @@ impl CancelToken {
     }
 }
 
-/// Future returned by [`CancelToken::cancelled`].
+/// Future returned by [`CancelToken::canceled`].
 #[derive(Debug)]
-pub struct Cancelled<'a> {
+pub struct Canceled<'a> {
     token: &'a CancelToken,
     registration: Option<usize>,
 }
 
-impl Future for Cancelled<'_> {
+impl Future for Canceled<'_> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         let this = self.get_mut();
         let token = this.token;
-        if token.is_cancelled() {
+        if token.is_canceled() {
             this.unregister();
             return Poll::Ready(());
         }
         let incoming = cx.waker().clone();
         let mut wakers = token.lock();
         // Cancellation sets the flag before taking this lock and draining it.
-        if token.is_cancelled() {
+        if token.is_canceled() {
             drop(wakers);
             this.unregister();
             return Poll::Ready(());
@@ -96,7 +96,7 @@ impl Future for Cancelled<'_> {
     }
 }
 
-impl Cancelled<'_> {
+impl Canceled<'_> {
     fn unregister(&mut self) {
         if let Some(slot) = self.registration.take() {
             let mut wakers = self.token.lock();
@@ -109,7 +109,7 @@ impl Cancelled<'_> {
         }
     }
 }
-impl Drop for Cancelled<'_> {
+impl Drop for Canceled<'_> {
     fn drop(&mut self) {
         self.unregister();
     }
@@ -120,27 +120,27 @@ pub(crate) async fn or_cancel<T>(
     cancel: &CancelToken,
     fut: impl Future<Output = T>,
 ) -> Result<T, ImportError> {
-    if cancel.is_cancelled() {
-        return Err(ImportError::Cancelled);
+    if cancel.is_canceled() {
+        return Err(ImportError::Canceled);
     }
     let mut fut = pin!(fut);
-    let mut stop = pin!(cancel.cancelled());
+    let mut stop = pin!(cancel.canceled());
     poll_fn(|cx| {
         if let Poll::Ready(v) = fut.as_mut().poll(cx) {
             return Poll::Ready(Ok(v));
         }
         if stop.as_mut().poll(cx).is_ready() {
-            return Poll::Ready(Err(ImportError::Cancelled));
+            return Poll::Ready(Err(ImportError::Canceled));
         }
         Poll::Pending
     })
     .await
 }
 
-/// `Err(Cancelled)` once cancellation was requested.
+/// `Err(Canceled)` once cancellation was requested.
 pub(crate) fn check(cancel: &CancelToken) -> Result<(), ImportError> {
-    if cancel.is_cancelled() {
-        Err(ImportError::Cancelled)
+    if cancel.is_canceled() {
+        Err(ImportError::Canceled)
     } else {
         Ok(())
     }
@@ -159,7 +159,7 @@ mod tests {
             self.0.fetch_add(1, Ordering::SeqCst);
         }
     }
-    fn poll(waiter: &mut Cancelled<'_>, count: &Arc<Count>) -> Poll<()> {
+    fn poll(waiter: &mut Canceled<'_>, count: &Arc<Count>) -> Poll<()> {
         let waker = Waker::from(count.clone());
         Pin::new(waiter).poll(&mut Context::from_waker(&waker))
     }
@@ -168,12 +168,12 @@ mod tests {
     fn every_live_waiter_wakes_even_after_shared_token_churn() {
         let token = CancelToken::new();
         let counts: Vec<_> = (0..40).map(|_| Arc::new(Count::default())).collect();
-        let mut waiters: Vec<_> = counts.iter().map(|_| token.cancelled()).collect();
+        let mut waiters: Vec<_> = counts.iter().map(|_| token.canceled()).collect();
         for (waiter, count) in waiters.iter_mut().zip(&counts) {
             assert!(poll(waiter, count).is_pending());
         }
         for _ in 0..100 {
-            assert!(poll(&mut token.cancelled(), &Arc::new(Count::default())).is_pending());
+            assert!(poll(&mut token.canceled(), &Arc::new(Count::default())).is_pending());
         }
         token.cancel();
         for (waiter, count) in waiters.iter_mut().zip(&counts) {
@@ -187,7 +187,7 @@ mod tests {
         let token = CancelToken::new();
         let previous = Arc::new(Count::default());
         let current = Arc::new(Count::default());
-        let mut waiter = token.cancelled();
+        let mut waiter = token.canceled();
         assert!(poll(&mut waiter, &previous).is_pending());
         assert!(poll(&mut waiter, &current).is_pending());
         token.cancel();
@@ -200,7 +200,7 @@ mod tests {
         let token = CancelToken::new();
         let abandoned = Arc::new(Count::default());
         for _ in 0..100 {
-            assert!(poll(&mut token.cancelled(), &abandoned).is_pending());
+            assert!(poll(&mut token.canceled(), &abandoned).is_pending());
         }
         token.cancel();
         assert_eq!(abandoned.0.load(Ordering::SeqCst), 0);
@@ -214,7 +214,7 @@ mod tests {
             std::thread::scope(|scope| {
                 let token_ref = &token;
                 let cancellation = scope.spawn(move || token_ref.cancel());
-                let mut waiter = token.cancelled();
+                let mut waiter = token.canceled();
                 let first = poll(&mut waiter, &count);
                 cancellation.join().unwrap();
                 assert!(first.is_ready() || count.0.load(Ordering::SeqCst) > 0);

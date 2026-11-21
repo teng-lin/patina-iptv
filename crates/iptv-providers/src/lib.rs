@@ -13,14 +13,14 @@
 //! that panels send as numbers or strings, `null`, `""`, `"N/A"` or PHP's
 //! `[]` become `None` instead of failing.
 //!
-//! **Stable ids.** See [`id`] for the rule that lets favourites, order and
+//! **Stable ids.** See [`id`] for the rule that lets favorites, order and
 //! hidden flags survive provider refreshes.
 //!
 //! **No secret leaks.** Credentials, tokens and MACs are wrapped in types
 //! whose `Debug`/`Display` redact; requests and responses redact in `Debug`;
 //! errors never quote bodies.
 //!
-//! Behaviour follows IPTVnator's documented provider compatibility rules,
+//! Behavior follows IPTVnator's documented provider compatibility rules,
 //! rewritten in Rust. M3U catch-up follows Kodi pvr.iptvsimple's documented
 //! modes where the two differ (see [`m3u::build_catchup_url`]).
 //!

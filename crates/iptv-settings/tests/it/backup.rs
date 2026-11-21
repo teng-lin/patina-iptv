@@ -12,7 +12,7 @@ fn sample() -> Settings {
     st.set("guide.autoplay", Value::Bool(true)).unwrap();
     st.set("history.recent_count", Value::Int(15)).unwrap();
     st.set("epg.time_offset", Value::ms(-30 * 60_000)).unwrap();
-    st.set("appearance.accent", Value::colour("teal")).unwrap();
+    st.set("appearance.accent", Value::color("teal")).unwrap();
     st.set("appearance.font_size", Value::choice("large"))
         .unwrap();
     st.set("logos.folder", Value::text("/storage/logos"))
@@ -70,7 +70,7 @@ fn round_trip_preserves_every_value_type_and_level() {
 }
 
 #[test]
-fn serialisation_is_stable_and_minimal() {
+fn serialization_is_stable_and_minimal() {
     let st = sample();
     let text = st.to_json_string();
     assert_eq!(text, st.clone().to_json_string());
@@ -238,7 +238,7 @@ fn version_1_documents_are_migrated() {
     });
     let (st, report) = load(v1);
     assert_eq!(report.version, 1);
-    assert_eq!(report.migrations, [1, 2]);
+    assert_eq!(report.migrations, [1, 2, 3]);
     assert!(report.unknown.is_empty());
     assert_eq!(st.duration_ms(keys::CONTROLS_PANEL_TIMEOUT, G), 9_000);
     assert!(st.bool(keys::AUTOPLAY, G));
@@ -294,11 +294,83 @@ fn version_2_folds_the_overlay_stay_choice_into_one() {
     })));
 
     let (st, report) = load(v2(json!({"guide.stay_on_guide_overlay": false})));
-    assert_eq!(report.migrations, [2]);
+    assert_eq!(report.migrations, [2, 3]);
     assert!(report.unknown.is_empty(), "the old key is gone, not kept");
     let saved = st.to_json();
     assert!(saved["global"].get("guide.stay_on_guide_overlay").is_none());
     assert!(load(saved).1.is_clean());
+}
+
+/// A backup written before US spelling (#139) restores every choice.
+#[test]
+fn version_3_documents_keep_their_choices_in_us_spelling() {
+    let v3 = json!({
+        "format": FORMAT,
+        "version": 3,
+        "global": {
+            "guide.show_programmes": false,
+            "appearance.accent": "blue_grey",
+            "appearance.background": "dark_grey",
+            "guide.now_highlight_style": "colour"
+        },
+        "playlists": {"pl-1": {"guide.show_programmes": false}},
+        "groups": {"pl-1": {"grp-1": {"appearance.accent": "grey"}}}
+    });
+    let (st, report) = load(v3);
+    assert_eq!(report.version, 3);
+    assert_eq!(report.migrations, [3]);
+    assert!(report.unknown.is_empty(), "{:?}", report.unknown);
+    // Both settings are global only: the overrides are kept (renamed) but
+    // not applied, as for any override at a level a setting does not allow.
+    let rejected: Vec<&Entry> = report.rejected.iter().map(|(e, _)| e).collect();
+    assert_eq!(
+        rejected,
+        [
+            &entry(Target::playlist("pl-1"), "guide.show_programs"),
+            &entry(Target::group("pl-1", "grp-1"), "appearance.accent"),
+        ]
+    );
+    assert_eq!(st.get("guide.show_programs").unwrap(), Value::Bool(false));
+    assert_eq!(st.color(keys::ACCENT, G), "blue_gray");
+    assert_eq!(st.color(keys::BACKGROUND, G), "dark_gray");
+    assert_eq!(
+        st.get("guide.now_highlight_style").unwrap(),
+        Value::Enum("color".into())
+    );
+    let saved = st.to_json();
+    assert_eq!(saved["version"], json!(VERSION));
+    assert_eq!(
+        saved["global"],
+        json!({
+            "appearance.accent": "blue_gray",
+            "appearance.background": "dark_gray",
+            "guide.now_highlight_style": "color",
+            "guide.show_programs": false
+        })
+    );
+    assert_eq!(
+        saved["playlists"]["pl-1"],
+        json!({"guide.show_programs": false})
+    );
+    assert_eq!(
+        saved["groups"]["pl-1"]["grp-1"],
+        json!({"appearance.accent": "gray"})
+    );
+    let (again, report) = load(saved);
+    assert!(report.migrations.is_empty() && report.unknown.is_empty());
+    assert_eq!(again, st);
+}
+
+#[test]
+fn version_3_keeps_a_value_already_under_the_us_key() {
+    let v3 = json!({
+        "format": FORMAT,
+        "version": 3,
+        "global": {"guide.show_programmes": false, "guide.show_programs": true}
+    });
+    let (st, report) = load(v3);
+    assert!(report.unknown.is_empty());
+    assert_eq!(st.get("guide.show_programs").unwrap(), Value::Bool(true));
 }
 
 #[test]
@@ -493,7 +565,7 @@ fn migrations_reach_every_layer() {
         "groups": {"pl-1": {"grp-1": {"player.panel_timeout_secs": 6}}}
     });
     let (st, report) = load(v1);
-    assert_eq!(report.migrations, [1, 2]);
+    assert_eq!(report.migrations, [1, 2, 3]);
     // The renamed key is global-only, so the overrides are kept but not
     // applied, under the new name.
     let rejected: Vec<&Entry> = report.rejected.iter().map(|(e, _)| e).collect();

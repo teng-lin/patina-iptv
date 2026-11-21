@@ -1,5 +1,5 @@
-//! The favourites editor overlay for the list on screen (from the menu's
-//! "Manage favourites…"): a star per channel, OK toggles, Left removes the
+//! The favorites editor overlay for the list on screen (from the menu's
+//! "Manage favorites…"): a star per channel, OK toggles, Left removes the
 //! whole list, Right adds it, Back leaves; persistent hints and, for touch,
 //! a tap per row plus "Add all" / "Remove all" buttons. Changes are saved
 //! by channel key (`favorites.rs`) at once.
@@ -77,7 +77,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 let starred = ui.app.favorites.with(|f| e.starred(f));
                 let group = crate::lists::entry_name(e.group, &*crate::schedule());
                 trf(
-                    "Favourites · {group} · {starred} of {total}",
+                    "Favorites · {group} · {starred} of {total}",
                     &[
                         ("group", (&group).into()),
                         ("starred", starred.into()),

@@ -11,7 +11,7 @@ type Chunk = (Vec<u8>, oneshot::Sender<Result<(), Failure>>);
 
 /// Owns a recording spool until all accepted writes have stopped.
 ///
-/// Keep this value outside a cancellable capture future and call [`Self::finish`]
+/// Keep this value outside a cancelable capture future and call [`Self::finish`]
 /// before renaming or deleting the spool. Dropping it requests shutdown but cannot
 /// interrupt an OS write; worker capacity remains reserved until actual termination.
 pub struct CaptureFile {

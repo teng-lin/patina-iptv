@@ -4,7 +4,7 @@
 //! sources' order, each with its source and whether a channel uses it,
 //! narrows them by the filter and by typing, and saves a choice that the
 //! guide shows: a channel no other one uses (downloaded first), one whose
-//! programmes are stored (at once), no guide data, automatic again. With
+//! programs are stored (at once), no guide data, automatic again. With
 //! every source switched off the stored guide goes, and the chooser with
 //! it.
 //!
@@ -164,7 +164,7 @@ fn lists_and_narrows(t: &mut T) {
         "Automatic",
         "Matched by its guide id and name",
         "No guide data",
-        "The guide shows no programmes for it",
+        "The guide shows no programs for it",
         "one · Main Guide · in use",
         "two · Main Guide · in use",
         "spare · Main Guide",

@@ -18,7 +18,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("desktop.rs", "WINDOW"),           // Native window handle.
     ("desktop.rs", "POINTER"),          // Pointer position within the window.
     ("desktop.rs", "LAST_MOVE"),        // Pointer gesture clock.
-    ("desktop.rs", "TRAVELLED"),        // Last pointer place, for Keys to Pointer.
+    ("desktop.rs", "TRAVELED"),         // Last pointer place, for Keys to Pointer.
     ("fonts.rs", "FITTED"),             // Font measurement cache.
     ("fonts.rs", "FONTS_IN"),           // Font registration flag.
     ("guide_assign_view.rs", "REQUEST"), // Discard stale dialog replies.
@@ -26,7 +26,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("i18n.rs", "SYSTEM"),              // System locale cache.
     ("i18n.rs", "WORDING_SETTINGS"),    // cfg(test)-only scoped wording preferences.
     ("i18n/pseudo.rs", "ENABLED"),      // test-support-only pseudolocale environment flag.
-    ("i18n/pseudo.rs", "FIXED"),        // test-support-only immutable expanded catalogue.
+    ("i18n/pseudo.rs", "FIXED"),        // test-support-only immutable expanded catalog.
     ("input.rs", "REMOTE_PHASES"),      // test-support-only remote key phase switch.
     ("input.rs", "REPEATS"),            // test-support-only keyboard repeat mirror.
     ("lib.rs", "RUNTIME"),              // The shell's single application handle.

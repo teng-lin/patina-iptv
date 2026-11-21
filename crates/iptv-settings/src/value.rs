@@ -12,7 +12,7 @@ pub enum Value {
     Enum(String),
     Text(String),
     /// A palette key.
-    Colour(String),
+    Color(String),
     KeyBindings(Vec<KeyBinding>),
 }
 
@@ -25,8 +25,8 @@ impl Value {
         Value::Text(text.to_owned())
     }
 
-    pub fn colour(name: &str) -> Value {
-        Value::Colour(name.to_owned())
+    pub fn color(name: &str) -> Value {
+        Value::Color(name.to_owned())
     }
 
     pub const fn ms(ms: i64) -> Value {
@@ -44,7 +44,7 @@ impl Value {
             Value::Duration(_) => "duration",
             Value::Enum(_) => "enum",
             Value::Text(_) => "text",
-            Value::Colour(_) => "colour",
+            Value::Color(_) => "color",
             Value::KeyBindings(_) => "key_bindings",
         }
     }
@@ -78,7 +78,7 @@ impl PressKind {
 /// every context. Names are tokens (`[a-z][a-z0-9_]*`, ≤ 32 chars): key
 /// names follow `iptv_nav::RemoteKey::name` (`ok`, `channel_up`,
 /// `digit_5`); context and action names are owned by the input layer,
-/// which ignores bindings it does not recognise.
+/// which ignores bindings it does not recognize.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct KeyBinding {
     pub context: Option<String>,

@@ -1,5 +1,5 @@
 //! The search screen's state: query, history, results in two tabs
-//! (channels, programmes) and remote focus.
+//! (channels, programs) and remote focus.
 //!
 //! The view renders this state and sends [`SearchAction`]s; the state
 //! answers with a [`SearchEffect`] for the app to run (search, play, close).
@@ -13,7 +13,7 @@ use iptv_epg::UnixTime;
 
 use crate::channels::ChannelHit;
 use crate::history::SearchHistory;
-use crate::programmes::ProgrammeHit;
+use crate::programs::ProgramHit;
 use crate::text::Query;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,7 +47,7 @@ impl Tab {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ResultId {
     Channel(crate::ChannelId),
-    Programme {
+    Program {
         channel: crate::ChannelId,
         start: UnixTime,
     },
@@ -56,7 +56,7 @@ pub enum ResultId {
 impl ResultId {
     pub fn channel(&self) -> &crate::ChannelId {
         match self {
-            ResultId::Channel(c) | ResultId::Programme { channel: c, .. } => c,
+            ResultId::Channel(c) | ResultId::Program { channel: c, .. } => c,
         }
     }
 }
@@ -115,7 +115,7 @@ pub struct SearchState {
     focus: Focus,
     keyboard: bool,
     channels: Vec<ChannelHit>,
-    programmes: Vec<ProgrammeHit>,
+    programs: Vec<ProgramHit>,
     /// Last focused result per tab.
     remembered: [Option<ResultId>; 2],
     history: SearchHistory,
@@ -130,7 +130,7 @@ impl SearchState {
             focus: Focus::Input,
             keyboard: true,
             channels: Vec::new(),
-            programmes: Vec::new(),
+            programs: Vec::new(),
             remembered: [None, None],
             history,
         }
@@ -154,8 +154,8 @@ impl SearchState {
     pub fn channels(&self) -> &[ChannelHit] {
         &self.channels
     }
-    pub fn programmes(&self) -> &[ProgrammeHit] {
-        &self.programmes
+    pub fn programs(&self) -> &[ProgramHit] {
+        &self.programs
     }
     pub fn history(&self) -> &SearchHistory {
         &self.history
@@ -168,7 +168,7 @@ impl SearchState {
     pub fn count(&self, tab: Tab) -> usize {
         match tab {
             Tab::Channels => self.channels.len(),
-            Tab::Programs => self.programmes.len(),
+            Tab::Programs => self.programs.len(),
         }
     }
 
@@ -178,7 +178,7 @@ impl SearchState {
                 .channels
                 .get(i)
                 .map(|h| ResultId::Channel(h.identity.clone())),
-            Tab::Programs => self.programmes.get(i).map(|h| ResultId::Programme {
+            Tab::Programs => self.programs.get(i).map(|h| ResultId::Program {
                 channel: h.identity.clone(),
                 start: h.start,
             }),
@@ -223,14 +223,14 @@ impl SearchState {
         &mut self,
         query: &str,
         channels: Vec<ChannelHit>,
-        programmes: Vec<ProgrammeHit>,
+        programs: Vec<ProgramHit>,
     ) -> bool {
         if query != self.query || self.phase == Phase::Idle {
             return false;
         }
         self.channels = channels;
-        self.programmes = programmes;
-        self.phase = if self.channels.is_empty() && self.programmes.is_empty() {
+        self.programs = programs;
+        self.phase = if self.channels.is_empty() && self.programs.is_empty() {
             Phase::NoResults
         } else {
             Phase::Results
@@ -312,7 +312,7 @@ impl SearchState {
             Focus::Result(id) => {
                 let tab = match id {
                     ResultId::Channel(_) => Tab::Channels,
-                    ResultId::Programme { .. } => Tab::Programs,
+                    ResultId::Program { .. } => Tab::Programs,
                 };
                 if self.phase == Phase::Idle || self.position(tab, &id).is_none() {
                     return SearchEffect::None;
@@ -344,7 +344,7 @@ impl SearchState {
         if Query::parse(&self.query).is_empty() {
             self.phase = Phase::Idle;
             self.channels.clear();
-            self.programmes.clear();
+            self.programs.clear();
             self.remembered = [None, None];
             SearchEffect::None
         } else {

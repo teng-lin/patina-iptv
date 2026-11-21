@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use iptv_core::guide::Schedule;
 use iptv_epg::{
-    ChannelKey, DAY, EpgRef, FeedId, GuideStore, MatchKind, ProgrammeData, SourceBuilder,
+    ChannelKey, DAY, EpgRef, FeedId, GuideStore, MatchKind, ProgramData, SourceBuilder,
     StoreOptions,
 };
 
@@ -15,14 +15,14 @@ use super::{EpgSchedule, GuideChannel, LOADING, NO_INFORMATION};
 
 /// Hour-aligned "now".
 const NOW: i64 = 1_800_000_000;
-/// Programmes of 45 minutes from two days back: never on the hour slots.
+/// Programs of 45 minutes from two days back: never on the hour slots.
 const LEN: i64 = 45 * 60;
 const FIRST: i64 = NOW - 2 * DAY + 600;
 /// The first screen: the hour before now to six hours on.
 const FROM: i64 = NOW - 3600;
 const TO: i64 = NOW + 6 * 3600;
 
-/// Channel `a`'s programmes overlapping `[from, to)`, as the store reads them.
+/// Channel `a`'s programs overlapping `[from, to)`, as the store reads them.
 fn store_between(from: i64, to: i64) -> GuideStore {
     let mut b = SourceBuilder::new(FeedId(1), 0, StoreOptions::default(), NOW);
     let titles: Vec<String> = (0..(4 * DAY / LEN)).map(|n| format!("P{n}")).collect();
@@ -31,7 +31,7 @@ fn store_between(from: i64, to: i64) -> GuideStore {
         if start < to && start + LEN > from {
             b.push_data(
                 "a.test",
-                &ProgrammeData {
+                &ProgramData {
                     start,
                     stop: Some(start + LEN),
                     title,
@@ -87,7 +87,7 @@ fn title_at(s: &EpgSchedule, t: i64) -> String {
 fn only_the_first_screen_is_held_and_nothing_is_asked_for() {
     let (s, requests) = first_screen();
     assert_eq!(s.held(), Some((FROM, TO)));
-    // Now and the next hours: real programmes.
+    // Now and the next hours: real programs.
     let now = title_at(&s, NOW);
     assert_eq!(now, format!("P{}", (NOW - FIRST) / LEN));
     assert_ne!(title_at(&s, NOW + 5 * 3600), LOADING);
@@ -101,9 +101,9 @@ fn only_the_first_screen_is_held_and_nothing_is_asked_for() {
 }
 
 #[test]
-fn a_programme_across_the_first_screens_end_is_held_whole() {
+fn a_program_across_the_first_screens_end_is_held_whole() {
     let (s, _) = first_screen();
-    // The programme airing at the held end reaches past it.
+    // The program airing at the held end reaches past it.
     let across = (TO - FIRST) / LEN;
     let (start, stop) = (FIRST + across * LEN, FIRST + (across + 1) * LEN);
     assert!(start < TO && stop > TO);

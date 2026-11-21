@@ -1,6 +1,6 @@
-//! The empty Movies or Shows catalogue: why it is empty and its one action.
+//! The empty Movies or Shows catalog: why it is empty and its one action.
 //! The state is the core's ([`VodState`]), worked out from every enabled
-//! playlist, the ones the catalogue reads; the actions are the ones the playlists screen and the wizard
+//! playlist, the ones the catalog reads; the actions are the ones the playlists screen and the wizard
 //! already run (refresh a playlist, open its actions, add a playlist).
 use super::*;
 use crate::data::Activity;
@@ -15,12 +15,12 @@ fn problem(kind: ImportErrorKind) -> ImportProblem {
         | ImportErrorKind::AuthFailed
         | ImportErrorKind::Blocked => ImportProblem::Access,
         ImportErrorKind::InvalidBody => ImportProblem::Format,
-        ImportErrorKind::Cancelled => ImportProblem::Stopped,
+        ImportErrorKind::Canceled => ImportProblem::Stopped,
         _ => ImportProblem::Other,
     }
 }
 
-/// Every enabled playlist, the ones the catalogue reads whichever is on
+/// Every enabled playlist, the ones the catalog reads whichever is on
 /// screen, as the core reads them for `kind`. Tracks what they depend on.
 fn sources(ui: Ui, kind: Kind) -> Vec<SourceVod> {
     ui.app.library.version.get();
@@ -81,9 +81,9 @@ fn source_vod(
     }
 }
 
-/// Keeps the catalogue's [`VodState`] current. When it changes while no
+/// Keeps the catalog's [`VodState`] current. When it changes while no
 /// titles are shown (an import started or finished, an import was switched
-/// on), the catalogue is read again: titles may have arrived. The first
+/// on), the catalog is read again: titles may have arrived. The first
 /// state only joins the read [`open`] started.
 pub(super) fn bind(ui: Ui) {
     let kind = computed(move || ui.vod.with(|s| s.query.kind));
@@ -193,7 +193,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> impl IntoElement {
                         button(
                             ui,
                             size,
-                            Control::Catalogue,
+                            Control::Catalog,
                             move || action().map_or("", label),
                             move || run(ui),
                         )

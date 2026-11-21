@@ -8,9 +8,9 @@
 //! floored to the hour (UTC), fixed for the schedule's lifetime. "Now" is
 //! the wall clock ([`Schedule::follows_wall_clock`]), so the app advances it
 //! with [`iptv_core::guide::now_minute`] without rebuilding the schedule.
-//! Where a channel has no programme, the
+//! Where a channel has no program, the
 //! gap is filled with hour-aligned placeholder slots clipped to the
-//! neighbouring programmes, so navigation always has a cell to land on.
+//! neighboring programs, so navigation always has a cell to land on.
 //!
 //! A stored guide can be held in part: the store passed in covers a recent
 //! window, and older days are paged in on demand ([`pages`],
@@ -33,7 +33,7 @@ use iptv_providers::model::{Channel, Group};
 
 /// Gap slots, and the epoch, are aligned to the hour.
 const SLOT: i64 = 3600;
-/// Minutes the guide can be browsed past its last programme.
+/// Minutes the guide can be browsed past its last program.
 pub const PAST_END: i32 = 60;
 /// Title of a gap slot.
 pub const NO_INFORMATION: &str = iptv_core::i18n::key("No information");
@@ -98,7 +98,7 @@ pub struct EpgSchedule {
     describe: Option<std::rc::Rc<DescriptionLookup>>,
     /// Older days than `store` holds, read in on demand.
     pages: std::rc::Rc<Pages>,
-    /// When the first programme in `store` starts and the last one ends.
+    /// When the first program in `store` starts and the last one ends.
     data_start: Option<UnixTime>,
     data_end: Option<UnixTime>,
     /// The only times `store` holds, when it holds less than its window
@@ -110,7 +110,7 @@ pub struct EpgSchedule {
     /// Shared with the next schedule of the same source (a refreshed guide),
     /// so a Stalker session renewed by one is the other's too.
     playback: Option<std::rc::Rc<playback::PlaybackContext>>,
-    /// Same stored/import snapshot as this catalogue, even without a session.
+    /// Same stored/import snapshot as this catalog, even without a session.
     source_authority: Option<std::sync::Arc<playback::SourceAuthority>>,
 }
 
@@ -132,7 +132,7 @@ fn group_slots<'a>(
     })
 }
 
-/// Reads the description of the programme starting at the given time on a
+/// Reads the description of the program starting at the given time on a
 /// channel, e.g. from the SQLite store (`Store::epg_description`).
 pub type DescriptionLookup = Box<dyn Fn(&ChannelKey, UnixTime) -> Option<String>>;
 
@@ -233,7 +233,7 @@ impl EpgSchedule {
         self.pages.insert(request, store)
     }
 
-    /// Whether the programmes around `t` are in memory; asks for their day
+    /// Whether the programs around `t` are in memory; asks for their day
     /// when they are not.
     pub fn ensure_loaded(&self, t: UnixTime) -> bool {
         self.pages.retry_failed(t);
@@ -256,7 +256,7 @@ impl EpgSchedule {
         self.pages.evict()
     }
 
-    /// Keeps the day holding `t` in memory (the programme playing from the
+    /// Keeps the day holding `t` in memory (the program playing from the
     /// archive); `None` keeps none.
     pub fn pin_page(&self, t: Option<UnixTime>) {
         self.pages.pin(t);
@@ -267,7 +267,7 @@ impl EpgSchedule {
         self.pages.loaded()
     }
 
-    /// `f` on the store holding the programmes around `t`; `None` while
+    /// `f` on the store holding the programs around `t`; `None` while
     /// its day is being read.
     fn with_store<R>(&self, t: UnixTime, f: impl FnOnce(&GuideStore) -> R) -> Option<R> {
         if let Some((from, to)) = self.held
@@ -283,7 +283,7 @@ impl EpgSchedule {
     }
 
     /// Descriptions not held in memory (a guide loaded from the store
-    /// without them) are read with `lookup(key, programme start)`.
+    /// without them) are read with `lookup(key, program start)`.
     pub fn with_description_lookup(
         mut self,
         lookup: impl Fn(&ChannelKey, UnixTime) -> Option<String> + 'static,
@@ -331,7 +331,7 @@ impl EpgSchedule {
     }
 
     /// Cheap immutable input for preparing an edit on a blocking worker.
-    pub fn same_catalogue(&self, other: &Self) -> bool {
+    pub fn same_catalog(&self, other: &Self) -> bool {
         std::sync::Arc::ptr_eq(&self.channels, &other.channels)
     }
     pub fn organization_builder(&self) -> OrganizationBuilder {
@@ -454,7 +454,7 @@ impl EpgSchedule {
     }
 
     /// What the player should open for `channel`: live, or `archive` (a
-    /// programme in guide minutes) from its start. `clock.now` is the real
+    /// program in guide minutes) from its start. `clock.now` is the real
     /// time, which can be later than the schedule's minute 0.
     pub fn resolve(
         &self,
@@ -465,7 +465,7 @@ impl EpgSchedule {
         self.resolve_from(channel, archive, 0, clock)
     }
 
-    /// [`Self::resolve`], an archived programme from `offset` seconds after
+    /// [`Self::resolve`], an archived program from `offset` seconds after
     /// its start (a seek: archive addresses are time-based, so a seek opens
     /// the archive again from the new time).
     pub fn resolve_from(
@@ -528,7 +528,7 @@ impl EpgSchedule {
         let t = self.probe(program);
         let (desc, start) = self
             .channel_store(Some(key), t, |s| {
-                let p = s.programme_at(key, t)?;
+                let p = s.program_at(key, t)?;
                 Some((p.desc().map(str::to_owned), p.start()))
             })
             .flatten()?;
@@ -539,7 +539,7 @@ impl EpgSchedule {
     }
 
     /// A time inside `program` (its first second, or its middle if short).
-    /// Read an overlapping programme from the retained part of its slot.
+    /// Read an overlapping program from the retained part of its slot.
     /// If it reaches the held window, that window already contains it whole.
     fn probe(&self, program: Program) -> UnixTime {
         let (a, b) = (self.unix(program.start), self.unix(program.end));
@@ -555,7 +555,7 @@ impl EpgSchedule {
         }
     }
 
-    /// The placeholder slot around `t` for a channel with no programme then
+    /// The placeholder slot around `t` for a channel with no program then
     /// (in `store`, which holds `t`).
     fn gap(store: &GuideStore, key: Option<&ChannelKey>, t: UnixTime) -> (UnixTime, UnixTime) {
         let slot_start = t - t.rem_euclid(SLOT);
@@ -563,7 +563,7 @@ impl EpgSchedule {
         let mut end = slot_start + SLOT;
         if let Some(key) = key {
             if let Some(prev_end) = store
-                .programmes(key, slot_start, t + 1)
+                .programs(key, slot_start, t + 1)
                 .map(|p| p.stop())
                 .filter(|&s| s <= t)
                 .max()
@@ -601,7 +601,7 @@ struct Catalog {
 /// ([`EpgSchedule::set_group_lists`]).
 pub type GroupList = (String, String, Vec<String>);
 
-/// A schedule's data with its organisation applied, made off the UI thread
+/// A schedule's data with its organization applied, made off the UI thread
 /// ([`EpgSchedule::prepare`], [`EpgSchedule::from_prepared`]).
 pub struct Prepared(Catalog);
 
@@ -709,7 +709,7 @@ impl Catalog {
     }
 }
 
-/// What organising a schedule reads, from a schedule or its [`Catalog`].
+/// What organizing a schedule reads, from a schedule or its [`Catalog`].
 struct Shape<'a> {
     channels: &'a [GuideChannel],
     sources: &'a [Option<Channel>],
@@ -827,8 +827,8 @@ impl Schedule for EpgSchedule {
         true
     }
 
-    /// From the earliest programme stored (the oldest day kept: pages'
-    /// [`pages::PagedWindow::oldest`], else the first programme in memory)
+    /// From the earliest program stored (the oldest day kept: pages'
+    /// [`pages::PagedWindow::oldest`], else the first program in memory)
     /// to [`PAST_END`] past the last one; without guide data, from now's
     /// current minute to the default horizon. The viewport includes its
     /// default padding around now.
@@ -852,7 +852,7 @@ impl Schedule for EpgSchedule {
             self.store
                 .schedule(key)
                 .and_then(|schedule| schedule.get(0))
-                .map(|programme| programme.start())
+                .map(|program| program.start())
         };
         start.map(|start| self.minute(start))
     }
@@ -894,14 +894,14 @@ impl Schedule for EpgSchedule {
     }
 
     fn program_at(&self, channel: usize, minute: i32) -> Program {
-        // What airs at the minute's last second: a programme starting partway
+        // What airs at the minute's last second: a program starting partway
         // through a minute (its start rounds down to it) owns that minute, so
-        // the minute a cell starts at finds that cell's programme, not the one
+        // the minute a cell starts at finds that cell's program, not the one
         // before it, and cells never overlap.
         let t = self.unix(minute) + 59;
         let key = self.key(channel);
         let found = self
-            .channel_store(key, t, |s| match key.and_then(|k| s.programme_at(k, t)) {
+            .channel_store(key, t, |s| match key.and_then(|k| s.program_at(k, t)) {
                 Some(p) => (p.start(), p.stop()),
                 None => Self::gap(s, key, t),
             })
@@ -909,7 +909,7 @@ impl Schedule for EpgSchedule {
         // Its day is loading: the hour slot.
         let (start, end) = found.unwrap_or_else(|| self.loading_slot(key, t));
         let (start, end) = (self.minute(start), self.minute(end));
-        // Sub-minute programmes still get a one-minute cell.
+        // Sub-minute programs still get a one-minute cell.
         Program {
             start,
             end: end.max(start + 1),
@@ -1124,7 +1124,7 @@ impl Schedule for EpgSchedule {
         };
         let t = self.probe(program);
         let found = self.channel_store(Some(key), t, |s| {
-            s.programme_at(key, t)
+            s.program_at(key, t)
                 .filter(|p| self.minute(p.start()) == program.start)
                 // A guide stored before badges were folded at import.
                 .map(|p| iptv_epg::fold_superscripts(p.title()).into_owned())
@@ -1147,7 +1147,7 @@ mod pages_tests;
 #[cfg(test)]
 mod tests;
 
-/// Sendable immutable catalogue shape for organization work.
+/// Sendable immutable catalog shape for organization work.
 pub struct OrganizationBuilder {
     channels: std::sync::Arc<Vec<GuideChannel>>,
     sources: std::sync::Arc<Vec<Option<Channel>>>,

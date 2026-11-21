@@ -7,14 +7,14 @@ use iptv_core::panels::{QuickAction, Shown};
 use iptv_core::playback::{Cause, ErrorKind, Waiting};
 use iptv_nav::Profile;
 
-/// An action card's label (ours); the favourite's shows its state.
+/// An action card's label (ours); the favorite's shows its state.
 pub(crate) fn quick_label(action: QuickAction, favorite: bool, detour: bool) -> &'static str {
     match action {
         QuickAction::Guide => tr("TV guide"),
         QuickAction::History => tr("History"),
         QuickAction::Channels => tr("Channels"),
-        QuickAction::Favorite if favorite => tr("★ Favourite"),
-        QuickAction::Favorite => tr("☆ Favourite"),
+        QuickAction::Favorite if favorite => tr("★ Favorite"),
+        QuickAction::Favorite => tr("☆ Favorite"),
         QuickAction::Multiview if detour => tr("Back to multiview"),
         QuickAction::Multiview => tr("Multiview"),
         QuickAction::Controls => tr("More controls"),
@@ -53,7 +53,7 @@ pub(crate) fn hint(
 /// Our own wording for a failure.
 pub(crate) fn failure_message(kind: &ErrorKind, catch_up: bool) -> String {
     let fixed = match kind {
-        ErrorKind::Unavailable if catch_up => tr("This programme can't be replayed."),
+        ErrorKind::Unavailable if catch_up => tr("This program can't be replayed."),
         ErrorKind::Unavailable => tr("This channel has no stream address."),
         ErrorKind::Account => tr("The provider refused this account."),
         ErrorKind::Http(404 | 410) => tr("The provider doesn't have this stream."),
@@ -116,7 +116,7 @@ mod tests {
         assert_eq!(hint(r, Shown::Banner, false, None), "");
         assert_eq!(
             quick_label(QuickAction::Favorite, true, false),
-            "★ Favourite"
+            "★ Favorite"
         );
     }
 
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn every_failure_has_its_own_words_without_addresses() {
         let replay = failure_message(&ErrorKind::Unavailable, true);
-        assert_eq!(replay, "This programme can't be replayed.");
+        assert_eq!(replay, "This program can't be replayed.");
         let cases = [
             (
                 ErrorKind::Unavailable,

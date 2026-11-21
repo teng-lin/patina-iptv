@@ -411,7 +411,7 @@ mod tests {
             assert_eq!(HourCycle::of_locale(locale), expected, "{locale}");
             assert_eq!(HourCycle::from_preference("auto", locale), expected);
         }
-        // A language the catalogue lacks is shown in English, but its
+        // A language the catalog lacks is shown in English, but its
         // readers did not start using a 12-hour clock.
         for locale in ["nl-NL", "xx", "C", ""] {
             assert_eq!(HourCycle::of_locale(locale), H24, "{locale}");

@@ -94,7 +94,7 @@ async fn main() {
         t.elapsed()
     );
 
-    // The app's defaults: a week of finished programmes, descriptions on.
+    // The app's defaults: a week of finished programs, descriptions on.
     let opts = StoreOptions {
         store_descriptions: std::env::var_os("BENCH_NO_DESC").is_none(),
         past_days_to_keep: Some(7),
@@ -146,9 +146,9 @@ async fn main() {
     let total = t.elapsed();
     let peak = status_kib("VmHWM:");
     println!(
-        "guide: {} channels, {} programmes, {} descriptions; stage file {:.0} MiB",
+        "guide: {} channels, {} programs, {} descriptions; stage file {:.0} MiB",
         counts.bindings,
-        counts.programmes,
+        counts.programs,
         counts.descriptions,
         staged as f64 / f64::from(1 << 20)
     );

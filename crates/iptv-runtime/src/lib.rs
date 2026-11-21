@@ -649,8 +649,8 @@ mod tests {
             .borrow_mut()
             .insert(SourceId(1), (1, second_cancel.clone()));
         drop(first);
-        assert!(first_cancel.is_cancelled());
-        assert!(!second_cancel.is_cancelled());
+        assert!(first_cancel.is_canceled());
+        assert!(!second_cancel.is_canceled());
     }
 }
 

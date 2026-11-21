@@ -419,7 +419,7 @@ mod tests {
         let xml = format!(
             "<tv><channel id=\"same\"><display-name>Shared</display-name></channel>\
              <programme channel=\"same\" start=\"20270115080000 +0000\" \
-             stop=\"20270115090000 +0000\"><title>{name} programme</title>\
+             stop=\"20270115090000 +0000\"><title>{name} program</title>\
              <desc>{name} description</desc></programme></tv>"
         );
         let xml = parse_xmltv(xml.as_bytes(), ParseOptions::default()).unwrap();
@@ -427,8 +427,8 @@ mod tests {
         for c in xml.channels {
             builder.push_channel(c);
         }
-        for p in xml.programmes {
-            builder.push_programme(p);
+        for p in xml.programs {
+            builder.push_program(p);
         }
         let feed = builder.finish();
         let mut index = MatchIndex::new();
@@ -597,7 +597,7 @@ mod tests {
             vec![part(1, "Alpha", NOW), part(2, "Beta", NOW + 7200)],
             NOW,
         );
-        // The fixture's programme lies at the same absolute time in each child,
+        // The fixture's program lies at the same absolute time in each child,
         // despite their different epochs.
         let t = iptv_epg::parse_xmltv(
             b"<tv><programme channel=\"same\" start=\"20270115080000 +0000\" \
@@ -605,14 +605,14 @@ mod tests {
             ParseOptions::default(),
         )
         .unwrap()
-        .programmes[0]
+        .programs[0]
             .start;
         let minute = ((t - NOW) / 60) as i32;
         let a = all.program_at(0, minute);
         let b = all.program_at(1, minute);
         assert_eq!(a, b);
-        assert_eq!(all.title(0, a), "Alpha programme");
-        assert_eq!(all.title(1, b), "Beta programme");
+        assert_eq!(all.title(0, a), "Alpha program");
+        assert_eq!(all.title(1, b), "Beta program");
         assert_eq!(all.description(1, b).as_deref(), Some("Beta description"));
         let clock = crate::playback::Clock {
             now: t + 7200,

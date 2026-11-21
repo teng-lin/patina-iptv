@@ -4,9 +4,9 @@
 //! carries out the [`Effect`]s it answers (store a value, run a command,
 //! close).
 //!
-//! Layout: the app's [`Page`]s (each one or more catalogue sections, or
+//! Layout: the app's [`Page`]s (each one or more catalog sections, or
 //! named rows), and the [`rows`] of the chosen one — headings, then
-//! settings and commands in catalogue order. Rows whose visibility
+//! settings and commands in catalog order. Rows whose visibility
 //! conditions fail, advanced settings, and rows the app does not offer
 //! ([`Offer::Hidden`]) are left out. Every other setting and command
 //! takes the focus, also those the app cannot act on yet ([`Status`]), so
@@ -18,9 +18,9 @@
 //! opens its list, a number or duration opens a stepper (Left/Down less,
 //! Right/Up more, Page keys ten steps, OK keeps, Back cancels), text opens
 //! a text editor (OK keeps a valid text, Back cancels), a command runs
-//! (after a confirmation when the catalogue asks for one).
+//! (after a confirmation when the catalog asks for one).
 
-use crate::catalogue::{self, Command};
+use crate::catalog::{self, Command};
 use crate::schema::{Section, Setting, ValueType};
 use crate::scope::Target;
 use crate::store::Settings;
@@ -62,7 +62,7 @@ pub enum Status {
 /// One part of a page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part {
-    /// A catalogue section's rows.
+    /// A catalog section's rows.
     Section(Section),
     /// Settings or commands by key, in this order (shown whatever their
     /// [`Offer`]).
@@ -147,15 +147,15 @@ impl Ctx<'_> {
 /// subsection get their section's name as heading.
 pub fn rows(page: &Page, ctx: &Ctx) -> Vec<Row> {
     let several = page.parts.len() > 1;
-    let tree = catalogue::tree(false);
+    let tree = catalog::tree(false);
     let mut rows = Vec::new();
     for part in page.parts {
         let section = match part {
             Part::Keys(keys) => {
                 rows.extend(keys.iter().filter_map(|k| {
-                    catalogue::setting(k)
+                    catalog::setting(k)
                         .map(Row::Setting)
-                        .or_else(|| catalogue::command(k).map(Row::Command))
+                        .or_else(|| catalog::command(k).map(Row::Command))
                 }));
                 continue;
             }
@@ -225,7 +225,7 @@ pub enum Pane {
 /// An open editor or dialog.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Editor {
-    /// An enum, colour or locale: its suggestions and focused/current entry.
+    /// An enum, color or locale: its suggestions and focused/current entry.
     Choice {
         setting: &'static Setting,
         focus: usize,
@@ -247,7 +247,7 @@ pub enum Editor {
         text: String,
         invalid: bool,
     },
-    /// "Really?" before a command the catalogue wants confirmed.
+    /// "Really?" before a command the catalog wants confirmed.
     Confirm { command: &'static Command },
 }
 
@@ -458,7 +458,7 @@ impl Screen {
                     value: Value::Bool(!b),
                 };
             }
-            Value::Enum(v) | Value::Colour(v) => {
+            Value::Enum(v) | Value::Color(v) => {
                 let variants = s.ty.editor_choices().map_or(&[][..], |c| c.variants);
                 let selected = variants.iter().position(|x| *x == v).unwrap_or(0);
                 Some(Editor::Choice {
@@ -570,7 +570,7 @@ impl Screen {
         };
         self.editor = None;
         let value = match setting.ty {
-            ValueType::Colour { .. } => Value::colour(variant),
+            ValueType::Color { .. } => Value::color(variant),
             ValueType::Text { .. } => Value::text(variant),
             _ => Value::choice(variant),
         };

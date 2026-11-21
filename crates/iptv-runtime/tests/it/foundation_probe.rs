@@ -1,5 +1,5 @@
 //! Proposed guides are inspected without changing configured sources, mappings
-//! or the viewed schedule. Every endpoint and programme in these tests is generated.
+//! or the viewed schedule. Every endpoint and program in these tests is generated.
 use crate::support;
 use iptv_epg::FeedId;
 use iptv_library::{GuideSource, SourceId};
@@ -132,7 +132,7 @@ fn seed(directory: &std::path::Path, url: SecretUrl, shift: i32) -> SourceId {
     .unwrap();
     let source = store
         .add_source(&Source {
-            name: "Synthetic catalogue".into(),
+            name: "Synthetic catalog".into(),
             config: SourceConfig::M3u(M3uSourceConfig {
                 location: SecretUrl::new("https://synthetic.invalid/generated.m3u"),
                 user_agent: Some("Synthetic-Private-Agent".into()),
@@ -193,7 +193,7 @@ fn unmatched_candidates_have_samples_from_the_exact_encrypted_snapshot_without_l
     let runtime = owner(directory.path());
     let before = runtime.browser_generation();
     let summary = probe(&runtime, source).unwrap();
-    assert_eq!((summary.channels, summary.programmes), (2, 2));
+    assert_eq!((summary.channels, summary.programs), (2, 2));
     let candidates = support::block_on(runtime.probe_candidates(
         summary.evidence.clone(),
         String::new(),
@@ -337,14 +337,14 @@ fn cancellation_ends_an_acknowledged_request_and_removes_its_partial_stage() {
         "the acknowledged request must have created a partial stage"
     );
     cancel.cancel();
-    assert_eq!(support::block_on(request), Err(InspectionError::Cancelled));
+    assert_eq!(support::block_on(request), Err(InspectionError::Canceled));
     assert!(runtime.drain_services());
     assert_probe_cache_empty(directory.path());
 }
 
 #[cfg(feature = "test-support")]
 #[test]
-fn shutdown_waits_for_a_cancelled_probe_worker_to_release_its_partial_stage() {
+fn shutdown_waits_for_a_canceled_probe_worker_to_release_its_partial_stage() {
     let server = Mock::new(XML.as_bytes().to_vec(), false);
     let directory = tempfile::tempdir().unwrap();
     let source = seed(directory.path(), server.url(), 0);
@@ -362,7 +362,7 @@ fn shutdown_waits_for_a_cancelled_probe_worker_to_release_its_partial_stage() {
     );
     assert!(held.wait_entered(Duration::from_secs(30)));
     cancel.cancel();
-    assert_eq!(support::block_on(request), Err(InspectionError::Cancelled));
+    assert_eq!(support::block_on(request), Err(InspectionError::Canceled));
     let path = directory.path().to_owned();
     let release = thread::spawn(move || {
         assert!(draining.wait_entered(Duration::from_secs(30)));
@@ -621,14 +621,14 @@ fn supplied_urls_do_not_borrow_provider_credentials_or_accept_url_userinfo() {
                 &cancel,
                 std::time::Instant::now() + Duration::from_secs(3)
             ),
-            Err(InspectionError::Cancelled)
+            Err(InspectionError::Canceled)
         );
         assert_eq!(
             lease.listed_channels_with_control(
                 &cancel,
                 std::time::Instant::now() + Duration::from_secs(3)
             ),
-            Err(InspectionError::Cancelled)
+            Err(InspectionError::Canceled)
         );
     }
     runtime.drain_services();
@@ -908,8 +908,8 @@ fn staged_reads_share_query_admission_until_the_actual_blocking_workers_exit() {
     // Dropping the public replies requests cancellation. Capacity is released
     // only once those actual workers observe it, including while their
     // configuration read is queued behind this held analysis lane.
-    let cancelled_by = Instant::now() + Duration::from_secs(2);
-    while runtime.active_inspection_workers() != 0 && Instant::now() < cancelled_by {
+    let canceled_by = Instant::now() + Duration::from_secs(2);
+    while runtime.active_inspection_workers() != 0 && Instant::now() < canceled_by {
         thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(runtime.active_inspection_workers(), 0);
@@ -1012,7 +1012,7 @@ fn queued_probe_configuration_honors_original_cancel_and_deadline_until_worker_e
         assert_eq!(
             support::block_on(work),
             Err(if cancel_explicitly {
-                InspectionError::Cancelled
+                InspectionError::Canceled
             } else {
                 InspectionError::Deadline
             })
@@ -1032,7 +1032,7 @@ fn queued_probe_configuration_honors_original_cancel_and_deadline_until_worker_e
                 .unwrap()
                 .items
                 .is_empty(),
-            "the empty synthetic catalogue remains queryable after worker exit"
+            "the empty synthetic catalog remains queryable after worker exit"
         );
         runtime.drain_services();
     }

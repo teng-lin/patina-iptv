@@ -19,7 +19,7 @@ fn the_guide_uses_independent_favorite_and_provider_group_orders() {
     let Some(home) = isolated!() else { return };
     let mut f = start(home, Settings::new(), false);
     let app = &mut f.app;
-    group(app, "Favourites");
+    group(app, "Favorites");
     reorder_favorites(app, 2);
     step(crate::isolated::wait_outside(
         app,
@@ -31,7 +31,7 @@ fn the_guide_uses_independent_favorite_and_provider_group_orders() {
                 .load_channels(
                     f.source,
                     &ChannelQuery {
-                        favourites_only: true,
+                        favorites_only: true,
                         ..Default::default()
                     },
                 )

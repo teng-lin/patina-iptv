@@ -57,7 +57,7 @@ fn early_foreground_return_keeps_saved_wake_until_durable_jobs_are_loaded() {
                 source: source.0,
                 channel: parsed.channels.items[0].id.as_str().into(),
                 channel_name: "Generated channel".into(),
-                title: "Generated future programme".into(),
+                title: "Generated future program".into(),
                 start: next,
                 end: next + 60,
             },

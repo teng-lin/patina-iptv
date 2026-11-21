@@ -3,7 +3,7 @@
 //! shows Favorites, so Back lands there with the channel focused. Not a
 //! favorite of this playlist, or no Favorites category offered
 //! (`channels.show_favorites`): All channels, as before. One stream opens.
-//! The list is decided once: the viewer's later choices and favourite
+//! The list is decided once: the viewer's later choices and favorite
 //! edits are left alone, a hidden channel focuses nothing in its place,
 //! and a PIN-locked channel moves the guide only once its PIN admits it.
 use crate::headless::Headless;
@@ -116,15 +116,15 @@ fn launch(home: &Home, setup: Setup) -> Headless {
     let source = add_playlist(&mut store, home, "Synthetic resume");
     let m = iptv_providers::m3u::parse_m3u(M3U);
     let [a, _, c] = [0, 1, 2].map(|i| m.channels.items[i].id.clone());
-    store.set_favourite(source, &a, true).unwrap();
+    store.set_favorite(source, &a, true).unwrap();
     match setup.favorite {
-        Favorite::Here => store.set_favourite(source, &c, true).unwrap(),
+        Favorite::Here => store.set_favorite(source, &c, true).unwrap(),
         Favorite::Elsewhere => {
             let other = add_playlist(&mut store, home, "Synthetic other");
-            store.set_favourite(other, &c, true).unwrap();
+            store.set_favorite(other, &c, true).unwrap();
         }
         Favorite::HereBeside => {
-            store.set_favourite(source, &c, true).unwrap();
+            store.set_favorite(source, &c, true).unwrap();
             add_playlist(&mut store, home, "Synthetic other");
         }
         Favorite::Not => {}
@@ -197,13 +197,13 @@ fn lands_in(app: &mut Headless, list: &str, channel: &str) {
     assert!(channel_selected(app, channel), "{:?}", app.screen().texts());
 }
 
-/// Toggles the playing channel's favourite from the full-screen menu
+/// Toggles the playing channel's favorite from the full-screen menu
 /// strip, then hides it.
 fn toggle_favorite(app: &mut Headless) {
     step(app.press_key("m"));
     step(app.wait_for("text:/M or Esc hide/"));
-    step(app.press("text:☆ Favourite"));
-    step(app.wait_for("text:★ Favourite"));
+    step(app.press("text:☆ Favorite"));
+    step(app.wait_for("text:★ Favorite"));
     step(app.press_key("escape"));
 }
 
@@ -211,7 +211,7 @@ fn toggle_favorite(app: &mut Headless) {
 fn a_resumed_favorite_returns_to_favorites() {
     let Some(home) = isolated!() else { return };
     let mut app = resume(&home, Setup::new(Favorite::Here));
-    lands_in(&mut app, "Favourites", "Local C");
+    lands_in(&mut app, "Favorites", "Local C");
     // Favorites lists A and C only.
     assert!(
         !app.screen()
@@ -239,7 +239,7 @@ fn another_playlists_favorite_returns_to_all_channels() {
 fn a_resumed_favorite_beside_another_playlist_returns_to_favorites() {
     let Some(home) = isolated!() else { return };
     let mut app = resume(&home, Setup::new(Favorite::HereBeside));
-    lands_in(&mut app, "Favourites", "Local C · Synthetic resume");
+    lands_in(&mut app, "Favorites", "Local C · Synthetic resume");
     assert!(
         !app.screen()
             .matches("id:guide-ui >> label:Local C · Synthetic other")
@@ -274,7 +274,7 @@ fn favoriting_the_resumed_channel_keeps_its_list() {
 }
 
 #[test]
-fn a_group_chosen_over_the_resumed_channel_stays_through_a_favourite_edit() {
+fn a_group_chosen_over_the_resumed_channel_stays_through_a_favorite_edit() {
     let Some(home) = isolated!() else { return };
     let before = iptv_app::player_opens(0);
     let mut app = launch(&home, Setup::new(Favorite::Not));
@@ -342,11 +342,11 @@ fn a_locked_resumed_favorite_moves_the_guide_only_after_its_pin() {
     step(app.press("id:parental-layer >> text:Continue"));
     playing(&mut app, before);
     to_guide(&mut app);
-    lands_in(&mut app, "Favourites", "Local C");
+    lands_in(&mut app, "Favorites", "Local C");
 }
 
 #[test]
-fn a_cancelled_pin_leaves_the_guide_on_all_channels() {
+fn a_canceled_pin_leaves_the_guide_on_all_channels() {
     let Some(home) = isolated!() else { return };
     let before = iptv_app::player_opens(0);
     let locked = Setup {

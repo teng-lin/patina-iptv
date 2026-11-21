@@ -1,4 +1,4 @@
-//! Whole-store snapshots use generated sources and catalogues only.
+//! Whole-store snapshots use generated sources and catalogs only.
 
 use iptv_providers::SecretUrl;
 use iptv_providers::model::{ContentKind, SourceConfig};
@@ -18,7 +18,7 @@ fn wal_snapshot_preserves_credentials_organization_history_and_cached_catalog() 
     let catalog = catalog(6, 2, XT_PASSWORD);
     replace(&mut store, id, &catalog);
     let last = catalog.channels.last().unwrap().id.clone();
-    store.set_favourite(id, &last, true).unwrap();
+    store.set_favorite(id, &last, true).unwrap();
     store
         .rename_channel(id, &last, Some("Generated custom name"))
         .unwrap();
@@ -47,7 +47,7 @@ fn wal_snapshot_preserves_credentials_organization_history_and_cached_catalog() 
         restored.combined_last_channel().unwrap(),
         Some(combined_key)
     );
-    assert!(restored.is_favourite(id, &last).unwrap());
+    assert!(restored.is_favorite(id, &last).unwrap());
     let channels = restored
         .load_channels(id, &ChannelQuery::default())
         .unwrap();

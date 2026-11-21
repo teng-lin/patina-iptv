@@ -2,7 +2,7 @@
 //! headless: every step of the wizard by keys and by taps (the empty
 //! state Back does not leave, the type list, a form's text entry with
 //! Done, Cancel, Return and Back, Menu and Paste from the clipboard, a
-//! field's error, a failed, a cancelled, an empty and an unsupported
+//! field's error, a failed, a canceled, an empty and an unsupported
 //! import, and a file that is added); then the picture size, sleep timer,
 //! audio delay and history choosers, picked by keys and by taps.
 //!
@@ -247,7 +247,7 @@ fn the_wizard_and_the_choosers() {
     step(app.wait_for("text:What did your provider give you?"));
 
     // A link: not a link, then one the server does not have, then one
-    // that never answers (cancelled), then an empty playlist.
+    // that never answers (canceled), then an empty playlist.
     step(app.press("text:Playlist link"));
     let placeholder = "http://…/playlist.m3u";
     step(app.wait_for(&format!("text:{placeholder}")));

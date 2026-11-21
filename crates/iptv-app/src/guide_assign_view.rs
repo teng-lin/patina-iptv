@@ -4,7 +4,7 @@
 //! field narrows the list as one types; the filter shows every guide
 //! channel or only those no channel uses. The choice is saved by channel
 //! key (`data::assign`) and shows at once when the stored guide has the
-//! programmes, else after the guide download it starts.
+//! programs, else after the guide download it starts.
 //!
 //! Remote: Up/Down (Page Up/Down) move, OK chooses (on the field: type,
 //! with the keyboard), Back ends typing, then closes. Touch and mouse:
@@ -323,7 +323,7 @@ fn row(ui: Ui, size: Scale, index: usize, focused: Memo<Option<usize>>) -> AnyEl
         })
         .unwrap_or_default(),
         Some(Row::Automatic) => tr("Matched by its guide id and name").to_owned(),
-        Some(Row::NoGuide) => tr("The guide shows no programmes for it").to_owned(),
+        Some(Row::NoGuide) => tr("The guide shows no programs for it").to_owned(),
         Some(Row::Channel(..)) => channel()
             .map(|c| channel_detail(ui, &c))
             .unwrap_or_default(),

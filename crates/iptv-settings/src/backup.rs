@@ -3,7 +3,7 @@
 //! ```json
 //! {
 //!   "format": "iptv-rs.settings",
-//!   "version": 3,
+//!   "version": 4,
 //!   "global":    { "player.info_panel_timeout": 5000 },
 //!   "playlists": { "<playlist id>": { "channels.group_sort": "name" } },
 //!   "groups":    { "<playlist id>": { "<group id>": { "channels.channel_sort": "manual" } } }
@@ -11,10 +11,10 @@
 //! ```
 //!
 //! Values: bool → boolean; integer → number; duration → whole
-//! milliseconds; enum, colour and text → string; key bindings → array of
+//! milliseconds; enum, color and text → string; key bindings → array of
 //! `{"context"?, "key", "press": "short"|"long", "action"}`. Only explicit
 //! choices are written (never defaults), and every object is written with
-//! sorted keys, so equal settings serialise to identical text.
+//! sorted keys, so equal settings serialize to identical text.
 //!
 //! Loading rules (forward and backward compatibility):
 //!
@@ -27,7 +27,7 @@
 //! 3. A number outside the setting's current range, or off its step grid,
 //!    is **clamped** into range and down onto the grid, and reported in
 //!    [`LoadReport::clamped`].
-//! 4. Any other invalid value (wrong JSON type, unknown enum/colour
+//! 4. Any other invalid value (wrong JSON type, unknown enum/color
 //!    variant, text too long or malformed, bad binding list, or an override
 //!    at a level the setting no longer allows) is **rejected**: the setting
 //!    keeps its inherited value, the raw entry is kept and written back
@@ -41,7 +41,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value as Json};
 
-use crate::catalogue;
+use crate::catalog;
 use crate::error::{LoadError, SettingsError};
 use crate::schema::{Setting, ValueType};
 use crate::scope::Target;
@@ -51,7 +51,7 @@ use crate::value::{KeyBinding, PressKind, Value};
 
 pub const FORMAT: &str = "iptv-rs.settings";
 /// The version [`Settings::to_json`] writes.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 
 const RESERVED: [&str; 5] = ["format", "version", "global", "playlists", "groups"];
 
@@ -76,7 +76,43 @@ pub static MIGRATIONS: &[Migration] = &[
         summary: "guide.stay_on_guide_overlay folds into guide.stay_on_guide (both layouts)",
         apply: v2_one_stay_on_guide,
     },
+    Migration {
+        from: 3,
+        summary: "US spelling: guide.show_programmes → guide.show_programs; \
+                  grey palettes → gray; now_highlight colour → color",
+        apply: v3_us_spelling,
+    },
 ];
+
+/// Stored names in US spelling (#139). The renamed key keeps its value
+/// unless the document already has the new key; renamed choices keep the
+/// same meaning. Values of other types are left for the loader to judge.
+fn v3_us_spelling(doc: &mut Map<String, Json>) {
+    const PALETTES: [(&str, &str); 3] = [
+        ("grey", "gray"),
+        ("blue_grey", "blue_gray"),
+        ("dark_grey", "dark_gray"),
+    ];
+    let renamed = |layer: &mut Map<String, Json>, key: &str, from: &str, to: &str| {
+        if layer.get(key).and_then(Json::as_str) == Some(from) {
+            layer.insert(key.to_owned(), Json::from(to));
+        }
+    };
+    for_each_layer(doc, &mut |layer| {
+        let (old, new) = ("guide.show_programmes", "guide.show_programs");
+        if let Some(value) = layer.remove(old)
+            && !layer.contains_key(new)
+        {
+            layer.insert(new.to_owned(), value);
+        }
+        for key in ["appearance.accent", "appearance.background"] {
+            for (from, to) in PALETTES {
+                renamed(layer, key, from, to);
+            }
+        }
+        renamed(layer, "guide.now_highlight_style", "colour", "color");
+    });
+}
 
 /// One "keep the guide open" choice now covers both guide layouts. The
 /// choice made for the layout in use wins; otherwise an explicit choice
@@ -214,7 +250,7 @@ impl Settings {
 
     /// The backup document as pretty-printed text.
     pub fn to_json_string(&self) -> String {
-        serde_json::to_string_pretty(&self.to_json()).expect("settings JSON always serialises")
+        serde_json::to_string_pretty(&self.to_json()).expect("settings JSON always serializes")
     }
 
     /// Loads a backup document (see the module docs for the rules).
@@ -288,7 +324,7 @@ impl Settings {
                 target: target.clone(),
                 key: key.clone(),
             };
-            let Some(s) = catalogue::setting(key) else {
+            let Some(s) = catalog::setting(key) else {
                 layer.raw.insert(key.clone(), json.clone());
                 report.unknown.push(entry);
                 continue;
@@ -351,7 +387,7 @@ pub(crate) fn value_json(value: &Value) -> Json {
     match value {
         Value::Bool(b) => Json::from(*b),
         Value::Int(n) | Value::Duration(n) => Json::from(*n),
-        Value::Enum(s) | Value::Text(s) | Value::Colour(s) => Json::from(s.as_str()),
+        Value::Enum(s) | Value::Text(s) | Value::Color(s) => Json::from(s.as_str()),
         Value::KeyBindings(list) => Json::Array(list.iter().map(binding_json).collect()),
     }
 }
@@ -374,7 +410,7 @@ fn decode(s: &Setting, json: &Json) -> Decoded {
         (ValueType::Duration { .. }, Json::Number(n)) => n.as_i64().map(Value::Duration),
         (ValueType::Enum { .. }, Json::String(v)) => Some(Value::Enum(v.clone())),
         (ValueType::Text { .. }, Json::String(v)) => Some(Value::Text(v.clone())),
-        (ValueType::Colour { .. }, Json::String(v)) => Some(Value::Colour(v.clone())),
+        (ValueType::Color { .. }, Json::String(v)) => Some(Value::Color(v.clone())),
         (ValueType::KeyBindings { .. }, Json::Array(items)) => items
             .iter()
             .map(binding_from_json)

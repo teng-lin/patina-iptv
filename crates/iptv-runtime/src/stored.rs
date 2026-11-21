@@ -354,7 +354,7 @@ pub fn check_at(decision: Decision, now: UnixTime) -> Option<UnixTime> {
     match decision {
         Decision::Keep { next_check } => next_check,
         Decision::Backoff { retry_at } => Some(retry_at),
-        // Still due (the download was cancelled or not recorded): later.
+        // Still due (the download was canceled or not recorded): later.
         Decision::Refresh(_) => Some(now + RETRY_DUE),
         Decision::Discard => None,
     }
@@ -364,11 +364,11 @@ pub fn check_at(decision: Decision, now: UnixTime) -> Option<UnixTime> {
 pub(crate) const RETRY_DUE: i64 = 3600;
 
 /// Replaces `source`'s stored guide with `guide` (the feeds that loaded)
-/// and drops programmes older than [`keep_past_days`]. A feed that failed
+/// and drops programs older than [`keep_past_days`]. A feed that failed
 /// is recorded, so automatic refreshes back off; each feed's result is
 /// kept for the guide sources screen.
 ///
-/// Not when one of `stops` was cancelled ([`Stops`]).
+/// Not when one of `stops` was canceled ([`Stops`]).
 pub(crate) fn replace(
     services: &Services,
     source: SourceId,
@@ -406,10 +406,10 @@ pub(crate) fn replace(
             store.record_epg_failure(source, error_kind(e))?;
         }
         log::info!(
-            "iptv data: stored the guide of source {}: {} channels, {} programmes ({pruned} old ones pruned)",
+            "iptv data: stored the guide of source {}: {} channels, {} programs ({pruned} old ones pruned)",
             source.0,
             counts.bindings,
-            counts.programmes
+            counts.programs
         );
         Ok(counts)
     })
@@ -431,12 +431,12 @@ impl Stops {
     }
 
     pub(crate) fn superseded(&self) -> bool {
-        self.0.iter().any(CancelToken::is_cancelled)
+        self.0.iter().any(CancelToken::is_canceled)
     }
 }
 
 /// Notes a failed guide download (every source in `configs` failed); the
-/// stored guide stays. Not when one of `stops` was cancelled ([`Stops`]).
+/// stored guide stays. Not when one of `stops` was canceled ([`Stops`]).
 pub(crate) fn record_failure(
     services: &Services,
     source: SourceId,
@@ -482,7 +482,7 @@ fn record_failure_kind(
 }
 
 /// Deletes `source`'s stored guide (no guide is configured any more). Not
-/// when one of `stops` was cancelled ([`Stops`]).
+/// when one of `stops` was canceled ([`Stops`]).
 pub(crate) fn discard(services: &Services, source: SourceId, stops: &[&CancelToken]) {
     let stops = Stops::of(stops);
     let deleted = services.blocking(move |store| {
@@ -545,10 +545,10 @@ pub(crate) async fn download_now(
                         resume: false,
                     })));
                 }
-                Err(ImportError::Cancelled) => {}
+                Err(ImportError::Canceled) => {}
                 // Superseded as it failed: the failure is not the guide's
                 // state any more (the guide may just have been deleted).
-                Err(_) if cancel.is_cancelled() => {}
+                Err(_) if cancel.is_canceled() => {}
                 Err(e) => {
                     log::warn!("iptv data: guide: {e}");
                     record_failure(services, source, &e, &guides, &[cancel]);
@@ -564,7 +564,7 @@ pub(crate) async fn download_now(
 pub fn error_kind(error: &ImportError) -> ImportErrorKind {
     match error {
         ImportError::InvalidConfig(_) => ImportErrorKind::InvalidConfig,
-        ImportError::Cancelled => ImportErrorKind::Cancelled,
+        ImportError::Canceled => ImportErrorKind::Canceled,
         ImportError::Network { .. } => ImportErrorKind::Network,
         ImportError::HttpStatus { .. } => ImportErrorKind::HttpStatus,
         ImportError::Auth { .. } => ImportErrorKind::AccountRejected,
@@ -804,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    fn guide_edits_debounce_within_a_source_without_cancelling_other_sources() {
+    fn guide_edits_debounce_within_a_source_without_canceling_other_sources() {
         let owner = super::super::Runtime::default();
         let a = SourceId(9001);
         let b = SourceId(9002);
@@ -865,7 +865,7 @@ mod tests {
                         bytes: 1,
                     },
                     channel_count: 10,
-                    programme_count: 100,
+                    program_count: 100,
                 })
                 .collect(),
         }
@@ -986,9 +986,9 @@ mod tests {
                 NOW,
             )
         };
-        // Fetched an hour ago, programmes for 3 days: stale in 23 h.
+        // Fetched an hour ago, programs for 3 days: stale in 23 h.
         assert_eq!(next(&stored), Some(NOW - 3600 + DAY));
-        // Programmes end in 20 h: 12 h before they run out.
+        // Programs end in 20 h: 12 h before they run out.
         stored.ends_at = Some(NOW + 20 * 3600);
         assert_eq!(next(&stored), Some(NOW + 8 * 3600));
         // A failed attempt 10 min ago: retry an hour after it.
@@ -1119,7 +1119,7 @@ mod tests {
                 ImportError::InvalidConfig("no link".into()),
                 ImportErrorKind::InvalidConfig,
             ),
-            (ImportError::Cancelled, ImportErrorKind::Cancelled),
+            (ImportError::Canceled, ImportErrorKind::Canceled),
             (
                 ImportError::Network {
                     step: Step::Playlist,

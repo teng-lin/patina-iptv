@@ -1,5 +1,5 @@
 //! The guide's context menu (Long OK / Menu) as a scrolling side panel, and
-//! the programme description popover. State lives in `iptv_core::menu`;
+//! the program description popover. State lives in `iptv_core::menu`;
 //! this opens, draws and performs it. Labels are iptv-rs's own wording.
 
 use crate::i18n::tr;
@@ -68,8 +68,8 @@ fn label(item: MenuItem, favorite: bool, blocked: bool) -> &'static str {
         CustomRecording => tr("Schedule a recording…"),
         SaveToList => tr("Save to my list"),
         Description => tr("Details"),
-        ToggleFavorite if favorite => tr("Remove from favourites"),
-        ToggleFavorite => tr("Add to favourites"),
+        ToggleFavorite if favorite => tr("Remove from favorites"),
+        ToggleFavorite => tr("Add to favorites"),
         BlockChannel if blocked => tr("Unblock channel"),
         BlockChannel => tr("Block channel"),
         BlockGroup if blocked => tr("Unblock group"),
@@ -80,7 +80,7 @@ fn label(item: MenuItem, favorite: bool, blocked: bool) -> &'static str {
         HideChannel => tr("Hide channel"),
         AssignEpg => tr("Choose guide data…"),
         ChannelOptions => tr("Channel options…"),
-        ManageFavorites => tr("Manage favourites…"),
+        ManageFavorites => tr("Manage favorites…"),
         ManageBlocked => tr("Manage blocked channels…"),
         ManageHidden => tr("Manage hidden channels…"),
         ReorderChannels => tr("Reorder channels"),
@@ -99,8 +99,8 @@ fn title(channel: usize, p: crate::guide::Program) -> String {
     crate::schedule().title_in(channel, p, crate::i18n::language())
 }
 
-/// Long OK / Menu: the menu for the focused programme (in full screen, the
-/// playing channel's current programme).
+/// Long OK / Menu: the menu for the focused program (in full screen, the
+/// playing channel's current program).
 pub fn open(ui: Ui) {
     let now = ui.focus.with(|f| f.now);
     let (channel, minute) = match (ui.mode.get(), ui.playing.get()) {
@@ -172,7 +172,7 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
     ui.menu.set(Some(menu));
 }
 
-/// Closes the menu or popover; guide focus stays on the programme it was
+/// Closes the menu or popover; guide focus stays on the program it was
 /// opened on (it does not jump to now).
 pub fn close(ui: Ui) {
     let origin = ui
@@ -237,8 +237,8 @@ pub fn perform(ui: Ui, item: MenuItem) {
             }
         }
         MenuItem::Record => crate::recordings_view::record_origin(ui, origin),
-        MenuItem::CustomRecording => crate::recordings_view::programme(ui, origin, true),
-        MenuItem::ScheduleRecording => crate::recordings_view::schedule_programme(ui, origin),
+        MenuItem::CustomRecording => crate::recordings_view::program(ui, origin, true),
+        MenuItem::ScheduleRecording => crate::recordings_view::schedule_program(ui, origin),
         // Details replaces the menu; Back from it returns to the guide.
         MenuItem::Description => ui.description.set(Some(origin)),
         MenuItem::WatchInNewWindow => {
@@ -248,7 +248,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
             close(ui);
             let schedule = crate::schedule();
             let now = ui.focus.with_untracked(|focus| focus.now);
-            let program = origin_programme(&*schedule, origin);
+            let program = origin_program(&*schedule, origin);
             if program.start != origin.program_start
                 || !program.can_replay(now, schedule.catchup_days(origin.channel))
                 || !crate::player::allow_guide_channel(origin.channel)
@@ -506,7 +506,7 @@ fn heading_text(ui: Ui, heading: Heading) -> String {
     };
     match heading {
         Heading::Program => {
-            let p = origin_programme(&*crate::schedule(), origin);
+            let p = origin_program(&*crate::schedule(), origin);
             format!(
                 "{} · {}–{}",
                 title(origin.channel, p),
@@ -664,10 +664,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .child(description(ui))
 }
 
-fn origin_programme(
-    schedule: &dyn crate::guide::Schedule,
-    origin: Origin,
-) -> crate::guide::Program {
+fn origin_program(schedule: &dyn crate::guide::Schedule, origin: Origin) -> crate::guide::Program {
     let minute = schedule
         .listing_start(origin.channel)
         .map_or(origin.program_start, |start| {
@@ -683,12 +680,9 @@ fn description(ui: Ui) -> impl IntoElement {
     let shown = move || ui.description.get().is_some();
     let program = move || {
         ui.guide_data();
-        ui.description.get().map(|origin| {
-            (
-                origin.channel,
-                origin_programme(&*crate::schedule(), origin),
-            )
-        })
+        ui.description
+            .get()
+            .map(|origin| (origin.channel, origin_program(&*crate::schedule(), origin)))
     };
     view()
         .absolute()
@@ -741,11 +735,11 @@ fn description(ui: Ui) -> impl IntoElement {
                 .child(
                     text(move || {
                         program()
-                            .and_then(|(channel, programme)| {
-                                crate::header::programme_description(
+                            .and_then(|(channel, program)| {
+                                crate::header::program_description(
                                     &*crate::schedule(),
                                     channel,
-                                    programme,
+                                    program,
                                 )
                             })
                             .unwrap_or_default()
@@ -771,7 +765,7 @@ fn description(ui: Ui) -> impl IntoElement {
                             || true,
                             move || {
                                 if let Some(origin) = ui.description.get_untracked() {
-                                    crate::recordings_view::programme(ui, origin, false);
+                                    crate::recordings_view::program(ui, origin, false);
                                 }
                             },
                         )
@@ -787,7 +781,7 @@ pub fn open_at(ui: Ui, channel: usize, minute: i32) {
     open_focused(ui);
 }
 
-/// A right-click or long press moved the guide's focus to a programme:
+/// A right-click or long press moved the guide's focus to a program:
 /// its menu opens, and autoplay holds on it. The focus stays there when
 /// the menu (or the details it opens) closes, and opening a menu never
 /// starts playback (`docs/interaction.md`): nothing tunes it until the

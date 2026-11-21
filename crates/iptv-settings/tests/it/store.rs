@@ -7,7 +7,7 @@ use iptv_settings::{
 
 const G: &Target = &Target::Global;
 
-/// Recognises the expected error variant.
+/// Recognizes the expected error variant.
 type Expect = fn(&SettingsError) -> bool;
 
 fn change(key: &'static str, target: Target) -> Change {
@@ -78,7 +78,7 @@ fn levels_beyond_a_settings_scope_are_refused_and_skipped() {
     let err = st.set_in(
         "appearance.accent",
         &Target::playlist("p"),
-        Value::colour("red"),
+        Value::color("red"),
     );
     assert!(matches!(err, Err(SettingsError::ScopeNotAllowed { .. })));
     // Playlist scope: no group overrides.
@@ -99,8 +99,8 @@ fn levels_beyond_a_settings_scope_are_refused_and_skipped() {
         st.choice(keys::GROUP_SORT, &Target::group("p", "g")),
         "name"
     );
-    st.set("appearance.accent", Value::colour("teal")).unwrap();
-    assert_eq!(st.colour(keys::ACCENT, &Target::group("p", "g")), "teal");
+    st.set("appearance.accent", Value::color("teal")).unwrap();
+    assert_eq!(st.color(keys::ACCENT, &Target::group("p", "g")), "teal");
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn writes_are_validated_and_failed_writes_store_nothing() {
         ("appearance.font_size", Value::choice("huge"), |e| {
             matches!(e, SettingsError::UnknownVariant { .. })
         }),
-        ("appearance.accent", Value::colour("dark"), |e| {
+        ("appearance.accent", Value::color("dark"), |e| {
             matches!(e, SettingsError::UnknownVariant { .. })
         }),
         ("appearance.accent", Value::choice("blue"), |e| {
@@ -397,7 +397,7 @@ fn errors_say_what_was_wrong() {
             says(
                 "appearance.accent",
                 Target::playlist("pl-1"),
-                Value::colour("red"),
+                Value::color("red"),
             ),
             r#"appearance.accent cannot be overridden for playlist "pl-1""#,
         ),
@@ -427,7 +427,7 @@ fn a_value_of_another_type_names_both_types() {
         (Value::ms(1), "duration"),
         (Value::choice("x"), "enum"),
         (Value::text("x"), "text"),
-        (Value::colour("x"), "colour"),
+        (Value::color("x"), "color"),
         (Value::KeyBindings(vec![]), "key_bindings"),
     ];
     for (value, name) in found {
@@ -569,7 +569,7 @@ fn typed_keys_reject_wrong_types_and_unknown_names_before_reading() {
     assert!(IntKey::try_new("guide.autoplay").is_err());
     assert!(DurationKey::try_new("history.recent_count").is_err());
     assert!(EnumKey::try_new("general.user_agent").is_err());
-    assert!(ColourKey::try_new("guide.autoplay").is_err());
+    assert!(ColorKey::try_new("guide.autoplay").is_err());
     assert!(TextKey::try_new("appearance.accent").is_err());
     assert!(BindingsKey::try_new("appearance.font_size").is_err());
     assert!(BoolKey::try_new("no.such_key").is_err());

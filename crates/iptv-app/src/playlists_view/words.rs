@@ -41,7 +41,7 @@ pub fn stored_failure(kind: ImportErrorKind) -> &'static str {
         ImportErrorKind::AccountRejected => tr("the provider refused the login"),
         ImportErrorKind::AuthFailed => tr("the portal ended the session"),
         ImportErrorKind::Blocked => tr("the portal does not accept this device"),
-        ImportErrorKind::Cancelled => tr("it was stopped"),
+        ImportErrorKind::Canceled => tr("it was stopped"),
         _ => tr("something went wrong"),
     }
 }
@@ -56,7 +56,7 @@ pub fn failure(failure: ImportFailure) -> &'static str {
         FailureKind::EmptyPlaylist => tr("the playlist had nothing to watch in it"),
         FailureKind::Unsupported => tr("the server is not a service of this type"),
         FailureKind::Busy => tr("too many playlists are updating; try again shortly"),
-        FailureKind::Cancelled => tr("it was stopped"),
+        FailureKind::Canceled => tr("it was stopped"),
     }
 }
 
@@ -271,9 +271,9 @@ pub fn param_value(form: &Form, p: Param) -> String {
 pub fn delete_consequences(p: &Playlist, next: Option<&str>, shown: bool) -> String {
     let gone = trf(
         "{count, plural, \
-         one {Its # channel, its guide and your favourites from it will be gone from the app. \
+         one {Its # channel, its guide and your favorites from it will be gone from the app. \
          The playlist at your provider is not affected.} \
-         other {Its # channels, its guide and your favourites from it will be gone from the app. \
+         other {Its # channels, its guide and your favorites from it will be gone from the app. \
          The playlist at your provider is not affected.}}",
         &[("count", p.channels.into())],
     );
@@ -396,7 +396,7 @@ mod tests {
             K::AccountRejected,
             K::AuthFailed,
             K::Blocked,
-            K::Cancelled,
+            K::Canceled,
             K::Other,
         ]
         .into_iter()
@@ -414,7 +414,7 @@ mod tests {
             FailureKind::Parse,
             FailureKind::EmptyPlaylist,
             FailureKind::Unsupported,
-            FailureKind::Cancelled,
+            FailureKind::Canceled,
         ]
         .into_iter()
         .map(|k| failure(ImportFailure::new(k)))
@@ -511,7 +511,7 @@ mod tests {
     fn deleting_states_its_consequences() {
         let p = playlist();
         let text = delete_consequences(&p, Some("Other"), true);
-        assert!(text.contains("1 channel,") && text.contains("favourites"));
+        assert!(text.contains("1 channel,") && text.contains("favorites"));
         assert!(text.contains("switches to “Other”"));
         assert!(delete_consequences(&p, None, true).contains("No playlists will be left"));
         assert!(!delete_consequences(&p, Some("Other"), false).contains("switches"));
@@ -596,7 +596,7 @@ mod tests {
             K::AccountRejected,
             K::AuthFailed,
             K::Blocked,
-            K::Cancelled,
+            K::Canceled,
             K::Other,
         ];
         let session = [
@@ -607,7 +607,7 @@ mod tests {
             FailureKind::EmptyPlaylist,
             FailureKind::Unsupported,
             FailureKind::Busy,
-            FailureKind::Cancelled,
+            FailureKind::Canceled,
         ];
         let told = || -> Vec<&'static str> {
             let stored = stored.iter().map(|kind| stored_failure(*kind));

@@ -63,7 +63,7 @@ files and legacy snapshot conversion use the same initialization boundary.
 What each portable crate owns:
 
 - `iptv-core`: UI-independent state. The guide model and focus, channel
-  lists, favourites, menus, player panels, the playback health machine,
+  lists, favorites, menus, player panels, the playback health machine,
   multiview and picture-in-picture state, the add-playlist wizard.
 - `iptv-nav`: remote and keyboard input. Key events become short or long
   presses, and a keymap resolves them to actions for the current context.
@@ -76,7 +76,7 @@ What each portable crate owns:
 - `iptv-guide`: the guide schedule built from imported channels and the EPG
   store, behind the `Schedule` trait of `iptv-core`.
 - `iptv-import`: the import pipeline that drives the two above.
-- `iptv-search`: channel and programme search, and the search screen's state.
+- `iptv-search`: channel and program search, and the search screen's state.
 - `iptv-library`: playlist and guide identifiers, policy and list models,
   guide edits, and the playlists, guide sources and guide assignment screen
   states. SQLite re-exports its former model paths. Guide feed IDs are
@@ -107,7 +107,7 @@ memory:
 
 - `CatalogSink`: catalog rows (groups, channels, films, series) as they are
   parsed, in steps that succeed or fail as a whole;
-- `GuideSink`: one feed's programmes as they are parsed, with `finish_feed`
+- `GuideSink`: one feed's programs as they are parsed, with `finish_feed`
   or `discard_feed` at the end;
 - `ProgressSink`: progress events for the import screen.
 
@@ -158,8 +158,8 @@ active lease's account identity across playlist edits. Unknown M3U account
 associations share a conservative budget. Retries retain a surface's existing
 reservation; desktop PiP reserves no additional provider connection.
 
-Media is private but unencrypted in a `-recordings` sibling of the catalogue
-directory, excluded from OS backups and untouched by catalogue directory
+Media is private but unencrypted in a `-recordings` sibling of the catalog
+directory, excluded from OS backups and untouched by catalog directory
 swaps. Playback uses a read-only random-capability HTTP server with byte-range
 support, so both native player hosts keep their guarded HTTP path. Deletion
 refuses the file currently playing. Interrupted jobs recover captured media
@@ -179,7 +179,7 @@ remove another service's active encrypted temporary file.
 Retained-media playback reports source-token-scoped timelines and numbered seek
 acknowledgements. Seeking preserves the player surface and pause state; stale
 observations cannot undo a newer seek. Recording and on-demand resume metadata
-live in the encrypted catalogue, independently of retained media bytes.
+live in the encrypted catalog, independently of retained media bytes.
 
 Parental policy, unlock scopes and PIN-dialog state live in the portable core.
 The native runtime stores salted one-way PIN/recovery verifiers, durable attempt
@@ -188,7 +188,7 @@ from current storage at native admission, with final grant checks before
 handing resolved streams to the decoder. Suspending a mobile player requires
 fresh shell authorization before it can open its retained URL again.
 
-The on-demand catalogue renders source/content identities, provider details,
+The on-demand catalog renders source/content identities, provider details,
 seasons/episodes and persisted progress. Temporary provider links are resolved
 again on retry; source-incarnation checks reject stale detail/progress work
 following source deletion and recreation. These native recording, parental
@@ -249,11 +249,11 @@ An import never writes to the live catalog while it downloads.
 2. **Publish.** Only when the whole import has passed does
    `Store::replace_catalog_stage` copy the stage into the store, in one
    transaction. Readers see the old catalog or the new one, never a mix.
-3. **Guide.** The EPG works the same way: `import_epg` streams programmes into
+3. **Guide.** The EPG works the same way: `import_epg` streams programs into
    an `EpgStage` (its own file, written by its own thread in bounded batches),
    and `Store::replace_epg` publishes it in one transaction.
 
-A failed or cancelled import publishes nothing: the stage is dropped and its
+A failed or canceled import publishes nothing: the stage is dropped and its
 file deleted, and a new source is stored only once its first import succeeded.
 A crash can leave a stale stage file, which is removed at the next start. A
 stored source's channels and guide are on screen before its refresh reaches
@@ -279,7 +279,7 @@ including inferred values and aliases, and compile-fail examples keep native
 snapshot and planning helpers private.
 
 Runtime owns the current schedule, library snapshot, refresh tickets and
-attempts, combined-source parts, guide status, favourites, search indexes,
+attempts, combined-source parts, guide status, favorites, search indexes,
 backup progress and settings. Its services own the store lanes, bounded
 refresh pool, file writer and shared two-worker Tokio executor. Refresh
 scheduling consumes foreground notifications and emits refresh requests;
@@ -307,7 +307,7 @@ does not keep the owner alive. Teardown drains accepted writes, rejects
 later work and cancels imports and link resolves.
 
 The private store service owns two long-lived connections to the encrypted
-catalogue. The writer serializes mutations, staging and reads that must
+catalog. The writer serializes mutations, staging and reads that must
 follow queued writes. The read-only connection serves guide, search and
 organization queries without waiting behind a publish transaction. Both
 live on dedicated threads; no SQLite operation runs on the UI thread.

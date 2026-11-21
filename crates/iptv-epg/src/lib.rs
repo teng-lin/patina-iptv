@@ -3,13 +3,13 @@
 //!
 //! - [`XmltvParser`]: sans-IO, incremental XMLTV parser. Feed it bytes in
 //!   any chunking (plain or gzip); it yields [`XmltvChannel`] and
-//!   [`XmltvProgramme`] records, skipping malformed entries with counted
+//!   [`XmltvProgram`] records, skipping malformed entries with counted
 //!   [`ParseWarnings`].
 //! - [`MatchIndex`]: maps playlist channels ([`ChannelKey`]) to EPG channel
-//!   ids by tvg-id, then by normalised name, with manual [`Override`]s.
+//!   ids by tvg-id, then by normalized name, with manual [`Override`]s.
 //! - [`MatchFilter`]: before a feed is matched, which of its EPG channels
 //!   some playlist channel could match (a streaming import keeps only
-//!   their programmes).
+//!   their programs).
 //! - [`SourceBuilder`] / [`GuideStore`]: compact per-channel schedules from
 //!   several sources with priorities, retention and O(log n) guide queries.
 //!   [`ScheduleRules`] are their ordering, overlap and retention rules, for
@@ -45,9 +45,9 @@ pub use parser::{ParseOptions, ParseStats, ParseWarnings, ParsedXmltv, XmltvPars
 pub use settle::{ScheduleRules, Settled};
 pub use settled_source::SettledBuilder;
 pub use store::{
-    EpgSource, GuideStore, IngestReport, NowNext, ProgrammeData, ProgrammeRef, ScheduleRef,
+    EpgSource, GuideStore, IngestReport, NowNext, ProgramData, ProgramRef, ScheduleRef,
     SourceBuilder, StoreOptions,
 };
 pub use superscript::fold_superscripts;
 pub use time::{DAY, TimePolicy, UnixTime, format_xmltv_time, parse_xmltv_time};
-pub use xmltv::{EpisodeNum, Rating, XmltvChannel, XmltvItem, XmltvProgramme};
+pub use xmltv::{EpisodeNum, Rating, XmltvChannel, XmltvItem, XmltvProgram};

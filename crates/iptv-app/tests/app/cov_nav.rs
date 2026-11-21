@@ -4,7 +4,7 @@
 //! details, a past one replayed, the recent searches, and the screen
 //! coming back after watching with `search.stay_on_search`), the player's
 //! channel list over and beside the video (its groups column, paging,
-//! zapping, an empty Favourites list), and multiview on a TV (the arrows
+//! zapping, an empty Favorites list), and multiview on a TV (the arrows
 //! between tiles, its menu's Add screen, Change channel, Enlarge, Full
 //! screen and back, Remove; Back leaving to the active tile, a zap or the
 //! guide ending a detour, the key hint timing out).
@@ -28,13 +28,13 @@ const SLOT: i64 = 3600;
 const FIELD: &str = "id:search-field";
 const TILE: &str = "id:multiview-tile";
 const MENU: &str = "id:multiview-menu";
-/// A programme's channel and times, as the details popover (and a search
+/// A program's channel and times, as the details popover (and a search
 /// result) shows them.
 // A time on another local day carries its weekday and date ("Thu 12 · 00:22"):
-// late in the evening the programme two hours on ends, or starts, tomorrow.
+// late in the evening the program two hours on ends, or starts, tomorrow.
 const TIMES: &str = "text:/^Test Channel One · ([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+ [AP]M–([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+ [AP]M$/";
 
-/// How many lines of channel one's programme times show: the details
+/// How many lines of channel one's program times show: the details
 /// popover adds one (it stays mounted, empty, while closed).
 fn times(app: &Headless) -> usize {
     app.screen().count(TIMES).unwrap()
@@ -49,7 +49,7 @@ fn wait_times(app: &mut Headless, n: usize) {
     );
 }
 
-/// Channel one's programmes are "Show <n>" and channel two's "Other <n>",
+/// Channel one's programs are "Show <n>" and channel two's "Other <n>",
 /// `n` counting hours from the one on air (0), with a few named ones:
 /// on now "Morning Talk" and "Other Now", two hours back "Recital
 /// Replay" (channel one replays a day) and "Old Concert" (channel two
@@ -198,7 +198,7 @@ fn keys_drive_the_guide_search_the_channel_list_and_multiview() {
 /// The guide by keyboard: the first key after the pointer starts from a
 /// row on screen; arrows, pages, Ch+/Ch-, Info and Menu.
 fn guide_keys(app: &mut Headless) {
-    // Down from channel one: channel two's programme on now.
+    // Down from channel one: channel two's program on now.
     step(app.press_key("down"));
     wait_focused(app, "Other Now");
     // Page Down: by the rows on screen, at most to the last channel;
@@ -218,7 +218,7 @@ fn guide_keys(app: &mut Headless) {
     // Info is not the guide's: nothing changes.
     step(app.press_key("i"));
     assert!(focused(app, "Morning Talk"));
-    // OK on a future programme opens its details with a recording action.
+    // OK on a future program opens its details with a recording action.
     step(app.press_key("right"));
     wait_focused(app, "Show 1");
     step(app.press_key("enter"));
@@ -228,7 +228,7 @@ fn guide_keys(app: &mut Headless) {
     step(app.back());
     step(app.press_key("home"));
     wait_focused(app, "Morning Talk");
-    // Menu: the programme's menu; Menu again closes it.
+    // Menu: the program's menu; Menu again closes it.
     step(app.press_key("m"));
     step(app.wait_for("text:Details"));
     step(app.press_key("down"));
@@ -286,7 +286,7 @@ fn guide_keys(app: &mut Headless) {
     assert!(app.screen().matches("text:☰  News").unwrap());
     close_search(app);
     // From Search down past TV, Movies and Shows stay reachable even
-    // without a VOD catalogue; Recordings, Playlists and Settings follow.
+    // without a VOD catalog; Recordings, Playlists and Settings follow.
     const PLAYLISTS: &str = "text:▲▼ choose   OK actions   Back close";
     const SETTINGS: &str = "text:▲▼ page   ▶ OK its settings   Back close";
     step(app.press_key("up"));
@@ -342,13 +342,13 @@ fn guide_keys(app: &mut Headless) {
     step(app.press_key("pageup"));
     wait_focused(app, "Morning Talk");
 
-    // The menu's Manage favourites: the editor takes the keys. OK adds the
+    // The menu's Manage favorites: the editor takes the keys. OK adds the
     // focused channel, OK again removes it; Left (remove all) with none
     // changes nothing; Right adds all, Left removes them; Back closes.
     const STAR: &str = "text:★ Test Channel Four";
     step(app.press_key("m"));
-    step(app.wait_for("text:Manage favourites…"));
-    step(app.press("text:Manage favourites…"));
+    step(app.wait_for("text:Manage favorites…"));
+    step(app.press("text:Manage favorites…"));
     step(app.press_key("down"));
     step(app.press_key("up"));
     step(app.press_key("enter"));
@@ -370,11 +370,11 @@ fn search_keys(app: &mut Headless) {
     step(app.press_key("/"));
     step(app.wait_for(FIELD));
     step(app.wait_for("text:No recent searches yet"));
-    // An upcoming programme (the only result: its tab shows): Back takes
+    // An upcoming program (the only result: its tab shows): Back takes
     // the keyboard down, Down to the tabs, Right (no other tab with
     // results), Down to it, OK: its details.
     step(app.type_text(FIELD, "Gala"));
-    step(app.wait_for("text:/^Programmes · 1$/"));
+    step(app.wait_for("text:/^Programs · 1$/"));
     step(app.back());
     step(app.press_key("down"));
     step(app.press_key("right"));
@@ -388,7 +388,7 @@ fn search_keys(app: &mut Headless) {
     // A digit pressed on a result goes into the query: nothing found.
     step(app.press_key("1"));
     step(app.wait_for("text:Nothing found for “Gala1”"));
-    // A past programme with replay: played from its start, full screen;
+    // A past program with replay: played from its start, full screen;
     // leaving full screen brings the screen back with its query.
     step(app.clear(FIELD));
     step(app.type_text(FIELD, "Recital"));
@@ -401,7 +401,7 @@ fn search_keys(app: &mut Headless) {
     step(app.press_key("o"));
     step(app.wait_for(FIELD));
     step(app.wait_for("text:Recital Replay"));
-    // A channel by its number (programmes match it too; the programmes'
+    // A channel by its number (programs match it too; the programs'
     // tab stays chosen): Right and Left switch the tabs; the channel plays
     // live. Search over the video brings the waiting screen back at once.
     step(app.clear(FIELD));
@@ -473,14 +473,14 @@ fn channel_list_keys(app: &mut Headless) {
     step(app.press_key("left"));
     gone(app, HEAD);
     step(app.wait_until("All channels", WAIT, |s| lit(s, "All channels")));
-    // Up twice: Recently watched, then Favourites, empty; Right cannot
+    // Up twice: Recently watched, then Favorites, empty; Right cannot
     // enter an empty list.
     step(app.press_key("up"));
     step(app.wait_until("recent", WAIT, |s| lit(s, "Recently watched")));
     step(app.press_key("up"));
-    step(app.wait_for("text:No favourites yet"));
+    step(app.wait_for("text:No favorites yet"));
     step(app.press_key("right"));
-    assert!(lit(app.screen(), "Favourites"), "still in the groups");
+    assert!(lit(app.screen(), "Favorites"), "still in the groups");
     // Down to the News group (entry 3); OK enters it.
     for _ in 0..3 {
         step(app.press_key("down"));
@@ -504,7 +504,7 @@ fn channel_list_keys(app: &mut Headless) {
     wait_list(app, false);
 
     // Shift + Left (Long Left): the list beside the video, shrunk to a
-    // preview, with the focused channel's programme under it.
+    // preview, with the focused channel's program under it.
     step(app.press_key("shift+left"));
     wait_list(app, true);
     step(app.wait_for("text:1  Test Channel One"));
@@ -537,7 +537,7 @@ fn channel_list_keys(app: &mut Headless) {
 }
 
 /// Whether the channel list's row or groups entry `text` shows in the
-/// focus pill's dark colour.
+/// focus pill's dark color.
 fn lit(screen: &nsh_testing::Screen, text: &str) -> bool {
     let dark = nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff);
     [
@@ -560,7 +560,7 @@ fn list_open(screen: &nsh_testing::Screen) -> bool {
         return true;
     }
     let entries = [
-        "Favourites",
+        "Favorites",
         "Recently watched",
         "All channels",
         "News",

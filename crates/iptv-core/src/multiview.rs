@@ -13,7 +13,7 @@
 //! to the heard tile ([`Multiview::audible_surface`]).
 //!
 //! The screen holds just the tiles ([`Layout`]): no empty cells, and the
-//! tiles flow again at once when one comes or goes. One tile sits centred
+//! tiles flow again at once when one comes or goes. One tile sits centered
 //! at half the width, two side by side, three as two above one, four two
 //! by two. A tile can be *enlarged*: big at the top, the others in a strip
 //! under it; enlarging another moves the big place to it, reducing it
@@ -40,7 +40,7 @@
 //!
 //! Opening starts
 //! with the playing channel as the only tile and asks for the next one at
-//! once (cancelling leaves the one tile); a short key hint shows until a
+//! once (canceling leaves the one tile); a short key hint shows until a
 //! key or a few seconds pass (the caller times it).
 //!
 //! Each tile keeps the player surface it was given (0 to [`MAX_SURFACES`]
@@ -349,7 +349,7 @@ impl<C: Clone + PartialEq> Multiview<C> {
             Key::Back => return self.leave(self.active),
         };
         if let Some((dx, dy)) = way
-            && let Some(to) = self.layout().neighbour(self.active, dx, dy)
+            && let Some(to) = self.layout().neighbor(self.active, dx, dy)
         {
             self.active = to;
         }

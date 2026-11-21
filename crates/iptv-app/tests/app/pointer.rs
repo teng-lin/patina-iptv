@@ -140,8 +140,8 @@ fn clicks_reach_the_guide_under_the_hidden_layers() {
     step(app.press("label:Video"));
     step(app.wait_for("label:Mute"));
     step(app.press("label:Play or pause"));
-    step(app.wait_for("label:Favourite"));
-    step(app.press("label:Favourite"));
+    step(app.wait_for("label:Favorite"));
+    step(app.press("label:Favorite"));
     step(app.wait_for("text:★ Test Channel Two"));
     step(app.press("label:Video"));
     step(app.wait_for_gone("label:Mute", Duration::from_secs(2)));
@@ -262,19 +262,19 @@ fn bar_buttons(app: &mut Headless, step: impl Fn(Result<(), String>)) {
         "Mute",
         "Play or pause",
         "Play or pause",
-        "Favourite",
-        "Favourite",
+        "Favorite",
+        "Favorite",
         "Subtitles and tracks",
         "Full screen",
         "Full screen",
     ] {
         step(app.press(&format!("label:{name}")));
     }
-    // Programme details: a second press closes them.
+    // Program details: a second press closes them.
     let details = "text:/^Test Channel Two · \\d/";
-    step(app.press("label:Programme details"));
+    step(app.press("label:Program details"));
     step(app.wait_for(details));
-    step(app.press("label:Programme details"));
+    step(app.press("label:Program details"));
     step(gone(app, details));
     // Picture size: a second press closes it, and so does a press beside
     // it; the bar stays meanwhile.
@@ -405,7 +405,7 @@ fn multiview(app: &mut Headless, step: impl Fn(Result<(), String>) + Copy) {
         (1280.0 - (panel.0 + panel.2) - 10.0 * 0.875).abs() < 0.5,
         "at the right edge: {panel:?}"
     );
-    assert!((panel.1 + panel.3 / 2.0 - 360.0).abs() < 1.0, "centred");
+    assert!((panel.1 + panel.3 / 2.0 - 360.0).abs() < 1.0, "centered");
     for item in ["Add screen", "Search and add", "Change channel", "Pause"] {
         assert!(
             app.screen()

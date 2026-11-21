@@ -47,7 +47,7 @@ fn unix_now() -> i64 {
         .as_secs() as i64
 }
 
-/// Hour-long programmes from a day back to two days ahead for `channels`,
+/// Hour-long programs from a day back to two days ahead for `channels`,
 /// "<prefix> Now" on air now.
 pub(super) fn guide(prefix: &str, channels: &[&str]) -> String {
     let now = unix_now();
@@ -63,7 +63,7 @@ pub(super) fn guide(prefix: &str, channels: &[&str]) -> String {
         while t < hour + 2 * 86_400 {
             let title = if t == hour { "Now" } else { "Other" };
             xml.push_str(&format!(
-                "<programme channel=\"{c}\" start=\"{}\" stop=\"{}\"><title>{prefix} {title}</title><desc>A synthetic programme.</desc></programme>",
+                "<programme channel=\"{c}\" start=\"{}\" stop=\"{}\"><title>{prefix} {title}</title><desc>A synthetic program.</desc></programme>",
                 format_xmltv_time(t),
                 format_xmltv_time(t + 3600)
             ));
@@ -311,8 +311,8 @@ fn stored_playlists_switch_refresh_and_go() {
         |_| iptv_app::player_has_source(0),
     ));
     assert!(iptv_app::player_has_source(0), "Alpha Two plays");
-    // A favourite of the first playlist's: full screen, the card's
-    // Favourite, back to the guide.
+    // A favorite of the first playlist's: full screen, the card's
+    // Favorite, back to the guide.
     step(app.press("text:/^(★ )?Alpha Two$/"));
     step(app.press_key("enter"));
     step(app.wait_for("id:player-actions"));
@@ -320,7 +320,7 @@ fn stored_playlists_switch_refresh_and_go() {
         step(app.press_key("right"));
     }
     step(app.press_key("enter"));
-    step(app.wait_for("text:★ Favourite"));
+    step(app.wait_for("text:★ Favorite"));
     step(app.back());
     step(app.back());
     step(app.wait_for("text:★ Alpha Two"));
@@ -341,7 +341,7 @@ fn stored_playlists_switch_refresh_and_go() {
     assert!(!iptv_app::player_has_source(0), "playback stopped");
     assert!(
         !app.screen().matches("text:/^★/").unwrap(),
-        "its favourites went"
+        "its favorites went"
     );
     assert!(
         data.join("last_channel-1").exists(),
@@ -539,7 +539,7 @@ fn stored_playlists_switch_refresh_and_go() {
     step(app.press("text:Update the guide now"));
     step(app.wait_for_within("text:/^Failed /", IMPORT));
     assert!(app.screen().matches("text:Fresh Now").unwrap());
-    // "Delete stored guide data": the channels stay without programmes.
+    // "Delete stored guide data": the channels stay without programs.
     step(app.press("text:Delete stored guide data"));
     // Its confirmation's button.
     step(app.wait_for("text:Delete stored guide data?"));
@@ -587,7 +587,7 @@ fn stored_playlists_switch_refresh_and_go() {
     drop(app);
 
     // A saved combined key resumes the owning source's channel, with its
-    // banner up full screen when the cached catalogue arrives.
+    // banner up full screen when the cached catalog arrives.
     let one = iptv_providers::m3u::parse_m3u(&nine).channels.items[0]
         .id
         .as_str()

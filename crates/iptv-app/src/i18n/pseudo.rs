@@ -54,7 +54,7 @@ fn accent(c: char) -> char {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn expansion_is_catalogue_only_and_keeps_formatted_messages_out() {
+    fn expansion_is_catalog_only_and_keeps_formatted_messages_out() {
         let source = "Play the last channel on start";
         let expanded = super::fixed(source).unwrap();
         assert!(expanded.chars().count() > source.chars().count() * 2);

@@ -1,8 +1,8 @@
 //! The guide's header: the preview at the top left (the video layer is laid
 //! out under it in guide mode, `panels::preview_rect`) and, to its right,
-//! the focused programme: its title (Roboto Medium) with the favourite star
+//! the focused program: its title (Roboto Medium) with the favorite star
 //! at the right, its times with a progress bar and the minutes left (the
-//! group's name at the right), and its description in grey. At the right
+//! group's name at the right), and its description in gray. At the right
 //! the list on screen (a tap opens the groups) and Add playlist.
 
 use crate::i18n::{tr, trf};
@@ -34,8 +34,8 @@ fn secondary() -> Rgba {
     tint(WHITE, TEXT_SECONDARY_ALPHA)
 }
 
-/// The focused programme: data version (a schedule swap re-renders even on
-/// equal minutes), now, row, catalog channel, programme. `None` on an
+/// The focused program: data version (a schedule swap re-renders even on
+/// equal minutes), now, row, catalog channel, program. `None` on an
 /// empty list.
 type Focused = Option<(u64, i32, usize, usize, Program)>;
 
@@ -108,7 +108,7 @@ fn preview(ui: Ui, size: Scale) -> impl IntoElement {
         )
 }
 
-/// Rounds the video's corners: a ring of the window colour whose inner edge
+/// Rounds the video's corners: a ring of the window color whose inner edge
 /// is the preview's rounded rectangle (guide mode only).
 fn preview_ring(ui: Ui) -> impl IntoElement {
     view()
@@ -132,10 +132,10 @@ fn preview_ring(ui: Ui) -> impl IntoElement {
 /// for them to pause.
 const SETTLE: Duration = Duration::from_millis(160);
 
-/// The focused programme as the description shows it: at once after a
+/// The focused program as the description shows it: at once after a
 /// pause, blank while keys repeat (a held key moves the focus 15–20 times a
 /// second, and laying out four lines of description each time costs a TV
-/// box more than the rest of the move), then the programme the keys
+/// box more than the rest of the move), then the program the keys
 /// stopped on.
 fn settled(ui: Ui, program: Memo<Focused>) -> Signal<Focused> {
     let shown = signal(program.get_untracked());
@@ -169,16 +169,16 @@ fn settled(ui: Ui, program: Memo<Focused>) -> Signal<Focused> {
 
 fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
     let settled = settled(ui, program);
-    // Read once per focused programme (a stored guide reads it from disk).
+    // Read once per focused program (a stored guide reads it from disk).
     let description = computed(move || {
         ui.app.guide_pages.get();
         settled.with(|p| {
             let (_, _, _, ch, p) = (*p)?;
             let schedule = crate::schedule();
-            programme_description(&*schedule, ch, p)
+            program_description(&*schedule, ch, p)
         })
     });
-    let favourite = move || {
+    let favorite = move || {
         program
             .with(|p| p.map(|p| p.3))
             .is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)))
@@ -220,7 +220,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                     .text_color(rgb(WHITE)),
                 )
                 .child(
-                    text(move || if favourite() { "★" } else { "" })
+                    text(move || if favorite() { "★" } else { "" })
                         .text_size(move || size.text_px(HEADER_TITLE * 0.8))
                         .text_color(move || rgb(ui.app.theme.with(|t| t.accent.light))),
                 )
@@ -312,8 +312,8 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
         )
 }
 
-/// The ⋯ at the end of the focused programme's title, for touch and a
-/// pointer: the menu the remote's Menu key opens for it (favourites,
+/// The ⋯ at the end of the focused program's title, for touch and a
+/// pointer: the menu the remote's Menu key opens for it (favorites,
 /// recording, details, replay). Its box is the title's text size (under
 /// the title's line height at every scale and text size, so showing it
 /// moves no text), its press reaches the least touch size around it.
@@ -336,7 +336,7 @@ fn more_side(size: Scale) -> f32 {
 }
 
 /// Whether the header's ⋯ shows: for touch and a pointer, with a
-/// programme to open, and not during an inline reorder of channels or
+/// program to open, and not during an inline reorder of channels or
 /// groups (the guide takes no pointer then, and the order is unfinished).
 fn more_shown(ui: Ui, program: Memo<Focused>) -> bool {
     !ui.keys_shown()
@@ -449,7 +449,7 @@ fn key_stats(ui: Ui) -> Option<Text> {
 }
 
 /// The same shortcuts in a compact header ([`Shortcuts::Below`]): one row
-/// under the preview and the focused programme, scrolled sideways where the
+/// under the preview and the focused program, scrolled sideways where the
 /// window is narrower than the row.
 fn shortcuts_row(ui: Ui) -> impl IntoElement {
     scroll()
@@ -501,10 +501,10 @@ pub fn header(ui: Ui) -> impl IntoElement {
         })
     });
     // A compact window moves the shortcuts under the preview and the
-    // programme (`iptv_core::layout`). Only this header's own views change:
+    // program (`iptv_core::layout`). Only this header's own views change:
     // the preview keeps its place, and the player under it is resized.
     let below = computed(move || crate::panels::shortcuts_now() == Shortcuts::Below);
-    // A compact portrait window stacks the programme under a preview as wide
+    // A compact portrait window stacks the program under a preview as wide
     // as the window (`GuideHeader::stacked`); the player under the preview
     // is resized with it, as for any other arrangement.
     let stacked = computed(move || crate::panels::guide_header_now().stacked());
@@ -619,32 +619,31 @@ mod tests {
     }
 }
 
-/// Description lookup shared by the header and selected-programme Details.
-pub(crate) fn programme_description(
+/// Description lookup shared by the header and selected-program Details.
+pub(crate) fn program_description(
     schedule: &dyn crate::guide::Schedule,
     channel: usize,
-    programme: Program,
+    program: Program,
 ) -> Option<String> {
     if let Some(combined) = schedule
         .as_any()
         .and_then(|schedule| schedule.downcast_ref::<iptv_guide::combined::CombinedSchedule>())
     {
-        combined.description(channel, programme)
+        combined.description(channel, program)
     } else {
         schedule
             .as_any()
             .and_then(|schedule| schedule.downcast_ref::<iptv_guide::EpgSchedule>())
-            .and_then(|schedule| schedule.description(channel, programme))
+            .and_then(|schedule| schedule.description(channel, program))
     }
 }
 
 #[cfg(test)]
 mod description_regressions {
-    use super::programme_description;
+    use super::program_description;
     use iptv_core::guide::Schedule;
     use iptv_epg::{
-        ChannelKey, EpgRef, FeedId, GuideStore, MatchKind, ProgrammeData, SourceBuilder,
-        StoreOptions,
+        ChannelKey, EpgRef, FeedId, GuideStore, MatchKind, ProgramData, SourceBuilder, StoreOptions,
     };
     use iptv_guide::{
         EpgSchedule, GuideChannel,
@@ -665,10 +664,10 @@ mod description_regressions {
         );
         builder.push_data(
             "synthetic-epg",
-            &ProgrammeData {
+            &ProgramData {
                 start: 1_800_000_000 - 1800,
                 stop: Some(1_800_000_000 + 1800),
-                title: "Synthetic selected programme",
+                title: "Synthetic selected program",
                 desc: description,
                 ..Default::default()
             },
@@ -698,13 +697,13 @@ mod description_regressions {
         )
     }
     #[test]
-    fn descriptions_follow_selected_source_programme_and_empty_data() {
+    fn descriptions_follow_selected_source_program_and_empty_data() {
         let now = 1_800_000_000;
         let first = Rc::new(schedule(now, Some("Synthetic amber description")));
         let second = Rc::new(schedule(now + 3600, Some("Synthetic birch description")));
         let selected = first.program_at(0, 0);
         assert_eq!(
-            programme_description(&*first, 0, selected).as_deref(),
+            program_description(&*first, 0, selected).as_deref(),
             Some("Synthetic amber description")
         );
         let combined = CombinedSchedule::new(
@@ -727,16 +726,12 @@ mod description_regressions {
             (1, "Synthetic birch description"),
         ] {
             assert_eq!(
-                programme_description(&combined, channel, combined.program_at(channel, 0))
-                    .as_deref(),
+                program_description(&combined, channel, combined.program_at(channel, 0)).as_deref(),
                 Some(expected)
             );
         }
         let empty = schedule(now, None);
-        assert_eq!(
-            programme_description(&empty, 0, empty.program_at(0, 0)),
-            None
-        );
-        assert_eq!(programme_description(&empty, 9, selected), None);
+        assert_eq!(program_description(&empty, 0, empty.program_at(0, 0)), None);
+        assert_eq!(program_description(&empty, 9, selected), None);
     }
 }

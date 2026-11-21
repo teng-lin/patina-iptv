@@ -1,5 +1,5 @@
 //! Combined startup must wait for the saved channel's own portal session.
-//! Only generated catalogues and a gated local mock portal are used.
+//! Only generated catalogs and a gated local mock portal are used.
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},

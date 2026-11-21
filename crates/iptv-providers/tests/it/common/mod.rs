@@ -20,7 +20,7 @@ fn odd_values() -> Vec<Value> {
     .unwrap()
 }
 
-/// Calls `f` with the body re-serialised once per (leaf, odd value) pair,
+/// Calls `f` with the body re-serialized once per (leaf, odd value) pair,
 /// plus once per removed object key, and with a few truncations.
 pub fn for_each_type_mutation(json: &str, mut f: impl FnMut(String)) {
     let root: Value = serde_json::from_str(json).unwrap();

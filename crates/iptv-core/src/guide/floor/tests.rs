@@ -5,7 +5,7 @@ use crate::timeline::Timeline;
 
 const S: SyntheticSchedule = SyntheticSchedule;
 
-/// The synthetic programmes with chosen archive windows (`days[c]` for
+/// The synthetic programs with chosen archive windows (`days[c]` for
 /// channel `c`) and stored guide (`first` minutes back from now 0).
 struct Archive {
     days: Vec<u8>,

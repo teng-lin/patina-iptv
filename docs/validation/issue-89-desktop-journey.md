@@ -14,7 +14,7 @@ All data is synthetic: the generated playlist of the
 `guide_window_preview` example (three "Synthetic" channels and twelve
 generated channels in each of three groups), the generated HLS test streams
 of `tools/make-hls-fixtures.sh` served from `127.0.0.1:18091`, and the
-generated playlists, catalogues and recordings of the headless scenarios.
+generated playlists, catalogs and recordings of the headless scenarios.
 No provider data was used.
 
 **Physical hardware: one Linux desktop, used only to host the runs below.**

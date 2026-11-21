@@ -65,7 +65,7 @@ fn begin(ui: Ui) -> Option<(Screen, u64, InspectionControl)> {
     accepted
 }
 fn accepts(screen: &Screen, generation: u64, cancel: &iptv_import::CancelToken) -> bool {
-    !cancel.is_cancelled() && screen.open && screen.generation == generation
+    !cancel.is_canceled() && screen.open && screen.generation == generation
 }
 fn finish(ui: Ui, generation: u64, cancel: &iptv_import::CancelToken, result: model::Result<()>) {
     update(ui, |s| finish_screen(s, generation, cancel, result));
@@ -144,10 +144,10 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
         let result = owner.inspect_channel(channel.clone(), control).await;
-        if cancel.is_cancelled()
+        if cancel.is_canceled()
             || inspection
                 .as_ref()
-                .is_some_and(iptv_import::CancelToken::is_cancelled)
+                .is_some_and(iptv_import::CancelToken::is_canceled)
         {
             return;
         }
@@ -517,7 +517,7 @@ fn error(error: &model::Error) -> &'static str {
             tr("Guide evidence changed; inspect again")
         }
         model::Error::Inspection(value) => crate::guide_inspect_view::error_text(value.clone()),
-        model::Error::Cancelled => tr("Cancelled"),
+        model::Error::Canceled => tr("Canceled"),
         _ => tr("Guide changes could not be saved"),
     }
 }
@@ -860,7 +860,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     .unwrap_or_default()
                 }))
                 .child(ui_kit::body(size, move || {
-                    tr("Programme coverage does not verify channel identity")
+                    tr("Program coverage does not verify channel identity")
                 }));
             let screen = screen.child(when(
                 move || state(ui, |s| s.busy).unwrap_or(false),
@@ -901,8 +901,8 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                 s.verification.as_ref().map(|v| {
                                     format!(
                                         "{}: {} / {}",
-                                        tr("Programme coverage available"),
-                                        v.programmes_available,
+                                        tr("Program coverage available"),
+                                        v.programs_available,
                                         v.channels
                                     )
                                 })
@@ -921,7 +921,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
 mod callback_regressions {
     use super::*;
     #[test]
-    fn a_cancelled_callback_cannot_finish_a_reopened_screen_at_the_same_generation() {
+    fn a_canceled_callback_cannot_finish_a_reopened_screen_at_the_same_generation() {
         let window = TimeWindow {
             from: 1_800_000_000,
             to: 1_800_003_600,

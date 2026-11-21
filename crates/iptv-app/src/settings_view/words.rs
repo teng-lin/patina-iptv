@@ -1,6 +1,6 @@
 //! The settings screen's wording (iptv-rs's own): names of sections,
 //! subsections, settings, commands and choices, and how values read. The
-//! catalogue's summaries serve as the rows' descriptions.
+//! catalog's summaries serve as the rows' descriptions.
 
 use crate::i18n::{tr, trf};
 
@@ -75,7 +75,7 @@ pub fn subsection(section: Section, subsection: &str) -> &'static str {
         (Section::Playback, "decoding") => tr("Picture"),
         (Section::Catchup, "seeking") => tr("Replay keys"),
         (Section::Catchup, "steps") => tr("Replay jumps"),
-        (Section::Vod, "catalogue") => tr("Movies and series"),
+        (Section::Vod, "catalog") => tr("Movies and series"),
         (Section::Vod, "playback") => tr("Series playback"),
         (_, "network") => tr("Network"),
         (_, "privacy") => tr("Privacy"),
@@ -86,7 +86,7 @@ pub fn subsection(section: Section, subsection: &str) -> &'static str {
         (_, "names") => tr("Channel names"),
         (_, "storage") => tr("Storage"),
         (_, "matching") => tr("Matching channels"),
-        (_, "colours") => tr("Colours"),
+        (_, "colors") => tr("Colors"),
         (_, "text") => tr("Text"),
         (_, "motion") => tr("Motion"),
 
@@ -159,7 +159,7 @@ pub fn label(key: &str) -> &'static str {
         "channels.channel_sort" => tr("Channel order"),
         "channels.show_new_groups" => tr("Show groups that appear later"),
         "channels.show_all_channels" => tr("All channels category"),
-        "channels.show_favorites" => tr("Favourites category"),
+        "channels.show_favorites" => tr("Favorites category"),
         "channels.show_all_playlists" => tr("All playlists category"),
         "channels.group_all_playlists_by_playlist" => tr("Keep each playlist together"),
         "channels.playlist_opens" => tr("A playlist opens on"),
@@ -170,22 +170,22 @@ pub fn label(key: &str) -> &'static str {
         "epg.update_interval" => tr("Download the guide every"),
         "epg.update_on_start" => tr("Update when the app starts"),
         "epg.update_on_playlist_change" => tr("Update after a playlist changes"),
-        "epg.keep_past" => tr("Keep finished programmes for"),
-        "epg.store_descriptions" => tr("Keep programme descriptions"),
+        "epg.keep_past" => tr("Keep finished programs for"),
+        "epg.store_descriptions" => tr("Keep program descriptions"),
         "epg.full_scan" => tr("Thorough channel matching"),
         "epg.time_offset" => tr("Shift guide times by"),
         "epg.add_source" => tr("Add a guide source"),
         "epg.manage_sources" => tr("Guide sources"),
         "epg.update_now" => tr("Update the guide now"),
         "epg.clear" => tr("Delete stored guide data"),
-        "appearance.accent" => tr("Accent colour"),
-        "appearance.background" => tr("Background colour"),
+        "appearance.accent" => tr("Accent color"),
+        "appearance.background" => tr("Background color"),
         "appearance.selection_style" => tr("Focus fill"),
         "appearance.ui_transparency" => tr("Video showing through screens"),
         "appearance.panel_transparency" => tr("See-through player panels"),
         "appearance.font_size" => tr("Text size"),
         "appearance.two_line_channel_names" => tr("Channel names on two lines"),
-        "appearance.two_line_program_titles" => tr("Programme titles on two lines"),
+        "appearance.two_line_program_titles" => tr("Program titles on two lines"),
         "appearance.animated_scrolling" => tr("Animated scrolling"),
         "appearance.animated_transitions" => tr("Animated transitions"),
         "guide.browse_mode" => tr("Guide layout"),
@@ -194,14 +194,14 @@ pub fn label(key: &str) -> &'static str {
         "guide.show_logos" => tr("Channel logos"),
         "guide.show_channel_names" => tr("Channel names"),
         "guide.show_channel_numbers" => tr("Channel numbers"),
-        "guide.show_now_playing" => tr("Programme on air in the list"),
-        "guide.show_programmes" => tr("Programme grid"),
-        "guide.show_description" => tr("Programme description"),
+        "guide.show_now_playing" => tr("Program on air in the list"),
+        "guide.show_programs" => tr("Program grid"),
+        "guide.show_description" => tr("Program description"),
         "guide.show_source_labels" => tr("Playlist and group of channels"),
         "guide.show_catchup_badge" => tr("Replay mark"),
-        "guide.dim_past" => tr("Dim finished programmes"),
-        "guide.highlight_playing" => tr("Colour the playing channel"),
-        "guide.highlight_now" => tr("Emphasise programmes on air"),
+        "guide.dim_past" => tr("Dim finished programs"),
+        "guide.highlight_playing" => tr("Color the playing channel"),
+        "guide.highlight_now" => tr("Emphasize programs on air"),
         "guide.now_highlight_style" => tr("On-air emphasis"),
         "guide.now_line_full_height" => tr("Time line across the grid"),
         "guide.autoplay" => tr("Play the focused channel by itself"),
@@ -209,7 +209,7 @@ pub fn label(key: &str) -> &'static str {
         "guide.fullscreen_timeout" => tr("Go full screen after"),
         "guide.stay_on_list" => tr("Keep the channel list after choosing"),
         "guide.stay_on_guide" => tr("Keep the guide after choosing"),
-        "guide.back_returns_to_now" => tr("Back returns to the programmes on air"),
+        "guide.back_returns_to_now" => tr("Back returns to the programs on air"),
         "logos.source" => tr("Preferred logos"),
         "logos.folder" => tr("Logo folder"),
         "logos.inexact_match" => tr("Near matches of file names"),
@@ -230,7 +230,7 @@ pub fn label(key: &str) -> &'static str {
         "player.pip_on_leave" => tr("Picture in picture when leaving"),
         "playback.video_decoder" => tr("Video decoding"),
         "playback.audio_decoder" => tr("Audio decoding"),
-        "playback.tunneling" => tr("Tunnelled video"),
+        "playback.tunneling" => tr("Tunneled video"),
         "playback.amlogic_workaround" => tr("Amlogic workaround"),
         "playback.black_frame_on_switch" => tr("Black picture while tuning"),
         "playback.passthrough" => tr("Surround audio to the receiver"),
@@ -256,9 +256,9 @@ pub fn label(key: &str) -> &'static str {
         "history.recent_add_after" => tr("Add to recent channels after"),
         "history.clear" => tr("Clear history"),
         "search.prefer_voice" => tr("Start with voice input"),
-        "search.favorites_first" => tr("Favourites first"),
+        "search.favorites_first" => tr("Favorites first"),
         "search.show_history" => tr("Show recent searches"),
-        "search.include_past_without_catchup" => tr("Finished programmes without replay"),
+        "search.include_past_without_catchup" => tr("Finished programs without replay"),
         "search.stay_on_search" => tr("Back to search after watching"),
         "search.clear_history" => tr("Clear recent searches"),
         "recordings.folder" => tr("Recording folder"),
@@ -290,7 +290,7 @@ pub fn label(key: &str) -> &'static str {
     }
 }
 
-/// What a command row does, where the catalogue's summary says more than
+/// What a command row does, where the catalog's summary says more than
 /// this version does.
 pub fn description(key: &str) -> Option<&'static str> {
     Some(match key {
@@ -341,12 +341,12 @@ pub fn choice(family: &str, variant: &str) -> String {
         ("level", "none") => tr("None"),
         ("level", "low") => tr("Low"),
         ("level", "high") => tr("High"),
-        ("selection_style", "accent_fill") => tr("Accent colour"),
+        ("selection_style", "accent_fill") => tr("Accent color"),
         ("selection_style", "neutral_fill") => tr("Neutral"),
         ("browse_mode", "preview") => tr("Video beside the list"),
         ("browse_mode", "overlay") => tr("List over the video"),
         ("now_highlight", "plain") => tr("Plain"),
-        ("now_highlight", "colour") => tr("Tinted"),
+        ("now_highlight", "color") => tr("Tinted"),
         ("now_highlight", "progress_only") => tr("Progress bar only"),
         ("corner", "top_left") => tr("Top left"),
         ("corner", "top_right") => tr("Top right"),
@@ -400,11 +400,11 @@ pub fn choice(family: &str, variant: &str) -> String {
         ("keyboard", "system") => tr("The device's"),
         ("keyboard", "built_in") => tr("The app's own"),
         ("playlist_opens", "all_channels") => tr("All channels"),
-        ("playlist_opens", "favorites") => tr("Favourites"),
+        ("playlist_opens", "favorites") => tr("Favorites"),
         ("card_style", "poster") => tr("Poster"),
         ("card_style", "landscape") => tr("Wide"),
         ("card_style", "compact") => tr("Compact"),
-        // Palettes: the theme's names (`blue_grey` → "Blue grey").
+        // Palettes: the theme's names (`blue_gray` → "Blue gray").
         ("accent" | "background", v) => return title(v),
         _ => "",
     };
@@ -416,13 +416,13 @@ fn title(key: &str) -> String {
         "amber" => tr("Amber"),
         "black" => tr("Black"),
         "blue" => tr("Blue"),
-        "blue_grey" => tr("Blue grey"),
+        "blue_gray" => tr("Blue gray"),
         "brown" => tr("Brown"),
         "cyan" => tr("Cyan"),
         "dark" => tr("Dark"),
-        "dark_grey" => tr("Dark grey"),
+        "dark_gray" => tr("Dark gray"),
         "green" => tr("Green"),
-        "grey" => tr("Grey"),
+        "gray" => tr("Gray"),
         "indigo" => tr("Indigo"),
         "lime" => tr("Lime"),
         "orange" => tr("Orange"),
@@ -521,7 +521,7 @@ pub fn value(setting: &Setting, value: &Value) -> String {
             zero(setting.key).unwrap_or_default().to_owned()
         }
         Value::Int(n) | Value::Duration(n) => amount(&setting.ty, *n),
-        Value::Enum(v) | Value::Colour(v) => setting
+        Value::Enum(v) | Value::Color(v) => setting
             .ty
             .choices()
             .map(|c| choice(c.family, v))
@@ -546,7 +546,7 @@ pub fn value(setting: &Setting, value: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use iptv_settings::catalogue;
+    use iptv_settings::catalog;
 
     use super::*;
 
@@ -558,7 +558,7 @@ mod tests {
                 assert!(!heading(sec, Some(sub)).is_empty(), "{sec:?}.{sub}");
             }
         }
-        for s in catalogue::settings() {
+        for s in catalog::settings() {
             assert!(!label(s.key).is_empty(), "{}", s.key);
             if let Some(choices) = s.ty.choices() {
                 for v in choices.variants {
@@ -566,14 +566,14 @@ mod tests {
                 }
             }
         }
-        for c in catalogue::commands() {
+        for c in catalog::commands() {
             assert!(!label(c.key).is_empty(), "{}", c.key);
         }
     }
 
     #[test]
     fn values_read_in_their_units() {
-        let read = |key: &str, v: Value| value(catalogue::setting(key).unwrap(), &v);
+        let read = |key: &str, v: Value| value(catalog::setting(key).unwrap(), &v);
         assert_eq!(read("general.resume_last_channel", Value::Bool(true)), "On");
         assert_eq!(
             read("epg.update_interval", Value::Duration(0)),
@@ -593,8 +593,8 @@ mod tests {
         assert_eq!(read("catchup.start_offset", Value::secs(75)), "+0:01:15");
         assert_eq!(read("appearance.ui_transparency", Value::Int(20)), "20 %");
         assert_eq!(
-            read("appearance.accent", Value::colour("blue_grey")),
-            "Blue grey"
+            read("appearance.accent", Value::color("blue_gray")),
+            "Blue gray"
         );
         assert_eq!(
             read("catchup.seek_keys", Value::choice("down_up")),

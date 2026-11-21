@@ -1,6 +1,6 @@
 //! Stable content and group ids.
 //!
-//! User customisations (favourites, order, hidden, renamed, blocked) live in
+//! User customizations (favorites, order, hidden, renamed, blocked) live in
 //! overlay tables keyed by these ids, while provider rows are replaced on
 //! every refresh. An id must therefore depend only on what identifies the
 //! item at the provider, never on list position or on volatile URL parts.
@@ -13,10 +13,10 @@
 //!    `id`, Stalker `id`): `"{source}:{kind}:{provider_id}"`, for example
 //!    `xt:live:1234`, `xt:movie:1234`, `st:live:77`. The kind is included
 //!    because panels reuse the same number for a live channel and a movie.
-//!    Numeric ids are canonicalised (`"0042"` → `42`).
+//!    Numeric ids are canonicalized (`"0042"` → `42`).
 //! 2. **No provider id** (M3U entries):
 //!    `"m3u:" + hex(xxh3_64(normalize_stream_url(url) + "\n" + normalize_name(name)))`.
-//!    Normalisation removes what changes between refreshes without changing
+//!    Normalization removes what changes between refreshes without changing
 //!    the stream: scheme (`http`/`https`), letter case of the host, default
 //!    ports, userinfo, fragment, the `|User-Agent=…` header suffix, volatile
 //!    query keys (`token`, `auth`, `expires`, `hdnts`, …; see
@@ -24,11 +24,11 @@
 //!    (`/live/USER/PASS/ID.ext`, `/USER/PASS/ID`) — the credentials and the
 //!    `.ts`/`.m3u8` extension. Names are trimmed, whitespace-collapsed and
 //!    lowercased.
-//! 3. **Duplicates** (two M3U entries with the same normalised URL and name)
+//! 3. **Duplicates** (two M3U entries with the same normalized URL and name)
 //!    get `~2`, `~3`, … in file order, so every id in one import is unique.
 //!
 //! Consequences: renaming an M3U channel at the provider, or moving it to a
-//! different stream path, yields a new id (the old customisation stops
+//! different stream path, yields a new id (the old customization stops
 //! matching); a password change, token rotation, `http`→`https` move or a
 //! `.ts`→`.m3u8` switch does not. Changing this rule changes persisted keys
 //! and needs a data migration.

@@ -1,4 +1,4 @@
-//! Superscript markers in programme titles. Providers append badges such
+//! Superscript markers in program titles. Providers append badges such
 //! as "ᴸᶦᵛᵉ" or "ᴺᵉʷ" in Unicode modifier letters, which many fonts lack in
 //! part (a missing "ᶦ" makes "Live" read wrong). A run of two or more such
 //! letters that spells a word is folded to its plain letters, set off from

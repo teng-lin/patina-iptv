@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Integrity regressions for native licence downloads."""
+"""Integrity regressions for native license downloads."""
 import hashlib
 import importlib.util
 import io
@@ -19,12 +19,12 @@ class NoticesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             artifact = {'name': 'Libtest', 'url': 'https://github.com/example/test', 'sha256': 'a' * 64, 'components': ['test']}
-            manifest = {'artifacts': [artifact], 'components': [{'component': 'test', 'files': [{'path': 'COPYING', 'url': 'https://example.test/license', 'sha256': checksum or hashlib.sha256(b'licence text').hexdigest()}]}]}
+            manifest = {'artifacts': [artifact], 'components': [{'component': 'test', 'files': [{'path': 'COPYING', 'url': 'https://example.test/license', 'sha256': checksum or hashlib.sha256(b'license text').hexdigest()}]}]}
             (root / 'manifest.json').write_text(json.dumps(manifest))
             (root / 'fetch.sh').write_text(f"Libtest {artifact['url']} {artifact_checksum or artifact['sha256']}\n")
-            with patch.object(module.urllib.request, 'urlopen', return_value=io.BytesIO(b'licence text')) as download:
+            with patch.object(module.urllib.request, 'urlopen', return_value=io.BytesIO(b'license text')) as download:
                 module.generate(root / 'manifest.json', root / 'out', root / 'fetch.sh')
-                self.assertEqual((root / 'out/test/COPYING').read_bytes(), b'licence text')
+                self.assertEqual((root / 'out/test/COPYING').read_bytes(), b'license text')
                 self.assertTrue((root / 'out/components.json').exists())
                 download.assert_called_once()
 

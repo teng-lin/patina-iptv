@@ -1,4 +1,4 @@
-//! Portable values for source-explicit catalogue and guide inspection.
+//! Portable values for source-explicit catalog and guide inspection.
 //! No view, database, network connection or player is part of this contract.
 use crate::{Choice, SourceId};
 use iptv_epg::{FeedId, MatchKind};
@@ -100,7 +100,7 @@ pub struct CandidateRef {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProgrammeInfo {
+pub struct ProgramInfo {
     pub channel: ChannelRef,
     pub candidate: CandidateRef,
     pub source_incarnation: String,
@@ -112,9 +112,9 @@ pub struct ProgrammeInfo {
     pub title: String,
 }
 
-/// A sample belongs to an XMLTV candidate, which may have no catalogue channel.
+/// A sample belongs to an XMLTV candidate, which may have no catalog channel.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CandidateProgramme {
+pub struct CandidateProgram {
     pub candidate: CandidateRef,
     pub source_incarnation: String,
     pub evidence_revision: String,
@@ -165,7 +165,7 @@ pub struct Coverage {
     pub diagnosis: Diagnosis,
     pub window: TimeWindow,
     pub covered_seconds: u64,
-    pub programme_count: u32,
+    pub program_count: u32,
     pub binding: Option<CandidateRef>,
     /// Coverage is schedule evidence, never proof of station identity.
     pub identity_verified: bool,
@@ -186,7 +186,7 @@ pub struct ProbeEvidence {
 pub struct ProbeSummary {
     pub evidence: ProbeEvidence,
     pub channels: u64,
-    pub programmes: u64,
+    pub programs: u64,
     pub bytes: u64,
     pub warnings: u64,
 }
@@ -201,7 +201,7 @@ pub enum InspectionError {
     PermissionDenied,
     StaleCursor,
     StaleEvidence,
-    Cancelled,
+    Canceled,
     Deadline,
     Busy,
     Storage,

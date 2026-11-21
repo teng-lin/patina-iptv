@@ -1,7 +1,7 @@
 """Pinned libmpv runtimes for Linux and macOS (stdlib only).
 
 The Windows runtime (`tools/mpv-runtime`) is the model: pinned sources from
-its lock, an offline build, a check of the build's licence configuration and
+its lock, an offline build, a check of the build's license configuration and
 binary dependencies, and a dependency release holding the runtime with its
 exact corresponding sources. This module adds the Linux and macOS variants
 without touching any Windows input, so the Windows recipe digest and runtime
@@ -10,7 +10,7 @@ stay byte-for-byte unchanged.
 Commands:
   lock     write the platform's source lock (shared entries of the Windows
            lock plus the platform's own, all SHA-256 pinned)
-  verify   check a build's feature/licence configuration headers
+  verify   check a build's feature/license configuration headers
   package  validate a build and write the runtime, source and test-tool
            archives, runtime-<platform>.json and SHA256SUMS
   fetch    download (or take) a runtime archive, verify it against a
@@ -134,7 +134,7 @@ def resolve_lock(platform, selection_path=HERE / "sources.json"):
         if not isinstance(item, dict) or str(item.get("name", "")).casefold() in shared:
             raise ValueError(f"Platform component duplicates a shared pin: {item.get('name')!r}")
     lock = {"schema": 1, "sources": chosen + list(extra)}
-    # The same validation as every other lock: names, HTTPS, SHA-256, licences.
+    # The same validation as every other lock: names, HTTPS, SHA-256, licenses.
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "lock.json"
         path.write_text(json.dumps(lock), encoding="utf-8")
@@ -197,7 +197,7 @@ def _tar(output, files):
 
 
 def bundle(platform, lock_path, work, output):
-    """The exact corresponding source: archives, licences, lock and build scripts.
+    """The exact corresponding source: archives, licenses, lock and build scripts.
 
     Same layout as the Windows bundle, so `prepare.py prepare --source-bundle`
     restores it offline.
@@ -242,7 +242,7 @@ def config_defines(*texts):
 
 
 def check_features(platform, component, defines):
-    """Errors for features that must be on (the app needs them) or off (licence)."""
+    """Errors for features that must be on (the app needs them) or off (license)."""
     errors = []
     for expected, keys in (("1", EXPECTED[platform][component]), ("0", REQUIRED_OFF[component])):
         for key in keys:
@@ -335,9 +335,9 @@ def validate_build(platform, build):
     if not smoke.is_file() or not all(f"PASS {name}" in smoke.read_text(encoding="utf-8")
                                        for name in ("generated.ts", "generated.m3u8")):
         errors.append("No passing build-time playback smoke test (logs/smoke.txt)")
-    licence = re.search(r'^#define FFMPEG_LICENSE "([^"]*)"', (logs / "ffmpeg-config.h").read_text(encoding="utf-8"), re.MULTILINE)
-    if not licence or licence[1] != "LGPL version 2.1 or later":
-        errors.append(f"FFmpeg licence is {licence[1] if licence else 'missing'}, expected LGPL version 2.1 or later")
+    license = re.search(r'^#define FFMPEG_LICENSE "([^"]*)"', (logs / "ffmpeg-config.h").read_text(encoding="utf-8"), re.MULTILINE)
+    if not license or license[1] != "LGPL version 2.1 or later":
+        errors.append(f"FFmpeg license is {license[1] if license else 'missing'}, expected LGPL version 2.1 or later")
     for component, headers in (("ffmpeg", ["ffmpeg-config.h", "ffmpeg-config_components.h"]), ("mpv", ["mpv-config.h"])):
         defines = config_defines(*((logs / name).read_text(encoding="utf-8") for name in headers))
         errors += [f"{component}: {error}" for error in check_features(platform, component, defines)]
@@ -526,7 +526,7 @@ SYSTEM_MEDIA = re.compile(r"^lib(av(codec|device|filter|format|util)|sw(resample
 
 
 def install_notices(runtime_dir, output):
-    """Copy the runtime's notices, licences, source pointer and build configuration."""
+    """Copy the runtime's notices, licenses, source pointer and build configuration."""
     runtime_dir, output = Path(runtime_dir), Path(output)
     if output.exists():
         shutil.rmtree(output)

@@ -1,8 +1,8 @@
 //! Player panels over full-screen video for the remote (and keys), as
 //! observed in the reference UX: OK shows a top bar (the playing channel's
 //! group; live state, sleep timer, date and time), the info card (`card`:
-//! logo, number and name, badges, programme, one time line, next
-//! programme) and the action cards beneath it; Long OK or Menu the control
+//! logo, number and name, badges, program, one time line, next
+//! program) and the action cards beneath it; Long OK or Menu the control
 //! strip; a channel change a compact banner. The card's time line is the
 //! only one: a replay's card shows its seek bar there. A pointer (desktop
 //! mouse, tablet touch) has the play bar instead (`play_bar.rs`, never on
@@ -32,7 +32,7 @@ pub use status::status;
 pub(crate) use words::{failure_message, waiting_text};
 
 const WHITE: u32 = 0xFFFFFF;
-/// Panel fill over video: the theme's panel colour, mostly opaque.
+/// Panel fill over video: the theme's panel color, mostly opaque.
 const PANEL_ALPHA: u8 = 0xE0;
 
 /// "Name · value", or the name alone.
@@ -115,8 +115,8 @@ fn label(ui: Ui, control: Control) -> String {
                     }),
             ),
         ),
-        Favorite if is_favorite(ui) => tr("★ Favourite").to_owned(),
-        Favorite => tr("☆ Favourite").to_owned(),
+        Favorite if is_favorite(ui) => tr("★ Favorite").to_owned(),
+        Favorite => tr("☆ Favorite").to_owned(),
         ChannelOptions => tr("Channel options").to_owned(),
         Settings => tr("Settings").to_owned(),
     }

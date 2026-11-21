@@ -26,24 +26,20 @@ fn inspect_offscreen_source_and_unmatched_samples_without_changing_saved_choices
         .collect();
     let mut extra: Vec<_> = extra_names
         .iter()
-        .map(|(id, name)| (id.as_str(), name.as_str(), "Synthetic Extra Page Programme"))
+        .map(|(id, name)| (id.as_str(), name.as_str(), "Synthetic Extra Page Program"))
         .collect();
-    extra.push((
-        "extra.north",
-        "Synthetic Extra",
-        "Synthetic Extra Programme",
-    ));
+    extra.push(("extra.north", "Synthetic Extra", "Synthetic Extra Program"));
     let server = Server::start(&[
         (
             "/guide.xml",
             support::guide(
                 support::now(),
                 &[
-                    ("amber.main", "Synthetic Amber", "Synthetic Main Programme"),
+                    ("amber.main", "Synthetic Amber", "Synthetic Main Program"),
                     (
                         "amber.east",
                         "Synthetic Amber East",
-                        "Synthetic Unmatched Programme",
+                        "Synthetic Unmatched Program",
                     ),
                 ],
             ),
@@ -137,7 +133,7 @@ fn inspect_offscreen_source_and_unmatched_samples_without_changing_saved_choices
     t.press("text:Synthetic Amber >> nth=0");
     t.wait("text:Synthetic Amber East", 10);
     t.press("text:Synthetic Amber East");
-    t.wait("text:/Synthetic Unmatched Programme/", 10);
+    t.wait("text:/Synthetic Unmatched Program/", 10);
     server.set(
         "/guide.xml",
         support::guide(
@@ -147,7 +143,7 @@ fn inspect_offscreen_source_and_unmatched_samples_without_changing_saved_choices
     );
     t.key("backspace");
     t.press("text:Synthetic Amber East");
-    t.wait("text:/Synthetic Unmatched Programme/", 10);
+    t.wait("text:/Synthetic Unmatched Program/", 10);
     assert!(!t.shows("text:/Changed After Probe/"));
     // Close returns to the original source screen; reopening starts a fresh request namespace.
     for _ in 0..3 {
@@ -200,7 +196,7 @@ fn inspect_offscreen_source_and_unmatched_samples_without_changing_saved_choices
     t.wait("text:Synthetic Extra 050", 10);
     assert!(!t.shows("text:Guide evidence changed; inspect again"));
     t.press("text:Synthetic Extra >> nth=0");
-    t.wait("text:/Synthetic Extra Programme/", 10);
+    t.wait("text:/Synthetic Extra Program/", 10);
     let store = crate::isolated::open_database(directory.join("iptv.sqlite")).unwrap();
     assert_eq!(store.active_source().unwrap(), Some(sources[0]));
     assert!(store.epg_overrides(sources[1]).unwrap().is_empty());

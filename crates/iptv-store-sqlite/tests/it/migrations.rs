@@ -85,6 +85,119 @@ fn existing_episode_progress_gains_a_resume_identity_when_upgraded() {
     assert_eq!(store.vod_progress(&episode).unwrap().position_ms, 37_000);
 }
 
+/// Schema 25 spells stored names the US way (#139): the rows of `favourites`
+/// and `epg_programmes`, a `cancelled` recording and `cancelled` import
+/// kinds written by a v24 build all survive the upgrade, with their ids and
+/// children.
+#[test]
+fn a_v24_store_keeps_its_data_under_us_spelling() {
+    use iptv_core::recording::{JobId, Status};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("generated-v24.db");
+    build_old_file(&path, HISTORY.iter().find(|v| v.version == 24).unwrap());
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "INSERT INTO recording_jobs(id,source_id,channel_id,channel_name,title,starts_at,ends_at,
+             status,message,source_incarnation)
+         SELECT 43,source_id,channel_id,channel_name,title,starts_at+120,ends_at+120,
+             'cancelled','Cancelled',source_incarnation FROM recording_jobs WHERE id=41;
+         INSERT INTO recording_jobs(id,source_id,channel_id,channel_name,title,starts_at,ends_at,
+             status,message,source_incarnation)
+         SELECT 45,source_id,channel_id,channel_name,title,starts_at+240,ends_at+240,
+             'cancelled','Recurring schedule disabled',source_incarnation
+         FROM recording_jobs WHERE id=41;
+         INSERT INTO recording_rule_jobs(job_id,rule_id,starts_at) VALUES(45,71,1800000240);
+         UPDATE source_imports SET last_error_kind='cancelled',movie_error_kind='cancelled',
+             series_error_kind='cancelled' WHERE source_id=1;
+         UPDATE epg_guides SET last_error_kind='cancelled';
+         UPDATE epg_feed_results SET error_kind='cancelled';",
+    )
+    .unwrap();
+    let old_favorites: i64 = conn
+        .query_row("SELECT COUNT(*) FROM favourites", [], |r| r.get(0))
+        .unwrap();
+    let old_programs: i64 = conn
+        .query_row("SELECT COUNT(*) FROM epg_programmes", [], |r| r.get(0))
+        .unwrap();
+    let old_rule_jobs: i64 = conn
+        .query_row("SELECT COUNT(*) FROM recording_rule_jobs", [], |r| r.get(0))
+        .unwrap();
+    let old_kinds: i64 = conn
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM epg_guides WHERE last_error_kind='cancelled')
+                  + (SELECT COUNT(*) FROM epg_feed_results WHERE error_kind='cancelled')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(old_favorites > 0 && old_programs > 0 && old_rule_jobs >= 3 && old_kinds > 0);
+    drop(conn);
+
+    let store = Store::open(&path).unwrap();
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    let jobs = store.recording_jobs().unwrap();
+    let canceled = jobs.iter().find(|j| j.id == JobId(43)).unwrap();
+    assert_eq!(canceled.status, Status::Canceled);
+    assert_eq!(canceled.message, "Canceled");
+    // A job a disabled rule canceled keeps the message that lets the rule
+    // restore it, and its link to the rule.
+    let disabled = jobs.iter().find(|j| j.id == JobId(45)).unwrap();
+    assert_eq!(
+        (disabled.status, disabled.message.as_str()),
+        (Status::Canceled, "Recurring schedule disabled")
+    );
+    let completed = jobs.iter().find(|j| j.id == JobId(41)).unwrap();
+    assert_eq!(
+        (completed.status, completed.bytes),
+        (Status::Completed, 18_800)
+    );
+    assert_eq!(
+        store.recording_progress(JobId(41)).unwrap().position_ms,
+        12_000
+    );
+    check_recording_completion(&store, 24);
+    let status = store.import_status(SRC).unwrap();
+    assert_eq!(status.last_error, Some(ImportErrorKind::Canceled));
+    assert_eq!(status.series_error, Some(ImportErrorKind::Canceled));
+    assert_eq!(status.movies_error, Some(ImportErrorKind::Canceled));
+    // check_guide covers v24 in every_historical_version_migrates_with_its_data;
+    // here every guide error kind was set to the old canceled slug instead.
+    check_overlays(&store, 24);
+    drop(store);
+
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+    assert_eq!(count("SELECT COUNT(*) FROM favorites"), old_favorites);
+    assert_eq!(count("SELECT COUNT(*) FROM epg_programs"), old_programs);
+    assert_eq!(
+        count("SELECT COUNT(*) FROM recording_rule_jobs"),
+        old_rule_jobs
+    );
+    assert_eq!(
+        count(
+            "SELECT (SELECT COUNT(*) FROM epg_guides WHERE last_error_kind='canceled')
+                  + (SELECT COUNT(*) FROM epg_feed_results WHERE error_kind='canceled')"
+        ),
+        old_kinds
+    );
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE '%favourite%' OR name LIKE '%programme%' OR sql LIKE '%cancelled%'"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "SELECT (SELECT COUNT(*) FROM source_imports WHERE 'cancelled' IN (last_error_kind,movie_error_kind,series_error_kind))
+                  + (SELECT COUNT(*) FROM epg_guides WHERE last_error_kind='cancelled')
+                  + (SELECT COUNT(*) FROM epg_feed_results WHERE error_kind='cancelled')
+                  + (SELECT COUNT(*) FROM recording_jobs WHERE status='cancelled')"
+        ),
+        0
+    );
+}
+
 /// A historical version: its schema snapshot and the data files to load
 /// into it, in order.
 struct Version {
@@ -470,6 +583,35 @@ const HISTORY: &[Version] = &[
             "data_v23.sql",
         ],
     },
+    Version {
+        version: 24,
+        data: &[
+            "data_v1.sql",
+            "data_v2.sql",
+            "data_v3.sql",
+            "data_v4.sql",
+            "data_v5.sql",
+            "data_v6.sql",
+            "data_v7.sql",
+            "data_v8.sql",
+            "data_v9.sql",
+            "data_v10.sql",
+            "data_v11.sql",
+            "data_v12.sql",
+            "data_v13.sql",
+            "data_v14.sql",
+            "data_v15.sql",
+            "data_v16.sql",
+            "data_v17.sql",
+            "data_v18.sql",
+            "data_v19.sql",
+            "data_v20.sql",
+            "data_v21.sql",
+            "data_v22.sql",
+            "data_v23.sql",
+            "data_v24.sql",
+        ],
+    },
 ];
 
 fn fixture(name: &str) -> String {
@@ -602,17 +744,17 @@ fn check_overlays(store: &Store, version: u32) {
     let sport = visible.iter().find(|r| r.name == "Fixture Sport").unwrap();
     assert_eq!(sport.number, Some(10));
     assert!(sport.blocked);
-    let favourites = store
+    let favorites = store
         .load_channels(
             SRC,
             &ChannelQuery {
-                favourites_only: true,
+                favorites_only: true,
                 ..Default::default()
             },
         )
         .unwrap();
     assert_eq!(
-        favourites
+        favorites
             .iter()
             .map(|r| r.channel.id.as_str())
             .collect::<Vec<_>>(),
@@ -623,7 +765,7 @@ fn check_overlays(store: &Store, version: u32) {
         .iter()
         .find(|o| o.channel_id == id("xt:live:999"))
         .unwrap();
-    assert!(gone.favourite && gone.customised);
+    assert!(gone.favorite && gone.customized);
     assert_eq!(gone.ordered && gone.in_custom_group, version >= 3);
     assert_eq!(orphans.len(), if version >= 3 { 2 } else { 1 });
     assert_eq!(
@@ -638,8 +780,8 @@ fn check_overlays(store: &Store, version: u32) {
     }
 }
 
-/// Organisation data written by v3 builds.
-fn check_organisation(store: &Store) {
+/// Organization data written by v3 builds.
+fn check_organization(store: &Store) {
     let news = store.channel(SRC, &id("xt:live:101")).unwrap().unwrap();
     assert_eq!(
         news.epg_override,
@@ -713,7 +855,7 @@ fn every_historical_version_migrates_with_its_data() {
             check_overlays(&store, v.version);
         }
         if v.version >= 3 {
-            check_organisation(&store);
+            check_organization(&store);
         }
         check_guide(&store, v.version);
         check_settings(&store, v.version);
@@ -729,7 +871,7 @@ fn every_historical_version_migrates_with_its_data() {
             check_overlays(&again, v.version);
         }
         if v.version >= 3 {
-            check_organisation(&again);
+            check_organization(&again);
         }
         check_guide(&again, v.version);
         check_settings(&again, v.version);
@@ -830,12 +972,12 @@ fn check_feed_results(store: &Store, version: u32) {
         assert_eq!((results, other), (vec![], vec![]));
         return;
     }
-    let loaded = |feed, channels, programmes, listed| FeedResult {
+    let loaded = |feed, channels, programs, listed| FeedResult {
         feed: iptv_epg::FeedId(feed),
         attempted_at: 1_700_001_000,
         error: None,
         channel_count: channels,
-        programme_count: programmes,
+        program_count: programs,
         listed_count: listed,
     };
     let listed = if version >= 6 { 2 } else { 0 };
@@ -848,7 +990,7 @@ fn check_feed_results(store: &Store, version: u32) {
                 attempted_at: 1_700_001_100,
                 error: Some(ImportErrorKind::Timeout),
                 channel_count: 0,
-                programme_count: 0,
+                program_count: 0,
                 listed_count: 0,
             }]
         );
@@ -905,7 +1047,7 @@ fn check_guide(store: &Store, version: u32) {
         guide.feeds[0].meta.etag.as_deref(),
         Some("\"fixture-etag\"")
     );
-    assert_eq!(guide.feeds[0].programme_count, 3);
+    assert_eq!(guide.feeds[0].program_count, 3);
     let state = guide.refresh_state();
     assert_eq!(state.feeds, configs);
     assert!(!state.last_attempt_failed);
@@ -921,14 +1063,14 @@ fn check_guide(store: &Store, version: u32) {
     assert_eq!(g.bound_count(), 3);
     let news = ChannelKey::new("xt:live:101");
     let titles: Vec<String> = g
-        .programmes(&news, 0, i64::MAX)
+        .programs(&news, 0, i64::MAX)
         .map(|p| p.title().to_owned())
         .collect();
     assert_eq!(
         titles,
         ["Morning Fixture", "Fixture Midday", "Fixture Evening"]
     );
-    let midday = g.programme_at(&news, 1_700_004_000).unwrap();
+    let midday = g.program_at(&news, 1_700_004_000).unwrap();
     assert_eq!(midday.season_episode(), (Some(1), Some(4)));
     assert_eq!(
         (midday.sub_title(), midday.rating()),
@@ -938,7 +1080,7 @@ fn check_guide(store: &Store, version: u32) {
     // The radio channel shares the news EPG channel (an override).
     let radio = ChannelKey::new("xt:live:103");
     assert_eq!(
-        g.programme_at(&radio, 1_700_000_100).unwrap().title(),
+        g.program_at(&radio, 1_700_000_100).unwrap().title(),
         "Morning Fixture"
     );
     assert_eq!(
@@ -950,7 +1092,7 @@ fn check_guide(store: &Store, version: u32) {
     );
     let sport = ChannelKey::new("xt:live:102");
     assert_eq!(
-        g.programme_at(&sport, 1_700_000_100).unwrap().icon(),
+        g.program_at(&sport, 1_700_000_100).unwrap().icon(),
         Some("http://img.example.com/m.png")
     );
     // A part of it (the app's narrow window, or an older day paged in):
@@ -966,12 +1108,12 @@ fn check_guide(store: &Store, version: u32) {
         )
         .unwrap();
     let titles: Vec<String> = part
-        .programmes(&radio, 0, i64::MAX)
+        .programs(&radio, 0, i64::MAX)
         .map(|p| p.title().to_owned())
         .collect();
     assert_eq!(titles, ["Fixture Midday"], "v{version}");
     assert_eq!(
-        part.programme_at(&radio, 1_700_004_000)
+        part.program_at(&radio, 1_700_004_000)
             .unwrap()
             .season_episode(),
         (Some(1), Some(4))
@@ -991,10 +1133,7 @@ fn tiny_guide() -> (GuideStore, EpgSourceConfig) {
     );
     let parsed = iptv_epg::parse_xmltv(xml.as_bytes(), Default::default()).unwrap();
     parsed.channels.into_iter().for_each(|c| b.push_channel(c));
-    parsed
-        .programmes
-        .into_iter()
-        .for_each(|p| b.push_programme(p));
+    parsed.programs.into_iter().for_each(|p| b.push_program(p));
     let src = b.finish();
     let mut index = MatchIndex::new();
     index.add_source(src.id(), src.priority(), src.channels());
@@ -1032,7 +1171,7 @@ fn first_guide_refresh_after_upgrading() {
             bytes: 10,
         }];
         let counts = staged::replace_epg(&mut store, SRC, &guide, &feeds, 7).unwrap();
-        assert_eq!((counts.channels, counts.programmes), (1, 1));
+        assert_eq!((counts.channels, counts.programs), (1, 1));
         let stored = store.epg_guide(SRC).unwrap().unwrap();
         assert_eq!((stored.feeds.len(), stored.match_fingerprint), (1, Some(7)));
         let g = store
@@ -1044,7 +1183,7 @@ fn first_guide_refresh_after_upgrading() {
             check_overlays(&store, v.version);
         }
         if v.version >= 3 {
-            check_organisation(&store);
+            check_organization(&store);
         }
         if v.version >= 4 {
             // The other source's failed attempt is untouched.
@@ -1116,18 +1255,18 @@ fn check_overlays_after_return(store: &Store) {
     );
     let returned = store.channel(SRC, &id("xt:live:999")).unwrap().unwrap();
     assert_eq!(returned.name, "Gone For Now");
-    assert!(returned.favourite);
-    let favourites = store
+    assert!(returned.favorite);
+    let favorites = store
         .load_channels(
             SRC,
             &ChannelQuery {
-                favourites_only: true,
+                favorites_only: true,
                 ..Default::default()
             },
         )
         .unwrap();
     assert_eq!(
-        favourites
+        favorites
             .iter()
             .map(|r| r.channel.id.as_str())
             .collect::<Vec<_>>(),

@@ -57,7 +57,7 @@ class Fixture(unittest.TestCase):
         return path
 
     def item(self, name):
-        source = self.archive(name, [("COPYING", f"{name} synthetic licence\n".encode()), ("main.c", b"/* fixture */\n")])
+        source = self.archive(name, [("COPYING", f"{name} synthetic license\n".encode()), ("main.c", b"/* fixture */\n")])
         return {"name": name, "version": "1", "url": f"https://example.invalid/{name}.tar.gz",
                 "sha256": prepare.digest(source), "license_files": ["COPYING"]}, source
 
@@ -135,7 +135,7 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(runtime.check_features("linux", "ffmpeg", configured),
                          ["CONFIG_PATINA_RELAY_GUARD_V1_PROTOCOL: expected 1, got missing"])
 
-    def test_licence_switches_must_be_off(self):
+    def test_license_switches_must_be_off(self):
         on = runtime.config_defines(defines(FFMPEG_ON, runtime.REQUIRED_OFF["ffmpeg"]))
         self.assertEqual(runtime.check_features("linux", "ffmpeg", on), [])
         gpl = runtime.config_defines(defines(FFMPEG_ON + ["CONFIG_GPL"], ["CONFIG_VERSION3", "CONFIG_NONFREE"]))
@@ -206,7 +206,7 @@ class ValidateTests(BuildFixture):
             "CONFIG_NONFREE: expected 0": {"ffmpeg-config_components.h": "#define CONFIG_NONFREE 1\n"},
             "HAVE_GPL: expected 0": {"mpv-config.h": defines(MPV_ON) + "#define HAVE_GPL 1\n"},
             "playback smoke test": {"smoke.txt": "PASS generated.ts: {}\n"},
-            "FFmpeg licence is GPL version 2 or later": {"ffmpeg-config.h": defines(FFMPEG_ON, runtime.REQUIRED_OFF["ffmpeg"])
+            "FFmpeg license is GPL version 2 or later": {"ffmpeg-config.h": defines(FFMPEG_ON, runtime.REQUIRED_OFF["ffmpeg"])
                                                          + '#define FFMPEG_LICENSE "GPL version 2 or later"\n'},
             "RPATH/RUNPATH": {"libmpv-dynamic.txt": READELF + " 0x1d (RUNPATH) Library runpath: [/work/prefix/lib]\n"},
         }

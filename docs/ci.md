@@ -20,7 +20,7 @@ subscriptions, so each selected lane runs once. Selection and the aggregate use
 | Installers and APK/AAB | Desktop installers for actual packaging/runtime/dependency inputs; one x86_64 debug APK for selected emulator smoke | Desktop preview formats; ARM compilation and emulator smoke | Unsigned release ARM APK/AAB and desktop installers, built once and retained |
 | Coverage and floors | Coverage/validation infrastructure changes; manual run available | Full workspace | Full report for this candidate SHA |
 | Fuzz | Affected targets, 30 seconds each; common dependency changes select all | All targets, 300 seconds each | All targets, 30 seconds each and retained corpus |
-| Allocation and large EPG/catalog budgets | Storage/import/EPG and their parser, schedule and model dependencies; small functional regressions stay in Linux tests | Full release-mode fixture, including ignored million-programme EPG case | Full release-mode fixture |
+| Allocation and large EPG/catalog budgets | Storage/import/EPG and their parser, schedule and model dependencies; small functional regressions stay in Linux tests | Full release-mode fixture, including ignored million-program EPG case | Full release-mode fixture |
 
 Ordinary PR correctness tests still cover the whole Linux workspace. Only the
 three allocation-measurement modules are deferred to the explicit stress lane;

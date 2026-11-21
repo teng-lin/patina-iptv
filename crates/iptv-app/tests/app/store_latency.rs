@@ -1,5 +1,5 @@
 //! Real SQLCipher write contention must not delay guide input or rendering.
-//! All 10,000 channels and seven days of programmes are generated locally.
+//! All 10,000 channels and seven days of programs are generated locally.
 use crate::headless::Headless;
 use nsh_core::{ImageData, Size, element::Root, picker::PickedFile, prelude::*};
 use nsh_engine::EngineConfig;
@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The app on a generated 10,000-channel playlist with seven days of
-/// programmes, on the guide.
+/// programs, on the guide.
 fn ten_thousand_channels(home: &crate::isolated::Home) -> Headless {
     crate::performance::prepare(home);
     let now = SystemTime::now()
@@ -89,17 +89,17 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
     // This action queues a real database write while the other connection owns
     // SQLite's writer lock. The UI change and later navigation must still render.
     app.press_key("m").unwrap();
-    app.wait_for("text:Add to favourites").unwrap();
-    app.press("text:Add to favourites").unwrap();
+    app.wait_for("text:Add to favorites").unwrap();
+    app.press("text:Add to favorites").unwrap();
     let before: i64 = lock
-        .query_row("SELECT count(*) FROM favourites", [], |row| row.get(0))
+        .query_row("SELECT count(*) FROM favorites", [], |row| row.get(0))
         .unwrap();
     assert_eq!(before, 0, "the pending write cannot pass the held lock");
     let empty_cells: HashSet<_> = app
         .screen()
         .layout_nodes()
         .into_iter()
-        .filter(|node| node.hidden && node.test_id.as_deref() == Some("guide-programme"))
+        .filter(|node| node.hidden && node.test_id.as_deref() == Some("guide-program"))
         .map(|node| node.id)
         .collect();
     assert!(!empty_cells.is_empty(), "the sparse guide has unused slots");
@@ -146,7 +146,7 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
     lock.execute_batch("ROLLBACK").unwrap();
     eprintln!(
         "10k channels / 7 days, held SQLite writer: maximum key-to-mounted-frame {maximum:?}; \
-         unused programme slots restyled {restyled_empty}"
+         unused program slots restyled {restyled_empty}"
     );
     assert_eq!(
         restyled_empty, 0,
@@ -161,14 +161,14 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
     let end = Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(10));
     loop {
         let saved: i64 = lock
-            .query_row("SELECT count(*) FROM favourites", [], |row| row.get(0))
+            .query_row("SELECT count(*) FROM favorites", [], |row| row.get(0))
             .unwrap();
         if saved == 1 {
             break;
         }
         assert!(
             Instant::now() < end,
-            "queued favourite was not saved after unlocking"
+            "queued favorite was not saved after unlocking"
         );
         app.wait(Duration::from_millis(50)).unwrap();
     }
@@ -176,7 +176,7 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
 
 /// A UI read while the app's writer is busy with a long publish (a job
 /// that holds it for 6 s) and another connection holds SQLite's write lock
-/// with uncommitted deletes: the search screen's programme index reads
+/// with uncommitted deletes: the search screen's program index reads
 /// every stored title. On the writer's queue it would wait for the
 /// publish; on the reader it reads the last commit at once.
 #[test]
@@ -186,18 +186,18 @@ fn a_store_read_does_not_wait_for_a_busy_writer() {
     let Some(home) = isolated!() else { return };
     let mut app = ten_thousand_channels(&home);
     let lock = hold_writer(&home);
-    lock.execute_batch("DELETE FROM epg_programmes").unwrap();
+    lock.execute_batch("DELETE FROM epg_programs").unwrap();
     iptv_app::occupy_writer(PUBLISH);
     let started = Instant::now();
     app.press_key("/").unwrap();
     app.wait_for("id:search-field").unwrap();
     app.type_text("id:search-field", "Synthetic").unwrap();
-    app.wait_for_within("text:Programmes · 200+", Duration::from_secs(30))
+    app.wait_for_within("text:Programs · 200+", Duration::from_secs(30))
         .unwrap();
     let elapsed = started.elapsed();
     lock.execute_batch("ROLLBACK").unwrap();
     eprintln!(
-        "10k channels / 7 days, writer busy for {PUBLISH:?}: search's programme read {elapsed:?}"
+        "10k channels / 7 days, writer busy for {PUBLISH:?}: search's program read {elapsed:?}"
     );
     assert!(
         elapsed < Duration::from_secs(3),
@@ -206,7 +206,7 @@ fn a_store_read_does_not_wait_for_a_busy_writer() {
 }
 
 #[test]
-fn root_shutdown_drains_a_favourite_write_that_is_waiting_for_sqlite() {
+fn root_shutdown_drains_a_favorite_write_that_is_waiting_for_sqlite() {
     use crate::personalization::{menu, start};
     let Some(home) = isolated!() else { return };
     let mut fixture = start(home, iptv_settings::Settings::new(), false);
@@ -214,7 +214,7 @@ fn root_shutdown_drains_a_favourite_write_that_is_waiting_for_sqlite() {
     lock.pragma_update(None, "key", format!("x'{}'", "54".repeat(32)))
         .unwrap();
     lock.execute_batch("BEGIN IMMEDIATE").unwrap();
-    menu(&mut fixture.app, "Remove from favourites");
+    menu(&mut fixture.app, "Remove from favorites");
     let source = fixture.source;
     let path = fixture.path.clone();
     let release = std::thread::spawn(move || {
@@ -227,7 +227,7 @@ fn root_shutdown_drains_a_favourite_write_that_is_waiting_for_sqlite() {
         .load_channels(
             source,
             &iptv_store_sqlite::ChannelQuery {
-                favourites_only: true,
+                favorites_only: true,
                 ..Default::default()
             },
         )

@@ -212,7 +212,7 @@ fn parses_100k_entries_quickly_and_linearly() {
     assert_eq!(total, n);
     assert_eq!(pl.groups.len(), 50);
     assert_eq!(pl.channels.warning_count(), 0);
-    // Generous for unoptimised debug builds on slow CI; release is ~10x faster.
+    // Generous for unoptimized debug builds on slow CI; release is ~10x faster.
     assert!(elapsed.as_secs() < 20, "took {elapsed:?}");
 
     // Linearity: a 4x larger input must not take ~16x as long.

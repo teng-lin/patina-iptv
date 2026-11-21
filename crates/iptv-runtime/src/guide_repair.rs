@@ -73,7 +73,7 @@ impl State {
         if let Some((id, token)) = self.refreshes.remove(&source) {
             token.cancel();
             if let Some(operation) = self.operations.get_mut(&id)
-                && operation.phase != OperationPhase::Cancelled
+                && operation.phase != OperationPhase::Canceled
             {
                 operation.phase = OperationPhase::Superseded;
             }
@@ -206,8 +206,8 @@ impl Runtime {
     /// Host/storage readiness and source failures remain typed operation results.
     pub fn foundation_capabilities(&self) -> Vec<Capability> {
         [
-            ("catalogue_queries", CapabilityState::Implemented),
-            ("programme_queries", CapabilityState::Implemented),
+            ("catalog_queries", CapabilityState::Implemented),
+            ("program_queries", CapabilityState::Implemented),
             ("epg_inspection", CapabilityState::Implemented),
             ("epg_probe", CapabilityState::Implemented),
             ("epg_repair", CapabilityState::Implemented),
@@ -408,8 +408,8 @@ impl Runtime {
             if !services.is_current() {
                 return Err(InspectionError::OwnerClosed.into());
             }
-            if control.cancel.is_cancelled() {
-                return Err(Error::Cancelled);
+            if control.cancel.is_canceled() {
+                return Err(Error::Canceled);
             }
             owner.repairs.borrow_mut().reserve(&id)?;
             let _applying = Applying {
@@ -433,7 +433,7 @@ impl Runtime {
             }
             let held = leases(&owner, &plan.request)?;
             let source = plan.request.source;
-            let cancelled = crate::data::stored::supersede(&owner, source);
+            let canceled = crate::data::stored::supersede(&owner, source);
             let edit = crate::stored::guide_edit_revision(&owner, source);
             let id_for_write = id.clone();
             let digest = digest_hex(&digest);
@@ -442,8 +442,8 @@ impl Runtime {
             let writer_phase = phase.clone();
             let worker_plan = plan.clone();
             let saved = services.call(move |store| {
-                if token.is_cancelled() {
-                    return Ok(Err(Error::Cancelled));
+                if token.is_canceled() {
+                    return Ok(Err(Error::Canceled));
                 }
                 if Instant::now() >= deadline {
                     return Ok(Err(InspectionError::Deadline.into()));
@@ -474,11 +474,11 @@ impl Runtime {
                 saved,
             )
             .await;
-            cancelled.keep_check(&owner, source, owner.browser_generation(), now());
+            canceled.keep_check(&owner, source, owner.browser_generation(), now());
             // Once committed, cancellation/reply loss cannot turn durable effects
             // into a reported rollback. A retry uses the same journal receipt.
             let saved = saved?;
-            let outcome = publication::after_commit(&owner, saved, edit, cancelled.cancelled).await;
+            let outcome = publication::after_commit(&owner, saved, edit, canceled.canceled).await;
             Ok(outcome)
         }
     }
@@ -495,8 +495,8 @@ impl Runtime {
         let guard = write::CancelOnDrop(child.clone());
         async move {
             let _guard = guard;
-            if control.cancel.is_cancelled() {
-                return Err(Error::Cancelled);
+            if control.cancel.is_canceled() {
+                return Err(Error::Canceled);
             }
             let read_id = id.clone();
             let remaining = InspectionControl {
@@ -517,15 +517,15 @@ impl Runtime {
                 id: id.clone(),
             };
             let source = existing.source;
-            let cancelled = crate::data::stored::supersede(&owner, source);
+            let canceled = crate::data::stored::supersede(&owner, source);
             let edit = crate::stored::guide_edit_revision(&owner, source);
             let token = child.clone();
             let result_id = id.clone();
             let phase = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
             let writer_phase = phase.clone();
             let saved = services.call(move |store| {
-                if token.is_cancelled() {
-                    return Ok(Err(Error::Cancelled));
+                if token.is_canceled() {
+                    return Ok(Err(Error::Canceled));
                 }
                 if let Err(error) = write::begin(&writer_phase, &token, deadline) {
                     return Ok(Err(error));
@@ -552,9 +552,9 @@ impl Runtime {
                 saved,
             )
             .await;
-            cancelled.keep_check(&owner, source, owner.browser_generation(), now());
+            canceled.keep_check(&owner, source, owner.browser_generation(), now());
             let saved = saved?;
-            Ok(publication::after_commit(&owner, saved, edit, cancelled.cancelled).await)
+            Ok(publication::after_commit(&owner, saved, edit, canceled.canceled).await)
         }
     }
 
@@ -641,7 +641,7 @@ impl Runtime {
                 current,
                 window,
                 channels: verified.channels,
-                programmes_available: verified.programmes_available,
+                programs_available: verified.programs_available,
                 covered_seconds: verified.covered_seconds,
                 identity_unresolved: true,
                 current_revision: same,
@@ -653,7 +653,7 @@ impl Runtime {
                 && operation.commit.undone == expected_undone
                 && (!matches!(
                     operation.phase,
-                    OperationPhase::Cancelled | OperationPhase::Superseded
+                    OperationPhase::Canceled | OperationPhase::Superseded
                 ) || Some(operation.phase) == phase_at_start)
             {
                 operation.phase = if result.verified_coverage {
@@ -773,7 +773,7 @@ impl Runtime {
         let source = {
             let mut state = self.repairs.borrow_mut();
             let operation = state.operations.get_mut(id).ok_or(Error::CommitMissing)?;
-            operation.phase = OperationPhase::Cancelled;
+            operation.phase = OperationPhase::Canceled;
             let source = operation.commit.source;
             state
                 .refreshes

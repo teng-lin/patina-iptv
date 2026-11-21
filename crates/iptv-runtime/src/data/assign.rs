@@ -23,7 +23,7 @@ pub fn choose(
             // The choice is applied as soon as it is saved, in the order of the
             // store's writer: a guide action after this one (the guide data
             // deleted) then also shows after it. Nothing here waits for the
-            // work the choice cancelled, which may sit behind busy workers.
+            // work the choice canceled, which may sit behind busy workers.
             let applied = match saved.await {
                 Err(error) => {
                     log::warn!("iptv data: could not save a channel's guide: {error}");
@@ -34,12 +34,12 @@ pub fn choose(
                     Applied::Now
                 }
                 // The download that applies the choice is an update of its
-                // own, which starts once the cancelled work has unwound.
+                // own, which starts once the canceled work has unwound.
                 Ok(None)
                     if stored::restart_update(
                         &owner,
                         source,
-                        superseded.cancelled.clone(),
+                        superseded.canceled.clone(),
                         |_| {},
                     ) =>
                 {

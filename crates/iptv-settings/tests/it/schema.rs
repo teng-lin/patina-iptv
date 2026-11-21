@@ -1,15 +1,15 @@
-//! Integrity of the schema and catalogue.
+//! Integrity of the schema and catalog.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use iptv_settings::backup::{MIGRATIONS, VERSION};
-use iptv_settings::catalogue::{self, choices};
+use iptv_settings::catalog::{self, choices};
 use iptv_settings::schema::{Effect, Test, ValueType};
 use iptv_settings::validate::{check, is_token};
 use iptv_settings::{Scope, Section, Settings, Target, Value, keys};
 
 fn all() -> Vec<&'static iptv_settings::Setting> {
-    catalogue::settings().collect()
+    catalog::settings().collect()
 }
 
 #[test]
@@ -18,7 +18,7 @@ fn keys_are_unique_across_settings_and_commands() {
     for key in all()
         .iter()
         .map(|s| s.key)
-        .chain(catalogue::commands().map(|c| c.key))
+        .chain(catalog::commands().map(|c| c.key))
     {
         assert!(seen.insert(key), "duplicate key {key}");
     }
@@ -29,7 +29,7 @@ fn keys_are_dotted_tokens_under_a_section() {
     for key in all()
         .iter()
         .map(|s| s.key)
-        .chain(catalogue::commands().map(|c| c.key))
+        .chain(catalog::commands().map(|c| c.key))
     {
         let parts: Vec<&str> = key.split('.').collect();
         assert!(parts.len() >= 2, "{key}: needs section.name");
@@ -47,7 +47,7 @@ fn keys_are_dotted_tokens_under_a_section() {
 #[test]
 fn settings_sit_in_their_sections_table() {
     for section in Section::ALL {
-        for s in catalogue::section(section) {
+        for s in catalog::section(section) {
             assert_eq!(s.section, section, "{}", s.key);
         }
     }
@@ -85,11 +85,11 @@ fn numeric_ranges_are_well_formed() {
 }
 
 #[test]
-fn enum_and_colour_defaults_are_members() {
+fn enum_and_color_defaults_are_members() {
     for s in all() {
         let (choices, default) = match s.ty {
             ValueType::Enum { choices, default } => (choices, default),
-            ValueType::Colour { palette, default } => (palette, default),
+            ValueType::Color { palette, default } => (palette, default),
             _ => continue,
         };
         assert!(choices.contains(default), "{}: {default}", s.key);
@@ -127,12 +127,12 @@ fn dependencies_refer_to_existing_settings_of_a_matching_type() {
             assert!(!dep.any_of.is_empty(), "{}: empty dependency", s.key);
             for w in dep.any_of {
                 assert_ne!(w.key, s.key, "{}: depends on itself", s.key);
-                let target = catalogue::setting(w.key)
+                let target = catalog::setting(w.key)
                     .unwrap_or_else(|| panic!("{} depends on unknown {}", s.key, w.key));
                 let ok = match (w.test, &target.ty) {
                     (Test::IsTrue, ValueType::Bool { .. }) => true,
                     (Test::EnumIn(vs), ty) => {
-                        let c = ty.choices().expect("EnumIn needs an enum or colour");
+                        let c = ty.choices().expect("EnumIn needs an enum or color");
                         !vs.is_empty() && vs.iter().all(|v| c.contains(v))
                     }
                     (Test::NotEmpty, ValueType::Text { .. }) => true,
@@ -149,7 +149,7 @@ fn dependencies_are_acyclic() {
     fn visit(key: &'static str, path: &mut Vec<&'static str>) {
         assert!(!path.contains(&key), "dependency cycle: {path:?} -> {key}");
         path.push(key);
-        let s = catalogue::setting(key).unwrap();
+        let s = catalog::setting(key).unwrap();
         for w in s.depends.iter().flat_map(|d| d.any_of) {
             visit(w.key, path);
         }
@@ -169,7 +169,7 @@ fn dependencies_repeat_their_parents_conditions() {
     for s in all() {
         for dep in s.depends {
             for w in dep.any_of {
-                let parent = catalogue::setting(w.key).unwrap();
+                let parent = catalog::setting(w.key).unwrap();
                 for inherited in parent.depends.iter().filter(|d| d.effect == dep.effect) {
                     assert!(
                         s.depends.contains(inherited),
@@ -197,7 +197,7 @@ fn subsections_are_declared_and_used() {
             *used.entry((s.section, sub)).or_default() += 1;
         }
     }
-    for c in catalogue::commands() {
+    for c in catalog::commands() {
         if let Some(sub) = c.subsection {
             assert!(
                 c.section.subsections().contains(&sub),
@@ -232,7 +232,7 @@ fn label_keys_are_unique() {
         add(s.label_key());
         add(s.help_key());
     }
-    for c in catalogue::commands() {
+    for c in catalog::commands() {
         add(c.label_key());
         add(c.help_key());
     }
@@ -248,17 +248,17 @@ fn summaries_are_present() {
     for s in all() {
         assert!(!s.summary.trim().is_empty(), "{}", s.key);
     }
-    for c in catalogue::commands() {
+    for c in catalog::commands() {
         assert!(!c.summary.trim().is_empty(), "{}", c.key);
     }
 }
 
 #[test]
 fn commands_reset_existing_settings() {
-    for c in catalogue::commands() {
+    for c in catalog::commands() {
         for key in c.resets {
             assert!(
-                catalogue::setting(key).is_some(),
+                catalog::setting(key).is_some(),
                 "{} resets unknown {key}",
                 c.key
             );
@@ -269,7 +269,7 @@ fn commands_reset_existing_settings() {
 #[test]
 fn typed_keys_match_the_schema() {
     for (key, ty) in keys::ALL {
-        let s = catalogue::setting(key).unwrap_or_else(|| panic!("typed key {key} missing"));
+        let s = catalog::setting(key).unwrap_or_else(|| panic!("typed key {key} missing"));
         assert_eq!(s.ty.type_name(), *ty, "{key}");
     }
     // Every typed getter works on defaults.
@@ -284,8 +284,8 @@ fn typed_keys_match_the_schema() {
     st.duration_ms(keys::FULLSCREEN_TIMEOUT, g);
     st.bool(keys::AUTOPLAY, g);
     st.choice(keys::BROWSE_MODE, g);
-    st.colour(keys::ACCENT, g);
-    st.colour(keys::BACKGROUND, g);
+    st.color(keys::ACCENT, g);
+    st.color(keys::BACKGROUND, g);
     st.choice(keys::FONT_SIZE, g);
     st.choice(keys::CHANNEL_SORT, g);
     st.choice(keys::GROUP_SORT, g);
@@ -300,8 +300,8 @@ fn input_and_appearance_defaults_match_the_other_crates() {
     assert_eq!(st.duration_ms(keys::LONG_PRESS, g), 400); // iptv-nav DEFAULT_LONG_PRESS_MS
     assert_eq!(st.duration_ms(keys::INFO_PANEL_TIMEOUT, g), 4_000); // iptv-core Timeouts
     assert_eq!(st.duration_ms(keys::CONTROLS_PANEL_TIMEOUT, g), 7_000);
-    assert_eq!(st.colour(keys::ACCENT, g), "blue"); // theme.rs default: Blue on Dark
-    assert_eq!(st.colour(keys::BACKGROUND, g), "dark");
+    assert_eq!(st.color(keys::ACCENT, g), "blue"); // theme.rs default: Blue on Dark
+    assert_eq!(st.color(keys::BACKGROUND, g), "dark");
     assert_eq!(st.get("general.user_agent"), Ok(Value::text("")));
 }
 
@@ -350,7 +350,7 @@ fn every_scope_and_effect_is_exercised() {
 #[test]
 fn tree_lists_every_setting_once() {
     let count = |advanced: bool| -> Vec<&str> {
-        catalogue::tree(advanced)
+        catalog::tree(advanced)
             .iter()
             .flat_map(|sec| &sec.groups)
             .flat_map(|g| g.settings.iter().map(|s| s.key))
@@ -365,14 +365,14 @@ fn tree_lists_every_setting_once() {
         basic.len(),
         all().iter().filter(|s| !s.flags.advanced).count()
     );
-    let commands: usize = catalogue::tree(false)
+    let commands: usize = catalog::tree(false)
         .iter()
         .flat_map(|sec| &sec.groups)
         .map(|g| g.commands.len())
         .sum();
-    assert_eq!(commands, catalogue::commands().count());
+    assert_eq!(commands, catalog::commands().count());
     // Groups follow the declared subsection order, unsectioned first.
-    for sec in catalogue::tree(true) {
+    for sec in catalog::tree(true) {
         let order: Vec<Option<&str>> = sec.groups.iter().map(|g| g.subsection).collect();
         let declared: Vec<Option<&str>> = std::iter::once(None)
             .chain(sec.section.subsections().iter().copied().map(Some))
@@ -438,7 +438,7 @@ fn time_constructors_convert_their_unit_to_milliseconds() {
 #[test]
 fn types_name_themselves_and_give_their_default() {
     use iptv_settings::schema::{
-        IntUnit, Setting, TextKind, bindings, boolean, choice, colour, int, secs, text,
+        IntUnit, Setting, TextKind, bindings, boolean, choice, color, int, secs, text,
     };
     let cases = [
         (boolean(true), "bool", Value::Bool(true)),
@@ -450,11 +450,7 @@ fn types_name_themselves_and_give_their_default() {
             Value::choice("large"),
         ),
         (text(TextKind::Plain, 8, "abc"), "text", Value::text("abc")),
-        (
-            colour(&choices::ACCENT, "red"),
-            "colour",
-            Value::colour("red"),
-        ),
+        (color(&choices::ACCENT, "red"), "color", Value::color("red")),
         (bindings(4), "key_bindings", Value::KeyBindings(vec![])),
     ];
     for (ty, name, default) in cases {
@@ -462,15 +458,15 @@ fn types_name_themselves_and_give_their_default() {
         let s = Setting::new(Section::Search, "", "search.example", ty, "Synthetic.");
         assert_eq!(s.default_value(), default, "{name}");
         assert_eq!(s.default_value().type_name(), name, "value and type agree");
-        // Choices exist exactly for enums and colours.
-        assert_eq!(ty.choices().is_some(), matches!(name, "enum" | "colour"));
+        // Choices exist exactly for enums and colors.
+        assert_eq!(ty.choices().is_some(), matches!(name, "enum" | "color"));
     }
     assert_eq!(
         choice(&choices::SIZE, "large").choices(),
         Some(&choices::SIZE)
     );
     assert_eq!(
-        colour(&choices::ACCENT, "red").choices(),
+        color(&choices::ACCENT, "red").choices(),
         Some(&choices::ACCENT)
     );
 }

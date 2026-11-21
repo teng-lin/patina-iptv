@@ -7,7 +7,7 @@
 //! window while players and the recorder run.
 //!
 //! Synthetic data only: a generated 40-channel playlist, a generated
-//! on-demand catalogue on a local mock server and generated recordings.
+//! on-demand catalog on a local mock server and generated recordings.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -332,7 +332,7 @@ fn names(app: &Headless, prefix: &str) -> Vec<String> {
     names
 }
 
-/// The programme and channel menu closed (it stays mounted, see-through).
+/// The program and channel menu closed (it stays mounted, see-through).
 #[track_caller]
 fn menu_closed(app: &mut Headless) {
     step(
@@ -376,7 +376,7 @@ fn the_wheel_right_click_and_hover_never_tune_and_every_menu_has_a_visible_way_i
     // Right-click on a channel opens its menu without tuning; Back
     // (Escape, as the real-window run checks) closes it.
     step(app.right_click(&format!("id:guide-ui >> text:{}", channel(3))));
-    step(app.wait_for("id:menu-panel >> text:Add to favourites"));
+    step(app.wait_for("id:menu-panel >> text:Add to favorites"));
     step(app.back());
     menu_closed(app);
     assert_eq!(iptv_app::player_opens(0), opens, "a menu tunes nothing");
@@ -625,7 +625,7 @@ fn window_full_screen_resizing_and_display_scale_keep_the_stream_and_the_channel
     let row = format!("id:channel-list >> text:{}", shown[shown.len() / 2]);
     step(app.hover(&row));
     step(app.right_click(&row));
-    step(app.wait_for("id:menu-panel >> text:Add to favourites"));
+    step(app.wait_for("id:menu-panel >> text:Add to favorites"));
     step(app.back());
     menu_closed(app);
     assert_eq!(iptv_app::player_opens(0), opens, "the list tunes nothing");
@@ -1255,7 +1255,7 @@ fn with_autoplay_dismissing_a_right_clicked_menu_tunes_nothing() {
 
     for (n, dismiss) in [(3, "Back"), (5, "Backspace")] {
         step(app.right_click(&format!("id:guide-ui >> text:{}", channel(n))));
-        step(app.wait_for("id:menu-panel >> text:Add to favourites"));
+        step(app.wait_for("id:menu-panel >> text:Add to favorites"));
         if dismiss == "Back" {
             step(app.back());
         } else {
@@ -1281,7 +1281,7 @@ fn with_autoplay_dismissing_a_right_clicked_menu_tunes_nothing() {
 
     // A click on a right-clicked channel is a choice: it plays.
     step(app.right_click(&format!("id:guide-ui >> text:{}", channel(8))));
-    step(app.wait_for("id:menu-panel >> text:Add to favourites"));
+    step(app.wait_for("id:menu-panel >> text:Add to favorites"));
     step(app.back());
     menu_closed(app);
     step(app.press(&format!("id:guide-ui >> text:{}", channel(8))));

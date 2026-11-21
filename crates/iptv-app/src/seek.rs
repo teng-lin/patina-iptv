@@ -1,4 +1,4 @@
-//! Seeking while a programme plays from the archive (catch-up).
+//! Seeking while a program plays from the archive (catch-up).
 //!
 //! Archive addresses are time-based, so a seek opens the archive again from
 //! the new time (`Playback::CatchUp::offset`); that works the same for every
@@ -44,8 +44,8 @@ pub fn steps() -> Steps {
 }
 /// The archive reopens this long after the last seek key.
 const COMMIT_AFTER: Duration = Duration::from_millis(900);
-/// A seek stops this far before the archive's end (the programme's end,
-/// or now for a programme still airing).
+/// A seek stops this far before the archive's end (the program's end,
+/// or now for a program still airing).
 const END_MARGIN: i32 = 10;
 
 thread_local! {
@@ -55,9 +55,9 @@ thread_local! {
     static HOLD: Cell<SeekHold> = Cell::new(SeekHold::default());
 }
 
-/// The archived programme playing: its start and length in seconds and how
+/// The archived program playing: its start and length in seconds and how
 /// far into it the archive can go now.
-fn programme(ui: Ui) -> Option<(i32, i32, i32)> {
+fn program(ui: Ui) -> Option<(i32, i32, i32)> {
     let channel = ui.playing.get_untracked()?;
     let Playback::CatchUp { start, offset } = ui.playback.get_untracked() else {
         return None;
@@ -70,8 +70,8 @@ fn programme(ui: Ui) -> Option<(i32, i32, i32)> {
     Some((offset, length, limit.max(0)))
 }
 
-/// Seconds into the archived programme: the seek being chosen, else where
-/// the stream is. `None` unless a programme plays from the archive.
+/// Seconds into the archived program: the seek being chosen, else where
+/// the stream is. `None` unless a program plays from the archive.
 pub fn elapsed(ui: Ui) -> Option<(i32, i32)> {
     if crate::on_demand::active(ui) {
         let t = ui.player.main().timeline.get();
@@ -103,7 +103,7 @@ pub fn step(ui: Ui, delta: i32) -> bool {
         }
         return moved;
     }
-    let Some((offset, _, limit)) = programme(ui) else {
+    let Some((offset, _, limit)) = program(ui) else {
         return false;
     };
     let from = ui.seek_target.get_untracked().unwrap_or_else(|| {
@@ -130,7 +130,7 @@ pub fn key(ui: Ui, step: i32, repeat: bool) -> bool {
     });
     match factor {
         Some(f) => self::step(ui, step.saturating_mul(f)),
-        None => programme(ui).is_some() || crate::on_demand::seekable(ui),
+        None => program(ui).is_some() || crate::on_demand::seekable(ui),
     }
 }
 
@@ -145,7 +145,7 @@ pub fn commit_now(ui: Ui) {
     commit(ui);
 }
 
-/// The programme playing from the archive: its length in seconds and how
+/// The program playing from the archive: its length in seconds and how
 /// far into it a seek may go now. `None` unless one plays.
 pub fn span(ui: Ui) -> Option<(i32, i32)> {
     if crate::on_demand::active(ui) {
@@ -155,10 +155,10 @@ pub fn span(ui: Ui) -> Option<(i32, i32)> {
         let (_, length) = elapsed(ui)?;
         return (length > 0).then_some((length, length));
     }
-    programme(ui).map(|(_, length, limit)| (length, limit))
+    program(ui).map(|(_, length, limit)| (length, limit))
 }
 
-/// A seek to `target` seconds into the archived programme being chosen
+/// A seek to `target` seconds into the archived program being chosen
 /// (the play bar's progress bar under a finger or the mouse, within
 /// [`span`]'s limit): shown at once, opened once `commit` says so or the
 /// pointer pauses.
@@ -211,7 +211,7 @@ fn commit(ui: Ui) {
         ui.seek_target.set(None);
         return;
     };
-    log::info!("iptv seek: catch-up to {target} s into the programme");
+    log::info!("iptv seek: catch-up to {target} s into the program");
     ui.player.main().position_ms.set(0);
     ui.play(
         channel,

@@ -1,7 +1,7 @@
-//! The info card (logo, number and name, stream badges, programme, its one
-//! time line, next programme) and the compact banner a channel change
-//! shows (number and name, programme, progress). The time line is the
-//! programme's progress live and the seek bar in a replay
+//! The info card (logo, number and name, stream badges, program, its one
+//! time line, next program) and the compact banner a channel change
+//! shows (number and name, program, progress). The time line is the
+//! program's progress live and the seek bar in a replay
 //! (`iptv_core::panels::Line`): the card owns it, nothing else draws one.
 
 use iptv_core::panels::Line;
@@ -42,8 +42,8 @@ fn logo_in(schedule: &dyn iptv_core::guide::Schedule, channel: usize) -> Option<
     (logo.starts_with("http://") || logo.starts_with("https://")).then(|| logo.to_owned())
 }
 
-/// The programme on screen: live now, or the replayed one.
-fn programme(ui: Ui) -> (usize, Program) {
+/// The program on screen: live now, or the replayed one.
+fn program(ui: Ui) -> (usize, Program) {
     ui.guide_data();
     let channel = ui.playing.get().unwrap_or(0);
     let minute = match ui.playback.get() {
@@ -53,8 +53,8 @@ fn programme(ui: Ui) -> (usize, Program) {
     (channel, crate::schedule().program_at(channel, minute))
 }
 
-/// How far the programme on screen is, 0–1: where the archive plays (or
-/// the seek being chosen), else now in the live programme.
+/// How far the program on screen is, 0–1: where the archive plays (or
+/// the seek being chosen), else now in the live program.
 fn progress(ui: Ui) -> f32 {
     if let Some((at, length)) = crate::seek::elapsed(ui) {
         return if length > 0 {
@@ -63,7 +63,7 @@ fn progress(ui: Ui) -> f32 {
             0.0
         };
     }
-    let (_, p) = programme(ui);
+    let (_, p) = program(ui);
     let now = ui.focus.with(|f| f.now);
     if p.airing(now) == Airing::Live {
         p.progress(now)
@@ -81,7 +81,7 @@ fn line_kind(ui: Ui) -> Line {
         .unwrap_or(if replay { Line::Seek } else { Line::Progress })
 }
 
-/// Its ends: live, the programme's times and the minutes left; in a
+/// Its ends: live, the program's times and the minutes left; in a
 /// replay, the position (⇢ while a seek is chosen) and the length.
 fn ends(ui: Ui) -> (String, String) {
     match (line_kind(ui), crate::seek::elapsed(ui)) {
@@ -101,7 +101,7 @@ fn ends(ui: Ui) -> (String, String) {
             )
         }
         _ => {
-            let (_, p) = programme(ui);
+            let (_, p) = program(ui);
             let at = ui.focus.with(|f| f.now);
             let left =
                 minutes_left(crate::i18n::language(), p.start, p.end, at).unwrap_or_default();
@@ -110,7 +110,7 @@ fn ends(ui: Ui) -> (String, String) {
     }
 }
 
-/// The time line: a track with the programme's progress; a replay's seek
+/// The time line: a track with the program's progress; a replay's seek
 /// bar has a dot where it plays.
 pub(super) fn time_line(ui: Ui) -> View {
     let accent = move || rgb(ui.app.theme.with(|t| t.accent.light));
@@ -176,8 +176,8 @@ fn number_and_name(ui: Ui, channel: usize) -> String {
 }
 
 pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> impl IntoElement {
-    let channel = move || programme(ui).0;
-    let now = move || programme(ui).1;
+    let channel = move || program(ui).0;
+    let now = move || program(ui).1;
     let next = move || crate::schedule().program_at(channel(), now().end);
     let format = move || {
         let main = ui.player.main();
@@ -280,10 +280,10 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
         )
 }
 
-/// The channel-change banner: number and name, the programme on now, its
+/// The channel-change banner: number and name, the program on now, its
 /// progress and minutes left, in one compact panel.
 pub(super) fn banner(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> impl IntoElement {
-    let channel = move || programme(ui).0;
+    let channel = move || program(ui).0;
     view()
         .test_id("player-banner")
         .gap(px(6.0))
@@ -307,7 +307,7 @@ pub(super) fn banner(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> impl 
                     text(move || {
                         crate::schedule().title_in(
                             channel(),
-                            programme(ui).1,
+                            program(ui).1,
                             crate::i18n::language(),
                         )
                     })

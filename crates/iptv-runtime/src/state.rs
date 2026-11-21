@@ -67,7 +67,7 @@ pub struct LibrarySnapshot {
     pub active: Option<SourceId>,
 }
 
-/// The current single-source schedule can enter the combined catalogue without
+/// The current single-source schedule can enter the combined catalog without
 /// dropping a portal session, account format, connection limit or loaded guide.
 #[derive(Clone)]
 pub struct SingleSchedule {

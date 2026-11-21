@@ -1,6 +1,6 @@
 //! Zapping away from a Stalker channel whose stream address is still being
 //! asked for cancels that request: the portal sees its connection close.
-//! Only generated catalogues and a local mock portal are used.
+//! Only generated catalogs and a local mock portal are used.
 use std::{
     io::{ErrorKind, Read, Write},
     net::{TcpListener, TcpStream},
@@ -130,7 +130,7 @@ fn wait_for_cancel(stream: &mut TcpStream, budget: Duration) -> bool {
 }
 
 #[test]
-fn a_mock_read_timeout_does_not_mean_the_application_cancelled() {
+fn a_mock_read_timeout_does_not_mean_the_application_canceled() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
     let (mut server, _) = listener.accept().unwrap();
@@ -377,7 +377,7 @@ fn cached_static_stalker_playback_keeps_its_origin_without_a_portal_session() {
     assert_eq!(
         requests.0.lock().unwrap().requests,
         0,
-        "cached catalogue needs no portal session"
+        "cached catalog needs no portal session"
     );
     let before = iptv_app::player_opens(0);
     app.press_key("home").unwrap();

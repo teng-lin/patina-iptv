@@ -5,7 +5,7 @@
 //! sound, #135) and its own waiting or error state with
 //! Retry; the pointer chrome and the key hint (`multiview_view/chrome.rs`);
 //! a tile's menu as a panel at the right edge (`multiview_view/menu.rs`),
-//! with no backdrop over the tiles; and the connection warning, centred
+//! with no backdrop over the tiles; and the connection warning, centered
 //! over a dimmed screen. There are only tiles: no empty or "add" cells.
 //! Taps go to the tiles and menu items, a long press on a tile enlarges or
 //! reduces it; the video surfaces are below (`video.rs`). On a detour (a
@@ -28,10 +28,10 @@ use crate::{Ui, channel_name, tint};
 
 const WHITE: u32 = 0xFFFFFF;
 const PANEL_ALPHA: u8 = 0xE0;
-/// The active tile's outline: thin, light grey; the others keep a clear
+/// The active tile's outline: thin, light gray; the others keep a clear
 /// one as wide, so no tile's content moves when the focus does.
 const FRAME: f32 = 2.0;
-const FRAME_COLOUR: u32 = 0x9F9F9F;
+const FRAME_COLOR: u32 = 0x9F9F9F;
 /// A held press enlarges a tile after this long, ms.
 const LONG_PRESS_MS: f32 = 800.0;
 
@@ -160,7 +160,7 @@ fn tile(ui: Ui, index: usize) -> impl IntoElement {
         .border(px(FRAME))
         .border_color(move || {
             if active() {
-                rgb(FRAME_COLOUR)
+                rgb(FRAME_COLOR)
             } else {
                 tint(WHITE, 0)
             }
@@ -294,7 +294,7 @@ fn warning_content(ui: Ui) -> (String, String, usize) {
     content.unwrap_or_default()
 }
 
-/// The connection warning, centred over a dimmed screen; its choices in
+/// The connection warning, centered over a dimmed screen; its choices in
 /// a row.
 fn warning(ui: Ui) -> impl IntoElement {
     let content = computed(move || warning_content(ui));

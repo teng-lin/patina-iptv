@@ -1,10 +1,10 @@
-//! The guide's header: the preview at the top left, the focused programme
+//! The guide's header: the preview at the top left, the focused program
 //! beside it, and the shortcuts (the list on screen, Movies, Shows, Add
 //! playlist) at the right or, where the window has no room for three
 //! columns, on a row of their own under the other two. A compact portrait
 //! window (a phone held upright) stacks them instead: the preview across
-//! the window's width, the programme under it, then the shortcuts' row,
-//! where beside the programme the preview would be a thumbnail.
+//! the window's width, the program under it, then the shortcuts' row,
+//! where beside the program the preview would be a thumbnail.
 //!
 //! The preview keeps its place at the top left in every arrangement: the
 //! player under it is only resized, never hidden or moved elsewhere, and it
@@ -25,7 +25,7 @@ pub const PREVIEW_MIN_H: f32 = 64.0;
 pub const HEADER_MAX_SHARE: f32 = 0.55;
 /// At the accessibility text sizes (a text factor from
 /// [`LARGE_TEXT`]), the most the header grows to keep the focused
-/// programme's title and times whole: the guide's rows, drawn as large,
+/// program's title and times whole: the guide's rows, drawn as large,
 /// show fewer of themselves either way.
 pub const LARGE_TEXT: f32 = 1.5;
 pub const LARGE_TEXT_MAX_SHARE: f32 = 0.7;
@@ -35,12 +35,12 @@ pub const COLUMN_GAP: f32 = 24.0;
 /// (points at scale 1; the row also grows with larger text).
 pub const SHORTCUTS_ROW: f32 = 48.0;
 pub const SHORTCUTS_GAP: f32 = 8.0;
-/// The room the shortcuts' column and the focused programme need beside
+/// The room the shortcuts' column and the focused program need beside
 /// the preview (points at a text factor of 1): Movies and Shows side by
-/// side, and a programme's title and times.
+/// side, and a program's title and times.
 pub const SHORTCUTS_W: f32 = 260.0;
 pub const DETAILS_MIN_W: f32 = 240.0;
-/// The focused programme's lines beside the preview, as the app draws
+/// The focused program's lines beside the preview, as the app draws
 /// them (points at a text factor of 1): the title's and the times' type,
 /// their line height, and the widths of the times row's parts (the span
 /// "12:40 PM – 1:00 PM", the progress bar, "15 min left") and the gaps.
@@ -62,17 +62,17 @@ pub const MAX_TIMES_LINES: f32 = 2.0;
 /// and a portrait tablet's narrow Split View window, not a small desktop
 /// window (400 × 600 is 1.5), which keeps its rows for the guide.
 pub const STACK_RATIO: f32 = 1.6;
-/// The gap between the stacked preview and the programme under it (points
+/// The gap between the stacked preview and the program under it (points
 /// at scale 1).
 pub const STACK_GAP: f32 = 12.0;
 
 /// Where the guide's header puts its shortcuts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shortcuts {
-    /// A column at the right, beside the preview and the focused programme.
+    /// A column at the right, beside the preview and the focused program.
     Beside,
-    /// A row of their own under the preview and the focused programme, so
-    /// the programme keeps the width beside the preview.
+    /// A row of their own under the preview and the focused program, so
+    /// the program keeps the width beside the preview.
     Below,
 }
 
@@ -87,8 +87,8 @@ pub struct GuideHeader {
     /// The shortcuts' row height and the gap above it (0 beside).
     pub row: f32,
     pub row_gap: f32,
-    /// The gap between the preview and the focused programme under it, in
-    /// a stacked header ([`GuideHeader::stacked`]); 0 when the programme is
+    /// The gap between the preview and the focused program under it, in
+    /// a stacked header ([`GuideHeader::stacked`]); 0 when the program is
     /// beside the preview.
     pub stack_gap: f32,
 }
@@ -106,7 +106,7 @@ impl GuideHeader {
         {
             return stacked;
         }
-        // The programme's width if the shortcuts stayed beside it, with the
+        // The program's width if the shortcuts stayed beside it, with the
         // preview as that arrangement draws it.
         let (_, beside) = fit(width, height, 0.0, 0.0, HEADER_MAX_SHARE);
         let needed = (SHORTCUTS_W + DETAILS_MIN_W) * text;
@@ -117,7 +117,7 @@ impl GuideHeader {
             Shortcuts::Beside
         };
         let mut arranged = arrange(width, height, scale, font, shortcuts);
-        // A header grown for the programme widens its preview: beside, the
+        // A header grown for the program widens its preview: beside, the
         // columns must still have their room next to the preview it draws.
         if shortcuts == Shortcuts::Beside && room((arranged.0).1) < needed {
             shortcuts = Shortcuts::Below;
@@ -134,7 +134,7 @@ impl GuideHeader {
         }
     }
 
-    /// Whether the focused programme sits under the preview, which spans
+    /// Whether the focused program sits under the preview, which spans
     /// the window's width, rather than beside it.
     pub fn stacked(&self) -> bool {
         self.stack_gap > 0.0
@@ -142,12 +142,12 @@ impl GuideHeader {
 }
 
 /// The stacked header of a compact portrait window: the preview as wide as
-/// the window inside its margins, the programme's title and times under it,
+/// the window inside its margins, the program's title and times under it,
 /// then the shortcuts' row. `None` where that header would pass the
 /// header's largest share of the height (very large text, or a window
 /// barely taller than the ratio): the window keeps the other arrangement.
 /// A header shorter than its usual share grows to it, which gives the
-/// programme's description the room.
+/// program's description the room.
 fn stack(width: f32, height: f32, scale: f32, font: f32) -> Option<GuideHeader> {
     let text = scale * font;
     let w = (width - 2.0 * PREVIEW_MARGIN).floor();
@@ -192,7 +192,7 @@ fn arrange(
             (SHORTCUTS_GAP * scale).round(),
         ),
     };
-    // The programme's column, with the preview at its widest share (so
+    // The program's column, with the preview at its widest share (so
     // never narrower than drawn), and the room its title and times take.
     let side = match shortcuts {
         Shortcuts::Beside => SHORTCUTS_W * text + COLUMN_GAP * scale,
@@ -212,7 +212,7 @@ fn arrange(
     )
 }
 
-/// The height (points) the focused programme's title and times take in a
+/// The height (points) the focused program's title and times take in a
 /// column `column` points wide at `scale` and text factor `text`: the title
 /// on one line, then the times row, whose parts wrap onto further lines
 /// where the column is narrower than they are (the span over at most two
@@ -252,8 +252,8 @@ pub fn details_height(column: f32, scale: f32, text: f32) -> f32 {
 
 /// The header's height and the preview's width in a window `width` ×
 /// `height` with `below` points under the preview and `details` points
-/// wanted by the programme beside it. A short window grows the header
-/// rather than lose the preview or clip the programme, up to `most` of its
+/// wanted by the program beside it. A short window grows the header
+/// rather than lose the preview or clip the program, up to `most` of its
 /// height ([`HEADER_MAX_SHARE`], more at the largest text: the rail and
 /// the guide keep the rest); a window too short even for that squeezes
 /// them instead.
@@ -297,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn the_shortcuts_go_below_where_the_programme_has_no_room() {
+    fn the_shortcuts_go_below_where_the_program_has_no_room() {
         // Compact windows, then medium ones too narrow for three columns:
         // a 560-point desktop window and a portrait tablet.
         for (w, h, scale) in [
@@ -389,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn the_header_keeps_the_programmes_title_and_times_whole() {
+    fn the_header_keeps_the_programs_title_and_times_whole() {
         // An iPad's Split View and Stage Manager windows at the largest
         // standard text and at Accessibility Extra Large (AX3).
         for (w, h, font) in [
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn beside_keeps_its_room_next_to_the_preview_it_draws() {
-        // A short window whose header grows for the programme widens its
+        // A short window whose header grows for the program widens its
         // preview: where the columns would then lack their room beside it,
         // the shortcuts go below.
         for (w, h, scale, font) in [
@@ -476,7 +476,7 @@ mod tests {
     #[test]
     fn a_phone_held_upright_stacks_a_full_width_preview() {
         // Phones at full size: the preview spans the window inside its
-        // margins, the programme and the shortcuts' row under it.
+        // margins, the program and the shortcuts' row under it.
         for (w, h, want) in [
             (412.0, 915.0, (364.0, 388.0, 218.0)),
             (390.0, 844.0, (385.0, 366.0, 206.0)),
@@ -502,7 +502,7 @@ mod tests {
 
     #[test]
     fn only_tall_compact_windows_stack() {
-        // A phone on its side keeps the preview beside the programme, with
+        // A phone on its side keeps the preview beside the program, with
         // the guide's rows under a third of the height.
         for (w, h, want) in [
             (915.0, 412.0, (136.0, 199.0, 112.0)),

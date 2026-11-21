@@ -1,17 +1,17 @@
 //! A guide being downloaded, staged in its own SQLite file
 //! ([`EpgStage`]): `iptv_import::import_epg` streams each feed's
-//! programmes into it in bounded batches, and [`crate::Store::replace_epg`]
+//! programs into it in bounded batches, and [`crate::Store::replace_epg`]
 //! copies the bound channels' schedules into the store in one transaction.
 //!
 //! The stage is a separate file so a long download never holds the
-//! store's write lock, and so a failed or cancelled download leaves the
+//! store's write lock, and so a failed or canceled download leaves the
 //! stored guide untouched: dropping the stage deletes its file. The file
 //! is scratch space (no journal, no fsync): a crash leaves a stale file
 //! that [`EpgStage::remove_stale`] deletes at the next start.
 //!
 //! A writer thread owns the stage connection, so parsing and writing
 //! overlap. Memory stays bounded: SQLite's page cache ([`CACHE_KIB`]), at
-//! most [`IN_FLIGHT`] batches of at most [`BATCH`] programmes or
+//! most [`IN_FLIGHT`] batches of at most [`BATCH`] programs or
 //! [`BATCH_TEXT`] bytes of text on their way, and per feed a map of its
 //! staged EPG channel ids; the guide itself is never held.
 //!
@@ -20,7 +20,7 @@
 //! longest; a missing stop is shortest), then each channel's rows are read
 //! in start order to fill missing stops, trim overlaps and drop what the
 //! rules drop. The result is exactly the schedule
-//! `iptv_epg::SourceBuilder` would build from the same programmes.
+//! `iptv_epg::SourceBuilder` would build from the same programs.
 
 mod writer;
 
@@ -31,7 +31,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread::JoinHandle;
 
-use iptv_epg::{FeedId, IngestReport, ProgrammeData, ScheduleRules, StoreOptions, UnixTime};
+use iptv_epg::{FeedId, IngestReport, ProgramData, ScheduleRules, StoreOptions, UnixTime};
 use iptv_import::{GuideSink, SinkError};
 use rusqlite::{Connection, OpenFlags};
 
@@ -40,7 +40,7 @@ use writer::{Batch, Cmd};
 
 /// Page cache of the stage connection.
 const CACHE_KIB: i64 = 4096;
-/// Programmes per batch (one stage transaction each)...
+/// Programs per batch (one stage transaction each)...
 const BATCH: usize = 4096;
 /// ...or fewer when their texts reach this many bytes.
 const BATCH_TEXT: usize = 1 << 20;
@@ -49,7 +49,7 @@ const IN_FLIGHT: usize = 2;
 const PREFIX: &str = "epg-stage-";
 
 const SCHEMA: &str = "
-    CREATE TABLE programmes (
+    CREATE TABLE programs (
         ch INTEGER NOT NULL,
         start INTEGER NOT NULL,
         stop INTEGER NOT NULL,
@@ -69,7 +69,7 @@ const SCHEMA: &str = "
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct StagedChannel {
     pub id: i64,
-    /// Programmes kept after settling.
+    /// Programs kept after settling.
     pub kept: u64,
     /// Latest kept stop.
     pub last_stop: Option<UnixTime>,
@@ -80,7 +80,7 @@ struct Current {
     feed: FeedId,
     rules: ScheduleRules,
     descriptions: bool,
-    /// EPG channel id -> (stage channel id, programmes admitted).
+    /// EPG channel id -> (stage channel id, programs admitted).
     channels: HashMap<Box<str>, (i64, u64)>,
     first: i64,
     report: IngestReport,
@@ -238,7 +238,7 @@ impl EpgStage {
         self.request(Cmd::Sync)
     }
 
-    fn programme_inner(&mut self, channel: &str, p: &ProgrammeData<'_>) -> Result<()> {
+    fn program_inner(&mut self, channel: &str, p: &ProgramData<'_>) -> Result<()> {
         if self.failed.load(Ordering::Relaxed) {
             return self.request(Cmd::Sync);
         }
@@ -288,7 +288,7 @@ impl EpgStage {
         })?;
         let r = &mut cur.report;
         r.kept += settled.kept;
-        r.channels_with_programmes += settled.channels_with_programmes;
+        r.channels_with_programs += settled.channels_with_programs;
         r.dropped_bad_duration += settled.dropped_bad_duration;
         r.dropped_no_stop += settled.dropped_no_stop;
         r.dropped_retention += settled.dropped_retention;
@@ -367,12 +367,12 @@ impl GuideSink for EpgStage {
         Ok(())
     }
 
-    fn programme(
+    fn program(
         &mut self,
         channel: &str,
-        p: &ProgrammeData<'_>,
+        p: &ProgramData<'_>,
     ) -> std::result::Result<(), SinkError> {
-        self.programme_inner(channel, p).map_err(sink_error)
+        self.program_inner(channel, p).map_err(sink_error)
     }
 
     fn finish_feed(&mut self) -> std::result::Result<IngestReport, SinkError> {
@@ -383,7 +383,7 @@ impl GuideSink for EpgStage {
         self.discard_inner().map_err(sink_error)
     }
 
-    fn has_programmes(&self, feed: FeedId, epg_id: &str) -> bool {
+    fn has_programs(&self, feed: FeedId, epg_id: &str) -> bool {
         self.channel(feed, epg_id).is_some_and(|c| c.kept > 0)
     }
 }

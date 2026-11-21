@@ -240,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn a_mac_address_is_normalised() {
+    fn a_mac_address_is_normalized() {
         let stalker = Source {
             name: "Portal".into(),
             config: SourceConfig::Stalker(StalkerCredentials {

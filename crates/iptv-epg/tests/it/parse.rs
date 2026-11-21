@@ -1,4 +1,4 @@
-//! XMLTV parser behaviour on synthetic documents.
+//! XMLTV parser behavior on synthetic documents.
 
 use std::io::Write;
 
@@ -8,7 +8,7 @@ fn parse_chunked(xml: &[u8], chunk: usize, opts: ParseOptions) -> ParsedXmltv {
     let mut out = ParsedXmltv::default();
     let mut sink = |item| match item {
         XmltvItem::Channel(c) => out.channels.push(c),
-        XmltvItem::Programme(p) => out.programmes.push(p),
+        XmltvItem::Program(p) => out.programs.push(p),
     };
     let mut parser = XmltvParser::new(opts);
     for c in xml.chunks(chunk.max(1)) {
@@ -36,25 +36,25 @@ fn overflowing_episode_ordinals_survive_parsing_as_absent_components() {
         let from = format_xmltv_time(start + index as i64 * 3600);
         let to = format_xmltv_time(start + (index as i64 + 1) * 3600);
         xml.push_str(&format!(
-            r#"<programme channel="synthetic" start="{from}" stop="{to}"><title>Generated programme {index}</title><episode-num system="xmltv_ns">{ordinal}</episode-num></programme>"#,
+            r#"<programme channel="synthetic" start="{from}" stop="{to}"><title>Generated program {index}</title><episode-num system="xmltv_ns">{ordinal}</episode-num></programme>"#,
         ));
     }
     xml.push_str("</tv>");
     for chunk in [1, 31, xml.len()] {
         let parsed = parse_chunked(xml.as_bytes(), chunk, ParseOptions::default());
-        assert_eq!(parsed.stats.programmes, cases.len() as u64);
-        assert_eq!(parsed.programmes.len(), cases.len());
+        assert_eq!(parsed.stats.programs, cases.len() as u64);
+        assert_eq!(parsed.programs.len(), cases.len());
         let mut builder = SourceBuilder::new(FeedId(1), 0, StoreOptions::default(), start);
-        for (programme, (_, expected)) in parsed.programmes.iter().zip(&cases) {
-            let data = ProgrammeData::from_xmltv(programme);
+        for (program, (_, expected)) in parsed.programs.iter().zip(&cases) {
+            let data = ProgramData::from_xmltv(program);
             assert_eq!((data.season, data.episode), *expected);
-            builder.push_programme(programme.clone());
+            builder.push_program(program.clone());
         }
         let source = builder.finish();
         let schedule = source.schedule("synthetic").unwrap();
         assert_eq!(schedule.len(), cases.len());
-        for (programme, (_, expected)) in schedule.iter().zip(&cases) {
-            assert_eq!(programme.season_episode(), *expected);
+        for (program, (_, expected)) in schedule.iter().zip(&cases) {
+            assert_eq!(program.season_episode(), *expected);
         }
     }
 }
@@ -94,7 +94,7 @@ line two &#x2014; &unknown; & more</desc>
 fn parses_every_supported_field() {
     let r = parse_chunked(FULL.as_bytes(), 1 << 20, ParseOptions::default());
     assert_eq!(r.stats.warnings, ParseWarnings::default());
-    assert_eq!((r.stats.channels, r.stats.programmes), (2, 2));
+    assert_eq!((r.stats.channels, r.stats.programs), (2, 2));
 
     let a = &r.channels[0];
     assert_eq!(a.id, "alpha.example");
@@ -110,7 +110,7 @@ fn parses_every_supported_field() {
         Some("https://logos.example.com/b.png?a=1&b=2")
     );
 
-    let p = &r.programmes[0];
+    let p = &r.programs[0];
     assert_eq!(p.channel, "alpha.example");
     assert_eq!(p.start, t("20260301120000 +0000"));
     assert_eq!(p.stop, Some(t("20260301130000 +0000")));
@@ -134,7 +134,7 @@ fn parses_every_supported_field() {
     );
     assert_eq!(p.catchup_id.as_deref(), Some("cu-123"));
 
-    let q = &r.programmes[1];
+    let q = &r.programs[1];
     assert_eq!(q.stop, None);
     assert_eq!(q.start, t("20260301130000 +0000"));
 }
@@ -145,7 +145,7 @@ fn result_does_not_depend_on_chunking() {
     for n in [1, 2, 3, 5, 7, 13, 64, 333] {
         let r = parse_chunked(FULL.as_bytes(), n, ParseOptions::default());
         assert_eq!(r.channels, whole.channels, "chunk {n}");
-        assert_eq!(r.programmes, whole.programmes, "chunk {n}");
+        assert_eq!(r.programs, whole.programs, "chunk {n}");
         assert_eq!(r.stats.warnings, whole.stats.warnings, "chunk {n}");
     }
 }
@@ -161,9 +161,9 @@ fn time_policy_applies_assumed_offset_and_shift() {
     };
     let r = parse_chunked(FULL.as_bytes(), 100, opts);
     // Explicit +0000 keeps its offset, then the shift applies.
-    assert_eq!(r.programmes[0].start, t("20260301123000 +0000"));
+    assert_eq!(r.programs[0].start, t("20260301123000 +0000"));
     // No offset: assumed +0200, then the shift.
-    assert_eq!(r.programmes[1].start, t("20260301113000 +0000"));
+    assert_eq!(r.programs[1].start, t("20260301113000 +0000"));
 }
 
 #[test]
@@ -173,8 +173,8 @@ fn descriptions_can_be_dropped_at_parse_time() {
         ..ParseOptions::default()
     };
     let r = parse_chunked(FULL.as_bytes(), 50, opts);
-    assert!(r.programmes.iter().all(|p| p.desc.is_none()));
-    assert_eq!(r.programmes[0].title, "Morning & Noon");
+    assert!(r.programs.iter().all(|p| p.desc.is_none()));
+    assert_eq!(r.programs[0].title, "Morning & Noon");
 }
 
 const BROKEN: &str = r#"<tv>
@@ -196,13 +196,13 @@ fn malformed_entries_are_counted_and_skipped() {
         let r = parse_chunked(BROKEN.as_bytes(), n, ParseOptions::default());
         let w = r.stats.warnings;
         assert_eq!(w.channel_without_id, 1, "chunk {n}");
-        assert_eq!(w.programme_without_channel, 1, "chunk {n}");
+        assert_eq!(w.program_without_channel, 1, "chunk {n}");
         assert_eq!(w.bad_start, 2, "chunk {n}");
         assert_eq!(w.bad_stop, 1, "chunk {n}");
-        assert_eq!(w.programme_without_title, 2, "chunk {n}");
+        assert_eq!(w.program_without_title, 2, "chunk {n}");
         assert_eq!(w.malformed_xml, 1, "chunk {n}");
         assert_eq!(w.truncated, 1, "chunk {n}");
-        let titles: Vec<_> = r.programmes.iter().map(|p| p.title.as_str()).collect();
+        let titles: Vec<_> = r.programs.iter().map(|p| p.title.as_str()).collect();
         assert_eq!(titles, ["Bad stop kept", "After the damage"], "chunk {n}");
         assert_eq!(r.channels.len(), 1);
         assert_eq!(r.channels[0].id, "ok.example");
@@ -222,8 +222,8 @@ fn oversized_elements_are_skipped() {
     };
     let r = parse_chunked(xml.as_bytes(), 256, opts);
     assert_eq!(r.stats.warnings.oversized, 1);
-    assert_eq!(r.programmes.len(), 1);
-    assert_eq!(r.programmes[0].title, "Small");
+    assert_eq!(r.programs.len(), 1);
+    assert_eq!(r.programs[0].title, "Small");
     assert!(
         r.stats.peak_buffer_bytes < 2000,
         "{}",
@@ -243,7 +243,7 @@ fn gzip_input_is_detected_and_decoded() {
     let gz = gzip(FULL.as_bytes());
     for n in [1, 10, 1 << 20] {
         let r = parse_chunked(&gz, n, ParseOptions::default());
-        assert_eq!(r.programmes, whole.programmes);
+        assert_eq!(r.programs, whole.programs);
         assert_eq!(r.channels, whole.channels);
         assert_eq!(r.stats.bytes_in, gz.len() as u64);
     }
@@ -253,7 +253,7 @@ fn gzip_input_is_detected_and_decoded() {
         ..ParseOptions::default()
     };
     let r = parse_chunked(&gz, 100, forced);
-    assert!(r.programmes.is_empty());
+    assert!(r.programs.is_empty());
 }
 
 #[test]
@@ -322,7 +322,7 @@ fn latin1_documents_are_transcoded() {
     xml.extend_from_slice(b"<programme channel=\"c.example\" start=\"20260301120000 +0000\"><title>D\xE9j\xE0 vu</title></programme></tv>");
     let r = parse_chunked(&xml, 7, ParseOptions::default());
     assert_eq!(r.channels[0].display_names, ["Cin\u{e9}ma"]);
-    assert_eq!(r.programmes[0].title, "D\u{e9}j\u{e0} vu");
+    assert_eq!(r.programs[0].title, "D\u{e9}j\u{e0} vu");
     assert_eq!(r.stats.warnings.total(), 0);
 }
 
@@ -330,7 +330,7 @@ fn latin1_documents_are_transcoded() {
 fn invalid_utf8_is_replaced_and_counted() {
     let xml = b"<tv><programme channel=\"c.example\" start=\"20260301120000 +0000\"><title>Bad \xFF byte</title></programme></tv>";
     let r = parse_chunked(xml, 3, ParseOptions::default());
-    assert_eq!(r.programmes[0].title, "Bad \u{FFFD} byte");
+    assert_eq!(r.programs[0].title, "Bad \u{FFFD} byte");
     assert_eq!(r.stats.warnings.invalid_utf8, 1);
 }
 
@@ -362,8 +362,8 @@ fn tiny_chunks_stay_linear() {
     );
     let started = std::time::Instant::now();
     let r = parse_chunked(xml.as_bytes(), 1, ParseOptions::default());
-    assert_eq!(r.programmes.len(), 2);
-    assert_eq!(r.programmes[0].desc.as_deref(), Some(desc.trim()));
+    assert_eq!(r.programs.len(), 2);
+    assert_eq!(r.programs[0].desc.as_deref(), Some(desc.trim()));
     assert!(started.elapsed().as_secs() < 10, "{:?}", started.elapsed());
 }
 
@@ -375,7 +375,7 @@ fn superscript_badges_in_titles_are_folded_at_import() {
 </tv>"#;
     // Fed a byte at a time: a badge split across chunks folds the same.
     let r = parse_chunked(xml.as_bytes(), 1, ParseOptions::default());
-    assert_eq!(r.programmes[0].title, "Cup Final Live");
-    assert_eq!(r.programmes[0].sub_title.as_deref(), Some("New Episode"));
-    assert_eq!(r.programmes[1].title, "H₂O Facts");
+    assert_eq!(r.programs[0].title, "Cup Final Live");
+    assert_eq!(r.programs[0].sub_title.as_deref(), Some("New Episode"));
+    assert_eq!(r.programs[1].title, "H₂O Facts");
 }

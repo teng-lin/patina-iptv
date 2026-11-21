@@ -19,10 +19,10 @@ async fn displayed(
                 return;
             }
         }
-        panic!("display event stream ended before the expected catalogue");
+        panic!("display event stream ended before the expected catalog");
     })
     .await
-    .expect("cached library did not publish the expected catalogue");
+    .expect("cached library did not publish the expected catalog");
 }
 
 #[test]

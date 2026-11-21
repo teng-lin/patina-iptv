@@ -55,8 +55,8 @@ fn check(services: &Services, cancel: &CancelToken, deadline: Instant) -> Inspec
     if !services.is_current() {
         return Err(InspectionError::OwnerClosed);
     }
-    if cancel.is_cancelled() {
-        return Err(InspectionError::Cancelled);
+    if cancel.is_canceled() {
+        return Err(InspectionError::Canceled);
     }
     if Instant::now() >= deadline {
         return Err(InspectionError::Deadline);
@@ -959,7 +959,7 @@ impl Runtime {
             let summary = ProbeSummary {
                 evidence: snapshot.evidence.clone(),
                 channels,
-                programmes: stats.programmes,
+                programs: stats.programs,
                 bytes: stats.bytes_in,
                 warnings: stats.warnings.total(),
             };
@@ -1103,7 +1103,7 @@ impl Runtime {
         candidate: CandidateRef,
         window: TimeWindow,
         control: InspectionControl,
-    ) -> impl Future<Output = InspectionResult<Vec<CandidateProgramme>>> + use<> {
+    ) -> impl Future<Output = InspectionResult<Vec<CandidateProgram>>> + use<> {
         let lease = self.lease_probe(&evidence);
         let services = self.services();
         let deadline = Instant::now() + control.timeout.min(PROBE_DEADLINE);
@@ -1130,27 +1130,27 @@ impl Runtime {
             // The probe parser already applied this feed's configured shift.
             // Reparse with the same policy, captured independently of current config.
             let mut parser = StrictXmltvParser::new(parse_options(lease.0.time));
-            let mut raw = BTreeMap::<i64, iptv_epg::XmltvProgramme>::new();
+            let mut raw = BTreeMap::<i64, iptv_epg::XmltvProgram>::new();
             let mut overflow = false;
             let mut failure = None;
             let mut sink = |item| {
                 if overflow {
                     return;
                 }
-                let XmltvItem::Programme(programme) = item else {
+                let XmltvItem::Program(program) = item else {
                     return;
                 };
-                if programme.channel != candidate.epg_channel
-                    || programme.stop.is_some_and(|stop| stop <= programme.start)
+                if program.channel != candidate.epg_channel
+                    || program.stop.is_some_and(|stop| stop <= program.start)
                 {
                     return;
                 }
                 // Retain one look-ahead event to infer the final visible stop.
-                if programme.start >= window.to {
+                if program.start >= window.to {
                     if raw
                         .range(window.to..)
                         .next()
-                        .is_some_and(|(&start, _)| start <= programme.start)
+                        .is_some_and(|(&start, _)| start <= program.start)
                     {
                         return;
                     }
@@ -1161,27 +1161,27 @@ impl Runtime {
                 // The latest predecessor is also boundary evidence when it
                 // ended before the window: it cuts off any earlier no-stop row.
                 // Keep just that predecessor even when the feed is out of order.
-                if programme.start < window.from {
+                if program.start < window.from {
                     if raw
                         .range(..window.from)
                         .next_back()
-                        .is_some_and(|(&start, _)| start > programme.start)
+                        .is_some_and(|(&start, _)| start > program.start)
                     {
                         return;
                     }
                     if let Some((&start, _)) = raw.range(..window.from).next_back()
-                        && start < programme.start
+                        && start < program.start
                     {
                         raw.remove(&start);
                     }
                 }
-                match raw.entry(programme.start) {
+                match raw.entry(program.start) {
                     std::collections::btree_map::Entry::Vacant(entry) => {
-                        entry.insert(programme);
+                        entry.insert(program);
                     }
                     std::collections::btree_map::Entry::Occupied(mut entry) => {
-                        if iptv_epg::ScheduleRules::replaces(programme.stop, entry.get().stop) {
-                            entry.insert(programme);
+                        if iptv_epg::ScheduleRules::replaces(program.stop, entry.get().stop) {
+                            entry.insert(program);
                         }
                     }
                 }
@@ -1217,7 +1217,7 @@ impl Runtime {
             }
             let raw: Vec<_> = raw.into_values().collect();
             let intervals: Vec<_> = raw.iter().map(|p| (p.start, p.stop)).collect();
-            let mut programmes = Vec::new();
+            let mut programs = Vec::new();
             iptv_epg::ScheduleRules::new(
                 iptv_epg::StoreOptions {
                     past_days_to_keep: None,
@@ -1234,7 +1234,7 @@ impl Runtime {
                         && p.start < window.to
                         && stop > window.from
                     {
-                        programmes.push(CandidateProgramme {
+                        programs.push(CandidateProgram {
                             candidate: candidate.clone(),
                             source_incarnation: lease.0.source_incarnation.clone(),
                             evidence_revision: hex(&evidence.digest),
@@ -1246,10 +1246,10 @@ impl Runtime {
                     }
                 },
             );
-            if programmes.len() > MAX_PAGE as usize {
+            if programs.len() > MAX_PAGE as usize {
                 return Err(InspectionError::LimitExceeded);
             }
-            Ok(programmes)
+            Ok(programs)
         });
         await_worker(services, control, deadline, task, operation_cancel, guard)
     }

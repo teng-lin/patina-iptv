@@ -33,12 +33,12 @@ render portable state and issue actions; focus uses content identity.
 |---|---|
 | `inspect_channel` | One source-scoped channel or a typed missing/access/storage outcome |
 | `query_channels` | Bounded semantic page matching explicit source scope and text/visibility filters |
-| `query_programmes` | Bounded programme page in a supplied UTC interval, optionally for one channel |
+| `query_programs` | Bounded program page in a supplied UTC interval, optionally for one channel |
 | `epg_audit` | Coverage/diagnosis over an explicit interval; schedule coverage never proves broadcast identity |
 | `epg_candidates` | Configured-feed alternatives and matching evidence without mutating automatic choices |
 | `probe_feed` | Bounded inspection of a configured or supplied feed into disposable private staging |
 | `probe_candidates` | A bounded page from the exact staged channel index |
-| `probe_schedule` | Bounded programme samples from the exact retained snapshot for a candidate |
+| `probe_schedule` | Bounded program samples from the exact retained snapshot for a candidate |
 
 Requests select one source, selected sources, or all enabled sources explicitly.
 There is no implicit shown-source fallback. Reading another source changes no
@@ -51,11 +51,11 @@ playback queries enforce its current policy and source membership; grants are
 revoked on lock and owner retirement. The administrative parental API remains
 experimental outside this versioned query/repair contract.
 
-Channel identity is `(SourceId, ContentId)` within its current catalogue context.
+Channel identity is `(SourceId, ContentId)` within its current catalog context.
 Names, list positions and physical row IDs are not identities. Source deletion,
 recreation and restore invalidate retained authority; IDs alone do not promise
 continuity across those events. Source/feed incarnations distinguish reused
-numeric IDs. Programme references preserve channel/feed provenance, source
+numeric IDs. Program references preserve channel/feed provenance, source
 incarnation, evidence revision and observed interval; provider event IDs are
 optional and scoped evidence rather than global identity.
 
@@ -66,17 +66,17 @@ samples and use `Target::Staged` for repair, never `Target::Configured`.
 Atomic apply allocates any new durable feed identity.
 
 All timestamps use Unix seconds. Query intervals are half-open `[from, to)` in
-UTC: a programme ending exactly at `from`, or starting exactly at `to`, is out.
+UTC: a program ending exactly at `from`, or starting exactly at `to`, is out.
 Parse supplied XMLTV offsets and apply configured shifts once. Display timezone
 changes cannot move stored instants. A shifted edition is distinct from a
 feed-wide timing problem. Missing/contradictory evidence is reported.
 
-Catalogue ordering is deterministic by semantic identity; programme continuation
+Catalog ordering is deterministic by semantic identity; program continuation
 also includes its semantic time key. Cursors bind owner, scope, filter, ordering
 and relevant semantic evidence. Unchanged physical reimport preserves valid
 continuation; unsafe input/data changes return `StaleCursor`. Staged continuation
 is bound to the exact evidence and filter. Immutable repair-preview offsets are
-positions within one fixed, digest-bound plan, not physical catalogue row IDs.
+positions within one fixed, digest-bound plan, not physical catalog row IDs.
 
 An empty successful page is different from an unreadable store, missing/disabled
 source, blocked channel, invalid request, stale evidence or owner retirement.
@@ -92,7 +92,7 @@ The current foundation limits are:
 | Query page / preview page | 200 returned items per page |
 | Query text | 256 UTF-8 bytes |
 | Explicit query source set | 64 sources |
-| Programme/audit window | Positive interval, at most 31 days |
+| Program/audit window | Positive interval, at most 31 days |
 | Query deadline | At most 3 seconds end to end, including admission/queue time |
 | Probe request | At most 60 seconds, 3 redirects, 32 MiB input, 256 MiB expanded |
 | Probe XML | Finite record/text/nesting and item limits; external entities disabled |
@@ -107,9 +107,9 @@ The current foundation limits are:
 Callers may request a shorter budget through `InspectionControl`. Queueing,
 network reads, XML parsing, SQL analysis and result publication observe finite
 budgets and owner/cancellation state. Heavy analysis runs separately from guide
-page reads. Cancelling or dropping one operation must not cancel sibling work
+page reads. Canceling or dropping one operation must not cancel sibling work
 merely because a caller shares a cancellation control; ordinary completion
-must not cancel the caller's token. Expired/cancelled work releases its worker,
+must not cancel the caller's token. Expired/canceled work releases its worker,
 snapshot and temporary-artifact resources.
 
 A deadline is not a rollback acknowledgement for a committed mutation. Reads
@@ -145,10 +145,10 @@ never silently applies a subset. Manual choices and intentional no-guide are
 protected by default. Overriding them requires explicit opt-in for those rows.
 Preview shows added feeds, settings/order changes and indirect automatic-match
 effects, including effects outside the mapped batch. Incomplete impact evidence
-is labelled; it is not represented as a complete preview. Indirect effects use
+is labeled; it is not represented as a complete preview. Indirect effects use
 actual retained before-bindings. `availability_unknown` distinguishes an
 unproven after-binding from a known absence; channel metadata alone cannot
-prove the fallback chain has retained programmes.
+prove the fallback chain has retained programs.
 
 A staged target carries exact staged evidence, not a guessed future feed ID.
 Apply pins/validates its stage, allocates any new feed IDs in the writer
@@ -164,10 +164,10 @@ Apply checks relevant before-values/evidence inside the transaction; undo
 compares all affected committed after-values. Unrelated edits survive. Removing
 an added feed conflicts if another explicit choice now uses it. An undo conflict
 changes no subset. Undo restores configuration and schedules refresh as needed;
-it cannot promise resurrection of replaced cached programme bytes.
+it cannot promise resurrection of replaced cached program bytes.
 
 Completion distinguishes durable configuration/mapping, installed effective
-bindings, available programmes, pending verification and verified coverage.
+bindings, available programs, pending verification and verified coverage.
 A saved choice can require refresh; cache/refresh failure preserves the saved
 choice and reports the incomplete effective outcome. Old import/cache/verification
 work cannot overwrite a newer commit or certify a revision it never examined.
@@ -177,7 +177,7 @@ An old verification cannot replace a later undo or cancellation observation.
 Status recovery checks the durable journal before reusing transient state.
 Verification exposes
 `evidence_revision` and `current_evidence_revision` in addition to configuration
-and mapping revisions: a later programme or binding refresh with identical
+and mapping revisions: a later program or binding refresh with identical
 configuration cannot certify an observation from an earlier snapshot.
 
 Automatic matching, including an observed absence, requires evidence of a
@@ -191,7 +191,7 @@ Ordinary restart retains committed choices and eligible inverses, reconstructs
 operation observations and expires uncommitted previews. Restore invalidates
 old undo authority, cursors, previews and active work, then recomputes current
 coverage. Probe caches are disposable, encrypted with a random secret for their
-owning epoch, excluded from catalogue backups, and removed/invalidated when the
+owning epoch, excluded from catalog backups, and removed/invalidated when the
 owner retires or stale crash artifacts are found.
 
 ## Capability and compatibility policy

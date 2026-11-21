@@ -2,7 +2,7 @@
 //! the periodic check survives; with automatic updates off it stays silent.
 //!
 //! That holds for a store that is unavailable as a whole and for one that
-//! reads in part: a guide check whose catalogue reads while its guide
+//! reads in part: a guide check whose catalog reads while its guide
 //! sources or its guide's state do not must not take the missing part for
 //! "no guide configured" (which deletes the stored guide) or for "never
 //! downloaded" (which downloads it and makes up a check).
@@ -191,7 +191,7 @@ fn unreadable_guide_sources_are_not_taken_for_no_guide_configured() {
         let (checks, others) = timer_check(&owner, source);
         assert_eq!((checks.len(), others), (1, 0), "{checks:?}");
         assert!(checks[0] > before);
-        // The guide sources cannot be read any more; the catalogue can.
+        // The guide sources cannot be read any more; the catalog can.
         raw(directory.path())
             .execute_batch("DROP TABLE guide_sources")
             .unwrap();
@@ -230,7 +230,7 @@ fn an_unreadable_guide_state_makes_up_no_check_when_guide_updates_are_manual() {
         let (checks, others) = timer_check(&owner, source);
         assert_eq!((checks.len(), others), (1, 0), "{checks:?}");
         // The guide's state cannot be read any more (its feeds are gone
-        // from under it); the catalogue and the guide sources can.
+        // from under it); the catalog and the guide sources can.
         raw(directory.path())
             .execute_batch("DROP TABLE epg_feeds")
             .unwrap();

@@ -6,7 +6,7 @@ use crate::staged;
 
 use iptv_epg::{
     ChannelKey, EpgRef, GuideStore, MatchKind, SourceBuilder, StoreOptions, XmltvChannel,
-    XmltvProgramme,
+    XmltvProgram,
 };
 use iptv_import::EpgSourceConfig;
 use iptv_providers::{ContentId, SecretUrl};
@@ -25,7 +25,7 @@ fn store() -> (Store, SourceId) {
     (store, a)
 }
 
-/// One feed listing three channels; `news` and `film` have programmes,
+/// One feed listing three channels; `news` and `film` have programs,
 /// `quiet` none. Playlist channel `k1` is bound to `news`.
 fn guide() -> GuideStore {
     let mut b = SourceBuilder::new(FEED, 1, StoreOptions::default(), NOW);
@@ -41,12 +41,12 @@ fn guide() -> GuideStore {
         });
     }
     for (channel, title) in [("news.test", "Bulletin"), ("film.test", "Feature")] {
-        b.push_programme(XmltvProgramme {
+        b.push_program(XmltvProgram {
             channel: channel.into(),
             start: NOW,
             stop: Some(NOW + H),
             title: title.into(),
-            ..XmltvProgramme::default()
+            ..XmltvProgram::default()
         });
     }
     let mut g = GuideStore::new();
@@ -72,8 +72,7 @@ fn feeds() -> Vec<EpgFeedMeta> {
 
 fn title(store: &Store, source: SourceId, key: &str) -> Option<String> {
     let g = store.load_epg(source, &EpgWindow::from(NOW, 1)).unwrap();
-    g.programme_at(&key.into(), NOW)
-        .map(|p| p.title().to_owned())
+    g.program_at(&key.into(), NOW).map(|p| p.title().to_owned())
 }
 
 #[test]
@@ -115,7 +114,7 @@ fn each_feed_keeps_how_its_last_download_went() {
                 attempted_at: NOW,
                 error: None,
                 channel_count: 1,
-                programme_count: 1,
+                program_count: 1,
                 listed_count: 3,
             },
             FeedResult {
@@ -123,7 +122,7 @@ fn each_feed_keeps_how_its_last_download_went() {
                 attempted_at: NOW,
                 error: Some(ImportErrorKind::Network),
                 channel_count: 0,
-                programme_count: 0,
+                program_count: 0,
                 listed_count: 0,
             },
         ]
@@ -144,7 +143,7 @@ fn each_feed_keeps_how_its_last_download_went() {
 }
 
 #[test]
-fn a_chosen_guide_applies_to_the_stored_guide_when_its_programmes_are_there() {
+fn a_chosen_guide_applies_to_the_stored_guide_when_its_programs_are_there() {
     let (mut store, a) = store();
     assert!(
         !store.rebind_epg(a, &"k1".into(), None, 5).unwrap(),
@@ -172,7 +171,7 @@ fn a_chosen_guide_applies_to_the_stored_guide_when_its_programmes_are_there() {
         (stored.bound_channels, stored.match_fingerprint),
         (2, Some(7))
     );
-    // Films' programmes were not stored (nothing was bound to it): needs a
+    // Films' programs were not stored (nothing was bound to it): needs a
     // download, nothing changes.
     assert!(
         !store
@@ -201,7 +200,7 @@ fn manual_choices_are_read_back_for_matching() {
     store
         .set_epg_override(a, &two, Some(&EpgOverride::Disabled))
         .unwrap();
-    store.set_favourite(a, &one, true).unwrap();
+    store.set_favorite(a, &one, true).unwrap();
     let read = store.epg_overrides(a).unwrap();
     assert_eq!(read.len(), 2);
     assert_eq!(read[0].1.feed(), Some(FEED));

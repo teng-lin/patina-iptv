@@ -1,11 +1,11 @@
-//! The catalogue's contract: every setting with its documented type,
+//! The catalog's contract: every setting with its documented type,
 //! default, range, scope and flags; every visibility condition; every
 //! command. Each setting also round-trips through the store and the
 //! backup format.
 
-use iptv_settings::catalogue::{self, choices as c};
+use iptv_settings::catalog::{self, choices as c};
 use iptv_settings::schema::{
-    IntUnit, Test, TextKind, TimeUnit, ValueType, When, bindings, boolean, choice, colour, days,
+    IntUnit, Test, TextKind, TimeUnit, ValueType, When, bindings, boolean, choice, color, days,
     dur, hours, int, mins, offset_hm, offset_hms, secs, text,
 };
 use iptv_settings::{Change, KeyBinding, PressKind, Scope, Setting, Settings, SettingsError};
@@ -15,7 +15,7 @@ const GL: Scope = Scope::Global;
 const PL: Scope = Scope::Playlist;
 const GR: Scope = Scope::Group;
 
-/// `(key, type with default and range, scope, flags)` in catalogue order;
+/// `(key, type with default and range, scope, flags)` in catalog order;
 /// flags: `a` advanced, `r` requires a restart. Built at run time with the
 /// schema's constructors, so their unit conversions are checked as well.
 fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
@@ -105,10 +105,10 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
         ("epg.full_scan", boolean(false), GL, "a"),
         ("epg.time_offset", offset_hm(-720, 840, 15, 0), PL, ""),
         // Appearance.
-        ("appearance.accent", colour(&c::ACCENT, "blue"), GL, ""),
+        ("appearance.accent", color(&c::ACCENT, "blue"), GL, ""),
         (
             "appearance.background",
-            colour(&c::BACKGROUND, "dark"),
+            color(&c::BACKGROUND, "dark"),
             GL,
             "",
         ),
@@ -158,7 +158,7 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
         ("guide.show_channel_names", boolean(true), GL, ""),
         ("guide.show_channel_numbers", boolean(true), GL, ""),
         ("guide.show_now_playing", boolean(true), GL, ""),
-        ("guide.show_programmes", boolean(true), GL, ""),
+        ("guide.show_programs", boolean(true), GL, ""),
         ("guide.show_description", boolean(true), GL, ""),
         ("guide.show_source_labels", boolean(false), GL, ""),
         ("guide.show_catchup_badge", boolean(true), GL, ""),
@@ -167,7 +167,7 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
         ("guide.highlight_now", boolean(true), GL, ""),
         (
             "guide.now_highlight_style",
-            choice(&c::NOW_HIGHLIGHT, "colour"),
+            choice(&c::NOW_HIGHLIGHT, "color"),
             GL,
             "",
         ),
@@ -419,7 +419,7 @@ const CONDITIONS: &[(&str, &str)] = &[
     ),
 ];
 
-/// `(key, flags, resets)` in catalogue order; flags: `c` asks for
+/// `(key, flags, resets)` in catalog order; flags: `c` asks for
 /// confirmation, `r` requires a restart.
 const COMMANDS: &[(&str, &str, &[&str])] = &[
     ("recordings.quit_host", "c", &[]),
@@ -491,7 +491,7 @@ fn other_value(s: &Setting) -> Value {
             ..
         } => Value::Duration(next(default_ms, max_ms, step_ms)),
         ValueType::Enum { choices, default } => Value::Enum(other(choices.variants, default)),
-        ValueType::Colour { palette, default } => Value::Colour(other(palette.variants, default)),
+        ValueType::Color { palette, default } => Value::Color(other(palette.variants, default)),
         ValueType::Text { kind, .. } => Value::text(match kind {
             TextKind::Plain => "SyntheticPlayer/1.0",
             TextKind::CommaList => "HD ,EXAMPLE: ",
@@ -510,7 +510,7 @@ fn other_value(s: &Setting) -> Value {
 
 /// A value of `w.key` for which `w` holds (or fails).
 fn condition_value(w: &When, holds: bool) -> Value {
-    let s = catalogue::setting(w.key).unwrap();
+    let s = catalog::setting(w.key).unwrap();
     match w.test {
         Test::IsTrue => Value::Bool(holds),
         Test::EnumIn(variants) => {
@@ -520,7 +520,7 @@ fn condition_value(w: &When, holds: bool) -> Value {
                 .find(|v| variants.contains(v) == holds)
                 .expect("a variant on each side of the test");
             match s.ty {
-                ValueType::Colour { .. } => Value::colour(v),
+                ValueType::Color { .. } => Value::color(v),
                 _ => Value::choice(v),
             }
         }
@@ -533,14 +533,14 @@ fn condition_value(w: &When, holds: bool) -> Value {
 /// holds.
 fn satisfy(st: &mut Settings, s: &Setting) {
     for w in s.depends.iter().flat_map(|d| d.any_of) {
-        satisfy(st, catalogue::setting(w.key).unwrap());
+        satisfy(st, catalog::setting(w.key).unwrap());
         st.set(w.key, condition_value(w, true)).unwrap();
     }
 }
 
 #[test]
-fn the_catalogue_holds_exactly_the_documented_settings() {
-    let keys: Vec<&str> = catalogue::settings().map(|s| s.key).collect();
+fn the_catalog_holds_exactly_the_documented_settings() {
+    let keys: Vec<&str> = catalog::settings().map(|s| s.key).collect();
     let documented: Vec<&str> = documented().iter().map(|r| r.0).collect();
     assert_eq!(keys, documented);
 }
@@ -549,7 +549,7 @@ fn the_catalogue_holds_exactly_the_documented_settings() {
 fn settings_have_their_documented_type_default_range_scope_and_flags() {
     let st = Settings::new();
     for (key, ty, scope, flags) in documented() {
-        let s = catalogue::setting(key).unwrap();
+        let s = catalog::setting(key).unwrap();
         assert_eq!(s.ty, ty, "{key}");
         assert_eq!(s.scope, scope, "{key}");
         assert_eq!(s.flags.advanced, flags.contains('a'), "{key} advanced");
@@ -578,7 +578,7 @@ fn durations_are_stored_in_milliseconds_whatever_their_unit() {
     assert_eq!(ms("recordings.trail_padding"), 5 * 60_000);
     assert_eq!(ms("playlists.update_interval"), 24 * 3_600_000);
     assert_eq!(ms("epg.keep_past"), 7 * 86_400_000);
-    let offset = catalogue::setting("epg.time_offset").unwrap();
+    let offset = catalog::setting("epg.time_offset").unwrap();
     assert_eq!(
         offset.ty,
         ValueType::Duration {
@@ -589,7 +589,7 @@ fn durations_are_stored_in_milliseconds_whatever_their_unit() {
             default_ms: 0,
         }
     );
-    let start = catalogue::setting("catchup.start_offset").unwrap();
+    let start = catalog::setting("catchup.start_offset").unwrap();
     assert!(matches!(
         start.ty,
         ValueType::Duration {
@@ -604,7 +604,7 @@ fn durations_are_stored_in_milliseconds_whatever_their_unit() {
 
 #[test]
 fn every_setting_round_trips_through_the_store_and_the_backup() {
-    for s in catalogue::settings() {
+    for s in catalog::settings() {
         let key = s.key;
         let deepest = match s.scope {
             Scope::Global => Target::Global,
@@ -657,7 +657,7 @@ fn every_setting_round_trips_through_the_store_and_the_backup() {
 
 #[test]
 fn the_documented_settings_have_conditions() {
-    let found: Vec<(&str, String)> = catalogue::settings()
+    let found: Vec<(&str, String)> = catalog::settings()
         .filter(|s| !s.depends.is_empty())
         .map(|s| (s.key, describe(s)))
         .collect();
@@ -672,7 +672,7 @@ fn the_documented_settings_have_conditions() {
 /// conditions holds; any single condition is enough.
 #[test]
 fn conditions_show_and_enable_their_settings() {
-    for s in catalogue::settings().filter(|s| !s.depends.is_empty()) {
+    for s in catalog::settings().filter(|s| !s.depends.is_empty()) {
         let key = s.key;
         let g = &Target::Global;
         let mut all_hold = Settings::new();
@@ -705,25 +705,25 @@ fn conditions_show_and_enable_their_settings() {
 fn settings_without_conditions_are_always_shown_and_editable() {
     let mut st = Settings::new();
     // Flip every switch: none of them may hide an unconditional setting.
-    for s in catalogue::settings() {
+    for s in catalog::settings() {
         if let ValueType::Bool { default } = s.ty {
             st.set(s.key, Value::Bool(!default)).unwrap();
         }
     }
-    for s in catalogue::settings().filter(|s| s.depends.is_empty()) {
+    for s in catalog::settings().filter(|s| s.depends.is_empty()) {
         assert_eq!(st.is_visible(s.key, &Target::Global), Ok(true), "{}", s.key);
         assert_eq!(st.is_enabled(s.key, &Target::Global), Ok(true), "{}", s.key);
     }
 }
 
 #[test]
-fn unknown_keys_are_not_in_the_catalogue() {
-    assert_eq!(catalogue::setting("general.no_such_setting"), None);
-    assert_eq!(catalogue::setting(""), None);
+fn unknown_keys_are_not_in_the_catalog() {
+    assert_eq!(catalog::setting("general.no_such_setting"), None);
+    assert_eq!(catalog::setting(""), None);
     // Commands are not settings, and settings are not commands.
-    assert_eq!(catalogue::setting("general.backup"), None);
-    assert_eq!(catalogue::command("general.language"), None);
-    assert_eq!(catalogue::command("general.no_such_command"), None);
+    assert_eq!(catalog::setting("general.backup"), None);
+    assert_eq!(catalog::command("general.language"), None);
+    assert_eq!(catalog::command("general.no_such_command"), None);
     let st = Settings::new();
     let unknown = SettingsError::UnknownKey("general.backup".into());
     assert_eq!(st.get("general.backup"), Err(unknown.clone()));
@@ -739,7 +739,7 @@ fn unknown_keys_are_not_in_the_catalogue() {
 
 #[test]
 fn commands_are_the_documented_ones() {
-    let found: Vec<(&str, String, &[&str])> = catalogue::commands()
+    let found: Vec<(&str, String, &[&str])> = catalog::commands()
         .map(|c| {
             let flags = [(c.confirm, 'c'), (c.requires_restart, 'r')]
                 .iter()
@@ -754,23 +754,20 @@ fn commands_are_the_documented_ones() {
         .map(|(k, f, r)| (*k, (*f).to_owned(), *r))
         .collect();
     assert_eq!(found, documented);
-    let restore = catalogue::command("remote.restore_defaults").unwrap();
+    let restore = catalog::command("remote.restore_defaults").unwrap();
     assert_eq!(restore.label_key(), "settings.remote.restore_defaults");
     assert_eq!(restore.help_key(), "settings.remote.restore_defaults.help");
     assert_eq!(restore.subsection, Some("mapping"));
-    assert_eq!(
-        catalogue::command("general.backup").unwrap().subsection,
-        None
-    );
+    assert_eq!(catalog::command("general.backup").unwrap().subsection, None);
 }
 
 #[test]
 fn a_reset_command_restores_what_it_names() {
     let mut st = Settings::new();
-    let bound = other_value(catalogue::setting("remote.key_overrides").unwrap());
+    let bound = other_value(catalog::setting("remote.key_overrides").unwrap());
     st.set("remote.key_overrides", bound).unwrap();
     st.set("remote.long_press", Value::ms(600)).unwrap();
-    let command = catalogue::command("remote.restore_defaults").unwrap();
+    let command = catalog::command("remote.restore_defaults").unwrap();
     for key in command.resets {
         st.reset(key).unwrap();
     }

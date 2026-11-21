@@ -97,7 +97,7 @@ fn saved_fixture_with_protection(
                 source: source.0,
                 channel: parsed.channels.items[0].id.as_str().into(),
                 channel_name: "Generated channel".into(),
-                title: "Generated saved programme".into(),
+                title: "Generated saved program".into(),
                 start: 1800000000,
                 end: 1800000120,
             },
@@ -329,7 +329,7 @@ fn tv_saved_playback_returns_through_guide_preview_without_reopening_the_player(
     step(app.wait_for_gone("id:play-bar-layer", Duration::from_secs(2)));
     step(app.wait_for("id:guide-preview"));
     // A recording also owns the preview when no live channel is playing.
-    // Search and the empty Favourites group remain valid origins on TV/desktop.
+    // Search and the empty Favorites group remain valid origins on TV/desktop.
     for idiom in [Idiom::Desktop, Idiom::Tv] {
         step(app.set_environment("saved preview navigation", |env| {
             env.idiom = idiom;
@@ -360,7 +360,7 @@ fn tv_saved_playback_returns_through_guide_preview_without_reopening_the_player(
         step(app.back());
         step(app.wait_for_gone("id:search-screen", Duration::from_secs(2)));
         step(app.press_key("right"));
-        step(app.press("id:guide-groups >> text:Favourites"));
+        step(app.press("id:guide-groups >> text:Favorites"));
         step(app.press_key("up"));
         assert!(
             app.screen()
@@ -382,7 +382,7 @@ fn tv_saved_playback_returns_through_guide_preview_without_reopening_the_player(
     );
     step(app.press_key("enter"));
     step(app.wait_for_gone("id:player-banner", Duration::from_secs(2)));
-    step(app.wait_for("id:player-panels >> text:Generated saved programme"));
+    step(app.wait_for("id:player-panels >> text:Generated saved program"));
     step(app.wait_for("id:player-time-line"));
     assert_eq!(iptv_app::player_opens(0), opens);
     assert_eq!(props.lock().unwrap()["source"], source);
@@ -436,7 +436,7 @@ fn back_returns_to_the_library_and_delete_handles_the_playing_file_after_consent
     // Deleting a different retained file never stops the current recording's playback.
     let mut store = crate::isolated::open_database(&database).unwrap();
     let mut other = store.recording_job(id).unwrap().unwrap().request;
-    other.title = "Generated other programme".into();
+    other.title = "Generated other program".into();
     other.start += 200;
     other.end += 200;
     store
@@ -458,18 +458,18 @@ fn back_returns_to_the_library_and_delete_handles_the_playing_file_after_consent
     .unwrap();
     drop(store);
     step(app.wait_for_within(
-        "label:/^Delete recording · Generated other programme/",
+        "label:/^Delete recording · Generated other program/",
         Duration::from_secs(10),
     ));
-    step(app.press("label:/^Delete recording · Generated other programme/"));
+    step(app.press("label:/^Delete recording · Generated other program/"));
     step(app.press("id:recording-delete-confirmation >> text:Delete recording"));
     step(app.wait_for_gone(
-        "label:/^Delete recording · Generated other programme/",
+        "label:/^Delete recording · Generated other program/",
         Duration::from_secs(10),
     ));
     assert_eq!(props.lock().unwrap()["source"], source);
     assert_eq!(iptv_app::player_opens(0), opens);
-    step(app.press("label:/^Delete recording · Generated saved programme/"));
+    step(app.press("label:/^Delete recording · Generated saved program/"));
     step(app.wait_for("id:recording-delete-confirmation"));
     step(app.press("id:recording-delete-confirmation >> text:Cancel"));
     assert_eq!(props.lock().unwrap()["source"], source);
@@ -480,7 +480,7 @@ fn back_returns_to_the_library_and_delete_handles_the_playing_file_after_consent
             .unwrap()
             .is_some()
     );
-    step(app.press("label:/^Delete recording · Generated saved programme/"));
+    step(app.press("label:/^Delete recording · Generated saved program/"));
     step(app.press("id:recording-delete-confirmation >> text:Delete recording"));
     step(app.wait_for_within("text:/No recordings here/", Duration::from_secs(10)));
     assert!(props.lock().unwrap()["source"].is_null());

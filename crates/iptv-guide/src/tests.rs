@@ -10,7 +10,7 @@ use super::{EpgSchedule, GuideChannel, NO_INFORMATION};
 /// Hour-aligned "now" for readable minutes.
 const NOW: i64 = 1_800_000_000;
 
-/// Channel `a.test` has programmes around now with a gap; `b.test` has none.
+/// Channel `a.test` has programs around now with a gap; `b.test` has none.
 fn xmltv() -> String {
     let p = |from: i64, to: i64, title: &str| {
         format!(
@@ -56,9 +56,9 @@ fn store_from(
         .into_iter()
         .for_each(|c| builder.push_channel(c));
     parsed
-        .programmes
+        .programs
         .into_iter()
-        .for_each(|p| builder.push_programme(p));
+        .for_each(|p| builder.push_program(p));
     let source = builder.finish();
     let mut index = MatchIndex::new();
     index.add_source(source.id(), source.priority(), source.channels());
@@ -94,7 +94,7 @@ fn schedule() -> EpgSchedule {
 }
 
 #[test]
-fn a_programme_starting_mid_minute_owns_that_minute() {
+fn a_program_starting_mid_minute_owns_that_minute() {
     // "Second" starts 30 s into minute 30: the minute rounds down to it.
     let p = |from: i64, to: i64, title: &str| {
         format!(
@@ -123,7 +123,7 @@ fn a_programme_starting_mid_minute_owns_that_minute() {
     let first = s.program_at(0, 29);
     assert_eq!(s.title(0, first), "First");
     assert_eq!(first.end, 30, "cells meet without overlapping");
-    // A tap on the cell (its start minute) focuses that programme.
+    // A tap on the cell (its start minute) focuses that program.
     let mut f = Focus::at(10);
     f.tap(0, second.start, &s);
     assert_eq!(s.title(0, f.program(&s)), "Second");
@@ -132,7 +132,7 @@ fn a_programme_starting_mid_minute_owns_that_minute() {
 }
 
 #[test]
-fn real_programmes_map_to_guide_minutes_with_titles_and_descriptions() {
+fn real_programs_map_to_guide_minutes_with_titles_and_descriptions() {
     let s = schedule();
     let p = s.program_at(0, 0);
     assert_eq!(
@@ -164,12 +164,12 @@ fn descriptions_left_out_of_memory_come_from_the_lookup() {
     let lazy = EpgSchedule::new(vec![("News".to_owned(), vec![ch])], store, NOW)
         .with_description_lookup(|key, start| Some(format!("{key} at {}", start - NOW)));
     assert_eq!(lazy.description(0, p).as_deref(), Some("a at -1800"));
-    // No programme there: nothing to look up.
+    // No program there: nothing to look up.
     assert_eq!(lazy.description(0, lazy.program_at(0, 70)), None);
 }
 
 #[test]
-fn gaps_are_filled_with_slots_clipped_to_neighbours() {
+fn gaps_are_filled_with_slots_clipped_to_neighbors() {
     let s = schedule();
     let gap = s.program_at(0, 70);
     assert_eq!(
@@ -186,7 +186,7 @@ fn gaps_are_filled_with_slots_clipped_to_neighbours() {
 }
 
 #[test]
-fn programmes_in_a_window_are_contiguous() {
+fn programs_in_a_window_are_contiguous() {
     let s = schedule();
     for ch in 0..2 {
         let ps = s.programs_between(ch, -30, 150);
@@ -300,7 +300,7 @@ fn the_epoch_is_the_import_hour_and_now_follows_the_wall_clock() {
     assert_eq!((s.epoch(), s.epoch_unix()), (NOW, NOW));
     assert!(s.follows_wall_clock());
     assert_eq!((s.minute(NOW + 90), s.unix(-30)), (1, NOW - 1800));
-    // Programmes keep their minutes from the epoch, whatever the time now.
+    // Programs keep their minutes from the epoch, whatever the time now.
     let news = Program {
         start: -30,
         end: 30,
@@ -309,7 +309,7 @@ fn the_epoch_is_the_import_hour_and_now_follows_the_wall_clock() {
     let now = now_minute(&s, NOW + 25 * 60 + 13, 0);
     assert_eq!(now, 25);
     assert_eq!(news.airing(now), Airing::Live);
-    // Five minutes later the next programme is live without a rebuild.
+    // Five minutes later the next program is live without a rebuild.
     let later = now_minute(&s, NOW + 30 * 60, 0);
     assert_eq!(news.airing(later), Airing::Ended);
     let mut f = Focus::at(now);
@@ -346,7 +346,7 @@ fn catchup_urls_carry_epoch_times_and_numbers_come_from_the_playlist() {
         start: -120,
         end: -60,
     };
-    let url = s.catchup_url(1, past, 15).expect("archived programme");
+    let url = s.catchup_url(1, past, 15).expect("archived program");
     assert_eq!(
         url,
         format!(
@@ -360,7 +360,7 @@ fn catchup_urls_carry_epoch_times_and_numbers_come_from_the_playlist() {
     let sought = s
         .resolve_from(1, Some(past), 600, s.clock_at(15))
         .ready()
-        .expect("archived programme");
+        .expect("archived program");
     assert_eq!(
         sought.url,
         format!(
@@ -377,16 +377,16 @@ fn titles_stored_with_superscript_badges_show_them_as_words() {
     // A guide stored before import folded badges: the title still carries
     // "ᴸᶦᵛᵉ", which the guide, header, info card and play bar show as text.
     let mut parsed = parse_xmltv(xmltv().as_bytes(), ParseOptions::default()).expect("parses");
-    parsed.programmes[0].title = "Alpha Newsᴸᶦᵛᵉ".to_owned();
+    parsed.programs[0].title = "Alpha Newsᴸᶦᵛᵉ".to_owned();
     let mut builder = SourceBuilder::new(FeedId(1), 0, StoreOptions::default(), NOW);
     parsed
         .channels
         .into_iter()
         .for_each(|c| builder.push_channel(c));
     parsed
-        .programmes
+        .programs
         .into_iter()
-        .for_each(|p| builder.push_programme(p));
+        .for_each(|p| builder.push_program(p));
     let source = builder.finish();
     let a = ChannelKey::new("a");
     let mut index = MatchIndex::new();
@@ -596,9 +596,9 @@ fn a_repeated_group_id_keeps_keys_names_and_starts_together() {
     );
 }
 
-/// A schedule prepared on another thread is the one organised in place.
+/// A schedule prepared on another thread is the one organized in place.
 #[test]
-fn a_prepared_schedule_crosses_threads_and_matches_one_organised_in_place() {
+fn a_prepared_schedule_crosses_threads_and_matches_one_organized_in_place() {
     use super::Organization;
     fn send<T: Send>(value: T) -> T {
         value

@@ -1,6 +1,6 @@
-//! Why a Movies or Shows catalogue is empty, and the one thing to do next.
+//! Why a Movies or Shows catalog is empty, and the one thing to do next.
 //!
-//! The shell describes each enabled playlist, the ones the catalogue reads
+//! The shell describes each enabled playlist, the ones the catalog reads
 //! ([`SourceVod`]: its type, whether its movie and series import is on, a
 //! refresh running now, how its last import went and whether it has titles); [`VodState::of`] reduces
 //! them to one state with at most one action ([`VodState::action`]). Nothing
@@ -23,7 +23,7 @@ pub struct SourceVod {
     /// Its last import failed, or could not download the titles of the
     /// kind shown, by kind (never the provider's text).
     pub failed: Option<ImportProblem>,
-    /// Its catalogue has titles of the kind shown.
+    /// Its catalog has titles of the kind shown.
     pub has_titles: bool,
 }
 
@@ -52,7 +52,7 @@ impl From<FailureKind> for ImportProblem {
             FailureKind::Busy => Self::Busy,
             FailureKind::Auth => Self::Access,
             FailureKind::Parse | FailureKind::Unsupported => Self::Format,
-            FailureKind::Cancelled => Self::Stopped,
+            FailureKind::Canceled => Self::Stopped,
             FailureKind::Storage | FailureKind::EmptyPlaylist => Self::Other,
         }
     }
@@ -258,7 +258,7 @@ mod tests {
             ImportProblem::Access
         );
         assert_eq!(
-            ImportProblem::from(FailureKind::Cancelled),
+            ImportProblem::from(FailureKind::Canceled),
             ImportProblem::Stopped
         );
         assert_eq!(ImportProblem::from(FailureKind::Busy), ImportProblem::Busy);

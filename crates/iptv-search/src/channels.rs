@@ -22,15 +22,15 @@ pub struct ChannelHit {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChannelSearchOptions {
-    /// Favourite channels before all others (then by match quality).
-    pub favourites_first: bool,
+    /// Favorite channels before all others (then by match quality).
+    pub favorites_first: bool,
     pub limit: usize,
 }
 
 impl Default for ChannelSearchOptions {
     fn default() -> Self {
         ChannelSearchOptions {
-            favourites_first: false,
+            favorites_first: false,
             limit: 100,
         }
     }
@@ -132,13 +132,13 @@ impl ChannelIndex {
             .max()
     }
 
-    /// Channels matching `query`: favourites first when asked, then
+    /// Channels matching `query`: favorites first when asked, then
     /// exact > prefix > word > word-prefix > substring, ties by channel
     /// index; at most `opts.limit`.
     pub fn search_channels(
         &self,
         query: &str,
-        favourites: &BTreeSet<usize>,
+        favorites: &BTreeSet<usize>,
         opts: ChannelSearchOptions,
     ) -> Vec<ChannelHit> {
         let query = Query::parse(query);
@@ -151,7 +151,7 @@ impl ChannelIndex {
                     .map(|score| (channel, score))
             })
             .collect();
-        let fav = |channel: usize| opts.favourites_first && favourites.contains(&channel);
+        let fav = |channel: usize| opts.favorites_first && favorites.contains(&channel);
         // Rank borrowed positions first: only returned hits clone their owned identity.
         hits.sort_by(|a, b| fav(b.0).cmp(&fav(a.0)).then(b.1.cmp(&a.1)));
         hits.truncate(opts.limit);
@@ -224,19 +224,19 @@ mod tests {
     }
 
     #[test]
-    fn favourites_first_and_limit() {
+    fn favorites_first_and_limit() {
         let opts = ChannelSearchOptions {
-            favourites_first: true,
+            favorites_first: true,
             limit: 3,
         };
         assert_eq!(
             search("kestrel", &[4, 2], opts),
             [(2, Word), (4, Substring), (1, Exact)]
         );
-        // Not asked: favourites rank like any channel.
+        // Not asked: favorites rank like any channel.
         let opts = ChannelSearchOptions { limit: 2, ..opts };
         let plain = ChannelSearchOptions {
-            favourites_first: false,
+            favorites_first: false,
             ..opts
         };
         assert_eq!(search("kestrel", &[4], plain), [(1, Exact), (7, Exact)]);
@@ -284,8 +284,8 @@ mod tests {
 mod visibility_tests {
     use super::*;
     use iptv_core::guide::{Program, Schedule, SyntheticSchedule};
-    struct VisibleCatalogue;
-    impl Schedule for VisibleCatalogue {
+    struct VisibleCatalog;
+    impl Schedule for VisibleCatalog {
         fn channel_count(&self) -> usize {
             3
         }
@@ -319,10 +319,10 @@ mod visibility_tests {
     }
     #[test]
     fn hidden_channels_cannot_match_or_consume_the_visible_result_limit() {
-        let index = ChannelIndex::from_schedule(&VisibleCatalogue);
+        let index = ChannelIndex::from_schedule(&VisibleCatalog);
         let options = ChannelSearchOptions {
             limit: 1,
-            favourites_first: true,
+            favorites_first: true,
         };
         let favorites = [0].into_iter().collect();
         assert!(

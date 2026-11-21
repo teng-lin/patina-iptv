@@ -6,11 +6,11 @@
 //! and traverses its controls with the D-pad. Short OK keeps the info card.
 //!
 //! Left: mute and (desktop) volume, the stream's quality, the channel.
-//! Centre: rewind, play/pause, fast-forward (catch-up only; `seek.rs`).
-//! Right: favourite, subtitles and tracks, programme details, picture size,
+//! Center: rewind, play/pause, fast-forward (catch-up only; `seek.rs`).
+//! Right: favorite, subtitles and tracks, program details, picture size,
 //! channel list, multiview, guide, (desktop) window full screen, frame rate. Under
-//! it the programme's progress: where the archive plays (click or drag to
-//! seek) or how far the live programme is, with its times. It acts on
+//! it the program's progress: where the archive plays (click or drag to
+//! seek) or how far the live program is, with its times. It acts on
 //! the full-screen player (surface 0); while multiview's grid is open it
 //! does not show (the tiles take the taps), and its state then times the
 //! grid's pointer chrome instead (`multiview.rs`). On a multiview detour
@@ -98,7 +98,7 @@ pub fn shows(ui: Ui) -> bool {
 }
 
 /// Leaving full screen or a key hides the bar; it stays while a popup
-/// over the video (a chooser, the programme details) is open.
+/// over the video (a chooser, the program details) is open.
 pub fn bind(ui: Ui) {
     effect(move || {
         let away =
@@ -279,7 +279,7 @@ fn back(ui: Ui) -> impl IntoElement {
         )
 }
 
-/// The round ‹'s colour over video (the player's, the guide's over its
+/// The round ‹'s color over video (the player's, the guide's over its
 /// preview): the bar's panel.
 pub(crate) fn back_bg(ui: Ui) -> impl Fn() -> Rgba + Copy + 'static {
     move || tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA)
@@ -360,7 +360,7 @@ fn bar_now(ui: Ui) -> impl IntoElement {
                         .items_center()
                         .gap(px(GROUP_GAP))
                         .child(left(ui))
-                        .child(centre(ui))
+                        .child(center(ui))
                         .child(right(ui)),
                 )
                 .child(progress::line(ui)),
@@ -442,9 +442,9 @@ fn control_label(control: Control) -> &'static str {
         Control::PlayPause => crate::i18n::key("Play or pause"),
         Control::Forward => crate::i18n::key("Fast-forward"),
         Control::Record => crate::i18n::key("Record"),
-        Control::Favourite => crate::i18n::key("Favourite"),
+        Control::Favorite => crate::i18n::key("Favorite"),
         Control::Tracks => crate::i18n::key("Subtitles and tracks"),
-        Control::Details => crate::i18n::key("Programme details"),
+        Control::Details => crate::i18n::key("Program details"),
         Control::Picture => crate::i18n::key("Picture size"),
         Control::Channels => crate::i18n::key("Channel list"),
         Control::Multiview => crate::i18n::key("Multiview"),
@@ -461,7 +461,7 @@ fn control_id(control: Control) -> &'static str {
         Control::PlayPause => "play-bar-play-pause",
         Control::Forward => "play-bar-forward",
         Control::Record => "play-bar-record",
-        Control::Favourite => "play-bar-favourite",
+        Control::Favorite => "play-bar-favorite",
         Control::Tracks => "play-bar-tracks",
         Control::Details => "play-bar-details",
         Control::Picture => "play-bar-picture",
@@ -485,7 +485,7 @@ fn enabled(ui: Ui, control: Control) -> bool {
             matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::seekable(ui)
         }
         Control::Record => crate::player_panels::enabled(ui, iptv_core::panels::Control::Record),
-        Control::Favourite | Control::Details => ui.playing.get().is_some(),
+        Control::Favorite | Control::Details => ui.playing.get().is_some(),
         Control::Tracks => tracks(ui).is_some(),
         Control::Multiview => crate::capabilities::multiview(ui).available(),
         Control::Pip => crate::pip::can_enter(ui),
@@ -519,7 +519,7 @@ fn activate(
         }
         Control::PlayPause => crate::player::toggle_pause(ui),
         Control::Record => crate::recordings_view::toggle_current(ui),
-        Control::Favourite => {
+        Control::Favorite => {
             if let Some(ch) = ui.playing.get_untracked() {
                 crate::favorites::toggle(ui, ch);
             }
@@ -619,7 +619,7 @@ pub fn key(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> bool {
                     Control::PlayPause,
                     Control::Forward,
                     Control::Record,
-                    Control::Favourite,
+                    Control::Favorite,
                     Control::Tracks,
                     Control::Details,
                     Control::Picture,
@@ -838,7 +838,7 @@ fn volume(ui: Ui) -> impl IntoElement {
 }
 
 /// Rewind, play/pause, fast-forward.
-fn centre(ui: Ui) -> impl IntoElement {
+fn center(ui: Ui) -> impl IntoElement {
     let size = target();
     view()
         .flex_shrink_0()
@@ -871,12 +871,12 @@ fn right_width(ui: Ui, size: f32) -> f32 {
     buttons * size + (buttons - 1.0) * 2.0 + FPS_W + 6.0
 }
 
-/// Favourite, tracks, details, picture size, channels, multiview, guide,
+/// Favorite, tracks, details, picture size, channels, multiview, guide,
 /// window full screen, frame rate.
 fn right(ui: Ui) -> impl IntoElement {
     let icon_window = nsh_core::element::desktop::current_window();
     let size = target();
-    let favourite = move || {
+    let favorite = move || {
         ui.playing
             .get()
             .is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)))
@@ -901,9 +901,9 @@ fn right(ui: Ui) -> impl IntoElement {
         .child(button(ui, Control::Record, || Icon::Record, size))
         .child(button(
             ui,
-            Control::Favourite,
+            Control::Favorite,
             move || {
-                if favourite() {
+                if favorite() {
                     Icon::StarFilled
                 } else {
                     Icon::Star
@@ -961,14 +961,14 @@ fn right(ui: Ui) -> impl IntoElement {
         )
 }
 
-/// The playing programme's details (the description popover), or closes
+/// The playing program's details (the description popover), or closes
 /// them when they show.
 fn details(ui: Ui) {
     if ui.description.with_untracked(Option::is_some) {
         crate::menu_view::close(ui);
         return;
     }
-    let (channel, p) = untracked(|| progress::programme(ui));
+    let (channel, p) = untracked(|| progress::program(ui));
     crate::recordings_view::remember(
         ui,
         Origin {

@@ -1,7 +1,7 @@
-//! A source has one cancellable guide timer or in-flight guide read.
+//! A source has one cancelable guide timer or in-flight guide read.
 //!
 //! Work that takes a source's guide over (an import, an update asked for)
-//! cancels its entry. A timer or a check cancelled that way stays *owed*
+//! cancels its entry. A timer or a check canceled that way stays *owed*
 //! until that work answers with the next check or with none: work that
 //! ends without an answer (it failed, was refused, or could not read the
 //! store) then leaves the check the refresh policy had asked for, instead
@@ -39,7 +39,7 @@ struct Entry {
 pub(crate) struct GuideChecks {
     next: u64,
     entries: BTreeMap<SourceId, Entry>,
-    /// When the check that other work cancelled was due (0: it was
+    /// When the check that other work canceled was due (0: it was
     /// running), until that work answers.
     owed: BTreeMap<SourceId, i64>,
     #[cfg(feature = "test-support")]
@@ -106,7 +106,7 @@ impl GuideChecks {
     pub fn current(&self, source: SourceId, ticket: u64) -> bool {
         self.entries
             .get(&source)
-            .is_some_and(|entry| entry.ticket == ticket && !entry.token.is_cancelled())
+            .is_some_and(|entry| entry.ticket == ticket && !entry.token.is_canceled())
     }
     /// Other work takes `source`'s guide over: its timer or check stops
     /// and stays owed until that work answers.
@@ -240,19 +240,19 @@ mod tests {
         let (first, first_token) = checks.replace(source, GuideWork::Check);
         let (_, other) = checks.replace(SourceId(2), GuideWork::Check);
         let (second, second_token) = checks.replace(source, GuideWork::Check);
-        assert!(first_token.is_cancelled());
+        assert!(first_token.is_canceled());
         assert!(!checks.current(source, first));
         assert!(checks.current(source, second));
         assert_eq!(checks.entries.len(), 2);
         checks.cancel(source);
-        assert!(second_token.is_cancelled());
-        assert!(!other.is_cancelled());
+        assert!(second_token.is_canceled());
+        assert!(!other.is_canceled());
         drop(checks);
-        assert!(other.is_cancelled());
+        assert!(other.is_canceled());
     }
 
     #[test]
-    fn a_timer_cancelled_by_other_work_stays_owed_until_that_work_answers() {
+    fn a_timer_canceled_by_other_work_stays_owed_until_that_work_answers() {
         let mut checks = GuideChecks::default();
         let source = SourceId(1);
         // Nothing registered: work that takes over owes nothing.
@@ -268,7 +268,7 @@ mod tests {
         checks.cancel(source);
         checks.replace(source, GuideWork::Timer(900));
         assert_eq!(checks.take_owed(source), None);
-        // So does the owed check running; cancelled again, it is owed now.
+        // So does the owed check running; canceled again, it is owed now.
         checks.cancel(source);
         checks.replace(source, GuideWork::Check);
         assert_eq!(checks.take_owed(source), None);
@@ -298,11 +298,11 @@ mod tests {
         let (ticket, timer) = checks.replace(shown, GuideWork::Timer(500));
         checks.replace(other, GuideWork::Timer(600));
         checks.clear(Some(shown));
-        assert!(timer.is_cancelled() && !checks.current(shown, ticket));
+        assert!(timer.is_canceled() && !checks.current(shown, ticket));
         assert!(checks.entries.is_empty());
         assert_eq!(checks.take_owed(other), None);
         assert_eq!(checks.take_owed(shown), Some(500));
-        // What work under way had cancelled before, and a running check.
+        // What work under way had canceled before, and a running check.
         checks.replace(shown, GuideWork::Timer(500));
         checks.cancel(shown);
         checks.clear(Some(shown));
@@ -331,15 +331,15 @@ mod tests {
         let source = SourceId(1);
         let (ticket, timer) = checks.replace(source, GuideWork::Timer(500));
         assert_eq!(checks.interrupt_read(source), None);
-        assert!(checks.current(source, ticket) && !timer.is_cancelled());
+        assert!(checks.current(source, ticket) && !timer.is_canceled());
         let (_, read) = checks.replace(source, GuideWork::Check);
         assert_eq!(checks.interrupt_read(source), Some(GuideWork::Check));
-        assert!(read.is_cancelled() && checks.entries.is_empty());
+        assert!(read.is_canceled() && checks.entries.is_empty());
         // The stopped check is owed until other work answers for it.
         assert_eq!(checks.take_owed(source), Some(0));
         let (_, cache) = checks.replace(source, GuideWork::Cache);
         assert_eq!(checks.interrupt_read(source), Some(GuideWork::Cache));
-        assert!(cache.is_cancelled());
+        assert!(cache.is_canceled());
         assert_eq!(checks.take_owed(source), None);
         checks.owe(source, 300);
         assert_eq!(checks.take_owed(source), Some(300));

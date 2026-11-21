@@ -71,7 +71,7 @@ pub static PLAYER: &[Setting] = &[
         "panels",
         "player.description_on_switch_only",
         boolean(false),
-        key("Include the programme description only in the channel-change panel."),
+        key("Include the program description only in the channel-change panel."),
     ),
     // default: ours
     player(
@@ -278,7 +278,7 @@ pub static CATCHUP: &[Setting] = &[
         "source",
         "catchup.start_offset",
         offset_hms(-3_600, 3_600, 1, 0),
-        key("Correction added to a replayed programme's start time."),
+        key("Correction added to a replayed program's start time."),
     )
     .scope(Scope::Playlist),
     // default: ours

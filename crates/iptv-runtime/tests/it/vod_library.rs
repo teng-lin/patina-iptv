@@ -74,7 +74,7 @@ fn movie_playback_progress_survives_restart_and_locked_direct_ids_are_rejected()
     assert!(support::block_on(owner.vod_play(details.clone(), key.clone(), false)).is_err());
     support::block_on(owner.parental_authorize(target, Pin::parse("2468").unwrap())).unwrap();
     assert!(support::block_on(owner.vod_play(details, key.clone(), false)).is_ok());
-    let (cards, _, _, _) = support::block_on(owner.vod_catalogue(
+    let (cards, _, _, _) = support::block_on(owner.vod_catalog(
         Query {
             continue_watching: true,
             ..Default::default()
@@ -91,7 +91,7 @@ fn movie_playback_progress_survives_restart_and_locked_direct_ids_are_rejected()
     assert!(owner.drain_services());
 }
 
-/// Two playlists carrying the same generated catalogue: identical provider
+/// Two playlists carrying the same generated catalog: identical provider
 /// ids and titles, playable through local direct links.
 fn two_playlists(
     dir: &std::path::Path,
@@ -430,12 +430,12 @@ fn an_out_of_order_episode_resumes_after_restart_and_a_stale_writer_cannot_resto
     };
     credentials.server_url = format!("http://{address}");
     let source = store.add_source(&source_data).unwrap();
-    let catalogue = common::catalog(1, 1, common::XT_PASSWORD);
-    common::replace(&mut store, source, &catalogue);
+    let catalog = common::catalog(1, 1, common::XT_PASSWORD);
+    common::replace(&mut store, source, &catalog);
     let series = Key {
         source: source.0,
         kind: Kind::Series,
-        id: catalogue.series[0].id.to_string(),
+        id: catalog.series[0].id.to_string(),
     };
     drop(store);
     let make = || {
@@ -477,7 +477,7 @@ fn an_out_of_order_episode_resumes_after_restart_and_a_stale_writer_cannot_resto
     store.delete_source(source).unwrap();
     let replacement = store.add_source(&source_data).unwrap();
     assert_eq!(replacement, source);
-    common::replace(&mut store, replacement, &catalogue);
+    common::replace(&mut store, replacement, &catalog);
     drop(store);
     assert!(
         support::block_on(owner.vod_save_progress(

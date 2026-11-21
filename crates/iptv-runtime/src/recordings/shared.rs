@@ -167,7 +167,7 @@ impl Transport {
                     input.closing.store(true, Ordering::Release);
                     let closing = input.clone();
                     // Closure remains owned even if this retirement waiter is
-                    // cancelled by UI teardown or another replacement.
+                    // canceled by UI teardown or another replacement.
                     input.executor.spawn(async move {
                         relay.shutdown().await;
                         closing.closed.store(true, Ordering::Release);
@@ -535,7 +535,7 @@ impl Runtime {
                 }
                 let result = async {
                     state.retire_unused().await;
-                    if stopping.is_cancelled() || revision.is_none() {
+                    if stopping.is_canceled() || revision.is_none() {
                         return Err(Error::unavailable(key("Channel unavailable")));
                     }
                     let member = ContentId::from_stored(channel.clone());
@@ -627,7 +627,7 @@ impl Runtime {
                         {
                             let mut data = state.lock();
                             if data.viewer_revision.get(&surface).copied() != revision
-                                || stopping.is_cancelled()
+                                || stopping.is_canceled()
                             {
                                 return Err(Error::unavailable(key("Channel unavailable")));
                             }
@@ -648,7 +648,7 @@ impl Runtime {
                                 )));
                             }
                             if data.viewer_revision.get(&surface).copied() != revision
-                                || stopping.is_cancelled()
+                                || stopping.is_canceled()
                             {
                                 return Err(Error::unavailable(key("Channel unavailable")));
                             }
@@ -729,7 +729,7 @@ impl Runtime {
                             }
                         }
                         if incoming.is_none()
-                            && !stopping.is_cancelled()
+                            && !stopping.is_canceled()
                             && let Ok(input) = Transport::passthrough(&source, policy.clone())
                         {
                             incoming = Some(register_transport(
@@ -737,7 +737,7 @@ impl Runtime {
                             ));
                         }
                         if incoming.is_none() {
-                            // A failed/cancelled actual owner stays registered until
+                            // A failed/canceled actual owner stays registered until
                             // retire_unused joins it; a protocol with no owner can
                             // release its provisional reservation immediately.
                             let empty = state
@@ -778,7 +778,7 @@ impl Runtime {
                             .is_none_or(|input| data.available(input.id));
                         let current = valid
                             && available
-                            && !stopping.is_cancelled()
+                            && !stopping.is_canceled()
                             && data.viewer_revision.get(&surface).copied() == revision;
                         match data.viewers.get_mut(&surface).filter(|lease| {
                             lease.source == source_id.0

@@ -1,6 +1,6 @@
 //! Provider-neutral catalog model shared by M3U, Xtream and Stalker.
 //!
-//! Provider rows are replaced on every refresh; user customisations are keyed
+//! Provider rows are replaced on every refresh; user customizations are keyed
 //! by [`ContentId`]/[`GroupId`] (see [`crate::id`]) and survive that.
 
 use std::fmt;
@@ -88,7 +88,7 @@ pub struct M3uSourceConfig {
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct XtreamCredentials {
-    /// Portal base as typed; normalise with [`crate::xtream::normalize_server_url`].
+    /// Portal base as typed; normalize with [`crate::xtream::normalize_server_url`].
     pub server_url: String,
     pub username: Secret,
     pub password: Secret,
@@ -161,7 +161,7 @@ pub struct CatchUp {
     /// M3U `catchup-source` template, if declared.
     pub source: Option<String>,
     /// M3U `catchup-correction` (hours, may be fractional) in seconds, added
-    /// to the programme times written into catch-up URLs. `0` when absent.
+    /// to the program times written into catch-up URLs. `0` when absent.
     pub correction_secs: i32,
 }
 
@@ -278,10 +278,10 @@ pub struct SeriesDetails {
     pub episodes: Import<Episode>,
 }
 
-/// One programme from a provider EPG call (Xtream `get_short_epg` /
+/// One program from a provider EPG call (Xtream `get_short_epg` /
 /// `get_simple_data_table`). XMLTV is a separate crate.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Programme {
+pub struct Program {
     pub epg_id: Option<String>,
     pub title: String,
     pub description: Option<String>,
@@ -364,7 +364,7 @@ pub const INFOMIR_OUI: &str = "00:1A:79";
 pub struct MacAddress(String);
 
 impl MacAddress {
-    /// Normalises typed input (colons, hyphens, dots, spaces or none; any
+    /// Normalizes typed input (colons, hyphens, dots, spaces or none; any
     /// case) to `00:1A:79:12:34:56`. `None` if it is not 12 hex digits.
     pub fn parse(input: &str) -> Option<Self> {
         let digits: String = input

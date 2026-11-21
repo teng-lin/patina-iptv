@@ -10,7 +10,7 @@ use crate::scale::Scale;
 use crate::theme::BRIGHT_TEXT;
 use crate::{Ui, channel_name};
 
-/// The logo box, as tall as a programme: missing or broken logos leave
+/// The logo box, as tall as a program: missing or broken logos leave
 /// it empty (sizes at full size, scaled with the grid).
 const LOGO_W: f32 = 60.0;
 /// Inside the logo box around the logo.
@@ -45,7 +45,7 @@ pub(super) fn cell(
     editing: Memo<Option<bool>>,
 ) -> impl IntoElement {
     let playing = move || channel.get().is_some() && ui.playing.get() == channel.get();
-    let colour = move || {
+    let color = move || {
         if editing.get() == Some(false) {
             rgb(crate::theme::FOCUSED_TEXT)
         } else if playing() {
@@ -147,7 +147,7 @@ pub(super) fn cell(
             .text_right()
             .font_family(SANS)
             .text_size(move || size.text_px(CHANNEL))
-            .text_color(colour),
+            .text_color(color),
         )
         .child(
             view()
@@ -190,7 +190,7 @@ pub(super) fn cell(
             .number_of_lines(1)
             .font_family(SANS)
             .text_size(move || size.text_px(CHANNEL))
-            .text_color(colour),
+            .text_color(color),
         )
         .child(
             // The playing marker, after the name.

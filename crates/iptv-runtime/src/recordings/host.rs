@@ -90,7 +90,7 @@ impl State {
         // and its writer/reader handles have been released.
         let mut execution = self.execution();
         if execution.started && !self.lock().stopped {
-            return !execution.shutdown.is_cancelled();
+            return !execution.shutdown.is_canceled();
         }
         let mut host = self
             .host
@@ -179,7 +179,7 @@ pub fn start_background_host(ports: crate::Ports) -> Result<(), Error> {
     }
     crate::backup::lock(&ports.directory)
         .map_err(|_| Error::unavailable("Recording storage already in use"))?;
-    // Serialize native restarts with catalogue activation and handle closure.
+    // Serialize native restarts with catalog activation and handle closure.
     let _activation = ACTIVATION
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);

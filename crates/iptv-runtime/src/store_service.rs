@@ -9,7 +9,7 @@
 //! - **The writer** ([`Services::call`], [`Services::blocking`]) runs every write, all staging,
 //!   and the reads that must see writes queued before them, in FIFO order.
 //! - **The reader** ([`Services::read`]) runs UI reads (guide pages, descriptions,
-//!   search, favourites, organisation) on a second, `query_only`
+//!   search, favorites, organization) on a second, `query_only`
 //!   connection to the same file. The store uses WAL, so these read the
 //!   last commit while the writer holds a long publish transaction instead
 //!   of queueing behind it. A read closure gets `&Store`, so it cannot call
@@ -283,7 +283,7 @@ impl Service {
         );
     }
 
-    /// Root teardown only, after the favourites writer has submitted its last
+    /// Root teardown only, after the favorites writer has submitted its last
     /// work. Accepted requests already belong to their workers, independent
     /// of UI futures.
     #[cfg(test)]
@@ -374,7 +374,7 @@ impl Services {
     }
 
     fn affinity(&self) -> Result<u64, StoreError> {
-        if !self.closed.is_cancelled() && self.service.epochs.permits(self.epoch) {
+        if !self.closed.is_canceled() && self.service.epochs.permits(self.epoch) {
             Ok(self.epoch)
         } else {
             Err(stale())
@@ -387,7 +387,7 @@ impl Services {
     }
 
     pub(crate) fn closed(&self) -> impl Future<Output = ()> + '_ {
-        self.closed.cancelled()
+        self.closed.canceled()
     }
 
     pub(crate) fn directory(&self) -> &Path {

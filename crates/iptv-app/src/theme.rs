@@ -1,6 +1,6 @@
 //! Patina: ink surfaces, mineral accents and a pale blue focus marker.
-//! Designed for this app. Opaque programme focus isolates its text from video;
-//! dark accent fills keep white control labels readable. Saved colour names
+//! Designed for this app. Opaque program focus isolates its text from video;
+//! dark accent fills keep white control labels readable. Saved color names
 //! remain stable so existing preferences select the corresponding new tones.
 
 use crate::i18n::key;
@@ -39,11 +39,11 @@ pub const ACCENTS: [Accent; 16] = [
     a(key("Amber"), 0xF2CE8C, 0x72521F),
     a(key("Black"), 0xCED8DE, 0x394650),
     a(key("Blue"), 0x9CCBEB, 0x285575),
-    a(key("Blue grey"), 0xB6CBD7, 0x405564),
+    a(key("Blue gray"), 0xB6CBD7, 0x405564),
     a(key("Brown"), 0xDEC1A7, 0x614C3C),
     a(key("Cyan"), 0x99DEDF, 0x265E62),
     a(key("Green"), 0xACD7AE, 0x3B593F),
-    a(key("Grey"), 0xCDD2D8, 0x4D545C),
+    a(key("Gray"), 0xCDD2D8, 0x4D545C),
     a(key("Indigo"), 0xBCC1EE, 0x4A4F75),
     a(key("Lime"), 0xD0DB9B, 0x535E32),
     a(key("Orange"), 0xEFBE97, 0x704C30),
@@ -58,13 +58,13 @@ pub const BACKGROUNDS: [Background; 18] = [
     b(key("Amber"), 0x24211B, 0x1C1913, 0x2E2B25),
     b(key("Black"), 0x171C20, 0x0F1418, 0x21262A),
     b(key("Blue"), 0x19232C, 0x111B24, 0x232D36),
-    b(key("Blue grey"), 0x20262D, 0x181E25, 0x2A3037),
+    b(key("Blue gray"), 0x20262D, 0x181E25, 0x2A3037),
     b(key("Brown"), 0x25211E, 0x1D1916, 0x2F2B28),
     b(key("Cyan"), 0x192728, 0x111F20, 0x233132),
     b(key("Dark"), 0x1C2429, 0x141C21, 0x262E33),
-    b(key("Dark grey"), 0x222529, 0x1A1D21, 0x2C2F33),
+    b(key("Dark gray"), 0x222529, 0x1A1D21, 0x2C2F33),
     b(key("Green"), 0x1D271F, 0x151F17, 0x273129),
-    b(key("Grey"), 0x282B2F, 0x202327, 0x323539),
+    b(key("Gray"), 0x282B2F, 0x202327, 0x323539),
     b(key("Indigo"), 0x212330, 0x191B28, 0x2B2D3A),
     b(key("Lime"), 0x25281C, 0x1D2014, 0x2F3226),
     b(key("Orange"), 0x29221C, 0x211A14, 0x332C26),
@@ -126,14 +126,14 @@ pub const fn blend(under: u32, over: u32, a: u8) -> u32 {
 }
 
 const WHITE: u32 = 0xFFFFFF;
-/// The focused programme: a light pill whatever the background, with
+/// The focused program: a light pill whatever the background, with
 /// near-black text.
 pub const FOCUSED_CELL: u32 = 0xC8DDEB;
 pub const FOCUSED_TEXT: u32 = 0x171C20;
 /// Titles of the focused row and channel names: white, a touch dimmer.
 pub const BRIGHT_TEXT: u32 = 0xF5F3EE;
 /// Names in the lists (groups, channels, results, menu items) on the
-/// window and panel colours.
+/// window and panel colors.
 pub const LIST_TEXT: u32 = 0xE8EDF0;
 /// Error text on dark surfaces and its ink counterpart on pale blue focus.
 pub const ERROR: u32 = 0xF0B5AC;
@@ -141,15 +141,15 @@ pub const ERROR_FOCUSED: u32 = 0x753A32;
 /// Lift the focused row slightly above the resting ink surface.
 pub const ROW_ALPHA: u8 = 0x18;
 
-/// The guide's colours for a theme (`0xRRGGBB`; titles of rows without the
+/// The guide's colors for a theme (`0xRRGGBB`; titles of rows without the
 /// focus and the ruler's times are white at [`TEXT_SECONDARY_ALPHA`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GuideColors {
     /// Behind everything: header, ruler, channel column, between cells.
     pub window: u32,
-    /// A programme.
+    /// A program.
     pub cell: u32,
-    /// The other programmes of the focused row.
+    /// The other programs of the focused row.
     pub row_cell: u32,
     /// The playing channel's number, name and marker.
     pub playing: u32,
@@ -256,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn every_bundle_gives_guide_colours_from_its_own_tones() {
+    fn every_bundle_gives_guide_colors_from_its_own_tones() {
         for accent in ACCENTS {
             for background in BACKGROUNDS {
                 let g = Theme { accent, background }.guide();

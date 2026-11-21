@@ -167,7 +167,7 @@ fn startup_and_periodic_refresh_skip_disabled_sources_and_failures_keep_the_cach
         )
         .unwrap();
     drop(store);
-    // A failed manual update keeps the successful catalogue on screen and on disk.
+    // A failed manual update keeps the successful catalog on screen and on disk.
     std::fs::write(&file_a, "#EXTM3U\n").unwrap();
     step(app.press("text:☰  All channels"));
     step(app.press_key("left"));

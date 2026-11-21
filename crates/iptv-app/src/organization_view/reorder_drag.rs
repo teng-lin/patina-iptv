@@ -119,7 +119,7 @@ impl DragList {
         });
     }
 
-    fn finish(self, cancelled: bool) {
+    fn finish(self, canceled: bool) {
         let mut drag = None;
         self.active.update(|active| drag = active.take());
         let Some(drag) = drag else { return };
@@ -128,7 +128,7 @@ impl DragList {
             if let Some(order) = screen.editor.reorder.as_mut()
                 && order.selected().is_some_and(|item| item.id == drag.id)
             {
-                if cancelled {
+                if canceled {
                     order.move_selected_to(drag.from);
                 }
                 order.toggle_selection();

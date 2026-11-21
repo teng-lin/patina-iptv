@@ -113,7 +113,7 @@ impl StrictXmltvParser {
             || warnings.truncated != 0
             || warnings.oversized != 0
             || warnings.channel_without_id != 0
-            || warnings.programme_without_channel != 0
+            || warnings.program_without_channel != 0
         {
             return Err(StrictError::InvalidXml);
         }
@@ -389,10 +389,10 @@ mod tests {
         for size in [1, 7, xml.len()] {
             let mut parser = StrictXmltvParser::new(ParseOptions::default());
             let mut channels = Vec::new();
-            let mut programmes = Vec::new();
+            let mut programs = Vec::new();
             let mut collect = |item| match item {
                 XmltvItem::Channel(channel) => channels.push(channel),
-                XmltvItem::Programme(programme) => programmes.push(programme),
+                XmltvItem::Program(program) => programs.push(program),
             };
             for piece in xml.chunks(size) {
                 parser.feed(piece, &mut collect).unwrap();
@@ -401,8 +401,8 @@ mod tests {
             assert_eq!(stats.bytes_in, xml.len() as u64);
             assert_eq!(channels[0].id, "café.id", "chunk size {size}");
             assert_eq!(channels[0].display_names, ["Café"]);
-            assert_eq!(programmes[0].channel, "café.id");
-            assert_eq!(programmes[0].title, "Synthetic Café");
+            assert_eq!(programs[0].channel, "café.id");
+            assert_eq!(programs[0].title, "Synthetic Café");
         }
     }
 }

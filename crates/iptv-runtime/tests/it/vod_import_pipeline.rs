@@ -1,5 +1,5 @@
 //! Normal native imports must make movies/series discoverable without seeded
-//! catalogue rows. Generated HTTP responses exercise download, stage and publish.
+//! catalog rows. Generated HTTP responses exercise download, stage and publish.
 #![cfg(feature = "test-support")]
 
 use iptv_core::wizard::ImportCounts;
@@ -96,7 +96,7 @@ impl Provider {
     }
     fn source(&self) -> Source {
         Source {
-            name: "Generated full catalogue".into(),
+            name: "Generated full catalog".into(),
             config: SourceConfig::Xtream(XtreamCredentials {
                 server_url: format!("http://{}", self.address),
                 username: Secret::new("generated-viewer"),
@@ -184,7 +184,7 @@ impl Host {
             RuntimeEvent::ScheduleReady(schedule) => {
                 let owner = weak.upgrade().unwrap();
                 owner.set_schedule(schedule.clone());
-                // The real shell reports the presented catalogue through this
+                // The real shell reports the presented catalog through this
                 // public port; that publishes its live/VOD navigation state.
                 owner.favorites_catalog_changed(schedule.as_ref());
                 presented.set(presented.get() + 1);
@@ -484,7 +484,7 @@ async fn a_live_only_playlist_on_screen_still_offers_the_cross_source_shelves() 
 }
 
 /// Hidden-source policy and background imports update only the shelves: the
-/// live-only guide on screen retains its source, catalogue and channel identity.
+/// live-only guide on screen retains its source, catalog and channel identity.
 #[tokio::test(flavor = "current_thread")]
 async fn hidden_playlist_mutations_update_shelves_without_republishing_the_guide() {
     tokio::task::LocalSet::new()
@@ -530,13 +530,13 @@ async fn hidden_playlist_mutations_update_shelves_without_republishing_the_guide
             assert_eq!(host.owner.shown_source(), Some(shown));
             assert_eq!(host.has_vod.get(), Some(false));
             assert_eq!(host.any_vod.get(), Some(true));
-            let catalogue = host.owner.schedule();
-            let channel = catalogue.channel_key(0);
+            let catalog = host.owner.schedule();
+            let channel = catalog.channel_key(0);
             let publications = host.publications.get();
             let unchanged = || {
                 assert_eq!(host.owner.shown_source(), Some(shown));
                 assert!(!data::combined::active(&host.owner));
-                assert!(Rc::ptr_eq(&catalogue, &host.owner.schedule()));
+                assert!(Rc::ptr_eq(&catalog, &host.owner.schedule()));
                 assert_eq!(host.owner.schedule().channel_key(0), channel);
                 assert_eq!(host.publications.get(), publications);
                 assert_eq!(host.has_vod.get(), Some(false));
@@ -558,7 +558,7 @@ async fn hidden_playlist_mutations_update_shelves_without_republishing_the_guide
                 .unwrap();
             assert_eq!(host.any_vod.get(), Some(true), "enable is awaited");
             unchanged();
-            // A normal hidden-source import removes its old on-demand catalogue.
+            // A normal hidden-source import removes its old on-demand catalog.
             data::library::refresh(&host.owner, hidden);
             tokio::time::timeout(Duration::from_secs(20), async {
                 while host.any_vod.get() != Some(false) {

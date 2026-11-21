@@ -63,7 +63,7 @@ pub enum SourceMeta {
         header: M3uHeader,
     },
     Xtream {
-        /// Normalised portal base.
+        /// Normalized portal base.
         base_url: String,
         /// `None` when no account probe answered with `user_info`.
         account: Option<AccountInfo>,
@@ -71,7 +71,7 @@ pub enum SourceMeta {
         xmltv_url: SecretUrl,
     },
     Stalker {
-        /// Authorised session: endpoint, mode, token and profile, needed for
+        /// Authorized session: endpoint, mode, token and profile, needed for
         /// `create_link` and the watchdog. `Debug` is redacted.
         session: Box<StalkerSession>,
     },

@@ -1,5 +1,5 @@
 //! Private encrypted raw probe snapshots and bounded channel indexes.
-//! Programme schedules are parsed on demand from these exact retained bytes.
+//! Program schedules are parsed on demand from these exact retained bytes.
 use crate::{DatabaseKey, Result, StoreError};
 use iptv_epg::XmltvChannel;
 use rusqlite::{Connection, OpenFlags, params};
@@ -114,7 +114,7 @@ impl InspectionStage {
     ) -> Result<T> {
         self.conn.progress_handler(
             1000,
-            Some(move || cancel.is_cancelled() || std::time::Instant::now() >= deadline),
+            Some(move || cancel.is_canceled() || std::time::Instant::now() >= deadline),
         )?;
         let result = operation(self);
         self.conn.progress_handler(0, None::<fn() -> bool>)?;

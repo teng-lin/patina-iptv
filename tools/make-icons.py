@@ -50,7 +50,7 @@ def ground(n, grain=0.010):
 
 
 def put_p(canvas, height, cx, cy):
-    """Draws the P `height` px tall, its master tile centred on (cx, cy),
+    """Draws the P `height` px tall, its master tile centered on (cx, cy),
     so it keeps the render's placement within the tile."""
     n = round(TILE * height / PH)
     canvas.alpha_composite(P.resize((n, n), Image.LANCZOS), (round(cx - n / 2), round(cy - n / 2)))

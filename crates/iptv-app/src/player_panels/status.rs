@@ -24,7 +24,7 @@ enum Status {
         message: String,
         detail: String,
     },
-    /// A replayed programme reached its end.
+    /// A replayed program reached its end.
     Over,
 }
 
@@ -143,7 +143,7 @@ pub fn status(ui: Ui) -> impl IntoElement {
                     text(move || match status.get() {
                         Status::Failed { title, .. } => title,
                         _ if crate::on_demand::active(ui) => tr("Playback finished").into(),
-                        _ => tr("The programme has ended").to_owned(),
+                        _ => tr("The program has ended").to_owned(),
                     })
                     .text_size(move || size(OSD_TITLE))
                     .font_weight(FontWeight::BOLD)

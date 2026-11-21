@@ -19,7 +19,7 @@
 //!    ([`RefreshReason::ChannelsChanged`]; matching needs the XMLTV channel
 //!    list, which is not stored).
 //! 6. With an interval: older than it ([`RefreshReason::Stale`]), or the
-//!    stored programmes end within [`RefreshPolicy::min_ahead`]
+//!    stored programs end within [`RefreshPolicy::min_ahead`]
 //!    ([`RefreshReason::RunningOut`], at most once per
 //!    `retry_after_failure`). At [`Trigger::Startup`] only with `on_start`.
 
@@ -43,7 +43,7 @@ pub struct RefreshPolicy {
     pub on_playlist_change: bool,
     /// After a failed attempt, automatic triggers wait this long (seconds).
     pub retry_after_failure: i64,
-    /// Refresh early when the stored programmes end sooner than `now` plus
+    /// Refresh early when the stored programs end sooner than `now` plus
     /// this (seconds; only when an interval is set).
     pub min_ahead: i64,
 }
@@ -96,7 +96,7 @@ pub struct GuideState {
     pub feeds: Vec<EpgSourceConfig>,
     /// [`matching_fingerprint`] of the stored bindings.
     pub match_fingerprint: Option<u64>,
-    /// Latest stored programme end.
+    /// Latest stored program end.
     pub ends_at: Option<UnixTime>,
     pub bound_channels: usize,
 }
@@ -310,7 +310,7 @@ impl Fnv {
     }
 }
 
-/// splitmix64 finaliser: spreads FNV's output before summing.
+/// splitmix64 finalizer: spreads FNV's output before summing.
 fn mix(mut z: u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);

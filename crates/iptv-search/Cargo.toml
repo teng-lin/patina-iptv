@@ -1,6 +1,6 @@
 [package]
 name = "iptv-search"
-description = "Search layer of iptv-rs: text folding shared with EPG matching, channel and programme search, search history and the search screen's state machine. No NSH, no I/O, no clock; must build for wasm32."
+description = "Search layer of iptv-rs: text folding shared with EPG matching, channel and program search, search history and the search screen's state machine. No NSH, no I/O, no clock; must build for wasm32."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

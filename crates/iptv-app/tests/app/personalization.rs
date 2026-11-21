@@ -130,7 +130,7 @@ pub fn launch_prepared(
         )
         .unwrap();
     for c in &m.channels.items {
-        store.set_favourite(source, &c.id, true).unwrap();
+        store.set_favorite(source, &c.id, true).unwrap();
     }
     drop(store);
     prepare(&path, source);
@@ -155,7 +155,7 @@ pub fn launch_prepared(
 #[track_caller]
 pub fn menu(app: &mut Headless, label: &str) {
     step(app.press_key("m"));
-    step(app.wait_for("text:Manage favourites…"));
+    step(app.wait_for("text:Manage favorites…"));
     step(app.press(&format!("text:{label}")));
 }
 #[track_caller]

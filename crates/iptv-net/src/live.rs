@@ -159,16 +159,16 @@ impl LiveInput {
         };
         tokio::spawn(async move {
             let mut state = CaptureState::default();
-            let cancelled_preparation = async {
-                prepare_cancel.cancelled().await;
+            let canceled_preparation = async {
+                prepare_cancel.canceled().await;
                 if prepared.load(Ordering::Acquire) {
                     std::future::pending::<()>().await;
                 }
             };
             let outcome = tokio::select! {
                 biased;
-                _ = ending.cancelled() => Err(Failure::Network),
-                _ = cancelled_preparation => Err(Failure::Network),
+                _ = ending.canceled() => Err(Failure::Network),
+                _ = canceled_preparation => Err(Failure::Network),
                 result = recording::receive(&client, &relay, &mut sink, &mut state) => result,
             };
             let failure = outcome.err().unwrap_or(Failure::Network);
@@ -383,7 +383,7 @@ impl Sink for Fanout {
 // pre-roll preserves the latest PAT section's continuation and following media
 // in their original order; a multi-section PAT may complete only after capture
 // continues live. A new PAT atomically replaces the old interval, so changing
-// programme versions/PIDs never injects obsolete cached PMT/media packets.
+// program versions/PIDs never injects obsolete cached PMT/media packets.
 fn retain_preroll(buffer: &mut Buffer, bytes: &[u8]) {
     for packet in bytes.as_chunks::<188>().0 {
         let pid = (u16::from(packet[1] & 0x1f) << 8) | u16::from(packet[2]);

@@ -66,7 +66,7 @@ pub fn field_error(error: FieldError) -> &'static str {
 
 /// Why the last import did not add the playlist.
 pub fn failure(kind: PlaylistKind, failure: ImportFailure) -> &'static str {
-    if failure.field == Some(Field::EpgUrl) && failure.kind != FailureKind::Cancelled {
+    if failure.field == Some(Field::EpgUrl) && failure.kind != FailureKind::Canceled {
         return tr(
             "The guide link did not load. Correct it, or clear it to use the provider's guide.",
         );
@@ -99,7 +99,7 @@ pub fn failure(kind: PlaylistKind, failure: ImportFailure) -> &'static str {
         FailureKind::Unsupported => {
             tr("This server is not a service of the chosen type. Try another type.")
         }
-        FailureKind::Cancelled => {
+        FailureKind::Canceled => {
             tr("Stopped. Your entries are kept; add the playlist again when ready.")
         }
     }
@@ -159,7 +159,7 @@ mod tests {
             FailureKind::Parse,
             FailureKind::EmptyPlaylist,
             FailureKind::Unsupported,
-            FailureKind::Cancelled,
+            FailureKind::Canceled,
         ];
         let texts: std::collections::BTreeSet<_> = kinds
             .iter()
@@ -279,7 +279,7 @@ mod tests {
             FailureKind::Busy,
             FailureKind::EmptyPlaylist,
             FailureKind::Unsupported,
-            FailureKind::Cancelled,
+            FailureKind::Canceled,
         ];
         let told = |kind: PlaylistKind| -> Vec<&'static str> {
             kinds

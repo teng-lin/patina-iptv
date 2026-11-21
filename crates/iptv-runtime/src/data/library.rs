@@ -3,7 +3,7 @@
 //! the next start opens it), refresh, rename, its guide sources, delete.
 //!
 //! One refresh per playlist runs at a time; each has a ticket, so a
-//! cancelled one never overwrites what a newer one reports.
+//! canceled one never overwrites what a newer one reports.
 use std::rc::Rc;
 
 use crate::model::{SourceId, StoreError, StoredSource};
@@ -186,7 +186,7 @@ pub(super) fn run(owner: &Rc<crate::Runtime>, stored: StoredSource, purpose: Pur
             owner.spawn(crate::favorites::refresh_vod_availability(owner));
         }
         if !current() {
-            // Cancelled or replaced by a newer import of it, which reports.
+            // Canceled or replaced by a newer import of it, which reports.
             if matches!(update, Update::Done(_)) {
                 changed(owner);
             }
@@ -382,7 +382,7 @@ pub async fn edit_guides(
     Ok(true)
 }
 
-/// Deletes stored playlist `id` with its channels, guide and favourites.
+/// Deletes stored playlist `id` with its channels, guide and favorites.
 /// The shown one gives way to the newest other playlist, or to the
 /// first-run state when none is left.
 pub async fn delete(owner: &Rc<crate::Runtime>, id: SourceId) -> Result<(), StoreError> {

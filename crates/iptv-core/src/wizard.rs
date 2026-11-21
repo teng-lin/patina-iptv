@@ -25,7 +25,7 @@
 //! - Every Back lands on a defined focus target: the form returns to the
 //!   type list on the chosen type, the type list to the empty state's add
 //!   action (AC13).
-//! - Submitting while an import runs does nothing; results for a cancelled
+//! - Submitting while an import runs does nothing; results for a canceled
 //!   or superseded import are ignored by [`ImportId`].
 //!
 //! Secrets: usernames, passwords and MAC addresses print as `***` in
@@ -242,7 +242,7 @@ const FIELDS_BY_INDEX: [Field; Field::COUNT] = [
 
 /// The provider-neutral result of the form; the app maps it to its provider
 /// configuration. Values are trimmed (passwords excepted) and the MAC is
-/// normalised to `AA:BB:CC:DD:EE:FF`.
+/// normalized to `AA:BB:CC:DD:EE:FF`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlaylistDraft {
     pub source: DraftSource,
@@ -464,7 +464,7 @@ pub enum FailureKind {
     /// A source this app cannot use (another portal type, a format we lack).
     Unsupported,
     /// The import was stopped before it finished.
-    Cancelled,
+    Canceled,
 }
 
 impl FailureKind {
@@ -967,7 +967,7 @@ impl Wizard {
     fn on_processing(&mut self, running: ImportId, event: WizardEvent) -> Option<WizardEffect> {
         match event {
             WizardEvent::Cancel | WizardEvent::Back | WizardEvent::Tap(Target::CancelImport) => {
-                self.fail(ImportFailure::new(FailureKind::Cancelled));
+                self.fail(ImportFailure::new(FailureKind::Canceled));
                 Some(WizardEffect::CancelImport { id: running })
             }
             WizardEvent::Progress { id, progress } if id == running => {
@@ -1002,7 +1002,7 @@ impl Wizard {
         }
         self.form_focus = match (failure.field, failure.kind) {
             (Some(field), _) if self.kind.has_field(field) => Target::Field(field),
-            (_, FailureKind::Cancelled) => Target::Submit,
+            (_, FailureKind::Canceled) => Target::Submit,
             (_, FailureKind::Auth) => Target::Field(self.kind.auth_field()),
             _ => Target::Field(self.kind.source_field()),
         };
@@ -1759,9 +1759,9 @@ mod tests {
             );
             assert_eq!(w.step(), Step::Form);
             assert_eq!(w.focus(), Some(Target::Submit));
-            assert_eq!(w.failure(), Some(ImportFailure::new(Cancelled)));
+            assert_eq!(w.failure(), Some(ImportFailure::new(Canceled)));
             assert_eq!(w.value(Mac), "00:1a:79:00:00:01");
-            // The importer's late answer for the cancelled id is ignored.
+            // The importer's late answer for the canceled id is ignored.
             w.handle(E::Succeeded {
                 id,
                 counts: ImportCounts {
@@ -1789,7 +1789,7 @@ mod tests {
         assert_eq!(
             w.handle(E::Failed {
                 id,
-                failure: ImportFailure::new(Cancelled)
+                failure: ImportFailure::new(Canceled)
             }),
             None
         );

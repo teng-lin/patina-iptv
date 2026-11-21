@@ -29,7 +29,7 @@
 //!
 //! The live URL's own `{lutc}`/`${now}`/`${timestamp}` placeholders are
 //! expanded first ([`expand_live_url`]); generated URLs keep its query and
-//! fragment byte for byte, and no URL is re-serialised by a URL library.
+//! fragment byte for byte, and no URL is re-serialized by a URL library.
 //!
 //! ## Placeholders
 //!
@@ -52,20 +52,20 @@
 //! ## Timing
 //!
 //! `catchup-correction` ([`CatchUp::correction_secs`](crate::model::CatchUp::correction_secs)) is added to the
-//! programme's `start` and `end` first (Kodi: the times used to build the
+//! program's `start` and `end` first (Kodi: the times used to build the
 //! URL are corrected); `now` is not shifted, and the checks below use the
 //! corrected times. The replay then runs from
 //! `start − buffer_before_secs + offset_secs` to `end + buffer_after_secs`
-//! (the end buffer stops at `now`). A programme that starts after `now`, or
-//! a replay start after `now`, is [`CatchupError::FutureProgramme`] (also
-//! for `vod`, which Kodi lets reach future programmes); a replay start past
+//! (the end buffer stops at `now`). A program that starts after `now`, or
+//! a replay start after `now`, is [`CatchupError::FutureProgram`] (also
+//! for `vod`, which Kodi lets reach future programs); a replay start past
 //! the replay end, or before the archive window (`catchup-days`, else
 //! [`CatchupRequest::default_window_days`]), is
 //! [`CatchupError::OutsideArchive`].
 //!
 //! ## References
 //!
-//! Behaviour is written from these public descriptions (no code copied):
+//! Behavior is written from these public descriptions (no code copied):
 //! [Kodi pvr.iptvsimple README (Omega)], sections "Catchup", "Catchup format
 //! specifiers" and "Supported M3U and XMLTV elements";
 //! [Flussonic DVR playback]; IPTVnator's `catchup.utils.ts` (MIT) for the
@@ -88,11 +88,11 @@ pub const DEFAULT_CATCHUP_WINDOW_DAYS: u32 = 7;
 /// What to replay. All times are Unix seconds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CatchupRequest<'a> {
-    /// Programme start and end from the guide.
+    /// Program start and end from the guide.
     pub start: i64,
     pub end: i64,
     pub now: i64,
-    /// Where to begin inside the replay, from its start (the programme start
+    /// Where to begin inside the replay, from its start (the program start
     /// minus `buffer_before_secs`), for seeking. `0` plays from the start.
     pub offset_secs: u32,
     /// The viewer's UTC offset in seconds at `start`. Date-part placeholders
@@ -106,11 +106,11 @@ pub struct CatchupRequest<'a> {
     pub server_offset_minutes: Option<i32>,
     /// Archive window used when the channel declares none.
     pub default_window_days: u32,
-    /// Extra time before the programme start and after its end (Kodi's
+    /// Extra time before the program start and after its end (Kodi's
     /// "buffer before/after"); included in `{duration}`.
     pub buffer_before_secs: u32,
     pub buffer_after_secs: u32,
-    /// The programme's XMLTV `catchup-id`, for `{catchup-id}` and the
+    /// The program's XMLTV `catchup-id`, for `{catchup-id}` and the
     /// default `catchup="vod"` source.
     pub catchup_id: Option<&'a str>,
 }
@@ -151,7 +151,7 @@ pub fn expand_live_url(url: &str, now: i64, local_offset_secs: i32) -> String {
     expand(url, &vars, Scope::Live).unwrap_or_else(|_| url.to_owned())
 }
 
-/// The replay URL for a programme on `channel`. See the module docs for the
+/// The replay URL for a program on `channel`. See the module docs for the
 /// rules and the checks.
 pub fn build_catchup_url(channel: &Channel, req: CatchupRequest) -> Result<String, CatchupError> {
     let catch_up = channel.catch_up.as_ref().ok_or(CatchupError::Unsupported)?;
@@ -207,7 +207,7 @@ fn has_scheme(s: &str) -> bool {
     })
 }
 
-/// The finished URL must parse; it is returned as built, not re-serialised.
+/// The finished URL must parse; it is returned as built, not re-serialized.
 fn checked(url: String) -> Result<String, CatchupError> {
     match url::Url::parse(&url) {
         Ok(_) => Ok(url),
@@ -230,7 +230,7 @@ fn window<'a>(
         req.now,
     );
     if start > now {
-        return Err(CatchupError::FutureProgramme);
+        return Err(CatchupError::FutureProgram);
     }
     let from = start
         .saturating_sub(i64::from(req.buffer_before_secs))
@@ -239,7 +239,7 @@ fn window<'a>(
         .saturating_add(i64::from(req.buffer_after_secs))
         .min(end.max(now));
     if from > now {
-        return Err(CatchupError::FutureProgramme);
+        return Err(CatchupError::FutureProgram);
     }
     if from > to || from.max(start) < now.saturating_sub(i64::from(days) * 86_400) {
         return Err(CatchupError::OutsideArchive);
@@ -291,7 +291,7 @@ fn set_utc_params(raw: &str, vars: &Vars) -> Result<String, CatchupError> {
 }
 
 /// Flussonic DVR forms: HLS `NAME-FROM-DURATION.m3u8`, or `NAME-FROM-now.m3u8`
-/// while the programme is on air; MPEG-TS `timeshift_abs-FROM.ts` (open-ended
+/// while the program is on air; MPEG-TS `timeshift_abs-FROM.ts` (open-ended
 /// either way). Query and fragment are kept byte for byte.
 fn flussonic(live: &str, vars: &Vars) -> Result<String, CatchupError> {
     let (origin, path, rest) = split_path(live).ok_or(CatchupError::MalformedUrl)?;

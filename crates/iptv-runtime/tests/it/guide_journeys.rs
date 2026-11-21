@@ -1,7 +1,7 @@
 //! Cached single-source startup, descriptions, older pages and manual guide edits.
 #![cfg(feature = "test-support")]
 use crate::common;
-use iptv_epg::{ChannelKey, DAY, EpgRef, FeedId, MatchKind, ProgrammeData};
+use iptv_epg::{ChannelKey, DAY, EpgRef, FeedId, MatchKind, ProgramData};
 use iptv_import::{EpgImport, EpgSourceConfig, GuideSink, ListedChannel};
 use iptv_runtime::{Ports, Runtime, RuntimeEvent, data};
 use iptv_settings::{Settings, Target, Value};
@@ -59,8 +59,8 @@ fn seed(root: &std::path::Path, now: i64) -> (SourceId, String, Settings) {
     let source = store
         .add_source(&common::m3u_source("Generated cached guide"))
         .unwrap();
-    let catalogue = common::catalog(2, 1, common::XT_PASSWORD);
-    common::replace(&mut store, source, &catalogue);
+    let catalog = common::catalog(2, 1, common::XT_PASSWORD);
+    common::replace(&mut store, source, &catalog);
     store
         .set_source_policy(
             source,
@@ -84,19 +84,19 @@ fn seed(root: &std::path::Path, now: i64) -> (SourceId, String, Settings) {
     let options = iptv_import::store_options(&settings, &Target::Global);
     let mut stage = EpgStage::create_in_store(&store, root).unwrap();
     stage.begin_feed(FEED, 1000, options, now).unwrap();
-    for (index, channel) in catalogue.channels.iter().enumerate() {
+    for (index, channel) in catalog.channels.iter().enumerate() {
         let id = channel.epg_id.as_deref().unwrap();
         for start in [now - 3 * DAY, now - 60] {
             stage
-                .programme(
+                .program(
                     id,
-                    &ProgrammeData {
+                    &ProgramData {
                         start,
                         stop: Some(start + 3600),
                         title: if index == 0 {
-                            "Generated first programme"
+                            "Generated first program"
                         } else {
-                            "Generated second programme"
+                            "Generated second program"
                         },
                         desc: Some("Generated retained description"),
                         ..Default::default()
@@ -107,7 +107,7 @@ fn seed(root: &std::path::Path, now: i64) -> (SourceId, String, Settings) {
     }
     stage.finish_feed().unwrap();
     let import = EpgImport {
-        bindings: catalogue
+        bindings: catalog
             .channels
             .iter()
             .map(|channel| {
@@ -123,7 +123,7 @@ fn seed(root: &std::path::Path, now: i64) -> (SourceId, String, Settings) {
             .collect(),
         listed: vec![(
             FEED,
-            catalogue
+            catalog
                 .channels
                 .iter()
                 .map(|channel| ListedChannel {
@@ -150,10 +150,10 @@ fn seed(root: &std::path::Path, now: i64) -> (SourceId, String, Settings) {
             &mut stage,
             &import,
             &[metadata],
-            iptv_import::matching_fingerprint(&catalogue.channels, &Default::default()),
+            iptv_import::matching_fingerprint(&catalog.channels, &Default::default()),
         )
         .unwrap();
-    (source, catalogue.channels[0].id.to_string(), settings)
+    (source, catalog.channels[0].id.to_string(), settings)
 }
 
 #[test]

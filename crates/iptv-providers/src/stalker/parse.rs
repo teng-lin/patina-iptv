@@ -151,7 +151,7 @@ pub struct StalkerProfile {
     /// Per-user jitter (seconds) for the first periodic ping.
     pub timeslot: Option<u32>,
     pub account_name: Option<String>,
-    /// Expiry/tariff text as the portal formats it (not normalised).
+    /// Expiry/tariff text as the portal formats it (not normalized).
     pub expires: Option<String>,
 }
 
@@ -351,7 +351,7 @@ impl HasProviderId for Series {
             .unwrap_or_else(|| self.id.to_string())
     }
 }
-/// Native `series/get_ordered_list` catalogue; rows need no playback command.
+/// Native `series/get_ordered_list` catalog; rows need no playback command.
 pub fn parse_series_page(response: &HttpResponse) -> Result<Page<Series>, ProviderError> {
     typed::page(response, |o| {
         let id = o.str("id").ok_or("series without id")?;
@@ -851,7 +851,7 @@ mod tests {
     }
 }
 
-// Auth classification must not materialise a catalog just to look for js.error.
+// Auth classification must not materialize a catalog just to look for js.error.
 #[derive(Default)]
 struct AuthProbe {
     message: Option<String>,

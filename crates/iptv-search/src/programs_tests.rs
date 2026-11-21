@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use iptv_core::guide::Airing::{self, *};
 use iptv_epg::{
-    ChannelKey, EpgRef, FeedId, GuideStore, MatchKind, SourceBuilder, StoreOptions, XmltvProgramme,
+    ChannelKey, EpgRef, FeedId, GuideStore, MatchKind, SourceBuilder, StoreOptions, XmltvProgram,
 };
 
 use super::*;
@@ -17,10 +17,10 @@ fn keys() -> Vec<ChannelKey> {
     ["a", "b", "c", "d"].map(ChannelKey::new).to_vec()
 }
 
-fn store(programmes: &[(&str, i64, i64, &str)]) -> GuideStore {
+fn store(programs: &[(&str, i64, i64, &str)]) -> GuideStore {
     let mut b = SourceBuilder::new(FeedId(1), 0, StoreOptions::default(), NOW);
-    for &(ch, start, stop, title) in programmes {
-        b.push_programme(XmltvProgramme {
+    for &(ch, start, stop, title) in programs {
+        b.push_program(XmltvProgram {
             channel: format!("{ch}.example"),
             start,
             stop: Some(stop),
@@ -73,8 +73,8 @@ fn guide() -> GuideStore {
     ])
 }
 
-fn index() -> ProgrammeIndex {
-    ProgrammeIndex::build(&guide(), &keys())
+fn index() -> ProgramIndex {
+    ProgramIndex::build(&guide(), &keys())
 }
 
 /// Archive days per channel: a 2, d 7.
@@ -82,8 +82,8 @@ fn catchup(ch: usize) -> u8 {
     [2, 0, 0, 7][ch]
 }
 
-fn opts() -> ProgrammeSearchOptions<'static> {
-    ProgrammeSearchOptions {
+fn opts() -> ProgramSearchOptions<'static> {
+    ProgramSearchOptions {
         catchup_days: Some(&catchup),
         ..Default::default()
     }
@@ -91,8 +91,8 @@ fn opts() -> ProgrammeSearchOptions<'static> {
 
 type Row = (usize, i64, MatchQuality, Airing, bool);
 
-fn run(idx: &ProgrammeIndex, q: &str, o: ProgrammeSearchOptions<'_>) -> Vec<Row> {
-    idx.search_programmes(q, NOW, o)
+fn run(idx: &ProgramIndex, q: &str, o: ProgramSearchOptions<'_>) -> Vec<Row> {
+    idx.search_programs(q, NOW, o)
         .into_iter()
         .map(|h| (h.channel, h.start - NOW, h.score, h.airing, h.catchup))
         .collect()
@@ -124,9 +124,9 @@ fn ranks_by_quality_then_nearest_to_now() {
 }
 
 #[test]
-fn past_programmes_need_catch_up_unless_asked() {
+fn past_programs_need_catch_up_unless_asked() {
     let idx = index();
-    let with_past = ProgrammeSearchOptions {
+    let with_past = ProgramSearchOptions {
         include_past_without_catchup: true,
         ..opts()
     };
@@ -147,8 +147,8 @@ fn past_programmes_need_catch_up_unless_asked() {
             (0, -3 * HOUR, Prefix, Ended, true),
         ]
     );
-    // Without archive information no past programme is playable.
-    let none = ProgrammeSearchOptions::default();
+    // Without archive information no past program is playable.
+    let none = ProgramSearchOptions::default();
     assert_eq!(
         run(&idx, "night owl st", none),
         [(0, 2 * HOUR, Prefix, Upcoming, false)]
@@ -158,7 +158,7 @@ fn past_programmes_need_catch_up_unless_asked() {
 #[test]
 fn time_window_and_live_catch_up() {
     let idx = index();
-    let wide = ProgrammeSearchOptions {
+    let wide = ProgramSearchOptions {
         look_ahead: 5 * DAY,
         look_back: 9 * DAY,
         include_past_without_catchup: true,
@@ -177,7 +177,7 @@ fn time_window_and_live_catch_up() {
             (3, -8 * DAY, Exact, Ended, false)
         ]
     );
-    // A live programme on a channel with an archive can be restarted; one
+    // A live program on a channel with an archive can be restarted; one
     // without cannot. Diacritics fold.
     assert_eq!(
         run(&idx, "morning", opts()),
@@ -190,7 +190,7 @@ fn time_window_and_live_catch_up() {
 #[test]
 fn group_by_time_and_by_channel() {
     let idx = index();
-    let by = |group_by| ProgrammeSearchOptions { group_by, ..opts() };
+    let by = |group_by| ProgramSearchOptions { group_by, ..opts() };
     let rows =
         |o| -> Vec<(usize, i64)> { run(&idx, "owl", o).iter().map(|r| (r.0, r.1)).collect() };
     assert_eq!(
@@ -218,30 +218,30 @@ fn group_by_time_and_by_channel() {
 }
 
 #[test]
-fn favourites_first_and_limit() {
+fn favorites_first_and_limit() {
     let idx = index();
     let fav = BTreeSet::from([0]);
-    let o = ProgrammeSearchOptions {
-        favourites: Some(&fav),
-        favourites_first: true,
+    let o = ProgramSearchOptions {
+        favorites: Some(&fav),
+        favorites_first: true,
         limit: 3,
         ..opts()
     };
     let rows: Vec<(usize, i64)> = run(&idx, "owl", o).iter().map(|r| (r.0, r.1)).collect();
     assert_eq!(rows, [(0, 2 * HOUR), (0, -3 * HOUR), (1, HOUR)]);
-    let one = ProgrammeSearchOptions { limit: 1, ..opts() };
+    let one = ProgramSearchOptions { limit: 1, ..opts() };
     assert_eq!(run(&idx, "owl", one).len(), 1);
-    let zero = ProgrammeSearchOptions { limit: 0, ..opts() };
+    let zero = ProgramSearchOptions { limit: 0, ..opts() };
     assert!(run(&idx, "owl", zero).is_empty());
 }
 
 #[test]
 fn hit_fields_and_index_stats() {
     let idx = index();
-    let hits = idx.search_programmes("late", NOW, opts());
+    let hits = idx.search_programs("late", NOW, opts());
     assert_eq!(
         hits,
-        [ProgrammeHit {
+        [ProgramHit {
             identity: crate::ChannelId::new(None, "d"),
             channel: 3,
             start: NOW - 10 * MIN,
@@ -252,14 +252,14 @@ fn hit_fields_and_index_stats() {
             score: Prefix,
         }]
     );
-    assert_eq!(idx.programme_count(), 12);
+    assert_eq!(idx.program_count(), 12);
     assert_eq!(idx.title_count(), 7);
     assert!(idx.word_count() >= 12);
     assert!(idx.heap_bytes() > 0);
-    assert!(idx.search_programmes("  ", NOW, opts()).is_empty());
-    assert!(idx.search_programmes("zebra", NOW, opts()).is_empty());
-    let empty = ProgrammeIndex::build(&GuideStore::new(), &keys());
-    assert!(empty.search_programmes("owl", NOW, opts()).is_empty());
+    assert!(idx.search_programs("  ", NOW, opts()).is_empty());
+    assert!(idx.search_programs("zebra", NOW, opts()).is_empty());
+    let empty = ProgramIndex::build(&GuideStore::new(), &keys());
+    assert!(empty.search_programs("owl", NOW, opts()).is_empty());
 }
 
 /// Deterministic synthetic titles from invented syllables.
@@ -290,7 +290,7 @@ fn synthetic_titles(n: usize) -> Vec<String> {
         .collect()
 }
 
-/// The index returns exactly what checking every programme would.
+/// The index returns exactly what checking every program would.
 #[test]
 fn agrees_with_a_linear_scan() {
     let titles = synthetic_titles(400);
@@ -301,8 +301,8 @@ fn agrees_with_a_linear_scan() {
         progs.push((ch, start, start + HOUR, t.as_str()));
     }
     let store = store(&progs);
-    let idx = ProgrammeIndex::build(&store, &keys());
-    let all = ProgrammeSearchOptions {
+    let idx = ProgramIndex::build(&store, &keys());
+    let all = ProgramSearchOptions {
         include_past_without_catchup: true,
         look_back: 100 * DAY,
         look_ahead: 100 * DAY,
@@ -332,14 +332,14 @@ fn agrees_with_a_linear_scan() {
         let q = Query::parse(qs);
         let mut expect: Vec<(usize, i64, MatchQuality)> = Vec::new();
         for (c, key) in keys().iter().enumerate() {
-            for p in store.programmes(key, i64::MIN, i64::MAX) {
+            for p in store.programs(key, i64::MIN, i64::MAX) {
                 if let Some(s) = q.match_tokens(&crate::tokens(p.title())) {
                     expect.push((c, p.start(), s));
                 }
             }
         }
         let mut got: Vec<_> = idx
-            .search_programmes(qs, NOW, all)
+            .search_programs(qs, NOW, all)
             .into_iter()
             .map(|h| (h.channel, h.start, h.score))
             .collect();
@@ -355,7 +355,7 @@ fn agrees_with_a_linear_scan() {
 fn hidden_channels_do_not_consume_the_result_limit() {
     let idx = index();
     let visible = |c| c == 1;
-    let opts = ProgrammeSearchOptions {
+    let opts = ProgramSearchOptions {
         visible: Some(&visible),
         limit: 1,
         include_past_without_catchup: true,

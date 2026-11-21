@@ -10,7 +10,7 @@
 //! description on demand ([`description_lookup`]).
 //!
 //! The `epg.*` settings drive it (global values, `crate::settings`): the
-//! refresh policy, how many days of finished programmes are kept (the
+//! refresh policy, how many days of finished programs are kept (the
 //! last of them held in memory, older ones paged in: `pages.rs`), and
 //! whether descriptions are stored. The storage settings
 //! travel with each guide's config, so changing them downloads the guide
@@ -162,9 +162,9 @@ pub fn update_now(owner: &Rc<crate::Runtime>, done: impl FnOnce() + 'static) -> 
     started
 }
 
-/// Work cancelled by a guide action, until its writer guards unwind.
+/// Work canceled by a guide action, until its writer guards unwind.
 pub(crate) struct Superseded {
-    pub cancelled: Option<super::library::ImportCompletion>,
+    pub canceled: Option<super::library::ImportCompletion>,
     pub read: Option<GuideWork>,
 }
 impl Superseded {
@@ -185,7 +185,7 @@ impl Superseded {
 pub(crate) fn supersede(owner: &Rc<crate::Runtime>, source: SourceId) -> Superseded {
     crate::stored::next_guide_edit(owner, source);
     Superseded {
-        cancelled: super::library::supersede_import(owner, source),
+        canceled: super::library::supersede_import(owner, source),
         read: owner.interrupt_guide_read(source),
     }
 }
@@ -212,7 +212,7 @@ pub fn update_source(
 /// [`update_source`] for a change the download has to include (a
 /// channel's guide choice just saved): an update that runs already read
 /// the store before it, and is replaced instead of joined. `after`: work
-/// that change cancelled, which the download starts after.
+/// that change canceled, which the download starts after.
 pub(super) fn restart_update(
     owner: &std::rc::Rc<crate::Runtime>,
     source: SourceId,
@@ -252,7 +252,7 @@ fn start_update(
         return false;
     }
     // This update owns the source's guide from now on: work it replaces
-    // is revoked. What that cancelled, and an update a guide action
+    // is revoked. What that canceled, and an update a guide action
     // superseded before, only unwinds: this one starts after it.
     let mut unwinding = unwinding_updates(owner, source);
     unwinding.extend(super::library::replace_import(owner, source));
@@ -347,7 +347,7 @@ fn start_update(
             }
             completion.finish();
             end_update(&owner, source, &completion);
-            // This update cancelled the source's timer and did not answer for
+            // This update canceled the source's timer and did not answer for
             // it: a guide action superseded it (its NextCheck was dropped),
             // the worker pool refused it, or the store could not be read.
             // Newer work that replaced it answers instead.
@@ -402,7 +402,7 @@ pub fn guides_changed(owner: &std::rc::Rc<crate::Runtime>, source: SourceId) {
 }
 
 /// "Delete stored guide data": the source on screen keeps its channels
-/// without programmes until its guide is downloaded again (at the next
+/// without programs until its guide is downloaded again (at the next
 /// start, refresh, or "Update the guide now"). The store works off the UI
 /// thread; `done` hears whether the guide was deleted. False when no
 /// playlist is on screen.
@@ -423,7 +423,7 @@ pub fn clear(owner: &std::rc::Rc<crate::Runtime>, done: impl FnOnce(bool) + 'sta
         async move {
             let outcome = saved.await;
             // A check stopped for it stays owed, as after a download that
-            // was cancelled: still due, later, not at once.
+            // was canceled: still due, later, not at once.
             let later = super::now_unix() + RETRY_DUE;
             for (source, superseded) in superseded {
                 superseded.keep_check(&owner, source, generation, later);

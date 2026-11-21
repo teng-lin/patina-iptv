@@ -285,7 +285,7 @@ impl Store {
     }
 
     /// Deletes the source with its catalog, credentials, settings, stored
-    /// guide, customisations and history (and forgets it as the shown
+    /// guide, customizations and history (and forgets it as the shown
     /// source). Returns `false` if it did not exist.
     pub fn delete_source(&mut self, id: SourceId) -> Result<bool> {
         let tx = self.conn.transaction()?;
@@ -419,8 +419,8 @@ impl Store {
         Ok(())
     }
 
-    /// Whether the catalogue of `id` has movies, and series, as the
-    /// catalogue reads them (an embedded series of a movie list is a series).
+    /// Whether the catalog of `id` has movies, and series, as the
+    /// catalog reads them (an embedded series of a movie list is a series).
     pub fn on_demand_kinds(&self, id: SourceId) -> Result<(bool, bool)> {
         crate::vod::on_demand_kinds(&self.conn, id)
     }

@@ -167,7 +167,7 @@ pub(crate) async fn import_stalker<F: Fetch, P: ProgressSink>(
     Ok(catalog)
 }
 
-/// Finds the API endpoint and mode, and authorises a session on it.
+/// Finds the API endpoint and mode, and authorizes a session on it.
 pub(crate) async fn discover<F: Fetch, P: ProgressSink>(
     ctx: &mut Ctx<'_, F, P>,
     creds: &StalkerCredentials,

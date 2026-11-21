@@ -1,5 +1,5 @@
 //! The search screen: the field, the recent searches and the results, in
-//! the lists' look (`list_rows.rs`): channel names in Roboto and programme
+//! the lists' look (`list_rows.rs`): channel names in Roboto and program
 //! titles in Roboto Condensed at the guide's sizes, the focus its light
 //! pill.
 
@@ -85,12 +85,12 @@ fn hint(ui: Ui) -> &'static str {
     match (ui.keys_shown(), idle) {
         (true, true) => tr("OK type   ▼ recent searches   Back close"),
         (true, false) if add => {
-            tr("▲▼ move   ◀▶ channels / programmes   OK add   Back keyboard, then close")
+            tr("▲▼ move   ◀▶ channels / programs   OK add   Back keyboard, then close")
         }
         (true, false) => {
-            tr("▲▼ move   ◀▶ channels / programmes   OK watch   Back keyboard, then close")
+            tr("▲▼ move   ◀▶ channels / programs   OK watch   Back keyboard, then close")
         }
-        (false, true) => tr("Type a channel or programme, or tap a recent search"),
+        (false, true) => tr("Type a channel or program, or tap a recent search"),
         (false, false) if add => tr("Tap a result to add its channel to multiview"),
         (false, false) => tr("Tap a result to watch it"),
     }
@@ -153,9 +153,9 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
                 .col_start(move || if compact() { 1_i16 } else { 2 })
                 .col_end(move || if compact() { -1_i16 } else { 3 })
                 .min_w(px(0.0))
-                .label(move || tr("Channel, number or programme"))
+                .label(move || tr("Channel, number or program"))
                 .value(move || state(ui, |s| s.state.query().to_owned()).unwrap_or_default())
-                .placeholder(move || tr("Channel, number or programme"))
+                .placeholder(move || tr("Channel, number or program"))
                 .auto_focus(want_keyboard.get_untracked())
                 .auto_capitalize(AutoCapitalize::None)
                 .auto_correct(false)
@@ -246,7 +246,7 @@ fn tab_button(ui: Ui, tab: Tab, size: Scale) -> impl IntoElement {
     let focused =
         move || selected() && state(ui, |s| *s.state.focus() == Focus::Tabs) == Some(true);
     let label =
-        move || state(ui, |s| tab_label(tab, s.state.count(tab), s.programmes)).unwrap_or_default();
+        move || state(ui, |s| tab_label(tab, s.state.count(tab), s.programs)).unwrap_or_default();
     ui_kit::tab(ui, size, label, selected, focused, move || {
         apply(ui, SearchAction::ShowTab(tab));
     })
@@ -265,15 +265,15 @@ fn status(ui: Ui) -> String {
 }
 
 /// The result at `i` of the shown tab, with its identity.
-fn result_at(ui: Ui, i: usize) -> Option<(ResultId, Option<ProgrammeHit>)> {
+fn result_at(ui: Ui, i: usize) -> Option<(ResultId, Option<ProgramHit>)> {
     state(ui, |s| match s.state.tab() {
         Tab::Channels => s
             .state
             .channels()
             .get(i)
             .map(|h| (ResultId::Channel(h.identity.clone()), None)),
-        Tab::Programs => s.state.programmes().get(i).map(|h| {
-            let id = ResultId::Programme {
+        Tab::Programs => s.state.programs().get(i).map(|h| {
+            let id = ResultId::Program {
                 channel: h.identity.clone(),
                 start: h.start,
             };
@@ -347,7 +347,7 @@ fn result_row(
     size: Scale,
 ) -> impl IntoElement {
     let item = move || result_at(ui, at.index());
-    // Programme titles in the grid's type, channel names in the column's.
+    // Program titles in the grid's type, channel names in the column's.
     let family = move || match item() {
         Some((_, Some(_))) => CONDENSED,
         _ => SANS,

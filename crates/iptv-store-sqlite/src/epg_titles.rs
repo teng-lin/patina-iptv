@@ -1,4 +1,4 @@
-//! Programme titles of a stored guide, streamed for programme search: every
+//! Program titles of a stored guide, streamed for program search: every
 //! day the store keeps can be searched without holding those days as a
 //! guide in memory (the app holds only the last day: `Store::load_epg`).
 
@@ -11,11 +11,11 @@ use crate::error::{Result, StoreError};
 use crate::{SourceId, Store};
 
 impl Store {
-    /// Calls `f(position, start, stop, title)` for every stored programme
+    /// Calls `f(position, start, stop, title)` for every stored program
     /// of `source` overlapping `[from, to)` on the playlist channels
     /// `keys` (`position` is the key's index in `keys`; channels sharing
-    /// an EPG channel each hear its programmes). Channel by channel, each
-    /// in start order. Returns how many programmes were read.
+    /// an EPG channel each hear its programs). Channel by channel, each
+    /// in start order. Returns how many programs were read.
     pub fn for_each_epg_title(
         &self,
         source: SourceId,
@@ -54,7 +54,7 @@ impl Store {
         }
         drop(rows);
         let mut titles = self.conn.prepare_cached(
-            "SELECT start, stop, title FROM epg_programmes
+            "SELECT start, stop, title FROM epg_programs
              WHERE channel_id = ?1 AND start < ?3 AND stop > ?2 ORDER BY start",
         )?;
         let mut n = 0;
@@ -64,7 +64,7 @@ impl Store {
                 let (start, stop) = (r.get(0)?, r.get(1)?);
                 let title = match r.get_ref(2)?.as_str_or_null() {
                     Ok(t) => t.unwrap_or_default(),
-                    Err(_) => return Err(StoreError::InvalidData("epg_programmes title".into())),
+                    Err(_) => return Err(StoreError::InvalidData("epg_programs title".into())),
                 };
                 for &position in at {
                     f(position, start, stop, title);

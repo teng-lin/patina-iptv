@@ -10,7 +10,7 @@ use quick_xml::events::{BytesRef, BytesStart, Event};
 
 use crate::decode::{Compression, DecodeError, GZIP_SLICE, InputDecoder};
 use crate::time::{TimePolicy, parse_xmltv_time};
-use crate::xmltv::{EpisodeNum, Rating, XmltvChannel, XmltvItem, XmltvProgramme};
+use crate::xmltv::{EpisodeNum, Rating, XmltvChannel, XmltvItem, XmltvProgram};
 
 /// Parser settings, usually one per EPG source.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,12 +46,12 @@ pub struct ParseWarnings {
     /// Elements over `max_element_bytes`.
     pub oversized: u64,
     pub channel_without_id: u64,
-    pub programme_without_channel: u64,
-    /// Missing or unparsable `start`: programme skipped.
+    pub program_without_channel: u64,
+    /// Missing or unparsable `start`: program skipped.
     pub bad_start: u64,
     /// Unparsable `stop`: kept, the stop is inferred later.
     pub bad_stop: u64,
-    pub programme_without_title: u64,
+    pub program_without_title: u64,
     /// Invalid UTF-8 sequences replaced with U+FFFD.
     pub invalid_utf8: u64,
     /// The declared encoding is not supported; decoded as UTF-8.
@@ -64,10 +64,10 @@ impl ParseWarnings {
             + self.truncated
             + self.oversized
             + self.channel_without_id
-            + self.programme_without_channel
+            + self.program_without_channel
             + self.bad_start
             + self.bad_stop
-            + self.programme_without_title
+            + self.program_without_title
             + self.invalid_utf8
             + self.unknown_encoding
     }
@@ -76,7 +76,7 @@ impl ParseWarnings {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ParseStats {
     pub channels: u64,
-    pub programmes: u64,
+    pub programs: u64,
     pub warnings: ParseWarnings,
     /// Bytes passed to `feed`, before decompression.
     pub bytes_in: u64,
@@ -95,7 +95,7 @@ pub struct ParseStats {
 /// let mut parser = XmltvParser::new(ParseOptions::default());
 /// let mut titles = Vec::new();
 /// let mut sink = |item| {
-///     if let XmltvItem::Programme(p) = item {
+///     if let XmltvItem::Program(p) = item {
 ///         titles.push(p.title)
 ///     }
 /// };
@@ -104,7 +104,7 @@ pub struct ParseStats {
 /// }
 /// let stats = parser.finish(&mut sink).unwrap();
 /// assert_eq!(titles, ["Noon"]);
-/// assert_eq!((stats.channels, stats.programmes, stats.warnings.total()), (1, 1, 0));
+/// assert_eq!((stats.channels, stats.programs, stats.warnings.total()), (1, 1, 0));
 /// ```
 pub struct XmltvParser {
     opts: ParseOptions,
@@ -267,7 +267,7 @@ impl XmltvParser {
         }
         LimitExceeded::check(
             LimitKind::Items,
-            self.stats.channels.saturating_add(self.stats.programmes),
+            self.stats.channels.saturating_add(self.stats.programs),
             self.opts.limits.items,
         )
         .map_err(DecodeError::Limit)?;
@@ -423,7 +423,7 @@ pub fn parse_xmltv(bytes: &[u8], opts: ParseOptions) -> Result<ParsedXmltv, Deco
     let mut out = ParsedXmltv::default();
     let mut sink = |item| match item {
         XmltvItem::Channel(c) => out.channels.push(c),
-        XmltvItem::Programme(p) => out.programmes.push(p),
+        XmltvItem::Program(p) => out.programs.push(p),
     };
     let mut parser = XmltvParser::new(opts);
     parser.feed(bytes, &mut sink)?;
@@ -436,7 +436,7 @@ pub fn parse_xmltv(bytes: &[u8], opts: ParseOptions) -> Result<ParsedXmltv, Deco
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ParsedXmltv {
     pub channels: Vec<XmltvChannel>,
-    pub programmes: Vec<XmltvProgramme>,
+    pub programs: Vec<XmltvProgram>,
     pub stats: ParseStats,
 }
 
@@ -501,8 +501,8 @@ enum Field {
 
 enum Body {
     Channel(XmltvChannel),
-    Programme {
-        p: XmltvProgramme,
+    Program {
+        p: XmltvProgram,
         start_ok: bool,
         bad_stop: bool,
     },
@@ -537,13 +537,13 @@ impl Element {
                 let stop = stop_raw
                     .as_deref()
                     .and_then(|s| parse_xmltv_time(s, opts.time));
-                Body::Programme {
-                    p: XmltvProgramme {
+                Body::Program {
+                    p: XmltvProgram {
                         channel: attr(e, "channel").unwrap_or_default().trim().to_string(),
                         start: start_t.unwrap_or_default(),
                         stop,
                         catchup_id: attr(e, "catchup-id").filter(|s| !s.is_empty()),
-                        ..XmltvProgramme::default()
+                        ..XmltvProgram::default()
                     },
                     start_ok: start_t.is_some(),
                     bad_stop: stop_raw.is_some() && stop.is_none(),
@@ -632,7 +632,7 @@ impl Element {
     fn icon(&mut self, e: &BytesStart) {
         let slot = match &mut self.body {
             Body::Channel(c) => &mut c.icon,
-            Body::Programme { p, .. } => &mut p.icon,
+            Body::Program { p, .. } => &mut p.icon,
         };
         if slot.is_none() {
             *slot = attr(e, "src")
@@ -659,7 +659,7 @@ impl Element {
                     c.display_names.push(value);
                 }
             }
-            Body::Programme { p, .. } => match field {
+            Body::Program { p, .. } => match field {
                 // Superscript badges ("ᴸᶦᵛᵉ") read as words: `fold_superscripts`.
                 Field::Title if p.title.is_empty() => p.title = folded(value),
                 Field::SubTitle if p.sub_title.is_none() => p.sub_title = Some(folded(value)),
@@ -691,21 +691,21 @@ impl Element {
                     sink(XmltvItem::Channel(c));
                 }
             }
-            Body::Programme {
+            Body::Program {
                 p,
                 start_ok,
                 bad_stop,
             } => {
                 if p.channel.is_empty() {
-                    w.programme_without_channel += 1;
+                    w.program_without_channel += 1;
                 } else if !start_ok {
                     w.bad_start += 1;
                 } else if p.title.is_empty() {
-                    w.programme_without_title += 1;
+                    w.program_without_title += 1;
                 } else {
                     w.bad_stop += u64::from(bad_stop);
-                    stats.programmes += 1;
-                    sink(XmltvItem::Programme(p));
+                    stats.programs += 1;
+                    sink(XmltvItem::Program(p));
                 }
             }
         }
