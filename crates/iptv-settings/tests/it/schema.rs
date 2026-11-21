@@ -1,4 +1,4 @@
-//! Integrity of the schema and catalogue.
+//! Integrity of the schema and catalog.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -458,7 +458,7 @@ fn types_name_themselves_and_give_their_default() {
         let s = Setting::new(Section::Search, "", "search.example", ty, "Synthetic.");
         assert_eq!(s.default_value(), default, "{name}");
         assert_eq!(s.default_value().type_name(), name, "value and type agree");
-        // Choices exist exactly for enums and colours.
+        // Choices exist exactly for enums and colors.
         assert_eq!(ty.choices().is_some(), matches!(name, "enum" | "color"));
     }
     assert_eq!(

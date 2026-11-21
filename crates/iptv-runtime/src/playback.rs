@@ -127,7 +127,7 @@ pub(crate) fn load_combined_channel(services: &Services) -> Option<String> {
 }
 
 /// Common resolver clock for viewing and recording. `at` selects the local
-/// offset at a programme's start for catch-up; live callers use `None`.
+/// offset at a program's start for catch-up; live callers use `None`.
 pub fn clock(now: i64, at: Option<i64>) -> iptv_guide::playback::Clock {
     clock_with_offset(now, at, |instant| {
         #[cfg(all(windows, feature = "test-support"))]

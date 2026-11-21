@@ -36,7 +36,7 @@ fn current(ui: Ui) -> Option<Target> {
                 .focus
                 .with(|f| f.program(&v).airing(f.now) == Airing::Live);
             let ch = crate::lists::focused_channel(ui)?;
-            // A pan from the live programme moves the focus along the row
+            // A pan from the live program moves the focus along the row
             // without leaving the channel: a waiting choice stays, and
             // panning back starts no preview again.
             if !live {
@@ -117,7 +117,7 @@ fn sync(ui: Ui) {
     ui.browse_playback.update(|b| b.focus(target, p, now));
 }
 /// A touch or mouse drag in the guide or a list crossed the drag
-/// threshold: a preview waiting to start is cancelled; a tap's choice
+/// threshold: a preview waiting to start is canceled; a tap's choice
 /// still plays (`BrowsePlayback::dragged`).
 pub fn dragged(ui: Ui) {
     ui.browse_playback.update(|b| b.dragged());

@@ -58,9 +58,9 @@ pub fn preview_rect() -> (f32, f32, f32, f32) {
     (PREVIEW_MARGIN, top + PREVIEW_MARGIN, w, h)
 }
 
-/// The opaque colours of the regions, drawn under the video layer with the
-/// same geometry as the foreground: the window colour under the header,
-/// the groups column and the guide; the panel colour under the rail.
+/// The opaque colors of the regions, drawn under the video layer with the
+/// same geometry as the foreground: the window color under the header,
+/// the groups column and the guide; the panel color under the rail.
 /// The foreground stays clear in guide mode, so the video shows wherever it is
 /// laid out: today the preview rectangle.
 pub fn backdrop(ui: Ui) -> impl IntoElement {
@@ -84,8 +84,8 @@ pub fn backdrop(ui: Ui) -> impl IntoElement {
         )
 }
 
-/// The groups column: Favourites, Recently watched, All channels, then the
-/// playlist's groups, in the guide's type on the window colour; the focus
+/// The groups column: Favorites, Recently watched, All channels, then the
+/// playlist's groups, in the guide's type on the window color; the focus
 /// is the guide's light pill. Moving over (or tapping) one shows its list.
 pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
     // New data: the selected group stays in view.

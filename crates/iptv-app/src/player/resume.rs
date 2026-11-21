@@ -127,7 +127,7 @@ pub fn adopt(ui: Ui) -> bool {
         return true;
     }
     // Preparing the early stream already owns this request, even before a
-    // native source is published. Adopting its catalogue identity keeps that
+    // native source is published. Adopting its catalog identity keeps that
     // health session and its in-flight preparation.
     let requested = main.source.with_untracked(Option::is_some)
         || main.health.with_untracked(|health| {

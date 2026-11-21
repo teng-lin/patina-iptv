@@ -154,7 +154,7 @@ pub struct StoredGuide {
     pub last_error: Option<ImportErrorKind>,
     pub match_fingerprint: Option<u64>,
     pub bound_channels: u64,
-    /// Latest programme end written.
+    /// Latest program end written.
     pub ends_at: Option<UnixTime>,
     /// Highest priority first.
     pub feeds: Vec<StoredEpgFeed>,
@@ -195,7 +195,7 @@ pub struct EpgCounts {
 /// What [`Store::load_epg`] reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EpgWindow<'a> {
-    /// Programmes overlapping `[from, to)`.
+    /// Programs overlapping `[from, to)`.
     pub from: UnixTime,
     pub to: UnixTime,
     /// Only these playlist channels; `None`: every bound channel.
@@ -306,7 +306,7 @@ fn insert_feed_channels(
 }
 
 /// Copies one staged channel's schedule (`stage`) to store channel
-/// `channel`; returns (programmes, descriptions).
+/// `channel`; returns (programs, descriptions).
 ///
 /// `OR FAIL`, with foreign keys off ([`Store::replace_epg`]): a multi-row
 /// statement that may abort half-way needs a statement journal, which
@@ -344,11 +344,11 @@ pub(crate) struct Binding {
 
 impl Store {
     /// Replaces `source`'s stored guide with a downloaded one in one
-    /// transaction: `import` (how it matched) and `stage` (its programmes,
+    /// transaction: `import` (how it matched) and `stage` (its programs,
     /// from the same `iptv_import::import_epg` run).
     ///
     /// Stores every bound EPG channel of the feeds in `feeds` (all of its
-    /// programmes, descriptions apart), the bindings and each feed's
+    /// programs, descriptions apart), the bindings and each feed's
     /// channel list; bindings to a feed missing from `feeds` are skipped
     /// and counted. `match_fingerprint`: `iptv_import::matching_fingerprint`
     /// of the channels and overrides `import` was matched with. Clears a
@@ -367,7 +367,7 @@ impl Store {
         // transaction: consistent by construction. Off for the copy's sake
         // (`copy_programs`); it cannot change inside a transaction. A
         // larger page cache holds more of `epg_programs_by_stop`, which
-        // every channel's programmes sweep (a third faster).
+        // every channel's programs sweep (a third faster).
         let replaced = self
             .conn
             .pragma_update(None, "foreign_keys", false)
@@ -507,7 +507,7 @@ impl Store {
     }
 
     /// Records a failed (or partly failed) guide download. Stored
-    /// programmes stay; the refresh policy backs off.
+    /// programs stay; the refresh policy backs off.
     pub fn record_epg_failure(&mut self, source: SourceId, kind: ImportErrorKind) -> Result<()> {
         ensure_source(&self.conn, source)?;
         let now = self.now();
@@ -653,7 +653,7 @@ impl Store {
         Ok(guide)
     }
 
-    /// The description of the programme starting at `start` on playlist
+    /// The description of the program starting at `start` on playlist
     /// channel `key`, read on demand.
     pub fn epg_description(
         &self,
@@ -672,7 +672,7 @@ impl Store {
             .optional()?)
     }
 
-    /// Deletes programmes (of every source) that ended at or before
+    /// Deletes programs (of every source) that ended at or before
     /// `before`. Returns how many.
     pub fn prune_epg(&mut self, before: UnixTime) -> Result<u64> {
         let tx = self

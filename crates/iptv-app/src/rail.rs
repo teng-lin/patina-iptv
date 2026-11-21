@@ -1,8 +1,8 @@
-//! The navigation rail left of the groups column, on the panel colour: icons while the groups
+//! The navigation rail left of the groups column, on the panel color: icons while the groups
 //! have the focus, icons with labels while it has the focus itself. Items
 //! without a screen in this build are dimmed and never take the focus
 //! (`iptv_core::browse`); the focused one is the light pill the guide's
-//! focused programme is. Left from the groups lands on Search. The icons
+//! focused program is. Left from the groups lands on Search. The icons
 //! are our own simple line drawings.
 
 use crate::i18n::tr;
@@ -66,7 +66,7 @@ fn label(item: RailItem) -> &'static str {
     }
 }
 
-/// A 24-unit line drawing in the text colour.
+/// A 24-unit line drawing in the text color.
 pub(crate) fn icon(item: RailItem) -> ImageSrc {
     let body = match item {
         RailItem::Search => "<circle cx='10.5' cy='10.5' r='6'/><path d='M15 15l5.5 5.5'/>",

@@ -15,7 +15,7 @@ pub struct TimePolicy {
     /// `0` treats such times as UTC.
     pub assumed_offset_minutes: i32,
     /// Per-source correction added to every parsed time, in minutes (the
-    /// "EPG offset" setting of the reference UX). Positive moves programmes
+    /// "EPG offset" setting of the reference UX). Positive moves programs
     /// later.
     pub shift_minutes: i32,
 }

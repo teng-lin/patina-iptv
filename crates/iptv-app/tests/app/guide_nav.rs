@@ -1,5 +1,5 @@
 //! Moving along the guide's timeline, run headless on a desktop: a finger
-//! (or mouse) dragging the programmes sideways pans them and flings on, so
+//! (or mouse) dragging the programs sideways pans them and flings on, so
 //! does a sideways wheel, a Now button takes them back, a tap (even with a
 //! small wobble) still plays. Left, day/hour keys and touch reach retained
 //! past listings with or without catch-up. OK on a listing outside the
@@ -19,13 +19,13 @@ use nsh_core::{ImageData, Point, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
 
 const IMPORT: Duration = Duration::from_secs(20);
-/// Programmes of 45 minutes.
+/// Programs of 45 minutes.
 const LEN: i64 = 45 * 60;
 const FIRST: i32 = -95;
 
-/// Channel one's programmes are "Show <n>", channel two's "Other <n>": `n`
-/// counts from the programme airing at `now` (0), negative before it.
-/// Programme 0 began 25 minutes before `now`, so a day of archive starts
+/// Channel one's programs are "Show <n>", channel two's "Other <n>": `n`
+/// counts from the program airing at `now` (0), negative before it.
+/// Program 0 began 25 minutes before `now`, so a day of archive starts
 /// 20 minutes into "Show -32": "Show -31" is the oldest replay, with
 /// minutes to spare either side.
 fn guide(now: i64) -> String {
@@ -102,7 +102,7 @@ fn the_timeline_pans_by_touch_and_left_reaches_retained_listings() {
     step(app.press_key("down"));
     assert!(focused(&app, "Other 0"));
 
-    // Dragging the programmes right shows earlier ones: three drags and
+    // Dragging the programs right shows earlier ones: three drags and
     // the final fling go several hours back, within retained listings.
     for _ in 0..3 {
         step(app.drag("text:Test Channel One", Point::new(px(500.0), px(12.0))));
@@ -262,14 +262,14 @@ fn step(result: Result<(), String>) {
     }
 }
 
-/// Whether the programme titled `title` has the focus: its title shows in
+/// Whether the program titled `title` has the focus: its title shows in
 /// the header as well as in its cell.
 fn focused(app: &Headless, title: &str) -> bool {
     let texts = app.screen().texts();
     texts.iter().filter(|t| **t == title).count() >= 2
 }
 
-/// The numbers of channel one's programmes on screen ("Show <n>").
+/// The numbers of channel one's programs on screen ("Show <n>").
 fn shown(app: &Headless) -> Vec<i32> {
     let mut found: Vec<i32> = app
         .screen()

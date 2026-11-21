@@ -31,7 +31,7 @@ pub(crate) enum Overlay {
     FavoritesEditor,
     /// A chooser the play bar or a menu opened (tracks, picture size…).
     Chooser,
-    /// The programme details popup.
+    /// The program details popup.
     Description,
     Menu,
     Search,
@@ -166,7 +166,7 @@ impl Overlay {
     }
 
     /// Whether a mouse moving over full-screen video leaves the play bar
-    /// alone while it is open. Everything does but the programme details:
+    /// alone while it is open. Everything does but the program details:
     /// the bar is layered over them and held while they are open
     /// (`play_bar::bind`), and its own button toggles them, so the bar
     /// still comes up over them. (A chooser holds the bar too, but a bar
@@ -295,7 +295,7 @@ mod tests {
                 !over_the_picture.contains(&overlay),
                 "{overlay:?}"
             );
-            // Only the programme details let a moving mouse bring the
+            // Only the program details let a moving mouse bring the
             // play bar up; the channel list and the custom groups screen
             // keep it away like every other overlay.
             assert_eq!(

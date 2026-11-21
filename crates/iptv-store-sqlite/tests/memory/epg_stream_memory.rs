@@ -1,7 +1,7 @@
 //! Memory of the streaming guide import does not grow with the guide: the
 //! Rust heap (every thread, counted by a global allocator) and SQLite's
 //! own heap (`sqlite3_memory_highwater`) peak at the same level for a
-//! guide eight times longer. The programmes go to the stage in batches of
+//! guide eight times longer. The programs go to the stage in batches of
 //! bounded size; only the channel lists stay in memory.
 //!
 //! Each case runs in a fresh process: the counters are process-wide.
@@ -22,7 +22,7 @@ const NOW: i64 = 1_800_000_000;
 const CHANNELS: usize = 500;
 
 /// Peak Rust heap above the start, SQLite heap high-water while staging
-/// and in all (bytes), programmes stored.
+/// and in all (bytes), programs stored.
 fn import(days: i64) -> (usize, usize, usize, u64) {
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::open(dir.path().join("iptv.sqlite")).unwrap();

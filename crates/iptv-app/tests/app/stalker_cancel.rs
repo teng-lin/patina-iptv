@@ -1,6 +1,6 @@
 //! Zapping away from a Stalker channel whose stream address is still being
 //! asked for cancels that request: the portal sees its connection close.
-//! Only generated catalogues and a local mock portal are used.
+//! Only generated catalogs and a local mock portal are used.
 use std::{
     io::{ErrorKind, Read, Write},
     net::{TcpListener, TcpStream},

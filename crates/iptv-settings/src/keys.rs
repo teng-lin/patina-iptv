@@ -46,7 +46,7 @@ pub const ACCENT: ColorKey = ColorKey("appearance.accent");
 pub const BACKGROUND: ColorKey = ColorKey("appearance.background");
 pub const FONT_SIZE: EnumKey = EnumKey("appearance.font_size");
 
-// Organisation.
+// Organization.
 pub const CHANNEL_SORT: EnumKey = EnumKey("channels.channel_sort");
 pub const GROUP_SORT: EnumKey = EnumKey("channels.group_sort");
 pub const RECENT_COUNT: IntKey = IntKey("history.recent_count");
@@ -69,7 +69,7 @@ pub const CONFIRM_EXIT_WINDOW: DurationKey = DurationKey("general.confirm_exit_w
 // Appearance over video.
 pub const UI_TRANSPARENCY: IntKey = IntKey("appearance.ui_transparency");
 
-// Guide and player behaviour.
+// Guide and player behavior.
 pub const BACK_RETURNS_TO_NOW: BoolKey = BoolKey("guide.back_returns_to_now");
 pub const INFO_ON_SWITCH: BoolKey = BoolKey("player.info_on_switch");
 pub const PIP_ON_LEAVE: EnumKey = EnumKey("player.pip_on_leave");
@@ -170,7 +170,7 @@ pub const VOD_AUTOPLAY_NEXT_EPISODE: BoolKey = BoolKey("vod.autoplay_next_episod
 pub const GUIDE_SHOW_LOGOS: BoolKey = BoolKey("guide.show_logos");
 
 impl BoolKey {
-    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    /// Resolve a catalog key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
         let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
@@ -190,7 +190,7 @@ impl BoolKey {
 }
 
 impl IntKey {
-    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    /// Resolve a catalog key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
         let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
@@ -210,7 +210,7 @@ impl IntKey {
 }
 
 impl DurationKey {
-    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    /// Resolve a catalog key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
         let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
@@ -230,7 +230,7 @@ impl DurationKey {
 }
 
 impl EnumKey {
-    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    /// Resolve a catalog key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
         let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
@@ -250,7 +250,7 @@ impl EnumKey {
 }
 
 impl TextKey {
-    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    /// Resolve a catalog key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
         let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
@@ -270,7 +270,7 @@ impl TextKey {
 }
 
 impl ColorKey {
-    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    /// Resolve a catalog key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
         let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;
@@ -290,7 +290,7 @@ impl ColorKey {
 }
 
 impl BindingsKey {
-    /// Resolve a catalogue key, rejecting unknown keys and wrong value types.
+    /// Resolve a catalog key, rejecting unknown keys and wrong value types.
     pub fn try_new(key: &'static str) -> Result<Self, crate::SettingsError> {
         let setting = crate::catalog::setting(key)
             .ok_or_else(|| crate::SettingsError::UnknownKey(key.to_owned()))?;

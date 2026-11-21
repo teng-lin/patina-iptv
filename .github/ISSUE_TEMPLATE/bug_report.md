@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a problem or unexpected behaviour in Patina IPTV
+about: Report a problem or unexpected behavior in Patina IPTV
 title: ''
 labels: bug
 assignees: ''
@@ -16,11 +16,11 @@ assignees: ''
 2. 
 3. 
 
-## Expected Behaviour
+## Expected Behavior
 
 <!-- What you expected to happen. -->
 
-## Actual Behaviour
+## Actual Behavior
 
 <!-- What actually happened. -->
 

@@ -34,7 +34,7 @@ pub const PAST: i32 = 30;
 /// [`Schedule::browsable`] reaches).
 pub const HISTORY: i32 = 7 * 24 * 60;
 
-/// Where a programme sits relative to now.
+/// Where a program sits relative to now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Airing {
     Ended,
@@ -43,7 +43,7 @@ pub enum Airing {
 }
 
 impl Program {
-    /// Where the programme sits at guide minute `now`.
+    /// Where the program sits at guide minute `now`.
     pub fn airing(&self, now: i32) -> Airing {
         if self.end <= now {
             Airing::Ended
@@ -54,13 +54,13 @@ impl Program {
         }
     }
 
-    /// Whether the channel's archive reaches the start of this programme.
+    /// Whether the channel's archive reaches the start of this program.
     pub fn can_replay(&self, now: i32, archive_days: u8) -> bool {
         let window = i32::from(archive_days) * 24 * 60;
         window > 0 && self.start <= now && self.start >= now.saturating_sub(window)
     }
 
-    /// Played fraction of a live programme at `now` (0 otherwise).
+    /// Played fraction of a live program at `now` (0 otherwise).
     pub fn progress(&self, now: i32) -> f32 {
         match self.airing(now) {
             Airing::Live => (now - self.start) as f32 / (self.end - self.start) as f32,
@@ -69,7 +69,7 @@ impl Program {
     }
 }
 
-/// A programme: `[start, end)` in guide minutes from the schedule's epoch.
+/// A program: `[start, end)` in guide minutes from the schedule's epoch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Program {
     pub start: i32,
@@ -77,12 +77,12 @@ pub struct Program {
 }
 
 /// Guide data the focus model and the UI read: channels, groups and
-/// programmes by guide minute (minute 0 is [`Schedule::epoch_unix`]). Implemented by
+/// programs by guide minute (minute 0 is [`Schedule::epoch_unix`]). Implemented by
 /// [`SyntheticSchedule`] (tests, demos) and by the store + EPG backed
 /// schedule in the app.
 pub trait Schedule {
     /// Unix time of guide minute 0. Fixed for the schedule's lifetime, so
-    /// programmes keep their minutes while now advances.
+    /// programs keep their minutes while now advances.
     fn epoch_unix(&self) -> i64 {
         SYNTHETIC_EPOCH_UNIX
     }
@@ -133,10 +133,10 @@ pub trait Schedule {
     fn group_blocked(&self, _group: usize) -> bool {
         false
     }
-    /// The programme airing at `minute`; gaps without guide data are filled
-    /// with placeholder programmes so navigation always has a cell.
+    /// The program airing at `minute`; gaps without guide data are filled
+    /// with placeholder programs so navigation always has a cell.
     fn program_at(&self, channel: usize, minute: i32) -> Program;
-    /// The programmes overlapping `[from, from + minutes)`, in order.
+    /// The programs overlapping `[from, from + minutes)`, in order.
     fn programs_between(&self, channel: usize, from: i32, minutes: i32) -> Vec<Program>;
     /// The channel's archive window in days (0: no catch-up).
     fn catchup_days(&self, channel: usize) -> u8;
@@ -215,7 +215,7 @@ pub trait Schedule {
     }
     /// The guide minutes that can be browsed at `now`, `[first, end)`: by
     /// default [`HISTORY`] back and [`HORIZON`] ahead; a stored guide from
-    /// the oldest retained data to a little past its last programme. Supply
+    /// the oldest retained data to a little past its last program. Supply
     /// `now` as the first minute when there are no retained past listings.
     fn browsable(&self, now: i32) -> (i32, i32) {
         (now - HISTORY, now + HORIZON)
@@ -227,7 +227,7 @@ pub trait Schedule {
         Some(self.browsable(0).0)
     }
     /// The concrete schedule, for features that need more than this trait
-    /// (programme search reads the EPG store; playback resolves streams).
+    /// (program search reads the EPG store; playback resolves streams).
     fn as_any(&self) -> Option<&dyn core::any::Any> {
         None
     }
@@ -260,7 +260,7 @@ pub fn secs_to_next_minute(s: &dyn Schedule, wall_unix: i64, shown_secs: u64) ->
 }
 
 /// Deterministic synthetic guide data: [`CHANNELS`] channels in [`GROUPS`]
-/// groups, programmes of 15–120 minutes from a week back to the horizon,
+/// groups, programs of 15–120 minutes from a week back to the horizon,
 /// and catch-up on even channels.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SyntheticSchedule;
@@ -314,7 +314,7 @@ fn mix(mut x: u64) -> u64 {
     x
 }
 
-/// The `n`th programme of `channel`, deterministic and cheap to recompute.
+/// The `n`th program of `channel`, deterministic and cheap to recompute.
 fn program_seq(channel: usize) -> impl Iterator<Item = Program> {
     const LENGTHS: [i32; 8] = [15, 30, 30, 45, 60, 60, 90, 120];
     let offset = (mix(channel as u64) % 60) as i32;
@@ -341,7 +341,7 @@ pub fn catchup_days(channel: usize) -> u8 {
 /// while the app runs, so this exceeds [`HORIZON`]).
 const SYNTHETIC_AHEAD: i32 = 2 * 24 * 60;
 
-/// The programme of `channel` airing at `minute` (clamped to the guide's data).
+/// The program of `channel` airing at `minute` (clamped to the guide's data).
 pub fn program_at(channel: usize, minute: i32) -> Program {
     let minute = minute.clamp(-HISTORY, SYNTHETIC_AHEAD - 1);
     program_seq(channel)
@@ -349,7 +349,7 @@ pub fn program_at(channel: usize, minute: i32) -> Program {
         .expect("endless")
 }
 
-/// The programmes of `channel` overlapping `[from, from + VISIBLE)`.
+/// The programs of `channel` overlapping `[from, from + VISIBLE)`.
 pub fn visible_programs(channel: usize, from: i32) -> Vec<Program> {
     let to = from + VISIBLE;
     program_seq(channel)
@@ -375,7 +375,7 @@ pub enum Pane {
 pub enum PreviewOrigin {
     /// The first row of the current guide list.
     Guide,
-    /// The built-in Favourites group, including when it is empty.
+    /// The built-in Favorites group, including when it is empty.
     Favorites,
     /// The navigation rail's Search action.
     Search,
@@ -470,8 +470,8 @@ impl Focus {
         self.keep_cursor_visible(s);
     }
 
-    /// Now moved to `now`. A focus on the live programme follows the
-    /// clock (onto the next programme when it ends) and a window at its
+    /// Now moved to `now`. A focus on the live program follows the
+    /// clock (onto the next program when it ends) and a window at its
     /// default position moves with now; a focus browsing the past or the
     /// future stays where it is. Returns false when `now` is unchanged.
     pub fn tick(&mut self, now: i32, s: &dyn Schedule) -> bool {
@@ -534,7 +534,7 @@ impl Focus {
         self.keep_cursor_visible(s);
     }
 
-    /// One programme back, down to the row's floor, never to the groups
+    /// One program back, down to the row's floor, never to the groups
     /// (`Action::PastPrograms`).
     pub fn enter_past(&mut self, s: &dyn Schedule) {
         if self.pane == Pane::Guide {
@@ -543,7 +543,7 @@ impl Focus {
         }
     }
 
-    /// Back on a past or future programme: the channel's live programme and
+    /// Back on a past or future program: the channel's live program and
     /// the default window. Returns false when already there.
     pub fn return_to_now(&mut self, s: &dyn Schedule) -> bool {
         if self.pane != Pane::Guide || self.program(s).airing(self.now) == Airing::Live {
@@ -568,7 +568,7 @@ impl Focus {
     }
 
     /// Shows what plays on row `channel` of the list `s` (a zap, a resumed
-    /// channel): its live programme and the default window.
+    /// channel): its live program and the default window.
     pub fn show_channel(&mut self, channel: usize, s: &dyn Schedule) {
         self.pane = Pane::Guide;
         self.channel = channel.min(s.channel_count().saturating_sub(1));
@@ -576,7 +576,7 @@ impl Focus {
         self.window = home_window(self.now);
     }
 
-    /// A tap on the programme of `channel` airing at `minute`: it gets the
+    /// A tap on the program of `channel` airing at `minute`: it gets the
     /// focus where it is (the window stays on the visible cell).
     pub fn tap(&mut self, channel: usize, minute: i32, s: &dyn Schedule) {
         self.pane = Pane::Guide;
@@ -605,13 +605,13 @@ impl Focus {
         }
     }
 
-    /// The focused programme (in the guide pane).
+    /// The focused program (in the guide pane).
     pub fn program(&self, s: &dyn Schedule) -> Program {
         s.program_at(self.channel, self.cursor)
     }
 
     pub(crate) fn keep_cursor_visible(&mut self, s: &dyn Schedule) {
-        // The focused programme's start (now, for a live one) stays on
+        // The focused program's start (now, for a live one) stays on
         // screen; the window moves in steps.
         let p = self.program(s);
         let anchor = if p.airing(self.now) == Airing::Live {
@@ -841,7 +841,7 @@ mod tests {
         assert!(!f.return_to_now(&S), "already at now");
     }
 
-    /// A small schedule with real-data time: the synthetic programmes, a
+    /// A small schedule with real-data time: the synthetic programs, a
     /// wall-clock epoch, and `channels`/`groups` rows.
     struct Small {
         channels: usize,

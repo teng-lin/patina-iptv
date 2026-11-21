@@ -1,7 +1,7 @@
 //! Search and add: multiview's tile menu opens the search screen to pick
 //! a channel for a new tile. The screen shows over the grid without
 //! leaving full screen (leaving it would end multiview); choosing a
-//! channel, or a programme (its channel), hands the channel to multiview
+//! channel, or a program (its channel), hands the channel to multiview
 //! (`multiview::picked`) and closes the screen, so the grid is back with
 //! the new tile. Back (or Close) closes it without one
 //! (`multiview::list_closed`, from [`super::close`]).

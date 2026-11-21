@@ -22,7 +22,7 @@ pub struct ChannelHit {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChannelSearchOptions {
-    /// Favourite channels before all others (then by match quality).
+    /// Favorite channels before all others (then by match quality).
     pub favorites_first: bool,
     pub limit: usize,
 }
@@ -132,7 +132,7 @@ impl ChannelIndex {
             .max()
     }
 
-    /// Channels matching `query`: favourites first when asked, then
+    /// Channels matching `query`: favorites first when asked, then
     /// exact > prefix > word > word-prefix > substring, ties by channel
     /// index; at most `opts.limit`.
     pub fn search_channels(
@@ -233,7 +233,7 @@ mod tests {
             search("kestrel", &[4, 2], opts),
             [(2, Word), (4, Substring), (1, Exact)]
         );
-        // Not asked: favourites rank like any channel.
+        // Not asked: favorites rank like any channel.
         let opts = ChannelSearchOptions { limit: 2, ..opts };
         let plain = ChannelSearchOptions {
             favorites_first: false,

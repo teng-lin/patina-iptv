@@ -308,7 +308,7 @@ impl Server {
     }
 }
 
-/// An XMLTV guide: per channel (id, display name), one programme `title`
+/// An XMLTV guide: per channel (id, display name), one program `title`
 /// on now (an hour around `now`).
 pub fn guide(now: i64, channels: &[(&str, &str, &str)]) -> String {
     use iptv_epg::format_xmltv_time;

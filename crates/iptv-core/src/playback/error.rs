@@ -18,7 +18,7 @@ pub enum ErrorKind {
     Resolve,
     /// The provider refused the account itself (its login), not one stream.
     Account,
-    /// Nothing to play: no stream address or no archive for this programme.
+    /// Nothing to play: no stream address or no archive for this program.
     Unavailable,
     Other,
 }

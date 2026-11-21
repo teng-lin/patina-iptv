@@ -1,5 +1,5 @@
 //! Wheels and touchpads pan the timeline on the desktops. NSH hands
-//! wheels to scroll views only, so the programme area sits in a horizontal
+//! wheels to scroll views only, so the program area sits in a horizontal
 //! scroll view whose content is far wider than it, with the grid stuck to
 //! its left edge (`sticky`): a horizontal wheel, a two-finger sideways
 //! swipe and Shift + wheel scroll it, and the changes of its offset pan the
@@ -49,7 +49,7 @@ pub(super) fn trackball(pan: Pan, grid: impl IntoElement + 'static) -> Scroll {
         .on_scroll(move |e: &ScrollEvent| {
             let x = e.offset.x.0;
             let dx = x - last.with(|l| std::mem::replace(l, x));
-            // A jump (the offset first set, the scroll recentred) is no
+            // A jump (the offset first set, the scroll recentered) is no
             // wheel: only the steps are.
             if dx != 0.0 && dx.abs() < PAD / 4.0 {
                 if !coasting.with(|c| *c) {

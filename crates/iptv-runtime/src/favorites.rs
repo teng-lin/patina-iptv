@@ -1,7 +1,7 @@
-//! Favourite and recently watched channels, kept by channel key per source
+//! Favorite and recently watched channels, kept by channel key per source
 //! in the store (its `favorites` and `watch_history` tables), so they
 //! survive refreshes and restarts. `Ui::favorites` holds their catalog
-//! channels on screen (stars, search ranking); the Favourites and Recently
+//! channels on screen (stars, search ranking); the Favorites and Recently
 //! watched lists are built from here (`lists.rs`).
 //!
 //! The in-memory lists are the truth while a source is shown; writes go to
@@ -50,7 +50,7 @@ fn source_has_vod(store: &Store, source: SourceId) -> Result<bool, StoreError> {
 }
 
 /// Whether any enabled source has movies or shows: one status read per
-/// configured playlist, never a catalogue scan.
+/// configured playlist, never a catalog scan.
 fn any_enabled_vod(store: &Store) -> Result<bool, StoreError> {
     for source in store.sources()? {
         if store.source_policy(source.id)?.enabled && source_has_vod(store, source.id)? {
@@ -97,7 +97,7 @@ fn apply_vod_availability(state: &mut State, request: &VodRequest, any_vod: bool
 }
 
 /// Refresh just the cross-source availability, leaving the guide and its
-/// favourites intact. Policy/deletion callers await this nonblocking read;
+/// favorites intact. Policy/deletion callers await this nonblocking read;
 /// completed background imports schedule it. Errors retain the last good value.
 pub(crate) fn refresh_vod_availability(
     owner: &Rc<super::Runtime>,
@@ -179,9 +179,9 @@ fn unsaved(owner: &super::Runtime) -> std::sync::Arc<AtomicUsize> {
     owner.favorite_unsaved.clone()
 }
 
-/// Reads saved favourites. The store's reader does not wait for a long
+/// Reads saved favorites. The store's reader does not wait for a long
 /// publish, but it cannot see a write still queued: while any of ours is,
-/// a favourites-inbox barrier must finish before queuing the read.
+/// a favorites-inbox barrier must finish before queuing the read.
 async fn load<R: Send + 'static>(
     owner: &super::Runtime,
     read: impl FnOnce(&Store) -> Result<R, StoreError> + Send + 'static,
@@ -198,7 +198,7 @@ async fn load<R: Send + 'static>(
     }
 }
 
-/// A new app root must reload persisted favourites, including an applied restore.
+/// A new app root must reload persisted favorites, including an applied restore.
 pub fn reset(owner: &super::Runtime) {
     // Never reuse a previous root's epoch-bound writer when restoring a library.
     owner
@@ -210,7 +210,7 @@ pub fn reset(owner: &super::Runtime) {
 }
 
 /// The source whose catalog is about to be shown (`data.rs`, before
-/// `set_schedule`): its saved favourites and recent channels. The same
+/// `set_schedule`): its saved favorites and recent channels. The same
 /// source keeps its in-memory lists (writes may still be on their way).
 pub async fn prepare_source(
     owner: &std::rc::Rc<super::Runtime>,
@@ -276,7 +276,7 @@ pub async fn prepare_source(
     })
 }
 
-/// Load enabled-source favourites while preserving edits already held in memory.
+/// Load enabled-source favorites while preserving edits already held in memory.
 pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<impl FnOnce()> {
     let history_revision = owner
         .favorites
@@ -375,7 +375,7 @@ fn write_owner(state: &State, key: &str) -> Option<(SourceId, String)> {
 }
 
 /// A new catalog is on screen (`set_schedule`): index its keys and show
-/// its favourites.
+/// its favorites.
 pub fn catalog_changed(owner: &super::Runtime, catalog: &dyn Schedule) {
     let index = KeyIndex::build(catalog);
     owner.favorites.with(|s| s.borrow_mut().index = index);
@@ -394,7 +394,7 @@ pub fn publish(owner: &super::Runtime) {
     });
 }
 
-/// The favourites on screen as catalog channels, in their order.
+/// The favorites on screen as catalog channels, in their order.
 pub fn favorite_channels(owner: &super::Runtime) -> Vec<usize> {
     owner.favorites.with(|s| {
         let s = s.borrow();
@@ -424,7 +424,7 @@ pub fn channel_of(owner: &super::Runtime, key: &str) -> Option<usize> {
     owner.favorites.with(|s| s.borrow().index.get(key))
 }
 
-/// Changes favourites through their catalog channels (the editor works on
+/// Changes favorites through their catalog channels (the editor works on
 /// sets of them): what `f` adds or removes is saved by key.
 pub fn edit(owner: &super::Runtime, f: impl FnOnce(&mut BTreeSet<usize>)) {
     let before = owner.favorites.with(|state| {
@@ -447,7 +447,7 @@ pub fn edit(owner: &super::Runtime, f: impl FnOnce(&mut BTreeSet<usize>)) {
     owner.emit(super::RuntimeEvent::FavoriteOrderChanged);
 }
 
-/// Adds `channel` (catalog) to the favourites or removes it.
+/// Adds `channel` (catalog) to the favorites or removes it.
 pub fn toggle(owner: &super::Runtime, channel: usize) {
     edit(owner, |set| {
         if !set.remove(&channel) {
@@ -855,15 +855,15 @@ pub(crate) async fn save_order(
     Ok(())
 }
 
-/// The store write for a favourite that the list in memory just moved to
+/// The store write for a favorite that the list in memory just moved to
 /// `index`, by the owner lookup the other writes use ([`write_owner`]).
 ///
 /// One playlist on screen: `index` is its place in that playlist's list,
 /// which is what the store keeps. "All playlists": the list is every
-/// playlist's favourites together, so `index` is not a place in any one
+/// playlist's favorites together, so `index` is not a place in any one
 /// of them. The store keeps an order per playlist only, so the write
-/// carries the favourite's place among its own playlist's favourites,
-/// read from the moved list. How the playlists' favourites interleave is
+/// carries the favorite's place among its own playlist's favorites,
+/// read from the moved list. How the playlists' favorites interleave is
 /// held in memory, as for the rest of the combined list
 /// ([`prepare_combined`]). (No screen reorders the combined list today:
 /// the menu item is disabled there. This keeps the function right

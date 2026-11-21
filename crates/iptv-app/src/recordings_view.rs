@@ -343,7 +343,7 @@ fn prepare_program(ui: Ui, origin: Origin, custom: bool) -> bool {
     let Some(mut request) = request else {
         return false;
     };
-    // A future programme keeps its actual window when opened from its context menu.
+    // A future program keeps its actual window when opened from its context menu.
     let custom = custom && request.start <= crate::time::wall_unix();
     if custom {
         request.start = crate::time::wall_unix();

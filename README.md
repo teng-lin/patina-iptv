@@ -4,7 +4,7 @@
 
 **Keep watching. Find what’s next.**
 
-Browse the guide over live TV, keep your favourites close, and make your
+Browse the guide over live TV, keep your favorites close, and make your
 own IPTV playlists feel at home. Pick up a remote, tap the screen, or
 reach for your mouse and keyboard.
 
@@ -20,7 +20,7 @@ TiviMate.
 <table>
   <tr>
     <td><img src="docs/screenshots/tv-groups.png" alt="The menu and channel groups beside the guide"></td>
-    <td><img src="docs/screenshots/tv-playback.png" alt="Full-screen playback with the programme card"></td>
+    <td><img src="docs/screenshots/tv-playback.png" alt="Full-screen playback with the program card"></td>
   </tr>
 </table>
 
@@ -43,7 +43,7 @@ A patina is the finish that metal earns with age and handling, like the
 green of weathered copper. Rust is iron's patina, and Patina is written in
 Rust. The name also fits the app's look (dark ink surfaces with mineral
 accents, and the metal P of its icon) and the way it is meant to be used:
-a player that settles into a household's habits through its favourites,
+a player that settles into a household's habits through its favorites,
 custom groups and history.
 
 ## Features
@@ -55,14 +55,14 @@ custom groups and history.
 - **Watching:** guide over live video, channel list beside the video,
   multiview (up to four tiles on desktop, two on Android),
   picture-in-picture on the desktops, track and picture-size choice.
-- **Library:** favourites, custom groups, reordering, hiding, history and
-  channel/programme search.
-- **Movies and series:** browse provider catalogues by playlist and category,
+- **Library:** favorites, custom groups, reordering, hiding, history and
+  channel/program search.
+- **Movies and series:** browse provider catalogs by playlist and category,
   search and sort titles, choose seasons and episodes, resume unfinished items
   and continue to the next episode.
 - **Parental controls:** protect channels, groups, movies and series with a PIN,
   timed or session unlocks, protected settings and a one-time recovery code.
-- **Recording:** record live TV, schedule once, daily, weekly or by programme
+- **Recording:** record live TV, schedule once, daily, weekly or by program
   title, and keep captures running independently of the player window. Retained
   recordings support pause, seeking, resume and playback from the beginning.
   MPEG-TS and unencrypted MPEG-TS HLS use private local storage outside backups;
@@ -288,12 +288,12 @@ mocks: `tools/mock-xtream.py` (Xtream API), `tools/mock-live-cuts.py`
 
 ## Movies, series and parental controls
 
-**Films** and **Series** in the navigation rail open the on-demand catalogue
+**Films** and **Series** in the navigation rail open the on-demand catalog
 provided by Xtream Codes or Stalker sources. Filter by playlist/category, search
 by title and choose a sort order. Details show available metadata, seasons and
 episodes; Continue watching restores saved progress. Episode playback can
 continue into the next season. Availability and metadata depend on the provider.
-M3U imports remain channel playlists; Patina does not guess a movie catalogue
+M3U imports remain channel playlists; Patina does not guess a movie catalog
 from channel names or URL extensions.
 
 **Continue watching** and **Recently added**, below Live TV in the rail, list
@@ -320,7 +320,7 @@ the top; if the lookup fails, an error and **Retry** keep the title to find.
 - *Recently added* sorts by the date the provider reports adding a movie or
   last changing a series, newest first. Titles without such a date follow by
   name. The release year is never used as that date. No index serves this
-  order across both catalogues, so each page sorts the enabled library.
+  order across both catalogs, so each page sorts the enabled library.
 - Both shelves can take a while on a large library or a long watch history,
   so the app reads them, and the place of a focused title, on a separate
   store lane from the one the guide reads from, and stops a read when the
@@ -341,7 +341,7 @@ Use **Block channel**, **Block group** or the on-demand block control to protect
 content. The first protected action sets a four-to-eight-digit PIN and displays
 a recovery code. Parental settings control live/on-demand protection, unlock
 scope and whether opening general settings requires the PIN. Changing parental
-policy, protected organisation or backups still requires administrative unlock.
+policy, protected organization or backups still requires administrative unlock.
 Recovery resets the PIN and rotates the recovery code. Viewing locks do not
 cancel recordings that were already authorized.
 
@@ -352,13 +352,13 @@ immediately; the control turns red while capture is active. Press it again to
 stop recording while playback continues.
 On a TV while watching, press Menu or long-press OK to open the control strip,
 then choose **Record**.
-In the guide, long-press a current programme (right-click on desktop) to open
+In the guide, long-press a current program (right-click on desktop) to open
 its menu and choose **Record**, without starting or changing playback.
-For a future programme, right-click on desktop or long-press on touch/TV, then
-choose **Schedule recording**. It schedules that programme immediately using its
+For a future program, right-click on desktop or long-press on touch/TV, then
+choose **Schedule recording**. It schedules that program immediately using its
 guide times, without a form. Choose **Edit recording** in Recordings for adjustments.
 For channels without guide data, **Schedule a recording…** opens the manual editor.
-On a TV, Menu/long OK also opens the programme menu. Up/Down chooses a form row,
+On a TV, Menu/long OK also opens the program menu. Up/Down chooses a form row,
 Left/Right changes its value, and Select opens an exact date/time/name editor.
 Touch and mouse users tap a field to edit it. Repeat and padding are under
 **Recording options**.
@@ -370,14 +370,14 @@ also returns to saved playback.
 
 The row's pencil edits a schedule, its cancel control cancels it, and its stop
 control retains captured media. The trash icon on the right asks for confirmation.
-Cancelling leaves playback and the file intact. Confirming deletion automatically
+Canceling leaves playback and the file intact. Confirming deletion automatically
 stops that file if it is playing, then deletes it; other playback is unaffected.
 Remote users can open secondary actions with Menu. A dot marks recording
-programmes in the guide.
+programs in the guide.
 
 Use **Repeat** to choose once, daily, weekly or series. Daily and weekly
 schedules keep their local clock time across daylight-saving changes; series
-rules match the programme title on the selected channel as guide data arrives.
+rules match the program title on the selected channel as guide data arrives.
 An accepted individual job keeps its start/end times. Cancel repeating schedule
 stops future occurrences without deleting finished recordings. If multiple
 repeating schedules share the selected recording, this cancels all of them.
@@ -407,10 +407,10 @@ apply. Watching and recording currently use separate upstream connections. Accou
 as the same Xtream/portal account share their budget. M3U account associations
 are unknown and are counted conservatively against other streams.
 
-Media is stored beside the catalogue directory, in its `-recordings` sibling,
+Media is stored beside the catalog directory, in its `-recordings` sibling,
 with a limit of 8 GiB per recording, four simultaneous recorders and a
 conservative 32 GiB media budget. Recordings are not encrypted with the
-catalogue and are excluded from portable and OS backups. Catalogue restore
+catalog and are excluded from portable and OS backups. Catalog restore
 clears recording schedules/history; existing media files remain in that
 directory and are never overwritten by restored recording identities.
 
@@ -441,8 +441,8 @@ directory and are never overwritten by restored recording identities.
 | `crates/iptv-epg` | XMLTV parser and channel matching |
 | `crates/iptv-guide` | Guide schedule and stream resolution |
 | `crates/iptv-import` | Source and guide import pipeline |
-| `crates/iptv-search` | Channel and programme search |
-| `crates/iptv-library` | Channel organisation, custom groups, ordering, favourites and history |
+| `crates/iptv-search` | Channel and program search |
+| `crates/iptv-library` | Channel organization, custom groups, ordering, favorites and history |
 | `crates/iptv-player-mpv` | libmpv playback adapter for desktop and iPad |
 | `crates/iptv-runtime` | Headless application runtime, lanes, background tasks and scheduler |
 | `crates/iptv-net` | HTTP adapter (reqwest + rustls) |
@@ -491,7 +491,7 @@ tag builds and publishes the release.
 
 [AGPL-3.0-only](LICENSE). Bundled Roboto fonts are under the
 [SIL Open Font License](crates/iptv-app/fonts/OFL.txt). Packages that
-bundle FFmpeg and mpv carry their licences too, and the
+bundle FFmpeg and mpv carry their licenses too, and the
 [source of those bundled libraries](docs/release.md#corresponding-source-for-bundled-media-libraries)
 is published: the retained source archive of each platform's libmpv build
 (named in the package's `SOURCE.txt`), and

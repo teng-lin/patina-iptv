@@ -19,7 +19,7 @@ use nsh_core::{ImageData, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
 
 const IMPORT: Duration = Duration::from_secs(20);
-/// Programmes of 45 minutes, "Show <n>" counting from the one on now (0).
+/// Programs of 45 minutes, "Show <n>" counting from the one on now (0).
 const LEN: i64 = 45 * 60;
 const CARD: &str = "id:player-card";
 const LINE: &str = "id:player-time-line";
@@ -89,7 +89,7 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_pauses() {
     step(app.wait_for_within("text:Show 0", IMPORT));
     step(app.set_environment("a TV", |e| e.idiom = Idiom::Tv));
 
-    // Two programmes back, OK replays it full screen: the card alone, its
+    // Two programs back, OK replays it full screen: the card alone, its
     // time line the seek bar (position and length), no action cards.
     step(app.press_key("home"));
     step(app.press_key("left"));

@@ -334,7 +334,7 @@ fn programs_of_channels_nothing_can_match_are_not_kept() {
 fn a_channel_declared_after_its_programs_still_binds() {
     let chans = channels(2);
     let full = synth::xmltv(&synth::m3u_epg_channels(2), NOW - HOUR, NOW + HOUR, HOUR);
-    // Move the first <channel> after the programmes.
+    // Move the first <channel> after the programs.
     let first = full.lines().find(|l| l.starts_with("<channel")).unwrap();
     let body = full
         .replacen(&format!("{first}\n"), "", 1)
@@ -517,7 +517,7 @@ fn passing_failures_are_retried_after_doubling_waits() {
         match seen.get() {
             1 => common::connect_error(),
             2 => SimResponse::status(503).into(),
-            // Every programme arrives, then the connection breaks.
+            // Every program arrives, then the connection breaks.
             3 => Reply::Truncated(SimResponse::ok(body.clone())),
             _ => SimResponse::ok(body.clone()).into(),
         }

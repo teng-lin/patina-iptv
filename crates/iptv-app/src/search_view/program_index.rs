@@ -1,4 +1,4 @@
-//! The programme index of the search screen, built on its own thread from
+//! The program index of the search screen, built on its own thread from
 //! every day the store keeps (`Store::for_each_epg_title`): the guide in
 //! memory holds only the last day (`data/pages.rs`), and search reaches
 //! back as far as the store does. A guide that is not stored (none on

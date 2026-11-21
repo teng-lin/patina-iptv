@@ -4,7 +4,7 @@
 //! field narrows the list as one types; the filter shows every guide
 //! channel or only those no channel uses. The choice is saved by channel
 //! key (`data::assign`) and shows at once when the stored guide has the
-//! programmes, else after the guide download it starts.
+//! programs, else after the guide download it starts.
 //!
 //! Remote: Up/Down (Page Up/Down) move, OK chooses (on the field: type,
 //! with the keyboard), Back ends typing, then closes. Touch and mouse:

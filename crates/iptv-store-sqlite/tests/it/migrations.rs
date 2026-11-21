@@ -739,7 +739,7 @@ fn check_overlays(store: &Store, version: u32) {
     }
 }
 
-/// Organisation data written by v3 builds.
+/// Organization data written by v3 builds.
 fn check_organization(store: &Store) {
     let news = store.channel(SRC, &id("xt:live:101")).unwrap().unwrap();
     assert_eq!(

@@ -14,11 +14,11 @@ use super::{EpgSchedule, GuideChannel, LOADING, NO_INFORMATION};
 
 /// Hour-aligned "now".
 const NOW: i64 = 1_800_000_000;
-/// Programmes of 45 minutes: never on the hour slots a loading day shows.
+/// Programs of 45 minutes: never on the hour slots a loading day shows.
 const LEN: i64 = 45 * 60;
 const FIRST: i64 = NOW - 6 * DAY + 600;
 
-/// Channel `a`'s programmes overlapping `[from, to)`, as the store reads a
+/// Channel `a`'s programs overlapping `[from, to)`, as the store reads a
 /// window back: `P<n>` from [`FIRST`] on, every [`LEN`], until a day ahead.
 fn store_between(from: i64, to: i64) -> GuideStore {
     let mut b = SourceBuilder::new(FeedId(1), 0, StoreOptions::default(), NOW);
@@ -147,7 +147,7 @@ fn an_older_day_loads_on_demand_and_then_shows() {
 fn programs_across_the_window_edge_read_the_same_from_both_sides() {
     let (s, requests) = paged(NOW - 7 * DAY);
     let edge = NOW - DAY;
-    // The programme airing at the edge started before it.
+    // The program airing at the edge started before it.
     let straddling = s.program_at(0, minute_of(&s, edge));
     assert!(s.unix(straddling.start) < edge);
     assert_eq!(s.title(0, straddling), title_at(edge));
@@ -178,7 +178,7 @@ fn browsing_back_in_the_guide_pages_in_the_previous_day() {
     deliver(&s, &requests);
     let shown = f.program(&s);
     assert_eq!(s.title(0, shown), title_at(s.unix(f.cursor)));
-    // The cells across the window are real programmes again.
+    // The cells across the window are real programs again.
     for p in s.programs_between(0, f.window, iptv_core::guide::VISIBLE) {
         assert_ne!(s.title(0, p), LOADING);
         assert_ne!(s.title(0, p), NO_INFORMATION);
@@ -277,7 +277,7 @@ fn the_guide_browses_from_the_oldest_day_kept_to_past_its_last_program() {
     let home = iptv_core::guide::home_window(0);
     assert_eq!(bare.browsable(0), (0, horizon));
     assert_eq!(iptv_core::guide::view_range(&bare, 0), (home, horizon));
-    // Without pages (the whole guide in memory): its first programme.
+    // Without pages (the whole guide in memory): its first program.
     let whole = EpgSchedule::new(vec![], store_between(NOW - 2 * DAY, NOW + DAY), NOW);
     let first = whole.browsable(minute_of(&whole, NOW)).0;
     let held = minute_of(&whole, NOW - 2 * DAY);

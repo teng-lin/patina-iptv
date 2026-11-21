@@ -1,6 +1,6 @@
 //! The settings screen's wording (iptv-rs's own): names of sections,
 //! subsections, settings, commands and choices, and how values read. The
-//! catalogue's summaries serve as the rows' descriptions.
+//! catalog's summaries serve as the rows' descriptions.
 
 use crate::i18n::{tr, trf};
 
@@ -290,7 +290,7 @@ pub fn label(key: &str) -> &'static str {
     }
 }
 
-/// What a command row does, where the catalogue's summary says more than
+/// What a command row does, where the catalog's summary says more than
 /// this version does.
 pub fn description(key: &str) -> Option<&'static str> {
     Some(match key {

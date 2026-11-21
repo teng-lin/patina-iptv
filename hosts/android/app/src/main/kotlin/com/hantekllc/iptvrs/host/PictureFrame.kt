@@ -6,7 +6,7 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
- * Sizes and centres the video surface for a picture-size mode; whatever
+ * Sizes and centers the video surface for a picture-size mode; whatever
  * exceeds the frame is clipped by it. Layout only (the SurfaceView is never
  * scaled or translated), so the video surface composites normally.
  */

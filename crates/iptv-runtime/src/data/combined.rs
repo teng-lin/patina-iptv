@@ -465,7 +465,7 @@ pub fn resume(owner: &Rc<crate::Runtime>) {
     });
 }
 
-/// Toggle a parent row without changing the channel catalogue or player surface.
+/// Toggle a parent row without changing the channel catalog or player surface.
 pub fn toggle_playlist(owner: &Rc<crate::Runtime>, group: usize) -> bool {
     let schedule = owner.schedule();
     let Some(all) = schedule

@@ -94,7 +94,7 @@ async fn main() {
         t.elapsed()
     );
 
-    // The app's defaults: a week of finished programmes, descriptions on.
+    // The app's defaults: a week of finished programs, descriptions on.
     let opts = StoreOptions {
         store_descriptions: std::env::var_os("BENCH_NO_DESC").is_none(),
         past_days_to_keep: Some(7),

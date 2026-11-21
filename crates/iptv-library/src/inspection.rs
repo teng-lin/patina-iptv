@@ -1,4 +1,4 @@
-//! Portable values for source-explicit catalogue and guide inspection.
+//! Portable values for source-explicit catalog and guide inspection.
 //! No view, database, network connection or player is part of this contract.
 use crate::{Choice, SourceId};
 use iptv_epg::{FeedId, MatchKind};
@@ -112,7 +112,7 @@ pub struct ProgramInfo {
     pub title: String,
 }
 
-/// A sample belongs to an XMLTV candidate, which may have no catalogue channel.
+/// A sample belongs to an XMLTV candidate, which may have no catalog channel.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CandidateProgram {
     pub candidate: CandidateRef,

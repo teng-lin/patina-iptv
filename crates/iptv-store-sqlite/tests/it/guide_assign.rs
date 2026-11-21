@@ -25,7 +25,7 @@ fn store() -> (Store, SourceId) {
     (store, a)
 }
 
-/// One feed listing three channels; `news` and `film` have programmes,
+/// One feed listing three channels; `news` and `film` have programs,
 /// `quiet` none. Playlist channel `k1` is bound to `news`.
 fn guide() -> GuideStore {
     let mut b = SourceBuilder::new(FEED, 1, StoreOptions::default(), NOW);
@@ -171,7 +171,7 @@ fn a_chosen_guide_applies_to_the_stored_guide_when_its_programs_are_there() {
         (stored.bound_channels, stored.match_fingerprint),
         (2, Some(7))
     );
-    // Films' programmes were not stored (nothing was bound to it): needs a
+    // Films' programs were not stored (nothing was bound to it): needs a
     // download, nothing changes.
     assert!(
         !store

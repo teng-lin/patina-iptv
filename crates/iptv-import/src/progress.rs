@@ -30,7 +30,7 @@ pub enum Phase {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Progress {
     pub phase: Phase,
-    /// Items parsed so far in this phase (channels, programmes, groups).
+    /// Items parsed so far in this phase (channels, programs, groups).
     pub items: u64,
     /// Body bytes received so far in this phase.
     pub bytes: u64,

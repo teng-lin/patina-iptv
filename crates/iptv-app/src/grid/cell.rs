@@ -1,14 +1,14 @@
-//! One programme cell of a guide row: a rounded box at its minutes in the
-//! row's band with its title, coloured by the focus.
+//! One program cell of a guide row: a rounded box at its minutes in the
+//! row's band with its title, colored by the focus.
 //!
 //! Kept cheap for the keys, which move the focus many times a second on a
 //! TV box (`tests/app/guide_scroll_cost.rs`):
 //!
 //! - a cell reads its row's focus only ([`RowFocus`]): a move re-runs the
 //!   cells of the two rows it leaves and enters;
-//! - a slot without a programme is invisible, so the platform does not
+//! - a slot without a program is invisible, so the platform does not
 //!   draw it (a row has [`super::MAX_CELLS`] slots, most rows use a few);
-//! - a past programme the row cannot replay is dimmed by colours mixed
+//! - a past program the row cannot replay is dimmed by colors mixed
 //!   with the window's, as the dimmed group would show on it, rather than
 //!   by the view's opacity, which Android draws through an offscreen layer
 //!   per cell (over full-screen video, where the guide is translucent,
@@ -25,7 +25,7 @@ use crate::theme::{
 };
 use crate::{Ui, ViewMode};
 
-/// What a row's cells read of the focus: the focused programme's start
+/// What a row's cells read of the focus: the focused program's start
 /// when the row has it (`None` otherwise), and whether the row has it.
 #[derive(Clone, Copy)]
 pub(super) struct RowFocus {
@@ -37,16 +37,16 @@ pub(super) struct RowFocus {
 /// How a cell looks, from the focus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Look {
-    /// The focused programme: a light pill, dark title.
+    /// The focused program: a light pill, dark title.
     Focused,
-    /// Another programme of the focused row: a lighter cell, white title.
+    /// Another program of the focused row: a lighter cell, white title.
     Lit,
-    /// Any other row's: the cell colour, grey title.
+    /// Any other row's: the cell color, gray title.
     Rest,
 }
 
-/// A cell's background and title colours (`0xRRGGBBAA`) and opacity, for
-/// `look`, dimmed or not, on the guide's colours `g` (the window colour
+/// A cell's background and title colors (`0xRRGGBBAA`) and opacity, for
+/// `look`, dimmed or not, on the guide's colors `g` (the window color
 /// `window` under them), opaque or over video (`overlay`, the cells' alpha
 /// then).
 pub(super) fn colors(
@@ -112,11 +112,11 @@ pub(super) fn cell(
             )
         })
     };
-    // A memo each: the colours below re-run when one changes, not on every
+    // A memo each: the colors below re-run when one changes, not on every
     // change of what they are made from.
     let look = computed(move || match program() {
         // An unused slot never follows focus. Restyling invisible cells on
-        // every row move wastes the same native work as a visible programme.
+        // every row move wastes the same native work as a visible program.
         None => Look::Rest,
         Some(p) if focus.start.get() == Some(p.start) && ui.keys_shown() => Look::Focused,
         _ if focus.lit.get() => Look::Lit,
@@ -138,7 +138,7 @@ pub(super) fn cell(
         colors(look.get(), dim.get(), &g, window, overlay)
     });
     let title_text = move || {
-        // Equal programme minutes on new data still re-read the title.
+        // Equal program minutes on new data still re-read the title.
         ui.guide_data();
         match (channel.get(), program()) {
             (Some(ch), Some(p)) => format!(
@@ -255,7 +255,7 @@ mod tests {
             assert_eq!(dim_cell, with_alpha(group_cell, 0xFF), "{look:?}");
             assert_eq!(dim_title, with_alpha(group_title, 0xFF), "{look:?}");
         }
-        // Undimmed: the colours as they were.
+        // Undimmed: the colors as they were.
         let rest = colors(Look::Rest, false, &g, window, None);
         assert_eq!(rest.0, with_alpha(g.cell, 0xFF));
         assert_eq!(rest.1, with_alpha(WHITE, TEXT_SECONDARY_ALPHA));

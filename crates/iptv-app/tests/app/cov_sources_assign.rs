@@ -4,7 +4,7 @@
 //! sources' order, each with its source and whether a channel uses it,
 //! narrows them by the filter and by typing, and saves a choice that the
 //! guide shows: a channel no other one uses (downloaded first), one whose
-//! programmes are stored (at once), no guide data, automatic again. With
+//! programs are stored (at once), no guide data, automatic again. With
 //! every source switched off the stored guide goes, and the chooser with
 //! it.
 //!

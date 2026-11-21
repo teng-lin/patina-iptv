@@ -1,4 +1,4 @@
-//! Bounded on-demand catalogue reads and durable, source-scoped watch progress.
+//! Bounded on-demand catalog reads and durable, source-scoped watch progress.
 use crate::{Result, Store, StoreError};
 use iptv_core::vod::{
     Card, Category, DiscoveryPage, DiscoveryQuery, Key, Kind, Progress, Query, Shelf, Source,
@@ -6,8 +6,8 @@ use iptv_core::vod::{
 use iptv_providers::model::StreamLocator;
 use rusqlite::{OptionalExtension, params};
 
-/// Every movie and series of the catalogues, once each: a series that a
-/// source lists both as a series and as an embedded movie-catalogue series
+/// Every movie and series of the catalogs, once each: a series that a
+/// source lists both as a series and as an embedded movie-catalog series
 /// is the series row. `added` is the provider's added time for movies and
 /// last-modified time for series; never the release year.
 macro_rules! catalog_items {
@@ -20,15 +20,15 @@ v.source_id,v.id,'series',v.name,v.group_ids,v.poster,v.plot,v.year,v.rating_x10
 FROM series v)"
     };
 }
-/// Whether source `id` has movies, and series, as the catalogue reads them.
+/// Whether source `id` has movies, and series, as the catalog reads them.
 pub(crate) fn on_demand_kinds(
     conn: &rusqlite::Connection,
     id: crate::SourceId,
 ) -> Result<(bool, bool)> {
-    // The kind rule of `catalogue_items!` on the base tables, keyed by
+    // The kind rule of `catalog_items!` on the base tables, keyed by
     // source: a movie-list row is a movie unless it is an embedded series;
     // a series is a series-list row or an embedded one. (The shared CTE
-    // would be materialised across every source.)
+    // would be materialized across every source.)
     let mut statement = conn.prepare_cached(
         "SELECT EXISTS(SELECT 1 FROM vod WHERE source_id=?1 AND is_series=0), \
 EXISTS(SELECT 1 FROM series WHERE source_id=?1) OR \
@@ -90,7 +90,7 @@ macro_rules! unfinished {
 /// and series of enabled sources with their card columns and progress time
 /// (`$min` is the minimum position). The progress records drive the query;
 /// each looks up its own title by primary key, so the work follows what was
-/// watched, not the catalogue's size. `CROSS JOIN` keeps that order. A
+/// watched, not the catalog's size. `CROSS JOIN` keeps that order. A
 /// series appears once, through its parent record, which follows the
 /// episode watched last; when that episode was finished, the row resumes
 /// the next one from its start (position 0).
@@ -142,7 +142,7 @@ WHERE m.source_id=?2 AND m.kind=?3 AND m.id=?4"
 /// identity. Every key is unique, so the order is total and pages are
 /// stable while the library is unchanged.
 ///
-/// No index serves this order across both catalogues: each page sorts the
+/// No index serves this order across both catalogs: each page sorts the
 /// enabled movies and series (a temporary B-tree over the whole library),
 /// so it is linear in the library's size. The runtime therefore reads it
 /// on the store's analysis lane, never on the reader that serves guide
@@ -303,7 +303,7 @@ v.is_series=1))) ORDER BY g.name COLLATE NOCASE,g.source_id,g.id LIMIT 2000")?;
         exact: Option<&Key>,
     ) -> Result<(Vec<Card>, bool)> {
         let limit = limit.clamp(1, 200);
-        // Explicit equality lets SQLite use each catalogue's source/content key.
+        // Explicit equality lets SQLite use each catalog's source/content key.
         // An optional OR predicate would still scan every shared-name item.
         let identity = if exact.is_some() {
             "v.source_id=?2 AND v.id=?9"
@@ -358,8 +358,8 @@ x WHERE x.value=?4))) AND instr(lower(v.name),lower(?5))>0 AND (?6=0 OR (",
     /// [`iptv_core::vod::DISCOVERY_PAGE_MAX`].
     ///
     /// Continue watching is driven by the progress records (bounded by what
-    /// was watched, not by the catalogue): each record looks up its own
-    /// title by primary key. Recently added sorts the enabled catalogues by
+    /// was watched, not by the catalog): each record looks up its own
+    /// title by primary key. Recently added sorts the enabled catalogs by
     /// the provider's added/last-modified time; it never uses release year.
     pub fn vod_discovery(&self, query: DiscoveryQuery) -> Result<DiscoveryPage> {
         let limit = query.bounded_limit();
@@ -396,7 +396,7 @@ x WHERE x.value=?4))) AND instr(lower(v.name),lower(?5))>0 AND (?6=0 OR (",
             store.vod_discovery(DiscoveryQuery::around(shelf, rank))
         })
     }
-    /// Read source authority and catalogue data from the same committed
+    /// Read source authority and catalog data from the same committed
     /// snapshot. A configuration edit cannot pair replacement credentials
     /// with an older incarnation checked by the caller. Errors roll back
     /// through the transaction guard without retaining the read snapshot.
@@ -435,7 +435,7 @@ x WHERE x.value=?4))) AND instr(lower(v.name),lower(?5))>0 AND (?6=0 OR (",
         };
         Ok(rank.map(|rank| u32::try_from(rank.max(0)).unwrap_or(u32::MAX)))
     }
-    /// Runs `read` so that cancelling `cancel` (the shelf closed, a newer
+    /// Runs `read` so that canceling `cancel` (the shelf closed, a newer
     /// page was asked for, the application closed) stops its SQLite work
     /// within a bounded number of steps instead of finishing a long sort.
     pub fn vod_cancelable<T>(
@@ -1304,7 +1304,7 @@ mod tests {
             .cards
             .remove(0);
         assert_eq!(row.progress.resume_ms(), 0);
-        // The Shows catalogue's Continue watching filter agrees.
+        // The Shows catalog's Continue watching filter agrees.
         let shows = Query {
             kind: Kind::Series,
             continue_watching: true,
@@ -1490,7 +1490,7 @@ mod tests {
         assert_eq!(window.start, 0);
         assert_eq!(window.cards.len(), DISCOVERY_PAGE as usize);
         assert!(window.cards.iter().all(|c| c.key != oldest));
-        // A cancelled window read on either shelf stops without a page.
+        // A canceled window read on either shelf stops without a page.
         let cancel = iptv_import::CancelToken::new();
         cancel.cancel();
         for which in [Shelf::ContinueWatching, Shelf::RecentlyAdded] {
@@ -1536,7 +1536,7 @@ mod tests {
             .unwrap();
         assert_eq!(every_page(&store, Shelf::ContinueWatching, 10).len(), 2);
         // Deleting a playlist removes its progress; the same id recreated
-        // with the same catalogue starts clean.
+        // with the same catalog starts clean.
         let source = store.source(b).unwrap().unwrap().source;
         store.delete_source(b).unwrap();
         assert_eq!(
@@ -1656,7 +1656,7 @@ mod tests {
     /// Recently added has no index for its order: every page sorts the
     /// whole enabled library. That is why the runtime reads it on the
     /// analysis lane, not the guide's reader, and why it must stop when
-    /// cancelled rather than finish the sort.
+    /// canceled rather than finish the sort.
     #[test]
     fn recently_added_sorts_the_library_and_a_cancel_stops_it() {
         use std::sync::{
@@ -1683,10 +1683,10 @@ mod tests {
         let page = store.vod_discovery_cancelable(first, &cancel).unwrap();
         assert_eq!(page.cards.len(), iptv_core::vod::DISCOVERY_PAGE as usize);
         assert!(page.more);
-        // Cancelled before it starts: no SQLite work at all.
+        // Canceled before it starts: no SQLite work at all.
         cancel.cancel();
         assert!(store.vod_discovery_cancelable(first, &cancel).is_err());
-        // Cancelled while it ran (the shelf closed meanwhile): its result is
+        // Canceled while it ran (the shelf closed meanwhile): its result is
         // not reported as current. While it runs, the installed progress
         // handler is what interrupts SQLite's sort.
         let cancel = iptv_import::CancelToken::new();
@@ -1694,7 +1694,7 @@ mod tests {
         let counted = steps.clone();
         let stopper = cancel.clone();
         let result = store.vod_cancelable(&cancel, move |store| {
-            // Installing a second handler would replace the cancelling one,
+            // Installing a second handler would replace the canceling one,
             // so the read cancels its own token from its row callback.
             store
                 .conn

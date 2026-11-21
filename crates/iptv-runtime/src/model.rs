@@ -9,7 +9,7 @@ pub use iptv_library::{
 pub use iptv_store_sqlite::DatabaseKey;
 pub(crate) use iptv_store_sqlite::StoredGuide;
 
-/// What early playback needs before the full catalogue has been loaded.
+/// What early playback needs before the full catalog has been loaded.
 /// Storage overlays other than the parental block stay inside the runtime.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlaybackChannel {

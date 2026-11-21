@@ -1,4 +1,4 @@
-//! Synthetic catalogue exercises direct-ID gates independently of shell menus.
+//! Synthetic catalog exercises direct-ID gates independently of shell menus.
 use crate::common;
 use crate::support;
 use iptv_core::parental::{ContentKind, Pin, Target};

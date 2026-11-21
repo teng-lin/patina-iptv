@@ -6,10 +6,10 @@
 //! cargo test --release -p iptv-store-sqlite --test memory epg_memory:: -- --ignored --nocapture
 //! ```
 //!
-//! The first runs the 1000-channel guide (~83 programmes per channel, as
+//! The first runs the 1000-channel guide (~83 programs per channel, as
 //! `make-iptv-fixtures.py --channels 1000 --days-back 2 --days-ahead 1`
 //! writes it); the second the script's default (5000 channels, 9 days,
-//! 1.2M programmes).
+//! 1.2M programs).
 
 use crate::epg_synth;
 use crate::staged;
@@ -84,7 +84,7 @@ fn sqlite_heap() -> usize {
     usize::try_from(unsafe { rusqlite::ffi::sqlite3_memory_used() }).unwrap_or(0)
 }
 
-/// Days of finished programmes the guide keeps (`epg.keep_past` default).
+/// Days of finished programs the guide keeps (`epg.keep_past` default).
 const KEEP_PAST_DAYS: u32 = 2;
 
 /// The stored path: import, write to a file-backed store, drop the import,

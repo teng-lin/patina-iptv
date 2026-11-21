@@ -1,7 +1,7 @@
 //! EPG, appearance, guide/list presentation and logos.
 //!
 //! Default provenance markers as in `general.rs`; `// default: declared
-//! (06)` is behaviour the reference documents as its default
+//! (06)` is behavior the reference documents as its default
 //! (`06-defaults-and-input.md`) without a recovered value.
 
 use super::{choices::*, key};

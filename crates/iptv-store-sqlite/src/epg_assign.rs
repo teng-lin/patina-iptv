@@ -5,7 +5,7 @@
 //! key across refreshes) that EPG matching applies at the next download.
 //! [`Store::rebind_epg`] applies it to the stored guide at once when that
 //! is possible without a download: turning a channel's guide off, or
-//! pointing it at an EPG channel whose programmes are stored.
+//! pointing it at an EPG channel whose programs are stored.
 
 use iptv_epg::{ChannelKey, MatchKind};
 use iptv_providers::ContentId;
@@ -156,7 +156,7 @@ impl Store {
 
     /// Points playlist channel `key` of the stored guide at EPG channel
     /// `to` (`None`: no guide), without a download. False (and nothing
-    /// changed) when there is no stored guide or `to`'s programmes are not
+    /// changed) when there is no stored guide or `to`'s programs are not
     /// stored. `match_fingerprint`: the fingerprint of the channels and
     /// overrides the bindings now follow.
     pub fn rebind_epg(

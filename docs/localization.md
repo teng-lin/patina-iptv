@@ -4,7 +4,7 @@ Choose **Settings → General → Language**. The choice applies immediately and
 is saved in settings and backups. **System language** uses the device's preferred
 locale when the app starts. Unsupported device languages fall back to English.
 
-The initial catalogue provides English, Spanish, French, German, Italian,
+The initial catalog provides English, Spanish, French, German, Italian,
 Portuguese, Russian, Simplified Chinese, Traditional Chinese, Japanese and Korean.
 Regional variants use the base language (for example `es-MX` and `pt-BR`). Chinese
 script tags take precedence over regions: `zh-Hant` uses Traditional Chinese;
@@ -12,9 +12,9 @@ script tags take precedence over regions: `zh-Hant` uses Traditional Chinese;
 
 ## What is translated
 
-The catalogue now covers the known application-owned UI inventory in all eleven
+The catalog now covers the known application-owned UI inventory in all eleven
 languages: navigation, settings names/choices/help, playlist and guide setup,
-backup/restore, channel organisation, guide/search/multiview hints, playback and
+backup/restore, channel organization, guide/search/multiview hints, playback and
 track controls, recordings, parental controls and movie/series flows. Counts and
 dates use the selected language's formatting rules.
 
@@ -29,7 +29,7 @@ batches reduced its pinned baseline to zero:
 | Playback, tracks and picture controls | 64 | 0 |
 | Search | 12 | 0 |
 | Multiview | 10 | 0 |
-| Favourites and channel menus | 5 | 0 |
+| Favorites and channel menus | 5 | 0 |
 | Desktop menus | 3 | 0 |
 | Generated playlist name | 1 | 0 |
 | **Total** | **437** | **0** |
@@ -39,7 +39,7 @@ batches reduced its pinned baseline to zero:
 **System language**; its classification is documented under `[not-shown]`.
 No displayed message was moved there to reduce the count.
 
-This is catalogue coverage, not completed human language review. The new
+This is catalog coverage, not completed human language review. The new
 translations are machine-drafted and reviewed for source meaning, conditions,
 placeholders and application context. Fluent speakers still need to review all
 ten non-English locales for grammar, natural wording and terminology consistency.
@@ -50,9 +50,9 @@ its controls have localized accessible labels.
 
 Unknown messages still fall back to their English source. The token-based lint
 has the limitations described below, so a zero baseline does not prove that no
-unrecognised or dynamically built text exists. New messages must use the existing
-catalogue helpers and complete locale columns. Provider channel/playlist names,
-programme titles/descriptions and track labels remain opaque. Generated guide
+unrecognized or dynamically built text exists. New messages must use the existing
+catalog helpers and complete locale columns. Provider channel/playlist names,
+program titles/descriptions and track labels remain opaque. Generated guide
 loading/gap labels and the ungrouped bucket are localized by provenance; a real
 provider title named **No information** or a provider group named **Other** stays
 unchanged. An automatically generated playlist name is localized when created
@@ -153,12 +153,12 @@ that `tr` shows as written.
 
 ### The lint
 
-`crates/iptv-app/tests/app/catalogue_lint.rs` reads the sources of the app,
-the core, the guide and library crates and the settings catalogue, and fails
+`crates/iptv-app/tests/app/catalog_lint.rs` reads the sources of the app,
+the core, the guide and library crates and the settings catalog, and fails
 on:
 
 - a literal given to `tr`, `trf` or `key`, to the core's `translate` or
-  `format`, or to a helper or message type it knows, that has no catalogue
+  `format`, or to a helper or message type it knows, that has no catalog
   row. `concat!("…", "…")` is the literal it makes;
 - a message given as a name (`tr(label)`, `button(ui, size, label, act)`)
   that is not a listed carrier of checked messages;
@@ -171,7 +171,7 @@ on:
   `trf("{count} items", &[("cnt", n.into())])`, or `tr` of a message with a
   placeholder;
 - a literal that reads as text for a person and is neither a message nor on
-  `catalogue_allowlist.txt`;
+  `catalog_allowlist.txt`;
 - an allowlist line that matches no literal any more, or an `[untranslated]`
   section larger or smaller than the size pinned in the test.
 
@@ -191,7 +191,7 @@ catch:
 
 - one word in a call it does not know to show text: `Button::new("OK")`,
   `"EPG"` in a struct field. Outside the calls listed in `TEXT_SINKS`, only
-  a capitalised word (`Cancel`) or several words read as text;
+  a capitalized word (`Cancel`) or several words read as text;
 - text assembled from pieces that are not literals;
 - a listed carrier name reused for another variable in the same file: a
   carrier is a file and a name, not a binding;
@@ -204,12 +204,12 @@ catch:
 These are for review. The lint's header lists them with the reasons.
 
 Adding a language also requires adding its tag to
-`iptv_settings::catalogue::choices::LANGUAGE`, its plural forms to `plural.rs`
+`iptv_settings::catalog::choices::LANGUAGE`, its plural forms to `plural.rs`
 and its calendar to `calendar.rs`; tests check each of the three.
 The setting remains text-valued so older backups and unlisted locale tags survive.
 
 Run `cargo test -p iptv-core -p iptv-settings`, the core wasm build, the app
-build, `cargo test -p iptv-app --features test-support --test app catalogue_lint`
+build, `cargo test -p iptv-app --features test-support --test app catalog_lint`
 and `cargo test -p iptv-app --features test-support --test app interface_languages`. The `interface_languages` headless
 scenarios check switching languages without remounting settings, persistence,
 returning to the system preference, and the translated flows, counts, dates
@@ -219,7 +219,7 @@ and clock. Headless tests pin their system locale through
 ## Layout and regression fixtures
 
 `test-support` builds can set `IPTV_RS_TEST_PSEUDOLOCALE=1` to double and accent
-fixed catalogue labels. This test-only map accepts catalogue keys; it never
+fixed catalog labels. This test-only map accepts catalog keys; it never
 expands provider values or changes persisted language choices. It does not alter
 formatted/plural messages: Russian plural cases and real Chinese/Japanese text
 are exercised separately. Production builds contain neither this map nor the

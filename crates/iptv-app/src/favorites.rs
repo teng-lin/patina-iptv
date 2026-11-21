@@ -1,4 +1,4 @@
-//! Shell entry points for favourite actions; state and persistence live in Runtime.
+//! Shell entry points for favorite actions; state and persistence live in Runtime.
 use crate::Ui;
 use iptv_core::favorites::History;
 use iptv_core::guide::Schedule;
@@ -16,11 +16,11 @@ pub fn toggle(_ui: Ui, channel: usize) {
 pub fn reorder(_ui: Ui, key: &str, index: usize) {
     crate::runtime().reorder_favorite(key, index);
 }
-/// A new app root must reload persisted favourites, including an applied restore.
+/// A new app root must reload persisted favorites, including an applied restore.
 pub fn reset() {
     crate::runtime().reset_favorites();
 }
-/// The favourites on screen as catalog channels, in their order.
+/// The favorites on screen as catalog channels, in their order.
 pub fn favorite_channels() -> Vec<usize> {
     crate::runtime().favorite_channels()
 }

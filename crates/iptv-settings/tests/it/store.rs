@@ -7,7 +7,7 @@ use iptv_settings::{
 
 const G: &Target = &Target::Global;
 
-/// Recognises the expected error variant.
+/// Recognizes the expected error variant.
 type Expect = fn(&SettingsError) -> bool;
 
 fn change(key: &'static str, target: Target) -> Change {

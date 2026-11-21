@@ -1,7 +1,7 @@
 //! The time ruler over the grid: the date of the day shown and the time
 //! (light accent), the touch steps of the time window and, once it left
 //! now, a Now button over the channel column; the half-hour slot times
-//! (grey) over the programmes and the now line's dot, sliding with them
+//! (gray) over the programs and the now line's dot, sliding with them
 //! (`pan.rs`); and a thin line under it all.
 
 use crate::i18n::tr;
@@ -142,7 +142,7 @@ pub(super) fn ruler(
         .child(view().h(px(SEPARATOR_H)).bg(separator))
         .child(
             // The now dot and the line through the separator under it, over
-            // the programmes only, sliding with them.
+            // the programs only, sliding with them.
             view()
                 .absolute()
                 .bottom(px(0.0))

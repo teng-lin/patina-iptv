@@ -2,16 +2,16 @@
 //!
 //! A shown schedule holds the stored guide from `crate::paging::LOADED_PAST_DAYS`
 //! before its start on ([`window`]: the guide's first screen, a day of
-//! "earlier programmes" and the play bar's archive of the last day need
+//! "earlier programs" and the play bar's archive of the last day need
 //! nothing more), not every day `epg.keep_past` keeps: on Android a week
 //! of a large guide was most of the app's memory. Older days are pages
-//! (`iptv_guide::pages`): the first guide cell, programme detail or
+//! (`iptv_guide::pages`): the first guide cell, program detail or
 //! catch-up that needs one asks `loader` for it, which reads it on its
 //! own thread (`Store::load_epg` of that day) and puts it in the schedule
-//! on screen; `RuntimeEvent::GuideChanged` asks the shell to redraw programmes.
+//! on screen; `RuntimeEvent::GuideChanged` asks the shell to redraw programs.
 //!
 //! Pages go again when the guide's window is back at now (`bind`); the
-//! day of the programme playing from the archive is pinned meanwhile, and
+//! day of the program playing from the archive is pinned meanwhile, and
 //! catch-up waits for its day before it resolves the archive ([`ready`]).
 
 use std::rc::Rc;
@@ -35,7 +35,7 @@ impl std::fmt::Display for PageReadError {
 impl std::error::Error for PageReadError {}
 pub(crate) struct Waiter {
     // None waits for a held first-screen schedule to be replaced; it has no
-    // older-page request that can complete its missing programme window.
+    // older-page request that can complete its missing program window.
     request: Option<PageRequest>,
     complete: Box<dyn FnOnce(Result<(), PageReadError>)>,
 }
@@ -44,7 +44,7 @@ pub use crate::paging::{kept_from, window};
 
 /// `schedule` (source `source`'s stored guide, as [`window`] at `now`
 /// read it) with its older days paged in on demand, back to the first
-/// programme stored.
+/// program stored.
 pub async fn paged(
     owner: &Rc<crate::Runtime>,
     schedule: EpgSchedule,
@@ -178,7 +178,7 @@ fn each(schedule: &dyn Schedule, mut f: impl FnMut(&EpgSchedule)) {
     }
 }
 /// A schedule replaced the one on screen (with the whole window after a
-/// first screen, `opening.rs`): what waited for its programmes looks again.
+/// first screen, `opening.rs`): what waited for its programs looks again.
 pub fn replaced(owner: &Rc<crate::Runtime>) {
     for waiter in owner
         .page_waiters
@@ -197,8 +197,8 @@ pub fn want(schedule: &dyn Schedule, minute: i32) {
     });
 }
 
-/// Whether the programmes around `t` are in memory on `schedule`, so a
-/// catch-up there resolves with its programme's real times; when not, its
+/// Whether the programs around `t` are in memory on `schedule`, so a
+/// catch-up there resolves with its program's real times; when not, its
 /// day is pinned and asked for, and `retry` runs once a page arrived.
 pub fn ready(
     owner: &Rc<crate::Runtime>,
@@ -726,13 +726,13 @@ mod tests {
     #[test]
     fn the_guide_goes_back_to_its_first_program_stored() {
         let w = window(NOW, 7);
-        // Two days stored of the seven kept: back to the first programme.
+        // Two days stored of the seven kept: back to the first program.
         let first = NOW - 2 * DAY + 600;
         assert_eq!(kept_from(w, Some(first), NOW).oldest, first);
-        // Older programmes than the store keeps (not pruned yet): no
+        // Older programs than the store keeps (not pruned yet): no
         // further back than it keeps.
         assert_eq!(kept_from(w, Some(NOW - 9 * DAY), NOW).oldest, w.oldest);
-        // Keeping everything: the first programme bounds it.
+        // Keeping everything: the first program bounds it.
         let all = window(NOW, u32::MAX);
         assert_eq!(kept_from(all, Some(first), NOW).oldest, first);
         // Nothing stored: no past at all.

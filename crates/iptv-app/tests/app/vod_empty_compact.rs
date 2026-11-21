@@ -1,4 +1,4 @@
-//! The empty Movies and Shows catalogue in a compact window (#130): its
+//! The empty Movies and Shows catalog in a compact window (#130): its
 //! message and action are the one pane (`iptv_core::vod::Screen::one_pane`).
 //! At 400×600 with an M3U-only library the categories give way, the
 //! message keeps a readable width, Add playlist and Close stay inside the
@@ -62,7 +62,7 @@ fn resize(app: &mut crate::Headless, (w, h): (f32, f32)) {
     app.settle();
 }
 
-/// The one-pane empty catalogue: no categories, a message as wide as most
+/// The one-pane empty catalog: no categories, a message as wide as most
 /// of the window, its action and Close inside it.
 #[track_caller]
 fn one_pane(app: &mut crate::Headless, pseudo: bool) {

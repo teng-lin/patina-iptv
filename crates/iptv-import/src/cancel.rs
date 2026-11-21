@@ -137,7 +137,7 @@ pub(crate) async fn or_cancel<T>(
     .await
 }
 
-/// `Err(Cancelled)` once cancellation was requested.
+/// `Err(Canceled)` once cancellation was requested.
 pub(crate) fn check(cancel: &CancelToken) -> Result<(), ImportError> {
     if cancel.is_canceled() {
         Err(ImportError::Canceled)

@@ -663,7 +663,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
             crate::recordings_view::program(ui, origin, false);
             return;
         }
-        // Back (or Menu) closes programme details.
+        // Back (or Menu) closes program details.
         if matches!(action, Action::Back | Action::ShowMenu) {
             crate::menu_view::close(ui);
         }
@@ -707,7 +707,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         return;
     }
     // The preview owns focus, not the guide row left underneath it. Keep
-    // programme/list commands from acting on a different channel.
+    // program/list commands from acting on a different channel.
     if ui.mode.get() == ViewMode::Guide && ui.focus.with(|f| f.pane == Pane::Preview) {
         match action {
             Action::MoveUp => mv(Move::Up),

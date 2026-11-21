@@ -1,7 +1,7 @@
 //! iptv-rs NSH shell (TV + tablet): remote (D-pad) and touch drive one
 //! app-owned focus model (`guide.rs`, `browse.rs`); the layout follows the
 //! reference UX's regions (header with the preview and the focused
-//! programme, navigation rail and groups beside the guide grid) over one
+//! program, navigation rail and groups beside the guide grid) over one
 //! persistent video layer (`video.rs`). The guide shows one list at a time (`lists.rs`).
 
 use crate::i18n::tr;
@@ -180,7 +180,7 @@ pub enum ViewMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Playback {
     Live,
-    /// An archived programme (its start in guide minutes), from `offset`
+    /// An archived program (its start in guide minutes), from `offset`
     /// seconds into it.
     CatchUp {
         start: i32,
@@ -199,13 +199,13 @@ pub struct Stats {
 /// Application-wide signals deliberately shared by every presentation window.
 #[derive(Clone, Copy)]
 pub struct SharedUi {
-    /// Ordered favourites/recent lists changed, including while a popup owns its list.
+    /// Ordered favorites/recent lists changed, including while a popup owns its list.
     pub list_version: Signal<u64>,
     pub theme: Signal<Theme>,
     /// The app's monotonic clock origin (core state machines take ms), on
     /// the engine's clock: the one its timers run on.
     pub epoch: Instant,
-    /// The favourite channels on screen (catalog channels); kept by key
+    /// The favorite channels on screen (catalog channels); kept by key
     /// and changed through `favorites.rs`.
     pub favorites: Signal<BTreeSet<usize>>,
     /// The source has movies or shows (the rail lists them).
@@ -216,7 +216,7 @@ pub struct SharedUi {
     /// Bumped when the guide data changes (views re-read `schedule()`).
     pub data_version: Signal<u64>,
     /// Bumped when an older day of the guide was paged in (`data/pages.rs`):
-    /// views showing programmes re-read them ([`Ui::guide_data`]).
+    /// views showing programs re-read them ([`Ui::guide_data`]).
     pub guide_pages: Signal<u64>,
     pub picture: Signal<PictureSettings>,
     /// The stored playlists: which one is shown, their refreshes (`data.rs`).
@@ -237,7 +237,7 @@ pub struct Ui {
     /// running: the channel key focused then (`browse_playback::hold`).
     pub autoplay_held: Signal<Option<Option<String>>>,
     pub pending_zap: Signal<Option<iptv_core::browse_playback::Target>>,
-    /// A timeline pan's hold on the channel whose programme on air it
+    /// A timeline pan's hold on the channel whose program on air it
     /// started from: browse playback keeps that channel while the pan
     /// moves the focus along the row (`grid/pan.rs`, `browse_playback.rs`).
     pub pan_anchor: Signal<Option<iptv_core::browse_playback::PanAnchor>>,
@@ -266,11 +266,11 @@ pub struct Ui {
     pub play_bar_height: Signal<f32>,
     pub paused: Signal<bool>,
     /// A catch-up seek being chosen: the target, in seconds into the
-    /// programme, opened once the keys pause (`seek.rs`).
+    /// program, opened once the keys pause (`seek.rs`).
     pub seek_target: Signal<Option<i32>>,
     /// The open context menu, if any.
     pub menu: Signal<Option<Menu>>,
-    /// The programme description popover, if open.
+    /// The program description popover, if open.
     pub description: Signal<Option<Origin>>,
     pub recordings: Signal<iptv_core::recording::Screen>,
     pub vod: Signal<iptv_core::vod::Screen>,
@@ -281,7 +281,7 @@ pub struct Ui {
     pub sleep: Signal<SleepTimer>,
     /// The open chooser over the video (picture size, sleep timer).
     pub chooser: Signal<Option<chooser::Open>>,
-    /// The favourites editor, when open.
+    /// The favorites editor, when open.
     pub editor: Signal<Option<FavoritesEditor>>,
     pub organization: Signal<Option<organization_view::Open>>,
     organization_generation: Signal<u64>,
@@ -438,13 +438,13 @@ impl Ui {
 }
 
 impl Ui {
-    /// Tracks the programmes on screen: a new schedule or a day paged in.
+    /// Tracks the programs on screen: a new schedule or a day paged in.
     /// The value changes with either.
     pub fn guide_data(&self) -> u64 {
         self.app.data_version.get() << 32 | (self.app.guide_pages.get() & 0xFFFF_FFFF)
     }
 
-    /// OK or a tap on the focused programme: a live one plays (OK on the
+    /// OK or a tap on the focused program: a live one plays (OK on the
     /// channel already playing goes full screen). An available replay plays
     /// from the archive. Other listings open their details.
     pub fn watch(&self) {
@@ -573,7 +573,7 @@ impl Ui {
         self.input.get().back_controls(remote_back)
     }
 
-    /// A foreground UI surface colour. In guide mode the opaque colours are
+    /// A foreground UI surface color. In guide mode the opaque colors are
     /// drawn by the backdrop *under* the video layer (`panels::backdrop`), so
     /// the foreground is clear and the preview rectangle shows the video; in
     /// overlay mode it tints the full-screen video.
@@ -704,7 +704,7 @@ pub fn schedule() -> Rc<dyn Schedule> {
 /// Swaps the guide data (after an import) and tells the views to re-read.
 /// The guide keeps its list and focused channel by identity, at the new
 /// schedule's now; channel indices into the old data (open menus) that no
-/// longer exist are dropped, the playing channel and favourites are found
+/// longer exist are dropped, the playing channel and favorites are found
 /// again by key.
 pub fn set_schedule(ui: &Ui, schedule: Rc<dyn Schedule>) {
     let kept = lists::keep(*ui);
@@ -734,7 +734,7 @@ pub fn in_archive(channel: usize, program: Program, now: i32) -> bool {
     program.end <= now && program.can_replay(now, schedule().catchup_days(channel))
 }
 
-/// `0xRRGGBB` with alpha, as an NSH colour.
+/// `0xRRGGBB` with alpha, as an NSH color.
 pub fn tint(rgb_hex: u32, alpha: u8) -> Rgba {
     rgba(theme::with_alpha(rgb_hex, alpha))
 }
@@ -1042,7 +1042,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(search_view::layer(ui))
         .child(menu_view::layer(ui))
         .child(chooser::layer(ui))
-        // Over the popups it opens (choosers, programme details), so its
+        // Over the popups it opens (choosers, program details), so its
         // buttons stay usable and toggle them.
         .child(play_bar::layer(ui))
         .child(fav_editor::layer(ui))
@@ -1116,7 +1116,7 @@ fn pointer_moved(ui: Ui, e: &MouseEvent) {
     let (x, y) = (e.page_position.x.0, e.page_position.y.0);
     // Anywhere else (the guide, lists, Recordings), a mouse that really
     // moved after keys switches to Pointer, so the ⋯ controls show: no
-    // focus moves and no playback is scheduled or cancelled.
+    // focus moves and no playback is scheduled or canceled.
     if desktop::pointer_traveled(ui.player_surface, x, y) {
         pointer_input(ui);
     }
@@ -1250,7 +1250,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 ui.play_bar.update(iptv_core::play_bar::PlayBar::hide);
                 true
             }
-            // Hint, past programme → now, guide → groups → rail → leave
+            // Hint, past program → now, guide → groups → rail → leave
             // (`general.confirm_exit`: only after a second press).
             (ViewMode::Overlay, _, _) if ui.playing.get_untracked().is_some() => {
                 ui.mode.set(ViewMode::Fullscreen);

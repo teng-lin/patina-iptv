@@ -10,7 +10,7 @@
 //!   provider-neutral [`Catalog`]. [`import_m3u_text`] parses a playlist
 //!   already in memory.
 //! - [`import_epg`]: chunked XMLTV download per source with priorities,
-//!   programmes streamed into a [`GuideSink`] as they are parsed (only the
+//!   programs streamed into a [`GuideSink`] as they are parsed (only the
 //!   feeds' channel lists stay in memory), matched against the catalog's
 //!   channels. Each source has its own time and size budget and is tried
 //!   again after a passing failure. [`MemoryGuide`] is an in-memory sink.

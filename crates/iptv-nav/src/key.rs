@@ -9,7 +9,7 @@ pub enum RemoteKey {
     Down,
     Left,
     Right,
-    /// OK / select (D-pad centre, Enter).
+    /// OK / select (D-pad center, Enter).
     Ok,
     Back,
     Menu,

@@ -4,9 +4,9 @@
 //! carries out the [`Effect`]s it answers (store a value, run a command,
 //! close).
 //!
-//! Layout: the app's [`Page`]s (each one or more catalogue sections, or
+//! Layout: the app's [`Page`]s (each one or more catalog sections, or
 //! named rows), and the [`rows`] of the chosen one — headings, then
-//! settings and commands in catalogue order. Rows whose visibility
+//! settings and commands in catalog order. Rows whose visibility
 //! conditions fail, advanced settings, and rows the app does not offer
 //! ([`Offer::Hidden`]) are left out. Every other setting and command
 //! takes the focus, also those the app cannot act on yet ([`Status`]), so
@@ -18,7 +18,7 @@
 //! opens its list, a number or duration opens a stepper (Left/Down less,
 //! Right/Up more, Page keys ten steps, OK keeps, Back cancels), text opens
 //! a text editor (OK keeps a valid text, Back cancels), a command runs
-//! (after a confirmation when the catalogue asks for one).
+//! (after a confirmation when the catalog asks for one).
 
 use crate::catalog::{self, Command};
 use crate::schema::{Section, Setting, ValueType};
@@ -62,7 +62,7 @@ pub enum Status {
 /// One part of a page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part {
-    /// A catalogue section's rows.
+    /// A catalog section's rows.
     Section(Section),
     /// Settings or commands by key, in this order (shown whatever their
     /// [`Offer`]).
@@ -225,7 +225,7 @@ pub enum Pane {
 /// An open editor or dialog.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Editor {
-    /// An enum, colour or locale: its suggestions and focused/current entry.
+    /// An enum, color or locale: its suggestions and focused/current entry.
     Choice {
         setting: &'static Setting,
         focus: usize,
@@ -247,7 +247,7 @@ pub enum Editor {
         text: String,
         invalid: bool,
     },
-    /// "Really?" before a command the catalogue wants confirmed.
+    /// "Really?" before a command the catalog wants confirmed.
     Confirm { command: &'static Command },
 }
 

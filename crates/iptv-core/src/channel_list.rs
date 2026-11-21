@@ -1,7 +1,7 @@
 //! The channel list over full-screen video (the player's Left; Long Left
 //! shows it beside the video shrunk to a preview), as the reference's
 //! player defaults have it: the list the guide shows (a group, All
-//! channels, Favourites, Recently watched: [`crate::lists::ChannelList`])
+//! channels, Favorites, Recently watched: [`crate::lists::ChannelList`])
 //! with the same numbers and what is on now. Up/Down move, OK plays (OK
 //! on what plays closes the list), Back closes.
 //!

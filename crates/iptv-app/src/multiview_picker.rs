@@ -19,7 +19,7 @@ use crate::list_rows::{self, Mark, ROW, ROW_TWO};
 use crate::scale::Scale;
 use crate::{Ui, clock, ui_kit};
 
-/// An independent browser over the shared channel catalogue. The portable
+/// An independent browser over the shared channel catalog. The portable
 /// schedule owns playlist expansion; replacing this snapshot never changes
 /// the guide's selected category or its persisted expansion preferences.
 #[derive(Clone)]
@@ -84,7 +84,7 @@ fn refresh(ui: Ui) {
 }
 
 /// A new data generation keeps picker-local expansion by source identity.
-/// Channel indices remain those of the shared catalogue, so selecting a row
+/// Channel indices remain those of the shared catalog, so selecting a row
 /// still routes playback to its current source and stream.
 fn refresh_catalog(ui: Ui) {
     let current = crate::schedule();

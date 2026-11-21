@@ -1,4 +1,4 @@
-//! The guide's look, headless: programme titles are set in the bundled
+//! The guide's look, headless: program titles are set in the bundled
 //! Roboto Condensed, channel names and the rest in Roboto (the app's
 //! default family), every list falling back to the system's sans-serif;
 //! the sizes are the TiviMate-like ones in a full-screen window and
@@ -6,7 +6,7 @@
 //! too long for the channel column ends in two dots; rows are 50 dp apart
 //! at full size. The lists (the groups column, the player's channel list)
 //! name groups and channels in the same type as the guide's channel
-//! column, and programmes in its programme type.
+//! column, and programs in its program type.
 //!
 //! Synthetic data only: a playlist picked from a file, with a local XMLTV
 //! guide.
@@ -52,7 +52,7 @@ fn the_guide_uses_the_bundled_fonts_and_proportions() {
          #EXTINF:-1 tvg-id=\"two\" group-title=\"News\",{LONG}\nhttp://stream.example.test/2.m3u8\n",
         guide_path.display()
     );
-    // Rows to scroll through (no programmes).
+    // Rows to scroll through (no programs).
     for n in 3..=FILLERS {
         playlist.push_str(&format!(
             "#EXTINF:-1 group-title=\"News\",Filler {n}\nhttp://stream.example.test/{n}.m3u8\n"
@@ -162,7 +162,7 @@ fn the_guide_uses_the_bundled_fonts_and_proportions() {
         assert!(close_to(&group, &name), "group rows: {group:?}");
         let row = styles(&mut app, "1  Test Channel One");
         assert!(close_to(&row, &name), "channel list row: {row:?}");
-        // What is on, in the list: the programmes' family.
+        // What is on, in the list: the programs' family.
         let on = app
             .screen()
             .texts()
@@ -235,19 +235,19 @@ fn has(app: &mut Headless, text: &str, family: &str, size: f32, weight: u16) -> 
 fn check_sizes(app: &mut Headless, scale: f32) {
     const ROBOTO: &str = "Roboto, sans-serif";
     const CONDENSED: &str = "'Roboto Condensed', Roboto, sans-serif";
-    // Programme titles: Roboto Condensed 20.
+    // Program titles: Roboto Condensed 20.
     assert!(has(app, "Golden Engine", CONDENSED, 20.0 * scale, 400));
     // Channel names: Roboto 20.
     assert!(has(app, "Test Channel One", ROBOTO, 20.0 * scale, 400));
-    // The focused programme's title: in its cell, and in the header in
+    // The focused program's title: in its cell, and in the header in
     // Roboto Medium 22.
     assert!(has(app, "Quiet Harbour", CONDENSED, 20.0 * scale, 400));
     assert!(has(app, "Quiet Harbour", ROBOTO, 22.0 * scale, 500));
 }
 
 /// The ruler's half-hour times each span their slot (to the next one, but
-/// for the inset): they slide with the programmes in a strip as wide as
-/// the programme area, and a time sized to its text would be fitted to
+/// for the inset): they slide with the programs in a strip as wide as
+/// the program area, and a time sized to its text would be fitted to
 /// the room left between it and that strip's edge, which the slide does
 /// not move: near the right edge a platform's text engine (CoreText,
 /// Pango) cut it to "2" or "…" although it showed whole on screen.
@@ -260,7 +260,7 @@ fn check_ruler(app: &mut Headless) {
             let t = n.text.as_ref()?.text.text.to_string();
             // "11:30 PM" on the scenarios' 12-hour clock ("23:30" on a
             // 24-hour one), or past midnight "Wed 11 · 12:00 AM" (not a
-            // programme's "11:10 PM – 12:10 AM", nor the clock's
+            // program's "11:10 PM – 12:10 AM", nor the clock's
             // "Tue 10 Nov  11:11 PM").
             let last = t.rsplit(" · ").next().unwrap_or(&t);
             let clock = last

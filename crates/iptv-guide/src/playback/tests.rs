@@ -128,7 +128,7 @@ fn xtream_timeshift_uses_the_panel_clock_and_program_length() {
     let ch = xtream_channel(42, Some(3));
     let acc = account(r#""m3u8","ts""#);
     let ctx = PlaybackContext::xtream(&creds(None), Some(&acc), StreamFormat::Auto).unwrap();
-    // A programme that started 30 minutes ago and runs an hour.
+    // A program that started 30 minutes ago and runs an hour.
     let archive = Archive {
         start: NOW - 1800,
         end: NOW + 1800,

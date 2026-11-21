@@ -18,7 +18,7 @@
 //! reopening where it played, giving up after the fast attempts, seeking
 //! (keys, the play bar's buttons and its progress line), the end of a
 //! replay and Next back to live; the play bar: what the host reported,
-//! mute and volume, tracks, programme details, hiding by itself, picture
+//! mute and volume, tracks, program details, hiding by itself, picture
 //! in picture (stopping playback closes it).
 //!
 //! Synthetic data only: a three-channel playlist "picked" from a file,
@@ -43,7 +43,7 @@ use nsh_engine::EngineConfig;
 use serde_json::{Value, json};
 
 const IMPORT: Duration = Duration::from_secs(20);
-/// Programmes of 45 minutes, "Show <n>" counting from the one on now (0).
+/// Programs of 45 minutes, "Show <n>" counting from the one on now (0).
 const LEN: i64 = 45 * 60;
 const CARD: &str = "id:player-card";
 
@@ -709,7 +709,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     assert_eq!(prop(&app, &props, "textTrack"), json!("t1"));
     // The strip's other buttons by taps, each opening its chooser or
     // screen: the audio track, the sound's delay, the picture size, the
-    // sleep timer (set, then off again), the favourite, Search, the
+    // sleep timer (set, then off again), the favorite, Search, the
     // channel list and recordings.
     let pick_next = |app: &mut Headless, button: &str| {
         strip(app);
@@ -834,7 +834,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     let before = opens();
     step(app.press_remote(nsh_tv::RemoteKey::Stop));
     assert_eq!(opens(), before, "nothing to stop");
-    // Two days back: older programmes than the guide holds (the last day)
+    // Two days back: older programs than the guide holds (the last day)
     // are paged in from the store; one there replays; back at now they are
     // dropped again.
     step(app.press_key("mod+left"));
@@ -847,7 +847,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     state(&mut app, "ready");
     step(app.press_remote(nsh_tv::RemoteKey::Stop));
     step(app.wait_for("text:☰  All channels"));
-    // Two programmes back on channel one, OK replays it.
+    // Two programs back on channel one, OK replays it.
     step(app.press_key("home"));
     step(app.press_key("left"));
     step(app.press_key("left"));
@@ -949,7 +949,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
 
     // --- The card's action cards ------------------------------------------
     // OK, then Right to a card and OK: Channels (the list over the video),
-    // the favourite, More controls (the strip).
+    // the favorite, More controls (the strip).
     if seen(&app, CARD) {
         step(app.back());
         step(app.wait_for_gone(CARD, Duration::from_secs(1)));
@@ -1046,9 +1046,9 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     assert_eq!(opens(), before + 1, "tried again");
     state(&mut app, "ready");
 
-    // A replay under the pointer: the bar's TV guide, then two programmes
+    // A replay under the pointer: the bar's TV guide, then two programs
     // back; the bar's rewind and fast-forward, and its progress line under
-    // a finger, seek in it; its programme details open and close.
+    // a finger, seek in it; its program details open and close.
     step(app.press("label:Video"));
     step(app.wait_for("label:TV guide"));
     step(app.press("label:TV guide"));

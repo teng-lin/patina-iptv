@@ -1,4 +1,4 @@
-//! Native VOD metadata and episode links use bounded, cancellable portal sessions.
+//! Native VOD metadata and episode links use bounded, cancelable portal sessions.
 use crate::common::synth::{SimResponse, StalkerSim};
 use crate::common::{FakeFetch, Reply, block_on, connect_error};
 use iptv_import::{CancelToken, FailureKind, ImportError, LimitKind, Step, on_demand};

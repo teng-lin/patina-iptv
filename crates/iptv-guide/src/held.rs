@@ -9,7 +9,7 @@ use iptv_epg::{ChannelKey, GuideStore, UnixTime};
 use crate::{EpgSchedule, SLOT};
 
 impl EpgSchedule {
-    /// `store` holds only the programmes overlapping `[from, to)` (a cold
+    /// `store` holds only the programs overlapping `[from, to)` (a cold
     /// start's first screen, read before the rest of the window): other
     /// times show as [`crate::LOADING`], and ask for nothing; the schedule with the
     /// whole window replaces this one.
@@ -46,8 +46,8 @@ impl EpgSchedule {
         self.with_store(t, f)
     }
 
-    /// A programme held whole that reaches past the held part's end to `t`
-    /// ([`Self::held_only`]: the read takes every programme overlapping it).
+    /// A program held whole that reaches past the held part's end to `t`
+    /// ([`Self::held_only`]: the read takes every program overlapping it).
     pub(crate) fn held_across(
         &self,
         key: Option<&ChannelKey>,
@@ -58,8 +58,8 @@ impl EpgSchedule {
         Some((p.start(), p.stop()))
     }
 
-    /// The hour slot around `t` shown while its programmes load; past a
-    /// held part's end it starts no earlier than the programme held there
+    /// The hour slot around `t` shown while its programs load; past a
+    /// held part's end it starts no earlier than the program held there
     /// ends, so cells do not overlap.
     pub(crate) fn loading_slot(
         &self,

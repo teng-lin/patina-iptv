@@ -319,7 +319,7 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     step(app.wait_for("text:Edit remote bindings"));
     step(app.press("text:Edit remote bindings"));
     step(app.wait_for("text:Remote bindings"));
-    step(app.press("id:remote-Action")); // Toggle favourite -> Nothing.
+    step(app.press("id:remote-Action")); // Toggle favorite -> Nothing.
     step(app.wait_for("id:remote-Save"));
     step(app.press("id:remote-Save"));
     step(app.wait_for("text:/^Currently: .* · custom binding$/"));

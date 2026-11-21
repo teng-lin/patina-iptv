@@ -3,18 +3,18 @@
 This directory builds the libmpv that Patina's AppImage (Linux x86_64) and
 macOS disk image (Apple silicon) bundle, from the same pinned sources as the
 Windows runtime in [`../mpv-runtime`](../mpv-runtime/README.md). It replaces
-Ubuntu's and Homebrew's libmpv/FFmpeg, whose versions, licences and minimum
+Ubuntu's and Homebrew's libmpv/FFmpeg, whose versions, licenses and minimum
 OS changed with whatever the build machine had installed.
 
 Nothing here is an input of the Windows runtime: the Windows recipe digest,
 source bundle and DLL are unchanged. This directory reuses the Windows
-pipeline's `prepare.py` (verified downloads, safe extraction, licence checks,
+pipeline's `prepare.py` (verified downloads, safe extraction, license checks,
 offline restore) and `smoke.py` (synthetic MPEG-TS/HLS playback).
 
 | File | Purpose |
 | --- | --- |
 | `sources.json` | Which components of `../mpv-runtime/sources.lock.json` each platform uses, plus the platform's own SHA-256-pinned sources. Shared entries are copied verbatim, so a version changes in one place. |
-| `runtime.py` | `lock` (resolve the platform lock), `verify` (feature and licence checks of the configure headers), `package` (validate the build evidence, write the archives and manifest), `fetch` (download, verify and unpack a pinned runtime for app packaging). |
+| `runtime.py` | `lock` (resolve the platform lock), `verify` (feature and license checks of the configure headers), `package` (validate the build evidence, write the archives and manifest), `fetch` (download, verify and unpack a pinned runtime for app packaging). |
 | `linux/Dockerfile`, `linux/build.sh` | The Linux build: the Windows builder's pinned Ubuntu 24.04 image and package snapshot, plus the headers of the host libraries libmpv links dynamically. Compiles with networking disabled. |
 | `macos/build.sh`, `macos/xcode-version` | The macOS build on an Apple silicon runner with the pinned Xcode; no Docker, so the script isolates itself (see below). |
 | `smoke.py` | Plays generated MPEG-TS and local HLS through the exact library. |
@@ -123,7 +123,7 @@ Dispatch **Build retained libmpv dependencies** (`mpv-runtime.yml`) with the
 platform. It builds, packages, smoke-tests the exact archive on that platform,
 and only then publishes the dependency release `mpv-runtime-<platform>-<digest>`
 with the runtime, `mpv-runtime-<platform>-sources.tar.gz` (the exact
-corresponding sources, licences and build scripts, restorable offline with
+corresponding sources, licenses and build scripts, restorable offline with
 `prepare.py prepare --source-bundle`), `runtime-<platform>.json` and
 `SHA256SUMS`. The digest covers the platform lock, this directory's scripts
 for that platform and the shared `prepare.py`/`smoke.py`. Existing releases are

@@ -1,6 +1,6 @@
 //! A tablet viewer's journey by touch alone (#88), run headless on an
 //! Android tablet: visible controls reach and play a channel, a past
-//! programme, a movie and an episode, and their visible Back and Close
+//! program, a movie and an episode, and their visible Back and Close
 //! return (from a movie or an episode, to its details). Rotating, a narrow split-screen window and the largest system
 //! text keep what plays (the same `tv.player`, never detached or
 //! re-parented, no stream opened again, the movie's progress), the open
@@ -12,7 +12,7 @@
 //! core's policy and never restart a stream the viewer stopped.
 //!
 //! Synthetic data only: a generated playlist and XMLTV guide picked from
-//! files, and a generated on-demand catalogue on a local mock server.
+//! files, and a generated on-demand catalog on a local mock server.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -203,7 +203,7 @@ fn show_bar(app: &mut Headless) {
     step(app.wait_for("id:play-bar-back"));
 }
 
-/// The bar's visible ‹ is labelled `label` (where it returns to).
+/// The bar's visible ‹ is labeled `label` (where it returns to).
 #[track_caller]
 fn back_says(app: &Headless, label: &str) {
     let screen = app.screen();
@@ -234,7 +234,7 @@ fn in_preview(app: &mut Headless) {
     }));
 }
 
-// --- Live: a channel and a past programme -------------------------------
+// --- Live: a channel and a past program -------------------------------
 
 const SLOT: i64 = 3600;
 
@@ -327,7 +327,7 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
     );
     assert_eq!(sources(&seen).len(), 1, "Back opens nothing");
 
-    // A past programme in the archive: the visible ‹ steps back to it,
+    // A past program in the archive: the visible ‹ steps back to it,
     // and a tap replays it full screen.
     for _ in 0..4 {
         step(app.press("label:Go back 30 minutes"));
@@ -349,7 +349,7 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
             .any(|n| n.kind == ViewKind::Native && n.bounds.size.width.0 < LANDSCAPE.0)
     }));
 
-    // An upcoming programme's details open by a tap and offer, by
+    // An upcoming program's details open by a tap and offer, by
     // visible controls, what its menu holds.
     step(app.press("text:Now"));
     for _ in 0..4 {

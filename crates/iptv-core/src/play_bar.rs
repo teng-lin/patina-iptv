@@ -5,7 +5,7 @@
 //! The mouse moving over the video shows it; a tap (or a click) on the
 //! video shows it, and another hides it. It hides once nothing happened
 //! for [`HIDE_AFTER_MS`], but not while the mouse rests on it nor while a
-//! popup it opened (a chooser, the programme details) is open. Using one
+//! popup it opened (a chooser, the program details) is open. Using one
 //! of its controls counts as something happening. Times are milliseconds
 //! on the caller's monotonic clock (no clock access here).
 
@@ -158,7 +158,7 @@ impl PlayBar {
 }
 
 /// Where a press `x` points into a progress bar `width` points wide seeks
-/// to, in seconds into a programme `length` seconds long, no further than
+/// to, in seconds into a program `length` seconds long, no further than
 /// `limit` (what the archive holds so far).
 pub fn seek_target(x: f32, width: f32, length: i32, limit: i32) -> i32 {
     // A NaN width seeks nowhere too.
@@ -258,7 +258,7 @@ mod tests {
         assert_eq!(bar.focus, Some(PlayPause));
         bar.move_focus(1, &[Mute, PlayPause, Favorite, Guide], 100);
         assert_eq!(bar.focus, Some(Favorite));
-        // Favourite disappears: recover from transport, not its old index.
+        // Favorite disappears: recover from transport, not its old index.
         bar.move_focus(1, &[Mute, PlayPause, Picture, Guide], 200);
         assert_eq!(bar.focus, Some(Picture));
         bar.move_focus(-99, &[Mute, PlayPause, Picture, Guide], 300);
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn a_press_on_the_progress_bar_seeks_within_the_archive() {
-        // A 60-minute programme, 600 px wide.
+        // A 60-minute program, 600 px wide.
         assert_eq!(seek_target(300.0, 600.0, 3_600, 3_600), 1_800);
         assert_eq!(seek_target(-20.0, 600.0, 3_600, 3_600), 0);
         assert_eq!(seek_target(900.0, 600.0, 3_600, 3_600), 3_600);

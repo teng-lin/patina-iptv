@@ -7,7 +7,7 @@
 # the font). Every other script falls back to the system's fonts.
 # Downloads are checked against pinned SHA-256 sums; the subsetter is a
 # pinned fontTools run through uvx. Output names keep their name tables
-# (licence and copyright fields) intact. Output (fontTools 4.60.1):
+# (license and copyright fields) intact. Output (fontTools 4.60.1):
 #   Roboto-Regular.woff2, Roboto-Medium.woff2, RobotoCondensed-Regular.woff2
 #   with the sums printed at the end; see crates/iptv-app/fonts/README.md.
 # Usage: tools/fetch-fonts.sh   (needs curl, unzip, sha256sum, uvx)

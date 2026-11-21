@@ -44,7 +44,7 @@ pub fn source_from_draft_in(
         }),
         DraftSource::Stalker { portal, mac } => SourceConfig::Stalker(StalkerCredentials {
             portal_url: with_scheme(portal.expose()),
-            // The wizard normalised it already; parse again only to type it.
+            // The wizard normalized it already; parse again only to type it.
             mac: MacAddress::parse(mac.expose())
                 .unwrap_or_else(|| MacAddress::from_stored(mac.expose())),
             serial: None,

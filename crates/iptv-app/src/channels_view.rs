@@ -1,6 +1,6 @@
 //! The player's channel list (Left over full-screen video; Long Left
 //! beside the video shrunk to a preview; the control row's Channels): the
-//! list the guide shows (`Ui::list`: a group, All channels, Favourites,
+//! list the guide shows (`Ui::list`: a group, All channels, Favorites,
 //! Recently watched) numbered as in the guide, with what is on now. Left
 //! opens the guide's groups column beside it; moving over its entries
 //! changes the guide's list as the guide's own column does
@@ -331,7 +331,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .child(channels_column)
         .child(
             // Over the video: a tap closes the list. Beside the preview:
-            // the focused channel's programme; a tap on the preview goes
+            // the focused channel's program; a tap on the preview goes
             // back to full screen.
             view()
                 .test_id("channel-list-beside")
@@ -541,7 +541,7 @@ fn channel_row(
                 .text_color(move || mark().text()),
         )
         .child(
-            // What is on: a programme title, in the grid's type.
+            // What is on: a program title, in the grid's type.
             list_rows::second(
                 size,
                 move || entry().map_or(String::new(), |e| e.1),
@@ -604,7 +604,7 @@ fn more_room(ui: Ui) -> f32 {
     if more_shown(ui) { MORE + 8.0 } else { 0.0 }
 }
 
-/// Under the preview: the focused channel and its programme now.
+/// Under the preview: the focused channel and its program now.
 /// In the guide header's type.
 fn preview_info(ui: Ui, size: Scale) -> impl IntoElement {
     let info = move || {

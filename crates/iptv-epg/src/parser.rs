@@ -47,7 +47,7 @@ pub struct ParseWarnings {
     pub oversized: u64,
     pub channel_without_id: u64,
     pub program_without_channel: u64,
-    /// Missing or unparsable `start`: programme skipped.
+    /// Missing or unparsable `start`: program skipped.
     pub bad_start: u64,
     /// Unparsable `stop`: kept, the stop is inferred later.
     pub bad_stop: u64,

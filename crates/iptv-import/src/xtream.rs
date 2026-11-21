@@ -90,7 +90,7 @@ pub(crate) async fn import_xtream<F: Fetch, P: ProgressSink>(
             soften_items(&mut catalog, kind, result)?;
         }
         // A staged catalog synthesizes missing groups in SQL. The in-memory
-        // compatibility API keeps its existing placeholder-group behaviour.
+        // compatibility API keeps its existing placeholder-group behavior.
         let referenced: Vec<_> = match kind {
             ContentKind::Live => catalog
                 .channels

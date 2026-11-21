@@ -233,7 +233,7 @@ impl Runtime {
         Ok(())
     }
     /// Update authorization for a bounded set of content identities. The full
-    /// catalogue snapshot is reserved for boot, catalogue changes and management.
+    /// catalog snapshot is reserved for boot, catalog changes and management.
     pub(crate) async fn parental_refresh_targets(&self, targets: Vec<Target>) -> Result<(), Error> {
         self.refresh_targets(targets, None).await.map(|_| ())
     }

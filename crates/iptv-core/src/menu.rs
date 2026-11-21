@@ -3,9 +3,9 @@
 //! was opened on so focus returns there when it closes.
 //!
 //! [`program_menu`] follows the structure observed in the reference UX's
-//! programme menu:
-//! global actions, then the programme's, the channel's and the group's
-//! sections. Programme actions that cannot apply are **omitted** (not shown
+//! program menu:
+//! global actions, then the program's, the channel's and the group's
+//! sections. Program actions that cannot apply are **omitted** (not shown
 //! disabled); which actions are enabled is the app's call (what it has
 //! built). Labels are the shell's own (i18n), not stored here.
 
@@ -17,7 +17,7 @@ pub enum MenuItem {
     // Global.
     Search,
     Settings,
-    // Programme.
+    // Program.
     StartFromBeginning,
     ExternalPlayer,
     WatchInNewWindow,
@@ -150,7 +150,7 @@ impl Menu {
     }
 }
 
-/// The programme actions that apply, in order (`now`: guide minutes;
+/// The program actions that apply, in order (`now`: guide minutes;
 /// `catchup_days`: the channel's archive window, 0 = none).
 pub fn program_actions(program: Program, catchup_days: u8, now: i32) -> Vec<MenuItem> {
     use MenuItem::*;
@@ -169,7 +169,7 @@ pub fn program_actions(program: Program, catchup_days: u8, now: i32) -> Vec<Menu
     items
 }
 
-/// The guide's full context menu for a programme. `enabled` says which
+/// The guide's full context menu for a program. `enabled` says which
 /// actions the app can perform.
 pub fn program_menu(
     program: Program,

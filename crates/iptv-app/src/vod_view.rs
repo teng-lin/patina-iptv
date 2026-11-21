@@ -1,4 +1,4 @@
-//! Movies and series share one portable catalogue state and the persistent player.
+//! Movies and series share one portable catalog state and the persistent player.
 //! The cross-source shelves (Continue watching, Recently added) use the same
 //! state, details and playback; only their list is read differently.
 use crate::{
@@ -139,7 +139,7 @@ fn reload(ui: Ui, append: bool) {
     load(ui, append, None);
 }
 
-/// [`reload`]; with `keep` (the titles it had loaded), a catalogue read
+/// [`reload`]; with `keep` (the titles it had loaded), a catalog read
 /// again from its top reads at least that many, so a title focused pages
 /// down keeps the focus by identity (a shelf always reads the window
 /// around its focused title). Retry of that read reads as many again.
@@ -182,7 +182,7 @@ fn load(ui: Ui, append: bool, keep: Option<u32>) {
             return;
         }
         // A shelf reads one bounded page across every playlist; a
-        // catalogue also refreshes its filter choices.
+        // catalog also refreshes its filter choices.
         let result =
             match (shelf, anchor) {
                 (Some(shelf), Some(key)) => owner

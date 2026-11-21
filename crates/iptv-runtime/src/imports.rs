@@ -220,7 +220,7 @@ pub enum Msg {
     /// What the store has (before the playlist), or the source's guide
     /// loaded after the playlist was reported.
     Guide(Box<Imported>),
-    /// What the store has, with only the first screen's programmes
+    /// What the store has, with only the first screen's programs
     /// (`opening.rs`); a `Guide` follows.
     FirstScreen(Box<Imported>, opening::Held),
 }
@@ -355,7 +355,7 @@ pub(crate) async fn guide_pipeline(
         }
         Decision::Discard => {
             stored::discard(services, source, &[cancel]);
-            // Its programmes went: the guide on screen shows none.
+            // Its programs went: the guide on screen shows none.
             let _ = tx.send(Msg::Guide(Box::new(Imported {
                 groups,
                 channels: channels.clone(),
@@ -798,7 +798,7 @@ pub(crate) fn planned_guides(services: &Services, job: &Job) -> Vec<GuideSource>
     }
 }
 
-/// A downloaded guide not stored yet: how it matched, and its programmes
+/// A downloaded guide not stored yet: how it matched, and its programs
 /// staged in a file next to the store (deleted when this is dropped, so a
 /// guide that is never kept leaves the stored one as it was).
 pub(crate) struct Downloaded {
@@ -825,7 +825,7 @@ pub(crate) fn keep_guide(
 }
 
 /// Downloads `guides` for the catalog's channels with the user's guide
-/// choices, streaming the programmes to a stage file (memory stays small
+/// choices, streaming the programs to a stage file (memory stays small
 /// whatever the guide's size). The guide `must_load` (the one the user
 /// just typed), when given, must load.
 pub(crate) async fn download_guide<P: ProgressSink>(

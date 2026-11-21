@@ -1,10 +1,10 @@
-//! Compact programme storage for the guide.
+//! Compact program storage for the guide.
 //!
 //! Each EPG source becomes an [`EpgSource`]: per EPG channel a sorted,
 //! non-overlapping array of 16-byte slots plus an interned string arena.
 //! A [`GuideStore`] holds several sources and binds playlist channels to
 //! the best one (highest priority with data). Every query is a hash lookup
-//! plus a binary search: O(log n) in the channel's programme count.
+//! plus a binary search: O(log n) in the channel's program count.
 
 use std::collections::HashMap;
 
@@ -20,7 +20,7 @@ use crate::xmltv::{XmltvChannel, XmltvItem, XmltvProgram};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StoreOptions {
     pub store_descriptions: bool,
-    /// Programmes that ended more than this many days before `now` are
+    /// Programs that ended more than this many days before `now` are
     /// dropped. `None` keeps everything.
     pub past_days_to_keep: Option<u32>,
 }
@@ -34,28 +34,28 @@ impl Default for StoreOptions {
     }
 }
 
-/// What happened to the programmes of one source during ingest.
+/// What happened to the programs of one source during ingest.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct IngestReport {
     pub programs_in: u64,
     pub kept: u64,
-    /// EPG channels with at least one programme.
+    /// EPG channels with at least one program.
     pub channels_with_programs: u64,
     /// `stop <= start`.
     pub dropped_bad_duration: u64,
-    /// No `stop` and no following programme to end it.
+    /// No `stop` and no following program to end it.
     pub dropped_no_stop: u64,
     /// Older than `past_days_to_keep`.
     pub dropped_retention: u64,
-    /// Same channel and start as an earlier (longer or equal) programme.
+    /// Same channel and start as an earlier (longer or equal) program.
     pub dropped_duplicate: u64,
-    /// Programmes shortened to end where the next one starts.
+    /// Programs shortened to end where the next one starts.
     pub overlaps_trimmed: u64,
 }
 
 const NO_STOP: i64 = i64::MIN;
 
-/// One programme in a schedule: 16 bytes, times relative to the schedule
+/// One program in a schedule: 16 bytes, times relative to the schedule
 /// base (seconds; a schedule spans at most ~136 years).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Slot {
@@ -66,13 +66,13 @@ pub(crate) struct Slot {
     pub(crate) extra: u32,
 }
 
-/// One programme's fields as plain values: what [`SourceBuilder::push_data`]
+/// One program's fields as plain values: what [`SourceBuilder::push_data`]
 /// takes and [`ProgramRef::data`] returns, so a stored guide round-trips
 /// without building XMLTV records.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ProgramData<'a> {
     pub start: UnixTime,
-    /// `None`: ends where the next programme starts.
+    /// `None`: ends where the next program starts.
     pub stop: Option<UnixTime>,
     pub title: &'a str,
     pub sub_title: Option<&'a str>,
@@ -88,7 +88,7 @@ pub struct ProgramData<'a> {
 }
 
 impl<'a> ProgramData<'a> {
-    /// The fields of a parsed programme (first category, rating value,
+    /// The fields of a parsed program (first category, rating value,
     /// season and episode from the first readable `<episode-num>`).
     pub fn from_xmltv(p: &'a XmltvProgram) -> Self {
         let (season, episode) = p
@@ -187,7 +187,7 @@ impl EpgSource {
         })
     }
 
-    /// Number of programmes held.
+    /// Number of programs held.
     pub fn program_count(&self) -> usize {
         self.schedules.iter().map(|s| s.slots.len()).sum()
     }
@@ -340,7 +340,7 @@ impl SourceBuilder {
         self.push_data(&p.channel, &ProgramData::from_xmltv(&p));
     }
 
-    /// Adds one programme of EPG channel `channel` from plain values (a
+    /// Adds one program of EPG channel `channel` from plain values (a
     /// stored guide). Same rules as [`Self::push_program`].
     pub fn push_data(&mut self, channel: &str, p: &ProgramData<'_>) {
         if !self.rules.admit(p.start, p.stop, &mut self.report) {
@@ -373,9 +373,9 @@ impl SourceBuilder {
     /// Sorts, resolves overlaps and freezes the source.
     ///
     /// Per channel, deterministically ([`crate::ScheduleRules`]):
-    /// programmes are ordered by start; of several with the same start the
+    /// programs are ordered by start; of several with the same start the
     /// longest (then the first in input) is kept; a missing stop becomes
-    /// the next programme's start; a programme running into the next one
+    /// the next program's start; a program running into the next one
     /// is cut at the next start.
     pub fn finish(mut self) -> EpgSource {
         let mut schedules = Vec::with_capacity(self.raw.len());
@@ -431,7 +431,7 @@ impl SourceBuilder {
     }
 }
 
-/// A borrowed view of one programme.
+/// A borrowed view of one program.
 #[derive(Clone, Copy)]
 pub struct ProgramRef<'a> {
     src: &'a EpgSource,
@@ -571,30 +571,30 @@ impl<'a> ScheduleRef<'a> {
         self.src.id
     }
 
-    /// Index of the first programme starting after `t`.
+    /// Index of the first program starting after `t`.
     fn first_after(&self, t: UnixTime) -> usize {
         self.sched
             .slots
             .partition_point(|s| self.sched.start(s) <= t)
     }
 
-    /// Index of the programme airing at `t`.
+    /// Index of the program airing at `t`.
     pub fn index_at(&self, t: UnixTime) -> Option<usize> {
         let i = self.first_after(t).checked_sub(1)?;
         (self.sched.stop(&self.sched.slots[i]) > t).then_some(i)
     }
 
-    /// The programme airing at `t` (`start <= t < stop`).
+    /// The program airing at `t` (`start <= t < stop`).
     pub fn at(&self, t: UnixTime) -> Option<ProgramRef<'a>> {
         self.get(self.index_at(t)?)
     }
 
-    /// The first programme that starts after `t`.
+    /// The first program that starts after `t`.
     pub fn next_after(&self, t: UnixTime) -> Option<ProgramRef<'a>> {
         self.get(self.first_after(t))
     }
 
-    /// Index range of programmes overlapping `[t0, t1)`.
+    /// Index range of programs overlapping `[t0, t1)`.
     pub fn range_indices(&self, t0: UnixTime, t1: UnixTime) -> std::ops::Range<usize> {
         let slots = &self.sched.slots;
         // Non-overlapping and sorted by start, so stops are sorted too.
@@ -603,7 +603,7 @@ impl<'a> ScheduleRef<'a> {
         lo..hi.max(lo)
     }
 
-    /// Programmes overlapping `[t0, t1)`, in time order.
+    /// Programs overlapping `[t0, t1)`, in time order.
     pub fn range(
         self,
         t0: UnixTime,
@@ -617,7 +617,7 @@ impl<'a> ScheduleRef<'a> {
         (0..self.len()).map(move |i| self.get(i).expect("in range"))
     }
 
-    /// Current and next programme at `now`.
+    /// Current and next program at `now`.
     pub fn now_next(&self, now: UnixTime) -> NowNext<'a> {
         let i = self.first_after(now);
         let current = i
@@ -689,7 +689,7 @@ impl GuideStore {
         self.rebind();
     }
 
-    /// Drops programmes that ended more than `past_days` before `now`.
+    /// Drops programs that ended more than `past_days` before `now`.
     pub fn prune(&mut self, now: UnixTime, past_days: u32) {
         let cutoff = now - i64::from(past_days) * DAY;
         for s in &mut self.sources {
@@ -753,7 +753,7 @@ impl GuideStore {
         })
     }
 
-    /// Programmes of `key` overlapping `[t0, t1)`; empty when unbound.
+    /// Programs of `key` overlapping `[t0, t1)`; empty when unbound.
     pub fn programs(
         &self,
         key: &ChannelKey,
@@ -788,7 +788,7 @@ impl GuideStore {
             .collect()
     }
 
-    /// When the last programme held ends (any source, bound or not).
+    /// When the last program held ends (any source, bound or not).
     pub fn last_stop(&self) -> Option<UnixTime> {
         self.sources
             .iter()
@@ -797,7 +797,7 @@ impl GuideStore {
             .max()
     }
 
-    /// When the first programme held starts (any source, bound or not).
+    /// When the first program held starts (any source, bound or not).
     pub fn first_start(&self) -> Option<UnixTime> {
         self.sources
             .iter()

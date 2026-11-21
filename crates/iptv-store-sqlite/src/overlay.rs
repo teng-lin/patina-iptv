@@ -1,4 +1,4 @@
-//! User overlays: favourites, hidden, blocked, custom name and number, EPG
+//! User overlays: favorites, hidden, blocked, custom name and number, EPG
 //! override, and the orphan report over every overlay table.
 //!
 //! Setters accept any channel id, present or not: overlays are keyed by
@@ -35,7 +35,7 @@ fn write_favorite_order(conn: &Connection, source: SourceId, keys: &[String]) ->
     Ok(())
 }
 
-/// A `channel_overlays` row with nothing customised left.
+/// A `channel_overlays` row with nothing customized left.
 const EMPTY_OVERLAY: &str = "custom_name IS NULL AND custom_number IS NULL \
     AND hidden = 0 AND blocked = 0 AND epg_mode IS NULL";
 
@@ -98,7 +98,7 @@ impl EpgOverride {
     }
 }
 
-/// Customisations whose channel is not in the current catalog. They are
+/// Customizations whose channel is not in the current catalog. They are
 /// kept and apply again when the id returns.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -114,7 +114,7 @@ pub struct OrphanedOverlay {
     pub in_custom_group: bool,
 }
 
-/// Every overlay table as `(source_id, channel_id, favourite, customised,
+/// Every overlay table as `(source_id, channel_id, favorite, customized,
 /// ordered, in_custom_group)` rows.
 const OVERLAY_ROWS: &str = "
     SELECT source_id, channel_id, 1 AS favorite, 0 AS customized, 0 AS ordered, 0 AS grouped
@@ -204,12 +204,12 @@ impl Store {
         Ok(())
     }
 
-    /// All saved favourites in order, including channels absent from the latest import.
+    /// All saved favorites in order, including channels absent from the latest import.
     pub fn favorite_keys(&self, source: SourceId) -> Result<Vec<String>> {
         favorite_ids(&self.conn, source)
     }
 
-    /// Adds to (at the end) or removes from favourites. Idempotent.
+    /// Adds to (at the end) or removes from favorites. Idempotent.
     pub fn set_favorite(&mut self, source: SourceId, id: &ContentId, on: bool) -> Result<()> {
         let now = self.now();
         let tx = self
@@ -233,7 +233,7 @@ impl Store {
         Ok(())
     }
 
-    /// Flips the favourite flag; returns the new state.
+    /// Flips the favorite flag; returns the new state.
     pub fn toggle_favorite(&mut self, source: SourceId, id: &ContentId) -> Result<bool> {
         let on = !self.is_favorite(source, id)?;
         self.set_favorite(source, id, on)?;
@@ -248,9 +248,9 @@ impl Store {
         )?)
     }
 
-    /// Moves a favourite to `index` in the favourites list as shown (present
+    /// Moves a favorite to `index` in the favorites list as shown (present
     /// channels, hidden ones included). Returns `false` if it is not a
-    /// favourite.
+    /// favorite.
     pub fn move_favorite(
         &mut self,
         source: SourceId,
@@ -270,7 +270,7 @@ impl Store {
         Ok(true)
     }
 
-    /// Commits an order for the favourites in the current catalog.
+    /// Commits an order for the favorites in the current catalog.
     pub fn save_favorite_order(
         &mut self,
         source: SourceId,

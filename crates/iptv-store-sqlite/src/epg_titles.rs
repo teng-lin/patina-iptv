@@ -1,4 +1,4 @@
-//! Programme titles of a stored guide, streamed for programme search: every
+//! Program titles of a stored guide, streamed for program search: every
 //! day the store keeps can be searched without holding those days as a
 //! guide in memory (the app holds only the last day: `Store::load_epg`).
 
@@ -11,11 +11,11 @@ use crate::error::{Result, StoreError};
 use crate::{SourceId, Store};
 
 impl Store {
-    /// Calls `f(position, start, stop, title)` for every stored programme
+    /// Calls `f(position, start, stop, title)` for every stored program
     /// of `source` overlapping `[from, to)` on the playlist channels
     /// `keys` (`position` is the key's index in `keys`; channels sharing
-    /// an EPG channel each hear its programmes). Channel by channel, each
-    /// in start order. Returns how many programmes were read.
+    /// an EPG channel each hear its programs). Channel by channel, each
+    /// in start order. Returns how many programs were read.
     pub fn for_each_epg_title(
         &self,
         source: SourceId,

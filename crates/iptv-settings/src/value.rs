@@ -78,7 +78,7 @@ impl PressKind {
 /// every context. Names are tokens (`[a-z][a-z0-9_]*`, ≤ 32 chars): key
 /// names follow `iptv_nav::RemoteKey::name` (`ok`, `channel_up`,
 /// `digit_5`); context and action names are owned by the input layer,
-/// which ignores bindings it does not recognise.
+/// which ignores bindings it does not recognize.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct KeyBinding {
     pub context: Option<String>,

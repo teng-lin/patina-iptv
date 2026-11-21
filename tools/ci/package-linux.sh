@@ -114,7 +114,7 @@ python3 tools/mpv-runtime-unix/runtime.py check-bundle --platform linux \
   --runtime "$runtime" --libraries "$appdir/usr/lib"
 python3 tools/mpv-runtime-unix/runtime.py notices --runtime "$runtime" \
   --output "$appdir/usr/bin/notices/mpv-runtime"
-# Licence texts, the inventory, and the source package of every other
+# License texts, the inventory, and the source package of every other
 # bundled library (GTK and the host libraries libmpv uses: Ubuntu builds).
 python3 tools/ci/linux-native-notices.py "$appdir" "$VERSION" "$runtime"
 python3 tools/ci/check-notices.py "$appdir" mpv-runtime/components.json

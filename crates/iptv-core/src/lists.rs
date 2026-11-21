@@ -1,5 +1,5 @@
 //! What the guide lists. The groups column holds fixed entries first
-//! (Favourites, Recently watched, All channels) and then the playlist's
+//! (Favorites, Recently watched, All channels) and then the playlist's
 //! groups; the selected entry is the list the guide shows, as catalog
 //! channel indices in display order ([`ChannelList`]).
 //!
@@ -9,7 +9,7 @@
 //! Rows are numbered by their place in the list (1..n), so every list
 //! starts at 1.
 //!
-//! Lists are rebuilt when the selection, the catalog or the favourites
+//! Lists are rebuilt when the selection, the catalog or the favorites
 //! change; focus is put back by content identity ([`ListId`], channel
 //! keys), never by index.
 
@@ -105,11 +105,11 @@ impl ListId {
 
 /// The groups column entry a channel resumed at startup
 /// (`general.resume_last_channel`) is shown in, decided once the playlist's
-/// catalog and favourites are both installed (the runtime installs the
-/// favourites before it shows the catalog, and resumes after):
+/// catalog and favorites are both installed (the runtime installs the
+/// favorites before it shows the catalog, and resumes after):
 ///
 /// - Favorites when that category is offered and the channel is one of
-///   this catalog's favourites (`favorites`; a channel favourited in
+///   this catalog's favorites (`favorites`; a channel favorited in
 ///   another playlist is not among them).
 /// - All channels for a hidden channel: no list has a row for it, so the
 ///   guide keeps its start and focuses nothing else in its place.
@@ -250,7 +250,7 @@ impl ChannelList {
 }
 
 /// A list as a [`Schedule`]: channel `i` is the list's row `i`, numbered by
-/// position; programmes, names, keys and streams are the catalog channel's.
+/// position; programs, names, keys and streams are the catalog channel's.
 /// The focus model and the grid run on it.
 #[derive(Clone)]
 pub struct ListView {

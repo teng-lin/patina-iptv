@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 /// Moves `item` so it lands at `index` among the items in `present`.
-/// Orphans keep their place relative to their neighbours, so a channel that
+/// Orphans keep their place relative to their neighbors, so a channel that
 /// comes back later reappears where it was. An `index` past the end moves
 /// the item last. Returns `false` if `item` is not in the list.
 pub(crate) fn move_to(

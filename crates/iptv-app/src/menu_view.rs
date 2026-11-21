@@ -1,5 +1,5 @@
 //! The guide's context menu (Long OK / Menu) as a scrolling side panel, and
-//! the programme description popover. State lives in `iptv_core::menu`;
+//! the program description popover. State lives in `iptv_core::menu`;
 //! this opens, draws and performs it. Labels are iptv-rs's own wording.
 
 use crate::i18n::tr;
@@ -99,8 +99,8 @@ fn title(channel: usize, p: crate::guide::Program) -> String {
     crate::schedule().title_in(channel, p, crate::i18n::language())
 }
 
-/// Long OK / Menu: the menu for the focused programme (in full screen, the
-/// playing channel's current programme).
+/// Long OK / Menu: the menu for the focused program (in full screen, the
+/// playing channel's current program).
 pub fn open(ui: Ui) {
     let now = ui.focus.with(|f| f.now);
     let (channel, minute) = match (ui.mode.get(), ui.playing.get()) {
@@ -172,7 +172,7 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
     ui.menu.set(Some(menu));
 }
 
-/// Closes the menu or popover; guide focus stays on the programme it was
+/// Closes the menu or popover; guide focus stays on the program it was
 /// opened on (it does not jump to now).
 pub fn close(ui: Ui) {
     let origin = ui
@@ -781,7 +781,7 @@ pub fn open_at(ui: Ui, channel: usize, minute: i32) {
     open_focused(ui);
 }
 
-/// A right-click or long press moved the guide's focus to a programme:
+/// A right-click or long press moved the guide's focus to a program:
 /// its menu opens, and autoplay holds on it. The focus stays there when
 /// the menu (or the details it opens) closes, and opening a menu never
 /// starts playback (`docs/interaction.md`): nothing tunes it until the

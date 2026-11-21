@@ -1,8 +1,8 @@
-//! A tile's menu: a panel at the right edge, vertically centred, over the
+//! A tile's menu: a panel at the right edge, vertically centered, over the
 //! tiles without dimming them (they stay in view, and a tap on one closes
 //! the menu). Its rows are the lists' (`list_rows.rs`): the guide's pitch
 //! and type, the focus its light pill with dark text while the keys are
-//! shown; the panel is the theme's panel colour. Sizes are at full size,
+//! shown; the panel is the theme's panel color. Sizes are at full size,
 //! scaled with the guide (`scale.rs`): on a TV (× 0.8) the panel is
 //! 208 dp wide, 8 dp from the edge, with 40 dp rows.
 

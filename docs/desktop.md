@@ -13,7 +13,7 @@ rule was checked on.
 
 | Where | Vertical wheel or two-finger swipe | Horizontal swipe, or Shift + wheel | Right-click | Visible way in |
 |---|---|---|---|---|
-| Guide | Moves through the channels | Moves through programme time | Programme and channel menu | ⋯ after the programme's title |
+| Guide | Moves through the channels | Moves through program time | Program and channel menu | ⋯ after the program's title |
 | Guide's groups column | Scrolls the groups | Nothing | Group options | ⋯ on the shown group's row |
 | Channel list over the video | Scrolls the channels | Nothing | Channel menu | ⋯ at the end of each row |
 | Channel list's groups column | Scrolls the groups | Nothing | Group options | ⋯ on the shown group's row |
@@ -41,7 +41,7 @@ Windows and Command on macOS.
 | Arrows, Enter | Move and choose; Enter on a channel plays it full screen |
 | Escape or Backspace | One step back ([Getting back](interaction.md#getting-back)) |
 | / or Mod+F | Search |
-| M, Shift+F10 | Menu for the focused programme, channel or group |
+| M, Shift+F10 | Menu for the focused program, channel or group |
 | Space | Play or pause |
 | = and - | Channel up and down (a page in the guide) |
 | P | Previous channel |
@@ -49,7 +49,7 @@ Windows and Command on macOS.
 | [ and ] | Rewind and fast-forward |
 | I | Information |
 | G | Back to the guide |
-| Home | The programmes on now |
+| Home | The programs on now |
 | Shift+← and Shift+→, Mod+← and Mod+→ | An hour, a day through the guide |
 | 0–9 | Channel number |
 | Ctrl+M | Mute or unmute |

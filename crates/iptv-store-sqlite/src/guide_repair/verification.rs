@@ -1,4 +1,4 @@
-//! Verification reads actual bindings/programmes, never infers them from commit.
+//! Verification reads actual bindings/programs, never infers them from commit.
 use super::*;
 
 #[derive(Clone, Debug)]
@@ -151,7 +151,7 @@ impl Store {
             }
         }
         // Feed-only repairs have indirect effects; certify inputs, not invented
-        // programme availability for channels never selected in the batch.
+        // program availability for channels never selected in the batch.
         if rows.is_empty() {
             effective &= inputs_current && bindings_current && automatic_current;
         }
@@ -370,7 +370,7 @@ impl Store {
 }
 
 impl Store {
-    /// Semantic programme/binding evidence, stable across physical no-op imports.
+    /// Semantic program/binding evidence, stable across physical no-op imports.
     /// Hash rows incrementally on the bounded analysis connection; no row IDs.
     pub fn guide_repair_coverage_revision(
         &self,
@@ -382,7 +382,7 @@ impl Store {
         let mut digest = Sha256::new();
         digest.update(self.source_incarnation(source)?.as_bytes());
         // Effective automatic proof is part of the examined evidence, including
-        // catalogue changes that leave mapping/configuration revisions intact.
+        // catalog changes that leave mapping/configuration revisions intact.
         let (_, configuration) = revisions(&self.conn, source)?;
         let (current, fingerprint) =
             self.guide_repair_automatic_projection_current(source, configuration)?;

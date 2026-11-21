@@ -1,5 +1,5 @@
-//! The favourites editor overlay for the list on screen (from the menu's
-//! "Manage favourites…"): a star per channel, OK toggles, Left removes the
+//! The favorites editor overlay for the list on screen (from the menu's
+//! "Manage favorites…"): a star per channel, OK toggles, Left removes the
 //! whole list, Right adds it, Back leaves; persistent hints and, for touch,
 //! a tap per row plus "Add all" / "Remove all" buttons. Changes are saved
 //! by channel key (`favorites.rs`) at once.

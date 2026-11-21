@@ -1,5 +1,5 @@
 //! The search screen: a query field, recent searches, and results in two
-//! tabs (channels, programmes). State and rules live in
+//! tabs (channels, programs). State and rules live in
 //! `iptv_search::SearchState`; this module builds the indexes, runs the
 //! searches (debounced), maps remote keys and taps to search actions and
 //! carries out what the state answers (play, show details, close).
@@ -10,7 +10,7 @@
 //! Ranking follows `search.favorites_first` and
 //! `search.include_past_without_catchup`; with `search.show_history` off
 //! the screen opens without the recent searches (they are still kept).
-//! Programmes are searched over every day the store keeps
+//! Programs are searched over every day the store keeps
 //! (`program_index.rs`), not only the guide days held in memory.
 //! Wording is iptv-rs's own.
 //!
@@ -49,7 +49,7 @@ const LIMIT: usize = 200;
 /// Where builds before the store kept the recent searches, as plaintext.
 const LEGACY_HISTORY_FILE: &str = "search-history.json";
 
-/// Whether programme search can run on the current guide data.
+/// Whether program search can run on the current guide data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProgramSearch {
     /// No readable EPG behind the current schedule.
@@ -74,14 +74,14 @@ pub struct Screen {
 /// What choosing a result does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Outcome {
-    /// Channels and programmes on now: the channel, live.
+    /// Channels and programs on now: the channel, live.
     Live(usize),
-    /// A past programme still in the archive: replay from its start.
+    /// A past program still in the archive: replay from its start.
     CatchUp {
         channel: usize,
         start: UnixTime,
     },
-    /// Upcoming programmes (and past ones without replay): their details.
+    /// Upcoming programs (and past ones without replay): their details.
     Details {
         channel: usize,
         start: UnixTime,
@@ -176,8 +176,8 @@ fn key_action(state: &SearchState, action: Action) -> Option<SearchAction> {
     })
 }
 
-/// The guide minute (from the schedule's `epoch`) inside a programme
-/// starting at `start`: rounded up, so it never falls in the programme before.
+/// The guide minute (from the schedule's `epoch`) inside a program
+/// starting at `start`: rounded up, so it never falls in the program before.
 fn guide_minute(start: UnixTime, epoch: UnixTime) -> i32 {
     (start - epoch + 59).div_euclid(60) as i32
 }
@@ -187,7 +187,7 @@ fn display_minute(t: UnixTime, epoch: UnixTime) -> i32 {
     (t - epoch).div_euclid(60) as i32
 }
 
-/// The airing and replay marker of a programme result.
+/// The airing and replay marker of a program result.
 fn badge(hit: &ProgramHit) -> String {
     let when = match hit.airing {
         Airing::Live => tr("On now"),
@@ -321,7 +321,7 @@ fn set_programs(ui: Ui, status: ProgramSearch) {
 }
 
 /// Builds the indexes for the current guide data when they are stale:
-/// channels at once, programmes a moment later (about 0.1 s for a large
+/// channels at once, programs a moment later (about 0.1 s for a large
 /// EPG), so the screen shows first.
 fn prepare(ui: Ui) {
     let version = ui.app.data_version.get_untracked();
@@ -427,7 +427,7 @@ fn run_search(ui: Ui, query: &str) {
     });
 }
 
-/// Searches the current query again (new data, programme index ready).
+/// Searches the current query again (new data, program index ready).
 fn search_again(ui: Ui) {
     let query = ui.search.with_untracked(|s| {
         s.as_ref()

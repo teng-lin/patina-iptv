@@ -377,7 +377,7 @@ impl State {
             execution.generation
         };
         // A replacement may already be running when this waiter wakes. Wait
-        // for the execution we cancelled, rather than its successor's flag.
+        // for the execution we canceled, rather than its successor's flag.
         self.changed
             .wait_timeout_while(self.lock(), Duration::from_secs(15), |d| {
                 d.completed_run < generation
@@ -387,7 +387,7 @@ impl State {
     }
 }
 
-/// Media lives beside the catalogue directory, so catalogue restore cannot delete
+/// Media lives beside the catalog directory, so catalog restore cannot delete
 /// recordings. This app-managed directory is private and excluded from OS backup.
 pub fn media_directory(root: &Path) -> PathBuf {
     let mut name = root.file_name().unwrap_or_default().to_os_string();
@@ -1598,7 +1598,7 @@ async fn record(
         } => Ok("Recording finished"),
         result = result => result.map(|_| "Recording finished"),
     };
-    // The cancelled receive future no longer owns file writes. Keep the active
+    // The canceled receive future no longer owns file writes. Keep the active
     // reservation until its worker acknowledges drain, sync and descriptor close.
     let outcome = match file {
         Some(file) => {

@@ -1,4 +1,4 @@
-//! The user's channel lists that outlive a catalog: favourites (in the
+//! The user's channel lists that outlive a catalog: favorites (in the
 //! order they were added) and recently watched channels (newest first).
 //! Both hold channel keys (content identity, stable across refreshes);
 //! [`KeyIndex`] turns them into the catalog channels on screen. The shell
@@ -36,7 +36,7 @@ impl KeyIndex {
     }
 }
 
-/// Favourite channels by key, in the order they were added.
+/// Favorite channels by key, in the order they were added.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Favorites {
     keys: Vec<String>,
@@ -85,7 +85,7 @@ impl Favorites {
         true
     }
 
-    /// Moves a favourite to its displayed position, retaining absent keys.
+    /// Moves a favorite to its displayed position, retaining absent keys.
     pub fn move_key_among(
         &mut self,
         key: &str,
@@ -116,12 +116,12 @@ impl Favorites {
             .collect();
     }
 
-    /// The favourites as catalog channels: the Favourites list, in order.
+    /// The favorites as catalog channels: the Favorites list, in order.
     pub fn channels(&self, index: &KeyIndex) -> Vec<usize> {
         index.channels(&self.keys)
     }
 
-    /// The favourite catalog channels as a set (stars, search ranking).
+    /// The favorite catalog channels as a set (stars, search ranking).
     pub fn set_of(&self, index: &KeyIndex) -> BTreeSet<usize> {
         self.channels(index).into_iter().collect()
     }

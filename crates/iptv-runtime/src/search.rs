@@ -22,7 +22,7 @@ struct Indexes {
     /// Every day the store keeps; dropped when the screen closes (it is
     /// about the size of a week's guide).
     pub programs: Option<ProgramIndex>,
-    /// The `data_version` whose programme index is being built.
+    /// The `data_version` whose program index is being built.
     pub building: Option<u64>,
 }
 
@@ -275,8 +275,8 @@ impl crate::Runtime {
 }
 
 impl crate::Runtime {
-    /// Reads the stored programme titles of `sources` from `from` on into
-    /// an index of `rows` channels (the search screen's programme search).
+    /// Reads the stored program titles of `sources` from `from` on into
+    /// an index of `rows` channels (the search screen's program search).
     /// Each source includes the incarnation captured from the accepting schedule;
     /// queued work cannot adopt another source that reused its numeric id.
     pub fn read_program_index(

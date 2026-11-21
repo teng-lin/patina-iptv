@@ -1,5 +1,5 @@
 //! The search screen: the field, the recent searches and the results, in
-//! the lists' look (`list_rows.rs`): channel names in Roboto and programme
+//! the lists' look (`list_rows.rs`): channel names in Roboto and program
 //! titles in Roboto Condensed at the guide's sizes, the focus its light
 //! pill.
 
@@ -347,7 +347,7 @@ fn result_row(
     size: Scale,
 ) -> impl IntoElement {
     let item = move || result_at(ui, at.index());
-    // Programme titles in the grid's type, channel names in the column's.
+    // Program titles in the grid's type, channel names in the column's.
     let family = move || match item() {
         Some((_, Some(_))) => CONDENSED,
         _ => SANS,

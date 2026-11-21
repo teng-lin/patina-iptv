@@ -5,7 +5,7 @@
 //! ```
 //!
 //! Budget (release, desktop-class CPU): replacing 50k channels in one
-//! transaction well under 3 s. Debug builds compile SQLite unoptimised, so
+//! transaction well under 3 s. Debug builds compile SQLite unoptimized, so
 //! the budget is only asserted in release.
 
 use crate::common;
@@ -40,7 +40,7 @@ fn replace_50k_channel_catalog() {
     let (_, fresh) = timed("replace_catalog (empty store)", || {
         replace(&mut s, src, &first)
     });
-    // A realistic amount of customisation.
+    // A realistic amount of customization.
     timed("1000 favorites + 500 renames + 500 hides", || {
         for i in 0..1000 {
             s.set_favorite(src, &first.channels[i * 37].id, true)

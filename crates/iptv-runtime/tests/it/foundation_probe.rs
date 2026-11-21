@@ -1,5 +1,5 @@
 //! Proposed guides are inspected without changing configured sources, mappings
-//! or the viewed schedule. Every endpoint and programme in these tests is generated.
+//! or the viewed schedule. Every endpoint and program in these tests is generated.
 use crate::support;
 use iptv_epg::FeedId;
 use iptv_library::{GuideSource, SourceId};

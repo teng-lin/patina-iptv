@@ -270,7 +270,7 @@ fn bar_buttons(app: &mut Headless, step: impl Fn(Result<(), String>)) {
     ] {
         step(app.press(&format!("label:{name}")));
     }
-    // Programme details: a second press closes them.
+    // Program details: a second press closes them.
     let details = "text:/^Test Channel Two · \\d/";
     step(app.press("label:Program details"));
     step(app.wait_for(details));

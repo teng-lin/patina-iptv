@@ -288,7 +288,7 @@ impl Runtime {
         Ok(crate::favorites::save_order(self, source, original, order).await?)
     }
 
-    /// Resolves once the favourite and history edits made so far are saved;
+    /// Resolves once the favorite and history edits made so far are saved;
     /// false when they could not be.
     pub fn flush_favorites(self: &Rc<Self>) -> impl Future<Output = bool> + use<> {
         let owner = self.clone();
@@ -377,7 +377,7 @@ impl Runtime {
         (observed, release)
     }
 
-    /// A stored source's catalogue size as an import worker reads it (a
+    /// A stored source's catalog size as an import worker reads it (a
     /// blocking read on the reader lane), to run on another thread.
     pub fn worker_catalog_size(
         &self,

@@ -203,14 +203,14 @@ fn later(ui: Ui, delay: Duration, f: impl FnOnce() + 'static) {
     });
 }
 
-/// The viewer's clock, with the local UTC offset at `at` (the programme's
+/// The viewer's clock, with the local UTC offset at `at` (the program's
 /// start for catch-up: date placeholders describe that instant).
 fn clock(at: Option<i64>) -> Clock {
     let now = crate::time::wall_unix();
     crate::runtime::playback::clock(now, at)
 }
 
-/// Identity and UTC survive a catalogue reorder or a different guide epoch.
+/// Identity and UTC survive a catalog reorder or a different guide epoch.
 struct PendingArchive {
     key: String,
     at: i64,
@@ -717,7 +717,7 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
         return;
     }
     let schedule = crate::schedule();
-    // An older day's programme: capture semantic identity and UTC before
+    // An older day's program: capture semantic identity and UTC before
     // waiting. ScheduleReady can synchronously complete this waiter before
     // the deferred follow_playing effect has remapped the numeric row.
     if let Playback::CatchUp { start, offset } = playback {
@@ -1236,7 +1236,7 @@ pub fn bind(ui: Ui) {
 /// Whether the host stops its players in `lifecycle`: Android's does while
 /// the activity is stopped (`TvActivity`, `PlayerComponent.background`) and
 /// reopens them after, and so does iOS's (`mpv/ios.rs`), so waiting then
-/// is no stall. Desktop players play on in a minimised window.
+/// is no stall. Desktop players play on in a minimized window.
 fn stopped_in_background(lifecycle: Lifecycle) -> bool {
     cfg!(any(target_os = "android", target_os = "ios")) && lifecycle == Lifecycle::Background
 }
@@ -1318,7 +1318,7 @@ pub fn source_ready(ui: Ui, refresh: bool) {
     log::info!("iptv player: resuming the last channel");
     crate::startup::mark("last channel resolved");
     // The guide's list follows only playback the parental lock admitted
-    // (at once, or after its PIN): a cancelled PIN leaves the guide as it
+    // (at once, or after its PIN): a canceled PIN leaves the guide as it
     // was.
     crate::parental_view::admitted(ui, channel, move || {
         ui.play(channel, Playback::Live);

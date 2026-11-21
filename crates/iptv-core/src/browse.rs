@@ -14,11 +14,11 @@
 //! - Left from the groups focuses the rail (it expands with labels) on
 //!   Search: Left, Left, OK searches. Items without a screen in this
 //!   build are dimmed and skipped.
-//! - Back: hint card → guide (a past or future programme returns to now
+//! - Back: hint card → guide (a past or future program returns to now
 //!   first, unless [`Columns::back_to_now`] is off) → groups → rail →
 //!   leave the app.
 //!
-//! An empty list (no favourites yet) cannot be entered: the focus stays in
+//! An empty list (no favorites yet) cannot be entered: the focus stays in
 //! the groups column while the guide explains how to add some.
 
 use crate::guide::{Focus, Move, Pane, PreviewOrigin, Schedule};
@@ -130,7 +130,7 @@ pub struct Columns<'a> {
     /// Entries in the groups column ([`crate::lists::entry_count`]).
     pub entries: usize,
     pub rail: &'a [RailItem],
-    /// Back on a past or future programme returns to now before it goes
+    /// Back on a past or future program returns to now before it goes
     /// to the groups (`guide.back_returns_to_now`).
     pub back_to_now: bool,
 }
@@ -147,7 +147,7 @@ pub enum Outcome {
     Preview,
     /// A list was chosen: the columns closed, the guide has the focus.
     Committed,
-    /// OK on a programme: watch it.
+    /// OK on a program: watch it.
     Watch,
     /// Return the existing preview to full screen without tuning a channel.
     ReturnToPlayer,
@@ -183,7 +183,7 @@ impl Focus {
         matches!(self.layout_pane(), Pane::Rail | Pane::Groups)
     }
 
-    /// Up from the first guide row, Favourites or Search reaches the playing
+    /// Up from the first guide row, Favorites or Search reaches the playing
     /// preview without changing the underlying channel, time or list identity.
     pub fn focus_preview(&mut self, playing: bool) -> bool {
         if !playing {
@@ -319,7 +319,7 @@ impl Focus {
     }
 
     /// Shows the groups column (and the rail beside it) with the focus on
-    /// the selected group: Left from the floor programme does it in
+    /// the selected group: Left from the floor program does it in
     /// [`Focus::navigate`]; this is Hold Left, the Groups key or a tap on
     /// the list's name.
     pub fn open_groups(&mut self) {
@@ -378,7 +378,7 @@ impl Focus {
         }
     }
 
-    /// After the list changed under the focus (favourites edited, a new
+    /// After the list changed under the focus (favorites edited, a new
     /// catalog): back on `row` (where the focused channel is now), else on
     /// the nearest row. An emptied list hands the focus to the groups.
     pub fn restore(&mut self, row: Option<usize>, list: &dyn Schedule) {

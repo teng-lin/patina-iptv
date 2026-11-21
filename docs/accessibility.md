@@ -7,12 +7,12 @@ Keep those results separate from the assistive-technology runs below.
 
 ## Repeatable matrix
 
-Use generated playlists, XMLTV, provider catalogues and local mock streams only
+Use generated playlists, XMLTV, provider catalogs and local mock streams only
 ([synthetic setup](../README.md#try-it-with-synthetic-data)). Test with the app's
 Small, Medium, Large and Extra large text settings; repeat the largest setting
-with system text at 1.3. Include long generated source/channel/programme names
+with system text at 1.3. Include long generated source/channel/program names
 and a translated interface. Use 960×540 logical points for TV/small desktop and
-1280×800 for tablet. A clipped programme title may use ellipsis, but its accessible
+1280×800 for tablet. A clipped program title may use ellipsis, but its accessible
 name must retain the full title. Actions must remain visible or scroll into view.
 
 | Journey | Expected behavior | Deterministic coverage |
@@ -22,7 +22,7 @@ name must retain the full title. Actions must remain visible or scroll into view
 | Player and track chooser | Controls/choices expose roles and selected state; inactive controls and covered video are absent from accessibility | `tv_player`, `tv_replay`, `accessibility_visibility` |
 | Parental PIN and recovery | Keypad, recovery and manager use their own focus ranges; Cancel remains visible; disabled controls cannot activate while checking; credential results remain private across a background-recording window hide and require a fresh PIN before redisplay | `parental`, `accessibility_visibility`, core `parental::dialog_tests` |
 | Schedule a recording | D-pad reveals focused values and Save, including with enlarged text; Back cancels the draft and returns to its channel | `recordings`, `accessibility_visibility` |
-| VOD details, seasons and episodes | Catalogue and episode selection expose content identity; Back and resume retain the intended item | `vod_library` |
+| VOD details, seasons and episodes | Catalog and episode selection expose content identity; Back and resume retain the intended item | `vod_library` |
 | Nested modal dismissal | Covered controls cannot receive accessibility focus; Back exposes only the next layer and restores content selection | `accessibility_visibility` |
 | Video contrast and lifetime | Opaque focus/text colors stay readable over black, white and bright video; UI transitions keep the same player and stream | theme and grid-cell unit tests; `accessibility_visibility` |
 
@@ -60,7 +60,7 @@ an enabled screen-reader run.
    checks as unverified if nobody listened to the output.
 3. Open each modal while video plays. Traverse all controls; hidden/covered
    controls must not be reachable. Close nested choosers/PIN/settings with Back
-   and verify the origin channel/programme rather than a row number.
+   and verify the origin channel/program rather than a row number.
 4. Set Extra large and system font scale 1.3; repeat PIN/recovery, source setup,
    recording Save and episode selection. Reach every primary action by D-pad and
    touch, including after scrolling up again. Repeat over synthetic black/white

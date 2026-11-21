@@ -1,6 +1,6 @@
-//! The fields most guide cells do not need, packed per programme into one
+//! The fields most guide cells do not need, packed per program into one
 //! shared `Vec<u32>`: a presence mask followed only by the fields that are
-//! set. A programme with a description and an episode number costs three
+//! set. A program with a description and an episode number costs three
 //! words (12 bytes) instead of a fixed 28-byte record; one with nothing
 //! extra costs nothing (its slot says [`NO_EXTRA`]).
 
@@ -24,7 +24,7 @@ const TEXT_FIELDS: u32 = 6;
 /// Mask bit of the packed `season << 16 | episode` word (after the texts).
 const EPISODE_BIT: u32 = 1 << TEXT_FIELDS;
 
-/// One programme's extras while building.
+/// One program's extras while building.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Extra {
     pub text: [Sym; TEXT_FIELDS as usize],

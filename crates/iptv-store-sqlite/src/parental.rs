@@ -1,4 +1,4 @@
-//! Parental credentials are encrypted with the catalogue. Only one-way
+//! Parental credentials are encrypted with the catalog. Only one-way
 //! verifiers are stored, and credential Debug output is always redacted.
 use crate::{Result, Store};
 use iptv_core::parental::{ContentKind, Target};
@@ -97,8 +97,8 @@ impl Store {
         }
         Ok(())
     }
-    /// Explicit blocks and provider-labelled adult categories. Parent membership
-    /// is resolved from the current catalogue, never from a caller's claim.
+    /// Explicit blocks and provider-labeled adult categories. Parent membership
+    /// is resolved from the current catalog, never from a caller's claim.
     pub fn parental_blocks(&self) -> Result<Vec<Target>> {
         let mut q=self.conn.prepare("SELECT source_id,kind,content_id FROM parental_blocks WHERE blocked=1 UNION SELECT source_id,'live',channel_id \
              FROM channel_overlays WHERE blocked=1 UNION SELECT source_id,CASE WHEN kind IN ('live','radio') THEN 'group' \
@@ -121,8 +121,8 @@ impl Store {
         }
         Ok(targets)
     }
-    /// Resolve only this identity's explicit, legacy and provider-labelled block.
-    /// Each branch uses its source/content key; unrelated catalogue memberships
+    /// Resolve only this identity's explicit, legacy and provider-labeled block.
+    /// Each branch uses its source/content key; unrelated catalog memberships
     /// are never materialized for a playback authorization.
     pub fn parental_target_blocked(&self, target: &Target) -> Result<bool> {
         self.conn

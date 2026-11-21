@@ -10,7 +10,7 @@ use crate::scale::Scale;
 use crate::theme::BRIGHT_TEXT;
 use crate::{Ui, channel_name};
 
-/// The logo box, as tall as a programme: missing or broken logos leave
+/// The logo box, as tall as a program: missing or broken logos leave
 /// it empty (sizes at full size, scaled with the grid).
 const LOGO_W: f32 = 60.0;
 /// Inside the logo box around the logo.

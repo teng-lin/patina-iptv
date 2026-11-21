@@ -226,7 +226,7 @@ fn epg_override_survives_refresh_and_clears() {
     s.set_epg_override(src, &id, None).unwrap();
     s.set_epg_override(src, &cat.channels[2].id, None).unwrap();
     assert_eq!(s.channel(src, &id).unwrap().unwrap().epg_override, None);
-    // Nothing customised is left, so nothing can become an orphan.
+    // Nothing customized is left, so nothing can become an orphan.
     replace(&mut s, src, &catalog(0, 1, XT_PASSWORD));
     assert!(s.orphaned_overlays(Some(src)).unwrap().is_empty());
 }

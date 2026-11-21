@@ -290,7 +290,7 @@ fn prune_delete_and_cascade() {
     staged::replace_epg(&mut store, a, &two_feed_guide("a"), &feeds, 0).unwrap();
     staged::replace_epg(&mut store, b, &two_feed_guide("b"), &feeds, 0).unwrap();
     // Ending at or before now: X-3..X-1 and Y-3..Y-1 (y's two-hour
-    // programmes were cut at the next start), for both sources.
+    // programs were cut at the next start), for both sources.
     assert_eq!(store.prune_epg(NOW).unwrap(), 12);
     let g = store.load_epg(a, &EpgWindow::from(NOW, 30)).unwrap();
     assert_eq!(titles(&g, "k1", 0, i64::MAX).len(), 6);
@@ -417,7 +417,7 @@ fn the_first_program_stored_bounds_the_guide() {
             .is_empty()
     );
 
-    // Pruned days go: the first programme left is now's.
+    // Pruned days go: the first program left is now's.
     store.prune_epg(NOW).unwrap();
     assert_eq!(store.epg_first_start(a).unwrap(), Some(NOW));
     assert_eq!(
@@ -455,7 +455,7 @@ fn a_window_read_seeks_to_the_program_reaching_into_it() {
     };
     assert_eq!(read(NOW - H, i64::MAX), ["Long", "After"]);
     assert_eq!(read(NOW, NOW + H), ["Long"]);
-    // From exactly a programme's start, and between two.
+    // From exactly a program's start, and between two.
     assert_eq!(read(NOW + 2 * H, i64::MAX), ["After"]);
     assert_eq!(read(NOW - 40 * H, NOW - 35 * H), ["Older"]);
     assert_eq!(read(NOW - 45 * H, NOW - 39 * H), ["Old", "Older"]);

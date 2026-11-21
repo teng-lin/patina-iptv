@@ -139,7 +139,7 @@ fn list_open(app: &crate::Headless) -> bool {
         })
 }
 
-/// Whether the programme and channel menu is open (its items exist only
+/// Whether the program and channel menu is open (its items exist only
 /// while it is).
 fn menu_open(app: &crate::Headless) -> bool {
     shows(app, "id:menu-panel >> text:Manage favorites…")
@@ -499,7 +499,7 @@ fn a_press_belongs_to_its_owner_and_a_prompt_takes_its_keys() {
     plays(app, &lifetime, "http://example.test/a", 1);
 
     // OK held in the guide while a tap on Local C opens its PIN prompt; OK
-    // goes up while the prompt shows; the prompt is cancelled before the
+    // goes up while the prompt shows; the prompt is canceled before the
     // hold would have been long: no menu by a late timer.
     step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
     step(app.press("id:guide-ui >> label:Local C"));
@@ -715,7 +715,7 @@ fn a_back_or_ok_held_into_a_pin_prompt_stays_cut_short() {
     step(app.remote_phase(RemoteKey::Back, KeyPhase::Down));
     step(app.press("id:player-actions >> text:TV guide"));
     step(app.remote_phase(RemoteKey::Back, KeyPhase::Up));
-    // (No platform Back follows: Android cancelled it.) OK on Local C.
+    // (No platform Back follows: Android canceled it.) OK on Local C.
     step(app.remote_tap(RemoteKey::Down));
     step(app.remote_tap(RemoteKey::Down));
     step(app.remote_tap(RemoteKey::Ok));

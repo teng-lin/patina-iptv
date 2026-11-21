@@ -1,5 +1,5 @@
 //! Real SQLCipher write contention must not delay guide input or rendering.
-//! All 10,000 channels and seven days of programmes are generated locally.
+//! All 10,000 channels and seven days of programs are generated locally.
 use crate::headless::Headless;
 use nsh_core::{ImageData, Size, element::Root, picker::PickedFile, prelude::*};
 use nsh_engine::EngineConfig;
@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The app on a generated 10,000-channel playlist with seven days of
-/// programmes, on the guide.
+/// programs, on the guide.
 fn ten_thousand_channels(home: &crate::isolated::Home) -> Headless {
     crate::performance::prepare(home);
     let now = SystemTime::now()
@@ -176,7 +176,7 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
 
 /// A UI read while the app's writer is busy with a long publish (a job
 /// that holds it for 6 s) and another connection holds SQLite's write lock
-/// with uncommitted deletes: the search screen's programme index reads
+/// with uncommitted deletes: the search screen's program index reads
 /// every stored title. On the writer's queue it would wait for the
 /// publish; on the reader it reads the last commit at once.
 #[test]

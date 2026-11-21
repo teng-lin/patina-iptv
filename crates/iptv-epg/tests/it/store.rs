@@ -1,4 +1,4 @@
-//! Guide store: normalisation of schedules, retention, priorities, queries.
+//! Guide store: normalization of schedules, retention, priorities, queries.
 
 use std::collections::HashMap;
 
@@ -79,7 +79,7 @@ fn schedules_are_sorted_non_overlapping_and_deterministic() {
     assert_eq!(r.dropped_no_stop, 1);
     assert_eq!(r.overlaps_trimmed, 2);
 
-    // Same result for any input order of distinct programmes (equal
+    // Same result for any input order of distinct programs (equal
     // starts with equal stops keep input order, so drop that tie here).
     let mut input: Vec<_> = messy()
         .into_iter()

@@ -40,7 +40,7 @@ pub(super) fn activate_navigation(ui: Ui) {
 }
 
 /// Whether the rail widens to show its labels: while the remote is on it,
-/// except beside the one-pane empty catalogue, which keeps the width.
+/// except beside the one-pane empty catalog, which keeps the width.
 fn rail_labels(ui: Ui) -> bool {
     ui.vod
         .with(|s| s.control == Control::Navigation && !s.one_pane())
@@ -395,7 +395,7 @@ fn tools(ui: Ui, size: Scale) -> View {
 
 pub(super) fn hero(ui: Ui, size: Scale) -> View {
     view()
-        // The one-pane empty catalogue has no title to describe: only the
+        // The one-pane empty catalog has no title to describe: only the
         // tools' row, so its message and action stay in the window.
         .h(move || {
             size.px(if ui.vod.with(|s| s.one_pane()) {
@@ -635,7 +635,7 @@ fn grid(ui: Ui, size: Scale) -> impl IntoElement {
 }
 
 fn category_heading(ui: Ui, size: Scale) -> impl IntoElement {
-    // The one-pane empty catalogue has nothing to filter.
+    // The one-pane empty catalog has nothing to filter.
     when(
         move || ui.vod.with(|s| !s.one_pane()),
         move || category_heading_button(ui, size),
@@ -673,7 +673,7 @@ fn category_heading_button(ui: Ui, size: Scale) -> View {
 pub(super) fn screen(ui: Ui, size: Scale) -> View {
     super::empty::bind(ui);
     // The layout class at the current text size (`iptv_core::layout`):
-    // a compact window shows the empty catalogue as its one pane.
+    // a compact window shows the empty catalog as its one pane.
     let compact = computed(move || {
         use iptv_core::layout::Class;
         let text = size.of(1.0) * crate::settings::text_factor();

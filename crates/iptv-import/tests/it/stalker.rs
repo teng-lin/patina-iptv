@@ -375,7 +375,7 @@ fn unsafe_optional_vod_rolls_back_active_sink_step_and_fails_import() {
     assert!(sink.rolled_back);
 }
 
-/// A native series catalogue is separate from the legacy VOD `is_series` rows.
+/// A native series catalog is separate from the legacy VOD `is_series` rows.
 fn native_series_fetch(category_status: u16, page_status: u16) -> FakeFetch {
     let sim = StalkerSim {
         channels: 2,

@@ -1,19 +1,19 @@
 //! The guide's timeline under a finger, a mouse and a wheel: where the
-//! programme grid is panned to, in fractional guide minutes, free of UI so
+//! program grid is panned to, in fractional guide minutes, free of UI so
 //! the rules are unit-tested on the host.
 //!
 //! A drag decides its axis once it moved [`SLOP`] (a tap's small wobble
 //! stays a tap; a vertical drag stays the channel list's), then moves the
 //! view with the finger, 1:1 in dp (the platform's pan reports dp, and dp
-//! per minute is the programme area's width over [`VISIBLE`]); released
+//! per minute is the program area's width over [`VISIBLE`]); released
 //! fast enough it flings on and slows down ([`FLING_GAIN`], [`FRICTION`]),
 //! about as far as a native list's fling. The view stays within what the
 //! guide can show ([`crate::guide::view_range`]): back as far as the
-//! retained listings go, on to a little past the last programme. Keys move the focus model's window
+//! retained listings go, on to a little past the last program. Keys move the focus model's window
 //! ([`crate::guide::Focus`]); the view follows it while nothing pans, and a
 //! settled pan hands its window back ([`Timeline::window`]).
 //!
-//! The grid draws a [`Band`] of programmes around the view and slides it
+//! The grid draws a [`Band`] of programs around the view and slides it
 //! by the view's offset in it, so a pan rebuilds cells only when the band
 //! moves (every [`MARGIN`] or so), not every frame.
 
@@ -34,7 +34,7 @@ pub const FRICTION: f32 = 2.0;
 pub const FLING_GAIN: f32 = 1.2;
 /// Below this speed (dp per second) a release or a fling stops.
 pub const STOP_SPEED: f32 = 40.0;
-/// Minutes of programmes the grid holds beyond each edge of the view.
+/// Minutes of programs the grid holds beyond each edge of the view.
 pub const MARGIN: i32 = STEP;
 /// The minutes a [`Band`] spans.
 pub const BAND: i32 = VISIBLE + 2 * MARGIN;
@@ -309,10 +309,10 @@ impl Threshold {
         }
     }
 
-    /// Finger `id`'s touches were cancelled with it at `(x, y)`: true when
+    /// Finger `id`'s touches were canceled with it at `(x, y)`: true when
     /// that is a drag (the followed finger had moved [`CANCEL_MOVE`], the
     /// cancel's own position included, and had not yet been reported
-    /// crossing). A fast drag a scroll view takes over may be cancelled
+    /// crossing). A fast drag a scroll view takes over may be canceled
     /// before any move reached that far.
     pub fn canceled(&mut self, id: u32, x: f32, y: f32) -> bool {
         let Some((fid, fx, fy)) = self.from else {
@@ -337,7 +337,7 @@ pub struct Band {
 }
 
 impl Band {
-    /// The band centred on `view`.
+    /// The band centered on `view`.
     pub fn around(view: f32) -> Band {
         Band {
             base: view.floor() as i32 - MARGIN,

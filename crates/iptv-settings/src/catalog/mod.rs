@@ -1,4 +1,4 @@
-//! iptv-rs's settings catalogue: every setting and command, grouped by
+//! iptv-rs's settings catalog: every setting and command, grouped by
 //! section, plus lookups and the UI tree.
 //!
 //! The capability set and its structure follow the reference player's
@@ -7,12 +7,12 @@
 //! row's comment records where its default comes from.
 //!
 //! Not settings: per-playlist provider data (URL, credentials, name, EPG
-//! sources and assignments), the parental PIN (a secret), and customisation
-//! overlays (names, favourites, hidden, blocked, order) live in their own
+//! sources and assignments), the parental PIN (a secret), and customization
+//! overlays (names, favorites, hidden, blocked, order) live in their own
 //! stores.
 
 /// Marks app-owned help text for translation by the consuming interface.
-/// The app catalogue lint checks every literal passed here.
+/// The app catalog lint checks every literal passed here.
 const fn key(message: &'static str) -> &'static str {
     message
 }
@@ -75,7 +75,7 @@ pub struct SectionNode {
     pub groups: Vec<GroupNode>,
 }
 
-/// The entries of one subsection: settings in catalogue order, then
+/// The entries of one subsection: settings in catalog order, then
 /// commands.
 #[derive(Debug)]
 pub struct GroupNode {

@@ -4,8 +4,8 @@
 //! with named placeholders and counts. A message kept as data and shown
 //! later (an error's text, a notice sent as an event) is marked with
 //! [`key`] where it is written, and translated with [`tr`] where it is
-//! shown. `tests/app/catalogue_lint.rs` checks that every literal in one
-//! of these calls has a catalogue row, and that no user-facing literal
+//! shown. `tests/app/catalog_lint.rs` checks that every literal in one
+//! of these calls has a catalog row, and that no user-facing literal
 //! goes around them.
 use iptv_core::clock::{HourCycle, Style};
 use iptv_core::i18n::{self, Args, Language};
@@ -14,7 +14,7 @@ use iptv_settings::{Target, keys};
 #[cfg(feature = "test-support")]
 mod pseudo;
 
-/// A deliberately expanded fixed catalogue label for synthetic layout scenarios.
+/// A deliberately expanded fixed catalog label for synthetic layout scenarios.
 #[cfg(feature = "test-support")]
 pub fn pseudo_fixed_for_test(source: &str) -> Option<&'static str> {
     pseudo::fixed(source)
@@ -104,7 +104,7 @@ pub fn trf(source: &str, args: &Args<'_>) -> String {
     i18n::format(language(), source, args)
 }
 
-/// Marks `source` as a catalogue message that is translated where it is
+/// Marks `source` as a catalog message that is translated where it is
 /// shown, not here: the text of an error or of a notice that travels as
 /// data. Returns it unchanged.
 pub const fn key(source: &'static str) -> &'static str {
@@ -286,7 +286,7 @@ mod tests {
     }
 
     /// The names of the controls that show an icon only (`.label(…)`, read
-    /// by VoiceOver and TalkBack): each has a row in the catalogue, so a
+    /// by VoiceOver and TalkBack): each has a row in the catalog, so a
     /// screen reader speaks the interface language. A name that only
     /// reached `tr` without a row would stay English without a sign.
     #[test]

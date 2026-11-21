@@ -184,7 +184,7 @@ fn organization_rows_in(
         None => store.ordered_guide_channels(source, scope),
     }?;
     if *kind == Kind::Favorites {
-        // The source's favourite writer publishes membership and order optimistically.
+        // The source's favorite writer publishes membership and order optimistically.
         let mut by_id: std::collections::HashMap<_, _> = rows
             .into_iter()
             .map(|row| (row.channel.id.as_str().to_owned(), row))

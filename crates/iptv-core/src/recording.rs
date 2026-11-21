@@ -113,7 +113,7 @@ impl Repeat {
 pub struct RuleId(pub i64);
 
 /// A guide occurrence is identified by its original start, independently of
-/// padding or a record-now capture that begins after the programme started.
+/// padding or a record-now capture that begins after the program started.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RecurrenceTiming {
     pub program_start: i64,
@@ -188,7 +188,7 @@ pub struct Screen {
     pub draft: Option<Draft>,
     pub busy: bool,
     pub read_generation: u64,
-    /// The content selected when an action menu opened; catalogue row indices
+    /// The content selected when an action menu opened; catalog row indices
     /// may change while that menu remains visible.
     pub context: Option<(crate::menu::Origin, Request)>,
 }

@@ -4,12 +4,12 @@
 //! released moving flings on, and a gesture the system cancels comes to
 //! rest where it is. None of them plays, opens details or a menu, or
 //! schedules a recording, whether it starts on a channel, inside a
-//! programme, or on the boundary between two short programmes. Crossing
+//! program, or on the boundary between two short programs. Crossing
 //! the drag threshold also cancels a preview `guide.autoplay` was about
 //! to start, while a tap's own choice still plays.
 //!
 //! Synthetic data only: a generated 30-channel playlist and an XMLTV
-//! guide around now with long and short programmes, picked from files.
+//! guide around now with long and short programs, picked from files.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -27,7 +27,7 @@ use nsh_engine::EngineConfig;
 
 const IMPORT: Duration = Duration::from_secs(30);
 const CHANNELS: usize = 30;
-/// Programme lengths in minutes, by channel: long cells and short ones
+/// Program lengths in minutes, by channel: long cells and short ones
 /// whose boundaries sit a few dp apart.
 const LENGTHS: [i64; 4] = [180, 45, 15, 30];
 /// Longer than the switch delay: a preview that was going to start has.
@@ -37,7 +37,7 @@ fn name(n: usize) -> String {
     format!("Tab Channel {n:02}")
 }
 
-/// Channel `n`'s programmes are "C<n> P<k>", `k` counting from the one on
+/// Channel `n`'s programs are "C<n> P<k>", `k` counting from the one on
 /// air at `now` (0); channel 1 replays a day back.
 fn guide(now: i64) -> String {
     let mut xml = String::from("<?xml version=\"1.0\"?><tv>");
@@ -49,7 +49,7 @@ fn guide(now: i64) -> String {
     }
     for n in 1..=CHANNELS {
         let len = LENGTHS[(n - 1) % LENGTHS.len()] * 60;
-        // Programme 0 began a third of its length ago.
+        // Program 0 began a third of its length ago.
         let first = now - len / 3;
         let count = (14 * 3600 / len).max(4);
         for k in -count..count {
@@ -116,7 +116,7 @@ fn row_y(app: &Headless, row: usize) -> f32 {
         .unwrap_or_else(|| panic!("{name} is mounted"))
 }
 
-/// Channel one's programme numbers on screen: the timeline's place.
+/// Channel one's program numbers on screen: the timeline's place.
 fn shown(app: &Headless) -> Vec<i64> {
     let mut found: Vec<i64> = app
         .screen()
@@ -300,8 +300,8 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     assert_eq!(on_screen(&app).first(), Some(&1));
     assert!(!app.screen().matches("text:Now").unwrap(), "at now");
 
-    // A preview waiting to start (a key moved the focus) is cancelled by
-    // a horizontal drag: it pans to later programmes and nothing plays.
+    // A preview waiting to start (a key moved the focus) is canceled by
+    // a horizontal drag: it pans to later programs and nothing plays.
     step(app.press_key("down"));
     step(app.drag(
         &format!("text:{}", name(2)),
@@ -321,8 +321,8 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
         "a horizontal drag scrolls no channels"
     );
 
-    // Back at now on the same channel: the cancelled preview stays
-    // cancelled (the pan never left the channel).
+    // Back at now on the same channel: the canceled preview stays
+    // canceled (the pan never left the channel).
     step(app.press("text:Now"));
     step(app.wait_for_gone("text:Now", Duration::from_secs(3)));
     step(app.wait(SETTLE));
@@ -330,7 +330,7 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
 
     // At the list's top a drag down scrolls nothing (a platform's scroll
     // view may report no drag then), yet it crosses the threshold: the
-    // preview a key started waiting for is cancelled.
+    // preview a key started waiting for is canceled.
     step(app.press_key("down"));
     step(app.drag(&format!("text:{}", name(2)), Point::new(px(4.0), px(300.0))));
     step(app.wait(SETTLE));
@@ -339,7 +339,7 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     step(app.press_key("up"));
 
     // Vertically: the channels scroll, the timeline stays, and the preview
-    // the key started waiting for is cancelled too.
+    // the key started waiting for is canceled too.
     step(app.press_key("down"));
     step(app.drag(
         &format!("text:{}", name(3)),
@@ -415,7 +415,7 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     nothing_activated(&app, &tuned, &db, "scrolling back");
     assert_eq!(on_screen(&app).first(), Some(&1), "back at the top");
 
-    // Drags that start on programmes: a long one, the boundary between
+    // Drags that start on programs: a long one, the boundary between
     // two adjacent fifteen-minute ones, and a past one.
     for cell in ["text:C1 P0", "text:C3 P1", "text:C3 P2", "text:C2 P-1"] {
         step(app.drag(cell, Point::new(px(-150.0), px(4.0))));
@@ -461,8 +461,8 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     step(app.wait_for_gone("text:Now", Duration::from_secs(3)));
 
     // Keys move the focus off where a pan left it and back: the pan's
-    // hold on the channel ended, so coming back to that later programme
-    // starts nothing (only a focus on a programme on air would).
+    // hold on the channel ended, so coming back to that later program
+    // starts nothing (only a focus on a program on air would).
     step(app.press_key("down"));
     step(app.drag(
         &format!("text:{}", name(2)),
@@ -477,7 +477,7 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     step(app.wait_for_gone("text:Now", Duration::from_secs(3)));
 
     // Under the threshold a drag is still a tap, an 8 dp sideways wobble
-    // included: it chooses the live programme. A pan right after it,
+    // included: it chooses the live program. A pan right after it,
     // before the switch delay, keeps that choice: it plays full screen.
     step(app.drag(&format!("text:{}", name(5)), Point::new(px(8.0), px(1.0))));
     step(app.drag(
@@ -532,9 +532,9 @@ fn bounds_of(app: &Headless, test_id: &str) -> Option<f32> {
         .map(|n| n.bounds.size.width.0)
 }
 
-/// #156: a long press on another channel, or on one of its programmes,
+/// #156: a long press on another channel, or on one of its programs,
 /// focuses it and opens its menu. Dismissed (Back), or left for the
-/// programme's details, it tunes nothing until a key moves the focus,
+/// program's details, it tunes nothing until a key moves the focus,
 /// which autoplays as before. A menu action that plays still plays.
 #[test]
 fn tablet_long_press_menus_tune_nothing_until_the_focus_moves() {

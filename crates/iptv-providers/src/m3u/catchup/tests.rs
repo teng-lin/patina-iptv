@@ -191,7 +191,7 @@ fn checks_the_archive_window() {
         ..old(8)
     };
     assert!(build_catchup_url(&unknown, wide).is_ok());
-    // Seeking past the programme end.
+    // Seeking past the program end.
     let past_end = CatchupRequest {
         offset_secs: 3601,
         ..old(1)
@@ -448,7 +448,7 @@ fn catchup_correction_shifts_program_times() {
         build_catchup_url(&items[1], REQ).as_deref(),
         Ok("http://l.example.com/b?utc=1700001800&lutc=1700010000")
     );
-    // A correction that moves the start past now is a future programme.
+    // A correction that moves the start past now is a future program.
     let late = CatchupRequest::new(1_700_000_000, 1_700_003_600, 1_700_001_000);
     assert_eq!(
         build_catchup_url(&items[1], late),

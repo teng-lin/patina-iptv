@@ -175,7 +175,7 @@ fn multiview_picker_expansion_preserves_the_guides_category_and_saved_expansion(
     let picker = "id:multiview-picker";
     step(app.wait_for(picker));
     // The picker's expansion is temporary. In particular, folding Alpha must
-    // not remove the guide's selected News category from its own catalogue.
+    // not remove the guide's selected News category from its own catalog.
     step(app.press(&format!("{picker} >> text:▾  Alpha")));
     step(app.wait_for(&format!("{picker} >> text:▸  Alpha")));
     step(app.press(&format!("{picker} >> text:▸  Alpha")));
@@ -184,7 +184,7 @@ fn multiview_picker_expansion_preserves_the_guides_category_and_saved_expansion(
     step(app.wait_for(&format!("{picker} >> text:▸  Alpha")));
     step(app.press(&format!("{picker} >> text:▸  Beta")));
     step(app.wait_for(&format!("{picker} >> text:▾  Beta")));
-    // Give any erroneously queued preference writes or catalogue rebuilds a
+    // Give any erroneously queued preference writes or catalog rebuilds a
     // chance to finish before checking that the stored guide choice is intact.
     step(app.run_for(Duration::from_secs(1)));
     assert_eq!(

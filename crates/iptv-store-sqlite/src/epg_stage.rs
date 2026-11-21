@@ -1,17 +1,17 @@
 //! A guide being downloaded, staged in its own SQLite file
 //! ([`EpgStage`]): `iptv_import::import_epg` streams each feed's
-//! programmes into it in bounded batches, and [`crate::Store::replace_epg`]
+//! programs into it in bounded batches, and [`crate::Store::replace_epg`]
 //! copies the bound channels' schedules into the store in one transaction.
 //!
 //! The stage is a separate file so a long download never holds the
-//! store's write lock, and so a failed or cancelled download leaves the
+//! store's write lock, and so a failed or canceled download leaves the
 //! stored guide untouched: dropping the stage deletes its file. The file
 //! is scratch space (no journal, no fsync): a crash leaves a stale file
 //! that [`EpgStage::remove_stale`] deletes at the next start.
 //!
 //! A writer thread owns the stage connection, so parsing and writing
 //! overlap. Memory stays bounded: SQLite's page cache ([`CACHE_KIB`]), at
-//! most [`IN_FLIGHT`] batches of at most [`BATCH`] programmes or
+//! most [`IN_FLIGHT`] batches of at most [`BATCH`] programs or
 //! [`BATCH_TEXT`] bytes of text on their way, and per feed a map of its
 //! staged EPG channel ids; the guide itself is never held.
 //!
@@ -20,7 +20,7 @@
 //! longest; a missing stop is shortest), then each channel's rows are read
 //! in start order to fill missing stops, trim overlaps and drop what the
 //! rules drop. The result is exactly the schedule
-//! `iptv_epg::SourceBuilder` would build from the same programmes.
+//! `iptv_epg::SourceBuilder` would build from the same programs.
 
 mod writer;
 
@@ -40,7 +40,7 @@ use writer::{Batch, Cmd};
 
 /// Page cache of the stage connection.
 const CACHE_KIB: i64 = 4096;
-/// Programmes per batch (one stage transaction each)...
+/// Programs per batch (one stage transaction each)...
 const BATCH: usize = 4096;
 /// ...or fewer when their texts reach this many bytes.
 const BATCH_TEXT: usize = 1 << 20;
@@ -69,7 +69,7 @@ const SCHEMA: &str = "
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct StagedChannel {
     pub id: i64,
-    /// Programmes kept after settling.
+    /// Programs kept after settling.
     pub kept: u64,
     /// Latest kept stop.
     pub last_stop: Option<UnixTime>,
@@ -80,7 +80,7 @@ struct Current {
     feed: FeedId,
     rules: ScheduleRules,
     descriptions: bool,
-    /// EPG channel id -> (stage channel id, programmes admitted).
+    /// EPG channel id -> (stage channel id, programs admitted).
     channels: HashMap<Box<str>, (i64, u64)>,
     first: i64,
     report: IngestReport,

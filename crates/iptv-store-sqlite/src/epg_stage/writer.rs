@@ -30,7 +30,7 @@ const UPSERT: &str = "
 /// Text fields of a staged row, in [`Batch`] order.
 const TEXTS: usize = 7;
 
-/// One staged programme; texts are spans of [`Batch::text`].
+/// One staged program; texts are spans of [`Batch::text`].
 struct Row {
     ch: i64,
     start: UnixTime,
@@ -41,7 +41,7 @@ struct Row {
     text: [Option<(u32, u32)>; TEXTS],
 }
 
-/// Programmes on their way to the writer: one string buffer for all
+/// Programs on their way to the writer: one string buffer for all
 /// their texts.
 #[derive(Default)]
 pub(super) struct Batch {
@@ -92,7 +92,7 @@ impl Batch {
     }
 }
 
-/// A feed's staged channels: (EPG id, stage channel id, programmes
+/// A feed's staged channels: (EPG id, stage channel id, programs
 /// admitted).
 pub(super) type FeedChannels = Vec<(Box<str>, i64, u64)>;
 

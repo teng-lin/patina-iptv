@@ -1,5 +1,5 @@
 //! The search screen's state: query, history, results in two tabs
-//! (channels, programmes) and remote focus.
+//! (channels, programs) and remote focus.
 //!
 //! The view renders this state and sends [`SearchAction`]s; the state
 //! answers with a [`SearchEffect`] for the app to run (search, play, close).

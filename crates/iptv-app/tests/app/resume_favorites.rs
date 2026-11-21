@@ -3,7 +3,7 @@
 //! shows Favorites, so Back lands there with the channel focused. Not a
 //! favorite of this playlist, or no Favorites category offered
 //! (`channels.show_favorites`): All channels, as before. One stream opens.
-//! The list is decided once: the viewer's later choices and favourite
+//! The list is decided once: the viewer's later choices and favorite
 //! edits are left alone, a hidden channel focuses nothing in its place,
 //! and a PIN-locked channel moves the guide only once its PIN admits it.
 use crate::headless::Headless;
@@ -197,7 +197,7 @@ fn lands_in(app: &mut Headless, list: &str, channel: &str) {
     assert!(channel_selected(app, channel), "{:?}", app.screen().texts());
 }
 
-/// Toggles the playing channel's favourite from the full-screen menu
+/// Toggles the playing channel's favorite from the full-screen menu
 /// strip, then hides it.
 fn toggle_favorite(app: &mut Headless) {
     step(app.press_key("m"));

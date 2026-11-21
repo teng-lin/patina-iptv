@@ -14,7 +14,7 @@ rotation.
 All data is synthetic: the 300-channel generated playlist and XMLTV from
 `tools/make-iptv-fixtures.py`, generated HLS test streams from
 `tools/make-hls-fixtures.sh`, served by `tools/mock-server.py` on the host,
-and the generated catalogues of the headless app scenarios. No provider data
+and the generated catalogs of the headless app scenarios. No provider data
 was used.
 
 **Physical devices: none.** Everything below is emulator, headless or a
@@ -67,7 +67,7 @@ verified here (the screenshots only show video in the preview afterwards).
 
 The Broadway display has no OpenGL, so the desktop real window shows no
 video ("The current backend does not support OpenGL"). Its screenshots show
-layout, focus and input behaviour only; video continuity on desktop rests on
+layout, focus and input behavior only; video continuity on desktop rests on
 the headless scenarios.
 
 ## Journey results
@@ -85,7 +85,7 @@ here checked it.
 | Choosing plays full screen (touch tap on a channel) | Pass | Manual; one `player 0 open` for the tap |
 | Visible Back in full screen (touch) | Pass | [tablet-full-screen-back.png](../screenshots/issue-86/tablet-full-screen-back.png) |
 | Back returns to the same channel, video shown in the preview | Pass | Tap on ‹ logged `play bar: back`; the guide showed the chosen channel with video in the preview; no new stream. Surface continuity not verified |
-| ⋯ visible for touch in the guide, opens the programme and channel menu | Pass | [tablet-guide-touch.png](../screenshots/issue-86/tablet-guide-touch.png); the menu listed programme and channel actions |
+| ⋯ visible for touch in the guide, opens the program and channel menu | Pass | [tablet-guide-touch.png](../screenshots/issue-86/tablet-guide-touch.png); the menu listed program and channel actions |
 | Keys hide ⋯ and keep its room; Back stays visible on a tablet | Pass | Manual D-pad after touch: focus highlight shown, ⋯ hidden, title unmoved, ‹ kept |
 | Find movies and series: Movies with an M3U-only library | Pass | [tablet-movies-empty-state.png](../screenshots/issue-86/tablet-movies-empty-state.png): explains M3U has live channels only, offers Add playlist |
 | Close Movies returns to the same channel | Pass | Manual |
@@ -103,7 +103,7 @@ here checked it.
 | Choosing plays full screen (remote OK) | Pass | Smoke "full screen" and a manual OK on another channel |
 | Long OK opens the controls without a short-OK action | Pass | Smoke "shared TV controls and long OK release" |
 | Back returns to the guide on the same channel | Pass | Manual: `key=back … ctx=Player action=Some(Back)`, then the guide on the chosen channel with video in the preview. Surface continuity not verified |
-| No ⋯ and no visible Back with the remote | Pass | [tv-guide-remote.png](../screenshots/issue-86/tv-guide-remote.png): the programme title uses the ⋯'s room |
+| No ⋯ and no visible Back with the remote | Pass | [tv-guide-remote.png](../screenshots/issue-86/tv-guide-remote.png): the program title uses the ⋯'s room |
 | Touch on a TV shows ‹ and ⋯ | Pass | [tv-guide-after-touch.png](../screenshots/issue-86/tv-guide-after-touch.png) |
 | Touch: tap a channel plays full screen; the player's "TV guide" returns to the same channel | Pass | Manual |
 | Movies with an M3U-only library, remote and touch | Pass | Same message and Add playlist; remote Right from the categories focuses the action; Close shows only after touch |
@@ -121,7 +121,7 @@ here checked it.
 | Compact header at 560×800 and 400×600 | Pass | Shortcuts on their own row under the preview, channel kept; at 400×600 the row scrolls sideways (Add playlist starts off screen) |
 | Resize keeps channel, preview, title and episode on one player, no extra opens | Pass (headless) | `pane_collapse::resizing_the_guide_keeps_the_focused_channel_and_the_playing_preview`, `pane_collapse::resizing_movies_and_shows_keeps_the_title_and_the_episode` |
 | Movies and Shows: play, resume by identity | Pass (headless) | `vod_library::movies_and_series_reach_playback_and_resume_by_identity`, `desktop_clicks_through_continue_watching_and_recently_added` |
-| Empty, failed and disabled imports with their actions | Pass (headless) | `vod_library::desktop_retries_a_failed_import_and_refreshes_an_empty_one`, `an_import_switched_off_opens_that_playlists_import_switch`, `the_empty_state_covers_every_playlist_the_catalogue_reads` |
+| Empty, failed and disabled imports with their actions | Pass (headless) | `vod_library::desktop_retries_a_failed_import_and_refreshes_an_empty_one`, `an_import_switched_off_opens_that_playlists_import_switch`, `the_empty_state_covers_every_playlist_the_catalog_reads` |
 | Movies empty state at 400×600 for pointer | **Fail** | [desktop-400x600-movies-empty-squeezed.png](../screenshots/issue-86/desktop-400x600-movies-empty-squeezed.png) (English, Medium text); bug 1 below, fixed since by #130 (headless only) |
 | Extra large text with the pseudolocale, 1280×720 | Pass | [desktop-1280x720-extra-large-pseudo.png](../screenshots/issue-86/desktop-1280x720-extra-large-pseudo.png): shortcuts and preview visible |
 | Large text and translations keep accessible names | Pass (headless, Settings only) | `interface_languages::pseudolocalized_labels_keep_their_accessible_name_at_large_text_sizes` walks the Settings screen; it does not cover the journey's guide, player or Movies actions |
@@ -138,7 +138,7 @@ here checked it.
    can reach it: Right moves focus to the action and the categories slide
    away. At 560×800 it fits. This conflicts with "Movies and Shows already
    show one pane at a time in every class" and with the large-text criterion.
-   **Fixed by #130** after this run: in Compact the empty catalogue is one
+   **Fixed by #130** after this run: in Compact the empty catalog is one
    pane, its message and action beside the narrow rail with the categories
    gone. `vod_empty_compact` checks at 400×600, Medium and Extra large text,
    (and Extra large with the test pseudolocale) that the message keeps most

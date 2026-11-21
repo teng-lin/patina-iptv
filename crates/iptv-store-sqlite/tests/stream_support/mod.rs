@@ -204,7 +204,7 @@ pub fn playlist(entries: &[PlaylistEntry<'_>]) -> Vec<Channel> {
 }
 
 /// A generated guide: `channels` channels (`gen{n}.example`, "Generated
-/// n"), hourly programmes with descriptions over `days` days from `from`.
+/// n"), hourly programs with descriptions over `days` days from `from`.
 #[derive(Clone, Copy, Debug)]
 pub struct GenShape {
     pub channels: usize,
@@ -215,7 +215,7 @@ pub struct GenShape {
 /// Writes a [`GenShape`] guide as it is read (memory: one chunk).
 pub struct Generated {
     shape: GenShape,
-    /// Next channel element, then next programme channel.
+    /// Next channel element, then next program channel.
     channel: usize,
     programs: bool,
     done: bool,

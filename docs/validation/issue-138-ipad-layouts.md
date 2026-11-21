@@ -11,7 +11,7 @@ All data is synthetic: the 300-channel generated playlist and XMLTV from
 HLS test streams from `tools/make-hls-fixtures.sh --android-smoke`, served by
 `tools/mock-server.py 8138` on the Mac (every request logged: the stream
 counts below are its `index.m3u8` requests), and the generated playlists,
-guides and on-demand catalogue of the headless scenarios. No provider data
+guides and on-demand catalog of the headless scenarios. No provider data
 was used.
 
 **Physical iPad: none.** Everything below is the iPad simulator or
@@ -83,7 +83,7 @@ Patina (4); 10 s inactive beside Settings (4).
    than a 375-point window. The bar now reports its laid-out height
    (`Ui::play_bar_height`), and the chooser is never wider or taller than
    its room, its list scrolling (`chooser.rs`).
-6. **The header clipped the programme's title and times** in a short
+6. **The header clipped the program's title and times** in a short
    window at large text (700×560 at AX3: 64 points for the title and two
    lines of times). The header now budgets the title and the times, wrapped
    as the column's width makes them, before the description
@@ -105,10 +105,10 @@ Patina (4); 10 s inactive beside Settings (4).
 ## Observations, not fixed here
 
 1. **At AX3 the guide's rows truncate hard** (channel names "Sy…", short
-   programmes "…"); the times under the bar's progress wrap one character
+   programs "…"); the times under the bar's progress wrap one character
    per line in portrait ("12:4 / 0 / PM"). Readable but cramped.
 2. **Widening Movies after a compact window keeps the categories closed**:
-   the one-pane empty catalogue closes them, and `iptv_core::vod` keeps them
+   the one-pane empty catalog closes them, and `iptv_core::vod` keeps them
    closed in a wider window with the action focused (a tested remote rule).
    Touch then reaches Close through the category heading, one tap away.
 3. **The keyboard focus cannot reach the preview on iPad** (Up from the top

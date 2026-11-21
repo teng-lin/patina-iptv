@@ -211,7 +211,7 @@ pub enum ValueType {
         max_len: usize,
         default: &'static str,
     },
-    /// A colour bundle chosen by stable name (the palette's values live in
+    /// A color bundle chosen by stable name (the palette's values live in
     /// the app's theme); rendered as swatches.
     Color {
         palette: &'static Choices,
@@ -249,7 +249,7 @@ impl ValueType {
         }
     }
 
-    /// The variants of an enum or colour type.
+    /// The variants of an enum or color type.
     pub const fn choices(&self) -> Option<&'static Choices> {
         match self {
             ValueType::Enum { choices, .. } => Some(choices),
@@ -290,7 +290,7 @@ pub enum Effect {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Test {
     IsTrue,
-    /// Enum or colour value is one of these variants.
+    /// Enum or color value is one of these variants.
     EnumIn(&'static [&'static str]),
     /// Text is not empty.
     NotEmpty,
@@ -397,7 +397,7 @@ impl Setting {
     }
 }
 
-// Const constructors used by the catalogue.
+// Const constructors used by the catalog.
 
 pub const fn boolean(default: bool) -> ValueType {
     ValueType::Bool { default }

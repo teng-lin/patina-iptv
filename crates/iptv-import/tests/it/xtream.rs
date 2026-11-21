@@ -134,7 +134,7 @@ fn optional_lists_fail_softly() {
             .iter()
             .any(|w| w.step == Step::Items(ContentKind::Movie) && w.message.contains("500"))
     );
-    // Kept by kind: the empty movie list is a failure, not an empty catalogue.
+    // Kept by kind: the empty movie list is a failure, not an empty catalog.
     assert!(matches!(
         catalog.on_demand_failures.as_slice(),
         [(ContentKind::Movie, ImportError::HttpStatus { .. })]

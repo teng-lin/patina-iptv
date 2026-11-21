@@ -10,7 +10,7 @@
 //!
 //! Steps: open the store (each `open_store` of the app), the active source,
 //! its channels in provider order, the stored guide's state, the first
-//! screen's programmes and the guide window the app holds (an hour-aligned
+//! screen's programs and the guide window the app holds (an hour-aligned
 //! day back to the end), as the app reads them.
 
 use std::path::PathBuf;

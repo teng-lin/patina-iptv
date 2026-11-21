@@ -290,7 +290,7 @@ fn a_resumed_hidden_channel_keeps_all_channels() {
         }
     }
     let catalog = Hiding(Catalog::small());
-    // Hidden: no list has its row, favourite or not.
+    // Hidden: no list has its row, favorite or not.
     assert_eq!(resume_entry(1, &catalog, &[1], true), Some(ALL));
     assert_eq!(resume_entry(1, &catalog, &[], true), Some(ALL));
     assert_eq!(ChannelList::build(ALL, &catalog, &[1], &[]).row_of(1), None);

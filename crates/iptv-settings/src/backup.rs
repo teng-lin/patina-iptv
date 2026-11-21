@@ -11,10 +11,10 @@
 //! ```
 //!
 //! Values: bool → boolean; integer → number; duration → whole
-//! milliseconds; enum, colour and text → string; key bindings → array of
+//! milliseconds; enum, color and text → string; key bindings → array of
 //! `{"context"?, "key", "press": "short"|"long", "action"}`. Only explicit
 //! choices are written (never defaults), and every object is written with
-//! sorted keys, so equal settings serialise to identical text.
+//! sorted keys, so equal settings serialize to identical text.
 //!
 //! Loading rules (forward and backward compatibility):
 //!
@@ -27,7 +27,7 @@
 //! 3. A number outside the setting's current range, or off its step grid,
 //!    is **clamped** into range and down onto the grid, and reported in
 //!    [`LoadReport::clamped`].
-//! 4. Any other invalid value (wrong JSON type, unknown enum/colour
+//! 4. Any other invalid value (wrong JSON type, unknown enum/color
 //!    variant, text too long or malformed, bad binding list, or an override
 //!    at a level the setting no longer allows) is **rejected**: the setting
 //!    keeps its inherited value, the raw entry is kept and written back

@@ -289,7 +289,7 @@ release that does not exist yet or is still a draft:
 3. It creates a draft (or reuses the draft an interrupted run left), uploads
    every file to it, checks that it is still a draft, and makes it public once.
 
-So a failed or cancelled publish job can simply be rerun: the draft is completed
+So a failed or canceled publish job can simply be rerun: the draft is completed
 and published. Nothing can be re-uploaded to a public release, because users may
 have downloaded its files and the checksums name those bytes. To fix a
 published release, bump the version and tag again; do not delete and recreate
@@ -358,10 +358,10 @@ dependency release retains the exact sources it was built from:
 | macOS disk image | `tools/mpv-runtime-unix` (one `libmpv.2.dylib`) | `mpv-runtime-macos-sources.tar.gz` of release `mpv-runtime-macos-<digest>` | normally none; any Homebrew library: `Patina-<version>-macos-native-sources.tar` |
 | Linux AppImage | `tools/mpv-runtime-unix` (one `libmpv.so.2`) | `mpv-runtime-linux-sources.tar.gz` of release `mpv-runtime-linux-<digest>` | GTK, GStreamer and the host libraries libmpv uses, from Ubuntu 24.04: `Patina-<version>-linux-native-sources.tar` |
 
-Each package carries its runtime's notices, licences, build configuration and
+Each package carries its runtime's notices, licenses, build configuration and
 `SOURCE.txt` (the source archive's address and SHA-256) in
 `notices/mpv-runtime` (`notices/libmpv` on Windows). The source archives hold
-the downloaded upstream archives byte for byte, the licences, the lock and
+the downloaded upstream archives byte for byte, the licenses, the lock and
 the build scripts, and restore offline with `prepare.py prepare
 --source-bundle`. See [`tools/mpv-runtime-unix/README.md`](../tools/mpv-runtime-unix/README.md)
 for what each runtime contains and how to rebuild it.

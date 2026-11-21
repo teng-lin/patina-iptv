@@ -1,16 +1,16 @@
 //! The guide grid: a time ruler, one virtualized row per channel of the list
-//! on screen (`lists.rs`) with its programmes across the full remaining
+//! on screen (`lists.rs`) with its programs across the full remaining
 //! width, and a now-line. Rows are numbered by their place in the list;
 //! `at.index()` is a row, the catalog channel comes from the list.
 //!
-//! The look: programmes are rounded cells on the window colour; the focused
-//! programme is a light pill with dark text, the rest of its row lighter
-//! cells with white titles, every other row dimmed (grey titles). Sizes are
+//! The look: programs are rounded cells on the window color; the focused
+//! program is a light pill with dark text, the rest of its row lighter
+//! cells with white titles, every other row dimmed (gray titles). Sizes are
 //! dp at full size, the same on TV, tablet and a full-screen desktop; a
 //! smaller desktop window scales them (`scale.rs`; `fonts.rs` has the type).
 //!
 //! The timeline pans by touch and mouse drags (`pan.rs`): the rows hold
-//! the programmes of a band a little wider than the window and slide them,
+//! the programs of a band a little wider than the window and slide them,
 //! with the ruler's times and the now line, by one animated offset.
 
 use crate::i18n::tr;
@@ -37,8 +37,8 @@ use crate::scale::Scale;
 use crate::theme::{RADIUS, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, ViewMode, tint};
 
-/// Row pitch; a programme's height (the rest is the gap between rows), the
-/// gap between programmes, their corner radius and text inset (full size:
+/// Row pitch; a program's height (the rest is the gap between rows), the
+/// gap between programs, their corner radius and text inset (full size:
 /// [`Scale`] scales them, the pitch and height in whole px).
 pub const ROW_H: f32 = 50.0;
 const CELL_H: f32 = 46.0;
@@ -52,12 +52,12 @@ const CHANNEL_MIN: f32 = 234.0;
 const CHANNEL_MAX: f32 = 576.0;
 /// The now line's width.
 const NOW_W: f32 = 2.0;
-/// A past programme the row cannot replay (no catch-up, or before its
+/// A past program the row cannot replay (no catch-up, or before its
 /// archive): shown when the view is panned back for rows that can, dimmed
 /// to this opacity, and never focused by the keys (`guide::floor`).
 const PAST_DIM: f32 = 0.4;
 
-/// Cells a row can hold: about 12 per window of programmes, across the
+/// Cells a row can hold: about 12 per window of programs, across the
 /// band.
 const MAX_CELLS: usize = 40;
 const WHITE: u32 = 0xFFFFFF;
@@ -68,7 +68,7 @@ pub fn channel_width() -> f32 {
     (window().width.0 * CHANNEL_SHARE).clamp(CHANNEL_MIN * scale, CHANNEL_MAX * scale)
 }
 
-/// An opaque guide colour; over full-screen video (overlay) at the
+/// An opaque guide color; over full-screen video (overlay) at the
 /// overlay's alpha (`appearance.ui_transparency`).
 pub(crate) fn fill(ui: Ui, rgb_hex: u32) -> Rgba {
     let alpha = match ui.mode.get() {
@@ -79,7 +79,7 @@ pub(crate) fn fill(ui: Ui, rgb_hex: u32) -> Rgba {
 }
 
 pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
-    // The programme area's width: the window always spans all of it.
+    // The program area's width: the window always spans all of it.
     let width = signal(0.0_f32);
     let size = Scale::new();
     let pan = Pan::new(ui, width);
@@ -198,7 +198,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
                         .flex_1(),
                     )
                     .child(
-                        // Now, over the programmes only, sliding with them.
+                        // Now, over the programs only, sliding with them.
                         view()
                             .absolute()
                             .top(px(0.0))
@@ -366,7 +366,7 @@ fn row(
             crate::schedule().programs_between(ch, base, pan.minutes())
         })
     });
-    // The focused programme's start when this row has the focus (a memo
+    // The focused program's start when this row has the focus (a memo
     // per row: a key moving the focus re-runs the cells of the two rows
     // it leaves and enters only, not every row's).
     let focus = computed(move || {

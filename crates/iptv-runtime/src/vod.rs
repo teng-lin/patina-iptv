@@ -1,4 +1,4 @@
-//! On-demand catalogue and playback. Credentials and ephemeral provider links stay here.
+//! On-demand catalog and playback. Credentials and ephemeral provider links stay here.
 #[cfg(test)]
 mod recovery_tests;
 use crate::{Error, Runtime};
@@ -38,7 +38,7 @@ pub(crate) struct State {
     playback_completion: Mutex<Option<PlaybackCompletion>>,
 }
 impl State {
-    /// A token for a new discovery read, cancelling the one before.
+    /// A token for a new discovery read, canceling the one before.
     fn begin_discovery(&self) -> iptv_import::CancelToken {
         let token = iptv_import::CancelToken::new();
         if let Some(previous) = self
@@ -150,7 +150,7 @@ impl Runtime {
     > {
         self.vod_catalog_pages(query, offset, 1).await
     }
-    /// The catalogue from its top, a page at a time until it holds at
+    /// The catalog from its top, a page at a time until it holds at
     /// least `through` titles (or ends), with its filter choices. A list
     /// read again after the player (its progress changed) keeps the titles
     /// the viewer had loaded, so its focused title is found again by
@@ -216,7 +216,7 @@ impl Runtime {
     /// A newer discovery read, [`Runtime::vod_discovery_cancel`] (the shelf
     /// closed) or closing the application cancels a read still running.
     ///
-    /// Protected titles keep their identity and name, as in the catalogue,
+    /// Protected titles keep their identity and name, as in the catalog,
     /// but lose poster and plot until unlocked; opening or playing one goes
     /// through [`Runtime::vod_details`] and [`Runtime::vod_play`], which
     /// check the parental lock, the source's current incarnation and policy,
@@ -240,7 +240,7 @@ impl Runtime {
     /// ([`iptv_core::vod::DiscoveryQuery::around`]). A reopened shelf
     /// focuses its title again by identity this way, however deep it is.
     /// The place and the page come from one read transaction on the
-    /// analysis lane, cancelled like the shelf's other pages; a failure is
+    /// analysis lane, canceled like the shelf's other pages; a failure is
     /// reported, never mistaken for a title that has gone.
     pub fn vod_discovery_around(
         &self,
@@ -425,7 +425,7 @@ impl Runtime {
                             }
                         } else if let Some(StreamLocator::Xtream { stream_id, .. }) = &movie_locator
                         {
-                            // Detail metadata can fail independently of a usable catalogue stream.
+                            // Detail metadata can fail independently of a usable catalog stream.
                             if let Ok(response) = iptv_import::on_demand::detail(
                                 &client,
                                 xt.vod_info(*stream_id),
@@ -783,7 +783,7 @@ url,
             .await
             .map_err(|_| unavailable())??;
         // Portal authentication and link creation can outlive a playlist edit,
-        // disable or deletion. The old catalogue's result is no longer authority.
+        // disable or deletion. The old catalog's result is no longer authority.
         if let Some(parent) = &playing.parent {
             self.parental_check(&target(parent))
                 .await
@@ -1327,7 +1327,7 @@ mod tests {
             .block_on(owner.services().read(|s| s.vod_sources()))
             .unwrap();
         assert_eq!(sources.len(), 1);
-        // The shelf closes before the read ran: it is cancelled, not run.
+        // The shelf closes before the read ran: it is canceled, not run.
         owner.vod_discovery_cancel();
         release.send(()).unwrap();
         assert!(owner.services().block_on(read).is_err());
@@ -1408,7 +1408,7 @@ mod tests {
             waits_off_the_guide_reader(&owner, owner.vod_discovery(first));
             waits_off_the_guide_reader(&owner, owner.vod_discovery_around(shelf, older.clone()));
             // Closing before a host polls the future must not start a new,
-            // uncancelled query when the queued task eventually runs.
+            // uncanceled query when the queued task eventually runs.
             let pending = owner.vod_discovery(first);
             owner.vod_discovery_cancel();
             assert!(owner.services().block_on(pending).is_err(), "{shelf:?}");

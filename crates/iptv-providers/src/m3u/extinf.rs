@@ -1,4 +1,4 @@
-//! Tokeniser for `#EXTINF:` and `#EXTM3U` attribute lines.
+//! Tokenizer for `#EXTINF:` and `#EXTM3U` attribute lines.
 //!
 //! `#EXTINF:<duration> key="value" key=value key='value',<title>`
 //!

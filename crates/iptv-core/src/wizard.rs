@@ -25,7 +25,7 @@
 //! - Every Back lands on a defined focus target: the form returns to the
 //!   type list on the chosen type, the type list to the empty state's add
 //!   action (AC13).
-//! - Submitting while an import runs does nothing; results for a cancelled
+//! - Submitting while an import runs does nothing; results for a canceled
 //!   or superseded import are ignored by [`ImportId`].
 //!
 //! Secrets: usernames, passwords and MAC addresses print as `***` in
@@ -242,7 +242,7 @@ const FIELDS_BY_INDEX: [Field; Field::COUNT] = [
 
 /// The provider-neutral result of the form; the app maps it to its provider
 /// configuration. Values are trimmed (passwords excepted) and the MAC is
-/// normalised to `AA:BB:CC:DD:EE:FF`.
+/// normalized to `AA:BB:CC:DD:EE:FF`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlaylistDraft {
     pub source: DraftSource,
@@ -1761,7 +1761,7 @@ mod tests {
             assert_eq!(w.focus(), Some(Target::Submit));
             assert_eq!(w.failure(), Some(ImportFailure::new(Canceled)));
             assert_eq!(w.value(Mac), "00:1a:79:00:00:01");
-            // The importer's late answer for the cancelled id is ignored.
+            // The importer's late answer for the canceled id is ignored.
             w.handle(E::Succeeded {
                 id,
                 counts: ImportCounts {

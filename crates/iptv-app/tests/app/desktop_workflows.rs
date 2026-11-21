@@ -7,7 +7,7 @@
 //! window while players and the recorder run.
 //!
 //! Synthetic data only: a generated 40-channel playlist, a generated
-//! on-demand catalogue on a local mock server and generated recordings.
+//! on-demand catalog on a local mock server and generated recordings.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -332,7 +332,7 @@ fn names(app: &Headless, prefix: &str) -> Vec<String> {
     names
 }
 
-/// The programme and channel menu closed (it stays mounted, see-through).
+/// The program and channel menu closed (it stays mounted, see-through).
 #[track_caller]
 fn menu_closed(app: &mut Headless) {
     step(

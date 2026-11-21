@@ -15,7 +15,7 @@ use nsh_core::{ImageData, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
 
 const IMPORT: Duration = Duration::from_secs(20);
-/// Programmes of 45 minutes, from three days back to a day ahead.
+/// Programs of 45 minutes, from three days back to a day ahead.
 const LEN: i64 = 45 * 60;
 
 /// "Archive Show" before `now` − 25 h (only in the days paged in), "Recent

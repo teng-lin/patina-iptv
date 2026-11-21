@@ -1,4 +1,4 @@
-//! Independent application consumer: generated catalogue/guide fixtures and
+//! Independent application consumer: generated catalog/guide fixtures and
 //! public runtime queries, without an NSH root, renderer or native key broker.
 use crate::common;
 use crate::support;
@@ -534,7 +534,7 @@ fn hidden_content_and_blocked_access_have_different_query_semantics() {
 fn overlapping_stored_programs_count_separately_from_union_coverage() {
     let f = Fixture::new();
     let source = f.sources[0];
-    // Model a retained/legacy cache with overlapping physical programme rows.
+    // Model a retained/legacy cache with overlapping physical program rows.
     let raw = rusqlite::Connection::open(f._directory.path().join("iptv.sqlite")).unwrap();
     raw.pragma_update(None, "key", format!("x'{}'", "71".repeat(32)))
         .unwrap();

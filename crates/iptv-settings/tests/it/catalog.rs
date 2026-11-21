@@ -1,4 +1,4 @@
-//! The catalogue's contract: every setting with its documented type,
+//! The catalog's contract: every setting with its documented type,
 //! default, range, scope and flags; every visibility condition; every
 //! command. Each setting also round-trips through the store and the
 //! backup format.
@@ -15,7 +15,7 @@ const GL: Scope = Scope::Global;
 const PL: Scope = Scope::Playlist;
 const GR: Scope = Scope::Group;
 
-/// `(key, type with default and range, scope, flags)` in catalogue order;
+/// `(key, type with default and range, scope, flags)` in catalog order;
 /// flags: `a` advanced, `r` requires a restart. Built at run time with the
 /// schema's constructors, so their unit conversions are checked as well.
 fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
@@ -419,7 +419,7 @@ const CONDITIONS: &[(&str, &str)] = &[
     ),
 ];
 
-/// `(key, flags, resets)` in catalogue order; flags: `c` asks for
+/// `(key, flags, resets)` in catalog order; flags: `c` asks for
 /// confirmation, `r` requires a restart.
 const COMMANDS: &[(&str, &str, &[&str])] = &[
     ("recordings.quit_host", "c", &[]),

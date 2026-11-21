@@ -17,7 +17,7 @@
 //! guide's ‹ of an iPad window's controls.
 //!
 //! Synthetic data only: the personalization playlist (M3U), and a
-//! generated on-demand catalogue on a local mock server.
+//! generated on-demand catalog on a local mock server.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -149,7 +149,7 @@ pub(crate) fn channel_selected(app: &Headless, name: &str) -> bool {
 
 /// The guide's header in an iPad window: the video under the preview, the
 /// corner ‹ inside it, the shortcuts beside or under it by the policy and
-/// inside the window, the programme's minutes left on screen.
+/// inside the window, the program's minutes left on screen.
 #[track_caller]
 pub(crate) fn header_fits(app: &Headless, player: NodeId, size: (f32, f32), text: f32) {
     header_fits_as(app, player, size, text, policy(size, text));

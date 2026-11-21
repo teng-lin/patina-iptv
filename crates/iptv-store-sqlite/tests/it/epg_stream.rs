@@ -1,6 +1,6 @@
 //! The streaming guide import (`import_epg` into an [`EpgStage`], then
 //! [`Store::replace_epg`]) against the in-memory import it replaced, and
-//! what a failed or cancelled download leaves. Synthetic data only.
+//! what a failed or canceled download leaves. Synthetic data only.
 
 use crate::common;
 use crate::stream_support;
@@ -114,7 +114,7 @@ fn rows(guide: &GuideStore, key: &ChannelKey) -> Vec<ProgramData<'static>> {
 }
 
 /// Feed 1 (priority 1): tvg-ids `a0..a29` with every shape the schedule
-/// rules handle, a channel declared after its programmes, one never
+/// rules handle, a channel declared after its programs, one never
 /// declared, and channels nothing matches.
 fn feed_one() -> String {
     let mut els = Vec::new();
@@ -154,7 +154,7 @@ fn feed_one() -> String {
         match (*c, *h) {
             // Missing stops: the next start ends them; the last has none.
             (2, h) if h % 3 == 0 || h == 95 => p.stop = None,
-            // Overlaps the next programme: cut at its start.
+            // Overlaps the next program: cut at its start.
             (3, h) if h % 4 == 0 => p.stop = Some(start + 3 * HOUR),
             // Bad durations.
             (4, 10) => p.stop = Some(start),
@@ -203,7 +203,7 @@ fn feed_one() -> String {
 }
 
 /// Feed 2 (priority 5): name matches for `Alpha 10..17`, interleaved by
-/// time; `b3` declares a channel without programmes.
+/// time; `b3` declares a channel without programs.
 fn feed_two() -> String {
     let ids: Vec<String> = (0..8).map(|i| format!("b{i}")).collect();
     let names: Vec<String> = (0..8).map(|i| format!("ALPHA {} HD", i + 10)).collect();
@@ -479,7 +479,7 @@ fn a_canceled_or_failed_download_keeps_the_stored_guide() {
     let state = store.epg_guide(source).unwrap();
     assert_eq!(before.len(), 40 * 72);
 
-    // Cancelled half-way through the download: some programmes are
+    // Canceled half-way through the download: some programs are
     // already staged.
     let cancel = CancelToken::new();
     let c = cancel.clone();
@@ -534,7 +534,7 @@ fn a_failed_feed_is_left_out_and_the_others_are_stored() {
         days: 1,
         from: NOW,
     };
-    // The first feed breaks after channel elements and a few programmes.
+    // The first feed breaks after channel elements and a few programs.
     let mut broken = stream_support::xmltv(&[El::Channel("gen0.example", &["Generated 0"])]);
     broken.truncate(broken.len() - "</tv>\n".len());
     for h in 0..50 {

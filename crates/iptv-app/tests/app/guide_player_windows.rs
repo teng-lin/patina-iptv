@@ -242,7 +242,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     }
 
     // Main-window on-demand browsing must never become the auxiliary window's
-    // invisible overlay or capture its keyboard. Both catalogue kinds use VOD.
+    // invisible overlay or capture its keyboard. Both catalog kinds use VOD.
     for section in ["Movies", "Shows"] {
         step(app.right_click("id:guide-ui >> label:Local A"));
         step(app.back());

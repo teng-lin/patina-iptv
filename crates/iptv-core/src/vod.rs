@@ -1,6 +1,6 @@
 //! Portable on-demand library state. All selections use source/content identity.
 //!
-//! Besides the per-kind catalogue ([`Query`]), two cross-source discovery
+//! Besides the per-kind catalog ([`Query`]), two cross-source discovery
 //! shelves ([`Shelf`]) mix movies and series from every enabled playlist.
 //! They are read a bounded page at a time ([`DiscoveryQuery`]) in a total,
 //! deterministic order, so a page boundary never repeats or skips a title
@@ -32,9 +32,9 @@
 //! read locates the title's current place and returns the page holding it
 //! ([`DiscoveryQuery::around`]), however deep it is. Load more extends the
 //! window downwards and Load previous (or Up on its first title) upwards,
-//! a bounded page at a time; the per-kind catalogue always starts at its top.
+//! a bounded page at a time; the per-kind catalog always starts at its top.
 //!
-//! An empty catalogue says why ([`VodState`], set by the shell from the
+//! An empty catalog says why ([`VodState`], set by the shell from the
 //! playlists on screen) and offers one action ([`Screen::empty_action`]).
 mod library;
 pub use library::{EmptyAction, ImportProblem, SourceVod, VodState};
@@ -316,9 +316,9 @@ pub enum Control {
 /// An operation that failed, which Retry runs again exactly.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
-    /// The list: a catalogue from its top, a shelf around its focused title.
+    /// The list: a catalog from its top, a shelf around its focused title.
     List,
-    /// A catalogue read again from its top through at least `through`
+    /// A catalog read again from its top through at least `through`
     /// titles (the refresh after Back), so a title focused pages down is
     /// found again.
     Through { through: u32 },
@@ -389,7 +389,7 @@ pub struct Screen {
     pub categories_open: bool,
     pub search_open: bool,
     pub open: bool,
-    /// A cross-source shelf instead of the `query.kind` catalogue: the
+    /// A cross-source shelf instead of the `query.kind` catalog: the
     /// query's kind, filters and sort do not apply to it.
     pub shelf: Option<Shelf>,
     pub query: Query,
@@ -397,7 +397,7 @@ pub struct Screen {
     pub categories: Vec<Category>,
     pub cards: Vec<Card>,
     /// A shelf's position of `cards[0]` in its order: titles before it can
-    /// be loaded with Load previous. Always 0 for a catalogue.
+    /// be loaded with Load previous. Always 0 for a catalog.
     pub start: u32,
     /// Next store position after the pages consumed. Refreshes can repeat
     /// titles in a later page, so this must not use deduplicated card count.
@@ -417,7 +417,7 @@ pub struct Screen {
     /// What Retry repeats; set with [`Screen::error`] by [`Screen::fail`].
     pub retry: Option<Operation>,
     pub notice: Option<String>,
-    /// Why the catalogue may be empty; kept across [`Screen::begin`] and
+    /// Why the catalog may be empty; kept across [`Screen::begin`] and
     /// updated by the shell through [`Screen::set_library`].
     pub library: VodState,
     /// Whether the screen waits under the player for Back from the title
@@ -469,7 +469,7 @@ impl Screen {
         self.compact = compact;
         self.settle_panes();
     }
-    /// Whether the empty catalogue takes the window's width: in a compact
+    /// Whether the empty catalog takes the window's width: in a compact
     /// window its message and action are the one pane, the categories give
     /// way (there is nothing to filter), and the remote moves between the
     /// rail and the action.
@@ -481,12 +481,12 @@ impl Screen {
         self.categories_open && !self.one_pane()
     }
     /// Whether the rail (Close and the destinations) shows: beside the
-    /// categories, and always beside the one-pane empty catalogue, where it
+    /// categories, and always beside the one-pane empty catalog, where it
     /// is the pointer's way out.
     pub fn shows_navigation(&self) -> bool {
         self.categories_open || self.one_pane()
     }
-    /// Opens the categories, or in one pane goes to the empty catalogue's
+    /// Opens the categories, or in one pane goes to the empty catalog's
     /// action, the only thing there is to choose (the rail when it offers
     /// none).
     pub fn open_categories(&mut self) {
@@ -511,7 +511,7 @@ impl Screen {
         self.control = Control::Navigation;
     }
     /// Keeps the remote on something shown and never on an action it did
-    /// not see appear. Once the empty catalogue is the one pane, a remote
+    /// not see appear. Once the empty catalog is the one pane, a remote
     /// left on the hidden categories moves to where the titles would be
     /// (the action), or to the rail when there is no action, or when it was
     /// just sent off another playlist's action: OK never acts on a playlist
@@ -605,7 +605,7 @@ impl Screen {
     fn one_pane_without_action(&self) -> bool {
         self.one_pane() && self.empty_action().is_none()
     }
-    /// Sets why the catalogue may be empty. When the empty screen's action
+    /// Sets why the catalog may be empty. When the empty screen's action
     /// now acts on another playlist than the one it offered, a remote on it
     /// goes back to the categories: OK never acts on a playlist the screen
     /// did not show when the remote got there. When nothing is offered (an
@@ -618,7 +618,7 @@ impl Screen {
             return;
         };
         let target = action.target();
-        // The empty catalogue only (a load may be running): never a shelf,
+        // The empty catalog only (a load may be running): never a shelf,
         // details or a list with titles.
         let moved = self.offered.is_some_and(|offered| offered != target)
             && !self.is_shelf()
@@ -635,7 +635,7 @@ impl Screen {
                 self.focus_rail();
                 self.left_action = true;
             } else {
-                // A read is pending: when it publishes an empty catalogue
+                // A read is pending: when it publishes an empty catalog
                 // the remote must not land on this new action unseen.
                 self.control = Control::Category;
                 self.categories_open = true;
@@ -645,7 +645,7 @@ impl Screen {
         self.offered = Some(target);
         self.settle_panes();
     }
-    /// The catalogue's state while it shows no titles, has loaded and has
+    /// The catalog's state while it shows no titles, has loaded and has
     /// no error, and no search or filter narrows it: what its empty screen
     /// says. `None` otherwise (a shelf, details, titles, a narrowed list).
     pub fn empty_state(&self) -> Option<VodState> {
@@ -661,7 +661,7 @@ impl Screen {
             && !narrowed)
             .then_some(self.library)
     }
-    /// The one action of the empty catalogue, if it offers one. The
+    /// The one action of the empty catalog, if it offers one. The
     /// remote reaches it where the titles would be ([`Control::Catalog`]).
     pub fn empty_action(&self) -> Option<EmptyAction> {
         self.empty_state().and_then(VodState::action)
@@ -686,7 +686,7 @@ impl Screen {
         };
         self.reload()
     }
-    /// Whether a discovery shelf, rather than a catalogue, is shown.
+    /// Whether a discovery shelf, rather than a catalog, is shown.
     pub fn is_shelf(&self) -> bool {
         self.shelf.is_some()
     }
@@ -718,7 +718,7 @@ impl Screen {
         self.is_shelf() && self.start > 0
     }
     /// Starts reading the page before a shelf window; the titles shown and
-    /// the focus stay. `None` for a catalogue or at the shelf's top.
+    /// the focus stay. `None` for a catalog or at the shelf's top.
     pub fn begin_previous(&mut self) -> Option<DiscoveryQuery> {
         let query = DiscoveryQuery::before(self.shelf?, self.start)?;
         self.busy = true;
@@ -788,7 +788,7 @@ impl Screen {
             };
         }
     }
-    /// `operation` failed: `message` is a catalogue key, and Retry runs the
+    /// `operation` failed: `message` is a catalog key, and Retry runs the
     /// same operation again. With nothing else to act on, Retry takes the
     /// focus so OK repeats it; otherwise the focus stays where it was (the
     /// focused title, a loaded page, the Play button).
@@ -1223,7 +1223,7 @@ impl Screen {
                     .position(|c| matches!(c, Control::Catalog | Control::Play))
             });
         let Some(at) = at else {
-            // An empty catalogue has no content anchor. Enter its visible
+            // An empty catalog has no content anchor. Enter its visible
             // toolbar at the edge, without stepping past its first action.
             self.control = if delta < 0 {
                 controls[controls.len() - 1]
@@ -1317,7 +1317,7 @@ impl Screen {
         self.handoff = Handoff::Returned;
     }
     pub fn back(&mut self) {
-        // A pending catalogue read is cancelled here and read again by the
+        // A pending catalog read is canceled here and read again by the
         // shell ([`Screen::reload`]).
         let pending = self.busy && !self.is_shelf() && self.details.is_none();
         self.preview = None;
@@ -1769,7 +1769,7 @@ mod tests {
         let g = s.begin_shelf(Shelf::ContinueWatching);
         s.publish(g, vec![cards[0].clone()], false, false);
         assert_eq!(s.focused, Some(cards[0].key.clone()));
-        // Another shelf or a catalogue starts from its own top.
+        // Another shelf or a catalog starts from its own top.
         let g = s.begin_shelf(Shelf::RecentlyAdded);
         assert_eq!(s.focused, None);
         s.publish(g, cards.clone(), false, false);
@@ -2166,7 +2166,7 @@ mod tests {
         assert!(s.publish_window(g2, read(&gone, first)));
         assert_eq!(s.start, 0);
         assert_eq!(s.focused, Some(gone[0].key.clone()));
-        // A catalogue never windows.
+        // A catalog never windows.
         let g = s.begin(Kind::Movie);
         s.publish(g, numbered(3), false, false);
         assert_eq!(s.start, 0);

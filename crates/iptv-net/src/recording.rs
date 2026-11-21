@@ -37,8 +37,8 @@ impl Failure {
     }
 }
 
-/// Convenience capture. For cancellable recording/finalization use [`CaptureFile`]
-/// outside the cancelled future and await its finish acknowledgement.
+/// Convenience capture. For cancelable recording/finalization use [`CaptureFile`]
+/// outside the canceled future and await its finish acknowledgement.
 pub async fn capture(
     url: &str,
     headers: &[(String, String)],

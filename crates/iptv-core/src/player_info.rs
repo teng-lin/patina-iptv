@@ -1,6 +1,6 @@
 //! What the player's info card and top bar say: the stream badges
 //! (resolution class, frame rate, audio layout), the minutes left of a
-//! programme and the date with the time. Pure functions of the values the
+//! program and the date with the time. Pure functions of the values the
 //! caller passes (no clock access here).
 
 use crate::clock::Style;
@@ -33,7 +33,7 @@ pub fn badges(f: &StreamFormat) -> Vec<String> {
     out
 }
 
-/// "25 min left" in `language`, for a programme ending at guide minute
+/// "25 min left" in `language`, for a program ending at guide minute
 /// `end` at `now` (`None` once it ended or before it starts).
 pub fn minutes_left(language: &Language, start: i32, end: i32, now: i32) -> Option<String> {
     (start <= now && now < end).then(|| {

@@ -50,7 +50,7 @@ pub struct GuideSource {
     /// The name the user gave it.
     pub name: Option<String>,
     pub enabled: bool,
-    /// Added to every programme time of the feed (minutes).
+    /// Added to every program time of the feed (minutes).
     pub shift_minutes: i32,
 }
 
@@ -67,7 +67,7 @@ pub struct FeedResult {
     pub attempted_at: UnixTime,
     /// `None`: it loaded.
     pub error: Option<ImportErrorKind>,
-    /// What was stored from it (bound EPG channels and their programmes).
+    /// What was stored from it (bound EPG channels and their programs).
     pub channel_count: u64,
     pub program_count: u64,
     /// The channels it lists (0 for a guide stored before schema v6).
@@ -205,8 +205,8 @@ pub struct Playlist {
     pub kind: SourceKind,
     /// Live channels of the last successful import.
     pub channels: u32,
-    /// Its catalogue has movies, and series (an embedded series of a movie
-    /// list counts as a series, as the catalogue lists it).
+    /// Its catalog has movies, and series (an embedded series of a movie
+    /// list counts as a series, as the catalog lists it).
     pub has_movies: bool,
     pub has_series: bool,
     /// The last successful import could not download its movies, or its
@@ -246,7 +246,7 @@ pub enum Choice {
 }
 
 /// What a channel's guide is now: the saved choice and the guide channel
-/// its stored programmes come from (with how it was matched).
+/// its stored programs come from (with how it was matched).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Current {
     pub choice: Option<Choice>,

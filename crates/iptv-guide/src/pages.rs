@@ -8,7 +8,7 @@
 //! until [`crate::EpgSchedule::insert_page`] brings it, and is dropped
 //! again by [`crate::EpgSchedule::evict_pages`] (the user is back at now)
 //! or when more than [`MAX_PAGES`] are held (the least recently used one).
-//! The page of the programme playing from the archive can be pinned, so
+//! The page of the program playing from the archive can be pinned, so
 //! neither drops it.
 //!
 //! Days before [`PagedWindow::oldest`] (what the store keeps) are empty
@@ -29,14 +29,14 @@ pub const MAX_PAGES: usize = 3;
 /// Which part of a stored guide a schedule holds in memory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PagedWindow {
-    /// The schedule's store holds every programme airing at or after this
+    /// The schedule's store holds every program airing at or after this
     /// (rounded down to the hour); older ones are paged in.
     pub loaded_from: UnixTime,
     /// The store keeps nothing that ended before this.
     pub oldest: UnixTime,
 }
 
-/// One older day to read: programmes overlapping `[from, to)`.
+/// One older day to read: programs overlapping `[from, to)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PageRequest {
     pub(crate) owner: u64,

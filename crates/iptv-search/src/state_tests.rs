@@ -153,7 +153,7 @@ fn play_and_come_back_keeps_query_and_focused_result() {
         &Focus::Result(P(3, 50)),
         "same item, not same row"
     );
-    // The programme ended and dropped out: the same channel's next one.
+    // The program ended and dropped out: the same channel's next one.
     s.resume();
     s.set_results("owl", vec![ch(1)], vec![pr(2, 100), pr(3, 900)]);
     assert_eq!(s.focus(), &Focus::Result(P(3, 900)));
@@ -219,7 +219,7 @@ fn taps_pick_history_results_and_tabs() {
     );
     assert!(!s.keyboard_visible());
     assert!(s.set_results("orchard", vec![ch(1), ch(2)], vec![pr(3, 100), pr(4, 200)]));
-    // A programme tap switches tab, remembers the result and plays it.
+    // A program tap switches tab, remembers the result and plays it.
     assert_eq!(
         s.apply(Pick(Focus::Result(P(4, 200)))),
         SearchEffect::Play(P(4, 200))

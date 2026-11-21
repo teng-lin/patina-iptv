@@ -1,5 +1,5 @@
 //! Private encrypted raw probe snapshots and bounded channel indexes.
-//! Programme schedules are parsed on demand from these exact retained bytes.
+//! Program schedules are parsed on demand from these exact retained bytes.
 use crate::{DatabaseKey, Result, StoreError};
 use iptv_epg::XmltvChannel;
 use rusqlite::{Connection, OpenFlags, params};

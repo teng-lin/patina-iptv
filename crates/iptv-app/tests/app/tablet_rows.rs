@@ -1,7 +1,7 @@
 //! What a first run on a tablet shows, headless: the wizard's playlist
 //! link starts empty (no development address), the key-timing line shows
 //! only in development, a five-digit row number fits its column, and a
-//! superscript badge in a programme title reads as a word.
+//! superscript badge in a program title reads as a word.
 //!
 //! Synthetic data only: a 10,000-channel playlist picked from a file, with
 //! a local XMLTV guide for its first channel.
@@ -28,7 +28,7 @@ fn playlist(guide: &str) -> String {
     m3u
 }
 
-/// One programme around now whose title ends in a superscript badge.
+/// One program around now whose title ends in a superscript badge.
 fn guide(now: i64) -> String {
     format!(
         "<?xml version=\"1.0\"?><tv><channel id=\"one\"><display-name>One</display-name></channel>\
@@ -157,7 +157,7 @@ fn a_tablet_first_run_shows_whole_numbers_and_no_development_defaults() {
     );
 
     // Moving focus to another pane (Groups column via Tab).
-    // Programme cell and channel in the guide retain selection even when focus moves to groups pane.
+    // Program cell and channel in the guide retain selection even when focus moves to groups pane.
     step(app.press_key("tab"));
     assert!(
         app.screen()

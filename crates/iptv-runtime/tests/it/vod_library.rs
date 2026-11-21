@@ -91,7 +91,7 @@ fn movie_playback_progress_survives_restart_and_locked_direct_ids_are_rejected()
     assert!(owner.drain_services());
 }
 
-/// Two playlists carrying the same generated catalogue: identical provider
+/// Two playlists carrying the same generated catalog: identical provider
 /// ids and titles, playable through local direct links.
 fn two_playlists(
     dir: &std::path::Path,

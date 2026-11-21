@@ -288,7 +288,7 @@ pub fn render(message: &str, tag: &str, args: &Args<'_>) -> String {
 }
 
 /// What a message asks of its caller and of its language, for checking a
-/// catalogue: see [`shape`].
+/// catalog: see [`shape`].
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Shape {
     /// The names of its placeholders, plural ones included; sorted, once

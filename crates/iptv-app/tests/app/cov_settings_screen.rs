@@ -1,6 +1,6 @@
-//! The guide's menu, the favourites editor and the settings screen,
-//! headless: the menu's items (search, favourites, details, guide data,
-//! play from the beginning, disabled items), the favourites editor by
+//! The guide's menu, the favorites editor and the settings screen,
+//! headless: the menu's items (search, favorites, details, guide data,
+//! play from the beginning, disabled items), the favorites editor by
 //! keys and taps, and every kind of settings row and editor (a switch, a
 //! choice with swatches, a stepper, a text with a rejected value, a
 //! confirmation, the remote's key list, commands that open other screens
@@ -146,7 +146,7 @@ fn back_until(app: &mut Headless, done: impl Fn(&Screen) -> bool) {
     assert!(done(app.screen()), "still open: {:?}", app.screen().texts());
 }
 
-/// Menu (`M`) on the focused programme.
+/// Menu (`M`) on the focused program.
 #[track_caller]
 fn open_menu(app: &mut Headless) {
     step(app.press_key("m"));
@@ -154,7 +154,7 @@ fn open_menu(app: &mut Headless) {
 }
 
 fn menu(app: &mut Headless) {
-    // The menu names the programme, the channel and the list; items the
+    // The menu names the program, the channel and the list; items the
     // app cannot do yet do nothing.
     open_menu(app);
     assert!(app.screen().matches("role:menuitem").unwrap());
@@ -166,7 +166,7 @@ fn menu(app: &mut Headless) {
         app.shows("Open in another player"),
         "a disabled item keeps the menu"
     );
-    // Favourites: added, and the menu then offers to remove it.
+    // Favorites: added, and the menu then offers to remove it.
     step(app.press("text:Add to favorites"));
     step(app.wait_for_gone("text:Manage favorites…", GONE));
     open_menu(app);
@@ -229,7 +229,7 @@ fn menu(app: &mut Headless) {
     step(app.wait_for("text:☰  All channels"));
 }
 
-/// The favourites editor's title (empty while it is closed).
+/// The favorites editor's title (empty while it is closed).
 const EDITOR: &str = "text:/^Favorites · /";
 
 fn favorites(app: &mut Headless) {
@@ -285,7 +285,7 @@ fn input(app: &mut Headless) -> String {
     format!("view:{}", field_id(app.screen()).unwrap())
 }
 
-/// Presses the text sheet's button `label` (the favourites editor, mounted
+/// Presses the text sheet's button `label` (the favorites editor, mounted
 /// while closed, has a Done too).
 #[track_caller]
 fn sheet_button(app: &mut Headless, label: &str) {
@@ -434,7 +434,7 @@ fn settings(app: &mut Headless, home: &Path) {
 }
 
 fn appearance(app: &mut Headless, home: &Path) {
-    // A colour: the choice at the right, the current one ticked, each with
+    // A color: the choice at the right, the current one ticked, each with
     // its swatch; a tap picks.
     step(app.press("text:Appearance >> nth=0"));
     step(app.wait_for("text:Accent color"));

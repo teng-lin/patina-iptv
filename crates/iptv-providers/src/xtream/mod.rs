@@ -43,7 +43,7 @@ use crate::urlenc;
 /// Fallback User-Agent for API and playback requests.
 pub const DEFAULT_USER_AGENT: &str = "VLC/3.0.18 LibVLC/3.0.18";
 
-/// Normalises an Xtream server address to its portal base URL.
+/// Normalizes an Xtream server address to its portal base URL.
 pub fn normalize_server_url(input: &str) -> Result<String, ProviderError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -272,7 +272,7 @@ impl std::fmt::Debug for XtreamClient {
 }
 
 impl XtreamClient {
-    /// Normalises the server URL and trims the credentials.
+    /// Normalizes the server URL and trims the credentials.
     pub fn new(server_url: &str, username: &str, password: &str) -> Result<Self, ProviderError> {
         let base = normalize_server_url(server_url)?;
         let (username, password) = (username.trim(), password.trim());
@@ -306,7 +306,7 @@ impl XtreamClient {
         self
     }
 
-    /// The normalised portal base (no trailing slash).
+    /// The normalized portal base (no trailing slash).
     pub fn base_url(&self) -> &str {
         &self.base
     }
@@ -416,7 +416,7 @@ impl XtreamClient {
         self.api(Some("get_vod_info"), &[("vod_id", &vod_id.to_string())])
     }
 
-    /// Next programmes for a channel (titles base64; see [`parse_epg`]).
+    /// Next programs for a channel (titles base64; see [`parse_epg`]).
     pub fn short_epg(&self, stream_id: u64, limit: Option<u32>) -> HttpRequest {
         let id = stream_id.to_string();
         match limit {

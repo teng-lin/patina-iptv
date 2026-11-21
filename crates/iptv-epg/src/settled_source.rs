@@ -1,9 +1,9 @@
-//! Building an [`EpgSource`] from programmes that are already settled: a
+//! Building an [`EpgSource`] from programs that are already settled: a
 //! stored guide read back in start order per channel, whose rows passed
 //! [`crate::ScheduleRules`] when they were written (sorted, one per start,
 //! each with a stop at or before the next start).
 //!
-//! [`crate::SourceBuilder`] holds a 24-byte raw row per programme until
+//! [`crate::SourceBuilder`] holds a 24-byte raw row per program until
 //! [`crate::SourceBuilder::finish`] sorts and settles them into 16-byte
 //! slots, so reading a guide back peaked at about two and a half times what
 //! it keeps. Settled rows go straight into their slots: memory grows only
@@ -15,7 +15,7 @@ use crate::intern::Interner;
 use crate::matching::FeedId;
 use crate::store::{EpgSource, IngestReport, ProgramData, Schedule, Slot, intern_program};
 
-/// Builds an [`EpgSource`] one channel at a time from settled programmes.
+/// Builds an [`EpgSource`] one channel at a time from settled programs.
 ///
 /// ```
 /// use iptv_epg::*;
@@ -57,7 +57,7 @@ impl SettledBuilder {
         }
     }
 
-    /// The programmes that follow belong to EPG channel `channel` (a
+    /// The programs that follow belong to EPG channel `channel` (a
     /// channel named again continues its schedule).
     pub fn channel(&mut self, channel: &str) {
         self.end_channel();
@@ -72,7 +72,7 @@ impl SettledBuilder {
         self.current = Some(at);
     }
 
-    /// Adds the next programme of the current channel. One that is not
+    /// Adds the next program of the current channel. One that is not
     /// settled after the ones before it (no stop, not after its start,
     /// starting before the previous one ends, or beyond the compact
     /// slot's range) is dropped and counted; returns whether it was kept.

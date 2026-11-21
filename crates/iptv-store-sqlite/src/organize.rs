@@ -2,7 +2,7 @@
 //!
 //! Both keep ids of channels that are currently gone, in place, so a
 //! returning channel gets its old position back. Positions are rewritten
-//! densely on every move: cheap for groups and favourites, ~one write per
+//! densely on every move: cheap for groups and favorites, ~one write per
 //! channel for a manual order of the whole source.
 
 use std::collections::HashSet;
@@ -218,7 +218,7 @@ impl Store {
         Ok(())
     }
     /// Moves a channel to `index` in a list as shown in effective order
-    /// (hidden channels included). The first move materialises the list's
+    /// (hidden channels included). The first move materializes the list's
     /// current order. Returns `false` if the channel is not in the list.
     pub fn move_channel(
         &mut self,
@@ -530,7 +530,7 @@ impl Store {
 
     /// Puts a custom group's present members in provider order, in one
     /// transaction. Members whose channel is gone keep their place relative
-    /// to their neighbours, as a series of [`Store::move_in_custom_group`]
+    /// to their neighbors, as a series of [`Store::move_in_custom_group`]
     /// calls in that order would leave them.
     pub fn reset_custom_group_order(&mut self, group: CustomGroupId) -> Result<()> {
         let tx = self

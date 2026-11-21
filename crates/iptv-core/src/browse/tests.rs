@@ -8,7 +8,7 @@ use crate::lists::tests::Catalog;
 use crate::lists::{ALL, ChannelList, Entry, FAVORITES, FIRST_GROUP, ListView, entry_count};
 
 /// The guide screen as the shell runs it: the focus, the list it shows and
-/// the favourites, with the list rebuilt as the shell rebuilds it.
+/// the favorites, with the list rebuilt as the shell rebuilds it.
 struct Screen {
     catalog: Rc<dyn Schedule>,
     index: KeyIndex,
@@ -198,7 +198,7 @@ fn ok_chooses_the_group_and_focuses_its_first_channel() {
     assert_eq!(s.view.channel_number(s.focus.channel), 1);
     assert!(s.focus.hint, "the hint card shows");
     assert_eq!(s.focus.program(&s.view).airing(s.focus.now), Airing::Live);
-    // OK again watches the programme.
+    // OK again watches the program.
     assert_eq!(s.ok(), Outcome::Watch);
     assert!(!s.focus.hint, "any key dismisses the hint");
 }
@@ -347,7 +347,7 @@ fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
         ]
     );
     // A live-only playlist on screen while another enabled playlist has
-    // films: both the discovery shelves and catalogues stay reachable.
+    // films: both the discovery shelves and catalogs stay reachable.
     assert_eq!(
         rail_items(VodAvailability {
             shown: false,
@@ -445,7 +445,7 @@ fn a_tap_on_a_group_selects_and_filters_it() {
         Outcome::Moved
     );
     assert_eq!(s.focus.tap_entry(99, &cols), Outcome::None);
-    // A tap on a programme then leaves the columns (the grid's own tap).
+    // A tap on a program then leaves the columns (the grid's own tap).
     s.focus.tap(1, s.focus.now, &s.view);
     assert_eq!((s.focus.pane, s.channel()), (Pane::Guide, Some(6)));
 }

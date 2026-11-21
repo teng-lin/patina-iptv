@@ -7,7 +7,7 @@
 //! preview's rectangle.
 //!
 //! Synthetic data only: the personalization playlist, and a generated
-//! on-demand catalogue on a local mock server.
+//! on-demand catalog on a local mock server.
 
 use std::time::Duration;
 
@@ -117,7 +117,7 @@ fn video_follows_the_preview(app: &Headless, player: NodeId, (w, h): (f32, f32))
 }
 
 /// The compact header's parts stay apart and inside the window: the corner
-/// ‹ inside the preview, the shortcuts' row under it, the programme's
+/// ‹ inside the preview, the shortcuts' row under it, the program's
 /// minutes left on screen (its times line wraps rather than clip).
 #[track_caller]
 fn header_fits(app: &Headless, (w, h): (f32, f32)) {
@@ -164,7 +164,7 @@ fn resizing_the_guide_keeps_the_focused_channel_and_the_playing_preview() {
         env.os = nsh_core::platform::Os::Linux;
     }));
     let player = player(app);
-    // Play B in the preview, then focus C's programme.
+    // Play B in the preview, then focus C's program.
     step(app.press_key("down"));
     step(app.press_key("enter"));
     step(

@@ -46,7 +46,7 @@ the code as it is (`iptv_nav::Keymap::defaults`, `crates/iptv-app/src/input.rs`,
 - Long Back's release takes no step back.
 
 "–" below means the key does nothing there. Keys not listed for a surface
-fall back to the global row: Search opens search, Red toggles the favourite,
+fall back to the global row: Search opens search, Red toggles the favorite,
 digits enter a channel number, Play/Pause, Play and Pause play and pause,
 Stop stops playback, ⏮ (Previous) is the previous channel and ⏭ (Next) goes
 back to live.
@@ -56,13 +56,13 @@ back to live.
 | Key | Tap | Hold |
 |---|---|---|
 | Up / Down | Move between channels; Up from the first row focuses the mini-player when something plays | Repeats |
-| Left | Earlier programmes, then the groups column, then the rail | The groups column |
-| Right | Later programmes | Repeats |
-| OK | Choose: plays full screen (or keeps the guide with **Keep the guide after choosing**); the playing channel returns to full screen; a past programme with replay replays; any other programme opens its details | The programme and channel menu |
-| Menu | The programme and channel menu; on the groups column, the group's options | – |
-| Back | Hint card, then back to the programmes on air, then groups, then rail, then leave (see [Back](#back)) | Back to the video, when something plays |
+| Left | Earlier programs, then the groups column, then the rail | The groups column |
+| Right | Later programs | Repeats |
+| OK | Choose: plays full screen (or keeps the guide with **Keep the guide after choosing**); the playing channel returns to full screen; a past program with replay replays; any other program opens its details | The program and channel menu |
+| Menu | The program and channel menu; on the groups column, the group's options | – |
+| Back | Hint card, then back to the programs on air, then groups, then rail, then leave (see [Back](#back)) | Back to the video, when something plays |
 | Ch+ / Ch− and Page Up / Down | A page of channels | Repeats |
-| Record | Records or schedules the focused programme | – |
+| Record | Records or schedules the focused program | – |
 | Guide | – (already the guide) | – |
 | Info | – | – |
 
@@ -95,7 +95,7 @@ moving on before then cancels it.
 | Info | The info card alone | – |
 | Guide | The guide over the video | – |
 | Rewind / Fast-forward | – (nothing to seek live) | – |
-| Record | Starts or stops recording the playing programme | – |
+| Record | Starts or stops recording the playing program | – |
 | Back | Hides the info card or play bar; then back to the guide on the playing channel | Stops playback and returns to the guide |
 
 Channel up and down show the next channel's banner at once and tune after
@@ -108,7 +108,7 @@ The card captures Left, Right and OK while it shows.
 
 | Key | Tap | Hold |
 |---|---|---|
-| Left / Right | Move between the action cards (Guide, History, Channels, Favourite, Multiview, More controls) | Repeats |
+| Left / Right | Move between the action cards (Guide, History, Channels, Favorite, Multiview, More controls) | Repeats |
 | OK | Presses the focused action card; with none focused, hides the card | The play bar |
 | Up / Down | Channel up / down, the card following | Repeats |
 | Menu | The play bar | – |
@@ -157,8 +157,8 @@ Play a channel first").
 | Surface | Up / Down | OK | Left / Right | Back or Menu |
 |---|---|---|---|---|
 | Chooser (picture size, tracks, sleep timer, audio delay, history) | Move | Picks and closes; focus returns to the control that opened it | – | Closes; focus returns to that control |
-| Programme and channel menu | Move | Performs the item | – | Closes; focus returns to the programme or channel |
-| Programme details | – | Records the programme | – | Closes |
+| Program and channel menu | Move | Performs the item | – | Closes; focus returns to the program or channel |
+| Program details | – | Records the program | – | Closes |
 | Channel list over the video | Move | Plays the focused channel | Left: the groups; Right: back to the channels | Back: from the groups to the channels, then closes; Menu: the channel's or group's menu (also Hold OK) |
 | PIN prompt | Move between digits and actions | Presses the focused action | – | Back closes; the content it guarded is not played |
 | Settings and other screens | Move | Activates | Move between columns | Back returns to where Settings opened, on the same channel |
@@ -173,19 +173,19 @@ Back always dismisses the nearest surface, one step per press
 1. A channel number being typed.
 2. A PIN prompt, then a screen opened over the app (wizard, Movies and
    Shows, Recordings, Settings and its sub-screens).
-3. A chooser, then a menu or programme details.
+3. A chooser, then a menu or program details.
 4. Search, the channel list over the video, the multiview picker.
 5. Over video: the info card or the play bar.
 6. Full-screen video: back to where it was chosen (the guide on the playing
    channel, Recordings for a recording, the multiview grid for a tile). The
    stream keeps playing in the mini-player or behind the guide.
 7. In the guide over the video, back to the video.
-8. In the guide: the hint card, the programmes on air, the groups column,
+8. In the guide: the hint card, the programs on air, the groups column,
    the rail, then leave (after a confirmation when `general.confirm_exit` is
    on).
 
 Closing a chooser, menu, PIN prompt or settings screen restores focus by
-content identity (the control, programme or channel), not by row position,
+content identity (the control, program or channel), not by row position,
 also after the list was refreshed or reordered.
 
 ## Returning to playback
@@ -223,7 +223,7 @@ Native TV validation sends real key phases on a disposable `tv36` emulator
 with generated playlists and streams; see
 [issue #87 TV journey](validation/issue-87-tv-journey.md). Headless layout and
 keymap tests do not establish physical-remote or screen-reader speech
-behaviour.
+behavior.
 
 ## Android journey evidence
 

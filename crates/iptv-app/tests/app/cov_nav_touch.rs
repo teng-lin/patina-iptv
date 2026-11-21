@@ -1,5 +1,5 @@
 //! The app by pointer and touch, run headless: the search screen tapped
-//! (results by number and name, the tabs, Clear and Close, a programme on
+//! (results by number and name, the tabs, Clear and Close, a program on
 //! now played, one later shown in detail, one past replayed, nothing found)
 //! with the recent searches hidden (`search.show_history` off); the
 //! player's channel list tapped (its heading opens the groups, an entry
@@ -7,7 +7,7 @@
 //! by mouse and on a tablet (the pointer chrome's Add screen, a tile's
 //! enlarge and remove buttons, taps on tiles and the menu's items, a tap
 //! beside the menu closing it, a long press enlarging, Search and add with
-//! its programme results, a tile's own buffering and failure states and
+//! its program results, a tile's own buffering and failure states and
 //! Try again, the device's limit, Exit multiview), and on an account that
 //! allows one stream, the warning before adding a tile.
 //!
@@ -39,7 +39,7 @@ const WAIT: Duration = Duration::from_secs(3);
 /// "Gala Evening"'s channel and times: its result's second line, and the
 /// details popover's (mounted, empty, while closed).
 // A time on another local day carries its weekday and date ("Thu 12 · 00:22"):
-// late in the evening the programme two hours on ends, or starts, tomorrow.
+// late in the evening the program two hours on ends, or starts, tomorrow.
 const GALA: &str = "text:/^Test Channel One · ([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+ [AP]M–([A-Z][a-z]{2} [0-9]{1,2} · )?[0-9:]+ [AP]M$/";
 
 /// As in `cov_nav.rs`: "Morning Talk" on now on channel one, "Recital
@@ -242,7 +242,7 @@ fn xtream_server(now: i64) -> String {
 }
 
 /// Multiview on an Xtream account that allows one stream: adding a tile
-/// asks first (the warning, centred over a dimmed screen); Cancel by keys,
+/// asks first (the warning, centered over a dimmed screen); Cancel by keys,
 /// a tap beside it, and Add it anyway.
 fn multiview_past_the_account(app: &mut Headless, now: i64) {
     const WARNING: &str = "text:Your account allows 1 stream at once";
@@ -368,7 +368,7 @@ fn search_by_touch(app: &mut Headless, data: &std::path::Path) {
         step(app.wait(Duration::from_millis(50)));
     }
 
-    // A programme later (a channel matches too: the programmes' tab
+    // A program later (a channel matches too: the programs' tab
     // tapped): its details over the screen; Back closes them.
     open_search(app);
     step(app.type_text(FIELD, "Gala"));
@@ -382,13 +382,13 @@ fn search_by_touch(app: &mut Headless, data: &std::path::Path) {
     step(app.press("text:Close"));
     gone(app, FIELD);
 
-    // A programme on now: it plays full screen and the screen closes.
+    // A program on now: it plays full screen and the screen closes.
     open_search(app);
     step(app.type_text(FIELD, "Morning"));
     step(app.wait_for("text:On now · ↺ replay"));
     step(app.press("text:On now · ↺ replay"));
     gone(app, FIELD);
-    // Its channel a favourite (the play bar's ☆).
+    // Its channel a favorite (the play bar's ☆).
     step(app.press("label:Video"));
     step(app.wait_for("label:Favorite"));
     step(app.press("label:Favorite"));
@@ -396,13 +396,13 @@ fn search_by_touch(app: &mut Headless, data: &std::path::Path) {
     step(app.press("label:Video"));
     gone(app, "label:Mute");
 
-    // A past programme with replay plays from its start.
+    // A past program with replay plays from its start.
     open_search(app);
     step(app.type_text(FIELD, "Recital"));
     step(app.wait_for("text:Earlier · ↺ replay"));
     step(app.press("text:Earlier · ↺ replay"));
     gone(app, FIELD);
-    // Searching the playing channel: a favourite, "Playing" under it.
+    // Searching the playing channel: a favorite, "Playing" under it.
     open_search(app);
     step(app.type_text(FIELD, "Test Channel One"));
     step(app.wait_for("text:1   ★ Test Channel One"));
@@ -536,7 +536,7 @@ fn multiview_by_pointer(app: &mut Headless) {
     step(app.wait_for(MENU));
     step(app.press_at("label:Video", Point::new(px(4.0), px(4.0))));
     gone(app, MENU);
-    // Search and add by tap: the programmes are searched too; a channel
+    // Search and add by tap: the programs are searched too; a channel
     // result becomes a tile.
     step(app.press(&tile("Test Channel Two")));
     step(app.wait_for(MENU));

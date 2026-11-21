@@ -1,4 +1,4 @@
-//! The guide's moves along time beyond the programme steps: a desktop
+//! The guide's moves along time beyond the program steps: a desktop
 //! keyboard's hour and day jumps and its key back to now, and the window a
 //! touch or wheel pan settled at ([`crate::timeline`]). None goes before
 //! the focused row's floor ([`super::floor`]).
@@ -17,8 +17,8 @@ impl Focus {
     /// negative): Shift + Left/Right (an hour) and Ctrl + Left/Right (a
     /// day). The cursor stays between the row's floor and the end of the
     /// guide, as Left and Right do ([`super::floor`]), and lands on the
-    /// programme airing there; the window keeps its place relative to it (a
-    /// long programme does not pull it back to its start) and comes along
+    /// program airing there; the window keeps its place relative to it (a
+    /// long program does not pull it back to its start) and comes along
     /// when the floor held the cursor back.
     pub fn step_time(&mut self, minutes: i32, s: &dyn Schedule) {
         if self.pane != Pane::Guide {
@@ -33,7 +33,7 @@ impl Focus {
         self.lift_to_floor(s);
     }
 
-    /// Home: the focused channel's live programme in the default window,
+    /// Home: the focused channel's live program in the default window,
     /// also when the focus is already on it but the view was moved away.
     pub fn jump_to_now(&mut self) {
         self.pane = Pane::Guide;
@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn left_walks_back_from_a_later_program_to_the_live_one() {
-        // Right steps later. Left walks through each programme in reverse,
+        // Right steps later. Left walks through each program in reverse,
         // including those before now even without catch-up.
         for channel in [1, 3, 15, 77] {
             let mut f = Focus {

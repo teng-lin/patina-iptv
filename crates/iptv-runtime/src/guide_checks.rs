@@ -1,7 +1,7 @@
-//! A source has one cancellable guide timer or in-flight guide read.
+//! A source has one cancelable guide timer or in-flight guide read.
 //!
 //! Work that takes a source's guide over (an import, an update asked for)
-//! cancels its entry. A timer or a check cancelled that way stays *owed*
+//! cancels its entry. A timer or a check canceled that way stays *owed*
 //! until that work answers with the next check or with none: work that
 //! ends without an answer (it failed, was refused, or could not read the
 //! store) then leaves the check the refresh policy had asked for, instead
@@ -39,7 +39,7 @@ struct Entry {
 pub(crate) struct GuideChecks {
     next: u64,
     entries: BTreeMap<SourceId, Entry>,
-    /// When the check that other work cancelled was due (0: it was
+    /// When the check that other work canceled was due (0: it was
     /// running), until that work answers.
     owed: BTreeMap<SourceId, i64>,
     #[cfg(feature = "test-support")]
@@ -268,7 +268,7 @@ mod tests {
         checks.cancel(source);
         checks.replace(source, GuideWork::Timer(900));
         assert_eq!(checks.take_owed(source), None);
-        // So does the owed check running; cancelled again, it is owed now.
+        // So does the owed check running; canceled again, it is owed now.
         checks.cancel(source);
         checks.replace(source, GuideWork::Check);
         assert_eq!(checks.take_owed(source), None);
@@ -302,7 +302,7 @@ mod tests {
         assert!(checks.entries.is_empty());
         assert_eq!(checks.take_owed(other), None);
         assert_eq!(checks.take_owed(shown), Some(500));
-        // What work under way had cancelled before, and a running check.
+        // What work under way had canceled before, and a running check.
         checks.replace(shown, GuideWork::Timer(500));
         checks.cancel(shown);
         checks.clear(Some(shown));

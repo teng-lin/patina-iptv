@@ -597,7 +597,7 @@ mod tests {
             vec![part(1, "Alpha", NOW), part(2, "Beta", NOW + 7200)],
             NOW,
         );
-        // The fixture's programme lies at the same absolute time in each child,
+        // The fixture's program lies at the same absolute time in each child,
         // despite their different epochs.
         let t = iptv_epg::parse_xmltv(
             b"<tv><programme channel=\"same\" start=\"20270115080000 +0000\" \

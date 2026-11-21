@@ -150,7 +150,7 @@ object RecordingHost {
             true
         } catch (_: RuntimeException) {
             // Android may refuse a non-exact background launch. Retry through
-            // the registered alarm; the catalogue retains the accepted job.
+            // the registered alarm; the catalog retains the accepted job.
             arm(context, System.currentTimeMillis() / 1000 + 60)
             false
         }

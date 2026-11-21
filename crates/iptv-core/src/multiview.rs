@@ -2,7 +2,7 @@
 //! plays, the others are muted; the remote's focus is on it).
 //!
 //! The screen holds just the tiles ([`Layout`]): no empty cells, and the
-//! tiles flow again at once when one comes or goes. One tile sits centred
+//! tiles flow again at once when one comes or goes. One tile sits centered
 //! at half the width, two side by side, three as two above one, four two
 //! by two. A tile can be *enlarged*: big at the top, the others in a strip
 //! under it; enlarging another moves the big place to it, reducing it
@@ -27,7 +27,7 @@
 //!
 //! Opening starts
 //! with the playing channel as the only tile and asks for the next one at
-//! once (cancelling leaves the one tile); a short key hint shows until a
+//! once (canceling leaves the one tile); a short key hint shows until a
 //! key or a few seconds pass (the caller times it).
 //!
 //! Each tile keeps the player surface it was given (0 to [`MAX_SURFACES`]

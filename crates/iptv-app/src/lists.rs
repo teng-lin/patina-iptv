@@ -5,7 +5,7 @@
 //! `crate::schedule()` stays the full catalog: `Ui::playing`, `Ui::play`,
 //! search and the player use catalog channels. The focus works on rows of
 //! [`Ui::list`] through [`view`]; [`focused_channel`] maps back. The list
-//! is rebuilt when the selection, the catalog or the favourites change,
+//! is rebuilt when the selection, the catalog or the favorites change,
 //! and the focus stays on its channel by key.
 
 use std::cell::Cell;
@@ -49,7 +49,7 @@ pub fn number(ui: Ui, channel: usize) -> u32 {
     ui.list.with(|l| l.number_of(channel, &*catalog))
 }
 
-/// Catalogues stay visible; discovery shelves follow enabled playlists
+/// Catalogs stay visible; discovery shelves follow enabled playlists
 /// with imported movies or shows.
 pub fn rail(ui: Ui) -> Vec<RailItem> {
     rail_items(VodAvailability {
@@ -110,7 +110,7 @@ pub fn rebuild(ui: Ui, keep: bool) {
     });
 }
 
-/// The favourites changed: the Favourites list follows if it is shown.
+/// The favorites changed: the Favorites list follows if it is shown.
 pub fn favorites_changed(ui: Ui) {
     if matches!(
         Entry::at(ui.focus.with_untracked(|f| f.group)),
@@ -243,7 +243,7 @@ fn listed(ui: Ui, channel: usize) -> usize {
 }
 
 /// Shows what plays on catalog `channel` (a zap, a resumed or previous
-/// channel): its row, its live programme, the default window.
+/// channel): its row, its live program, the default window.
 pub fn show_channel(ui: Ui, channel: usize) {
     let row = listed(ui, channel);
     let view = view(ui);
@@ -253,7 +253,7 @@ pub fn show_channel(ui: Ui, channel: usize) {
 /// The channel resumed at startup (`player::source_ready`,
 /// `resume::adopt`), once it plays: shown in the list the core puts it in
 /// ([`resume_entry`]), so Back from full screen lands on it; else where
-/// [`show_channel`] shows any channel. Decided once: later favourite
+/// [`show_channel`] shows any channel. Decided once: later favorite
 /// edits and the viewer's own choices are left alone.
 pub fn show_resumed(ui: Ui, channel: usize) {
     if !into_resume_list(ui, channel) {
@@ -291,7 +291,7 @@ fn into_resume_list(ui: Ui, channel: usize) -> bool {
     true
 }
 
-/// Focuses catalog `channel`'s programme at `minute` where it is (a search
+/// Focuses catalog `channel`'s program at `minute` where it is (a search
 /// result, a closed menu).
 pub fn tap(ui: Ui, channel: usize, minute: i32) {
     let row = listed(ui, channel);
@@ -547,7 +547,7 @@ mod identity_tests {
         focus.channel = 1;
         let list = Rc::new(ChannelList::build(focus.group, &*before, &[], &[]));
         let kept = keep_list(focus, list, before);
-        // Both catalogue row indices and the group's position change. The
+        // Both catalog row indices and the group's position change. The
         // remaining focused channel is retained; a hidden member disappears.
         let after = catalog(&[("Sport", &["c"]), ("News", &["b", "a"])]);
         after.set_organization(Organization {

@@ -18,7 +18,7 @@ fn feeds() -> Vec<EpgSourceConfig> {
     ]
 }
 
-/// Fetched `age` seconds ago with programmes until `ends_in` from now.
+/// Fetched `age` seconds ago with programs until `ends_in` from now.
 fn stored(age: i64, ends_in: i64, fingerprint: u64) -> GuideState {
     GuideState {
         fetched_at: Some(NOW - age),

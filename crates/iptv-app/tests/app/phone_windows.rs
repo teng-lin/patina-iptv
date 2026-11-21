@@ -2,9 +2,9 @@
 //! a small and a large phone held upright and on their side, at the
 //! default text size and at large ones, the guide drawn at the phone's scale
 //! (0.7). Upright, the guide's header stacks
-//! a preview as wide as the window over the focused programme
+//! a preview as wide as the window over the focused program
 //! (`iptv_core::layout::GuideHeader::stacked`); on its side it keeps the
-//! preview beside the programme. The player's channel list stays inside an
+//! preview beside the program. The player's channel list stays inside an
 //! upright window, a strip beside it for a tap, and in the preview layout
 //! the video stays full screen under it until the window has room for it
 //! beside the list. The guide keeps its focus and the channel playing, and
@@ -85,7 +85,7 @@ fn phone_guide_stacks_upright_and_keeps_the_preview_beside_on_its_side() {
     assert!(channel_selected(app, "Local C"));
     let opens = iptv_app::player_opens(0);
 
-    // At the phone's guide scale every size keeps the programme's title and
+    // At the phone's guide scale every size keeps the program's title and
     // times whole, the largest text on its side too.
     for text in TEXT {
         for size in UPRIGHT.into_iter().chain(SIDEWAYS) {

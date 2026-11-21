@@ -1,6 +1,6 @@
 //! The lists' rows (the groups columns, the player's channel list, search,
-//! the favourites editor, the menu) in the guide's look: its type
-//! (`fonts.rs`: Roboto for names, Roboto Condensed for programme titles),
+//! the favorites editor, the menu) in the guide's look: its type
+//! (`fonts.rs`: Roboto for names, Roboto Condensed for program titles),
 //! its row pitch, both scaled with it on the desktop (`scale.rs`), and its
 //! selection: while the keys are shown, the focused row is the guide's
 //! light pill with near-black text. The list shown (a group, the row the
@@ -56,7 +56,7 @@ impl Mark {
         }
     }
 
-    /// A name's colour.
+    /// A name's color.
     pub fn text(self) -> Rgba {
         match self {
             Mark::Focused => rgb(FOCUSED_TEXT),
@@ -64,7 +64,7 @@ impl Mark {
         }
     }
 
-    /// A second line's colour.
+    /// A second line's color.
     pub fn secondary(self) -> Rgba {
         match self {
             Mark::Focused => tint(FOCUSED_TEXT, TEXT_SECONDARY_ALPHA),
@@ -72,7 +72,7 @@ impl Mark {
         }
     }
 
-    /// A disabled item's colour.
+    /// A disabled item's color.
     pub fn disabled(self) -> Rgba {
         match self {
             Mark::Focused => tint(FOCUSED_TEXT, TEXT_DISABLED_ALPHA),
@@ -91,7 +91,7 @@ fn text_pitch(pitch: f32) -> f32 {
 }
 
 /// A row `pitch` apart from the next (its fill [`GAP`] in from both), its
-/// content centred vertically, marked by `mark`.
+/// content centered vertically, marked by `mark`.
 pub fn row(size: Scale, pitch: f32, mark: impl Fn() -> Mark + 'static) -> View {
     row_with(size, move || pitch, mark)
 }
@@ -120,7 +120,7 @@ pub fn name(size: Scale, content: impl IntoReactive<SharedString>) -> Text {
         .text_size(move || size.text_px(LIST_ITEM))
 }
 
-/// A second line in `family` (Roboto Condensed for programme titles).
+/// A second line in `family` (Roboto Condensed for program titles).
 pub fn second(size: Scale, content: impl IntoReactive<SharedString>, family: &'static str) -> Text {
     text(content)
         .number_of_lines(1)
@@ -128,7 +128,7 @@ pub fn second(size: Scale, content: impl IntoReactive<SharedString>, family: &'s
         .text_size(move || size.text_px(LIST_SECONDARY))
 }
 
-/// Text at `sp` (scaled) in Roboto, in the secondary colour: headings,
+/// Text at `sp` (scaled) in Roboto, in the secondary color: headings,
 /// hints and status lines.
 pub fn small(size: Scale, content: impl IntoReactive<SharedString>, sp: f32) -> Text {
     text(content)

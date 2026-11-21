@@ -27,7 +27,7 @@ fn only_newer_work_takes_the_next_guide_check_over() {
         assert!(!fetching.superseded.get());
         assert!(!library::import_is_current(&runtime, source, &fetching));
 
-        // In its guide phase: cancelled, and returned to be waited for.
+        // In its guide phase: canceled, and returned to be waited for.
         let downloading = work();
         downloading.playlist_done();
         library::track_import(&runtime, source, &downloading);
@@ -49,7 +49,7 @@ fn only_newer_work_takes_the_next_guide_check_over() {
         assert!(newer.superseded.get() && newer.guide.is_canceled());
 
         // A playlist that is being deleted or switched off: its work is
-        // cancelled, but nothing replaces it. When the deletion fails the
+        // canceled, but nothing replaces it. When the deletion fails the
         // playlist stays, and that work still keeps its check.
         let deleted = work();
         library::track_import(&runtime, source, &deleted);

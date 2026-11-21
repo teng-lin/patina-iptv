@@ -47,12 +47,12 @@ fn px(r: Rect, w: f32, h: f32) -> (i32, i32, i32, i32) {
 fn the_grid_holds_just_the_tiles() {
     let grid = |n: usize, i: usize| Layout::Grid { tiles: n }.rect(i, TABLET);
     let (w, h) = (2560.0, 1600.0);
-    // One: centred at half the width, 16:9.
+    // One: centered at half the width, 16:9.
     assert_eq!(px(grid(1, 0), w, h), (640, 440, 1280, 720));
-    // Two: side by side over the width, centred vertically.
+    // Two: side by side over the width, centered vertically.
     assert_eq!(px(grid(2, 0), w, h), (0, 440, 1280, 720));
     assert_eq!(px(grid(2, 1), w, h), (1280, 440, 1280, 720));
-    // Three: two above, one centred below, the size of four's.
+    // Three: two above, one centered below, the size of four's.
     assert_eq!(px(grid(3, 0), w, h), (0, 80, 1280, 720));
     assert_eq!(px(grid(3, 2), w, h), (640, 800, 1280, 720));
     assert_eq!(px(grid(4, 3), w, h), (1280, 800, 1280, 720));
@@ -62,7 +62,7 @@ fn the_grid_holds_just_the_tiles() {
     // A tall window: the tiles stay 16:9, narrower than a column.
     let r = Layout::Grid { tiles: 4 }.rect(0, 1.0);
     assert!(near(r.w, 0.5) && near(r.w / r.h, VIDEO));
-    // A wide one: the rows fill the height, the grid centred.
+    // A wide one: the rows fill the height, the grid centered.
     let r = Layout::Grid { tiles: 4 }.rect(0, 3.0);
     assert!(near(r.h, 0.5) && near(r.w * 3.0 / r.h, VIDEO) && r.x > 0.0);
     // A bogus area falls back to 16:9.
@@ -77,7 +77,7 @@ fn enlarged_puts_one_big_over_a_centered_strip() {
     let (w, h) = (2560.0, 1600.0);
     let two = |i| px(Layout::Enlarged { tiles: 2, big: 1 }.rect(i, TABLET), w, h);
     let (bx, by, bw, bh) = two(1);
-    // About 86 % of the width, 16:9, centred, at the top.
+    // About 86 % of the width, 16:9, centered, at the top.
     assert!((2180..=2220).contains(&bw), "{bw}");
     assert!((bx - (2560 - bw) / 2).abs() <= 1);
     assert!(by <= 2);
@@ -87,7 +87,7 @@ fn enlarged_puts_one_big_over_a_centered_strip() {
     assert!((sw - 630).abs() <= 10, "{sw}");
     assert!((sx - (2560 - sw) / 2).abs() <= 1, "one small tile centered");
     assert!(sy + sh <= 1600);
-    // Four: three small ones side by side, centred, in tile order.
+    // Four: three small ones side by side, centered, in tile order.
     let four = |i| Layout::Enlarged { tiles: 4, big: 2 }.rect(i, TABLET);
     let small: Vec<Rect> = [0, 1, 3].iter().map(|&i| four(i)).collect();
     assert!(near(small[0].y, small[2].y));
@@ -146,7 +146,7 @@ fn the_arrows_move_the_sound_between_tiles() {
     let mut mv = Multiview::open(10, DESKTOP);
     add(&mut mv, 11);
     add(&mut mv, 12);
-    // 10 11 / 12 (centred). The added tile became active.
+    // 10 11 / 12 (centered). The added tile became active.
     assert_eq!(mv.active().channel, 12);
     mv.key(Key::Right, ok);
     assert_eq!(mv.active().channel, 12, "nothing right of the third");
@@ -269,7 +269,7 @@ fn removing_keeps_the_rest_consistent() {
     assert_eq!(mv.enlarged(), Some(1));
     assert_eq!(mv.active().channel, 12, "the sound stays with its tile");
     assert_eq!(surfaces(&mv), vec![(1, 11), (2, 12), (3, 13)]);
-    // Removing the enlarged tile: the grid again, the sound on a neighbour.
+    // Removing the enlarged tile: the grid again, the sound on a neighbor.
     assert!(mv.remove_tile(1));
     assert_eq!(mv.enlarged(), None);
     assert_eq!(mv.layout(), Layout::Grid { tiles: 2 });
@@ -314,7 +314,7 @@ fn replace_and_picks_keep_the_other_surfaces() {
     mv.picked(11);
     assert_eq!(surfaces(&mv), vec![(1, 11), (2, 20), (0, 13)]);
     assert_eq!(mv.active().channel, 11);
-    // A cancelled pick changes nothing.
+    // A canceled pick changes nothing.
     assert_eq!(mv.add(), Outcome::PickChannel);
     mv.cancel_pick();
     assert_eq!(mv.picked(30), Outcome::Stay);

@@ -309,7 +309,7 @@ impl Store {
             [id.0],
         )? == 1)
     }
-    /// Restored schedules must never rearm on a different host; media is not in catalogue backups.
+    /// Restored schedules must never rearm on a different host; media is not in catalog backups.
     pub fn discard_recording_jobs(&mut self) -> Result<()> {
         self.conn.execute("DELETE FROM recording_rules", [])?;
         self.conn.execute("DELETE FROM recording_jobs", [])?;
@@ -507,7 +507,7 @@ impl Store {
              }))?.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// A cancelled occurrence remains remembered, so refresh cannot recreate it.
+    /// A canceled occurrence remains remembered, so refresh cannot recreate it.
     pub fn recording_rule_has_occurrence(
         &self,
         rule: iptv_core::recording::RuleId,

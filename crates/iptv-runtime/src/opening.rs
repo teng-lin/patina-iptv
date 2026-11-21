@@ -8,7 +8,7 @@
 //! channel starts from its stored row (`player/resume.rs`).
 //!
 //! Through the store worker ([`send_stored`]): the channels with the first
-//! screen's programmes ([`first_rows`] around the channel the guide opens
+//! screen's programs ([`first_rows`] around the channel the guide opens
 //! on, [`first_screen`]: the hour before now to [`FIRST_SCREEN_HOURS`] on),
 //! shown with every other channel and time loading
 //! (`EpgSchedule::held_only`, `held_channels`); then the whole window
@@ -27,13 +27,13 @@ use iptv_store_sqlite::{EpgWindow, SourceId};
 use super::imports::{Imported, Job, Msg, Streams};
 use super::stored;
 
-/// Hours of programmes after the hour of now read first.
+/// Hours of programs after the hour of now read first.
 pub const FIRST_SCREEN_HOURS: i64 = 6;
 /// Channels read first either side of the one the guide opens on: a
 /// screen's rows and more.
 pub const FIRST_SCREEN_ROWS: usize = 30;
 
-/// What a first screen holds: the programmes of `keys` overlapping
+/// What a first screen holds: the programs of `keys` overlapping
 /// `[from, to)`.
 pub struct Held {
     pub from: UnixTime,
@@ -63,7 +63,7 @@ pub fn first_rows(channels: &[Channel], focus: Option<&str>) -> Vec<ChannelKey> 
         .collect()
 }
 
-/// Sends `id`'s stored channels with the first screen's programmes, then
+/// Sends `id`'s stored channels with the first screen's programs, then
 /// with the whole guide window. Nothing when it has no channels.
 pub(crate) async fn send_stored(
     services: &super::store_service::Services,
@@ -240,7 +240,7 @@ async fn send_stored_after(
                         .await;
                     if !matches!(discarded, Ok(Some(_))) {
                         // A superseded opening has no authoritative policy
-                        // answer. Let its caller's cancelled/current work
+                        // answer. Let its caller's canceled/current work
                         // decide what follows, just as after a store error.
                         let _ = tx.send(Msg::Guide(imported(groups, channels, guide)));
                         return false;

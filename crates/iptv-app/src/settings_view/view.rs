@@ -227,7 +227,7 @@ fn rows_list(ui: Ui, rows: Memo<Vec<Row>>, size: Scale) -> impl IntoElement {
     .flex_1()
 }
 
-/// The colour of a palette value, for its swatch.
+/// The color of a palette value, for its swatch.
 pub(super) fn swatch_color(ty: &ValueType, variant: &str) -> Option<u32> {
     let ValueType::Color { palette, .. } = ty else {
         return None;

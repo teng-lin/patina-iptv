@@ -167,7 +167,7 @@ impl Transport {
                     input.closing.store(true, Ordering::Release);
                     let closing = input.clone();
                     // Closure remains owned even if this retirement waiter is
-                    // cancelled by UI teardown or another replacement.
+                    // canceled by UI teardown or another replacement.
                     input.executor.spawn(async move {
                         relay.shutdown().await;
                         closing.closed.store(true, Ordering::Release);
@@ -737,7 +737,7 @@ impl Runtime {
                             ));
                         }
                         if incoming.is_none() {
-                            // A failed/cancelled actual owner stays registered until
+                            // A failed/canceled actual owner stays registered until
                             // retire_unused joins it; a protocol with no owner can
                             // release its provisional reservation immediately.
                             let empty = state

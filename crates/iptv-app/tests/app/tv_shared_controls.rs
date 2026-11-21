@@ -492,7 +492,7 @@ fn tv_shows_a_visible_back_once_touch_is_used_and_hides_it_for_keys() {
     step(app.wait_for_gone("id:play-bar-back", Duration::from_secs(2)));
 }
 
-/// The programme menu for `channel` is on screen (its heading names the
+/// The program menu for `channel` is on screen (its heading names the
 /// channel); Back closes it.
 #[track_caller]
 fn menu_opens_for(app: &mut crate::Headless, channel: &str) {
@@ -527,7 +527,7 @@ fn touch_and_pointer_reach_the_menu_without_a_shortcut() {
     assert!(room > 0.0);
 
     // A tap (here on the idle preview, which does nothing else) shows the
-    // ⋯ by the focused programme, on Local A, in that room; it opens the
+    // ⋯ by the focused program, on Local A, in that room; it opens the
     // Menu key's menu.
     step(app.press("id:guide-preview"));
     step(app.wait_for("id:guide-more"));
@@ -537,7 +537,7 @@ fn touch_and_pointer_reach_the_menu_without_a_shortcut() {
     assert_eq!(iptv_app::player_opens(0), opens, "a menu never plays");
 
     // Long press and right-click are its shortcuts: the same menu, no
-    // playback, on a channel and on a programme.
+    // playback, on a channel and on a program.
     step(app.long_press("id:guide-ui >> label:Local B"));
     menu_opens_for(app, "Local B");
     step(app.right_click("id:guide-ui >> label:Local B"));
@@ -596,7 +596,7 @@ fn a_tablet_shows_the_more_control_before_any_tap() {
     );
     let app = &mut fixture.app;
     // A tablet is touched first: the ⋯ shows at once, so the first tap
-    // need not land on a programme (which would play it).
+    // need not land on a program (which would play it).
     step(app.wait_for("id:guide-more"));
     step(app.press(GUIDE_MORE));
     menu_opens_for(app, "Local A");

@@ -6,8 +6,8 @@
 //!   matcher every search uses: all query tokens must match, the last one
 //!   may be the start of a word; quality is [`MatchQuality`].
 //! - [`ChannelIndex`]: channel names (plus extra keys such as numbers),
-//!   favourites first on request.
-//! - [`ProgramIndex`]: an inverted index of programme titles from an
+//!   favorites first on request.
+//! - [`ProgramIndex`]: an inverted index of program titles from an
 //!   [`iptv_epg::GuideStore`], with time window, catch-up and grouping.
 //! - [`SearchHistory`]: recent queries, de-duplicated, saved as a string list.
 //! - [`SearchState`]: the search screen (history, typing, Channels/Programs
@@ -30,7 +30,7 @@ pub use programs_builder::ProgramIndexBuilder;
 pub use state::{Focus, Phase, ResultId, SearchAction, SearchEffect, SearchState, Tab};
 pub use text::{MIN_INFIX, MatchQuality, Query, fold, tokens};
 
-/// Source-qualified content identity, independent of catalogue position.
+/// Source-qualified content identity, independent of catalog position.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ChannelId {
     pub source: Option<i64>,
@@ -49,7 +49,7 @@ impl ChannelId {
     }
 
     /// Bind stored content to the accepting source incarnation. Connection edits
-    /// and delete/recreate change it; ordinary catalogue refreshes do not.
+    /// and delete/recreate change it; ordinary catalog refreshes do not.
     pub fn in_source(
         source: i64,
         incarnation: impl Into<String>,

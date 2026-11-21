@@ -1,11 +1,11 @@
-//! Times the programme index on a synthetic guide: building it and running
+//! Times the program index on a synthetic guide: building it and running
 //! 100 as-you-type queries.
 //!
 //! ```sh
 //! cargo run --release -p iptv-search --example program_bench [channels] [days]
 //! ```
 //!
-//! Defaults: 2,000 channels, 7 days of programmes (4 back, 3 ahead), titles
+//! Defaults: 2,000 channels, 7 days of programs (4 back, 3 ahead), titles
 //! made from invented syllables (recurring series plus one-off titles).
 
 use std::collections::HashMap;

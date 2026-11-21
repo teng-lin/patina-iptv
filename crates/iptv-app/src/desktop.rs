@@ -70,7 +70,7 @@ pub fn bind(ui: Ui) {
     }
 }
 
-/// Whether the host reports and honours window positions: macOS and
+/// Whether the host reports and honors window positions: macOS and
 /// Windows. GTK 4 tells no position on Linux (X11 or Wayland), where the
 /// window manager or compositor keeps windows on the displays there are.
 const POSITIONS: bool = cfg!(any(target_os = "macos", windows));
@@ -259,7 +259,7 @@ pub fn pointer_moved(x: f32, y: f32, now_ms: u64) -> bool {
 }
 
 /// The mouse is at (`x`, `y`) in window `window` (its player surface: 0 is
-/// the main window): whether it travelled at least [`TRAVEL`] points from
+/// the main window): whether it traveled at least [`TRAVEL`] points from
 /// where it rested. Movement accumulates from that anchor, so a slow mouse
 /// counts too; the anchor moves only once the threshold is crossed. The
 /// first report in a window only records the place, so a resting mouse that

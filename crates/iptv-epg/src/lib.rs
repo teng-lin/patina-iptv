@@ -6,10 +6,10 @@
 //!   [`XmltvProgram`] records, skipping malformed entries with counted
 //!   [`ParseWarnings`].
 //! - [`MatchIndex`]: maps playlist channels ([`ChannelKey`]) to EPG channel
-//!   ids by tvg-id, then by normalised name, with manual [`Override`]s.
+//!   ids by tvg-id, then by normalized name, with manual [`Override`]s.
 //! - [`MatchFilter`]: before a feed is matched, which of its EPG channels
 //!   some playlist channel could match (a streaming import keeps only
-//!   their programmes).
+//!   their programs).
 //! - [`SourceBuilder`] / [`GuideStore`]: compact per-channel schedules from
 //!   several sources with priorities, retention and O(log n) guide queries.
 //!   [`ScheduleRules`] are their ordering, overlap and retention rules, for

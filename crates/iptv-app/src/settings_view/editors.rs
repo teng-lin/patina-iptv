@@ -1,5 +1,5 @@
 //! The settings screen's editors and dialogs, over the screen: a list for
-//! a choice (colours with their swatch), a stepper for numbers and
+//! a choice (colors with their swatch), a stepper for numbers and
 //! durations, the text sheet the wizard uses, and the confirmation of a
 //! command. Each says what it is about; the remote drives them through
 //! `iptv_settings::screen`, taps directly.

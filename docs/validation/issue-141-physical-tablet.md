@@ -42,10 +42,10 @@ after the step.
 
 | # | Check | Result | Evidence |
 |---|---|---|---|
-| 1 | Install and first run with a synthetic playlist; the guide loads | **Pass** | Fresh install, `iptv pip: supported true, tv false`. Touch alone: Add playlist, Playlist link (prefilled), Add playlist: `guide switched to 300 imported channels`, 73,559 programmes; Watch showed the guide ([screenshot](../screenshots/issue-141/tab-a9-guide-first-run.png)) |
+| 1 | Install and first run with a synthetic playlist; the guide loads | **Pass** | Fresh install, `iptv pip: supported true, tv false`. Touch alone: Add playlist, Playlist link (prefilled), Add playlist: `guide switched to 300 imported channels`, 73,559 programs; Watch showed the guide ([screenshot](../screenshots/issue-141/tab-a9-guide-first-run.png)) |
 | 2a | Tap a channel: full screen | **Pass** | A tap on a channel name played it full screen: 1 open, 1 stream request. A tap on the channel already playing in the preview went full screen with 0 requests |
 | 2b | Visible ‹ back | **Pass, with one unreproduced miss** | Tapping the video showed the ‹ and the play bar ([screenshot](../screenshots/issue-141/tab-a9-full-screen-play-bar.png)). The ‹ returned to the guide with the preview playing on (`play bar: back`, `left full screen`, 0 requests): 9 of 9 probe taps within its circle, after a new tune, and after a cold start. Observation 1 describes the miss |
-| 2c | ⋯ More options | **Pass** | The guide header's ⋯ opened the channel and programme menu ([screenshot](../screenshots/issue-141/tab-a9-more-options.png)) |
+| 2c | ⋯ More options | **Pass** | The guide header's ⋯ opened the channel and program menu ([screenshot](../screenshots/issue-141/tab-a9-more-options.png)) |
 | 2d | Vertical, horizontal and diagonal swipes tune nothing | **Pass** | `input swipe`, 300 ms each: vertical scrolled rows 1→12 only; horizontal panned 2:30→5:30 PM only, rows unchanged ([screenshot](../screenshots/issue-141/tab-a9-guide-after-horizontal-swipe.png)); a 5:3 diagonal panned (5:30→8:30 PM, rows unchanged); a 1:2 diagonal scrolled (rows 12→23, time unchanged); a drag starting on a channel name scrolled; an 80 ms fling panned into the next day. **0 new stream requests (3 → 3), no player, menu, details or record line** |
 | 2e | A tap with a small wobble still plays | **Pass** | Down, 8 px sideways and 2 px down in 150 ms on a channel: it played full screen (1 open, 1 request) |
 | 3 | Rotation keeps the channel and playback, no new stream | **Pass** | With `accelerometer_rotation 0`: full screen landscape → portrait ([screenshot](../screenshots/issue-141/tab-a9-portrait-full-screen.png)) → landscape, then the guide portrait → landscape. The same channel kept playing, same SurfaceView, same process, 0 opens, 0 requests (4 → 4). The user's rotation settings were restored afterwards |
@@ -65,13 +65,13 @@ audio opened a stream.
 ## Observations
 
 1. **‹ missed three taps once (not reproduced).** In the first full-screen
-   session after the first playback, three taps on the ‹'s drawn centre
+   session after the first playback, three taps on the ‹'s drawn center
    (65, 60) px over about a minute did nothing: `input tap` twice, and a
    120 ms press. Logcat showed the app's window received the touches (`ViewPostIme
    pointer 0/1`) but Patina logged no action. The play bar stayed up for
    that whole minute instead of auto-hiding, while play/pause on the same
    bar worked. A tap lower on the circle (66, 95) then worked. Afterwards
-   the same centre tap worked every time: nine probes from (40–90, 30–85)
+   the same center tap worked every time: nine probes from (40–90, 30–85)
    all returned, while (66, ≥110) below the circle did nothing, as
    expected. It also worked after tuning another channel and after a cold
    start. No system overlay covered that area (`dumpsys input`). Not
@@ -104,7 +104,7 @@ audio opened a stream.
 - TalkBack: not run, because enabling it changes the user's accessibility
   settings.
 - Replay, movie and episode playback on Android: the fixture is the M3U
-  smoke playlist, with no catch-up replay tapped and no VOD catalogue.
+  smoke playlist, with no catch-up replay tapped and no VOD catalog.
 - Physical iPad, and the iPad's audio session (#138).
 
 ## Device restoration

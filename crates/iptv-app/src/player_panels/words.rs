@@ -7,7 +7,7 @@ use iptv_core::panels::{QuickAction, Shown};
 use iptv_core::playback::{Cause, ErrorKind, Waiting};
 use iptv_nav::Profile;
 
-/// An action card's label (ours); the favourite's shows its state.
+/// An action card's label (ours); the favorite's shows its state.
 pub(crate) fn quick_label(action: QuickAction, favorite: bool, detour: bool) -> &'static str {
     match action {
         QuickAction::Guide => tr("TV guide"),

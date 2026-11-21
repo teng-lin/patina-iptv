@@ -9,7 +9,7 @@
 //! encoding a 4 MiB logo as a data URI), so a second worker keeps a burst
 //! from delaying a zap's link resolve; more workers would only add idle
 //! threads on a TV box. A current-thread runtime would need a thread of
-//! its own to drive it anyway, and would serialise those bursts.
+//! its own to drive it anyway, and would serialize those bursts.
 //!
 //! Tasks hand results to the UI through channels or the `JoinHandle`,
 //! which wake the NSH task awaiting them; nothing polls. Imports keep

@@ -383,7 +383,7 @@ impl Sink for Fanout {
 // pre-roll preserves the latest PAT section's continuation and following media
 // in their original order; a multi-section PAT may complete only after capture
 // continues live. A new PAT atomically replaces the old interval, so changing
-// programme versions/PIDs never injects obsolete cached PMT/media packets.
+// program versions/PIDs never injects obsolete cached PMT/media packets.
 fn retain_preroll(buffer: &mut Buffer, bytes: &[u8]) {
     for packet in bytes.as_chunks::<188>().0 {
         let pid = (u16::from(packet[1] & 0x1f) << 8) | u16::from(packet[2]);

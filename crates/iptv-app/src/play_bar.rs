@@ -6,11 +6,11 @@
 //! and traverses its controls with the D-pad. Short OK keeps the info card.
 //!
 //! Left: mute and (desktop) volume, the stream's quality, the channel.
-//! Centre: rewind, play/pause, fast-forward (catch-up only; `seek.rs`).
-//! Right: favourite, subtitles and tracks, programme details, picture size,
+//! Center: rewind, play/pause, fast-forward (catch-up only; `seek.rs`).
+//! Right: favorite, subtitles and tracks, program details, picture size,
 //! channel list, multiview, guide, (desktop) window full screen, frame rate. Under
-//! it the programme's progress: where the archive plays (click or drag to
-//! seek) or how far the live programme is, with its times. It acts on
+//! it the program's progress: where the archive plays (click or drag to
+//! seek) or how far the live program is, with its times. It acts on
 //! the full-screen player (surface 0); while multiview's grid is open it
 //! does not show (the tiles take the taps), and its state then times the
 //! grid's pointer chrome instead (`multiview.rs`). On a multiview detour
@@ -98,7 +98,7 @@ pub fn shows(ui: Ui) -> bool {
 }
 
 /// Leaving full screen or a key hides the bar; it stays while a popup
-/// over the video (a chooser, the programme details) is open.
+/// over the video (a chooser, the program details) is open.
 pub fn bind(ui: Ui) {
     effect(move || {
         let away =
@@ -274,7 +274,7 @@ fn back(ui: Ui) -> impl IntoElement {
         )
 }
 
-/// The round ‹'s colour over video (the player's, the guide's over its
+/// The round ‹'s color over video (the player's, the guide's over its
 /// preview): the bar's panel.
 pub(crate) fn back_bg(ui: Ui) -> impl Fn() -> Rgba + Copy + 'static {
     move || tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA)
@@ -829,7 +829,7 @@ fn right_width(ui: Ui, size: f32) -> f32 {
     buttons * size + (buttons - 1.0) * 2.0 + FPS_W + 6.0
 }
 
-/// Favourite, tracks, details, picture size, channels, multiview, guide,
+/// Favorite, tracks, details, picture size, channels, multiview, guide,
 /// window full screen, frame rate.
 fn right(ui: Ui) -> impl IntoElement {
     let icon_window = nsh_core::element::desktop::current_window();
@@ -919,7 +919,7 @@ fn right(ui: Ui) -> impl IntoElement {
         )
 }
 
-/// The playing programme's details (the description popover), or closes
+/// The playing program's details (the description popover), or closes
 /// them when they show.
 fn details(ui: Ui) {
     if ui.description.with_untracked(Option::is_some) {

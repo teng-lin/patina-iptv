@@ -67,7 +67,7 @@ pub struct FakeFetch {
     pub clock: Cell<Duration>,
     /// Every wait the importer asked for, in order.
     pub slept: RefCell<Vec<Duration>>,
-    /// Cancelled when the importer starts a wait.
+    /// Canceled when the importer starts a wait.
     pub cancel_on_sleep: RefCell<Option<CancelToken>>,
 }
 

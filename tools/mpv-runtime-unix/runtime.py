@@ -134,7 +134,7 @@ def resolve_lock(platform, selection_path=HERE / "sources.json"):
         if not isinstance(item, dict) or str(item.get("name", "")).casefold() in shared:
             raise ValueError(f"Platform component duplicates a shared pin: {item.get('name')!r}")
     lock = {"schema": 1, "sources": chosen + list(extra)}
-    # The same validation as every other lock: names, HTTPS, SHA-256, licences.
+    # The same validation as every other lock: names, HTTPS, SHA-256, licenses.
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "lock.json"
         path.write_text(json.dumps(lock), encoding="utf-8")

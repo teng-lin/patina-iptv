@@ -40,7 +40,7 @@ pub async fn stalker_link<F: Fetch>(
     .await
 }
 
-/// Authorize playback from saved credentials without importing a catalogue.
+/// Authorize playback from saved credentials without importing a catalog.
 /// The session stays in memory and follows the same endpoint/auth policy as an import.
 pub async fn stalker_session<F: Fetch>(
     fetch: &F,

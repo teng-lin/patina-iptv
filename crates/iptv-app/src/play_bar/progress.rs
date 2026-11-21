@@ -1,5 +1,5 @@
 //! The play bar's progress line: in catch-up where the archive plays
-//! (a press or a drag seeks there, `seek.rs`), live how far the programme
+//! (a press or a drag seeks there, `seek.rs`), live how far the program
 //! is; its times at both ends.
 
 use crate::i18n::tr;
@@ -12,7 +12,7 @@ use crate::{Playback, Ui, clock, tint};
 
 const WHITE: u32 = 0xFFFFFF;
 
-/// The programme on screen: live now, or the replayed one.
+/// The program on screen: live now, or the replayed one.
 pub(super) fn program(ui: Ui) -> (usize, crate::guide::Program) {
     ui.app.data_version.get();
     let channel = ui.playing.get().unwrap_or(0);

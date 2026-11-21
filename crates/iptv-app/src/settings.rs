@@ -18,7 +18,7 @@
 //! [`offer`] says what the app does with each setting and command: the
 //! ones it acts on ([`WIRED`], [`COMMANDS`]), what it shows read-only,
 //! what comes later, and what it does not offer at all (device-level
-//! features of TV boxes). Some settings apply here ([`bind`]: colours,
+//! features of TV boxes). Some settings apply here ([`bind`]: colors,
 //! panel timeouts, [`net_config`]); the others are read where they act
 //! (guide data, catch-up keys and steps, search, startup channel, Back,
 //! leaving, channel-change info).
@@ -258,7 +258,7 @@ pub fn palette_key(name: &str) -> String {
     name.to_lowercase().replace(' ', "_")
 }
 
-/// The colours chosen in `appearance.*`.
+/// The colors chosen in `appearance.*`.
 pub fn theme_of(s: &Settings) -> Theme {
     let at = &Target::Global;
     let (accent, background) = (s.color(keys::ACCENT, at), s.color(keys::BACKGROUND, at));
@@ -295,7 +295,7 @@ pub fn overlay_alpha(s: &Settings) -> u8 {
     u8::try_from(255 - percent * 255 / 100).unwrap_or(u8::MAX)
 }
 
-/// Applies the settings that live in `Ui` state: colours and panel
+/// Applies the settings that live in `Ui` state: colors and panel
 /// timeouts, now and after every change.
 pub fn bind(ui: Ui) {
     REVISION.with(|r| r.set(Some(ui.app.settings)));

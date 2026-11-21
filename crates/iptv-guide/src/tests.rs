@@ -10,7 +10,7 @@ use super::{EpgSchedule, GuideChannel, NO_INFORMATION};
 /// Hour-aligned "now" for readable minutes.
 const NOW: i64 = 1_800_000_000;
 
-/// Channel `a.test` has programmes around now with a gap; `b.test` has none.
+/// Channel `a.test` has programs around now with a gap; `b.test` has none.
 fn xmltv() -> String {
     let p = |from: i64, to: i64, title: &str| {
         format!(
@@ -123,7 +123,7 @@ fn a_program_starting_mid_minute_owns_that_minute() {
     let first = s.program_at(0, 29);
     assert_eq!(s.title(0, first), "First");
     assert_eq!(first.end, 30, "cells meet without overlapping");
-    // A tap on the cell (its start minute) focuses that programme.
+    // A tap on the cell (its start minute) focuses that program.
     let mut f = Focus::at(10);
     f.tap(0, second.start, &s);
     assert_eq!(s.title(0, f.program(&s)), "Second");
@@ -164,7 +164,7 @@ fn descriptions_left_out_of_memory_come_from_the_lookup() {
     let lazy = EpgSchedule::new(vec![("News".to_owned(), vec![ch])], store, NOW)
         .with_description_lookup(|key, start| Some(format!("{key} at {}", start - NOW)));
     assert_eq!(lazy.description(0, p).as_deref(), Some("a at -1800"));
-    // No programme there: nothing to look up.
+    // No program there: nothing to look up.
     assert_eq!(lazy.description(0, lazy.program_at(0, 70)), None);
 }
 
@@ -300,7 +300,7 @@ fn the_epoch_is_the_import_hour_and_now_follows_the_wall_clock() {
     assert_eq!((s.epoch(), s.epoch_unix()), (NOW, NOW));
     assert!(s.follows_wall_clock());
     assert_eq!((s.minute(NOW + 90), s.unix(-30)), (1, NOW - 1800));
-    // Programmes keep their minutes from the epoch, whatever the time now.
+    // Programs keep their minutes from the epoch, whatever the time now.
     let news = Program {
         start: -30,
         end: 30,
@@ -309,7 +309,7 @@ fn the_epoch_is_the_import_hour_and_now_follows_the_wall_clock() {
     let now = now_minute(&s, NOW + 25 * 60 + 13, 0);
     assert_eq!(now, 25);
     assert_eq!(news.airing(now), Airing::Live);
-    // Five minutes later the next programme is live without a rebuild.
+    // Five minutes later the next program is live without a rebuild.
     let later = now_minute(&s, NOW + 30 * 60, 0);
     assert_eq!(news.airing(later), Airing::Ended);
     let mut f = Focus::at(now);
@@ -596,7 +596,7 @@ fn a_repeated_group_id_keeps_keys_names_and_starts_together() {
     );
 }
 
-/// A schedule prepared on another thread is the one organised in place.
+/// A schedule prepared on another thread is the one organized in place.
 #[test]
 fn a_prepared_schedule_crosses_threads_and_matches_one_organized_in_place() {
     use super::Organization;

@@ -4,7 +4,7 @@
 //! shipped. `schema_migrations` records every applied version; all pending
 //! migrations run in one `BEGIN IMMEDIATE` transaction, so a failure leaves
 //! the file at its previous version and two processes opening the same file
-//! serialise instead of racing. Users skip releases, so opening any older
+//! serialize instead of racing. Users skip releases, so opening any older
 //! file applies every missing step in order (tested from each historical
 //! schema in `tests/fixtures/`).
 //!

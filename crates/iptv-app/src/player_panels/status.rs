@@ -24,7 +24,7 @@ enum Status {
         message: String,
         detail: String,
     },
-    /// A replayed programme reached its end.
+    /// A replayed program reached its end.
     Over,
 }
 

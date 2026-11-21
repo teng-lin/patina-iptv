@@ -189,7 +189,7 @@ pub fn reachable(window: Rect, areas: &[Rect]) -> Option<Rect> {
     if grabbable {
         return None;
     }
-    // The area whose rectangle is closest to the window's centre.
+    // The area whose rectangle is closest to the window's center.
     let (cx, cy) = (x + w / 2.0, y + h / 2.0);
     let distance = |&(ax, ay, aw, ah): &Rect| {
         let dx = (ax - cx).max(cx - (ax + aw)).max(0.0);

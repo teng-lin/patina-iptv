@@ -1,6 +1,6 @@
 //! Patina: ink surfaces, mineral accents and a pale blue focus marker.
-//! Designed for this app. Opaque programme focus isolates its text from video;
-//! dark accent fills keep white control labels readable. Saved colour names
+//! Designed for this app. Opaque program focus isolates its text from video;
+//! dark accent fills keep white control labels readable. Saved color names
 //! remain stable so existing preferences select the corresponding new tones.
 
 use crate::i18n::key;
@@ -126,14 +126,14 @@ pub const fn blend(under: u32, over: u32, a: u8) -> u32 {
 }
 
 const WHITE: u32 = 0xFFFFFF;
-/// The focused programme: a light pill whatever the background, with
+/// The focused program: a light pill whatever the background, with
 /// near-black text.
 pub const FOCUSED_CELL: u32 = 0xC8DDEB;
 pub const FOCUSED_TEXT: u32 = 0x171C20;
 /// Titles of the focused row and channel names: white, a touch dimmer.
 pub const BRIGHT_TEXT: u32 = 0xF5F3EE;
 /// Names in the lists (groups, channels, results, menu items) on the
-/// window and panel colours.
+/// window and panel colors.
 pub const LIST_TEXT: u32 = 0xE8EDF0;
 /// Error text on dark surfaces and its ink counterpart on pale blue focus.
 pub const ERROR: u32 = 0xF0B5AC;
@@ -141,15 +141,15 @@ pub const ERROR_FOCUSED: u32 = 0x753A32;
 /// Lift the focused row slightly above the resting ink surface.
 pub const ROW_ALPHA: u8 = 0x18;
 
-/// The guide's colours for a theme (`0xRRGGBB`; titles of rows without the
+/// The guide's colors for a theme (`0xRRGGBB`; titles of rows without the
 /// focus and the ruler's times are white at [`TEXT_SECONDARY_ALPHA`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GuideColors {
     /// Behind everything: header, ruler, channel column, between cells.
     pub window: u32,
-    /// A programme.
+    /// A program.
     pub cell: u32,
-    /// The other programmes of the focused row.
+    /// The other programs of the focused row.
     pub row_cell: u32,
     /// The playing channel's number, name and marker.
     pub playing: u32,

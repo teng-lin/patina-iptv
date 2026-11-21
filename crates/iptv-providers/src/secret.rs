@@ -13,7 +13,7 @@ use zeroize::Zeroize;
 /// [`Secret::expose`] only where it goes on the wire or into secure storage.
 ///
 /// Deliberately not `serde::Serialize`: persisting a secret is an explicit
-/// adapter decision (keystore), never a side effect of serialising a model.
+/// adapter decision (keystore), never a side effect of serializing a model.
 #[derive(Clone, Default, PartialEq, Eq, Hash)]
 pub struct Secret(String);
 
@@ -68,7 +68,7 @@ impl fmt::Display for Secret {
 }
 
 /// A URL that may carry credentials (an Xtream `get.php` playlist URL, a
-/// tokenised CDN link). `Debug`/`Display` show only `scheme://host`.
+/// tokenized CDN link). `Debug`/`Display` show only `scheme://host`.
 #[derive(Clone, Default, PartialEq, Eq, Hash)]
 pub struct SecretUrl(String);
 

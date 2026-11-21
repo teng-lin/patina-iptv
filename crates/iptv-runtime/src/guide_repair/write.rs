@@ -1,4 +1,4 @@
-//! A queued command may be cancelled; an in-flight atomic commit is reconciled.
+//! A queued command may be canceled; an in-flight atomic commit is reconciled.
 use super::*;
 use crate::store_service::Services;
 use std::{

@@ -1,4 +1,4 @@
-//! Whole-store snapshots use generated sources and catalogues only.
+//! Whole-store snapshots use generated sources and catalogs only.
 
 use iptv_providers::SecretUrl;
 use iptv_providers::model::{ContentKind, SourceConfig};

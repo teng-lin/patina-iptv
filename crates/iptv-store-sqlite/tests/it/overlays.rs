@@ -95,7 +95,7 @@ fn orphaned_overlays_are_kept_reported_and_reapplied() {
     assert_eq!(s.load_channels(src, &favorites()).unwrap().len(), 2);
     assert_eq!(s.channel_count(src, &favorites()).unwrap(), 2);
 
-    // Reordering while it is gone keeps its slot relative to neighbours.
+    // Reordering while it is gone keeps its slot relative to neighbors.
     s.move_favorite(src, &cat.channels[4].id, 0).unwrap();
 
     replace(&mut s, src, &cat);
@@ -187,7 +187,7 @@ fn filters_orders_and_paging() {
     assert_eq!(by_number[0].number, Some(0));
     assert_eq!(by_number[1].number, Some(2));
 
-    // Group + favourites + paging compose; pages tile the full list.
+    // Group + favorites + paging compose; pages tile the full list.
     let g = ChannelScope::Group(group(1).id);
     let in_group = ChannelQuery {
         scope: g.clone(),

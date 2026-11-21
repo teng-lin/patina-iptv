@@ -18,7 +18,7 @@ mod headless;
 pub use headless::Headless;
 /// Settings for the player scenarios that browse in two steps.
 mod browse_fixture;
-/// The personalization scenarios' start: a stored playlist of favourites.
+/// The personalization scenarios' start: a stored playlist of favorites.
 mod personalization;
 /// What the guide sources scenarios share.
 mod support;

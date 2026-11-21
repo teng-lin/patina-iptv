@@ -21,7 +21,7 @@ pub struct Language {
     pub name: &'static str,
 }
 
-/// Column order in the UTF-8 catalogue (English is the source column).
+/// Column order in the UTF-8 catalog (English is the source column).
 pub const LANGUAGES: &[Language] = &[
     Language {
         tag: "en",
@@ -43,7 +43,7 @@ pub const LANGUAGES: &[Language] = &[
         tag: "it",
         name: "Italiano",
     },
-    // The Portuguese catalogue uses European Portuguese vocabulary (e.g.
+    // The Portuguese catalog uses European Portuguese vocabulary (e.g.
     // "ecrã", "ficheiro", "definições") and CLDR pt-PT plural rules (zero
     // other, one one, million many). Regional locales like pt-BR resolve
     // to it as the closest match.
@@ -75,7 +75,7 @@ pub const LANGUAGES: &[Language] = &[
 
 /// Resolve regional/script tags, including POSIX locale names. Unsupported
 /// languages fall back to English; Chinese regions select the right script.
-/// The single supported Portuguese catalogue is European (vocabulary and
+/// The single supported Portuguese catalog is European (vocabulary and
 /// pt-PT plural rules); Brazilian locales (`pt-BR`) resolve to it.
 pub fn resolve(preference: &str, system: Option<&str>) -> &'static Language {
     let tag = if preference == "system" {
@@ -122,7 +122,7 @@ fn messages() -> &'static Catalog {
     })
 }
 
-/// The catalogue's text for `source` in `language`: `None` for English
+/// The catalog's text for `source` in `language`: `None` for English
 /// (the source is the text), an unknown message or an unknown language.
 fn find(language: &Language, source: &str) -> Option<&'static str> {
     let column = LANGUAGES.iter().position(|l| l.tag == language.tag)?;
@@ -146,7 +146,7 @@ pub fn translate<'a>(language: &Language, source: &'a str) -> &'a str {
 /// in `language` with `args` filled in and each plural's form chosen by
 /// the count it names.
 ///
-/// A message the catalogue lacks is formatted from its English source by
+/// A message the catalog lacks is formatted from its English source by
 /// English rules, so a count never selects a form the text does not have.
 pub fn format(language: &Language, source: &str, args: &Args<'_>) -> String {
     match find(language, source) {
@@ -155,7 +155,7 @@ pub fn format(language: &Language, source: &str, args: &Args<'_>) -> String {
     }
 }
 
-/// Whether the catalogue has a row for `source`: for the checks that no
+/// Whether the catalog has a row for `source`: for the checks that no
 /// message reaches [`translate`] or [`format()`] without one.
 pub fn is_cataloged(source: &str) -> bool {
     messages().contains_key(source)

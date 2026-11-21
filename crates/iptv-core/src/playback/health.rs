@@ -9,7 +9,7 @@
 //! played once the fast attempts are used up; behind the card the retries
 //! go on every [`RetryPolicy::background_delay_ms`], and the stream plays
 //! again by itself when the provider lets it. Catch-up keeps a finite
-//! policy: a programme that played retries the fast attempts (the app
+//! policy: a program that played retries the fast attempts (the app
 //! reopens it where it was), one that never played fails at once (a dead
 //! archive must not loop).
 //!

@@ -329,7 +329,7 @@ fn tv_saved_playback_returns_through_guide_preview_without_reopening_the_player(
     step(app.wait_for_gone("id:play-bar-layer", Duration::from_secs(2)));
     step(app.wait_for("id:guide-preview"));
     // A recording also owns the preview when no live channel is playing.
-    // Search and the empty Favourites group remain valid origins on TV/desktop.
+    // Search and the empty Favorites group remain valid origins on TV/desktop.
     for idiom in [Idiom::Desktop, Idiom::Tv] {
         step(app.set_environment("saved preview navigation", |env| {
             env.idiom = idiom;

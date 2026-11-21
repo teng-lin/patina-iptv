@@ -1,5 +1,5 @@
 //! Synthetic XMLTV guides shaped like `tools/make-iptv-fixtures.py`: the
-//! same word lists and programme lengths, generated in chunks and fed to
+//! same word lists and program lengths, generated in chunks and fed to
 //! the parser the way `iptv_import::import_epg` does it. Everything is
 //! invented; channel ids use the reserved `.example` domain.
 #![allow(dead_code)]
@@ -51,7 +51,7 @@ pub struct Shape {
 
 impl Shape {
     /// `make-iptv-fixtures.py --channels 1000 --days-back 2 --days-ahead 1`:
-    /// about 83 programmes per channel, 83k in all.
+    /// about 83 programs per channel, 83k in all.
     pub const THOUSAND: Shape = Shape {
         channels: 1000,
         days_back: 2,
@@ -86,7 +86,7 @@ impl Rng {
 }
 
 /// Writes the guide piecewise into `emit` (64 KiB chunks). Returns the
-/// programme count.
+/// program count.
 pub fn generate(shape: Shape, mut emit: impl FnMut(&[u8])) -> u64 {
     let mut buf = String::with_capacity(80 * 1024);
     let mut flush = |buf: &mut String, force: bool| {

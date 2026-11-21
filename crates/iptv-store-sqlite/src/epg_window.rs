@@ -1,9 +1,9 @@
-//! A guide window's programmes, read into settled builders
+//! A guide window's programs, read into settled builders
 //! (`Store::load_epg`).
 //!
 //! One query per bound EPG channel (one statement over all of them was no
-//! faster). Each seeks to the last programme starting at or before the
-//! window: stored programmes do not overlap, so no older one reaches into
+//! faster). Each seeks to the last program starting at or before the
+//! window: stored programs do not overlap, so no older one reaches into
 //! it, and the days the store keeps before the window (`epg.keep_past`)
 //! are not walked.
 
@@ -16,11 +16,11 @@ use rusqlite::{Connection, Row, params};
 use crate::epg::{Binding, EpgWindow};
 use crate::error::{Result, StoreError};
 
-/// The columns of a programme row, from `p` (and `d` for descriptions).
+/// The columns of a program row, from `p` (and `d` for descriptions).
 const COLUMNS: &str = "p.start, p.stop, p.title, p.sub_title, p.category, p.icon, p.rating,
      p.catchup_id, p.season, p.episode";
 
-/// The seek: the last programme of channel `{ch}` starting at or before
+/// The seek: the last program of channel `{ch}` starting at or before
 /// `?2` on (`?2` itself when none does).
 pub(crate) fn seek(ch: &str) -> String {
     format!(
@@ -29,7 +29,7 @@ pub(crate) fn seek(ch: &str) -> String {
     )
 }
 
-/// One channel's (`?1`) programmes overlapping `[?2, ?3)`.
+/// One channel's (`?1`) programs overlapping `[?2, ?3)`.
 fn channel_sql(descriptions: bool) -> String {
     let (desc, join) = desc_parts(descriptions);
     format!(
@@ -51,7 +51,7 @@ fn desc_parts(descriptions: bool) -> (&'static str, &'static str) {
     }
 }
 
-/// Reads `window`'s programmes of the channels `bindings` bind into
+/// Reads `window`'s programs of the channels `bindings` bind into
 /// `builders` (by feed; a feed without one is skipped), each EPG channel
 /// once.
 pub(crate) fn read_programs(
@@ -79,7 +79,7 @@ pub(crate) fn read_programs(
     Ok(())
 }
 
-/// A row's programme (columns as [`COLUMNS`], then the description).
+/// A row's program (columns as [`COLUMNS`], then the description).
 fn program<'r>(r: &'r Row<'_>) -> Result<ProgramData<'r>> {
     Ok(ProgramData {
         start: r.get(0)?,

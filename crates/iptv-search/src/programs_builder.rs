@@ -1,4 +1,4 @@
-//! A [`ProgramIndex`] from programmes read one at a time (a stored
+//! A [`ProgramIndex`] from programs read one at a time (a stored
 //! guide's titles streamed from disk) instead of a [`iptv_epg::GuideStore`]
 //! held in memory.
 
@@ -8,7 +8,7 @@ use iptv_epg::UnixTime;
 
 use crate::programs::ProgramIndex;
 
-/// Collects programmes for a [`ProgramIndex`].
+/// Collects programs for a [`ProgramIndex`].
 ///
 /// ```
 /// use iptv_search::{ProgramIndexBuilder, ProgramSearchOptions};
@@ -48,7 +48,7 @@ impl ProgramIndexBuilder {
         }
     }
 
-    /// Adds one programme; invalid channels, nonpositive or unrepresentable durations are ignored.
+    /// Adds one program; invalid channels, nonpositive or unrepresentable durations are ignored.
     pub fn push(&mut self, channel: usize, start: UnixTime, stop: UnixTime, title: &str) {
         if channel >= self.channels
             || stop <= start
@@ -67,7 +67,7 @@ impl ProgramIndexBuilder {
         self.raw.push((id, channel as u32, start, stop));
     }
 
-    /// Programmes added.
+    /// Programs added.
     pub fn len(&self) -> usize {
         self.raw.len()
     }

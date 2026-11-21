@@ -9,7 +9,7 @@ use iptv_epg::{ChannelKey, EpgRef, GuideStore, StoreOptions};
 use iptv_import::{EpgImport, GuideSink, ListedChannel};
 use iptv_store_sqlite::{EpgCounts, EpgFeedMeta, EpgStage, Result, SourceId, Store};
 
-/// `guide`'s bound schedules (every programme, descriptions included)
+/// `guide`'s bound schedules (every program, descriptions included)
 /// and its feeds' channel lists, as an import of them would leave them.
 pub fn stage(guide: &GuideStore) -> (EpgStage, EpgImport, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();

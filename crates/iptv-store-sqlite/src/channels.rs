@@ -57,8 +57,8 @@ pub use iptv_library::ChannelScope;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ChannelOrder {
     /// The user's order where they set one, else provider order: the
-    /// manual order of the list (all channels or a group), the favourites
-    /// order for an all-channels favourites list, member order for a custom
+    /// manual order of the list (all channels or a group), the favorites
+    /// order for an all-channels favorites list, member order for a custom
     /// group. Channels without a manual place follow in provider order.
     #[default]
     Effective,
@@ -189,7 +189,7 @@ fn build(
         "c.position"
     };
     let (mut from, effective) = match &q.scope {
-        // Favourites are few: drive the scan from them, in their order.
+        // Favorites are few: drive the scan from them, in their order.
         ChannelScope::All if q.favorites_only => (
             format!(
                 "FROM favorites f

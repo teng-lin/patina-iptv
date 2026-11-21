@@ -1,11 +1,11 @@
-//! Programme search over a [`GuideStore`]: an inverted index of folded
+//! Program search over a [`GuideStore`]: an inverted index of folded
 //! title words, built once per guide load.
 //!
 //! # Layout and memory
 //!
 //! Titles repeat (series, news), so the index works on distinct titles:
 //!
-//! - every programme: one 12-byte occurrence (channel, start, duration),
+//! - every program: one 12-byte occurrence (channel, start, duration),
 //!   grouped by title;
 //! - every distinct title: its text, three 4-byte offsets and 4 bytes per
 //!   word;
@@ -13,7 +13,7 @@
 //!   a 4-byte offset and 4 bytes per title containing it.
 //!
 //! For the synthetic 2,000 channels × 7 days of the `program_bench`
-//! example (312,000 programmes, 84,000 distinct titles, 12,000 words) that
+//! example (312,000 programs, 84,000 distinct titles, 12,000 words) that
 //! is about 9 MiB, close to the store itself; the occurrences (3.6 MiB) and
 //! the title text copied from the store (about 2.5 MiB) dominate.
 //! [`ProgramIndex::heap_bytes`] reports the actual figure. Times are
@@ -36,7 +36,7 @@ use iptv_epg::{ChannelKey, DAY, GuideStore, UnixTime};
 
 use crate::text::{MatchQuality, Query, tokens};
 
-/// How programme results are ordered.
+/// How program results are ordered.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum GroupBy {
     /// Match quality, then nearest to now: live, upcoming soonest, then
@@ -44,7 +44,7 @@ pub enum GroupBy {
     #[default]
     Relevance,
     /// Channels in the order of their best result; each channel's
-    /// programmes together, in start order.
+    /// programs together, in start order.
     Channel,
     /// Live, then upcoming soonest, then most recent past; match quality
     /// only breaks ties.
@@ -55,13 +55,13 @@ pub enum GroupBy {
 pub struct ProgramSearchOptions<'a> {
     /// Visibility is applied before ranking/limiting, preserving catalog indices.
     pub visible: Option<&'a dyn Fn(usize) -> bool>,
-    /// Past programmes are dropped unless the channel's archive still has
+    /// Past programs are dropped unless the channel's archive still has
     /// them; `true` keeps them anyway (shown as without catch-up).
     pub include_past_without_catchup: bool,
     /// The channel's archive window in days (0: none). `None`: no channel
     /// has catch-up.
     pub catchup_days: Option<&'a dyn Fn(usize) -> u8>,
-    /// Seconds before and after `now` to search (programmes overlapping
+    /// Seconds before and after `now` to search (programs overlapping
     /// the window count).
     pub look_back: i64,
     pub look_ahead: i64,
@@ -88,7 +88,7 @@ impl Default for ProgramSearchOptions<'_> {
     }
 }
 
-/// One programme result.
+/// One program result.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProgramHit {
     pub identity: crate::ChannelId,
@@ -98,7 +98,7 @@ pub struct ProgramHit {
     pub title: String,
     /// Relative to the `now` of the search.
     pub airing: Airing,
-    /// Playable from the archive (live programmes: restartable).
+    /// Playable from the archive (live programs: restartable).
     pub catchup: bool,
     pub score: MatchQuality,
 }
@@ -111,7 +111,7 @@ struct Occ {
     dur: u32,
 }
 
-/// Searchable programme titles of a [`GuideStore`], by channel index.
+/// Searchable program titles of a [`GuideStore`], by channel index.
 #[derive(Clone, Debug, Default)]
 pub struct ProgramIndex {
     base: i64,
@@ -144,8 +144,8 @@ fn offsets_from_counts(counts: &[u32]) -> Vec<u32> {
 }
 
 impl ProgramIndex {
-    /// Indexes every programme the store holds for `channels` (channel
-    /// index = position; unbound keys simply have no programmes).
+    /// Indexes every program the store holds for `channels` (channel
+    /// index = position; unbound keys simply have no programs).
     pub fn build<'k>(
         store: &GuideStore,
         channels: impl IntoIterator<Item = &'k ChannelKey>,
@@ -300,7 +300,7 @@ impl ProgramIndex {
         &self.identities
     }
 
-    /// Programmes indexed.
+    /// Programs indexed.
     pub fn program_count(&self) -> usize {
         self.occ.len()
     }
@@ -406,7 +406,7 @@ impl ProgramIndex {
         acc
     }
 
-    /// Programmes whose title matches `query` (see [`GroupBy`] for the
+    /// Programs whose title matches `query` (see [`GroupBy`] for the
     /// order), at most `opts.limit`.
     pub fn search_programs(
         &self,

@@ -147,7 +147,7 @@ fn past_programs_need_catch_up_unless_asked() {
             (0, -3 * HOUR, Prefix, Ended, true),
         ]
     );
-    // Without archive information no past programme is playable.
+    // Without archive information no past program is playable.
     let none = ProgramSearchOptions::default();
     assert_eq!(
         run(&idx, "night owl st", none),
@@ -177,7 +177,7 @@ fn time_window_and_live_catch_up() {
             (3, -8 * DAY, Exact, Ended, false)
         ]
     );
-    // A live programme on a channel with an archive can be restarted; one
+    // A live program on a channel with an archive can be restarted; one
     // without cannot. Diacritics fold.
     assert_eq!(
         run(&idx, "morning", opts()),
@@ -290,7 +290,7 @@ fn synthetic_titles(n: usize) -> Vec<String> {
         .collect()
 }
 
-/// The index returns exactly what checking every programme would.
+/// The index returns exactly what checking every program would.
 #[test]
 fn agrees_with_a_linear_scan() {
     let titles = synthetic_titles(400);

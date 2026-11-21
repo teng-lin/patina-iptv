@@ -1,4 +1,4 @@
-//! XMLTV parser behaviour on synthetic documents.
+//! XMLTV parser behavior on synthetic documents.
 
 use std::io::Write;
 

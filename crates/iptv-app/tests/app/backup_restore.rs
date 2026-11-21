@@ -140,7 +140,7 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
     step(app.wait_for(&message("Back up")));
     let archive = home.join("generated.patinabackup");
     step(app.on_pick_save_path(Some(archive.clone())));
-    // Native dialogs default to Cancel: cancelling export creates no archive.
+    // Native dialogs default to Cancel: canceling export creates no archive.
     step(app.press(&message("Back up")));
     assert!(!archive.exists());
     app.on_dialog(|_| DialogAnswer::Press(word("Choose file…")));
@@ -209,7 +209,7 @@ fn language_tag() -> String {
 
 fn word(source: &str) -> String {
     // The existing restore confirmation composes its heading with a question
-    // mark rather than storing a separate catalogue key.
+    // mark rather than storing a separate catalog key.
     if !iptv_core::i18n::is_cataloged(source)
         && let Some(base) = source.strip_suffix('?')
         && iptv_core::i18n::is_cataloged(base)

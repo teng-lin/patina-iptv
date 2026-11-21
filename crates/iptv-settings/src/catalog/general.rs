@@ -1,4 +1,4 @@
-//! General, playlists and channel organisation.
+//! General, playlists and channel organization.
 //!
 //! Default provenance: `// default: ours` is iptv-rs's choice;
 //! `// default: observed (07)` is the value the reference player displayed

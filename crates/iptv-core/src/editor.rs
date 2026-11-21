@@ -1,8 +1,8 @@
-//! The favourites editor for one list: its channels with a star each.
+//! The favorites editor for one list: its channels with a star each.
 //! OK toggles the focused channel, Left clears the whole list, Right sets
 //! the whole list (how the reference UX's editor was observed to behave);
 //! changes apply immediately. Channels are catalog indices (the list's
-//! rows when it opened); the shell keeps favourites by channel key.
+//! rows when it opened); the shell keeps favorites by channel key.
 
 use std::collections::BTreeSet;
 
@@ -57,19 +57,19 @@ impl FavoritesEditor {
         }
     }
 
-    /// Left: no channel of this list stays a favourite.
+    /// Left: no channel of this list stays a favorite.
     pub fn clear_group(&self, favorites: &mut BTreeSet<usize>) {
         for ch in &self.channels {
             favorites.remove(ch);
         }
     }
 
-    /// Right: every channel of this list becomes a favourite.
+    /// Right: every channel of this list becomes a favorite.
     pub fn set_group(&self, favorites: &mut BTreeSet<usize>) {
         favorites.extend(self.channels.iter().copied());
     }
 
-    /// How many of the list's channels are favourites.
+    /// How many of the list's channels are favorites.
     pub fn starred(&self, favorites: &BTreeSet<usize>) -> usize {
         self.channels
             .iter()
@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn a_list_need_not_be_contiguous() {
-        // Favourites or recent channels: any catalog channels, in list order.
+        // Favorites or recent channels: any catalog channels, in list order.
         let mut e = FavoritesEditor::new(0, vec![42, 3, 17]);
         let mut fav = BTreeSet::from([3]);
         e.move_focus(2);

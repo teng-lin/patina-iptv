@@ -1,6 +1,6 @@
 //! A channel picker with independent group selection and scoped search.
 //! Channels and groups retain focus by content identity as filters or the
-//! catalogue change. It never changes the guide's selected list.
+//! catalog change. It never changes the guide's selected list.
 
 use crate::guide::Schedule;
 use crate::lists::{ChannelList, ListId, entry_count};

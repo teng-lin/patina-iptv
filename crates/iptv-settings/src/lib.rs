@@ -6,7 +6,7 @@
 //!   type with its default, [`Scope`], [`Flags`], dependencies, and
 //!   i18n label keys derived from the key.
 //! - [`catalog`]: every setting and command of iptv-rs, plus the UI
-//!   [`tree`](catalogue::tree).
+//!   [`tree`](catalog::tree).
 //! - [`Settings`]: the store — validated, scoped (group → playlist →
 //!   global → default) reads and writes, resets, change lists.
 //! - [`backup`]: versioned JSON with migrations; unknown keys survive.

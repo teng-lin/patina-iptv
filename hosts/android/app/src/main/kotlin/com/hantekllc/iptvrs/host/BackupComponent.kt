@@ -21,9 +21,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * `archivePath` and `requestId`. `operation` is export (default) or import;
  * import streams a selected document into a new private file for Rust to
  * validate/stage, without loading the archive into memory. A successful import
- * leaves that file for Rust; export and all failed/cancelled operations remove
+ * leaves that file for Rust; export and all failed/canceled operations remove
  * their private temporary files. The `complete` event has only requestId,
- * success and cancelled; neither paths, document URIs nor exception messages
+ * success and canceled; neither paths, document URIs nor exception messages
  * cross the event/log boundary. After an explicit user confirmation, close
  * ends the activity and its process so staged restore activates on next launch.
  * No filesystem permission is needed.

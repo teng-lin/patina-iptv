@@ -1,6 +1,6 @@
 //! Multiview's tile menu on a TV, run headless with the TV idiom (keys
 //! stand in for the remote): OK opens a panel at the right edge,
-//! vertically centred, 208 dp wide with 40 dp rows, with no backdrop over
+//! vertically centered, 208 dp wide with 40 dp rows, with no backdrop over
 //! the tiles; its items in the reference's order and words, the focus the
 //! light pill with dark text. Pause holds that tile alone (⏸ on it) and
 //! Play resumes it; Search and add opens the search screen over the grid,
@@ -306,7 +306,7 @@ fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
         }),
     );
 
-    // OK: the panel at the right edge, centred, with the reference's items.
+    // OK: the panel at the right edge, centered, with the reference's items.
     step(app.press_key("enter"));
     step(app.wait_for(MENU));
     let (x, y, w, h) = panel(&app);

@@ -2,7 +2,7 @@
 //!
 //! The UI must never present a failure as "no channels" (AC11): network,
 //! server, authentication, unparseable content and a provably empty source
-//! are distinct variants, summarised by [`ImportError::kind`]. Messages
+//! are distinct variants, summarized by [`ImportError::kind`]. Messages
 //! never contain credentials, tokens or response bodies.
 
 use iptv_core::import_limits::LimitExceeded;

@@ -1,18 +1,18 @@
 //! EPG import, streamed: per source, a chunked download into
-//! [`XmltvParser`] (gzip detected automatically) whose programmes go
+//! [`XmltvParser`] (gzip detected automatically) whose programs go
 //! straight to a [`GuideSink`] (the app's on-disk stage), then the
 //! catalog's channels are matched against every source's channel list by
-//! priority and bound to the best source with programmes.
+//! priority and bound to the best source with programs.
 //!
-//! Only the feeds' channel lists stay in memory. Programmes of an EPG
+//! Only the feeds' channel lists stay in memory. Programs of an EPG
 //! channel no playlist channel can match ([`MatchFilter`]) are not passed
-//! on; a feed declares its channels before its programmes (XMLTV DTD
-//! order), and a programme of a channel not declared yet is passed on in
+//! on; a feed declares its channels before its programs (XMLTV DTD
+//! order), and a program of a channel not declared yet is passed on in
 //! case it is declared later. Matching and binding give the same result as
 //! matching the complete in-memory guide.
 //!
 //! A failing source does not discard the others: its error is kept in
-//! [`EpgSourceOutcome`] and its programmes are dropped from the sink. The
+//! [`EpgSourceOutcome`] and its programs are dropped from the sink. The
 //! import fails only when every source failed, on cancellation, or when
 //! the sink fails ([`ImportError::Storage`]).
 //!
@@ -140,9 +140,9 @@ impl EpgSourceConfig {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EpgSourceStats {
     pub parse: ParseStats,
-    /// What the sink kept of the programmes passed on.
+    /// What the sink kept of the programs passed on.
     pub ingest: IngestReport,
-    /// Programmes not passed on: no playlist channel can match their
+    /// Programs not passed on: no playlist channel can match their
     /// channel.
     pub skipped: u64,
     pub bytes: u64,
@@ -162,11 +162,11 @@ pub struct ListedChannel {
     pub name: Option<String>,
 }
 
-/// How the guide matched; the programmes are in the [`GuideSink`].
+/// How the guide matched; the programs are in the [`GuideSink`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EpgImport {
     /// Each playlist channel with guide data and the EPG channel it comes
-    /// from (the highest-priority candidate with programmes), by key.
+    /// from (the highest-priority candidate with programs), by key.
     pub bindings: Vec<(ChannelKey, EpgRef)>,
     pub matches: MatchReport,
     /// One entry per configured source, in input order.
@@ -198,7 +198,7 @@ impl EpgImport {
 
 /// Downloads and parses every source into `sink`, then matches `channels`
 /// (tvg-id, then names; `overrides` win) and binds each to the best source
-/// with programmes. `now` drives retention.
+/// with programs. `now` drives retention.
 #[allow(clippy::too_many_arguments)]
 pub async fn import_epg<F: Fetch, S: GuideSink, P: ProgressSink>(
     fetch: &F,

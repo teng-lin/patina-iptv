@@ -170,7 +170,7 @@ pub fn parse_categories(
 }
 
 /// `get_live_streams`. Ids use [`ContentKind::Live`] for radio too, so a
-/// panel flipping `stream_type` does not orphan customisations.
+/// panel flipping `stream_type` does not orphan customizations.
 pub fn parse_live_streams(response: &HttpResponse) -> Result<Import<Channel>, ProviderError> {
     collect_rows(response, ListKind::Live, |row| match row {
         CatalogRow::Channel(v) => Some(v),
@@ -452,7 +452,7 @@ pub struct VodDetails {
     pub playable: bool,
 }
 
-/// `get_vod_info`. Null/absent payloads normalise to empty metadata.
+/// `get_vod_info`. Null/absent payloads normalize to empty metadata.
 pub fn parse_vod_info(response: &HttpResponse, vod_id: u64) -> Result<VodDetails, ProviderError> {
     let body = json_body(response)?;
     let empty = serde_json::Map::new();

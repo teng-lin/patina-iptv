@@ -171,7 +171,7 @@ pub fn live_target(ui: Ui, channel: usize) -> Option<Target> {
     }
 }
 /// Runs `start` once live `channel` may play: at once, or after its PIN
-/// (never when the PIN is cancelled). `start` still plays through
+/// (never when the PIN is canceled). `start` still plays through
 /// [`allow_play`], which then admits it.
 pub fn admitted(ui: Ui, channel: usize, start: impl FnOnce() + 'static) {
     match live_target(ui, channel) {
@@ -180,7 +180,7 @@ pub fn admitted(ui: Ui, channel: usize, start: impl FnOnce() + 'static) {
     }
 }
 /// Synchronous gate is fed from a complete native membership snapshot at boot
-/// and after every catalogue change; the player also checks before resolution.
+/// and after every catalog change; the player also checks before resolution.
 pub fn allow_play(ui: Ui, channel: usize, playback: crate::Playback) -> bool {
     let Some(target) = live_target(ui, channel) else {
         return true;

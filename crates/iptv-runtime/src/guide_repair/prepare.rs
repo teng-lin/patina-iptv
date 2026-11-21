@@ -181,7 +181,7 @@ pub(super) fn prepare(
     }
     let before_channels = channels.clone();
     // Staging supplies all display names and candidates, including entries the
-    // normal filtered import did not retain programmes for.
+    // normal filtered import did not retain programs for.
     for held in leases {
         if let Some(feed) = held.evidence().feed {
             channels.insert(feed, staged_channels[&held.evidence().stage].clone());
