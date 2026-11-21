@@ -150,8 +150,10 @@ impl<C: Clone + PartialEq> Workspace<C> {
                 if self.heard.current() == Some(id) {
                     self.heard.listen(None);
                 }
-            } else {
-                self.heard.listen(Some(id));
+            } else if self.heard.listen(Some(id)) {
+                for other in self.sessions.iter_mut().filter(|s| s.id != id) {
+                    other.volume.muted = true;
+                }
             }
         }
     }
@@ -356,6 +358,11 @@ mod tests {
         assert!(w.on_surface(1).unwrap().volume.muted);
         w.set_volume(id, crate::sound::Volume::default());
         assert_eq!(w.audible(), Some(id), "sound can be selected again");
+        // Taking it with another window's volume mutes this one.
+        let other = w.open_auxiliary("two").unwrap();
+        w.set_volume(other, crate::sound::Volume::default());
+        assert_eq!(w.audible(), Some(other));
+        assert!(w.on_surface(1).unwrap().volume.muted);
     }
     #[test]
     fn exactly_one_player_is_heard_and_closing_it_hands_the_sound_back() {
