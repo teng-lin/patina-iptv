@@ -124,6 +124,18 @@ pub(crate) fn run_to_end(mut job: Box<dyn Sliced>) {
 /// that never ends would hold its lane, and a blocking request behind it,
 /// forever. A job reports its own failures (an abandoned publish) and then
 /// returns [`Progress::Done`].
+///
+/// Two rules for a store publish (the store driver, still to come with the
+/// browser store, follows them):
+///
+/// - A step runs on the lane's shared connection: it takes the store from
+///   the lane's connection for the step, as any job does, and gives it back
+///   before returning, so the reads between steps can use it.
+/// - The job writes to the publish copy (`Store::begin_publish`), never to
+///   the live database: between steps a transaction on the live database
+///   would stay open, and the reads between them would see part of the
+///   publish. `finish_publish` swaps the copy in at the last step, and
+///   [`Sliced::cancel`] calls `abandon_publish`.
 pub trait Sliced: Send {
     /// Does work worth at most `budget`, then returns.
     fn step(&mut self, budget: Budget) -> Progress;

@@ -360,7 +360,8 @@ fills them with the native implementations (`iptv-net`, threads and a
 two-worker Tokio runtime per owner, the OS random source).
 `execution::Cooperative` is the browser's: one thread, lanes run in turns of
 the host's event loop, a blocking request runs its lane's queue inline, and a
-`Sliced` job (a resumable publish) runs one step per turn. It has no workers,
+`Sliced` job (a resumable publish) runs at most one step per turn, the rest of
+the turn going to the other lanes' reads. It has no workers,
 so the services built on them report themselves unavailable, and staged
 probes, whose workers block, are refused. Only `native` modules may name
 `iptv-net` or start threads and Tokio runtimes

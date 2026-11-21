@@ -8,16 +8,20 @@
 //!   work, one item per lane in turn, until the turn's time is spent
 //!   (shared by every lane), then yields through the host's timer, so a
 //!   long queue does not hold the page and one lane cannot starve another.
-//! - A [`Sliced`] job (a resumable publish) runs one step of
-//!   [`Cooperative::SLICE`] rows per visit; the other lanes' jobs (reads)
-//!   run between its steps, and its own lane's later jobs wait for it.
+//! - A [`Sliced`] job (a resumable publish) runs at most one step of
+//!   [`Cooperative::SLICE`] rows per turn, started only while half the turn
+//!   is left; the other lanes' jobs (reads) use the rest of the turn, and
+//!   its own lane's later jobs wait for the whole job.
 //! - [`Lane::run`] (a blocking request) runs its lane's queue inline, up to
 //!   and including its job: one thread cannot wait for another. A sliced job
 //!   in front is stepped too, in slices; with a limit, only until the limit
 //!   passes, and the request then reports that it did not run in time (it
 //!   still runs later, in order).
-//! - Lanes share one connection ([`Lane::shares_connection`]): a browser
-//!   store has a single one, and reads run on it between writes.
+//! - Lanes share one connection ([`Execution::shares_connection`]): a
+//!   browser store has a single one, and reads run on it between writes.
+//! - Panics are caught where they unwind (native builds and tests): a
+//!   panicking step is dropped and logged, and a lane or turn is not left
+//!   marked running. A browser build aborts on panic.
 //! - Tasks are the host's tasks; CPU-bound work runs as a task too.
 //! - There are no workers. Services built on them (the refresh pool, the
 //!   file and favorites writers) report themselves unavailable.
@@ -61,9 +65,10 @@ impl Cooperative {
     /// draw and to take the next key.
     pub const TURN: Duration = Duration::from_millis(40);
 
-    /// Rows a sliced job's step does: about 50 ms of guide publishing on a
-    /// 2020 TV (the plan's measurement).
-    pub const SLICE: Budget = Budget { rows: 400 };
+    /// Rows a sliced job's step does: about 25 ms of guide publishing on a
+    /// 2020 TV (the plan measured 400 rows at about 50 ms), well inside a
+    /// turn, so the rest of the turn is left for reads.
+    pub const SLICE: Budget = Budget { rows: 200 };
 
     pub fn new(host: Arc<dyn CooperativeHost>) -> Self {
         Self::with_turn(host, Self::TURN)
@@ -139,11 +144,12 @@ impl Drop for Running<'_> {
     }
 }
 
-/// The next item of `state`, marked running; `None` when it has none, or
-/// when one of its jobs is running already (a job waiting for its own lane).
-fn begin(state: &Mutex<State>) -> Option<(Item, Running<'_>)> {
+/// The next item of `state`, marked running; `None` when it has none, when
+/// one of its jobs is running already (a job waiting for its own lane), or
+/// when it is a sliced job and `may_slice` is false.
+fn begin(state: &Mutex<State>, may_slice: bool) -> Option<(Item, Running<'_>)> {
     let mut locked = lock(state);
-    if locked.running {
+    if locked.running || (!may_slice && matches!(locked.queue.front(), Some(Item::Sliced(_)))) {
         return None;
     }
     let item = locked.queue.pop_front()?;
@@ -151,11 +157,23 @@ fn begin(state: &Mutex<State>) -> Option<(Item, Running<'_>)> {
     Some((item, Running(state)))
 }
 
-/// Runs one item of `state`: a job, or one step of a sliced job, which
-/// keeps its place at the front while it has more to do.
-fn run_one(state: &Mutex<State>, budget: Budget) -> bool {
-    let Some((item, running)) = begin(state) else {
-        return false;
+/// What [`run_one`] ran.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Ran {
+    Nothing,
+    Job,
+    Slice,
+}
+
+/// Runs one item of `state`: a job, or (when `may_slice`) one step of a
+/// sliced job, which keeps its place at the front while it has more to do.
+fn run_one(state: &Mutex<State>, budget: Budget, may_slice: bool) -> Ran {
+    let Some((item, running)) = begin(state, may_slice) else {
+        return Ran::Nothing;
+    };
+    let ran = match item {
+        Item::Job(_) => Ran::Job,
+        Item::Sliced(_) => Ran::Slice,
     };
     match item {
         Item::Job(job) => job(),
@@ -170,7 +188,7 @@ fn run_one(state: &Mutex<State>, budget: Budget) -> bool {
         }
     }
     drop(running);
-    true
+    ran
 }
 
 impl Inner {
@@ -191,6 +209,17 @@ impl Inner {
         }
         let inner = self.clone();
         self.host.spawn(Box::pin(async move {
+            // A job that panics ends this task (where panics unwind: native
+            // tests); the next push must spawn a new one.
+            struct Unscheduled<'a>(&'a Inner);
+            impl Drop for Unscheduled<'_> {
+                fn drop(&mut self) {
+                    if std::thread::panicking() {
+                        *lock(&self.0.scheduled) = false;
+                    }
+                }
+            }
+            let _unscheduled = Unscheduled(&inner);
             while inner.run_turn() {
                 // Yield through the host's timer: a task that is only
                 // pending is polled again at the next delivery, which may
@@ -201,22 +230,34 @@ impl Inner {
     }
 
     /// Runs queued work, one item per lane in turn, until the turn's time
-    /// is spent; true when work is left for another turn.
+    /// is spent; true when work is left for another turn. A turn runs at
+    /// most one slice of a sliced job, and starts it only while at least
+    /// half the turn is left; the other lanes' jobs (reads) use the rest.
     fn run_turn(&self) -> bool {
         let started = self.host.now();
         let lanes = self.lanes();
         let mut next = *lock(&self.next);
+        let mut sliced = false;
         loop {
             let mut ran = false;
             let mut spent = false;
             for _ in 0..lanes.len() {
-                if self.host.now().saturating_sub(started) >= self.turn {
+                let used = self.host.now().saturating_sub(started);
+                if used >= self.turn {
                     spent = true;
                     break;
                 }
                 let lane = &lanes[next % lanes.len()];
                 next = (next + 1) % lanes.len();
-                ran |= run_one(lane, Cooperative::SLICE);
+                let may_slice = !sliced && used <= self.turn / 2;
+                match run_one(lane, Cooperative::SLICE, may_slice) {
+                    Ran::Nothing => {}
+                    Ran::Job => ran = true,
+                    Ran::Slice => {
+                        ran = true;
+                        sliced = true;
+                    }
+                }
             }
             spent |= self.host.now().saturating_sub(started) >= self.turn;
             if !ran || spent {
@@ -272,7 +313,7 @@ impl Lane for TurnLane {
             if deadline.is_some_and(|deadline| self.inner.host.now() >= deadline) {
                 return false;
             }
-            if !run_one(&self.state, Cooperative::SLICE) {
+            if run_one(&self.state, Cooperative::SLICE, true) == Ran::Nothing {
                 return false;
             }
         }
@@ -532,7 +573,7 @@ mod tests {
     }
 
     #[test]
-    fn a_sliced_job_runs_in_row_slices_with_reads_between_them() {
+    fn a_turn_runs_one_slice_and_gives_the_rest_to_reads() {
         let (host, execution) = setup();
         let writer = execution.lane("writer").unwrap();
         let reader = execution.lane("reader").unwrap();
@@ -540,28 +581,49 @@ mod tests {
         assert!(writer.push_sliced(job));
         let log = Arc::new(Mutex::new(Vec::new()));
         let write = log.clone();
-        writer.push(Box::new(move || write.lock().unwrap().push("write")));
-        for _ in 0..2 {
+        writer.push(Box::new(move || {
+            write.lock().unwrap().push("write".to_owned())
+        }));
+        for _ in 0..3 {
             let read = log.clone();
             let counted = steps.clone();
             reader.push(Box::new(move || {
-                let at = counted.lock().unwrap().len();
-                read.lock().unwrap().push(if at == 1 {
-                    "read after 1"
-                } else {
-                    "read after 2"
-                });
+                let after = counted.lock().unwrap().len();
+                read.lock().unwrap().push(format!("read after {after}"));
             }));
         }
         assert!(host.poll());
-        assert_eq!(*steps.lock().unwrap(), [Cooperative::SLICE; 3]);
-        assert_eq!(*log.lock().unwrap(), ["read after 1", "read after 2"]);
-        // The write queued behind the publish waited for all of it.
-        assert!(!host.poll());
+        // One slice per delivery; every queued read ran beside it.
+        assert_eq!(*steps.lock().unwrap(), [Cooperative::SLICE]);
         assert_eq!(
             *log.lock().unwrap(),
-            ["read after 1", "read after 2", "write"]
+            ["read after 1", "read after 1", "read after 1"]
         );
+        assert!(host.poll());
+        assert_eq!(steps.lock().unwrap().len(), 2);
+        // The write queued behind the publish waits for all of it.
+        assert!(!host.poll());
+        assert_eq!(steps.lock().unwrap().len(), 3);
+        assert_eq!(log.lock().unwrap().last().unwrap().as_str(), "write");
+    }
+
+    #[test]
+    fn a_slice_starts_only_while_half_the_turn_is_left() {
+        let (host, execution) = setup();
+        let reader = execution.lane("reader").unwrap();
+        let writer = execution.lane("writer").unwrap();
+        let clock = host.clone();
+        // A read that takes 6 of the turn's 10 ms comes first.
+        reader.push(Box::new(move || clock.advance(6)));
+        let (job, steps, _) = publish(&host, 1);
+        writer.push_sliced(job);
+        assert!(host.poll());
+        assert!(
+            steps.lock().unwrap().is_empty(),
+            "4 ms left: no slice starts"
+        );
+        assert!(!host.poll());
+        assert_eq!(steps.lock().unwrap().len(), 1);
     }
 
     #[test]
@@ -627,6 +689,21 @@ mod tests {
         assert!(failing.is_err());
         assert!(!lane.is_current(), "the lane is not left running");
         assert!(lane.run(Box::new(|| {}), None));
+    }
+
+    #[test]
+    fn a_job_that_panics_in_a_turn_does_not_stop_later_turns() {
+        let (host, execution) = setup();
+        let lane = execution.lane("writer").unwrap();
+        lane.push(Box::new(|| panic!("synthetic job failure")));
+        let polled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| host.poll()));
+        assert!(polled.is_err());
+        host.tasks.lock().unwrap().clear();
+        let ran = Arc::new(AtomicBool::new(false));
+        let flag = ran.clone();
+        lane.push(Box::new(move || flag.store(true, Ordering::SeqCst)));
+        host.poll();
+        assert!(ran.load(Ordering::SeqCst), "a new turn was scheduled");
     }
 
     #[test]

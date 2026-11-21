@@ -210,22 +210,24 @@ newer TV engines is untested.
 
 ## Migration
 
-Each step keeps every native test passing and lands as its own pull request.
+Each step keeps every native test passing. Steps 1a, 1b, 1d and 1e landed
+together in one pull request (#195), each as its own commits; 1c is #193.
 
 - **0. Bridge.** Merge PR #190. Freeze the JavaScript host.
 - **1a. Network port.** The runtime takes a client factory over `Fetch`
   instead of `iptv_net` types. *Gate*: no `iptv_net::` outside `native`.
   *Status*: done (`Ports::network`, `network.rs`). The Stalker link client
   is the same factory's client, cached per configuration; Stalker's
-  cookies are request headers, so nothing native stays in it. Artwork
-  loads through it too.
+  cookies are request headers, so nothing native stays in it. A browser's
+  fetch cannot send `Cookie` or `User-Agent` (forbidden headers), so Stalker
+  still does not work there (Still open, 3). Artwork loads through it too.
 - **1b. Execution port.** Store queues, workers and the Tokio pool sit behind
   an executor supplied by `Ports`. *Gate*: no thread or runtime creation
   outside `native`. *Status*: done (`Ports::execution`, `execution.rs`):
   lanes, long-lived workers and a per-owner task executor, native as
   before; `execution::Cooperative` for the browser, which also drives
-  `Sliced` jobs one step per turn (the shape of the store's resumable
-  publish). Differs from the plan: the refresh pool, the file writer and
+  `Sliced` jobs at most one step per turn, the rest of the turn going to
+  reads (the shape of the store's resumable publish). Differs from the plan: the refresh pool, the file writer and
   the favorites writer are blocking workers, which a cooperative host
   does not have, so in the browser they report themselves unavailable;
   imports there need the pool's work as local tasks over the async store
@@ -235,7 +237,11 @@ Each step keeps every native test passing and lands as its own pull request.
   there); a `Sliced` step's budget is rows, as the store's `step(rows)`.
   The runtime's clocks are `crate::time` (std's natively, the host's in a
   browser build); the store's inspection API still takes std's `Instant`,
-  so bounded inspections cannot run in the browser yet.
+  so bounded inspections cannot run in the browser yet (until #193's
+  `*_until` API is on master). The store driver (open, chunk persistence,
+  a `Services` wrapper that pushes a publish on the writer lane as a
+  `Sliced` job over the copy store, holding the lane's connection only per
+  step) follows #193.
 - **1c. Store on wasm32.** `iptv-store-sqlite` builds with the
   `sqlite-wasm-rs` backend on an in-memory VFS that persists changed pages
   to IndexedDB; staging databases are in-memory files; publishes run in
