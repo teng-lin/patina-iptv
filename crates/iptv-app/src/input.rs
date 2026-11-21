@@ -469,6 +469,12 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
         let pending = nav.presses.held_key().is_some();
         nav.cut_short();
         if phase == Phase::Up {
+            // A remote's Back released here went down before this capture
+            // (one that went down in it is `back_in`'s): Android's Back on
+            // it does not dismiss the prompt, consumed or not.
+            if key == RemoteKey::Back && long_press() {
+                nav.consume(key);
+            }
             release_consumed(ui, &nav, key);
         } else if phase == Phase::Down {
             nav.unconsume(key);
