@@ -41,6 +41,9 @@ impl Batch {
 
 pub struct CatalogStage {
     pub(crate) path: PathBuf,
+    /// The file SQLite opened for it: in the browser, which store's files
+    /// it belongs to.
+    pub(crate) file: Option<String>,
     conn: Option<Connection>,
     batch: Batch,
     positions: [i64; 4],
@@ -153,6 +156,7 @@ impl CatalogStage {
         )?;
         Ok(Self {
             path,
+            file: conn.path().map(str::to_owned),
             conn: Some(conn),
             batch: Batch::default(),
             positions: [0; 4],

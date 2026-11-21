@@ -737,3 +737,42 @@ fn a_job_that_changed_nothing_leaves_the_copy_publishable() {
     drop(job);
     store.finish_publish(copy).unwrap();
 }
+
+/// A stage belongs to the store whose files hold it: another store's stage
+/// at the same path is refused, not published from the wrong file.
+#[test]
+fn a_stage_of_another_store_is_refused() {
+    use iptv_store_sqlite::{CatalogReplacement, StagePublication};
+    // Both stages at one explicit path, each in its own store's files.
+    let path = std::path::PathBuf::from("/stages/same.sqlite");
+    let stage_of = |store: &Store, channels: usize| {
+        let conn = store.open_staging_connection(&path).unwrap();
+        let mut stage = CatalogStage::from_connection(path.clone(), conn).unwrap();
+        for i in 0..channels {
+            stage
+                .push(CatalogRow::Channel(m3u_channel(i, 1, "staged")))
+                .unwrap();
+        }
+        stage.finish().unwrap();
+        stage
+    };
+    let mut a = Store::open_in_memory().unwrap();
+    let mut b = Store::open_in_memory().unwrap();
+    let source = b.add_source(&m3u_source("Synthetic")).unwrap();
+    a.add_source(&m3u_source("Synthetic")).unwrap();
+    let theirs = stage_of(&a, 5);
+    // B holds a stage at the same path: the path alone would match.
+    let ours = stage_of(&b, 2);
+    assert!(
+        CatalogReplacement::from_stage(&mut b, source, theirs, StagePublication::new())
+            .unwrap()
+            .finish()
+            .is_err()
+    );
+    let published = CatalogReplacement::from_stage(&mut b, source, ours, StagePublication::new())
+        .unwrap()
+        .finish()
+        .unwrap();
+    assert_eq!(published.counts.channels, 2);
+    let _ = &mut a;
+}

@@ -174,17 +174,19 @@ fn replace_250k_program_guide() {
         s.replace_epg(src, &mut stage, &import, &feeds, 2).unwrap()
     });
     let (mut stage, import, _stage_dir) = staged::stage(&s, &guide);
-    let mut job = EpgReplacement::new(
-        &mut s,
-        src,
-        &mut stage,
-        std::borrow::Cow::Borrowed(&import),
-        &feeds[..],
-        3,
-    )
-    .unwrap();
     let (mut slices, mut longest) = (0, Duration::ZERO);
+    // The total includes making the job (flushing the stage), as the
+    // one-call timing does.
     let (_, sliced) = timed("EpgReplacement in 400-row slices", || {
+        let mut job = EpgReplacement::new(
+            &mut s,
+            src,
+            &mut stage,
+            std::borrow::Cow::Borrowed(&import),
+            &feeds[..],
+            3,
+        )
+        .unwrap();
         loop {
             slices += 1;
             let start = Instant::now();

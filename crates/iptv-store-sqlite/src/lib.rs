@@ -292,10 +292,10 @@ impl Store {
     }
 
     fn init_with(mut conn: Connection, options: &OpenOptions, journal: Journal) -> Result<Self> {
-        conn.busy_timeout(options.busy_timeout)?;
         conn.pragma_update(None, "foreign_keys", true)?;
         match journal {
             Journal::Wal => {
+                conn.busy_timeout(options.busy_timeout)?;
                 // Persistent for files; in-memory databases answer "memory".
                 let _mode: String =
                     conn.pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get(0))?;

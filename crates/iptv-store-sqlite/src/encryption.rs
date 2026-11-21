@@ -146,6 +146,26 @@ impl Store {
             Ok(conn)
         }
     }
+    /// Attaches a stage for a publication. In the browser the stage must be
+    /// one of this store's files, by the file its connection opened, not by
+    /// a path another store's files might also hold.
+    pub(crate) fn attach_stage(&self, path: &Path, file: Option<&str>, schema: &str) -> Result<()> {
+        #[cfg(target_family = "wasm")]
+        {
+            let owned = self
+                .browser
+                .as_ref()
+                .zip(file)
+                .is_some_and(|(link, file)| link.files().owns(file));
+            if !owned {
+                return Err(StoreError::Unavailable(
+                    "the stage is not among the browser store's files",
+                ));
+            }
+        }
+        let _ = file;
+        self.attach_staging_database(path, schema)
+    }
     /// Attaches a scratch database created by this store. SQLCipher must receive
     /// the raw key again: inheriting a main database codec also inherits its salt.
     pub fn attach_staging_database(&self, path: &Path, schema: &str) -> Result<()> {

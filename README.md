@@ -76,9 +76,9 @@ custom groups and history.
 - **Private by default:** on desktop, iPad and Android the local catalog,
   including credentials, is encrypted with SQLCipher (browser TVs have no
   keystore; see [security](docs/security.md#samsung-tizen-host)); HTTPS is
-  the default transport. Whole-app backup and restore to a `.patinabackup`
-  file. Backups keep the TV guide's setup but not its downloaded programs,
-  which download again after a restore.
+  the default transport. On those platforms, whole-app backup and restore
+  to a `.patinabackup` file; backups keep the TV guide's setup but not its
+  downloaded programs, which download again after a restore.
 
 ## Install
 

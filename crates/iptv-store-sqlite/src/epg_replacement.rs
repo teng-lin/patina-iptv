@@ -368,7 +368,19 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
                 Phase::Guide => self.guide()?,
                 Phase::Feed { index, listed } => self.feed(meter, index, listed)?,
                 Phase::Binding { index, copy } => self.binding(meter, index, copy)?,
-                Phase::Finish => return self.commit().map(Step::Done),
+                Phase::Finish => {
+                    // Each feed's counts are a row of the budget; the last
+                    // metadata and the commit follow in one step.
+                    if !meter.unlimited()
+                        && let Some(&feed) = self.per_feed.keys().next()
+                    {
+                        let counts = self.per_feed.remove(&feed).unwrap_or_default();
+                        self.update_feed(feed, counts)?;
+                        meter.spend(1);
+                        continue;
+                    }
+                    return self.commit().map(Step::Done);
+                }
             }
         }
     }
@@ -376,8 +388,9 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
     fn begin(&mut self) -> Result<()> {
         let source = self.source;
         let path = self.stage.get().path().to_owned();
+        let file = self.stage.get().file().map(str::to_owned);
         let store = self.store();
-        store.attach_staging_database(&path, "epg_stage")?;
+        store.attach_stage(&path, file.as_deref(), "epg_stage")?;
         self.attached = true;
         // Every row references a row written just before it in the same
         // transaction: consistent by construction. Off for the copy's sake
@@ -710,20 +723,26 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
         Ok(())
     }
 
+    /// Records a feed's stored channel and program counts.
+    fn update_feed(&mut self, feed: u32, (channels, programs): (u64, u64)) -> Result<()> {
+        let source = self.source;
+        self.store().conn.execute(
+            "UPDATE epg_feeds SET channel_count = ?3, program_count = ?4
+             WHERE source_id = ?1 AND feed_id = ?2",
+            params![source.0, feed, channels as i64, programs as i64],
+        )?;
+        Ok(())
+    }
+
     fn commit(&mut self) -> Result<EpgCounts> {
         let source = self.source;
         let fingerprint = self.match_fingerprint;
         let counts = self.counts;
         let ends_at = self.ends_at;
-        let per_feed = std::mem::take(&mut self.per_feed);
-        let conn = &self.store().conn;
-        for (feed, (channels, programs)) in per_feed {
-            conn.execute(
-                "UPDATE epg_feeds SET channel_count = ?3, program_count = ?4
-                 WHERE source_id = ?1 AND feed_id = ?2",
-                params![source.0, feed, channels as i64, programs as i64],
-            )?;
+        for (feed, counts) in std::mem::take(&mut self.per_feed) {
+            self.update_feed(feed, counts)?;
         }
+        let conn = &self.store().conn;
         conn.execute(
             "UPDATE epg_guides SET bound_channels = ?2, ends_at = ?3 WHERE source_id = ?1",
             params![source.0, counts.bindings as i64, ends_at],

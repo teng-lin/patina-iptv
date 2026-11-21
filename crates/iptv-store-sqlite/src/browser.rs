@@ -766,6 +766,13 @@ impl BrowserFiles {
         Ok(conn)
     }
 
+    /// Whether `file`, a VFS path a connection opened, is a scratch file of
+    /// these files (not another store's file at the same local name).
+    pub(crate) fn owns(&self, file: &str) -> bool {
+        file.strip_prefix(&self.path(""))
+            .is_some_and(|name| !reserved(name) && lock(&self.0.namespace.files).contains_key(name))
+    }
+
     /// The VFS path to attach a caller's scratch `path` by, when it exists
     /// in these files.
     pub(crate) fn attachable(&self, path: &std::path::Path) -> Option<String> {

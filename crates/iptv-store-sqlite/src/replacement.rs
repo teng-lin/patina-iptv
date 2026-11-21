@@ -8,8 +8,11 @@
 //! readers are none: there each step commits (`pause`), and the swap of the
 //! copy is what readers of the database see at once.
 //!
-//! The browser drives a job in slices of a few hundred rows (about 50 ms
-//! each on a 2020 TV) between other work on its one thread; native callers
+//! The browser drives a job in slices of a few hundred rows between other
+//! work on its one thread. The target is at most 50 ms a slice on a 2020
+//! TV (the probe's rate suggests about 400 rows); a row budget does not
+//! guarantee elapsed time, and this code has yet to be measured there.
+//! Native callers
 //! run it to completion in one call (`finish`), which executes exactly the
 //! statements the one-shot methods always executed: an unlimited budget
 //! never splits a statement.

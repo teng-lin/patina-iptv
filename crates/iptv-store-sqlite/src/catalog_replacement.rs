@@ -62,6 +62,8 @@ impl StagePublication {
 
     /// Also the guide sources ([`Store::publish_catalog_stage`]).
     pub fn guides(mut self, guides: Vec<GuideSource>) -> Self {
+        // Explicit guides replace a provider plan set before.
+        self.provider_urls = None;
         self.guides = Some(guides);
         self
     }
@@ -379,7 +381,7 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
             stage, attached, ..
         } = &mut self.input
         {
-            store.attach_staging_database(&stage.path, "catalog_import")?;
+            store.attach_stage(&stage.path, stage.file.as_deref(), "catalog_import")?;
             *attached = true;
         }
         replacement::begin(&store.conn)?;

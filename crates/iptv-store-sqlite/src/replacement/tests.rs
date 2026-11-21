@@ -1312,3 +1312,51 @@ fn catalog_index_slices_seek_the_source_s_channels() {
     let steps = stmt.get_status(rusqlite::StatementStatus::VmStep);
     assert!(steps < 200, "{steps} VM steps");
 }
+
+/// `guides` after `provider_guides` publishes the explicit guides, not a
+/// provider plan.
+#[test]
+fn explicit_guides_replace_a_provider_plan() {
+    let urls = vec![SecretUrl::new("https://guide.example.test/provider.xml")];
+    let (mut store, source) = prepared(true);
+    let stage = stage_of(&store, &full_catalog(10, "New"));
+    let publication = StagePublication::new()
+        .provider_guides(urls, None)
+        .guides(Vec::new());
+    let published = CatalogReplacement::from_stage(&mut store, source, stage, publication)
+        .unwrap()
+        .finish()
+        .unwrap();
+    assert_eq!(published.guides, Some(Vec::new()));
+    assert!(store.guide_sources(source).unwrap().is_empty());
+}
+
+/// Each feed's final counts are a row of the budget: the last slice does
+/// not grow with the number of feeds.
+#[test]
+fn feed_counts_are_written_in_budgeted_steps() {
+    let (mut store, source) = store();
+    store.set_guide_sources(source, &guide_sources()).unwrap();
+    let (mut stage, import) = guide(&store, 3, 3, "New");
+    let mut job = EpgReplacement::new(
+        &mut store,
+        source,
+        &mut stage,
+        Cow::Borrowed(&import),
+        feeds(),
+        2,
+    )
+    .unwrap();
+    let mut finishing = 0;
+    loop {
+        let at_finish = job.phase() == "Finish";
+        let step = job.step(1).unwrap();
+        finishing += usize::from(at_finish);
+        if let Step::Done(_) = step {
+            break;
+        }
+    }
+    // Two feeds, at most one per step, then the commit: more than the one
+    // step that wrote every feed's counts and committed.
+    assert!(finishing >= 2, "{finishing} steps");
+}

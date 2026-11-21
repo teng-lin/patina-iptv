@@ -119,6 +119,9 @@ enum Lane {
 /// Implements [`GuideSink`]. Dropping it deletes the file.
 pub struct EpgStage {
     path: PathBuf,
+    /// The file SQLite opened for it: in the browser, which store's files
+    /// it belongs to.
+    file: Option<String>,
     lane: Option<Lane>,
     /// The writer failed; the next request returns its error.
     failed: Arc<AtomicBool>,
@@ -190,6 +193,7 @@ impl EpgStage {
     }
 
     fn create_with_connection(path: PathBuf, conn: Connection) -> Result<Self> {
+        let file = conn.path().map(str::to_owned);
         let opened = (|| -> Result<()> {
             // Scratch data: a crash deletes the file anyway.
             let _mode: String =
@@ -219,6 +223,7 @@ impl EpgStage {
         let lane = Lane::Inline(std::sync::Mutex::new(writer));
         Ok(Self {
             path,
+            file,
             lane: Some(lane),
             failed,
             batch: Batch::default(),
@@ -243,6 +248,11 @@ impl EpgStage {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// The file SQLite opened for the stage.
+    pub(crate) fn file(&self) -> Option<&str> {
+        self.file.as_deref()
     }
 
     /// The staged channel `epg_id` of loaded feed `feed`.
