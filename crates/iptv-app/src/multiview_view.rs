@@ -137,7 +137,8 @@ fn tile(ui: Ui, index: usize) -> impl IntoElement {
         .role(AccessibilityRole::Button)
         .label(move || {
             let name = channel().map_or_else(|| tr("Channels").to_owned(), channel_name);
-            if several() && !heard() {
+            let silent = !heard() || ui.media.volume.with(|v| v.muted);
+            if several() && silent {
                 trf("{channel} · muted", &[("channel", name.as_str().into())])
             } else {
                 name

@@ -210,6 +210,20 @@ fn multiview_focus_never_moves_the_sound_and_listen_to_this_does() {
     step(app.press(&listen));
     only_heard(app, &seen, 2, 0, "the pointer's Listen to this");
     badges(app, 2, 5);
+
+    // By keys alone, as a remote: focus Desk 03, OK opens its menu, Down
+    // to Listen to this (after Add screen, Search and add, Change channel
+    // and Pause), OK.
+    step(app.press(&tile(3)));
+    step(app.press_key("enter"));
+    step(app.wait_for(&format!("{MENU} >> text:Listen to this")));
+    for _ in 0..4 {
+        step(app.press_key("down"));
+    }
+    step(app.press_key("enter"));
+    step(app.wait_for_gone(MENU, Duration::from_secs(2)));
+    only_heard(app, &seen, 2, 1, "the remote's Listen to this");
+    badges(app, 2, 3);
 }
 
 // Player windows ("Watch in new window") exist on Linux and macOS only.
@@ -281,6 +295,13 @@ fn one_of_the_main_player_and_its_windows_is_heard_and_each_shows_it() {
         !app.screen().matches(&listen).unwrap(),
         "the heard window offers no Listen to this"
     );
+    // That window to the operating system's full screen and back (a
+    // double click on its video): the sound stays.
+    for _ in 0..2 {
+        step(app.press(&format!("{} >> label:Video", aux(1))));
+        step(app.press(&format!("{} >> label:Video", aux(1))));
+        only_heard(app, &seen, 3, 1, "a window's full screen");
+    }
 
     // Listen to this among the compact window's controls.
     step(app.hover(&format!("{} >> id:pip-video", aux(2))));
@@ -303,6 +324,31 @@ fn one_of_the_main_player_and_its_windows_is_heard_and_each_shows_it() {
     step(app.press("id:primary-pip >> id:pip-listen"));
     only_heard(app, &seen, 2, 0, "the main player's Listen to this");
     step(app.wait_for("id:primary-pip >> id:pip-heard"));
+    assert_eq!(seen.title("player-window-1"), "Desk 05 · muted");
+
+    // Back in the app, the main play bar's Listen to this, while the
+    // window has the sound. (A press on the video also opens or closes
+    // the window's panels, over its play bar.)
+    for _ in 0..3 {
+        step(app.hover(&format!("{} >> label:Video", aux(1))));
+        app.settle();
+        if app.screen().matches(&listen).unwrap() {
+            break;
+        }
+        step(app.press(&format!("{} >> label:Video", aux(1))));
+        app.settle();
+    }
+    step(app.wait_for(&listen));
+    step(app.press(&listen));
+    only_heard(app, &seen, 2, 1, "the window again");
+    step(app.hover("id:primary-pip >> id:pip-video"));
+    step(app.wait_for("id:primary-pip >> id:pip-back"));
+    step(app.press("id:primary-pip >> id:pip-back"));
+    app.settle();
+    let main_listen = "id:app-ui >> id:play-bar-listen";
+    show_controls(app, main_listen);
+    step(app.press(main_listen));
+    only_heard(app, &seen, 2, 0, "the main play bar's Listen to this");
     assert_eq!(seen.title("player-window-1"), "Desk 05 · muted");
     assert_eq!(opens(2), opened[..2], "moving the sound opens nothing");
 }

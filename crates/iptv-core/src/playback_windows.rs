@@ -62,7 +62,7 @@ impl<C: Clone + PartialEq> Workspace<C> {
     }
 
     /// Reopening a channel finds its existing player, without a new stream.
-    /// A new one does not take the sound.
+    /// A new one does not take the sound (an auxiliary one opens muted).
     pub fn open(&mut self, channel: C) -> Option<SessionId> {
         self.open_from(channel, 0)
     }
@@ -115,10 +115,13 @@ impl<C: Clone + PartialEq> Workspace<C> {
     /// Listen to this: session `id`'s window is heard (unmuted), the
     /// others are not.
     pub fn listen(&mut self, id: SessionId) {
-        if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
-            s.volume.muted = false;
-            self.heard.listen(Some(id));
+        if !self.sessions.iter().any(|s| s.id == id) {
+            return;
         }
+        for s in &mut self.sessions {
+            s.volume.muted = s.id != id;
+        }
+        self.heard.listen(Some(id));
     }
     /// The main player's Listen to this and audio controls reclaim sound
     /// from auxiliary windows.
@@ -373,6 +376,7 @@ mod tests {
         assert!(!w.on_surface(1).unwrap().volume.muted);
         w.listen(b);
         assert_eq!(w.audible(), Some(b));
+        assert!(w.on_surface(1).unwrap().volume.muted, "the other one muted");
         // Closing a window not heard changes nothing.
         let c = w.open_auxiliary("c").unwrap();
         w.close(c);

@@ -1,9 +1,9 @@
 //! The host's audio interruptions (#88): Android's `audio` player event
 //! (the audio focus lost or back, the headphones' route gone) applied by
 //! the core's policy (`iptv_core::interruption`) to the player that is
-//! heard: the full-screen one, multiview's heard tile or a desktop player
-//! window that took the sound (the others are muted; focus never moves
-//! it, #135). It only pauses and resumes: a stream the viewer stopped stays
+//! heard: the full-screen one, or multiview's heard tile (the others are
+//! muted; focus never moves the sound, #135). Desktop player windows get
+//! no such event. It only pauses and resumes: a stream the viewer stopped stays
 //! stopped, and resuming opens no stream.
 
 use iptv_core::interruption::Response;

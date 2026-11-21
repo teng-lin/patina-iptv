@@ -109,7 +109,9 @@ separate player window for that channel, beside the main window's player.
   or volume, move it as before. Clicking into a window, moving the keyboard
   focus, resizing, full screen and compact never move the sound.
 - **Now:** closing the window that has the sound gives it back to the
-  player heard before it that is still open, else to the main player.
+  player heard before it that is still open, else to the main player. A
+  main player whose own Mute is on stays muted: only its Mute or Listen to
+  this turns it on again.
 - **Now:** each window shows its own channel and keeps its own pause,
   volume, audio delay and channel list. A window's compact
   picture-in-picture is that window made small and floating; its player and
