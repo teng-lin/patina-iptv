@@ -3,7 +3,9 @@
 //! group picker for the next one; each tile plays on its own player surface
 //! (`player.rs`, `video.rs`; surface 0 is the full-screen player). The
 //! state machine is `iptv_core::multiview`; this runs it, starts and stops
-//! the surfaces its tiles name, mutes all but the active one, places the
+//! the surfaces its tiles name, mutes all but the heard one (which focus
+//! never moves: the tile menu's or the pointer chrome's Listen to this
+//! does, `listen.rs`; #135), places the
 //! tiles ([`tile_rect`]: the core's layout less a gap), and leaves to full
 //! screen. `multiview_view.rs` draws it.
 //!
@@ -46,7 +48,7 @@ use crate::{Playback, Ui, ViewMode};
 
 pub use lifecycle::{bind, follow};
 pub use pointer::{
-    add, choose, chrome_shows, dismiss, exit, long_press, remove, tap, toggle_enlarge,
+    add, choose, chrome_shows, dismiss, exit, listen, long_press, remove, tap, toggle_enlarge,
 };
 
 pub type State = Multiview<usize>;
@@ -105,17 +107,18 @@ pub fn pick_from(ui: Ui) -> Option<usize> {
     })
 }
 
-/// Whether `surface` is heard: the active tile's (on a detour that is
-/// surface 0), or the full-screen one outside multiview.
+/// Whether `surface` is heard: the heard tile's (on a detour surface 0,
+/// the one watched full screen), a desktop player window that took the
+/// sound, or else the full-screen one.
 pub fn audible(ui: Ui, surface: usize) -> bool {
-    if let Some(audible) = ui.player_windows.with(|w| w.audible) {
+    if let Some(audible) = ui.player_windows.with(|w| w.audible()) {
         return ui
             .player_windows
             .with(|w| w.on_surface(surface).is_some_and(|s| s.id == audible));
     }
     ui.multiview.with(|m| match m {
         None => surface == 0,
-        Some(m) => m.tiles().get(m.active_index()).map(|t| t.surface) == Some(surface),
+        Some(m) => m.audible_surface() == surface,
     })
 }
 
@@ -336,7 +339,11 @@ fn apply(ui: Ui, f: impl FnOnce(&mut State, &dyn Fn(usize) -> bool) -> Outcome<u
     ui.multiview.update(|m| {
         if let Some(m) = m.as_mut() {
             let before = m.assignments();
+            let heard = m.audible_surface();
             let outcome = f(m, &failed);
+            if m.audible_surface() != heard {
+                log::info!("iptv multiview: surface {} heard", m.audible_surface());
+            }
             step = Some((before, m.assignments(), outcome));
         }
     });

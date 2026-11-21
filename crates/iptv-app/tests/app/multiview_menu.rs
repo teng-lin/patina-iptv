@@ -291,12 +291,12 @@ fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
     );
     assert!(
         app.screen()
-            .matches("id:multiview-ui >> role:button[/^Test Channel Three$/]")
+            .matches("id:multiview-ui >> role:button[/^Test Channel Three · muted$/]")
             .unwrap()
     );
     assert!(
         app.screen()
-            .accessibility_state("id:multiview-ui >> role:button[/^Test Channel Three$/]")
+            .accessibility_state("id:multiview-ui >> role:button[/^Test Channel Three · muted$/]")
             .unwrap()
             .selected
     );
@@ -320,6 +320,7 @@ fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
             "Search and add",
             "Change channel",
             "Pause",
+            "Listen to this",
             "Enlarge screen",
             "Full screen",
             "Remove screen"

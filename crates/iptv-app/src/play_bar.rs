@@ -705,7 +705,44 @@ fn left(ui: Ui) -> impl IntoElement {
             size,
         ))
         .child(when(desktop_controls, move || volume(ui)))
+        .child(when(
+            move || crate::listen::choice(ui) && !crate::listen::heard(ui),
+            move || listen(ui),
+        ))
         .child(when(|| !crate::scale::phone(), move || title(ui)))
+}
+
+/// Listen to this, while another player is heard (#135): its sound
+/// moves here. Beside Mute, whose muted icon says this one is not heard.
+fn listen(ui: Ui) -> impl IntoElement {
+    view()
+        .role(AccessibilityRole::Button)
+        .test_id("play-bar-listen")
+        .label(move || tr("Listen to this"))
+        .flex_shrink_0()
+        .flex_row()
+        .items_center()
+        .gap(px(6.0))
+        .px(px(10.0))
+        .py(px(4.0))
+        .rounded(px(RADIUS_LARGE))
+        .bg(tint(WHITE, RESTING_ALPHA * 2))
+        .hover(|s| s.bg(tint(WHITE, RESTING_ALPHA * 3)))
+        .on_press(move || {
+            used(ui);
+            crate::listen::listen(ui);
+        })
+        .child(
+            svg(icons::src(Icon::Volume))
+                .size(px(16.0))
+                .text_color(rgb(WHITE)),
+        )
+        .child(
+            text(move || tr("Listen to this"))
+                .number_of_lines(1)
+                .text_size(px(12.0))
+                .text_color(rgb(WHITE)),
+        )
 }
 
 /// The quality badges and the channel's (or the title's) name.

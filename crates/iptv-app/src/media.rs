@@ -80,7 +80,7 @@ pub fn set_volume(ui: Ui, level: i32) {
 /// Include audio ownership so the main controls describe what is actually heard.
 pub fn muted(ui: Ui) -> bool {
     ui.media.volume.with(|v| v.muted)
-        || (ui.player_surface == 0 && ui.player_windows.with(|w| w.audible.is_some()))
+        || (ui.player_surface == 0 && ui.player_windows.with(|w| w.audible().is_some()))
 }
 
 fn change_volume(ui: Ui, change: impl FnOnce(&mut Volume)) {
