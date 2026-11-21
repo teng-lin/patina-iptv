@@ -167,10 +167,13 @@ fn too_large(what: &str) -> FetchError {
     )
 }
 
-/// The client enforces its limits whatever the adapter does: a total time no
-/// longer than the configured one, a declared or delivered body no larger
-/// than the budget. (The native adapter enforces the same limits itself;
-/// these checks then never fire first.)
+/// The client holds every request to its configuration whatever the adapter
+/// does: it asks for a total time no longer than the configured one (the
+/// request's timeout, which the adapter enforces: `iptv-net` natively, the
+/// web host's Page adapter in the browser), and refuses a successful
+/// response whose declared body, or a body whose delivered bytes, exceed
+/// the budget. The native adapter enforces the same byte limits itself, so
+/// these checks never fire first there.
 impl Fetch for Client {
     type Body = Body;
 
@@ -205,7 +208,10 @@ impl Fetch for Client {
         let response = self.transport.fetch_stream(self.limited(request));
         async move {
             let response = response.await?;
-            if response.content_length.is_some_and(|length| length > limit) {
+            // Only a body the caller will read: an error status keeps its
+            // own meaning (a 404 with a large declared page is a 404).
+            if response.is_success() && response.content_length.is_some_and(|length| length > limit)
+            {
                 return Err(too_large("declared body"));
             }
             Ok(StreamingResponse {
@@ -252,6 +258,7 @@ mod tests {
     struct Fake {
         body: Vec<u8>,
         declared: Option<u64>,
+        status: u16,
         asked: Arc<Mutex<Vec<HttpRequest>>>,
     }
 
@@ -282,7 +289,7 @@ mod tests {
         ) -> NetFuture<'_, Result<StreamingResponse<Body>, FetchError>> {
             self.asked.lock().unwrap().push(request);
             Box::pin(std::future::ready(Ok(StreamingResponse {
-                status: 200,
+                status: self.status,
                 content_length: self.declared,
                 body: Body::new(Memory(MemoryBody::new(&self.body, 4))),
             })))
@@ -310,6 +317,7 @@ mod tests {
         let fake = Fake {
             body: body.to_vec(),
             declared,
+            status: if body == b"not found" { 404 } else { 200 },
             asked: Arc::clone(&asked),
         };
         (Client::new(fake, config), asked)
@@ -344,6 +352,12 @@ mod tests {
         let (declared, _) = client(b"", Some(9));
         let refused = ready(declared.fetch_stream(HttpRequest::get("https://example.test/c")));
         assert_eq!(refused.err().unwrap().kind, FetchErrorKind::TooLarge);
+
+        // An error status is the caller's to read, whatever length it declares.
+        let (missing, _) = client(b"not found", Some(1 << 30));
+        let answer =
+            ready(missing.fetch_stream(HttpRequest::get("https://example.test/d"))).unwrap();
+        assert_eq!(answer.status, 404);
     }
 
     #[test]
