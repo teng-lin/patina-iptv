@@ -415,6 +415,14 @@ impl Services {
         &self.service.files
     }
 
+    /// A network client with this owner's settings of now.
+    pub(crate) fn network_client(&self) -> Result<crate::network::Client, iptv_import::FetchError> {
+        self.service
+            .ports
+            .network
+            .client(&super::settings::network_config(&self.settings()))
+    }
+
     /// Runs `future` on the owner's network runtime; await the handle for
     /// its output. Dropping the handle detaches the task (cancel it with its
     /// `CancelToken`).

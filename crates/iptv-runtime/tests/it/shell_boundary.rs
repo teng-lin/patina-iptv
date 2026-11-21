@@ -28,6 +28,9 @@ const SHELL_MAY_NAME: &[&str] = &[
     "guides",
     // Value types of the commands and events.
     "model",
+    // The network port: the configuration of a client and the client a
+    // host's adapter makes.
+    "network",
     // A stored source's playback context before its refresh (pure).
     "playback",
     // Typed parental errors, on-demand identities, and native recorder lifecycle

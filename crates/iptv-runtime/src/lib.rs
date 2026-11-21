@@ -118,7 +118,7 @@ pub struct Runtime {
     settings_changed: Slot<Cell<u64>>,
     settings_read_only: Cell<Option<std::io::ErrorKind>>,
     link_client:
-        std::sync::Arc<std::sync::Mutex<Option<(iptv_net::NetConfig, iptv_net::NetClient)>>>,
+        std::sync::Arc<std::sync::Mutex<Option<(network::NetworkConfig, network::Client)>>>,
     backup_busy: Cell<bool>,
     backup_progress: Cell<backup::Progress>,
     search: search::State,
@@ -695,8 +695,11 @@ pub mod model;
 
 pub mod settings;
 
+#[cfg(feature = "native")]
+mod native;
+pub mod network;
 mod ports;
-pub use ports::Ports;
+pub use ports::{MaybeSend, MaybeSync, Ports};
 pub mod storage;
 
 #[cfg(test)]

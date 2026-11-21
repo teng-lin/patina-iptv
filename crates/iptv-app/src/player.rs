@@ -1088,7 +1088,7 @@ fn resolve_link(
         channel_headers,
     } = *link;
     let cancel = crate::runtime().begin_link_resolution(surface, session);
-    let client = crate::runtime().link_client(crate::settings::net_config());
+    let client = crate::runtime().link_client(crate::settings::network_config());
     let request = crate::runtime().spawn_network(async move {
         let result = match client.await {
             Ok(net) => iptv_import::stalker_link(&net, &mut portal, &cmd, false, &cancel)

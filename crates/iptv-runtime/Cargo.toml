@@ -8,6 +8,11 @@ publish.workspace = true
 license.workspace = true
 
 [features]
+default = ["native"]
+# What only native hosts have: the iptv-net adapter, thread-based executors
+# and the native-only services (recording, backup files, the credential
+# store, staged probes). Without it the crate builds for wasm32.
+native = ["dep:iptv-net"]
 # Synthetic latency controls, absent from production packages.
 test-support = []
 
@@ -18,7 +23,7 @@ iptv-guide.workspace = true
 iptv-epg.workspace = true
 iptv-providers.workspace = true
 iptv-import.workspace = true
-iptv-net.workspace = true
+iptv-net = { workspace = true, optional = true }
 iptv-store-sqlite.workspace = true
 iptv-search.workspace = true
 iptv-settings.workspace = true

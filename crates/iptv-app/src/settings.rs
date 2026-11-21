@@ -19,7 +19,7 @@
 //! ones it acts on ([`WIRED`], [`COMMANDS`]), what it shows read-only,
 //! what comes later, and what it does not offer at all (device-level
 //! features of TV boxes). Some settings apply here ([`bind`]: colors,
-//! panel timeouts, [`net_config`]); the others are read where they act
+//! panel timeouts, [`network_config`]); the others are read where they act
 //! (guide data, catch-up keys and steps, search, startup channel, Back,
 //! leaving, channel-change info).
 
@@ -242,8 +242,8 @@ pub fn user_agent() -> Option<String> {
 }
 
 /// The network settings of provider requests.
-pub fn net_config() -> iptv_net::NetConfig {
-    crate::runtime::settings::net_config(&get())
+pub fn network_config() -> crate::runtime::network::NetworkConfig {
+    crate::runtime::settings::network_config(&get())
 }
 
 pub fn browse_mode() -> crate::ViewMode {

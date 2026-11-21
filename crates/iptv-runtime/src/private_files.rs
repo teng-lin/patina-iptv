@@ -194,7 +194,7 @@ fn write_unlocked(store: &Store, path: &Path, input: &mut impl Read) -> Result<(
     Ok(())
 }
 
-fn local_allowed(config: &iptv_net::NetConfig, request: &HttpRequest) -> bool {
+fn local_allowed(config: &crate::network::NetworkConfig, request: &HttpRequest) -> bool {
     #[cfg(debug_assertions)]
     let fixture = config.allow_private_fixture;
     #[cfg(not(debug_assertions))]
@@ -204,7 +204,7 @@ fn local_allowed(config: &iptv_net::NetConfig, request: &HttpRequest) -> bool {
 
 #[derive(Clone)]
 pub(crate) struct Client {
-    net: iptv_net::NetClient,
+    net: crate::network::Client,
     /// The owner whose private documents and network settings this reads.
     services: super::store_service::Services,
 }
@@ -212,7 +212,7 @@ impl Client {
     /// A client with the owner's network settings of now.
     pub(crate) fn new(services: &super::store_service::Services) -> Result<Self, FetchError> {
         Ok(Self {
-            net: iptv_net::NetClient::new(super::settings::net_config(&services.settings()))?,
+            net: services.network_client()?,
             services: services.clone(),
         })
     }
@@ -300,7 +300,7 @@ impl Client {
     }
 }
 pub(crate) enum Body {
-    Network(iptv_net::NetBody),
+    Network(crate::network::Body),
     Private {
         reader: Option<PrivateFileReader>,
         remaining: u64,
@@ -441,7 +441,7 @@ mod tests {
 
     #[test]
     fn local_documents_require_explicit_pick_and_never_content_provenance() {
-        let config = iptv_net::NetConfig::default();
+        let config = crate::network::NetworkConfig::default();
         let mut request = HttpRequest::get("file:/synthetic/private.m3u");
         assert!(!local_allowed(&config, &request));
         request.picked_file = true;
@@ -450,7 +450,7 @@ mod tests {
         assert!(!local_allowed(&config, &request));
         request.public_only = false;
         assert!(!local_allowed(
-            &iptv_net::NetConfig {
+            &crate::network::NetworkConfig {
                 allow_files: false,
                 ..config
             },

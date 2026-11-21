@@ -104,9 +104,10 @@ impl Runtime {
     /// the client.
     pub fn link_client(
         &self,
-        config: iptv_net::NetConfig,
-    ) -> impl Future<Output = Result<iptv_net::NetClient, iptv_net::FetchError>> + Send + use<>
-    {
+        config: crate::network::NetworkConfig,
+    ) -> impl Future<Output = Result<crate::network::Client, iptv_import::FetchError>>
+    + crate::MaybeSend
+    + use<> {
         crate::playback::link_client(self, config)
     }
 

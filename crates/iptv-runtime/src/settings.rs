@@ -1,6 +1,6 @@
 //! Settings persistence and effective values, owned by the application runtime.
 use super::file_writer::WriteError;
-use iptv_net::NetConfig;
+use crate::network::NetworkConfig;
 use iptv_settings::keys::{self, BoolKey, DurationKey, EnumKey};
 use iptv_settings::{Settings, SettingsError, Target, Value};
 use std::path::{Path, PathBuf};
@@ -340,12 +340,11 @@ pub fn user_agent(settings: &Settings) -> Option<String> {
 }
 
 /// The part of the provider network configuration that no setting changes
-/// (trust anchors, limits, the development fixture override). Playback
-/// transport reads its trust anchors from it on player threads, which act
-/// for no owner.
-pub fn base_net_config() -> NetConfig {
+/// (limits, the development fixture override). Playback transport reads it
+/// on player threads, which act for no owner.
+pub fn base_network_config() -> NetworkConfig {
     #[cfg_attr(not(debug_assertions), allow(unused_mut))]
-    let mut config = NetConfig::default();
+    let mut config = NetworkConfig::default();
     #[cfg(debug_assertions)]
     {
         config.allow_private_fixture =
@@ -354,14 +353,27 @@ pub fn base_net_config() -> NetConfig {
     config
 }
 
-/// The network settings of provider requests: [`base_net_config`] with
+/// The network settings of provider requests: [`base_network_config`] with
 /// `general.user_agent` for requests that do not name their own.
-pub fn net_config(settings: &Settings) -> NetConfig {
-    let mut config = base_net_config();
+pub fn network_config(settings: &Settings) -> NetworkConfig {
+    let mut config = base_network_config();
     if let Some(ua) = user_agent(settings) {
         config.user_agent = ua;
     }
     config
+}
+
+/// [`base_network_config`] as the native adapter's configuration (trust
+/// anchors included).
+#[cfg(feature = "native")]
+pub fn base_net_config() -> iptv_net::NetConfig {
+    crate::native::network::net_config(&base_network_config())
+}
+
+/// [`network_config`] as the native adapter's configuration.
+#[cfg(feature = "native")]
+pub fn net_config(settings: &Settings) -> iptv_net::NetConfig {
+    crate::native::network::net_config(&network_config(settings))
 }
 
 /// Adds `general.user_agent` to a stream's headers unless the stream
