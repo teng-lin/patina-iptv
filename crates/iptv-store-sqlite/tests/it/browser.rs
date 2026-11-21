@@ -49,9 +49,9 @@ impl Saved {
     /// A launch: new files restored from the saved chunks.
     fn restore(&self) -> BrowserFiles {
         let files = BrowserFiles::new().unwrap();
-        files.restore_size(self.size).unwrap();
+        let restore = files.restore_size(self.size).unwrap();
         for (&index, bytes) in &self.chunks {
-            files.restore_chunk(index, bytes).unwrap();
+            files.restore_chunk(restore, index, bytes).unwrap();
         }
         files
     }
@@ -170,10 +170,10 @@ fn a_take_is_one_commit_and_takes_do_not_overlap() {
 #[test]
 fn restoring_checks_chunk_sizes_and_refuses_an_open_database() {
     let files = BrowserFiles::new().unwrap();
-    files.restore_size(CHUNK_BYTES as u64 + 1024).unwrap();
-    assert!(files.restore_chunk(1, &[0; 512]).is_err());
-    assert!(files.restore_chunk(2, &[0; 1024]).is_err());
-    files.restore_chunk(1, &[0; 1024]).unwrap();
+    let restore = files.restore_size(CHUNK_BYTES as u64 + 1024).unwrap();
+    assert!(files.restore_chunk(restore, 1, &[0; 512]).is_err());
+    assert!(files.restore_chunk(restore, 2, &[0; 1024]).is_err());
+    files.restore_chunk(restore, 1, &[0; 1024]).unwrap();
     // Chunk 0 is missing: the store does not open on a hole of zeros.
     assert!(Store::open_browser(&files).is_err());
     // Sizes that are no SQLite database, or absurdly large ones (a corrupt
@@ -600,14 +600,18 @@ fn a_deleted_credential_is_not_in_the_saved_chunks() {
 #[test]
 fn file_operations_are_unavailable_in_the_browser() {
     use iptv_store_sqlite::{DatabaseKey, EpgStage, StoreError};
-    let unavailable = |e: StoreError| matches!(e, StoreError::Unavailable(_));
+    // Refused for the reason that there are no files, not some other one.
+    let no_files = |e: StoreError| matches!(e, StoreError::Unavailable(reason) if reason == "the browser build has no files");
+    // Refused with the browser build's way to do it instead.
+    let unavailable =
+        |e: StoreError| matches!(e, StoreError::Unavailable(reason) if reason.contains("browser"));
     let path = std::path::Path::new("/data/store.sqlite");
     assert!(unavailable(Store::open(path).unwrap_err()));
     assert!(unavailable(
         Store::open_with(path, &iptv_store_sqlite::OpenOptions::default()).unwrap_err()
     ));
     let key = DatabaseKey::from_bytes([7; 32]);
-    assert!(unavailable(Store::open_encrypted(path, &key).unwrap_err()));
+    assert!(no_files(Store::open_encrypted(path, &key).unwrap_err()));
     assert!(unavailable(CatalogStage::create_in("/data").err().unwrap()));
     assert!(unavailable(
         EpgStage::create("/data/stage.sqlite").unwrap_err()
@@ -615,39 +619,80 @@ fn file_operations_are_unavailable_in_the_browser() {
     assert!(unavailable(EpgStage::create_in("/data").unwrap_err()));
     let store = Store::open_in_memory().unwrap();
     assert!(unavailable(store.open_reader().unwrap_err()));
-    assert!(unavailable(store.snapshot_to(path).unwrap_err()));
-    assert!(unavailable(store.seal_snapshot(path).unwrap_err()));
-    assert!(unavailable(Store::validate_snapshot(path).unwrap_err()));
-    assert!(unavailable(
+    assert!(no_files(store.snapshot_to(path).unwrap_err()));
+    assert!(no_files(store.seal_snapshot(path).unwrap_err()));
+    assert!(no_files(Store::validate_snapshot(path).unwrap_err()));
+    assert!(no_files(
         Store::validate_encrypted_snapshot(path, &key).unwrap_err()
     ));
     let mut input: &[u8] = b"synthetic";
-    assert!(unavailable(
+    assert!(no_files(
         store.write_private_file(path, &mut input).unwrap_err()
     ));
-    assert!(unavailable(store.read_private_file(path).err().unwrap()));
+    assert!(no_files(store.read_private_file(path).err().unwrap()));
     use iptv_store_sqlite::InspectionStage;
-    assert!(unavailable(
-        InspectionStage::create(path, &key).err().unwrap()
-    ));
-    assert!(unavailable(
-        InspectionStage::open(path, &key).err().unwrap()
-    ));
+    assert!(no_files(InspectionStage::create(path, &key).err().unwrap()));
+    assert!(no_files(InspectionStage::open(path, &key).err().unwrap()));
 }
 
 /// A restore is refused while a take is out: the host's write of it would
 /// land on the restored database and mix two databases in storage.
 #[test]
 fn a_restore_waits_for_the_outstanding_take() {
+    use iptv_store_sqlite::StoreError;
     let files = BrowserFiles::new().unwrap();
     let store = Store::open_browser(&files).unwrap();
     let take = store.take_changed_chunks().unwrap();
     drop(store);
-    assert!(files.restore_size(0).is_err());
-    assert!(files.restore_chunk(0, &[0; 8192]).is_err());
+    assert!(matches!(
+        files.restore_size(0),
+        Err(StoreError::Unavailable(reason)) if reason.contains("take")
+    ));
     take.saved();
-    files.restore_size(0).unwrap();
+    let restore = files.restore_size(0).unwrap();
+    // An empty file has no chunk to give; the store opens.
+    assert!(files.restore_chunk(restore, 0, &[0; 512]).is_err());
     Store::open_browser(&files).unwrap();
+}
+
+/// A chunk of a superseded restore (read late from IndexedDB after the host
+/// restarted the restore) cannot enter the current one, nor a database the
+/// store has opened.
+#[test]
+fn a_late_chunk_of_an_old_restore_is_refused() {
+    use iptv_store_sqlite::StoreError;
+    let files = BrowserFiles::new().unwrap();
+    let old = files.restore_size(8192).unwrap();
+    let new = files.restore_size(8192).unwrap();
+    assert!(matches!(
+        files.restore_chunk(old, 0, &[1; 8192]),
+        Err(StoreError::Unavailable(_))
+    ));
+    // The new restore still misses its chunk: the store does not open.
+    assert!(Store::open_browser(&files).is_err());
+    let mut saved = Saved::default();
+    let source = {
+        let files = BrowserFiles::new().unwrap();
+        let mut store = Store::open_browser(&files).unwrap();
+        let source = store.add_source(&m3u_source("Synthetic")).unwrap();
+        saved.save(&store);
+        source
+    };
+    let files = BrowserFiles::new().unwrap();
+    let restore = files.restore_size(saved.size).unwrap();
+    for (&index, bytes) in &saved.chunks {
+        files.restore_chunk(restore, index, bytes).unwrap();
+    }
+    let store = Store::open_browser(&files).unwrap();
+    assert!(store.sources().unwrap().iter().any(|s| s.id == source));
+    // Opening ends the restore: a late chunk of it is refused too.
+    drop(store);
+    let (&index, bytes) = saved.chunks.iter().next().unwrap();
+    assert!(matches!(
+        files.restore_chunk(restore, index, bytes),
+        Err(StoreError::Unavailable(_))
+    ));
+    let _ = new;
 }
 
 /// A replacement that committed some steps on a publish copy and was then
@@ -671,4 +716,24 @@ fn a_partly_published_copy_is_not_swapped_in() {
     assert!(store.finish_publish(copy).is_err());
     assert!(!store.is_publishing());
     assert_eq!(channel_count(&store, source), 300);
+}
+
+/// A job whose committed slices changed nothing on the copy (an empty stage
+/// for a new source) does not break the copy when it is dropped.
+#[test]
+fn a_job_that_changed_nothing_leaves_the_copy_publishable() {
+    use iptv_store_sqlite::{CatalogReplacement, StagePublication, Step};
+    let files = BrowserFiles::new().unwrap();
+    let mut store = Store::open_browser(&files).unwrap();
+    let source = store.add_source(&m3u_source("Synthetic")).unwrap();
+    let mut copy = store.begin_publish().unwrap();
+    let mut stage =
+        CatalogStage::create_in_with("/stages", |path| copy.open_staging_connection(path)).unwrap();
+    stage.finish().unwrap();
+    let mut job =
+        CatalogReplacement::from_stage(&mut copy, source, stage, StagePublication::new()).unwrap();
+    assert_eq!(job.step(1).unwrap(), Step::Pending);
+    assert_eq!(job.step(1).unwrap(), Step::Pending);
+    drop(job);
+    store.finish_publish(copy).unwrap();
 }

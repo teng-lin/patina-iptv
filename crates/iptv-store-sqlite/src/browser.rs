@@ -210,6 +210,8 @@ struct FileState {
     take_outstanding: bool,
     /// Chunks `restore_size` expects that `restore_chunk` has not given.
     missing: BTreeSet<u32>,
+    /// The restore whose chunks this file takes, until the store opens it.
+    restore: Option<u64>,
     /// A publish copy exists: the database grants no write lock.
     frozen: bool,
     locks: Locks,
@@ -651,11 +653,14 @@ impl BrowserFiles {
     }
 
     /// Prepares the database file to be restored at launch: `size` bytes,
-    /// every chunk of which [`Self::restore_chunk`] must then give before
-    /// the store opens. Only before the store opens; replaces what the
-    /// files held. `size` must be a whole number of SQLite pages (512
-    /// bytes or more each) and at most [`MAX_DATABASE_BYTES`].
-    pub fn restore_size(&self, size: u64) -> Result<()> {
+    /// every chunk of which [`Self::restore_chunk`] must then give, with the
+    /// returned token, before the store opens. Only before the store opens;
+    /// replaces what the files held, and the token of an earlier restore
+    /// stops working, so a late chunk of it cannot enter this one. `size`
+    /// must be a whole number of SQLite pages (512 bytes or more each) and
+    /// at most [`MAX_DATABASE_BYTES`]. Refused while a take of the
+    /// database's chunks is out ([`ChangedChunks`]): settle it first.
+    pub fn restore_size(&self, size: u64) -> Result<RestoreToken> {
         if self.database_is_open() {
             return Err(unavailable("the browser database is open"));
         }
@@ -677,6 +682,8 @@ impl BrowserFiles {
                 "a stored database of {size} bytes is not a SQLite database this store restores"
             )));
         }
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let token = RestoreToken(NEXT.fetch_add(1, Ordering::Relaxed));
         let count = chunk_count(size);
         // One shared zero chunk: each is copied when restored.
         let zero = zero_chunk();
@@ -687,16 +694,18 @@ impl BrowserFiles {
             },
             changed: Some(BTreeSet::new()),
             missing: (0..count as u32).collect(),
+            restore: Some(token.0),
             ..FileState::default()
         };
         lock(&self.0.namespace.files).insert(DATABASE.to_owned(), Arc::new(Mutex::new(file)));
-        Ok(())
+        Ok(token)
     }
 
-    /// Copies chunk `index` of the stored database in (after
-    /// [`Self::restore_size`], before the store opens). `bytes` is the whole
-    /// chunk: [`CHUNK_BYTES`], or the rest of the file for the last one.
-    pub fn restore_chunk(&self, index: u32, bytes: &[u8]) -> Result<()> {
+    /// Copies chunk `index` of the stored database in, for the restore that
+    /// `restore` names (from [`Self::restore_size`]; refused once another
+    /// restore began or the store opened). `bytes` is the whole chunk:
+    /// [`CHUNK_BYTES`], or the rest of the file for the last one.
+    pub fn restore_chunk(&self, restore: RestoreToken, index: u32, bytes: &[u8]) -> Result<()> {
         if self.database_is_open() {
             return Err(unavailable("the browser database is open"));
         }
@@ -707,10 +716,9 @@ impl BrowserFiles {
             .database()
             .ok_or_else(|| unavailable("restore_size comes before restore_chunk"))?;
         let mut file = lock(&file);
-        if file.take_outstanding {
-            return Err(unavailable(
-                "a take of the database's chunks is not saved yet",
-            ));
+        // A take only exists of an opened database, whose restore is over.
+        if file.restore != Some(restore.0) {
+            return Err(unavailable("this restore was superseded or has opened"));
         }
         let start = u64::from(index) * CHUNK_BYTES as u64;
         let expected = file.data.chunk(index as usize).map(<[u8]>::len);
@@ -772,6 +780,11 @@ impl BrowserFiles {
         Arc::ptr_eq(&self.0, &other.0)
     }
 }
+
+/// One restore of the database ([`BrowserFiles::restore_size`]), which its
+/// chunks name ([`BrowserFiles::restore_chunk`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RestoreToken(u64);
 
 /// Which file of its [`BrowserFiles`] a store has open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -845,7 +858,9 @@ impl Link {
 /// stored chunks at or past `ceil(size / CHUNK_BYTES)`, then calls
 /// [`Self::saved`]. Until then the store gives out no other take. Dropping
 /// a take without `saved` (its write failed) returns its chunks: the next
-/// take includes them again.
+/// take includes them again. Settle every take (`saved`, or drop it) before
+/// restoring or discarding the files: a restore is refused while one is
+/// out, since its pending write would land on the restored database.
 #[must_use = "acknowledge a written take with `saved`; dropping it returns its chunks"]
 pub struct ChangedChunks {
     database: SharedFile,
@@ -949,12 +964,15 @@ impl Store {
         if files.database_is_open() {
             return Err(unavailable("the browser database is already open"));
         }
-        if let Some(database) = files.database()
-            && let Some(&index) = lock(&database).missing.first()
-        {
-            return Err(StoreError::InvalidData(format!(
-                "chunk {index} of the stored database was not restored"
-            )));
+        if let Some(database) = files.database() {
+            let mut database = lock(&database);
+            if let Some(&index) = database.missing.first() {
+                return Err(StoreError::InvalidData(format!(
+                    "chunk {index} of the stored database was not restored"
+                )));
+            }
+            // The restore is over: no late chunk of it enters the database.
+            database.restore = None;
         }
         Self::open_role(files, Role::Database, options)
     }
@@ -1256,9 +1274,9 @@ mod tests {
 
         fn restore(&self) -> BrowserFiles {
             let files = BrowserFiles::new().unwrap();
-            files.restore_size(self.size).unwrap();
+            let restore = files.restore_size(self.size).unwrap();
             for (&index, bytes) in &self.chunks {
-                files.restore_chunk(index, bytes).unwrap();
+                files.restore_chunk(restore, index, bytes).unwrap();
             }
             files
         }
@@ -1454,7 +1472,6 @@ mod tests {
         let copy = store.begin_publish().unwrap();
         drop(store);
         assert!(files.restore_size(8192).is_err());
-        assert!(files.restore_chunk(0, &[0; 8192]).is_err());
         drop(copy);
         files.restore_size(0).unwrap();
     }
