@@ -47,7 +47,9 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   again later.
 - In the list: Up/Down move, OK plays in the preview, OK on the playing
   channel goes full screen, Left opens the groups (moving through them
-  previews their channels), Back returns to the channels.
+  previews their channels), Back returns to the channels. Back in the
+  channels goes full screen when a channel plays, and asks to exit when
+  none does.
 - Full screen: Up/Down or Channel Up/Down zap within the list, OK or Left
   opens the list, Back asks to exit.
 - Yellow adds or removes the focused (or playing) channel from Favorites;
@@ -67,7 +69,8 @@ the previous one's data.
 
 ## Measured on a 2020 UN55TU7000 (Tizen 5.5, Chromium 69)
 
-With a real Xtream account of 7,257 channels and a 68 MB XMLTV guide:
+With a provider account of about 7,300 live channels and a 68 MB XMLTV
+guide:
 
 - First launch: channels show about 3 s after launch; the guide is
   imported and matched (6,022 channels bound) about 18 s after launch, in
@@ -82,10 +85,13 @@ With a real Xtream account of 7,257 channels and a 68 MB XMLTV guide:
 ## Known limits
 
 - The account is kept in the app's local storage on the TV, not in the
-  encrypted store the native hosts use.
-- Content-supplied addresses must be public. The browser resolves host names
-  itself, so literal LAN addresses and local names are refused, but a public
-  name that resolves to a LAN address is not detected.
+  encrypted store the native hosts use (see [security](../../docs/security.md#samsung-tizen-host)).
+- Content-supplied addresses (guide feeds, streams, logos) must be public,
+  and redirects are checked again. The browser resolves host names itself,
+  so a public name that resolves to a LAN address is not detected, and the
+  player and image loader follow their own redirects unchecked.
+- CI builds `iptv-web` for wasm32 with stable Rust; the TV build
+  (`build.sh`, rebuilt std for MVP WebAssembly) is not built in CI.
 - The TV sends its own User-Agent: providers that require a specific one on
   API requests do not work. Stalker portals are not offered.
 - Favorites can be added and removed but not reordered.

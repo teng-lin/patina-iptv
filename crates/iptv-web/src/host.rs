@@ -44,6 +44,12 @@ pub(crate) fn install(host: Rc<dyn Host>) {
     HOST.with(|h| *h.borrow_mut() = Some(host));
 }
 
+/// The host, unless the thread is shutting down (cleanup from destructors
+/// of tasks dropped with the thread must not touch destroyed state).
+pub(crate) fn host_if_alive() -> Option<Rc<dyn Host>> {
+    HOST.try_with(|h| h.borrow().clone()).ok().flatten()
+}
+
 pub(crate) fn host() -> Rc<dyn Host> {
     HOST.with(|h| {
         if h.borrow().is_none() {

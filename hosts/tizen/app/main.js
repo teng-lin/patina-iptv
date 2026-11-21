@@ -17,8 +17,15 @@ var ENTRIES = 11;
  * can be read after a normal launch, without a debugger attached.
  */
 var metrics = { at: Date.now(), keys: [], zaps: [] };
+var METRIC_SAMPLES = 200;
 function mark(name) {
-    if (metrics[name] === undefined) metrics[name] = Math.round(performance.now());
+    if (metrics[name] !== undefined) return;
+    metrics[name] = Math.round(performance.now());
+    saveMetrics();
+}
+function sample(list, value) {
+    list.push(value);
+    if (list.length > METRIC_SAMPLES) list.shift();
     saveMetrics();
 }
 var metricsTimer = null;
@@ -62,7 +69,19 @@ var player = {
     userAgent: null,
     token: 0,
     rect: PREVIEW,
+    lastStart: 0,
+    deferred: null,
+    /* Held channel keys: a zap within 300 ms of the last one waits, and only
+     * the newest is opened (opening is synchronous on the main thread). */
     play: function (url, userAgent) {
+        var now = performance.now();
+        clearTimeout(this.deferred);
+        if (now - this.lastStart < 300) {
+            var self = this;
+            this.deferred = setTimeout(function () { self.lastStart = 0; self.play(url, userAgent); }, 300 - (now - this.lastStart));
+            return;
+        }
+        this.lastStart = now;
         this.url = url;
         this.userAgent = userAgent;
         var token = ++this.token;
@@ -85,8 +104,8 @@ var player = {
                 oncurrentplaytime: function () {
                     if (timed || token !== player.token) return;
                     timed = true;
-                    metrics.zaps.push(Math.round(performance.now() - asked));
-                    saveMetrics();
+                    sample(metrics.zaps, Math.round(performance.now() - asked));
+                    loading(false);
                 },
                 onerror: function (e) { if (token === player.token) player.failed(String(e)); },
                 onstreamcompleted: function () { if (token === player.token) player.failed('The stream ended.'); }
@@ -126,6 +145,8 @@ var player = {
     stop: function () {
         this.token++;
         this.url = null;
+        clearTimeout(this.deferred);
+        loading(false);
         screensaver(true);
         if (hasAvplay()) {
             try { webapis.avplay.stop(); } catch (e) { /* idle */ }
@@ -152,10 +173,19 @@ function screensaver(on) {
 
 /* ---------- views ---------- */
 function loading(on, text) {
-    $('loading').classList.toggle('hidden', !on);
+    var box = $('loading');
+    box.classList.toggle('hidden', !on);
     if (text) $('loading-text').textContent = text;
-    /* Buffering over the list only darkens the preview, never the list. */
-    $('loading').style.background = view && view.ready ? 'transparent' : '#141C21';
+    /* Before the list exists it covers the screen; afterwards it only
+     * marks the video (the preview, or the full screen). */
+    var over = view && view.ready;
+    var r = over ? player.rect : FULL;
+    box.style.background = over ? 'transparent' : '#141C21';
+    box.style.left = r[0] + 'px';
+    box.style.top = r[1] + 'px';
+    box.style.width = r[2] + 'px';
+    box.style.height = r[3] + 'px';
+    $('loading-text').style.top = Math.round(r[3] / 2 - 20) + 'px';
 }
 function notice(text, info) {
     var n = $('notice');
@@ -194,7 +224,7 @@ function render() {
     var v = view;
     if (!v) return;
     var drawnAt = performance.now();
-    while (keyTimes.length) metrics.keys.push(Math.round(drawnAt - keyTimes.shift()));
+    while (keyTimes.length) sample(metrics.keys, Math.round(drawnAt - keyTimes.shift()));
     if (v.ready) mark('channelsShown');
     if (v.guide) mark('guideShown');
     if (!v.ready) {
@@ -288,6 +318,7 @@ worker.onmessage = function (e) {
         if (view && view.mode === 'full') showBanner(m.channel);
         break;
     case 'notice': notice(m.text, m.kind === 'info'); break;
+    case 'sourceRejected': loading(false); openSetup(); notice(m.text); break;
     case 'exit': $('confirm').classList.remove('hidden'); break;
     case 'fatal': loading(true, m.text); break;
     }
@@ -334,16 +365,19 @@ function savedSource() {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) { return null; }
 }
 function load(source) {
+    player.stop();
     send({ cmd: 'source', source: source, utcOffsetSecs: -new Date().getTimezoneOffset() * 60 });
 }
+/* Returns whether the key was the setup's own (so the page swallows it). */
 function setupKey(code) {
     if (setup.editing) {
-        /* The IME owns the keys; Done/OK, Cancel and Back leave the field. */
+        /* The IME and the field own the keys; Done/OK, Cancel and Back leave it. */
         if (code === 13 || code === 65376 || code === 65385 || code === 10009) {
             setup.editing.blur();
             setup.editing = null;
+            return true;
         }
-        return;
+        return false;
     }
     var fields = setupFields();
     var field = fields[setup.index];
@@ -353,22 +387,32 @@ function setupKey(code) {
         if (field.hasAttribute('data-kind-toggle')) setup.kind = setup.kind === 'xtream' ? 'm3u' : 'xtream';
         else if (field.hasAttribute('data-save')) {
             var source = setup.kind === 'xtream'
-                ? { kind: 'xtream', server: $('server').value, username: $('username').value, password: $('password').value }
-                : { kind: 'm3u', url: $('m3u').value };
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(source));
+                ? { kind: 'xtream', server: $('server').value.trim(), username: $('username').value.trim(), password: $('password').value }
+                : { kind: 'm3u', url: $('m3u').value.trim() };
+            var missing = setup.kind === 'xtream' ? !source.server || !source.username || !source.password : !source.url;
+            if (missing) { notice('Fill in every field first.'); return true; }
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(source));
+            } catch (e) {
+                notice('The TV could not save the playlist (storage full?).');
+            }
             closeSetup();
+            loading(true, 'Connecting to your provider…');
             load(source);
-            return;
+            return true;
         } else {
             setup.editing = field.querySelector('input');
             setup.editing.focus();
-            return;
+            return true;
         }
     } else if (code === 10009) {
         if (savedSource()) closeSetup(); else exit();
-        return;
+        return true;
+    } else {
+        return false;
     }
     drawSetup();
+    return true;
 }
 
 /* ---------- keys ---------- */
@@ -382,9 +426,11 @@ function exit() {
 
 document.addEventListener('keydown', function (e) {
     var code = e.keyCode;
-    if (setup.open) { setupKey(code); e.preventDefault(); return; }
+    if (setup.open) { if (setupKey(code)) e.preventDefault(); return; }
     if (!$('confirm').classList.contains('hidden')) {
         e.preventDefault();
+        /* A held Back that opened the dialog must not also confirm it. */
+        if (e.repeat) return;
         if (code === 13 || code === 10009) exit();
         else $('confirm').classList.add('hidden');
         return;

@@ -182,9 +182,9 @@ impl GuideStore {
         w.0
     }
 
-    /// The guide [`GuideStore::to_snapshot`] saved. `descriptions` keeps
-    /// program descriptions; `now` is only used for retention, which
-    /// `past_days_to_keep` applies as on import.
+    /// The guide [`GuideStore::to_snapshot`] saved. `store` decides, as on
+    /// import, whether descriptions are kept and how many past days
+    /// (`past_days_to_keep`, counted back from `now`).
     pub fn from_snapshot(
         bytes: &[u8],
         store: StoreOptions,

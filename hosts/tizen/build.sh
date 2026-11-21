@@ -16,7 +16,8 @@ out="$root/target/tizen"
 # Tizen 5.5 (2020, Chromium 69) validates only MVP WebAssembly plus
 # sign-extension and mutable globals. Stable Rust's std uses reference types
 # and bulk memory, so std is rebuilt for that feature set (needs nightly).
-nightly="nightly-2026-10-24"
+# The repository's pinned nightly (shared with the fuzz targets).
+nightly="$("$root/tools/ci/fuzz-imports.sh" --toolchain)"
 features="-C target-cpu=mvp -C target-feature=+sign-ext,+mutable-globals"
 
 install_host=""
@@ -50,15 +51,26 @@ cp "$root/target/tizen-wasm/wasm32-unknown-unknown/release/iptv_web.wasm" "$stag
 sed "s/__VERSION__/$version/" "$root/hosts/tizen/app/config.xml" >"$stage/config.xml"
 
 if [[ -z "${TIZEN_SIGNING_PROFILE:-}" || -z "$tizen_cli" ]]; then
+    if [[ -n "$install_host" ]]; then
+        echo "error: --install needs a signed package: set TIZEN_SIGNING_PROFILE and install Tizen Studio's CLI" >&2
+        exit 1
+    fi
     echo "Staged (unsigned) in $stage. Set TIZEN_SIGNING_PROFILE and install Tizen Studio to sign."
     exit 0
 fi
 
 echo "Signing with profile $TIZEN_SIGNING_PROFILE…"
-rm -f "$stage"/*.wgt
-"$tizen_cli" package -t wgt -s "$TIZEN_SIGNING_PROFILE" -- "$stage" >/dev/null
+rm -f "$stage"/*.wgt "$out/Patina.wgt"
+# The CLI can exit 0 without a package: its output says why.
+"$tizen_cli" package -t wgt -s "$TIZEN_SIGNING_PROFILE" -- "$stage"
+shopt -s nullglob
+packages=("$stage"/*.wgt)
+if [[ ${#packages[@]} -ne 1 ]]; then
+    echo "error: tizen package produced no .wgt (see its output above)" >&2
+    exit 1
+fi
 # The TV's installer rejects file names with spaces.
-mv "$stage"/*.wgt "$out/Patina.wgt"
+mv "${packages[0]}" "$out/Patina.wgt"
 echo "Built $out/Patina.wgt"
 
 if [[ -n "$install_host" ]]; then

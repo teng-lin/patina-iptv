@@ -17,10 +17,13 @@
 //!
 //! Live channels only: movies and series are not imported here.
 //!
-//! **Destination policy.** Content-supplied addresses must be public. The
-//! browser resolves host names itself and does not expose the answer, so
-//! this adapter refuses literal non-public addresses and local names only;
-//! a public name that resolves to a LAN address is not detected.
+//! **Destination policy.** Content-supplied addresses (guide feeds named by
+//! a playlist, stream and logo addresses) must be public, by
+//! `iptv_providers::content_url`; redirects are checked again and may not
+//! downgrade HTTPS. The browser resolves host names itself and does not
+//! expose the answer, so a public name that resolves to a LAN address is not
+//! detected, and the TV's image loader and player follow their own
+//! redirects.
 //!
 //! The exports are a C ABI: bytes cross through [`input`] (a buffer the host
 //! fills before an export that reads it) and the host's `emit` import.
@@ -75,6 +78,15 @@ pub extern "C" fn on_status(id: u32, status: u32, length: f64) {
     exec::poll();
 }
 
+/// Request `id` was redirected to the URL (`len` bytes in [`input`]); sent
+/// before its status. A refused hop fails the request.
+#[unsafe(no_mangle)]
+pub extern "C" fn on_redirect(id: u32, len: u32) {
+    let url = String::from_utf8_lossy(&take_input(len)).into_owned();
+    exec::deliver_redirect(id, &url);
+    exec::poll();
+}
+
 /// The whole body of request `id` (`len` bytes in [`input`]).
 #[unsafe(no_mangle)]
 pub extern "C" fn on_body(id: u32, len: u32) {
@@ -96,8 +108,9 @@ pub extern "C" fn on_end(id: u32) {
     exec::poll();
 }
 
-/// Request `id` failed: `kind` 1 connect, 2 timeout, 3 body, 4 invalid
-/// request, 5 too large, else other; the detail (`len` bytes) is in [`input`].
+/// Request `id` failed: `kind` 1 connect, 2 idle timeout, 3 body, 4 invalid
+/// request, 5 too large, 7 the import's deadline, else other; the detail
+/// (`len` bytes) is in [`input`].
 #[unsafe(no_mangle)]
 pub extern "C" fn on_error(id: u32, kind: u32, len: u32) {
     let detail = String::from_utf8_lossy(&take_input(len)).into_owned();

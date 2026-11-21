@@ -11,7 +11,7 @@ subscriptions, so each selected lane runs once. Selection and the aggregate use
 | Linux unit/integration correctness and doctests | Full suite for application/Rust changes | Full | Full |
 | iOS device/simulator adapters | Compile shared Rust/iOS input changes with verified MPVKit | Compile | Compile |
 | Production Linux credential broker | Credential/storage/build changes, isolated DBus and disposable keyring | Full | Full |
-| Nine portable crates built for wasm | Once, on Linux | Once, on Linux | Once, on Linux |
+| Nine portable crates and the Tizen core (`iptv-web`) built for wasm | Once, on Linux | Once, on Linux | Once, on Linux |
 | macOS/Windows | Compile all test targets, native player tests, Windows chrome tests, production app build | Full host suites | Full host suites |
 | Linux GTK PiP/context-loss and correlated first-render journeys | Ordinary host checks; no dependency on coverage | Full | Full |
 | Reader/writer/analysis independence gates | Exact isolated gates on Linux | Exact gates on every host | Exact gates on every host |

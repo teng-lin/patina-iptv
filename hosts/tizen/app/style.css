@@ -154,7 +154,7 @@ body.full #list { display: none; }
     height: 1080px;
     background: #141C21;
 }
-#loading-text { position: absolute; left: 0; top: 500px; width: 1920px; text-align: center; }
+#loading-text { position: absolute; left: 0; top: 500px; width: 100%; text-align: center; }
 
 #notice {
     position: absolute;

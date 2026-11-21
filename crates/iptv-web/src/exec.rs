@@ -67,6 +67,10 @@ struct Slot {
     waiting_chunk: bool,
     error: Option<FetchError>,
     woke: bool,
+    /// The request's scheme was HTTPS (a redirect must not downgrade it).
+    https: bool,
+    /// Content-supplied: every hop must be a public address.
+    public_only: bool,
 }
 
 fn next_id() -> u32 {
@@ -85,8 +89,47 @@ fn open_slot(id: u32) {
     SLOTS.with(|s| s.borrow_mut().insert(id, Slot::default()));
 }
 
+/// Owns a slot while a future waits on it. Dropped before the host
+/// answered (an import canceled mid-request), it frees the slot and, for a
+/// request, tells the host to abort it so no connection stays open.
+struct Pending {
+    id: u32,
+    request: bool,
+    done: bool,
+}
+
+impl Pending {
+    fn new(id: u32, request: bool) -> Self {
+        open_slot(id);
+        Self {
+            id,
+            request,
+            done: false,
+        }
+    }
+    /// The slot now belongs to someone else (a streamed body).
+    fn hand_over(mut self) {
+        self.done = true;
+    }
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        if self.done {
+            return;
+        }
+        if self.request
+            && let Some(host) = crate::host::host_if_alive()
+        {
+            host.fetch_close(self.id);
+        }
+        close_slot(self.id);
+    }
+}
+
 fn close_slot(id: u32) {
-    SLOTS.with(|s| s.borrow_mut().remove(&id));
+    // try_with: also called from destructors while the thread shuts down.
+    let _ = SLOTS.try_with(|s| s.borrow_mut().remove(&id));
 }
 
 // Deliveries from the host (the exports call these).
@@ -113,9 +156,34 @@ pub(crate) fn deliver_error(id: u32, kind: u32, detail: String) {
         3 => FetchErrorKind::Body,
         4 => FetchErrorKind::InvalidRequest,
         5 => FetchErrorKind::TooLarge,
+        7 => FetchErrorKind::Deadline,
         _ => FetchErrorKind::Other,
     };
     with_slot(id, |s| s.error = Some(FetchError::new(kind, detail)));
+}
+
+/// The browser followed a redirect to `url` before answering request `id`.
+/// A downgrade to HTTP, or a non-public hop of a content-supplied request,
+/// fails the request and aborts it.
+pub(crate) fn deliver_redirect(id: u32, url: &str) {
+    let refused = with_slot(id, |s| {
+        let downgrade = s.https && !url.trim_start().to_ascii_lowercase().starts_with("https:");
+        let private = s.public_only && iptv_providers::content_url::validate(url).is_err();
+        if downgrade || private {
+            let why = if downgrade {
+                "redirect to plain HTTP refused"
+            } else {
+                "redirect to a non-public address refused"
+            };
+            s.error = Some(FetchError::new(FetchErrorKind::Redirect, why));
+            true
+        } else {
+            false
+        }
+    });
+    if refused == Some(true) {
+        host().fetch_close(id);
+    }
 }
 
 pub(crate) fn deliver_wake(id: u32) {
@@ -131,17 +199,15 @@ pub(crate) fn deliver_stored(id: u32, value: Option<Vec<u8>>) {
 
 /// Reads `key` from the host's storage.
 pub(crate) async fn storage_get(key: &str) -> Option<Vec<u8>> {
-    let id = next_id();
-    open_slot(id);
+    let pending = Pending::new(next_id(), false);
+    let id = pending.id;
     host().store_get(id, key);
-    let value = std::future::poll_fn(|_| match with_slot(id, |s| s.chunk.take()) {
+    std::future::poll_fn(|_| match with_slot(id, |s| s.chunk.take()) {
         Some(Some(v)) => Poll::Ready(v),
         Some(None) => Poll::Pending,
         None => Poll::Ready(None),
     })
-    .await;
-    close_slot(id);
-    value
+    .await
 }
 
 /// Writes `value` under `key`; writes keep their order. Empty deletes.
@@ -162,44 +228,41 @@ fn request_json(request: &HttpRequest) -> String {
         "headers": headers,
         "body": request.body,
         "timeoutMs": request.timeout.map(|t| t.as_millis() as u64),
+        "idleMs": IDLE_TIMEOUT_MS,
     })
     .to_string()
 }
 
-/// Content-supplied destinations must be public. The browser resolves names
-/// itself, so only literal addresses and local names can be refused here;
-/// see the crate documentation.
+/// A download that receives nothing for this long fails (the native
+/// adapter's read timeout); the import's own deadline bounds the total.
+const IDLE_TIMEOUT_MS: u64 = 60_000;
+
+/// Whether `url` may be opened: any HTTP(S) address the user chose, and
+/// only public ones when the address came from content
+/// (`iptv_providers::content_url`). The browser resolves names itself, so a
+/// public name that resolves to a LAN address cannot be refused here; see
+/// the crate documentation.
+pub(crate) fn allowed(url: &str, public_only: bool) -> bool {
+    if public_only {
+        iptv_providers::content_url::validate(url).is_ok()
+    } else {
+        iptv_providers::content_url::validate_picked(url).is_ok()
+    }
+}
+
 pub(crate) fn check_destination(request: &HttpRequest) -> Result<(), FetchError> {
-    let url = url::Url::parse(&request.url)
-        .map_err(|_| FetchError::new(FetchErrorKind::InvalidRequest, "not a URL"))?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err(FetchError::new(
-            FetchErrorKind::Unsupported,
-            "only HTTP(S) is fetched",
-        ));
-    }
-    if !request.public_only {
-        return Ok(());
-    }
-    let private = match url.host() {
-        Some(url::Host::Ipv4(ip)) => !iptv_providers::content_url::public_ip(ip.into()),
-        Some(url::Host::Ipv6(ip)) => !iptv_providers::content_url::public_ip(ip.into()),
-        Some(url::Host::Domain(d)) => {
-            let d = d.trim_end_matches('.').to_ascii_lowercase();
-            d == "localhost"
-                || d.ends_with(".localhost")
-                || d.ends_with(".local")
-                || !d.contains('.')
-        }
-        None => true,
-    };
-    if private {
+    if allowed(&request.url, request.public_only) {
+        Ok(())
+    } else if request.public_only {
         Err(FetchError::new(
             FetchErrorKind::InvalidRequest,
             "a content-supplied address must be public",
         ))
     } else {
-        Ok(())
+        Err(FetchError::new(
+            FetchErrorKind::Unsupported,
+            "only HTTP(S) addresses are fetched",
+        ))
     }
 }
 
@@ -220,12 +283,20 @@ impl HostFetch {
         &self,
         request: &HttpRequest,
         stream: bool,
-    ) -> Result<(u32, u16, Option<u64>), FetchError> {
+    ) -> Result<(Pending, u16, Option<u64>), FetchError> {
         check_destination(request)?;
-        let id = next_id();
-        open_slot(id);
+        let pending = Pending::new(next_id(), true);
+        let id = pending.id;
+        with_slot(id, |s| {
+            s.https = request
+                .url
+                .trim_start()
+                .to_ascii_lowercase()
+                .starts_with("https:");
+            s.public_only = request.public_only;
+        });
         host().fetch(id, &request_json(request), stream);
-        let got = std::future::poll_fn(|_| {
+        let (status, length) = std::future::poll_fn(|_| {
             match with_slot(id, |s| {
                 if let Some(e) = s.error.take() {
                     Some(Err(e))
@@ -238,14 +309,8 @@ impl HostFetch {
                 None => Poll::Ready(Err(FetchError::new(FetchErrorKind::Other, "request lost"))),
             }
         })
-        .await;
-        match got {
-            Ok((status, length)) => Ok((id, status, length)),
-            Err(e) => {
-                close_slot(id);
-                Err(e)
-            }
-        }
+        .await?;
+        Ok((pending, status, length))
     }
 }
 
@@ -257,22 +322,12 @@ impl Fetch for HostFetch {
     }
 
     async fn sleep(&self, duration: Duration) {
-        let id = next_id();
-        open_slot(id);
-        host().sleep(id, duration.as_secs_f64() * 1000.0);
-        std::future::poll_fn(|_| {
-            if with_slot(id, |s| s.woke).unwrap_or(true) {
-                Poll::Ready(())
-            } else {
-                Poll::Pending
-            }
-        })
-        .await;
-        close_slot(id);
+        sleep_while(duration, || true).await;
     }
 
     async fn fetch(&self, request: HttpRequest) -> Result<HttpResponse, FetchError> {
-        let (id, status, _) = self.status(&request, false).await?;
+        let (mut pending, status, _) = self.status(&request, false).await?;
+        let id = pending.id;
         let body = std::future::poll_fn(|_| {
             match with_slot(id, |s| {
                 if let Some(e) = s.error.take() {
@@ -287,7 +342,9 @@ impl Fetch for HostFetch {
             }
         })
         .await;
-        close_slot(id);
+        // Answered (body or error): nothing is left to abort.
+        pending.request = false;
+        drop(pending);
         Ok(HttpResponse::new(status, body?))
     }
 
@@ -295,7 +352,9 @@ impl Fetch for HostFetch {
         &self,
         request: HttpRequest,
     ) -> Result<StreamingResponse<HostBody>, FetchError> {
-        let (id, status, content_length) = self.status(&request, true).await?;
+        let (pending, status, content_length) = self.status(&request, true).await?;
+        let id = pending.id;
+        pending.hand_over();
         Ok(StreamingResponse {
             status,
             content_length,
@@ -305,6 +364,23 @@ impl Fetch for HostFetch {
             },
         })
     }
+}
+
+/// Waits `duration`, or less: it ends as soon as `keep()` is false (checked
+/// whenever the executor polls), so a superseded task stops at the next
+/// delivery instead of holding its state until the timer fires.
+pub(crate) async fn sleep_while(duration: Duration, keep: impl Fn() -> bool) {
+    let pending = Pending::new(next_id(), false);
+    let id = pending.id;
+    host().sleep(id, duration.as_secs_f64() * 1000.0);
+    std::future::poll_fn(|_| {
+        if !keep() || with_slot(id, |s| s.woke).unwrap_or(true) {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    })
+    .await;
 }
 
 /// The body of a streamed response, read chunk by chunk from the host.
@@ -360,8 +436,10 @@ impl BodyStream for HostBody {
 
 impl Drop for HostBody {
     fn drop(&mut self) {
-        if !self.done.get() {
-            host().fetch_close(self.id);
+        if !self.done.get()
+            && let Some(host) = crate::host::host_if_alive()
+        {
+            host.fetch_close(self.id);
         }
         close_slot(self.id);
     }

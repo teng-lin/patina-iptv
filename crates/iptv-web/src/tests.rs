@@ -375,11 +375,19 @@ fn failures_are_reported_instead_of_an_empty_list() {
     send(
         serde_json::json!({ "cmd": "source", "source": { "kind": "xtream", "server": "http://tv.example.com" } }),
     );
-    assert_eq!(fake.events.borrow().last().unwrap()["type"], "notice");
+    assert_eq!(
+        fake.events.borrow().last().unwrap()["type"],
+        "sourceRejected"
+    );
     send(serde_json::json!({ "cmd": "source", "source": { "kind": "stalker" } }));
     send(serde_json::json!({ "cmd": "nonsense" }));
     crate::app::command("not json");
-    assert!(fake.events.borrow().iter().all(|e| e["type"] == "notice"));
+    assert!(
+        fake.events
+            .borrow()
+            .iter()
+            .all(|e| e["type"] == "notice" || e["type"] == "sourceRejected")
+    );
     // Keys before any playlist do nothing, except Back, which leaves.
     send(serde_json::json!({ "cmd": "key", "key": "down" }));
     send(serde_json::json!({ "cmd": "key", "key": "back" }));
@@ -537,4 +545,64 @@ fn a_failed_refresh_keeps_the_stored_guide() {
         .unwrap();
     let state: Value = serde_json::from_slice(&state).unwrap();
     assert_eq!(state["failed"], true);
+}
+
+#[test]
+fn logos_from_content_must_be_public() {
+    // Playlist streams on LAN addresses are refused by the import itself;
+    // logos are only filtered here, before the TV's image loader sees them.
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    let lan = "#EXTM3U\n\
+        #EXTINF:-1 tvg-logo=\"http://192.168.1.5/logo.png\" group-title=\"News\",Lan Logo\nhttp://media.example.com/one.ts\n\
+        #EXTINF:-1 tvg-logo=\"http://img.example.com/two.png\" group-title=\"News\",Public Logo\nhttp://media.example.com/two.ts\n";
+    send(
+        serde_json::json!({ "cmd": "source", "source": { "kind": "m3u", "url": "http://lists.example.com/list.m3u" } }),
+    );
+    deliver_with(&fake, &|_| Ok((200, lan.to_owned())));
+    let view = last_view(&fake);
+    assert!(view["rows"]["items"][0]["logo"].is_null(), "{view}");
+    assert_eq!(
+        view["rows"]["items"][1]["logo"],
+        "http://img.example.com/two.png"
+    );
+}
+
+#[test]
+fn a_canceled_request_is_aborted_and_its_slot_freed() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    send(
+        serde_json::json!({ "cmd": "source", "source": { "kind": "m3u", "url": "http://lists.example.com/list.m3u" } }),
+    );
+    let first = fake.requests.borrow()[0].0;
+    // Another playlist before the first answered: the first request is aborted.
+    send(
+        serde_json::json!({ "cmd": "source", "source": { "kind": "m3u", "url": "http://other.example.com/list.m3u" } }),
+    );
+    assert!(
+        fake.closed.borrow().contains(&first),
+        "{:?}",
+        fake.closed.borrow()
+    );
+    // A late answer to it changes nothing.
+    crate::exec::deliver_status(first, 200, None);
+    crate::exec::poll();
+    deliver(&fake);
+    assert_eq!(last_view(&fake)["rows"]["total"], 3);
+}
+
+#[test]
+fn a_redirect_may_not_downgrade_or_leave_public_addresses() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    send(
+        serde_json::json!({ "cmd": "source", "source": { "kind": "m3u", "url": "https://lists.example.com/list.m3u" } }),
+    );
+    let id = fake.requests.borrow_mut().remove(0).0;
+    crate::exec::deliver_redirect(id, "http://lists.example.com/list.m3u");
+    crate::exec::poll();
+    assert!(fake.closed.borrow().contains(&id));
+    let view = last_view(&fake);
+    assert_eq!(view["status"]["phase"], "failed", "{view}");
 }

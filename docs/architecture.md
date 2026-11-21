@@ -51,6 +51,7 @@ down: a crate may depend on crates in its own layer or below, never above.
 | Web application | `iptv-web` | The portable crates and a JavaScript host. No NSH, no Tokio, no native adapters. |
 
 `tools/check.sh` builds every portable crate for `wasm32-unknown-unknown`.
+That build is what keeps platform code out of them.
 
 `iptv-web` is the application layer for TV web runtimes, where NSH's web
 runtime cannot run (Samsung Tizen; see [hosts/tizen](../hosts/tizen/README.md)).
@@ -58,8 +59,8 @@ It runs the portable import, guide and list models in WebAssembly inside a
 Web Worker: its `Fetch` adapter hands each request to the worker's
 JavaScript, and a small executor polls the import after every delivery. The
 page renders the views it emits, sends remote keys and plays streams with
-the TV's native player.
-That build is what keeps platform code out of them.
+the TV's native player. Its stored guide is an `iptv-epg` snapshot
+(`GuideStore::to_snapshot`) rather than the SQLite store.
 
 `iptv-sqlcipher-init` is the narrow native FFI boundary for the pinned database
 library. It completes SQLite core initialization, invokes SQLCipher's idempotent

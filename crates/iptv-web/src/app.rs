@@ -60,6 +60,8 @@ pub(crate) struct App {
     guide_state: Option<GuideState>,
     /// Bumped to stop a waiting guide loop (a manual refresh replaces it).
     guide_generation: u32,
+    /// Cancels the current guide loop's download.
+    guide_cancel: CancelToken,
     cancel: CancelToken,
     generation: u32,
     /// The viewer's UTC offset, from the host.
@@ -97,6 +99,7 @@ impl App {
             guide: None,
             guide_state: None,
             guide_generation: 0,
+            guide_cancel: CancelToken::new(),
             cancel: CancelToken::new(),
             generation: 0,
             local_offset_secs: 0,
@@ -184,6 +187,12 @@ impl App {
             local_offset_secs: self.local_offset_secs,
         };
         match s.resolve(channel, None, clock) {
+            Resolution::Play(source) if !crate::exec::allowed(&source.url, source.public_only) => {
+                host().emit(
+                    &json!({ "type": "notice", "text": "This channel's address is not allowed (it must be a public HTTP(S) address)." })
+                        .to_string(),
+                );
+            }
             Resolution::Play(source) => {
                 self.playing = Some(channel);
                 if let Some(key) = s.channel_key(channel) {
@@ -322,7 +331,8 @@ impl App {
             "id": channel,
             "number": number.unwrap_or_else(|| self.rows.number_of(channel, s)),
             "name": s.channel_name(channel),
-            "logo": s.channel_logo(channel),
+            // Playlist artwork is content: only public addresses are loaded.
+            "logo": s.channel_logo(channel).filter(|l| crate::exec::allowed(l, true)),
             "now": now,
             "next": next,
             "playing": self.playing == Some(channel),
@@ -396,22 +406,19 @@ fn phase_name(p: &Progress) -> &'static str {
     }
 }
 
-fn report(generation: u32, p: &Progress) {
+/// Progress of the import that `current` says is still the one shown.
+fn report(current: &dyn Fn() -> bool, p: &Progress) {
     let status = json!({
         "phase": phase_name(p),
         "items": p.items,
         "bytes": p.bytes,
         "totalBytes": p.total_bytes,
     });
-    let current = with_app(|a| {
-        if a.generation == generation {
-            a.status = status.clone();
-            true
-        } else {
-            false
-        }
-    });
-    if current {
+    if !current() {
+        return;
+    }
+    with_app(|a| a.status = status.clone());
+    {
         host().emit(&json!({ "type": "progress", "status": status }).to_string());
     }
 }
@@ -466,7 +473,7 @@ async fn import(generation: u32, config: SourceConfig, cancel: CancelToken) {
     let fetch = HostFetch::new();
     let now = wall_secs();
     let current = move || with_app(|a| a.generation == generation);
-    let mut progress = move |p: &Progress| report(generation, p);
+    let mut progress = move |p: &Progress| report(&current, p);
     let catalog = match iptv_import::import_source(
         &fetch,
         &config,
@@ -484,17 +491,31 @@ async fn import(generation: u32, config: SourceConfig, cancel: CancelToken) {
             return;
         }
     };
+    if !current() {
+        return;
+    }
     let source_id = store::source_id(&config);
-    store::make_current(&source_id).await;
+    if !store::make_current(&source_id, &current).await {
+        return;
+    }
     let (favorites, recent) = store::load_lists(&source_id).await;
     let state = store::load_guide_state(&source_id).await;
     if !current() {
         return;
     }
-    let mut feeds = catalog.epg_sources(1).unwrap_or_default();
+    // The playlist's guide feeds now; when they cannot be read, the stored
+    // ones (so a broken header never discards a working guide).
+    let (mut feeds, feeds_error) = match catalog.epg_sources(1) {
+        Ok(feeds) => (feeds, None),
+        Err(e) => (
+            state.as_ref().map(|s| s.feeds.clone()).unwrap_or_default(),
+            Some(e.to_string()),
+        ),
+    };
     for feed in &mut feeds {
         feed.store = GUIDE_STORE;
     }
+    let state = state.map(|s| store::with_current_urls(s, &feeds));
     let fingerprint = matching_fingerprint(&catalog.channels, &Overrides::default());
     let policy = RefreshPolicy::default();
     // The stored guide shows at once, before any guide download.
@@ -517,7 +538,7 @@ async fn import(generation: u32, config: SourceConfig, cancel: CancelToken) {
         ),
         _ => (state, plan.decision),
     };
-    let has_guide = stored.is_some();
+    let has_guide = stored.as_ref().is_some_and(|g| g.bound_count() > 0);
     let first = schedule(&config, &catalog, stored.unwrap_or_default(), now);
     let inputs = Rc::new(GuideInputs {
         config,
@@ -526,7 +547,7 @@ async fn import(generation: u32, config: SourceConfig, cancel: CancelToken) {
         feeds,
         fingerprint,
     });
-    with_app(|a| {
+    let (guide_generation, guide_cancel) = with_app(|a| {
         a.source_id = Some(source_id);
         a.favorites = favorites;
         a.recent = recent;
@@ -534,27 +555,39 @@ async fn import(generation: u32, config: SourceConfig, cancel: CancelToken) {
         a.guide_loaded = has_guide;
         a.guide = Some(inputs.clone());
         a.guide_state = state;
-        a.status = json!({ "phase": "done", "guide": has_guide });
+        a.status = json!({ "phase": "done", "guide": has_guide, "error": feeds_error });
+        (a.guide_generation, a.guide_cancel.clone())
     });
     emit_view();
-    guide_loop(generation, inputs, decision, fetch, cancel).await;
+    guide_loop(
+        generation,
+        guide_generation,
+        inputs,
+        decision,
+        fetch,
+        guide_cancel,
+    )
+    .await;
 }
 
 /// Keeps the guide as the refresh policy decides, for as long as this
-/// playlist and guide loop are the current ones.
+/// playlist and this guide loop are the current ones.
 async fn guide_loop(
     generation: u32,
+    guide_generation: u32,
     inputs: Rc<GuideInputs>,
     mut decision: Decision,
     fetch: HostFetch,
     cancel: CancelToken,
 ) {
-    let guide_generation = with_app(|a| a.guide_generation);
     let current =
         move || with_app(|a| a.generation == generation && a.guide_generation == guide_generation);
     let policy = RefreshPolicy::default();
-    let mut progress = move |p: &Progress| report(generation, p);
+    let mut progress = move |p: &Progress| report(&current, p);
     loop {
+        if !current() {
+            return;
+        }
         let wait_until = match decision {
             Decision::Discard => {
                 store::discard_guide(&inputs.source_id);
@@ -619,7 +652,7 @@ async fn guide_loop(
                     let with_guide = schedule(&inputs.config, &inputs.catalog, guide, now);
                     with_app(|a| {
                         a.replace_schedule(with_guide);
-                        a.guide_loaded = true;
+                        a.guide_loaded = bound > 0;
                     });
                 }
                 with_app(|a| a.guide_state = Some(state));
@@ -643,7 +676,8 @@ async fn guide_loop(
             return; // Only on request ("refreshGuide").
         };
         let wait = (at - wall_secs()).max(1) as u64;
-        iptv_import::Fetch::sleep(&fetch, std::time::Duration::from_secs(wait)).await;
+        // A superseded loop stops at the next delivery, not hours later.
+        crate::exec::sleep_while(std::time::Duration::from_secs(wait), current).await;
         if !current() {
             return;
         }
@@ -659,15 +693,20 @@ async fn guide_loop(
     }
 }
 
-/// "Update the guide now": a manual refresh replaces the waiting loop.
+/// "Update the guide now": a manual refresh replaces the current guide loop,
+/// canceling a download it has in progress.
 fn refresh_guide() {
-    let Some((generation, inputs, state, cancel)) = with_app(|a| {
+    let Some((generation, guide_generation, inputs, state, cancel)) = with_app(|a| {
+        let inputs = a.guide.clone()?;
+        a.guide_cancel.cancel();
+        a.guide_cancel = CancelToken::new();
         a.guide_generation += 1;
         Some((
             a.generation,
-            a.guide.clone()?,
+            a.guide_generation,
+            inputs,
             a.guide_state.clone(),
-            a.cancel.clone(),
+            a.guide_cancel.clone(),
         ))
     }) else {
         return;
@@ -682,6 +721,7 @@ fn refresh_guide() {
     );
     spawn(guide_loop(
         generation,
+        guide_generation,
         inputs,
         decision,
         HostFetch::new(),
@@ -740,6 +780,7 @@ pub(crate) fn command(text: &str) {
                 }
                 let (generation, cancel) = with_app(|a| {
                     a.cancel.cancel();
+                    a.guide_cancel.cancel();
                     a.cancel = CancelToken::new();
                     a.generation += 1;
                     *a = App {
@@ -755,7 +796,10 @@ pub(crate) fn command(text: &str) {
                 emit_view();
                 spawn(import(generation, config, cancel));
             }
-            Err(text) => host().emit(&json!({ "type": "notice", "text": text }).to_string()),
+            // The host shows its setup again with the reason.
+            Err(text) => {
+                host().emit(&json!({ "type": "sourceRejected", "text": text }).to_string())
+            }
         },
         "key" => {
             let key = cmd.get("key").and_then(Value::as_str).unwrap_or("");
