@@ -33,7 +33,7 @@ pub(crate) const PLATFORM: Platform = if cfg!(target_os = "android") {
 };
 
 pub(crate) use clock::{offset_minutes, reload_time_zone};
-#[cfg(any(target_os = "android", test, feature = "test-support"))]
+#[cfg(feature = "test-support")]
 pub(crate) use platform_data::host_handle;
 pub(crate) use platform_data::{flush_on_host_stop, initialize, resolve_data_dir};
 pub(crate) use process::{log_library_base, process_age};
@@ -98,8 +98,10 @@ pub mod exports {
     /// Use a fresh explicit synthetic profile without changing the process home.
     #[cfg(feature = "test-support")]
     pub use super::platform_data::install_test_data_dir;
+    // Android's host registers its components in Kotlin.
     #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", windows))]
     use iptv_player_mpv as mpv;
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", windows))]
     use nsh_core::prelude::*;
 
     #[cfg(windows)]

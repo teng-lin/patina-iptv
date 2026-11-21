@@ -35,7 +35,8 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("lists.rs", "HINT_SHOWN"),    // Visible navigation hint revision.
     ("host/native/platform_data.rs", "ANDROID_FILES"), // Android files directory handle.
     ("host/native/platform_data.rs", "TEST_DIRECTORY"), // Test-only explicit isolated storage handle.
-    ("host/native/platform_data.rs", "HOST_STOP"), // The root owner's weak handle for off-thread host callbacks.
+    ("host/native/platform_data.rs", "HOST_STOP"),
+    ("host/web.rs", "HOST_STOP"), // The root owner's weak handle, as natively. // The root owner's weak handle for off-thread host callbacks.
     ("host/native/recording_host/android.rs", "HOST"), // JNI VM/class handle for OS wake publication.
     ("host/native/recording_host/windows.rs", "TASKS"), // Serialize OS task registration and removal.
     ("seek.rs", "PRESSES"),                             // Key gesture state.
@@ -59,7 +60,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
 const PLATFORM_CFG_OUTSIDE_HOST: &[&str] = &[
     "backup.rs",                 // Android's document picker beside the desktop file dialog.
     "desktop/player_windows.rs", // macOS window ordering of the desktop player windows.
-    "lib.rs",                    // The iPad's tap-outside rule; a desktop-only test walkthrough.
+    "lib.rs",                    // The desktop-only guide walkthrough of the headless tests.
     "main.rs",                   // The desktop binaries' entry points.
     "video.rs",                  // The emulator's mock-server alias; desktop popup routing.
 ];

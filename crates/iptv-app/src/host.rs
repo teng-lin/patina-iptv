@@ -1,5 +1,6 @@
 //! Host glue: what differs by platform, behind one facade the screens call.
-//! These modules are the only ones with platform `cfg`.
+//! Platform `cfg` belongs here; the few files outside that still have one
+//! are listed, to shrink, in `tests/app/architecture.rs`.
 //!
 //! Each host builds the runtime's [`Ports`](crate::runtime::Ports) for its
 //! platform (private directory, key broker, network, execution, entropy,

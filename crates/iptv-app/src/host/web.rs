@@ -175,8 +175,24 @@ pub(crate) fn initialize() -> std::io::Result<PathBuf> {
     resolve_data_dir()
 }
 
-/// The page's lifecycle does not flush yet (step 2).
-pub(crate) fn flush_on_host_stop(_owner: crate::runtime::HostHandle) {}
+thread_local! {
+    /// The root owner's handle, for the page's lifecycle (step 2) and the
+    /// headless helpers.
+    static HOST_STOP: std::cell::RefCell<Option<crate::runtime::HostHandle>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Keeps the root owner's handle. The page's lifecycle does not flush
+/// through it yet (step 2).
+pub(crate) fn flush_on_host_stop(owner: crate::runtime::HostHandle) {
+    HOST_STOP.with(|stop| *stop.borrow_mut() = Some(owner));
+}
+
+/// The root owner's handle (headless helpers).
+#[cfg(feature = "test-support")]
+pub(crate) fn host_handle() -> Option<crate::runtime::HostHandle> {
+    HOST_STOP.with(|stop| stop.borrow().clone())
+}
 
 /// Time since the Unix epoch on the host's wall clock.
 pub(crate) fn since_epoch() -> Option<Duration> {

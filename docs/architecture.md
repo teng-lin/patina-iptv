@@ -47,7 +47,7 @@ down: a crate may depend on crates in its own layer or below, never above.
 | Native adapters | `iptv-net`, `iptv-store-sqlite`, `iptv-sqlcipher-init` | Tokio and reqwest; SQLite. No NSH. `iptv-store-sqlite` also builds for `wasm32-unknown-unknown` (SQLite through `sqlite-wasm-rs` on in-memory files the host persists in chunks, no SQLCipher); its tests run there with `tools/wasm-test.mjs`. |
 | Application | `iptv-runtime` | All I/O through `Ports`. Its default `native` feature holds the native ports (`iptv-net`, threads and Tokio) and the native-only services (recording, the playback relay); without it the crate builds for wasm32. No NSH. Host JNI and credential brokers stay in the shell. |
 | Player adapter | `iptv-player-mpv` | NSH native components, platform APIs, libmpv. The Android build contains only the wire contract and track parser. |
-| Shell | `iptv-app` | NSH, the runtime and the player wire contract; platform APIs and adapters only in `src/host` (`host/native`, `host/web`). |
+| Shell | `iptv-app` | NSH, the runtime and the player wire contract; platform APIs and adapters in `src/host` (`host/native`, `host/web`), with five files outside it still holding a platform `cfg` (listed in `tests/app/architecture.rs`). |
 | Web application | `iptv-web` | The portable crates and a JavaScript host. No NSH, no Tokio, no native adapters. |
 
 `tools/check.sh` builds every portable crate for `wasm32-unknown-unknown`.

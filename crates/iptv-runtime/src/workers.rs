@@ -136,6 +136,7 @@ impl Hooks {
         *self.source_preparation.lock().unwrap() = Some(gate.0.clone());
         gate
     }
+    #[cfg(feature = "native")]
     pub(crate) fn take_source_preparation(&self) -> Option<Arc<crate::testing::GateState>> {
         self.source_preparation.lock().unwrap().take()
     }

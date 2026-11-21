@@ -687,7 +687,7 @@ impl Services {
     pub(crate) fn hold_source_preparation(&self) -> crate::TestGate {
         self.service.hooks.hold_source_preparation()
     }
-    #[cfg(feature = "test-support")]
+    #[cfg(all(feature = "test-support", feature = "native"))]
     pub(crate) fn take_source_preparation(&self) -> Option<Arc<crate::testing::GateState>> {
         self.service.hooks.take_source_preparation()
     }
