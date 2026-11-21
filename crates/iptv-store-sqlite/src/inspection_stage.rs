@@ -29,6 +29,7 @@ pub struct InspectionStage {
 }
 impl InspectionStage {
     pub fn create(path: &Path, key: &DatabaseKey) -> Result<Self> {
+        crate::files_available()?;
         crate::initialize_sqlite()?;
         let mut options = std::fs::OpenOptions::new();
         options.read(true).write(true).create_new(true);
@@ -63,6 +64,7 @@ impl InspectionStage {
         })
     }
     pub fn open(path: &Path, key: &DatabaseKey) -> Result<Self> {
+        crate::files_available()?;
         crate::initialize_sqlite()?;
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         key.apply(&conn)?;
@@ -106,18 +108,8 @@ impl InspectionStage {
         self.conn.execute_batch("COMMIT; PRAGMA optimize;")?;
         Ok(())
     }
-    /// Refused in the browser build: `Instant` panics there.
-    #[cfg(target_family = "wasm")]
-    pub fn bounded<T>(
-        &mut self,
-        _cancel: iptv_import::CancelToken,
-        _deadline: std::time::Instant,
-        _operation: impl FnOnce(&Self) -> Result<T>,
-    ) -> Result<T> {
-        Err(crate::StoreError::Unavailable(
-            "a bounded scan needs a monotonic clock the browser build does not have",
-        ))
-    }
+    /// Native only: `Instant` panics in the browser build, where
+    /// [`Self::bounded_until`] takes the host clock's expiry instead.
     #[cfg(not(target_family = "wasm"))]
     pub fn bounded<T>(
         &mut self,
@@ -125,10 +117,22 @@ impl InspectionStage {
         deadline: std::time::Instant,
         operation: impl FnOnce(&Self) -> Result<T>,
     ) -> Result<T> {
-        self.conn.progress_handler(
-            1000,
-            Some(move || cancel.is_canceled() || std::time::Instant::now() >= deadline),
-        )?;
+        self.bounded_until(
+            cancel,
+            move || std::time::Instant::now() >= deadline,
+            operation,
+        )
+    }
+    /// `bounded` (native) with the deadline as `expired`, which says whether
+    /// it has passed.
+    pub fn bounded_until<T>(
+        &mut self,
+        cancel: iptv_import::CancelToken,
+        expired: impl Fn() -> bool + Send + Sync + 'static,
+        operation: impl FnOnce(&Self) -> Result<T>,
+    ) -> Result<T> {
+        self.conn
+            .progress_handler(1000, Some(move || cancel.is_canceled() || expired()))?;
         let result = operation(self);
         self.conn.progress_handler(0, None::<fn() -> bool>)?;
         result
