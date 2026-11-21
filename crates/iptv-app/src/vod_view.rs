@@ -491,7 +491,7 @@ fn play_key(ui: Ui, details: Details, key: Key, restart: bool) {
     let run = move || {
         crate::parental_view::request(ui, iptv_runtime::vod::target(&key), move || {
             if ui.vod.with_untracked(|s| s.generation == generation) {
-                play_authorized(ui, details, key, restart, true);
+                play_authorized(ui, details, key, restart, true, None);
             }
         })
     };
@@ -503,8 +503,17 @@ fn play_key(ui: Ui, details: Details, key: Key, restart: bool) {
 }
 
 /// Plays `key` full screen, or (`full_screen` false) in the preview behind
-/// the details, which stay open (#187).
-fn play_authorized(ui: Ui, details: Details, key: Key, restart: bool, full_screen: bool) {
+/// the details, which stay open (#187). `after`: the episode that ended,
+/// when this autoplays the next one; the viewer stopping it or playing
+/// something else meanwhile cancels it.
+fn play_authorized(
+    ui: Ui,
+    details: Details,
+    key: Key,
+    restart: bool,
+    full_screen: bool,
+    after: Option<Key>,
+) {
     let generation = edit(ui, |s| s.begin_operation());
     // Retry plays the same title or episode the same way, after reading
     // its details and link afresh.
@@ -526,6 +535,14 @@ fn play_authorized(ui: Ui, details: Details, key: Key, restart: bool, full_scree
         };
         if ui.vod.with_untracked(|s| s.generation != generation) {
             not_played();
+            return;
+        }
+        if after.is_some_and(|ended| {
+            !ui.player
+                .vod
+                .with_untracked(|p| p.as_ref().is_some_and(|(p, _)| p.key == ended))
+        }) {
+            ui.vod.update(|s| s.busy = false);
             return;
         }
         ui.vod.update(|s| s.busy = false);
@@ -922,20 +939,13 @@ fn wait_for_next(ui: Ui, watched: Watched, details: Details, key: Key, season: u
 /// The next episode `key` plays on where the viewer watches, full screen
 /// or in the preview behind the series' details (chosen there), when it
 /// needs no PIN now. A PIN is asked for only when the viewer plays it:
-/// else it waits as with autoplay off. Nothing happens if the viewer chose
-/// something meanwhile.
+/// else it waits as with autoplay off, as it does when the viewer acted
+/// meanwhile. Nothing happens if something else plays by then.
 fn autoplay_next(ui: Ui, ended: Key, details: Details, key: Key, season: u32) {
     let series = details.item.key.clone();
-    // The viewer's choices: a title (`play_key` advances the generation),
-    // or anything else the player plays instead.
+    // The viewer acting on the screen meanwhile (`play_key` and Back
+    // advance its generation) leaves the next episode waiting.
     let generation = ui.vod.with_untracked(|s| s.generation);
-    let chosen = move || {
-        ui.vod.with_untracked(|s| s.generation) != generation
-            || !ui
-                .player
-                .vod
-                .with_untracked(|p| p.as_ref().is_some_and(|(p, _)| p.key == ended))
-    };
     crate::data::spawn_in_app(async move {
         let owner = crate::runtime();
         let allowed = owner
@@ -946,14 +956,22 @@ fn autoplay_next(ui: Ui, ended: Key, details: Details, key: Key, season: u32) {
                 .parental_check(&iptv_runtime::vod::target(&key))
                 .await
                 .is_ok();
-        if chosen() {
+        // Something else plays (Stop included): the viewer's.
+        if !ui
+            .player
+            .vod
+            .with_untracked(|p| p.as_ref().is_some_and(|(p, _)| p.key == ended))
+        {
             return;
         }
+        let allowed = allowed && ui.vod.with_untracked(|s| s.generation) == generation;
         match where_watched(ui, &series) {
-            Watched::FullScreen if allowed => play_authorized(ui, details, key, false, true),
+            Watched::FullScreen if allowed => {
+                play_authorized(ui, details, key, false, true, Some(ended))
+            }
             Watched::Details if allowed => {
                 select_next(ui, details.clone(), &key, season, false);
-                play_authorized(ui, details, key, false, false);
+                play_authorized(ui, details, key, false, false, Some(ended));
             }
             watched => wait_for_next(ui, watched, details, key, season),
         }
