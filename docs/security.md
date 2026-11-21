@@ -205,8 +205,8 @@ keystore, so a key the app held itself would only obscure the data; the
 store does not pretend to encrypt it. Freed pages are zeroed
 (`secure_delete`), so a deleted source's credentials are not in the chunks
 saved after the deletion. That cannot erase the superseded chunks the
-browser's IndexedDB (LevelDB on these TVs) may keep on its flash until it
-compacts them, just as it cannot erase copies in backups or storage-device
+browser's IndexedDB storage (LevelDB, and separate files for large values)
+may keep on its flash until it compacts or deletes them, just as it cannot erase copies in backups or storage-device
 remapping natively. Staging databases and a publish's copy of the database exist only in
 memory, and only the store's own connection can open its database.
 
