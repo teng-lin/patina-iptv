@@ -39,6 +39,32 @@ pub fn use_remote_key_phases() {
     REMOTE_PHASES.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Test support: whether the keyboard binding `name` ("enter") fires on
+/// the platform's auto-repeats now. A headless keyboard sends no repeats;
+/// the platform fires a binding again on one only when it repeats.
+#[cfg(feature = "test-support")]
+pub fn keyboard_repeats(name: &str) -> Option<bool> {
+    keyboard_repeats::get(name)
+}
+
+#[cfg(feature = "test-support")]
+mod keyboard_repeats {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    static REPEATS: Mutex<Option<HashMap<&'static str, bool>>> = Mutex::new(None);
+
+    pub(super) fn set(name: &'static str, repeat: bool) {
+        let mut repeats = REPEATS.lock().unwrap_or_else(|e| e.into_inner());
+        repeats.get_or_insert_default().insert(name, repeat);
+    }
+
+    pub(super) fn get(name: &str) -> Option<bool> {
+        let repeats = REPEATS.lock().unwrap_or_else(|e| e.into_inner());
+        repeats.as_ref()?.get(name).copied()
+    }
+}
+
 /// Whether keys arrive as a remote's raw phases and tell a tap from a hold.
 pub(crate) fn long_press() -> bool {
     #[cfg(feature = "test-support")]
@@ -62,8 +88,31 @@ struct Nav {
     raw: RawKeys,
     /// Keys whose press a PIN prompt or the remote editor took or cut
     /// short: their repeats and release do nothing until that key goes
-    /// down afresh.
-    consumed: Vec<RemoteKey>,
+    /// down afresh. A signal: a keyboard binding of such a key holds its
+    /// auto-repeats meanwhile (`bind`).
+    consumed: Signal<Vec<RemoteKey>>,
+    /// The capture seen open and its session: one number for as long as
+    /// it stays open, a new one for the next (even of the same prompt).
+    capture: Option<(Capture, u64)>,
+    sessions: u64,
+    /// The capture session a Back went down in, until its release:
+    /// Android's Back on that release closes only that one.
+    back_in: Option<u64>,
+}
+
+/// What takes the keys: a PIN prompt (which one) or the remote editor
+/// waiting for a key.
+#[derive(Clone, PartialEq)]
+enum Capture {
+    Pin(crate::parental_view::Prompt),
+    Editor,
+}
+
+/// What takes the keys now, if anything (tracked).
+fn capture(ui: Ui) -> Option<Capture> {
+    crate::parental_view::prompt(ui)
+        .map(Capture::Pin)
+        .or_else(|| crate::remote_editor::capturing(ui).then_some(Capture::Editor))
 }
 
 /// What owns input, finer than the keymap's [`Context`]: the info card and
@@ -109,8 +158,59 @@ impl Nav {
             keymap: crate::remote_editor::keymap(),
             presses: HeldPresses::default(),
             raw: RawKeys::default(),
-            consumed: Vec::new(),
+            consumed: signal(Vec::new()),
+            capture: None,
+            sessions: 0,
+            back_in: None,
         }
+    }
+
+    /// The session of capture `now` (none when nothing captures), and
+    /// whether it just began.
+    fn session(&mut self, now: Option<Capture>) -> (Option<u64>, bool) {
+        let Some(now) = now else {
+            self.capture = None;
+            return (None, false);
+        };
+        match &self.capture {
+            Some((seen, id)) if *seen == now => (Some(*id), false),
+            _ => {
+                self.sessions += 1;
+                self.capture = Some((now, self.sessions));
+                (Some(self.sessions), true)
+            }
+        }
+    }
+
+    fn is_consumed(&self, key: RemoteKey) -> bool {
+        self.consumed.with_untracked(|c| c.contains(&key))
+    }
+
+    fn consume(&self, key: RemoteKey) {
+        if !self.is_consumed(key) {
+            self.consumed.update(|c| c.push(key));
+        }
+    }
+
+    /// No longer consumed; whether it was.
+    fn unconsume(&self, key: RemoteKey) -> bool {
+        let was = self.is_consumed(key);
+        if was {
+            self.consumed.update(|c| c.retain(|k| *k != key));
+        }
+        was
+    }
+
+    /// A prompt or the editor took the keys: every key down now (the
+    /// press waiting and any other held) is cut short and stays so until
+    /// its release or a fresh press (its repeats, release or timer must
+    /// not act once the prompt closes).
+    fn cut_short(&mut self) {
+        let held = self.presses.held_key().into_iter().chain(self.raw.keys());
+        for key in held.collect::<Vec<_>>() {
+            self.consume(key);
+        }
+        self.presses.cancel();
     }
 }
 
@@ -246,14 +346,38 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
         .into_iter()
         .enumerate()
         .map(|(digit, name)| (name, RemoteKey::Digit(digit as u8)));
+    let consumed = input.nav.borrow().consumed;
     for (name, key) in KEYS.iter().copied().chain(digits) {
         if !long_press() || name.contains('+') {
             let nav = input.nav.clone();
-            on_key_with(name, named_key_options(key), move |_| {
-                key_event(ui, &nav, key, Phase::Down)
+            // A keyboard binding reports no phase: while a prompt has its
+            // key consumed it does not repeat (the platform holds the
+            // auto-repeats), so only a fresh press reaches it.
+            let held_off = computed(move || consumed.with(|c| c.contains(&key)));
+            effect(move || {
+                let mut options = named_key_options(key);
+                options.repeat &= !held_off.get();
+                #[cfg(feature = "test-support")]
+                keyboard_repeats::set(name, options.repeat);
+                let nav = nav.clone();
+                on_key_with(name, options, move |_| {
+                    key_event(ui, &nav, key, Phase::Down)
+                });
             });
         }
     }
+    // A prompt or the editor that opens while a key is held (by touch,
+    // say) takes that key as one a key event under it would.
+    let nav = input.nav.clone();
+    effect(move || {
+        let now = capture(ui);
+        let mut nav = nav.borrow_mut();
+        if nav.session(now).1 {
+            nav.cut_short();
+            drop(nav);
+            release_controls(ui);
+        }
+    });
     if crate::desktop::DESKTOP {
         on_key("shift+f10", move |_| {
             if context(&ui) == Context::Groups && ui.focus.with(|f| f.pane == Pane::Groups) {
@@ -317,49 +441,71 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     if key == RemoteKey::Back && phase == Phase::Down {
         ui.back_guard.update(BackGuard::pressed);
     }
-    let pin = crate::parental_view::is_open(ui);
-    if pin || crate::remote_editor::captures(ui) {
-        // A prompt or the editor takes the keys: a press pending from
-        // before is forgotten (its release or timer must not act once the
-        // prompt closes), and a key it takes acts nowhere else while held.
+    let captured = untracked(|| capture(ui));
+    let session = nav.borrow_mut().session(captured.clone()).0;
+    if key == RemoteKey::Back {
         let mut nav = nav.borrow_mut();
-        // The cut-short key stays consumed until its release or a fresh
-        // press: a later repeat must not start a new hold of it.
-        if let Some(held) = nav.presses.held_key()
-            && !nav.consumed.contains(&held)
-        {
-            nav.consumed.push(held);
-        }
-        nav.presses.cancel();
-        if phase == Phase::Up {
-            release_consumed(ui, &mut nav, key);
+        if phase == Phase::Down {
+            nav.back_in = None;
+        } else if let Some(began) = nav.back_in {
+            // A Back that went down in a prompt: its repeats do nothing,
+            // and once touch closed that prompt, Android's Back on its
+            // release does not act on what it exposed.
+            if phase == Phase::Up {
+                nav.back_in = None;
+                nav.unconsume(key);
+                if session != Some(began) {
+                    swallow_release(ui);
+                }
+            }
             return;
         }
-        if phase == Phase::Down {
-            nav.consumed.retain(|k| *k != key);
+    }
+    if let (Some(capture), Some(session)) = (captured, session) {
+        // A prompt or the editor takes the keys: a press pending from
+        // before is cut short, and a key it takes acts nowhere else while
+        // held.
+        let mut nav = nav.borrow_mut();
+        let pending = nav.presses.held_key().is_some();
+        nav.cut_short();
+        if phase == Phase::Up {
+            // A remote's Back released here went down before this capture
+            // (one that went down in it is `back_in`'s): Android's Back on
+            // it does not dismiss the prompt, consumed or not.
+            if key == RemoteKey::Back && long_press() {
+                nav.consume(key);
+            }
+            release_consumed(ui, &nav, key);
+        } else if phase == Phase::Down {
+            nav.unconsume(key);
+            let pin = matches!(capture, Capture::Pin(_));
             if key == RemoteKey::Back && (!pin || long_press()) {
                 // The platform's Back (`go_back`) closes the PIN prompt or
                 // cancels the editor's capture, once; acting here too
                 // would also step back from what the prompt exposes.
-                return;
-            }
-            nav.consumed.push(key);
-            drop(nav);
-            if pin {
-                crate::parental_view::remote(ui, key);
+                nav.back_in = Some(session);
             } else {
-                crate::remote_editor::capture(ui, key);
+                nav.consume(key);
+                drop(nav);
+                if pin {
+                    crate::parental_view::remote(ui, key);
+                } else {
+                    crate::remote_editor::capture(ui, key);
+                }
             }
+        }
+        if pending {
+            release_controls(ui);
         }
         return;
     }
     {
-        let mut nav = nav.borrow_mut();
+        let nav = nav.borrow();
         if phase == Phase::Down {
-            nav.consumed.retain(|k| *k != key);
-        } else if nav.consumed.contains(&key) {
+            nav.unconsume(key);
+        } else if nav.is_consumed(key) {
             if phase == Phase::Up {
-                release_consumed(ui, &mut nav, key);
+                release_consumed(ui, &nav, key);
             }
             return;
         }
@@ -398,12 +544,13 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     };
     // A card or bar on screen outlasts the wait (its own timeout can be
     // shorter than the long press): the release finds what was pressed.
-    // Each event of the press renews this (a repeat's touch alone would
-    // pull the deadline back in).
-    if phase != Phase::Up
-        && let Some(at) = nav.borrow().presses.long_deadline_ms()
-    {
-        keep_controls_until(ui, at + 50);
+    // Once the press is decided, their own timeout alone counts.
+    let waiting = nav.borrow().presses.long_deadline_ms();
+    // (Another key's release leaves a waiting press as it is.)
+    match waiting {
+        Some(at) if phase != Phase::Up => keep_controls_until(ui, at + 50),
+        Some(_) => {}
+        None => release_controls(ui),
     }
     let action = decision.and_then(|d| resolve(ui, &nav.borrow().keymap, d));
     if let Some((key, press, action)) = action {
@@ -429,13 +576,15 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
             // The surface of the moment: a press whose surface changed
             // while it was held does nothing (`HeldPresses`), nor does one
             // that a PIN prompt or the remote editor now captures.
-            let captured = crate::parental_view::is_open(ui) || crate::remote_editor::captures(ui);
+            let captured = untracked(|| capture(ui)).is_some();
             let decision = nav.borrow_mut().presses.poll(surface(&ui), ui.now_ms());
             let Some(decision) = decision else {
                 return;
             };
+            release_controls(ui);
             if captured {
                 log::info!("iptv long press by timer dropped: a prompt took the keys");
+                nav.borrow_mut().cut_short();
                 return;
             }
             let action = resolve(ui, &nav.borrow().keymap, decision);
@@ -523,12 +672,20 @@ fn keep_controls(ui: Ui) {
 /// The release of a key a prompt took or cut short: it is no longer
 /// consumed, and a Back that began before the prompt does not let
 /// Android's own Back act on its release either.
-fn release_consumed(ui: Ui, nav: &mut Nav, key: RemoteKey) {
-    if nav.consumed.contains(&key) {
-        nav.consumed.retain(|k| *k != key);
-        if key == RemoteKey::Back {
-            swallow_release(ui);
-        }
+fn release_consumed(ui: Ui, nav: &Nav, key: RemoteKey) {
+    if nav.unconsume(key) && key == RemoteKey::Back {
+        swallow_release(ui);
+    }
+}
+
+/// The held key no longer keeps the card or the play bar: decided,
+/// dropped or taken by a prompt.
+fn release_controls(ui: Ui) {
+    if ui.panels.with_untracked(|p| p.holding()) {
+        ui.panels.update(|p| p.release_hold());
+    }
+    if untracked(|| ui.play_bar.try_get()).is_some_and(|b| b.holding()) {
+        crate::play_bar::release_hold(ui);
     }
 }
 

@@ -48,6 +48,10 @@ The app tracks the last input used, not the device type.
   and mouse switches between modes as each is used.
 - **Now:** the first key after touch or a pointer moves focus onto a row on
   screen if the focused channel has scrolled out of view.
+- **Now:** a remote key held while touch opens or closes a PIN prompt does
+  nothing more until it is released or pressed again: no tap, hold or step
+  back acts on the screen the prompt covered or exposed
+  ([TV controls](tv-controls.md#taps-and-holds)).
 
 ## Destinations
 

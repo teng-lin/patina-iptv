@@ -41,9 +41,10 @@ pub fn open(ui: Ui) {
 pub fn is_open(ui: Ui) -> bool {
     ui.remote_editor.with(Option::is_some)
 }
-pub fn captures(ui: Ui) -> bool {
+/// Whether the editor waits for a key to bind (tracked).
+pub(crate) fn capturing(ui: Ui) -> bool {
     ui.remote_editor
-        .with_untracked(|s| s.as_ref().is_some_and(|s| s.capturing))
+        .with(|s| s.as_ref().is_some_and(|s| s.capturing))
 }
 fn state<R>(ui: Ui, f: impl FnOnce(&Editor) -> R) -> Option<R> {
     ui.remote_editor.with(|s| s.as_ref().map(f))
