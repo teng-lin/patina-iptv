@@ -59,28 +59,75 @@ pub fn close(ui: Ui) {
     crate::runtime().vod_discovery_cancel();
     ui.vod.update(|s| {
         s.open = false;
+        s.handoff = iptv_core::vod::Handoff::None;
         s.generation = s.generation.wrapping_add(1);
     });
+}
+
+/// Back from a movie or episode playing full screen: its details reopen
+/// over the same player, the played episode chosen (#147). The guide
+/// returns underneath, so leaving the details and their list ends where
+/// the title was chosen from, the title playing on in the preview. False
+/// when the title did not come from this screen.
+pub fn return_from_player(ui: Ui) -> bool {
+    let Some((details, played)) = ui
+        .player
+        .vod
+        .with_untracked(|p| p.as_ref().map(|(p, _)| (p.details.clone(), p.key.clone())))
+    else {
+        return false;
+    };
+    if !ui.vod.with_untracked(|s| s.returns_to(&details.item.key)) {
+        return false;
+    }
+    ui.vod.update(|s| s.return_from_player(details, &played));
+    ui.mode.set(crate::settings::browse_mode());
+    true
+}
+
+/// Whether Back from the title playing full screen returns to its
+/// details, and to which library (the visible ‹'s label).
+pub fn returns_to(ui: Ui) -> Option<Kind> {
+    ui.player.vod.with(|p| {
+        p.as_ref().and_then(|(p, _)| {
+            let item = &p.details.item.key;
+            ui.vod.with(|s| s.returns_to(item)).then_some(item.kind)
+        })
+    })
 }
 
 pub fn back(ui: Ui) -> bool {
     if ui.player.vod.with_untracked(Option::is_none) {
         crate::runtime().parental_content_closed();
     }
-    let (closed, refresh) = edit(ui, |s| {
+    let (closed, refresh, end) = edit(ui, |s| {
         let pending = s.busy;
         let had_details = s.details.is_some();
+        // Details reopened from the player over a list that watching
+        // changes (a shelf, or the Continue watching category): the list
+        // is read again for the progress and order just changed, its title
+        // kept by identity (a shelf reads the window around it). Another
+        // category's order does not change; its movie card already shows
+        // the progress (`Screen::return_from_player`), and reading it
+        // again from its first page could lose a deep title's focus.
+        let watched = had_details
+            && s.handoff == iptv_core::vod::Handoff::Returned
+            && (s.is_shelf() || s.query.continue_watching);
         s.back();
         if had_details {
             s.control = Control::Catalogue;
         }
-        (!s.open, pending && !had_details && s.open && !s.is_shelf())
+        (
+            !s.open,
+            s.open && (watched || (pending && !had_details && !s.is_shelf())),
+            s.end,
+        )
     });
     crate::parental_view::enforce(ui);
     if closed {
         crate::runtime().vod_discovery_cancel();
     } else if refresh {
-        reload(ui, false);
+        load(ui, false, Some(end));
     }
     true
 }
@@ -89,7 +136,19 @@ pub fn back(ui: Ui) -> bool {
 /// title), or (`append`) the page after the titles shown, which stay with
 /// the focus.
 fn reload(ui: Ui, append: bool) {
-    let (query, shelf, generation, offset, anchor) = edit(ui, |s| {
+    load(ui, append, None);
+}
+
+/// [`reload`]; with `keep` (the titles it had loaded), a catalogue read
+/// again from its top reads at least that many, so a title focused pages
+/// down keeps the focus by identity (a shelf always reads the window
+/// around its focused title). Retry of that read reads as many again.
+fn load(ui: Ui, append: bool, keep: Option<u32>) {
+    let (query, shelf, generation, offset, anchor, through) = edit(ui, |s| {
+        let through = match keep {
+            Some(end) if !append && !s.is_shelf() => end,
+            _ => 0,
+        };
         let offset = if append {
             s.begin_more()
         } else {
@@ -103,7 +162,14 @@ fn reload(ui: Ui, append: bool) {
         } else {
             s.shelf.and(s.focused.clone())
         };
-        (s.query.clone(), s.shelf, s.generation, offset, anchor)
+        (
+            s.query.clone(),
+            s.shelf,
+            s.generation,
+            offset,
+            anchor,
+            through,
+        )
     });
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
@@ -126,6 +192,18 @@ fn reload(ui: Ui, append: bool) {
                 .vod_discovery(DiscoveryQuery::after(shelf, offset as usize))
                 .await
                 .map(|page| (page, None)),
+            (None, _) if through > 0 => owner.vod_catalogue_through(query, through).await.map(
+                |(cards, more, sources, categories)| {
+                    (
+                        DiscoveryPage {
+                            cards,
+                            more,
+                            start: 0,
+                        },
+                        Some((sources, categories)),
+                    )
+                },
+            ),
             (None, _) => owner.vod_catalogue(query, offset).await.map(
                 |(cards, more, sources, categories)| {
                     (
@@ -160,6 +238,8 @@ fn reload(ui: Ui, append: bool) {
                     crate::i18n::key("On-demand library could not be loaded"),
                     if append {
                         Operation::More { offset }
+                    } else if through > 0 {
+                        Operation::Through { through }
                     } else {
                         Operation::List
                     },
@@ -217,6 +297,7 @@ fn retry(ui: Ui) {
     };
     match operation {
         Operation::List => reload(ui, false),
+        Operation::Through { through } => load(ui, false, Some(through)),
         Operation::More { .. } => reload(ui, true),
         Operation::Previous { step_up, .. } => load_previous(ui, step_up),
         Operation::Details(key) => retry_details(ui, key),
@@ -448,7 +529,10 @@ fn play_authorized(ui: Ui, details: Details, key: Key, restart: bool) {
                 }
                 flush(ui);
                 crate::player::play_vod(ui, playing, source);
-                close(ui);
+                // The screen waits under the player: Back from the title
+                // returns to its details (`return_from_player`).
+                crate::runtime().vod_discovery_cancel();
+                ui.vod.update(|s| s.hand_to_player());
             }
             Err(_) => {
                 ui.vod.update(|s| {

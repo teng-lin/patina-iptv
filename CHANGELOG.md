@@ -17,6 +17,18 @@ is below 1.0, a minor release may change behaviour.
 
 ### Changed
 
+- Back from a movie or an episode playing full screen now returns to its
+  details instead of the guide, on every input (a remote's Back, Escape or
+  Backspace, and the play bar's ‹, now labelled Movies or Shows): a movie
+  on Play or Resume, a series with the played episode and its season
+  selected. The title plays on, on the same player, and nothing is opened
+  again. Back from the details then returns to the list or shelf the title
+  was chosen from (Continue watching and Recently added included), on that
+  title, and from there to the guide as before (#147). A Continue watching
+  list or shelf is read again on the way, so a finished title leaves it. On
+  a desktop in the operating system's full screen, the first Back from a
+  movie, an episode or a recording now restores the window, as it does for
+  live TV, and the next one returns to the details or to Recordings.
 - Phone held upright, and other narrow portrait windows: the guide's header
   now stacks a preview as wide as the window over the focused programme,
   instead of a thumbnail beside it. The channel list stays inside a narrow

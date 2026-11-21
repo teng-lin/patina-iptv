@@ -148,11 +148,60 @@ impl Runtime {
         ),
         Error,
     > {
+        self.vod_catalogue_pages(query, offset, 1).await
+    }
+    /// The catalogue from its top, a page at a time until it holds at
+    /// least `through` titles (or ends), with its filter choices. A list
+    /// read again after the player (its progress changed) keeps the titles
+    /// the viewer had loaded, so its focused title is found again by
+    /// identity however many pages down it was. The pages come from one
+    /// read snapshot, so a write between them cannot shift a title out.
+    pub async fn vod_catalogue_through(
+        &self,
+        query: Query,
+        through: u32,
+    ) -> Result<
+        (
+            Vec<Card>,
+            bool,
+            Vec<iptv_core::vod::Source>,
+            Vec<iptv_core::vod::Category>,
+        ),
+        Error,
+    > {
+        self.vod_catalogue_pages(query, 0, through.max(1)).await
+    }
+    async fn vod_catalogue_pages(
+        &self,
+        query: Query,
+        offset: u32,
+        at_least: u32,
+    ) -> Result<
+        (
+            Vec<Card>,
+            bool,
+            Vec<iptv_core::vod::Source>,
+            Vec<iptv_core::vod::Category>,
+        ),
+        Error,
+    > {
+        const PAGE: u32 = 80;
         let mut result = self
             .services()
             .read(move |s| {
-                let (cards, more) = s.vod_page(&query, offset, 80)?;
-                Ok((cards, more, s.vod_sources()?, s.vod_categories(&query)?))
+                s.vod_read_snapshot(|s| {
+                    let mut cards = Vec::new();
+                    let mut more = true;
+                    let mut read = 0;
+                    // `read` counts store rows consumed, as Load more does.
+                    while more && read < at_least {
+                        let (page, next) = s.vod_page(&query, offset.saturating_add(read), PAGE)?;
+                        read = read.saturating_add(u32::try_from(page.len()).unwrap_or(u32::MAX));
+                        more = next;
+                        cards.extend(page);
+                    }
+                    Ok((cards, more, s.vod_sources()?, s.vod_categories(&query)?))
+                })
             })
             .await?;
         self.vod_redact_protected(&mut result.0).await?;
