@@ -3,7 +3,7 @@
 //! ```json
 //! {
 //!   "format": "iptv-rs.settings",
-//!   "version": 4,
+//!   "version": 5,
 //!   "global":    { "player.info_panel_timeout": 5000 },
 //!   "playlists": { "<playlist id>": { "channels.group_sort": "name" } },
 //!   "groups":    { "<playlist id>": { "<group id>": { "channels.channel_sort": "manual" } } }
@@ -51,7 +51,7 @@ use crate::value::{KeyBinding, PressKind, Value};
 
 pub const FORMAT: &str = "iptv-rs.settings";
 /// The version [`Settings::to_json`] writes.
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 
 const RESERVED: [&str; 5] = ["format", "version", "global", "playlists", "groups"];
 
@@ -82,7 +82,18 @@ pub static MIGRATIONS: &[Migration] = &[
                   grey palettes → gray; now_highlight colour → color",
         apply: v3_us_spelling,
     },
+    Migration {
+        from: 4,
+        summary: "player.sound_follows_tile added, off unless chosen",
+        apply: v4_sound_follows_tile,
+    },
 ];
+
+/// "Sound follows the selected tile" (#179) is new and off by default.
+/// Defaults are never written, so a document from before it has no entry
+/// and loads with it off: multiview's sound stays where Listen to this
+/// puts it, as before. Nothing is rewritten.
+fn v4_sound_follows_tile(_doc: &mut Map<String, Json>) {}
 
 /// Stored names in US spelling (#139). The renamed key keeps its value
 /// unless the document already has the new key; renamed choices keep the

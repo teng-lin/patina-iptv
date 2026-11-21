@@ -341,8 +341,23 @@ never moves the sound (#135). The state is the core's
   the same rule; see [desktop viewing](desktop.md#several-players).
 - **Now:** the [interruption policy](#interruptions-and-the-background)
   pauses and resumes the heard player, whichever it is.
-- **Planned:** an optional setting, "Sound follows the selected tile", for
-  viewers who prefer the focused tile to be heard.
+- **Now:** an optional setting, **Sound follows the selected tile**
+  (Settings, Playback, under Multiview; off by default), for viewers who
+  prefer the focused tile to be heard (#179). Its row is reached like
+  every settings row, by a remote's OK, a tap, a click or the keyboard.
+  With it on, each focus move of the viewer's in multiview (the arrows, a
+  tap or a click on another tile, a tile added, or a picked channel
+  already on another tile) makes that tile heard, as **Listen to this**
+  would, and the speaker badge moves with it. Only a focus that moves
+  takes the sound: opening a tile's menu, changing the focused tile's
+  channel and an arrow at the grid's edge move nothing, and **Listen to
+  this** still works. A full-screen
+  detour, enlarging or reducing (also of another tile, which takes the
+  focus) and removing a tile keep the rules above in both modes; focus
+  left by them takes the sound only at the next focus move. Desktop
+  player windows and picture in picture keep the explicit rule. The
+  choice applies at the next focus move, also in a multiview already
+  open.
 
 ## Text entry
 
@@ -478,8 +493,9 @@ Unavailable actions say why, using the host's reported capabilities
   `cargo test -p iptv-core` for core state and transition rules, the
   `iptv-core` wasm build and `cargo build -p iptv-app`.
 - Which player is heard: core tests in `iptv_core::heard`,
-  `iptv_core::multiview` (`heard_tests`) and `iptv_core::playback_windows`;
-  app scenarios `multiview_heard` and, for windows, `desktop_workflows`.
+  `iptv_core::multiview` (`heard_tests`, both with and without the sound
+  following the selected tile) and `iptv_core::playback_windows`; app
+  scenarios `multiview_heard` and, for windows, `desktop_workflows`.
 - Choosing, staying and returning: app scenarios `personalization_overlay`,
   `tv_shared_controls`, `pip_control`, `cov_nav` and `cov_nav_touch`; on a
   remote's raw key phases, `tv_remote_journey`.

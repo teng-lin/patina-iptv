@@ -95,7 +95,7 @@ impl Section {
             Section::Appearance => &["colors", "text", "motion"],
             Section::Guide => &["browsing", "content", "emphasis", "switching"],
             Section::Logos => &[],
-            Section::Player => &["panels", "info", "clock", "buttons", "pip"],
+            Section::Player => &["panels", "info", "clock", "buttons", "pip", "multiview"],
             Section::Playback => &["decoding", "audio", "buffering", "frame_rate", "external"],
             Section::Catchup => &["source", "seeking", "steps"],
             Section::History => &["history", "recent"],

@@ -14,6 +14,15 @@ is below 1.0, a minor release may change behavior.
   secondary action has a pointer entry point beside right-click. A second
   player window's title says when it is muted. The desktop's wheel,
   shortcut, window and display rules are documented in `docs/desktop.md`.
+- Multiview: an optional setting, **Sound follows the selected tile**
+  (Settings, Playback, Player, Multiview; off by default), for viewers who
+  prefer the focused tile to be heard (#179). With it on, moving the focus
+  to another tile (the arrows, a tap or a click, or a tile added) makes it
+  heard, and its speaker badge moves with it. A
+  full-screen detour, enlarging, reducing and removing a tile keep the
+  rules of #135. Desktop player windows and picture in picture keep
+  **Listen to this**. Settings documents move to version 5; existing
+  installs keep it off.
 
 ### Changed
 

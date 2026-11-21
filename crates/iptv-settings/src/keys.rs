@@ -73,6 +73,8 @@ pub const UI_TRANSPARENCY: IntKey = IntKey("appearance.ui_transparency");
 pub const BACK_RETURNS_TO_NOW: BoolKey = BoolKey("guide.back_returns_to_now");
 pub const INFO_ON_SWITCH: BoolKey = BoolKey("player.info_on_switch");
 pub const PIP_ON_LEAVE: EnumKey = EnumKey("player.pip_on_leave");
+/// Multiview: focusing a tile makes it heard (#179).
+pub const SOUND_FOLLOWS_TILE: BoolKey = BoolKey("player.sound_follows_tile");
 
 // Catch-up seeking.
 pub const SEEK_KEYS: EnumKey = EnumKey("catchup.seek_keys");
@@ -121,6 +123,7 @@ pub const ALL: &[(&str, &str)] = &[
     (BACK_RETURNS_TO_NOW.0, "bool"),
     (INFO_ON_SWITCH.0, "bool"),
     (PIP_ON_LEAVE.0, "enum"),
+    (SOUND_FOLLOWS_TILE.0, "bool"),
     (SEEK_KEYS.0, "enum"),
     (FORWARD_STEP.0, "duration"),
     (REWIND_STEP.0, "duration"),

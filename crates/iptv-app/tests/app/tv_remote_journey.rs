@@ -987,3 +987,45 @@ fn a_keyboard_key_a_prompt_took_holds_its_repeats_until_pressed_again() {
     step(app.press_key("enter"));
     assert_eq!(iptv_app::keyboard_repeats("enter"), Some(true));
 }
+
+/// "Sound follows the selected tile" (#179) by a remote alone: the rail's
+/// Settings, the Playback page, Down to its row, and OK turns it on, and
+/// it is saved; OK again turns it off.
+#[test]
+fn a_remote_changes_the_sound_follows_the_selected_tile_row() {
+    use crate::multiview_heard::{follows_on, saved_follows, to_follows_row};
+    let Some(home) = isolated!() else { return };
+    let path = home.data_dir().join("settings.json");
+    let (mut fixture, _, _) = tv(home, |_| {});
+    let app = &mut fixture.app;
+    // Left from the channels to the groups, then the rail; Settings is
+    // its last item.
+    for _ in 0..2 {
+        step(app.remote_tap(RemoteKey::Left));
+    }
+    step(app.wait_for("id:navigation-rail >> text:Settings"));
+    for _ in 0..12 {
+        step(app.remote_tap(RemoteKey::Down));
+    }
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("id:settings-screen"));
+    // The pages open on General; Playback is the fifth.
+    step(app.wait_for("text:Play the last channel on start"));
+    for _ in 0..4 {
+        step(app.remote_tap(RemoteKey::Down));
+    }
+    to_follows_row(app, |app, key| {
+        let key = match key {
+            "right" => RemoteKey::Right,
+            _ => RemoteKey::Down,
+        };
+        step(app.remote_tap(key));
+    });
+    assert!(!follows_on(app), "off by default");
+    step(app.remote_tap(RemoteKey::Ok));
+    saved_follows(app, &path, true);
+    assert!(follows_on(app));
+    step(app.remote_tap(RemoteKey::Ok));
+    saved_follows(app, &path, false);
+    assert!(!follows_on(app));
+}
