@@ -3,15 +3,15 @@
 
 use iptv_providers::model::{Channel, ContentKind, Group, Series, VodItem};
 use iptv_providers::{ContentId, GroupId};
-use rusqlite::{Connection, TransactionBehavior, params};
+use rusqlite::{Connection, params};
 
 use crate::codec::{
     catch_up_to_json, content_kind_from, group_ids_from_json, group_ids_to_json, narrow,
     stream_from_json, stream_to_json,
 };
 use crate::error::Result;
-use crate::sources::{CatalogCounts, ensure_source, record_import_success};
-use crate::{SourceId, Store, search};
+use crate::sources::CatalogCounts;
+use crate::{CatalogReplacement, SourceId, Store};
 
 /// Deletes in child-first order; overlay tables are never touched here.
 pub(crate) const DELETE_CATALOG: &[&str] = &[
@@ -23,10 +23,6 @@ pub(crate) const DELETE_CATALOG: &[&str] = &[
     "DELETE FROM series WHERE source_id = ?1",
     "DELETE FROM groups WHERE source_id = ?1",
 ];
-
-fn count(n: usize) -> u32 {
-    u32::try_from(n).unwrap_or(u32::MAX)
-}
 
 pub(crate) fn insert_groups(
     conn: &Connection,
@@ -219,36 +215,9 @@ impl Store {
         vod: &[VodItem],
         series: &[Series],
     ) -> Result<CatalogCounts> {
-        let now = self.now();
-        let fts = self.fts_index;
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        ensure_source(&tx, source)?;
-        search::forget_source(&tx, fts, source)?;
-        for sql in DELETE_CATALOG {
-            tx.execute(sql, [source.0])?;
-        }
-        let groups_n = insert_groups(&tx, source, groups, 0)?;
-        let channels_n = insert_channels(&tx, source, channels, 0)?;
-        let vod_n = insert_vod(&tx, source, vod, 0)?;
-        let series_n = insert_series(&tx, source, series, 0)?;
-        search::index_source(&tx, fts, source)?;
-        let total = groups.len() + channels.len() + vod.len() + series.len();
-        let counts = CatalogCounts {
-            groups: count(groups_n),
-            channels: count(channels_n),
-            vod: count(vod_n),
-            series: count(series_n),
-            duplicates: count(total - groups_n - channels_n - vod_n - series_n),
-        };
-        record_import_success(&tx, source, &counts, Default::default(), now)?;
-        #[cfg(test)]
-        crash_tests::boundary("staged");
-        tx.commit()?;
-        #[cfg(test)]
-        crash_tests::boundary("committed");
-        Ok(counts)
+        CatalogReplacement::new(self, source, groups, channels, vod, series)
+            .finish()
+            .map(|published| published.counts)
     }
 
     /// Provider groups in provider order, optionally of one kind.
@@ -406,3 +375,9 @@ impl Store {
 #[cfg(test)]
 #[path = "catalog/crash_tests.rs"]
 mod crash_tests;
+
+/// Where a crash test may end the process during a replacement.
+#[cfg(test)]
+pub(crate) fn crash_boundary(at: &str) {
+    crash_tests::boundary(at);
+}

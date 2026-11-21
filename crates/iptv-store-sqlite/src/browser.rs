@@ -681,8 +681,9 @@ impl Store {
     }
 
     /// Starts a publish on a copy of the database: returns a store on the
-    /// copy, where a long replacement runs in slices while this store keeps
-    /// serving reads of the last commit.
+    /// copy, where a long replacement runs in slices
+    /// ([`crate::CatalogReplacement`], [`crate::EpgReplacement`]) while this
+    /// store keeps serving reads of the last commit.
     ///
     /// Until [`Self::finish_publish`] or [`Self::abandon_publish`], this
     /// store refuses writes (`PRAGMA query_only`): a write here would be

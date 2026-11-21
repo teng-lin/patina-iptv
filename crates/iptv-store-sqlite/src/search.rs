@@ -110,6 +110,38 @@ pub(crate) fn index_source(conn: &Connection, fts: bool, source: SourceId) -> Re
     Ok(())
 }
 
+/// Drops the index rows of `source`'s channels with rowids in
+/// `(after, last]` (a slice of [`forget_source`]).
+pub(crate) fn forget_channels(
+    conn: &Connection,
+    source: SourceId,
+    after: i64,
+    last: i64,
+) -> Result<usize> {
+    Ok(conn
+        .prepare_cached(
+            "DELETE FROM channel_fts WHERE rowid IN (SELECT rowid FROM channels
+             WHERE +source_id = ?1 AND rowid > ?2 AND rowid <= ?3)",
+        )?
+        .execute(params![source.0, after, last])?)
+}
+
+/// Indexes `source`'s channels with rowids in `(after, last]` (a slice of
+/// [`index_source`]).
+pub(crate) fn index_channels(
+    conn: &Connection,
+    source: SourceId,
+    after: i64,
+    last: i64,
+) -> Result<usize> {
+    Ok(conn
+        .prepare_cached(&format!(
+            "INSERT INTO channel_fts (rowid, name, original) {INDEX_ROWS}
+             WHERE +c.source_id = ?1 AND c.rowid > ?2 AND c.rowid <= ?3"
+        ))?
+        .execute(params![source.0, after, last])?)
+}
+
 /// Re-indexes one channel after its custom name changed. A no-op for an
 /// id that is not in the catalog.
 pub(crate) fn reindex_channel(

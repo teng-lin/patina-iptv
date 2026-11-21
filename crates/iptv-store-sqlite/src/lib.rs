@@ -38,6 +38,10 @@
 //!   changed, for the host to persist (`Store::open_browser`, `browser.rs`).
 //!   There is one connection and no encryption; long replacements run on a
 //!   copy of the database while reads continue (`Store::begin_publish`).
+//! - **Long replacements are resumable**: [`CatalogReplacement`] and
+//!   [`EpgReplacement`] write until a row budget is spent and continue
+//!   later (the browser's slices); the one-shot methods run them to
+//!   completion with the same statements as before (`replacement.rs`).
 
 // The unit tests' browser build: host services for SQLite and a stand-in
 // for `tempfile`, shared with the integration executable.
@@ -48,7 +52,7 @@ extern crate self as tempfile;
 #[path = "../tests/it/wasm.rs"]
 mod wasm_test;
 #[cfg(all(test, target_family = "wasm"))]
-use wasm_test::tempdir;
+use wasm_test::{TempDir, tempdir};
 
 mod backup;
 #[cfg(target_family = "wasm")]
@@ -58,6 +62,8 @@ pub use browser::{BrowserFiles, CHUNK_BYTES, ChangedChunks};
 mod encryption;
 pub use encryption::DatabaseKey;
 mod catalog;
+mod catalog_replacement;
+pub use catalog_replacement::{CatalogPublished, CatalogReplacement, StagePublication};
 mod catalog_stage;
 pub use catalog_stage::CatalogStage;
 mod channels;
@@ -65,6 +71,8 @@ mod codec;
 mod epg;
 mod epg_assign;
 mod epg_extent;
+mod epg_replacement;
+pub use epg_replacement::EpgReplacement;
 mod epg_stage;
 mod epg_titles;
 mod epg_window;
@@ -90,7 +98,9 @@ mod organize;
 mod overlay;
 pub mod parental;
 mod recordings;
+mod replacement;
 pub use recordings::RecordingCompletion;
+pub use replacement::Step;
 mod search;
 mod search_history;
 mod source_settings;

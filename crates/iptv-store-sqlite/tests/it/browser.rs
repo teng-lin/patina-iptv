@@ -279,3 +279,115 @@ fn an_abandoned_publish_leaves_the_database_writable_and_unchanged() {
     catalog(&mut store, source, 60, "third");
     assert_eq!(channel_count(&store, source), 60);
 }
+
+/// The browser's guide refresh: the replacement runs in slices on the
+/// publish copy, guide reads between slices see the stored guide, the swap
+/// shows the new one, and it survives a relaunch.
+#[test]
+fn a_guide_publishes_in_slices_on_the_copy_while_the_guide_stays_readable() {
+    use iptv_epg::{EpgRef, FeedId, GuideStore, MatchKind, SourceBuilder, StoreOptions};
+    use iptv_import::EpgSourceConfig;
+    use iptv_providers::SecretUrl;
+    use iptv_store_sqlite::{EpgFeedMeta, EpgReplacement, EpgWindow, Step};
+
+    const NOW: i64 = 1_800_000_000;
+    let build = |tag: &str| {
+        let mut feed = SourceBuilder::new(FeedId(1), 1, StoreOptions::default(), NOW);
+        for c in 0..50 {
+            for p in 0..40 {
+                let start = NOW + p * 1800;
+                feed.push_program(iptv_epg::XmltvProgram {
+                    channel: format!("c{c}.example"),
+                    start,
+                    stop: Some(start + 1800),
+                    title: format!("{tag} {c}/{p}"),
+                    ..iptv_epg::XmltvProgram::default()
+                });
+            }
+        }
+        let mut guide = GuideStore::new();
+        guide.replace_source(feed.finish());
+        guide.set_matches(
+            (0..50)
+                .map(|c| {
+                    let candidate = EpgRef {
+                        source: FeedId(1),
+                        epg_id: format!("c{c}.example"),
+                        kind: MatchKind::TvgId,
+                    };
+                    (iptv_epg::ChannelKey(format!("k{c:02}")), vec![candidate])
+                })
+                .collect(),
+        );
+        guide
+    };
+    let feeds = [EpgFeedMeta {
+        config: EpgSourceConfig::new(
+            FeedId(1),
+            SecretUrl::new("https://guide.example.test/1.xml"),
+        ),
+        fetched_at: NOW,
+        etag: None,
+        last_modified: None,
+        bytes: 1,
+    }];
+    let title = |store: &Store, source| {
+        let guide = store.load_epg(source, &EpgWindow::from(NOW, 1)).unwrap();
+        guide
+            .programs(&"k07".into(), NOW, NOW + 1)
+            .map(|p| p.title().to_owned())
+            .collect::<Vec<_>>()
+    };
+
+    let files = BrowserFiles::new().unwrap();
+    let mut store = Store::open_browser(&files).unwrap();
+    store.set_clock(|| NOW);
+    let source = store.add_source(&m3u_source("Synthetic")).unwrap();
+    crate::staged::replace_epg(&mut store, source, &build("Old"), &feeds, 1).unwrap();
+    let mut saved = Saved::default();
+    saved.save(&store);
+
+    let copy = store.begin_publish().unwrap();
+    let (mut stage, import, _dir) = crate::staged::stage(&copy, &build("New"));
+    let mut job = EpgReplacement::new(
+        copy,
+        source,
+        &mut stage,
+        std::borrow::Cow::Owned(import),
+        feeds.to_vec(),
+        2,
+    )
+    .unwrap();
+    let mut slices = 0;
+    loop {
+        slices += 1;
+        match job.step(400).unwrap() {
+            Step::Pending => assert_eq!(title(&store, source), ["Old 7/0"]),
+            Step::Done(counts) => {
+                assert_eq!(counts.programs, 2000);
+                break;
+            }
+        }
+    }
+    assert!(slices > 5, "{slices} slices");
+    let copy = job.into_store();
+    drop(stage);
+    store.finish_publish(copy).unwrap();
+    assert_eq!(title(&store, source), ["New 7/0"]);
+    saved.save(&store);
+    let files = saved.restore();
+    let store = Store::open_browser(&files).unwrap();
+    assert_eq!(title(&store, source), ["New 7/0"]);
+}
+
+/// Code generic over threads (the runtime's executors) compiles for both
+/// targets: a browser store and its jobs are `Send`, as native ones are.
+#[test]
+fn browser_stores_and_jobs_are_send() {
+    fn send<T: Send>() {}
+    send::<Store>();
+    send::<BrowserFiles>();
+    send::<iptv_store_sqlite::CatalogReplacement<'static, Store>>();
+    send::<iptv_store_sqlite::EpgReplacement<'static, Store>>();
+    send::<iptv_store_sqlite::EpgStage>();
+}
