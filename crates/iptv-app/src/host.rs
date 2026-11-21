@@ -23,6 +23,20 @@ pub(crate) use web::*;
 
 use iptv_core::capabilities::Platform;
 
+/// What an image's header says about its size, before anything decodes it.
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+pub(crate) enum Extent {
+    /// A raster of this many pixels across and down.
+    Pixels(u32, u32),
+    /// A vector image (SVG), drawn by NSH's bounded rasterizer.
+    Vector,
+    /// Not an image this host decodes.
+    Unknown,
+    /// The host does not read headers: its own decoder bounds the image.
+    #[cfg_attr(not(target_family = "wasm"), allow(dead_code))]
+    Unchecked,
+}
+
 const fn on(platform: Platform) -> bool {
     PLATFORM as u8 == platform as u8
 }
@@ -40,9 +54,7 @@ pub(crate) const WINDOWS: bool = on(Platform::Windows);
 
 /// The host's public entry points, re-exported at the crate root (a
 /// platform's native components).
-pub mod exports {
-    #[cfg(not(target_family = "wasm"))]
-    pub use super::native::exports::*;
-    #[cfg(target_family = "wasm")]
-    pub use super::web::exports::*;
-}
+#[cfg(not(target_family = "wasm"))]
+pub use native::exports;
+#[cfg(target_family = "wasm")]
+pub use web::exports;

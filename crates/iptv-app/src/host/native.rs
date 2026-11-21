@@ -49,6 +49,16 @@ pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     ports
 }
 
+/// An image's size from its header (NSH's decoders' own probe).
+pub(crate) fn image_extent(bytes: &[u8]) -> super::Extent {
+    use nsh_core::image::Natural;
+    match Natural::of(bytes) {
+        Some(Natural::Pixels(width, height)) => super::Extent::Pixels(width, height),
+        Some(Natural::Vector(_)) => super::Extent::Vector,
+        None => super::Extent::Unknown,
+    }
+}
+
 /// Runs `work` off the UI thread, on a thread of its own named `name`.
 pub(crate) fn background(name: &str, work: impl FnOnce() + Send + 'static) -> std::io::Result<()> {
     std::thread::Builder::new()

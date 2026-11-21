@@ -45,6 +45,8 @@ mod guide_inspect_view;
 mod guide_repair_view;
 mod header;
 mod host;
+// A browser host exports nothing: the glob is empty there.
+#[allow(unused_imports)]
 #[doc(inline)]
 pub use host::exports::*;
 mod i18n;
@@ -108,7 +110,8 @@ pub use video::opens as player_opens;
 /// iOS (an iPad): a tap beside the open columns or list closes them.
 pub(crate) const IOS: bool = crate::host::IPAD;
 
-use std::time::{Duration, Instant};
+use nsh_core::time::Instant;
+use std::time::Duration;
 
 use guide::{Airing, Focus, Pane, Program, Schedule};
 use std::cell::RefCell;

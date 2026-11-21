@@ -1,3 +1,6 @@
+// The browser's `std::fs` is a stub whose `File` has no destructor; the
+// file paths that drop one early only fail there.
+#![cfg_attr(target_family = "wasm", allow(clippy::drop_non_drop))]
 //! Application-owned state and events. This module has no UI toolkit imports.
 //!
 //! The supported query/inspection/repair facade is specified in

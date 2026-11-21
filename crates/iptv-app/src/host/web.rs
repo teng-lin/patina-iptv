@@ -16,6 +16,7 @@
 //! - The local time zone is UTC until the host reports its offset.
 //! - Recording, backup files and staged probes are unavailable (the
 //!   runtime's capability model reports them so).
+//! - Artwork headers are not probed before the page decodes them.
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -146,6 +147,12 @@ pub(crate) fn log_library_base() {}
 /// Recording is unavailable here; its settings say so.
 pub(crate) fn recording_command(_key: &str) {
     crate::settings_view::notify(crate::i18n::tr("Recording unavailable"));
+}
+
+/// NSH's header probe is native only. The page's image element decodes
+/// artwork with the browser's own limits.
+pub(crate) fn image_extent(_bytes: &[u8]) -> super::Extent {
+    super::Extent::Unchecked
 }
 
 /// One thread: `work` runs now, before this returns.

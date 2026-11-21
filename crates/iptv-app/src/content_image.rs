@@ -22,15 +22,15 @@ const IMAGE_PIXELS: u64 = 16 * 1024 * 1024;
 /// header before handing bytes to any native backend. SVG uses NSH's bounded
 /// parser/rasterizer, which also disables external resources.
 fn acceptable_dimensions(bytes: &[u8]) -> bool {
-    use nsh_core::image::Natural;
-    match Natural::of(bytes) {
-        Some(Natural::Pixels(width, height)) => {
+    use crate::host::Extent;
+    match crate::host::image_extent(bytes) {
+        Extent::Pixels(width, height) => {
             width <= IMAGE_SIDE
                 && height <= IMAGE_SIDE
                 && u64::from(width) * u64::from(height) <= IMAGE_PIXELS
         }
-        Some(Natural::Vector(_)) => true,
-        None => false,
+        Extent::Vector | Extent::Unchecked => true,
+        Extent::Unknown => false,
     }
 }
 type Reply = oneshot::Sender<String>;
