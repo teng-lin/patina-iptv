@@ -891,23 +891,23 @@ fn finish_resumes_from_inside_every_phase() {
 }
 
 /// A cleanup failure after the commit (detaching the stage, restoring the
-/// connection) is returned natively, as master returned it, and logged in
-/// the browser, where an error would make the caller abandon the copy.
-/// Either way the job stays committed.
+/// connection) is returned, as master returned it; only on a browser
+/// publish copy, where an error would make the caller abandon the copy, is
+/// it logged and the step Done. Either way the job stays committed.
 #[test]
 fn a_cleanup_failure_after_the_commit_keeps_the_commit() {
+    let fail = || Some(crate::StoreError::Unavailable("synthetic cleanup failure"));
+    let returned = |finished: &crate::Result<Step<_>>| {
+        matches!(finished, Err(crate::StoreError::Unavailable(_)))
+    };
     let new = full_catalog(50, "New");
     let (mut catalog_store, source) = prepared(true);
     let stage = stage_of(&catalog_store, &new);
     let mut job =
         CatalogReplacement::from_stage(&mut catalog_store, source, stage, StagePublication::new())
             .unwrap();
-    job.fail_cleanup = Some(crate::StoreError::Unavailable("synthetic cleanup failure"));
-    let finished = job.step(u32::MAX);
-    #[cfg(target_family = "wasm")]
-    assert!(matches!(finished, Ok(Step::Done(_))));
-    #[cfg(not(target_family = "wasm"))]
-    assert!(matches!(finished, Err(crate::StoreError::Unavailable(_))));
+    job.fail_cleanup = fail();
+    assert!(returned(&job.step(u32::MAX)));
     assert!(job.is_done(), "the catalog committed");
     drop(job);
 
@@ -923,11 +923,243 @@ fn a_cleanup_failure_after_the_commit_keeps_the_commit() {
         2,
     )
     .unwrap();
-    job.fail_cleanup = Some(crate::StoreError::Unavailable("synthetic cleanup failure"));
+    job.fail_cleanup = fail();
     let finished = job.step(u32::MAX);
-    #[cfg(target_family = "wasm")]
-    assert!(matches!(finished, Ok(Step::Done(_))));
-    #[cfg(not(target_family = "wasm"))]
     assert!(matches!(finished, Err(crate::StoreError::Unavailable(_))));
     assert!(job.is_done(), "the guide committed");
+    drop(job);
+    drop(stage);
+
+    #[cfg(target_family = "wasm")]
+    {
+        let mut copy = store.begin_publish().unwrap();
+        let (mut stage, import) = guide(&copy, 5, 5, "Newer");
+        let mut job = EpgReplacement::new(
+            &mut copy,
+            source,
+            &mut stage,
+            Cow::Borrowed(&import),
+            feeds(),
+            3,
+        )
+        .unwrap();
+        job.fail_cleanup = fail();
+        assert!(matches!(job.step(u32::MAX), Ok(Step::Done(_))));
+        drop(job);
+        drop(stage);
+        store.finish_publish(copy).unwrap();
+    }
+}
+
+/// Runs `job` on a publish copy in 7-row steps until `reached(phase)`,
+/// checking that every pending step left the copy between transactions
+/// (each slice commits there), then ends it in one call (`finish`) or in
+/// more steps; whether the phase was reached.
+#[cfg(target_family = "wasm")]
+macro_rules! on_copy {
+    ($job:expr, $reached:expr, $finish:expr) => {{
+        let mut hit = false;
+        let mut done = false;
+        for _ in 0..100_000 {
+            if !hit && $reached(&$job.phase()) {
+                hit = true;
+                if $finish {
+                    break;
+                }
+            }
+            match $job.step(7).unwrap() {
+                Step::Pending => assert!($job.store().conn.is_autocommit()),
+                Step::Done(_) => {
+                    done = true;
+                    break;
+                }
+            }
+        }
+        if done {
+            drop($job);
+        } else {
+            $job.finish().unwrap();
+        }
+        hit
+    }};
+}
+
+/// The same phases on a browser publish copy, where each slice commits and
+/// the next begins again: finishing from each phase, or stepping on to the
+/// end, then swapping the copy in, leaves what master's code leaves.
+#[cfg(target_family = "wasm")]
+#[test]
+fn jobs_on_a_publish_copy_resume_from_every_phase() {
+    let new = full_catalog(300, "New");
+    let rows_phases: [Phase; 3] = [
+        ("memberships", |p| p.contains("member: Some")),
+        ("index", |p| p.starts_with("Index") && !p.contains(MIN)),
+        ("forget", |p| p.starts_with("Forget") && !p.contains(MIN)),
+    ];
+    let (mut expected, source) = prepared(true);
+    expected
+        .reference_replace_catalog(source, &new.groups, &new.channels, &new.vod, &new.series)
+        .unwrap();
+    let expected_rows = dump(&expected);
+    for (name, reached) in rows_phases {
+        for finish in [true, false] {
+            let (mut store, source) = prepared(true);
+            let mut copy = store.begin_publish().unwrap();
+            let mut job = CatalogReplacement::new(
+                &mut copy,
+                source,
+                &new.groups[..],
+                &new.channels[..],
+                &new.vod[..],
+                &new.series[..],
+            );
+            assert!(on_copy!(job, reached, finish), "rows never reached {name}");
+            store.finish_publish(copy).unwrap();
+            assert_same(
+                &dump(&store),
+                &expected_rows,
+                &format!("rows on a copy, {name}, {finish}"),
+            );
+        }
+    }
+
+    let (mut expected, source) = prepared(true);
+    let stage = stage_of(&expected, &new);
+    expected
+        .reference_publish_stage(source, stage, None, None, None)
+        .unwrap();
+    let expected_stage = dump(&expected);
+    let stage_phases: [Phase; 2] = [
+        ("table copy", |p| {
+            p.starts_with("Insert") && p.contains("after: Some")
+        }),
+        ("index", |p| p.starts_with("Index") && !p.contains(MIN)),
+    ];
+    for (name, reached) in stage_phases {
+        for finish in [true, false] {
+            let (mut store, source) = prepared(true);
+            let mut copy = store.begin_publish().unwrap();
+            let stage = stage_of(&copy, &new);
+            let mut job =
+                CatalogReplacement::from_stage(&mut copy, source, stage, StagePublication::new())
+                    .unwrap();
+            assert!(on_copy!(job, reached, finish), "stage never reached {name}");
+            store.finish_publish(copy).unwrap();
+            assert_same(
+                &dump(&store),
+                &expected_stage,
+                &format!("stage on a copy, {name}, {finish}"),
+            );
+        }
+    }
+
+    let prepare = || {
+        let (mut store, source) = store();
+        store.set_guide_sources(source, &guide_sources()).unwrap();
+        let (mut stage, import) = guide(&store, 30, 20, "Old");
+        store
+            .reference_replace_epg(source, &mut stage, &import, &feeds(), 1)
+            .unwrap();
+        (store, source)
+    };
+    let (mut expected, source) = prepare();
+    let (mut stage, import) = guide(&expected, 40, 25, "New");
+    expected
+        .reference_replace_epg(source, &mut stage, &import, &feeds(), 2)
+        .unwrap();
+    drop(stage);
+    let expected_guide = dump(&expected);
+    let guide_phases: [Phase; 3] = [
+        ("schedule delete", |p| p.contains("current: Some")),
+        ("listed channels", |p| {
+            p.contains("listed: Some(") && !p.contains("listed: Some(0)")
+        }),
+        ("schedule copy", |p| {
+            p.contains("copy: Some") && p.contains("after: Some")
+        }),
+    ];
+    for (name, reached) in guide_phases {
+        for finish in [true, false] {
+            let (mut store, source) = prepare();
+            let mut copy = store.begin_publish().unwrap();
+            let (mut stage, import) = guide(&copy, 40, 25, "New");
+            let mut job = EpgReplacement::new(
+                &mut copy,
+                source,
+                &mut stage,
+                Cow::Borrowed(&import),
+                feeds(),
+                2,
+            )
+            .unwrap();
+            assert!(on_copy!(job, reached, finish), "guide never reached {name}");
+            drop(stage);
+            store.finish_publish(copy).unwrap();
+            assert_same(
+                &dump(&store),
+                &expected_guide,
+                &format!("guide on a copy, {name}, {finish}"),
+            );
+        }
+    }
+}
+
+/// A job that committed slices on a publish copy and ended without its last
+/// commit breaks the copy for good: another job completing on it, before
+/// or after, does not make it publishable.
+#[cfg(target_family = "wasm")]
+#[test]
+fn an_unfinished_job_on_a_copy_cannot_be_published_by_a_later_one() {
+    let new = full_catalog(200, "New");
+    for unfinished_first in [true, false] {
+        let (mut store, source) = prepared(true);
+        let other = store
+            .add_source(&Source {
+                name: "Other".into(),
+                config: SourceConfig::M3u(M3uSourceConfig {
+                    location: SecretUrl::new("https://playlist.example.test/other.m3u"),
+                    user_agent: None,
+                    referrer: None,
+                }),
+            })
+            .unwrap();
+        let mut copy = store.begin_publish().unwrap();
+        let unfinished = |copy: &mut Store| {
+            let mut job = CatalogReplacement::new(
+                copy,
+                source,
+                &new.groups[..],
+                &new.channels[..],
+                &new.vod[..],
+                &new.series[..],
+            );
+            for _ in 0..5 {
+                assert_eq!(job.step(50).unwrap(), Step::Pending);
+            }
+        };
+        let completed = |copy: &mut Store| {
+            CatalogReplacement::new(
+                copy,
+                other,
+                &new.groups[..],
+                &new.channels[..10],
+                &[][..],
+                &[][..],
+            )
+            .finish()
+            .unwrap();
+        };
+        if unfinished_first {
+            unfinished(&mut copy);
+            completed(&mut copy);
+        } else {
+            completed(&mut copy);
+            unfinished(&mut copy);
+        }
+        assert!(
+            store.finish_publish(copy).is_err(),
+            "unfinished first: {unfinished_first}"
+        );
+        assert!(!store.is_publishing());
+    }
 }

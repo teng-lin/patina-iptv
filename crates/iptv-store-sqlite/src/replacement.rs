@@ -106,23 +106,41 @@ pub(crate) fn resume(store: &crate::Store) -> Result<()> {
 /// work is committed: rolling back the copy is dropping it, and its swap
 /// is what makes the publish atomic, so one transaction across all slices
 /// would only keep a third copy of every page it touched in the memory
-/// journal. The copy is marked partial until the job's last commit.
+/// journal. The first such commit of a job registers it on the copy
+/// (`claim`): until it commits its last step the copy holds part of it, and
+/// if it ends without that, the copy holds half a publish for good.
 /// Elsewhere the transaction stays open.
-pub(crate) fn pause(store: &mut crate::Store) -> Result<()> {
+pub(crate) fn pause(store: &mut crate::Store, claim: &mut bool) -> Result<()> {
     #[cfg(target_family = "wasm")]
     if store.is_publish_copy() && !store.conn.is_autocommit() {
-        store.set_partial(true);
+        if !*claim {
+            store.copy_job_started();
+            *claim = true;
+        }
         store.conn.execute_batch("COMMIT")?;
     }
-    let _ = store;
+    let _ = (store, claim);
     Ok(())
 }
 
-/// After a job's last commit: the copy holds the whole replacement.
-pub(crate) fn completed(store: &mut crate::Store) {
+/// After a job's last commit: the copy holds the whole of it.
+pub(crate) fn completed(store: &mut crate::Store, claim: &mut bool) {
     #[cfg(target_family = "wasm")]
-    store.set_partial(false);
-    let _ = store;
+    if std::mem::take(claim) {
+        store.copy_job_ended(true);
+    }
+    let _ = (store, claim);
+}
+
+/// A job that committed slices on a publish copy ended without its last
+/// commit (dropped, failed, handed back): the copy is broken for good, and
+/// `finish_publish` refuses it, whatever later jobs on it do.
+pub(crate) fn abandoned(store: &mut crate::Store, claim: &mut bool) {
+    #[cfg(target_family = "wasm")]
+    if std::mem::take(claim) {
+        store.copy_job_ended(false);
+    }
+    let _ = (store, claim);
 }
 
 /// Rolls back the job's transaction if it is open.
@@ -136,17 +154,19 @@ pub(crate) fn roll_back(conn: &Connection) {
 /// connection setting) returns to the caller. Natively its error, as the
 /// one-shot methods always reported it. In the browser the publish runs on
 /// a copy that the caller swaps in on success and abandons on error, so a
-/// cleanup failure is logged instead of discarding committed work.
-pub(crate) fn after_commit(cleanup: Result<()>) -> Result<()> {
-    #[cfg(not(target_family = "wasm"))]
-    return cleanup;
+/// cleanup failure on a publish copy is logged instead of discarding
+/// committed work. On any other store (the live database) it is returned:
+/// a stage left attached would keep its memory and refuse the next attach.
+pub(crate) fn after_commit(store: &crate::Store, cleanup: Result<()>) -> Result<()> {
     #[cfg(target_family = "wasm")]
-    {
+    if store.is_publish_copy() {
         if let Err(e) = cleanup {
             log::warn!("cleanup after a committed publish failed: {e}");
         }
-        Ok(())
+        return Ok(());
     }
+    let _ = store;
+    cleanup
 }
 
 pub(crate) fn finished_error() -> crate::StoreError {

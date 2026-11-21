@@ -773,9 +773,12 @@ struct PublishGuard {
     /// The database this publish copied: the one it unfreezes, and the only
     /// one it may replace (a restore since gives the files another).
     database: SharedFile,
-    /// A replacement on the copy committed some of its steps but not its
-    /// last: the copy holds half a publish and must not be swapped in.
-    partial: bool,
+    /// Replacements that committed slices on the copy and have not committed
+    /// their last step yet.
+    open_jobs: u32,
+    /// One of them ended without its last commit: the copy holds half a
+    /// publish for good and must not be swapped in.
+    broken: bool,
     armed: bool,
 }
 
@@ -1023,11 +1026,19 @@ impl Store {
             .is_some_and(|link| link.role == Role::PublishCopy)
     }
 
-    /// Marks this publish copy as holding part of a replacement (or no
-    /// longer): `finish_publish` refuses a partial copy.
-    pub(crate) fn set_partial(&mut self, partial: bool) {
+    /// A replacement committed its first slice on this publish copy.
+    pub(crate) fn copy_job_started(&mut self) {
         if let Some(guard) = self.browser.as_mut().and_then(|link| link.publish.as_mut()) {
-            guard.partial = partial;
+            guard.open_jobs += 1;
+        }
+    }
+
+    /// A replacement that committed slices on this copy ended: with its last
+    /// commit, or without (the copy is then broken for good).
+    pub(crate) fn copy_job_ended(&mut self, committed: bool) {
+        if let Some(guard) = self.browser.as_mut().and_then(|link| link.publish.as_mut()) {
+            guard.open_jobs = guard.open_jobs.saturating_sub(1);
+            guard.broken |= !committed;
         }
     }
 
@@ -1078,7 +1089,8 @@ impl Store {
             files: files.clone(),
             copy,
             database,
-            partial: false,
+            open_jobs: 0,
+            broken: false,
             armed: true,
         };
         let mut store = Self::open_role(
@@ -1130,8 +1142,8 @@ impl Store {
             .ok_or_else(|| unavailable("the publish copy has ended"))?;
         // Closes the copy's connection; the guard still owns the publish.
         drop(copy);
-        if guard.partial {
-            return Err(unavailable("the replacement on the copy did not finish"));
+        if guard.broken || guard.open_jobs > 0 {
+            return Err(unavailable("a replacement on the copy did not finish"));
         }
         let database = guard.database.clone();
         let new = std::mem::take(&mut lock(&guard.copy).data);

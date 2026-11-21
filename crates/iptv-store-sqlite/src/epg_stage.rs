@@ -53,7 +53,7 @@ const BATCH_TEXT: usize = 1 << 20;
 const IN_FLIGHT: usize = 2;
 const PREFIX: &str = "epg-stage-";
 
-const SCHEMA: &str = "
+pub(crate) const SCHEMA: &str = "
     CREATE TABLE programs (
         ch INTEGER NOT NULL,
         start INTEGER NOT NULL,

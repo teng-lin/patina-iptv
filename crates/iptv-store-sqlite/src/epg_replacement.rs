@@ -105,6 +105,9 @@ pub struct EpgReplacement<'a, S: BorrowMut<Store>> {
     /// Per feed: channels and programs written.
     per_feed: HashMap<u32, (u64, u64)>,
     ends_at: Option<i64>,
+    /// This job committed slices on a browser publish copy
+    /// (`replacement::pause`).
+    copy_claim: bool,
     /// Tests: an error the cleanup after the commit reports.
     #[cfg(test)]
     pub(crate) fail_cleanup: Option<StoreError>,
@@ -199,6 +202,7 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
             known,
             per_feed: HashMap::new(),
             ends_at: None,
+            copy_claim: false,
             #[cfg(test)]
             fail_cleanup: None,
         })
@@ -251,7 +255,14 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
         }
         let stepped = self.resume().and_then(|()| self.advance(&mut meter));
         let stepped = match stepped {
-            Ok(Step::Pending) => replacement::pause(self.store()).map(|()| Step::Pending),
+            Ok(Step::Pending) => {
+                let store = self
+                    .store
+                    .as_mut()
+                    .expect("the store stays until the job is dropped")
+                    .borrow_mut();
+                replacement::pause(store, &mut self.copy_claim).map(|()| Step::Pending)
+            }
             other => other,
         };
         match stepped {
@@ -259,7 +270,7 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
                 let cleanup = self.end();
                 #[cfg(test)]
                 let cleanup = cleanup.and(self.fail_cleanup.take().map_or(Ok(()), Err));
-                replacement::after_commit(cleanup)?;
+                replacement::after_commit(self.store(), cleanup)?;
                 Ok(Step::Done(counts))
             }
             Ok(Step::Pending) => Ok(Step::Pending),
@@ -291,10 +302,14 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
         let Some(store) = self.store.as_mut() else {
             return Ok(());
         };
-        let conn = &store.borrow_mut().conn;
+        let store = store.borrow_mut();
         if running {
-            replacement::roll_back(conn);
+            replacement::roll_back(&store.conn);
         }
+        if self.progress != Progress::Committed {
+            replacement::abandoned(store, &mut self.copy_claim);
+        }
+        let conn = &store.conn;
         let restored = if tuned {
             conn.pragma_update(None, "foreign_keys", true)
                 .and_then(|()| conn.pragma_update(None, "cache_size", -crate::CACHE_KIB))
@@ -697,7 +712,12 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
         )?;
         conn.execute_batch("COMMIT")?;
         self.progress = Progress::Committed;
-        replacement::completed(self.store());
+        let store = self
+            .store
+            .as_mut()
+            .expect("the store stays until the job is dropped")
+            .borrow_mut();
+        replacement::completed(store, &mut self.copy_claim);
         Ok(counts)
     }
 }
@@ -715,24 +735,17 @@ fn copy_slice(
     meter: &mut Meter,
     mut copy: Transfer,
 ) -> Result<Transfer> {
-    let description = if copy.descriptions {
-        " AND description IS NOT NULL"
-    } else {
-        ""
+    // The first slice has no lower bound (a start can be any i64); later
+    // ones continue after the last start, a seek on the stage's primary key
+    // (ch, start), so each slice reads only what it copies.
+    let mut end = conn.prepare_cached(&slice_end_sql(copy.descriptions, copy.after.is_some()))?;
+    let last: Option<i64> = match copy.after {
+        None => end.query_row(params![copy.staged.id, meter.limit()], |r| r.get(0))?,
+        Some(after) => {
+            end.query_row(params![copy.staged.id, meter.limit(), after], |r| r.get(0))?
+        }
     };
-    // The first slice has no lower bound (a start can be any i64).
-    let after = copy.after.unwrap_or(i64::MIN);
-    let from = if copy.after.is_some() {
-        "start > ?2"
-    } else {
-        "?2 IS NOT NULL"
-    };
-    let last: Option<i64> = conn
-        .prepare_cached(&format!(
-            "SELECT max(start) FROM (SELECT start FROM epg_stage.programs
-             WHERE ch = ?1 AND {from}{description} ORDER BY start LIMIT ?3)"
-        ))?
-        .query_row(params![copy.staged.id, after, meter.limit()], |r| r.get(0))?;
+    drop(end);
     let Some(last) = last else {
         if copy.descriptions {
             copy.finished = true;
@@ -742,27 +755,11 @@ fn copy_slice(
         }
         return Ok(copy);
     };
-    // `OR FAIL`, with foreign keys off: see `copy_programs`.
-    let n = if copy.descriptions {
-        conn.prepare_cached(
-            "INSERT OR FAIL INTO main.epg_descriptions (channel_id, start, description)
-             SELECT ?1, start, description FROM epg_stage.programs
-             WHERE ch = ?2 AND (?3 IS NULL OR start > ?3) AND start <= ?4
-                 AND description IS NOT NULL
-             ORDER BY start",
-        )?
-        .execute(params![copy.channel, copy.staged.id, copy.after, last])?
-    } else {
-        conn.prepare_cached(
-            "INSERT OR FAIL INTO main.epg_programs (channel_id, start, stop, title, sub_title,
-                 category, icon, rating, catchup_id, season, episode)
-             SELECT ?1, start, stop, title, sub_title, category, icon, rating, catchup_id,
-                 season, episode
-             FROM epg_stage.programs WHERE ch = ?2 AND (?3 IS NULL OR start > ?3)
-                 AND start <= ?4
-             ORDER BY start",
-        )?
-        .execute(params![copy.channel, copy.staged.id, copy.after, last])?
+    let sql = slice_insert_sql(copy.descriptions, copy.after.is_some());
+    let mut insert = conn.prepare_cached(&sql)?;
+    let n = match copy.after {
+        None => insert.execute(params![copy.channel, copy.staged.id, last])?,
+        Some(after) => insert.execute(params![copy.channel, copy.staged.id, last, after])?,
     };
     if copy.descriptions {
         copy.descriptions_copied += n as u64;
@@ -772,6 +769,45 @@ fn copy_slice(
     meter.spend(n.max(1));
     copy.after = Some(last);
     Ok(copy)
+}
+
+/// The last start of a schedule slice: `?1` the stage channel, `?2` the
+/// limit, `?3` the last start copied (when continuing).
+fn slice_end_sql(descriptions: bool, continuing: bool) -> String {
+    let description = if descriptions {
+        " AND description IS NOT NULL"
+    } else {
+        ""
+    };
+    let lower = if continuing { " AND start > ?3" } else { "" };
+    format!(
+        "SELECT max(start) FROM (SELECT start FROM epg_stage.programs
+         WHERE ch = ?1{lower}{description} ORDER BY start LIMIT ?2)"
+    )
+}
+
+/// Copies a schedule slice: `?1` the channel, `?2` the stage channel, `?3`
+/// the slice's last start, `?4` the last start copied (when continuing).
+fn slice_insert_sql(descriptions: bool, continuing: bool) -> String {
+    let lower = if continuing { " AND start > ?4" } else { "" };
+    // `OR FAIL`, with foreign keys off: see `copy_programs`.
+    if descriptions {
+        format!(
+            "INSERT OR FAIL INTO main.epg_descriptions (channel_id, start, description)
+             SELECT ?1, start, description FROM epg_stage.programs
+             WHERE ch = ?2 AND start <= ?3{lower} AND description IS NOT NULL
+             ORDER BY start"
+        )
+    } else {
+        format!(
+            "INSERT OR FAIL INTO main.epg_programs (channel_id, start, stop, title, sub_title,
+                 category, icon, rating, catchup_id, season, episode)
+             SELECT ?1, start, stop, title, sub_title, category, icon, rating, catchup_id,
+                 season, episode
+             FROM epg_stage.programs WHERE ch = ?2 AND start <= ?3{lower}
+             ORDER BY start"
+        )
+    }
 }
 
 /// Adds a channel's copied schedule to the counts.
@@ -809,6 +845,46 @@ impl StageHold<'_> {
         match self {
             Self::Borrowed(stage) => stage,
             Self::Owned(stage) => stage,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A continuing slice seeks the stage's primary key past its last start
+    /// instead of rescanning the channel's earlier programs.
+    #[test]
+    fn continuing_slices_seek_past_the_last_start() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .conn
+            .execute_batch(&format!(
+                "ATTACH DATABASE ':memory:' AS epg_stage;
+                 {}",
+                crate::epg_stage::SCHEMA
+                    .replace("CREATE TABLE programs", "CREATE TABLE epg_stage.programs")
+            ))
+            .unwrap();
+        let plan = |sql: &str| -> String {
+            let mut stmt = store
+                .conn
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .unwrap();
+            let rows = stmt
+                .query_map(
+                    rusqlite::params_from_iter(std::iter::repeat_n(0i64, stmt.parameter_count())),
+                    |r| r.get::<_, String>(3),
+                )
+                .unwrap();
+            rows.map(Result::unwrap).collect::<Vec<_>>().join("; ")
+        };
+        for descriptions in [false, true] {
+            let end = plan(&slice_end_sql(descriptions, true));
+            assert!(end.contains("ch=? AND start>?"), "{end}");
+            let insert = plan(&slice_insert_sql(descriptions, true));
+            assert!(insert.contains("ch=? AND start>? AND start<?"), "{insert}");
         }
     }
 }

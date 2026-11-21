@@ -137,6 +137,9 @@ pub struct CatalogReplacement<'a, S: BorrowMut<Store>> {
     /// Rows inserted per kind (rows input).
     inserted: [usize; 4],
     guides: Option<Vec<GuideSource>>,
+    /// This job committed slices on a browser publish copy
+    /// (`replacement::pause`).
+    copy_claim: bool,
     /// Tests: an error the cleanup after the commit reports.
     #[cfg(test)]
     pub(crate) fail_cleanup: Option<StoreError>,
@@ -214,6 +217,7 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
             fts: false,
             inserted: [0; 4],
             guides: None,
+            copy_claim: false,
             #[cfg(test)]
             fail_cleanup: None,
         }
@@ -266,7 +270,14 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
         }
         let stepped = self.resume().and_then(|()| self.advance(&mut meter));
         let stepped = match stepped {
-            Ok(Step::Pending) => replacement::pause(self.store()).map(|()| Step::Pending),
+            Ok(Step::Pending) => {
+                let store = self
+                    .store
+                    .as_mut()
+                    .expect("the store stays until the job is dropped")
+                    .borrow_mut();
+                replacement::pause(store, &mut self.copy_claim).map(|()| Step::Pending)
+            }
             other => other,
         };
         match stepped {
@@ -278,7 +289,7 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
                 let cleanup = self.detach();
                 #[cfg(test)]
                 let cleanup = cleanup.and(self.fail_cleanup.take().map_or(Ok(()), Err));
-                replacement::after_commit(cleanup)?;
+                replacement::after_commit(self.store(), cleanup)?;
                 Ok(Step::Done(published))
             }
             Ok(Step::Pending) => Ok(Step::Pending),
@@ -313,6 +324,9 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
         let store = store.borrow_mut();
         if self.progress == Progress::Running {
             replacement::roll_back(&store.conn);
+        }
+        if self.progress != Progress::Committed {
+            replacement::abandoned(store, &mut self.copy_claim);
         }
         if let Input::Stage { attached, .. } = &mut self.input
             && std::mem::take(attached)
@@ -644,7 +658,12 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
         if rows {
             crate::catalog::crash_boundary("committed");
         }
-        replacement::completed(self.store());
+        let store = self
+            .store
+            .as_mut()
+            .expect("the store stays until the job is dropped")
+            .borrow_mut();
+        replacement::completed(store, &mut self.copy_claim);
         Ok(CatalogPublished {
             counts,
             guides: self.guides.take(),
