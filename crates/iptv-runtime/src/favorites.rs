@@ -540,8 +540,14 @@ pub(crate) fn watch_time(owner: &super::Runtime, source: SourceId, key: String, 
 fn send(owner: &super::Runtime, write: Write) {
     let counted = !matches!(write, Write::Barrier(_) | Write::Shutdown(_));
     if !owner.services().has_workers() {
-        // No writer can run here: the change stays in memory, unsaved, and
-        // reads do not wait for it (a barrier answers false).
+        // No writer can run here: changes last for the session. They are
+        // kept in memory, and what waits for them hears that they are done.
+        match write {
+            Write::Barrier(done) => drop(done.send(true)),
+            Write::Shutdown(done) => drop(done.send(true)),
+            Write::SaveOrder(done) => done(true),
+            _ => owner.note_session_only(),
+        }
         return;
     }
     owner.favorite_writer.with(|w| {
@@ -1352,6 +1358,45 @@ mod start_tests {
         fn tasks(&self) -> Box<dyn Tasks> {
             crate::native::execution::NativeExecution.tasks()
         }
+    }
+
+    struct Unpolled;
+    impl crate::execution::CooperativeHost for Unpolled {
+        fn spawn(&self, _: crate::execution::Task) {}
+        fn delay(&self, _: std::time::Duration) -> crate::execution::Task {
+            Box::pin(std::future::pending())
+        }
+        fn now(&self) -> std::time::Duration {
+            std::time::Duration::ZERO
+        }
+    }
+
+    #[test]
+    fn without_workers_changes_are_session_only_and_said_so_once() {
+        let mut ports = crate::Ports::for_tests();
+        ports.execution = std::sync::Arc::new(crate::execution::Cooperative::new(
+            std::sync::Arc::new(Unpolled),
+        ));
+        let owner = crate::Runtime::new(ports);
+        let notices = std::rc::Rc::new(std::cell::Cell::new(0));
+        let seen = notices.clone();
+        owner.bind(move |event| {
+            if matches!(event, crate::RuntimeEvent::Notify(_)) {
+                seen.set(seen.get() + 1);
+            }
+        });
+        owner.start_services();
+        watch_time(&owner, SourceId(1), "synthetic-channel".into(), 1_000);
+        watch_time(&owner, SourceId(1), "synthetic-channel".into(), 1_000);
+        let cleared = clear_history(&owner);
+        let mut cleared = std::pin::pin!(cleared);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert_eq!(
+            cleared.as_mut().poll(&mut context),
+            std::task::Poll::Ready(true),
+            "a session-only change is done"
+        );
+        assert_eq!(notices.get(), 1, "the user hears it once");
     }
 
     #[test]

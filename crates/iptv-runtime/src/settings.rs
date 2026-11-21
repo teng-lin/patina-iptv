@@ -292,6 +292,7 @@ fn apply(
     if !services.has_workers() {
         // No file writer runs here (a browser host keeps its files through
         // a port still to come): the settings apply for this session.
+        owner.note_session_only();
         return Ok(());
     }
     let saved = services

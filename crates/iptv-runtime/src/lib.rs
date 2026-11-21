@@ -127,6 +127,8 @@ pub struct Runtime {
     link_client:
         std::sync::Arc<std::sync::Mutex<Option<(network::NetworkConfig, network::Client)>>>,
     backup_busy: Cell<bool>,
+    /// The user was told that changes last for the session.
+    session_only_noted: Cell<bool>,
     backup_progress: Cell<backup::Progress>,
     search: search::State,
     favorites: Slot<RefCell<favorites::State>>,
@@ -197,6 +199,7 @@ impl Runtime {
             settings_read_only: Cell::new(None),
             link_client: Default::default(),
             backup_busy: Cell::new(false),
+            session_only_noted: Cell::new(false),
             backup_progress: Cell::new(backup::Progress::Idle),
             search: search::State::default(),
             favorites: Slot::default(),

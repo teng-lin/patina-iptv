@@ -119,6 +119,16 @@ impl Runtime {
         crate::playback::link_client(self, config)
     }
 
+    /// Tells the user, once per owner, that changes last for the session:
+    /// this host has no writer to save them.
+    pub(crate) fn note_session_only(&self) {
+        if !self.session_only_noted.replace(true) {
+            self.emit(crate::RuntimeEvent::Notify(
+                "Changes last until Patina closes on this device.",
+            ));
+        }
+    }
+
     /// The host has blocking workers: imports, guide downloads, staged
     /// probes, backups and the file and favorites writers need them. A
     /// cooperative browser host has none, and its shell offers none of
