@@ -13,7 +13,8 @@
 //! Keys: the arrows, OK (the tile's menu), Long OK where keys report their
 //! release (enlarge/reduce), Back. A pointer (desktop, tablet; never a TV)
 //! shows the pointer chrome while it moves or after a tap, on the play
-//! bar's timer (`ui.play_bar`, which does not show itself in multiview): a
+//! bar's timer (`ui.play_bar`, which does not show itself in multiview, and
+//! which keeps the chrome until the next tap while a screen reader runs): a
 //! toolbar (Add screen, Exit multiview) and each tile's remove and
 //! enlarge buttons. A long press on a tile enlarges or reduces it.
 //!

@@ -109,10 +109,11 @@ In the guide:
   the accessibility focus stays on the window and a double tap chooses
   nothing. The NSH fix goes upstream first.
 - **Now:** with a screen reader on, the play bar over full-screen video
-  stays until the viewer hides it (a double tap on the video, Back or a
-  key) instead of hiding after its few seconds: moving from control to
-  control by swipes takes longer than that (WCAG 2.2.1,
-  `iptv_core::play_bar`).
+  stays until the viewer hides it (a double tap on the video, Back, or a
+  key off a TV) instead of hiding after its few seconds: moving from
+  control to control by swipes takes longer than that (WCAG 2.2.1,
+  `iptv_core::play_bar`). Multiview's pointer chrome, on the bar's timer,
+  stays the same way.
 
 ### Touch gestures in the guide
 

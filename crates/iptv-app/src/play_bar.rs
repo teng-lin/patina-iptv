@@ -1,8 +1,8 @@
 //! The pointer's play bar at the bottom of full-screen video: on the
 //! desktop the mouse moving over the video shows it, on a tablet a tap
 //! (a click on the desktop) shows it and another hides it; it hides after
-//! a few seconds without input, but not while the mouse rests on it
-//! (`iptv_core::play_bar`). A TV opens this same bar with long OK or Menu
+//! a few seconds without input, but not while the mouse rests on it nor
+//! while a screen reader runs (`iptv_core::play_bar`). A TV opens this same bar with long OK or Menu
 //! and traverses its controls with the D-pad. Short OK keeps the info card.
 //!
 //! Left: mute and (desktop) volume, the stream's quality, the channel.
@@ -97,8 +97,9 @@ pub fn shows(ui: Ui) -> bool {
         && available()
 }
 
-/// Leaving full screen or a key hides the bar; it stays while a popup
-/// over the video (a chooser, the program details) is open.
+/// Leaving full screen or a key (off a TV) hides the bar; it stays while
+/// a popup over the video (a chooser, the program details) is open or a
+/// screen reader runs.
 pub fn bind(ui: Ui) {
     effect(move || {
         let away =
