@@ -85,6 +85,12 @@ def plan(root=ROOT, release=False, tier="full", host="linux"):
         # The Tizen host's core; its TV artifact is built by hosts/tizen/build.sh.
         steps.append(step("web-core-wasm", "cargo", "build", "--locked", "-p", "iptv-web",
                           "--target", "wasm32-unknown-unknown"))
+        # The SQLite store's browser build: its tests compile for wasm32, then
+        # run in Node (needs a clang with the wasm32 target, and Node).
+        steps.append(step("store-wasm-check", "cargo", "check", "--locked", "-p", "iptv-store-sqlite",
+                          "--target", "wasm32-unknown-unknown", "--lib", "--tests"))
+        steps.append(step("store-wasm-tests", "node", "tools/wasm-test.mjs", "--cargo", "--locked",
+                          "-p", "iptv-store-sqlite", "--lib", "--test", "it"))
     steps.extend([
         step("guide-input-budget", "cargo", "test", *test_args,
              "--test", "app", LATENCY, "--", "--ignored", "--exact", "--format=pretty"),
