@@ -58,6 +58,9 @@ struct Inner {
     scheduled: Mutex<bool>,
     /// The lane the next turn starts with: the one the last turn reached.
     next: Mutex<usize>,
+    /// The lane whose sliced job may take the next turn's slice, so two
+    /// publishes take turns.
+    next_slice: Mutex<usize>,
 }
 
 impl Cooperative {
@@ -82,6 +85,7 @@ impl Cooperative {
             lanes: Mutex::default(),
             scheduled: Mutex::new(false),
             next: Mutex::new(0),
+            next_slice: Mutex::new(0),
         }))
     }
 }
@@ -237,6 +241,19 @@ impl Inner {
         let started = self.host.now();
         let lanes = self.lanes();
         let mut next = *lock(&self.next);
+        // The one lane whose sliced job may step this turn: the first, from
+        // where the last slice left off, that has one waiting.
+        let slicer = if lanes.is_empty() {
+            None
+        } else {
+            let from = *lock(&self.next_slice);
+            (0..lanes.len())
+                .map(|offset| (from + offset) % lanes.len())
+                .find(|&index| {
+                    let lane = lock(&lanes[index]);
+                    !lane.running && matches!(lane.queue.front(), Some(Item::Sliced(_)))
+                })
+        };
         let mut sliced = false;
         loop {
             let mut ran = false;
@@ -247,15 +264,17 @@ impl Inner {
                     spent = true;
                     break;
                 }
-                let lane = &lanes[next % lanes.len()];
+                let index = next % lanes.len();
+                let lane = &lanes[index];
                 next = (next + 1) % lanes.len();
-                let may_slice = !sliced && used <= self.turn / 2;
+                let may_slice = !sliced && slicer == Some(index) && used <= self.turn / 2;
                 match run_one(lane, Cooperative::SLICE, may_slice) {
                     Ran::Nothing => {}
                     Ran::Job => ran = true,
                     Ran::Slice => {
                         ran = true;
                         sliced = true;
+                        *lock(&self.next_slice) = index + 1;
                     }
                 }
             }
@@ -605,6 +624,31 @@ mod tests {
         assert!(!host.poll());
         assert_eq!(steps.lock().unwrap().len(), 3);
         assert_eq!(log.lock().unwrap().last().unwrap().as_str(), "write");
+    }
+
+    #[test]
+    fn two_publishes_take_turns_at_the_slice() {
+        let (host, execution) = setup();
+        let first = execution.lane("first").unwrap();
+        let second = execution.lane("second").unwrap();
+        let (one, one_steps, _) = publish(&host, 3);
+        let (two, two_steps, _) = publish(&host, 3);
+        first.push_sliced(one);
+        second.push_sliced(two);
+        let counts = || {
+            (
+                one_steps.lock().unwrap().len(),
+                two_steps.lock().unwrap().len(),
+            )
+        };
+        host.poll();
+        assert_eq!(counts(), (1, 0));
+        host.poll();
+        assert_eq!(counts(), (1, 1));
+        host.poll();
+        assert_eq!(counts(), (2, 1));
+        host.poll();
+        assert_eq!(counts(), (2, 2));
     }
 
     #[test]
