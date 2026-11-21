@@ -18,6 +18,7 @@
 //!   runtime's capability model reports them so).
 use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
@@ -90,33 +91,49 @@ struct Page {
     buffered: usize,
 }
 
-/// `work`, unless `deadline` (on `fetch`'s clock) passes first: the request's
-/// total time, which the page's fetch does not bound by itself.
-async fn within<T>(
-    fetch: &HostFetch,
-    deadline: Duration,
-    work: impl Future<Output = Result<T, FetchError>>,
-) -> Result<T, FetchError> {
-    let mut timer = std::pin::pin!(fetch.sleep(deadline.saturating_sub(fetch.elapsed())));
-    let mut work = std::pin::pin!(work);
-    std::future::poll_fn(move |cx| {
-        if let Poll::Ready(result) = work.as_mut().poll(cx) {
-            return Poll::Ready(result);
-        }
-        timer.as_mut().poll(cx).map(|()| {
-            Err(FetchError::new(
-                FetchErrorKind::Deadline,
-                "total request time exceeded",
-            ))
-        })
-    })
-    .await
+/// The longest wait a host timer holds (`setTimeout` counts milliseconds
+/// in a signed 32-bit integer).
+const LONGEST_TIMER: Duration = Duration::from_millis(i32::MAX as u64);
+
+/// When a request's total time ends, with one host timer for all of it:
+/// the response and every chunk of its body race the same timer.
+struct Deadline {
+    /// On the request's `HostFetch` clock.
+    at: Duration,
+    timer: Pin<Box<dyn Future<Output = ()>>>,
 }
 
-impl Page {
-    /// When `request`'s total time ends (the client always sets one).
-    fn deadline(&self, request: &HttpRequest) -> Duration {
-        self.fetch.elapsed() + request.timeout.unwrap_or(Duration::MAX / 4)
+impl Deadline {
+    fn new(fetch: &HostFetch, request: &HttpRequest) -> Self {
+        // The client always sets a timeout; a request without one waits as
+        // long as a host timer can.
+        let timeout = request.timeout.unwrap_or(LONGEST_TIMER).min(LONGEST_TIMER);
+        let timer = fetch.clone();
+        Self {
+            at: fetch.elapsed() + timeout,
+            timer: Box::pin(async move { timer.sleep(timeout).await }),
+        }
+    }
+
+    /// `work`, unless the deadline passes first. The clock is checked before
+    /// `work` is polled, so a result that arrives late is not taken.
+    async fn within<T>(
+        &mut self,
+        fetch: &HostFetch,
+        work: impl Future<Output = Result<T, FetchError>>,
+    ) -> Result<T, FetchError> {
+        let mut work = std::pin::pin!(work);
+        let expired = || FetchError::new(FetchErrorKind::Deadline, "total request time exceeded");
+        std::future::poll_fn(move |cx| {
+            if fetch.elapsed() >= self.at {
+                return Poll::Ready(Err(expired()));
+            }
+            if let Poll::Ready(result) = work.as_mut().poll(cx) {
+                return Poll::Ready(result);
+            }
+            self.timer.as_mut().poll(cx).map(|()| Err(expired()))
+        })
+        .await
     }
 }
 
@@ -130,9 +147,11 @@ impl Transport for Page {
     }
 
     fn fetch(&self, request: HttpRequest) -> NetFuture<'_, Result<HttpResponse, FetchError>> {
-        let deadline = self.deadline(&request);
-        Box::pin(within(&self.fetch, deadline, async move {
-            let mut response = self.fetch.fetch_stream(request).await?;
+        let mut deadline = Deadline::new(&self.fetch, &request);
+        Box::pin(async move {
+            let mut response = deadline
+                .within(&self.fetch, self.fetch.fetch_stream(request))
+                .await?;
             if response.is_success()
                 && response
                     .content_length
@@ -144,7 +163,10 @@ impl Transport for Page {
                 ));
             }
             let mut bytes = Vec::new();
-            while let Some(chunk) = response.body.next_chunk().await? {
+            while let Some(chunk) = deadline
+                .within(&self.fetch, response.body.next_chunk())
+                .await?
+            {
                 if bytes.len() + chunk.len() > self.buffered {
                     return Err(FetchError::new(
                         FetchErrorKind::TooLarge,
@@ -154,21 +176,23 @@ impl Transport for Page {
                 bytes.extend_from_slice(&chunk);
             }
             Ok(HttpResponse::new(response.status, bytes))
-        }))
+        })
     }
 
     fn fetch_stream(
         &self,
         request: HttpRequest,
     ) -> NetFuture<'_, Result<StreamingResponse<Body>, FetchError>> {
-        let deadline = self.deadline(&request);
+        let mut deadline = Deadline::new(&self.fetch, &request);
         Box::pin(async move {
-            let response = within(&self.fetch, deadline, self.fetch.fetch_stream(request)).await?;
+            let response = deadline
+                .within(&self.fetch, self.fetch.fetch_stream(request))
+                .await?;
             Ok(StreamingResponse {
                 status: response.status,
                 content_length: response.content_length,
                 body: Body::new(PageBody {
-                    body: response.body,
+                    body: Some(response.body),
                     fetch: self.fetch.clone(),
                     deadline,
                 }),
@@ -179,14 +203,27 @@ impl Transport for Page {
 
 /// A streamed body whose chunks end with the request's total time.
 struct PageBody {
-    body: HostBody,
+    /// Dropped (which closes it in the host) when the deadline passes.
+    body: Option<HostBody>,
     fetch: HostFetch,
-    deadline: Duration,
+    deadline: Deadline,
 }
 
 impl Chunks for PageBody {
     fn next_chunk(&mut self) -> NetFuture<'_, Result<Option<Vec<u8>>, FetchError>> {
-        Box::pin(within(&self.fetch, self.deadline, self.body.next_chunk()))
+        Box::pin(async move {
+            let Some(body) = self.body.as_mut() else {
+                return Err(FetchError::new(
+                    FetchErrorKind::Deadline,
+                    "total request time exceeded",
+                ));
+            };
+            let chunk = self.deadline.within(&self.fetch, body.next_chunk()).await;
+            if chunk.is_err() {
+                self.body = None;
+            }
+            chunk
+        })
     }
 }
 
