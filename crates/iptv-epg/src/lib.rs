@@ -28,6 +28,7 @@ mod normalize;
 mod parser;
 mod settle;
 mod settled_source;
+mod snapshot;
 mod store;
 mod strict;
 mod superscript;
@@ -44,6 +45,7 @@ pub use normalize::{normalize_name, strip_tag_prefix};
 pub use parser::{ParseOptions, ParseStats, ParseWarnings, ParsedXmltv, XmltvParser, parse_xmltv};
 pub use settle::{ScheduleRules, Settled};
 pub use settled_source::SettledBuilder;
+pub use snapshot::{SnapshotError, VERSION as SNAPSHOT_VERSION};
 pub use store::{
     EpgSource, GuideStore, IngestReport, NowNext, ProgramData, ProgramRef, ScheduleRef,
     SourceBuilder, StoreOptions,
