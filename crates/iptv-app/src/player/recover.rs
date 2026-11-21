@@ -14,7 +14,6 @@ use super::{later, open, target};
 use crate::{Playback, Ui};
 
 pub(super) fn fail(ui: Ui, surface: usize, session: u64, kind: ErrorKind, detail: String) {
-    eprintln!("DEBUG187 fail {surface} session {session} {kind:?} {detail}");
     let health = ui.player.stream(surface).health;
     if health.with_untracked(|h| h.session()) != session {
         return;
@@ -37,7 +36,6 @@ pub(super) fn fail(ui: Ui, surface: usize, session: u64, kind: ErrorKind, detail
 }
 
 fn schedule_retry(ui: Ui, surface: usize, retry: Retry) {
-    eprintln!("DEBUG187 retry {surface}");
     let wait = retry.at_ms.saturating_sub(ui.now_ms());
     log::info!("iptv player {surface} retry {} in {wait} ms", retry.attempt);
     watch_indicator(ui, surface);
@@ -128,7 +126,6 @@ pub(super) fn watch_stall(ui: Ui, surface: usize) {
 
 /// The host's `state` event from `surface`.
 pub fn on_state(ui: Ui, surface: usize, state: PlayerState) {
-    eprintln!("DEBUG187 native state {surface} {state:?}");
     if surface == 0 && state == PlayerState::Ended {
         ui.player.main().finished.set(true);
         crate::on_demand::flush(ui, true);
@@ -148,7 +145,6 @@ pub fn on_state(ui: Ui, surface: usize, state: PlayerState) {
 /// The host's `error` event from `surface`: Media3's code name and the
 /// HTTP status.
 pub fn on_error(ui: Ui, surface: usize, code: &str, http: Option<u16>) {
-    eprintln!("DEBUG187 native error {surface} {code} {http:?}");
     let kind = ErrorKind::from_player_code(code, http);
     let session = ui
         .player

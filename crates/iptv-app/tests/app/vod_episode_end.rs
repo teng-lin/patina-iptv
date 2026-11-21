@@ -215,9 +215,31 @@ fn watch(home: crate::isolated::Home, at: At, autoplay: bool, lock: Lock) -> Run
     }
 }
 
-/// The player reports the playing episode's last frame, then its end.
+/// The player plays the episode a moment, then reports its last frame
+/// and its end. (Ended the instant its stream opened, the first stream's
+/// runtime transport can still be settling on a slow host, and the next
+/// one waits for it.)
 fn end(run: &mut Run) {
     let token = run.props.lock().unwrap()["source"]["token"].clone();
+    for (name, data) in [
+        ("state", json!({"state": "ready"})),
+        (
+            "timeline",
+            json!({"token": token, "seekId": 0, "ms": 60_000, "durationMs": 120_000, "seekable": true}),
+        ),
+    ] {
+        run.app.engine().control().dispatch_event(
+            run.surface,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: name.into(),
+                data,
+            },
+        );
+        run.app.settle();
+    }
+    std::thread::sleep(Duration::from_secs(2));
+    run.app.settle();
     for (name, data) in [
         (
             "timeline",
