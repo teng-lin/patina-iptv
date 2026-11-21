@@ -23,13 +23,50 @@ thread_local! {
     static TASKS: RefCell<Vec<Task>> = const { RefCell::new(Vec::new()) };
     static SPAWNED: RefCell<Vec<Task>> = const { RefCell::new(Vec::new()) };
     static POLLING: Cell<bool> = const { Cell::new(false) };
+    /// A task was woken, or one spawned, since the current round began.
+    static WOKEN: Cell<bool> = const { Cell::new(false) };
+    /// A wake-up poll is already asked of the host.
+    static SCHEDULED: Cell<bool> = const { Cell::new(false) };
     static SLOTS: RefCell<HashMap<u32, Slot>> = RefCell::new(HashMap::new());
     static NEXT_ID: Cell<u32> = const { Cell::new(1) };
 }
 
-/// Runs `task` from the next [`poll`] on.
+/// Rounds one [`poll`] runs at most before it leaves the rest to the next
+/// one: a task that wakes itself on every poll must not hold the thread.
+const ROUNDS: usize = 64;
+
+/// The waker of every task: it marks work as runnable and, outside a
+/// poll, asks the host for one (a zero-length timer, whose delivery polls).
+struct Wake;
+
+impl std::task::Wake for Wake {
+    fn wake(self: std::sync::Arc<Self>) {
+        woken();
+    }
+}
+
+fn woken() {
+    WOKEN.with(|w| w.set(true));
+    if !POLLING.with(Cell::get) {
+        schedule();
+    }
+}
+
+/// Asks the host to call back soon, which polls.
+fn schedule() {
+    if SCHEDULED.with(|s| s.replace(true)) {
+        return;
+    }
+    if let Some(host) = crate::host::host_if_alive() {
+        host.sleep(next_id(), 0.0);
+    }
+}
+
+/// Runs `task` from the next [`poll`] on (one is asked of the host when
+/// none is running).
 pub(crate) fn spawn(task: impl Future<Output = ()> + 'static) {
     SPAWNED.with(|s| s.borrow_mut().push(Box::pin(task)));
+    woken();
 }
 
 /// Polls every task until none makes progress without a new delivery.
@@ -37,16 +74,26 @@ pub(crate) fn poll() {
     if POLLING.with(|p| p.replace(true)) {
         return; // A task's host call answered synchronously: the outer poll continues.
     }
-    let mut cx = Context::from_waker(Waker::noop());
-    // Every task runs until it waits on the host; a task spawned meanwhile
-    // gets its first poll in the next round.
+    SCHEDULED.with(|s| s.set(false));
+    let waker = Waker::from(std::sync::Arc::new(Wake));
+    let mut cx = Context::from_waker(&waker);
+    // Every task runs until it waits; while a task was woken or spawned
+    // during a round, another round follows.
+    let mut rounds = 0;
     loop {
+        WOKEN.with(|w| w.set(false));
         let mut tasks = TASKS.with(|t| std::mem::take(&mut *t.borrow_mut()));
         tasks.extend(SPAWNED.with(|s| std::mem::take(&mut *s.borrow_mut())));
         tasks.retain_mut(|t| t.as_mut().poll(&mut cx).is_pending());
-        TASKS.with(|t| *t.borrow_mut() = tasks);
-        if SPAWNED.with(|s| s.borrow().is_empty()) {
+        TASKS.with(|t| t.borrow_mut().extend(tasks));
+        rounds += 1;
+        if !WOKEN.with(Cell::get) {
             break;
+        }
+        if rounds == ROUNDS {
+            POLLING.with(|p| p.set(false));
+            schedule();
+            return;
         }
     }
     POLLING.with(|p| p.set(false));

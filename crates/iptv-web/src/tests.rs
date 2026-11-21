@@ -606,3 +606,74 @@ fn a_redirect_may_not_downgrade_or_leave_public_addresses() {
     let view = last_view(&fake);
     assert_eq!(view["status"]["phase"], "failed", "{view}");
 }
+
+#[test]
+fn a_task_woken_by_a_later_task_of_the_same_poll_runs_in_that_poll() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    let (send, receive) = futures_like::channel();
+    let done = Rc::new(std::cell::Cell::new(false));
+    let seen = done.clone();
+    crate::exec::spawn(async move {
+        receive.await;
+        seen.set(true);
+    });
+    crate::exec::spawn(async move { send.send() });
+    crate::exec::poll();
+    assert!(done.get(), "the waiting task ran once its reply arrived");
+    assert_eq!(crate::exec::pending_tasks(), 0);
+}
+
+#[test]
+fn a_task_spawned_outside_a_poll_asks_the_host_for_one() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    crate::exec::poll();
+    let before = fake.timers.borrow().len();
+    crate::exec::spawn(async {});
+    assert_eq!(fake.timers.borrow().len(), before + 1);
+    crate::exec::poll();
+    assert_eq!(crate::exec::pending_tasks(), 0);
+}
+
+/// A one-shot that registers its waker, as a real channel does.
+mod futures_like {
+    use std::cell::RefCell;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::rc::Rc;
+    use std::task::{Context, Poll, Waker};
+
+    #[derive(Default)]
+    struct Shared {
+        sent: bool,
+        waker: Option<Waker>,
+    }
+    pub struct Sender(Rc<RefCell<Shared>>);
+    pub struct Receiver(Rc<RefCell<Shared>>);
+    pub fn channel() -> (Sender, Receiver) {
+        let shared = Rc::default();
+        (Sender(Rc::clone(&shared)), Receiver(shared))
+    }
+    impl Sender {
+        pub fn send(self) {
+            let mut shared = self.0.borrow_mut();
+            shared.sent = true;
+            if let Some(waker) = shared.waker.take() {
+                waker.wake();
+            }
+        }
+    }
+    impl Future for Receiver {
+        type Output = ();
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+            let mut shared = self.0.borrow_mut();
+            if shared.sent {
+                Poll::Ready(())
+            } else {
+                shared.waker = Some(cx.waker().clone());
+                Poll::Pending
+            }
+        }
+    }
+}

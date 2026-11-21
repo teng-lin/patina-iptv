@@ -42,9 +42,17 @@ pub mod adapters {
 
     pub use crate::exec::{HostBody, HostFetch};
 
-    /// Runs `task` from the executor's next poll on.
+    /// Runs `task` from the executor's next poll on; outside a poll, one is
+    /// asked of the host.
     pub fn spawn(task: impl Future<Output = ()> + 'static) {
         crate::exec::spawn(task);
+    }
+
+    /// Polls the executor until no task can progress. iptv-web's own exports
+    /// poll after every delivery; a host that delivers through another
+    /// door (an NSH event) calls this after it.
+    pub fn poll() {
+        crate::exec::poll();
     }
 
     /// Ends after `duration`, on the host's timer.

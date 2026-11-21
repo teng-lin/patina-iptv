@@ -141,7 +141,10 @@ impl Chunks for PageBody {
 }
 
 /// The Worker's event loop: `iptv-web`'s executor, polled after every
-/// delivery from the host.
+/// delivery from the host. Its tasks have real wakers: a lane turn woken
+/// by work queued from an NSH task asks the host for a poll. The NSH TV
+/// platform also calls `iptv_web::adapters::poll` after each of its own
+/// deliveries (step 2).
 struct WorkerLoop;
 
 impl CooperativeHost for WorkerLoop {
