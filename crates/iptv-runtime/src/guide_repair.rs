@@ -118,9 +118,9 @@ fn receipt(owner: &Runtime, saved: Commit) -> Outcome {
 fn now() -> i64 {
     crate::imports::now_unix()
 }
-fn random_id() -> Result<String> {
+fn random_id(entropy: crate::ports::Entropy) -> Result<String> {
     let mut bytes = [0; 16];
-    getrandom::fill(&mut bytes).map_err(|_| Error::Storage)?;
+    entropy(&mut bytes).map_err(|_| Error::Storage)?;
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 fn digest_hex(bytes: &[u8; 32]) -> String {
@@ -205,11 +205,18 @@ impl Runtime {
     /// Implemented service surface, not a successful provider/credential probe.
     /// Host/storage readiness and source failures remain typed operation results.
     pub fn foundation_capabilities(&self) -> Vec<Capability> {
+        // Staged probes download on workers that block; a cooperative host
+        // has none and refuses them.
+        let probe = if self.services().can_block() {
+            CapabilityState::Implemented
+        } else {
+            CapabilityState::UnsupportedHost
+        };
         [
             ("catalog_queries", CapabilityState::Implemented),
             ("program_queries", CapabilityState::Implemented),
             ("epg_inspection", CapabilityState::Implemented),
-            ("epg_probe", CapabilityState::Implemented),
+            ("epg_probe", probe),
             ("epg_repair", CapabilityState::Implemented),
             ("epg_verification", CapabilityState::Implemented),
             ("epg_undo", CapabilityState::Implemented),
@@ -240,7 +247,7 @@ impl Runtime {
         } else {
             Err(Error::InvalidRequest)
         };
-        let id = random_id();
+        let id = random_id(services.ports().entropy);
         let created_at = now();
         let deadline = Instant::now() + control.timeout.min(PREVIEW_DEADLINE);
         let worker_cancel = CancelToken::new();

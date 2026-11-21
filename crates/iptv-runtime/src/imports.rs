@@ -1008,7 +1008,7 @@ pub(crate) async fn keep_picked_file(
 ) -> std::io::Result<String> {
     let name = kept_file_name(name);
     let mut random = [0u8; 8];
-    getrandom::fill(&mut random)
+    (services.ports().entropy)(&mut random)
         .map_err(|_| std::io::Error::other("cannot create document identity"))?;
     let dir = services
         .directory()

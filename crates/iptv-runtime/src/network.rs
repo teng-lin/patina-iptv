@@ -43,6 +43,10 @@ pub struct NetworkConfig {
     /// Ceiling on one request's total time; a request's own timeout applies
     /// when it is shorter.
     pub request_timeout: Duration,
+    /// Longest silence while waiting for headers or more body bytes.
+    pub read_timeout: Duration,
+    /// Redirects followed at most.
+    pub max_redirects: usize,
     /// Bytes a streamed body may deliver.
     pub max_streamed_bytes: u64,
     /// Bytes a buffered response may hold.
@@ -61,6 +65,8 @@ impl Default for NetworkConfig {
         Self {
             user_agent: iptv_providers::xtream::DEFAULT_USER_AGENT.to_owned(),
             request_timeout: Duration::from_secs(30 * 60),
+            read_timeout: Duration::from_secs(60),
+            max_redirects: 10,
             max_streamed_bytes: 512 << 20,
             max_buffered_bytes: 128 * 1024 * 1024,
             allow_files: true,

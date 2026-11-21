@@ -277,3 +277,4 @@ iptv-app/src/play_bar/icons.rs	<path d='M4 6h16M4 12h11M4 18h6'/>
 # Execution and entropy port failures are diagnostics; operations report typed errors.
 iptv-runtime/src/execution.rs	the task ended without an output
 iptv-runtime/src/execution/cooperative.rs	a cooperative executor has no workers
+iptv-runtime/src/ports.rs	the host supplied no entropy

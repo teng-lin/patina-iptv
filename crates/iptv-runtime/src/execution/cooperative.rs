@@ -240,6 +240,10 @@ impl Tasks for HostTasks {
     fn delay(&self, duration: Duration) -> Task {
         self.0.delay(duration)
     }
+
+    fn can_block(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

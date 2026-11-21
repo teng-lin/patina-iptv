@@ -8,6 +8,9 @@ use std::{
 
 type KeyBroker = dyn Fn(&Path) -> Result<DatabaseKey, StoreError> + Send + Sync;
 
+/// Fills a buffer with random bytes from the platform's secure source.
+pub type Entropy = fn(&mut [u8]) -> io::Result<()>;
+
 /// `Send` when the runtime runs work on threads (the `native` feature); no
 /// bound in a single-threaded browser build, whose adapters hold the page's
 /// values.
@@ -50,6 +53,10 @@ pub struct Ports {
     pub network: Arc<dyn crate::network::Network>,
     /// Runs store lanes, workers and each owner's tasks.
     pub execution: Arc<dyn crate::execution::Execution>,
+    /// Random bytes for salts, recovery codes and private identities. The
+    /// operating system's natively; a browser host supplies its own, and
+    /// without one every operation that needs randomness fails.
+    pub entropy: Entropy,
 }
 
 impl Ports {
@@ -85,6 +92,15 @@ impl Ports {
             startup_mark: |_, _| {},
             network,
             execution,
+            #[cfg(feature = "native")]
+            entropy: crate::native::entropy,
+            #[cfg(not(feature = "native"))]
+            entropy: |_| {
+                Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "the host supplied no entropy",
+                ))
+            },
         }
     }
 

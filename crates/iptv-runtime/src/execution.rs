@@ -126,6 +126,13 @@ pub trait Tasks: Send + Sync {
 
     /// A future that ends after `duration`.
     fn delay(&self, duration: Duration) -> Task;
+
+    /// [`Tasks::block_on`] may wait for I/O and timers. False for a
+    /// cooperative executor: work that blocks is refused there, as having
+    /// no capacity, instead of being started.
+    fn can_block(&self) -> bool {
+        true
+    }
 }
 
 /// The output of spawned work, awaited by whoever spawned it. Dropping it

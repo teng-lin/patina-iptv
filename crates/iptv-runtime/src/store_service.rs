@@ -373,6 +373,7 @@ fn stale() -> StoreError {
 }
 
 impl Services {
+    #[cfg(feature = "native")]
     pub(crate) fn service_retire(&self) -> bool {
         let drained = self.service.drain_on_shutdown_with(|| {});
         self.service.retire();
@@ -451,6 +452,11 @@ impl Services {
         work: impl FnOnce() -> R + Send + 'static,
     ) -> crate::execution::Join<R> {
         crate::execution::spawn_blocking(self.service.tasks(), work)
+    }
+
+    /// The owner's tasks may block on I/O ([`crate::execution::Tasks::can_block`]).
+    pub(crate) fn can_block(&self) -> bool {
+        self.service.tasks().can_block()
     }
 
     /// Drive a non-Send import on its bounded blocking worker, sharing the

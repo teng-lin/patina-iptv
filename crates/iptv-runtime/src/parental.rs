@@ -145,14 +145,15 @@ fn verify(
 fn replace_pin(
     store: &mut iptv_store_sqlite::Store,
     new: &Pin,
+    entropy: crate::ports::Entropy,
 ) -> Result<Zeroizing<String>, Error> {
     if !new.valid() {
         return Err(Error::InvalidPin);
     }
     let mut salt = [0; 16];
     let mut recovery = Zeroizing::new([0; 16]);
-    getrandom::fill(&mut salt).map_err(|_| Error::Storage)?;
-    getrandom::fill(recovery.as_mut()).map_err(|_| Error::Storage)?;
+    entropy(&mut salt).map_err(|_| Error::Storage)?;
+    entropy(recovery.as_mut()).map_err(|_| Error::Storage)?;
     let code = Zeroizing::new(
         recovery
             .iter()
@@ -410,6 +411,7 @@ impl Runtime {
         new: Pin,
     ) -> Result<Zeroizing<String>, Error> {
         let services = self.services();
+        let entropy = services.ports().entropy;
         let epoch = self.parental.borrow().epoch.clone();
         let now = (now_ms() / 1000) as i64;
         let result = services
@@ -427,7 +429,7 @@ impl Runtime {
                             now,
                         )?;
                     }
-                    replace_pin(store, &new)
+                    replace_pin(store, &new, entropy)
                 })();
                 if result.is_ok() {
                     epoch.fetch_add(1, Ordering::SeqCst);
@@ -455,12 +457,13 @@ impl Runtime {
         new: Pin,
     ) -> Result<Zeroizing<String>, Error> {
         let services = self.services();
+        let entropy = services.ports().entropy;
         let epoch = self.parental.borrow().epoch.clone();
         let now = (now_ms() / 1000) as i64;
         let result = services
             .call(move |store| {
                 let result = verify(store, recovery.trim().as_bytes(), true, now)
-                    .and_then(|()| replace_pin(store, &new));
+                    .and_then(|()| replace_pin(store, &new, entropy));
                 if result.is_ok() {
                     epoch.fetch_add(1, Ordering::SeqCst);
                 }
@@ -780,7 +783,12 @@ mod tests {
     #[test]
     fn administrative_worker_gate_rejects_expired_and_revoked_snapshots() {
         let mut store = iptv_store_sqlite::Store::open_in_memory().unwrap();
-        replace_pin(&mut store, &Pin::parse("2468").unwrap()).unwrap();
+        replace_pin(
+            &mut store,
+            &Pin::parse("2468").unwrap(),
+            crate::native::entropy,
+        )
+        .unwrap();
         let mut snapshot = Snapshot {
             access: Access::default(),
             epoch: Arc::new(AtomicU64::new(0)),
@@ -800,7 +808,7 @@ mod tests {
     fn salted_verifiers_rotation_recovery_and_durable_lockout() {
         let mut store = iptv_store_sqlite::Store::open_in_memory().unwrap();
         let pin = Pin::parse("2468").unwrap();
-        let code = replace_pin(&mut store, &pin).unwrap();
+        let code = replace_pin(&mut store, &pin, crate::native::entropy).unwrap();
         let original = store.parental_credential().unwrap().unwrap();
         assert_ne!(original.verifier.as_slice(), pin.bytes());
         assert_eq!(format!("{original:?}"), "ParentalCredential(***)");
@@ -821,7 +829,12 @@ mod tests {
             Err(Error::RetryAfter(29))
         );
         assert!(verify(&mut store, code.as_bytes(), true, 131).is_ok());
-        let new_code = replace_pin(&mut store, &Pin::parse("8642").unwrap()).unwrap();
+        let new_code = replace_pin(
+            &mut store,
+            &Pin::parse("8642").unwrap(),
+            crate::native::entropy,
+        )
+        .unwrap();
         let changed = store.parental_credential().unwrap().unwrap();
         assert_ne!(original.salt, changed.salt);
         assert_ne!(*code, *new_code);

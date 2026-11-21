@@ -2,7 +2,7 @@
 use super::{InspectionControl, guarded};
 use crate::{Runtime, store_service::Services};
 use iptv_epg::{FeedId, ParseOptions, StrictXmltvParser, TimePolicy, XmltvItem};
-use iptv_import::{BodyStream, CancelToken};
+use iptv_import::{BodyStream, CancelToken, Fetch};
 use iptv_library::inspection::*;
 use iptv_providers::{HttpRequest, SecretUrl};
 use iptv_store_sqlite::{DatabaseKey, InspectionStage};
@@ -40,9 +40,9 @@ pub struct ProbeRequest {
 fn now() -> i64 {
     crate::imports::now_unix()
 }
-fn random<const N: usize>() -> InspectionResult<[u8; N]> {
+fn random<const N: usize>(entropy: crate::ports::Entropy) -> InspectionResult<[u8; N]> {
     let mut bytes = [0; N];
-    getrandom::fill(&mut bytes).map_err(|_| InspectionError::Storage)?;
+    entropy(&mut bytes).map_err(|_| InspectionError::Storage)?;
     Ok(bytes)
 }
 fn hex(bytes: &[u8]) -> String {
@@ -65,6 +65,7 @@ fn check(services: &Services, cancel: &CancelToken, deadline: Instant) -> Inspec
 }
 
 pub(crate) struct Vault {
+    entropy: crate::ports::Entropy,
     nonce: Mutex<String>,
     key: Mutex<Option<DatabaseKey>>,
     stages: Arc<Mutex<Space>>,
@@ -78,10 +79,11 @@ pub(crate) struct Vault {
     stage_hook: Arc<Mutex<Option<Arc<crate::testing::GateState>>>>,
 }
 impl Vault {
-    pub(crate) fn new() -> Self {
-        let key = random().ok().map(DatabaseKey::from_bytes);
+    pub(crate) fn new(entropy: crate::ports::Entropy) -> Self {
+        let key = random(entropy).ok().map(DatabaseKey::from_bytes);
         Self {
-            nonce: Mutex::new(random::<16>().map(|b| hex(&b)).unwrap_or_default()),
+            entropy,
+            nonce: Mutex::new(random::<16>(entropy).map(|b| hex(&b)).unwrap_or_default()),
             key: Mutex::new(key),
             stages: Arc::new(Mutex::new(Space::default())),
             directory: Arc::new(Mutex::new(None)),
@@ -137,10 +139,11 @@ impl Vault {
     }
     pub(crate) fn renew(&self) {
         self.clear();
-        *self.nonce.lock().unwrap_or_else(|e| e.into_inner()) =
-            random::<16>().map(|b| hex(&b)).unwrap_or_default();
+        *self.nonce.lock().unwrap_or_else(|e| e.into_inner()) = random::<16>(self.entropy)
+            .map(|b| hex(&b))
+            .unwrap_or_default();
         *self.key.lock().unwrap_or_else(|e| e.into_inner()) =
-            random().ok().map(DatabaseKey::from_bytes);
+            random(self.entropy).ok().map(DatabaseKey::from_bytes);
         self.workers
             .state
             .lock()
@@ -595,7 +598,7 @@ struct Configuration {
     incarnation: String,
     source_incarnation: String,
     time: TimePolicy,
-    net: iptv_net::NetConfig,
+    net: crate::network::NetworkConfig,
     user_agent: Option<String>,
     public_only: bool,
 }
@@ -604,7 +607,8 @@ fn configuration(
     request: ProbeRequest,
 ) -> impl Future<Output = InspectionResult<Configuration>> + use<> {
     let services = owner.services();
-    let net = crate::settings::net_config(&services.settings());
+    let net = crate::settings::network_config(&services.settings());
+    let entropy = services.ports().entropy;
     let read = services.analyze(move |store| {
         store.read_snapshot(|store| {
             let Some(source) = store.source(request.source)? else {
@@ -643,7 +647,7 @@ fn configuration(
                     {
                         return Ok(Err(InspectionError::AddressPolicy));
                     }
-                    let incarnation = hex(&random::<16>().map_err(|_| {
+                    let incarnation = hex(&random::<16>(entropy).map_err(|_| {
                         iptv_store_sqlite::StoreError::Unavailable("probe identity unavailable")
                     })?);
                     (url, None, incarnation, TimePolicy::UTC, true)
@@ -744,7 +748,9 @@ fn admitted_worker<T: Send + 'static, Permit: Send + 'static>(
                 _permit: admission,
                 _completion: completion,
             };
-            if work._permit.is_some() {
+            // Probe workers block on their downloads: a host whose tasks
+            // cannot block has no capacity for them.
+            if work._permit.is_some() && services.can_block() {
                 services.spawn_blocking(move || work.run())
             } else {
                 drop(work);
@@ -830,7 +836,7 @@ impl Runtime {
             if configuration.url.expose().len() > 4096 {
                 return Err(InspectionError::InvalidRequest);
             }
-            let id = ProbeId(hex(&random::<16>()?));
+            let id = ProbeId(hex(&random::<16>(accepted.ports().entropy)?));
             let directory = {
                 let mut directory = directory.lock().unwrap_or_else(|e| e.into_inner());
                 // A timed-out worker may resume after shutdown or a restart.
@@ -875,7 +881,11 @@ impl Runtime {
             net.max_streamed_bytes = PROBE_BYTES;
             net.allow_files = false;
             net.read_timeout = Duration::from_secs(15);
-            let client = iptv_net::NetClient::new(net).map_err(network_error)?;
+            let client = accepted
+                .ports()
+                .network
+                .client(&net)
+                .map_err(network_error)?;
             let mut request = HttpRequest::get(configuration.url.expose());
             request.public_only = configuration.public_only;
             request.preserve_gzip = true;
@@ -1269,7 +1279,7 @@ mod worker_tests {
     #[test]
     fn completion_follows_capture_cleanup_for_run_panic_and_queued_drop() {
         for mode in 0..3 {
-            let vault = Vault::new();
+            let vault = Vault::new(crate::native::entropy);
             vault.renew();
             let gate = crate::TestGate::new();
             let cleanup = Cleanup(crate::TestGate(gate.0.clone()));

@@ -34,6 +34,10 @@ pub mod guide_repair;
 pub mod inspection;
 mod operations;
 pub mod parental;
+#[cfg(feature = "native")]
+pub mod recordings;
+#[cfg(not(feature = "native"))]
+#[path = "recordings_unavailable.rs"]
 pub mod recordings;
 pub mod vod;
 pub use error::Error;
@@ -165,6 +169,7 @@ impl Runtime {
     /// [`Runtime::start_services`].
     pub fn new(ports: Ports) -> Self {
         let recordings = recordings::host::acquire(&ports);
+        let entropy = ports.entropy;
         let store = std::sync::Arc::new(store_service::Service::new(ports));
         #[cfg(feature = "test-support")]
         let guide_checks = guide_checks::GuideChecks::mirrored(store.guide_checks.clone());
@@ -181,7 +186,7 @@ impl Runtime {
             resolving: Slot::default(),
             wizard_import: Slot::default(),
             store,
-            inspection: inspection::Vault::new(),
+            inspection: inspection::Vault::new(entropy),
             #[cfg(feature = "test-support")]
             inspection_scan: RefCell::default(),
             settings_saved: Slot::default(),

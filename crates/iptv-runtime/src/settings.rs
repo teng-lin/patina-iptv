@@ -363,18 +363,8 @@ pub fn network_config(settings: &Settings) -> NetworkConfig {
     config
 }
 
-/// [`base_network_config`] as the native adapter's configuration (trust
-/// anchors included).
 #[cfg(feature = "native")]
-pub fn base_net_config() -> iptv_net::NetConfig {
-    crate::native::network::net_config(&base_network_config())
-}
-
-/// [`network_config`] as the native adapter's configuration.
-#[cfg(feature = "native")]
-pub fn net_config(settings: &Settings) -> iptv_net::NetConfig {
-    crate::native::network::net_config(&network_config(settings))
-}
+pub use crate::native::network::{base_net_config, net_config};
 
 /// Adds `general.user_agent` to a stream's headers unless the stream
 /// names its own (a playlist's per-channel agent wins).

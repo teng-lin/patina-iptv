@@ -14,18 +14,31 @@ pub(crate) struct NativeNetwork;
 impl Network for NativeNetwork {
     fn client(&self, config: &NetworkConfig) -> Result<Client, FetchError> {
         Ok(Client::new(
-            Native(NetClient::new(net_config(config))?),
+            Native(NetClient::new(adapter_config(config))?),
             config.clone(),
         ))
     }
 }
 
+/// [`crate::settings::base_network_config`] as the native adapter's
+/// configuration (trust anchors included).
+pub fn base_net_config() -> NetConfig {
+    adapter_config(&crate::settings::base_network_config())
+}
+
+/// [`crate::settings::network_config`] as the native adapter's configuration.
+pub fn net_config(settings: &iptv_settings::Settings) -> NetConfig {
+    adapter_config(&crate::settings::network_config(settings))
+}
+
 /// The adapter configuration of `config`; every field it does not name
 /// keeps `iptv-net`'s default.
-pub(crate) fn net_config(config: &NetworkConfig) -> NetConfig {
+pub(crate) fn adapter_config(config: &NetworkConfig) -> NetConfig {
     NetConfig {
         user_agent: config.user_agent.clone(),
         request_timeout: config.request_timeout,
+        read_timeout: config.read_timeout,
+        max_redirects: config.max_redirects,
         max_streamed_bytes: config.max_streamed_bytes,
         max_buffered_bytes: config.max_buffered_bytes,
         allow_files: config.allow_files,
@@ -78,7 +91,7 @@ mod tests {
     #[test]
     fn the_portable_defaults_are_the_adapter_defaults() {
         assert_eq!(
-            super::net_config(&super::NetworkConfig::default()),
+            super::adapter_config(&super::NetworkConfig::default()),
             super::NetConfig::default()
         );
     }
