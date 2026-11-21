@@ -6,7 +6,9 @@ use std::borrow::Cow;
 use iptv_epg::{FeedId, MatchKind, ProgramData, StoreOptions};
 use iptv_import::{CatalogRow, CatalogSink, EpgImport, EpgSourceConfig, GuideSink, ListedChannel};
 use iptv_providers::SecretUrl;
-use iptv_providers::model::{Channel, Group, M3uSourceConfig, Source, SourceConfig};
+use iptv_providers::model::{
+    Channel, Group, M3uSourceConfig, Series, Source, SourceConfig, VodItem,
+};
 
 use super::Step;
 use crate::{
@@ -153,46 +155,229 @@ fn drive<T>(mut step: impl FnMut() -> crate::Result<Step<T>>) -> (T, usize) {
     }
 }
 
-#[test]
-fn a_sliced_catalog_replacement_writes_what_the_one_shot_writes() {
-    let (old_groups, old) = catalog(300, "Old");
-    let (groups, new) = catalog(500, "New");
-    let prepare = || {
-        let (mut store, source) = store();
-        store
-            .replace_catalog(source, &old_groups, &old, &[], &[])
-            .unwrap();
-        // Overlays survive by stable id.
-        store.set_favorite(source, &old[3].id, true).unwrap();
-        store
-            .rename_channel(source, &old[4].id, Some("Renamed"))
-            .unwrap();
-        (store, source)
+/// A catalog with every kind of row: groups, channels in one to three
+/// groups (one in 300), movies and series in groups, and a repeated
+/// channel, movie and series (duplicates the replacement drops).
+struct Catalog {
+    groups: Vec<Group>,
+    channels: Vec<Channel>,
+    vod: Vec<VodItem>,
+    series: Vec<Series>,
+}
+
+fn full_catalog(channels: usize, tag: &str) -> Catalog {
+    use iptv_providers::model::{ContentKind, SourceKind, StreamLocator};
+    use iptv_providers::{ContentId, GroupId};
+    let (mut groups, mut channels) = catalog(channels, tag);
+    let many: Vec<Group> = (0..300)
+        .map(|i| Group {
+            id: GroupId::from_m3u_title(&format!("{tag} extra {i}")),
+            name: format!("{tag} extra {i}"),
+            kind: ContentKind::Live,
+            provider_id: None,
+            adult: false,
+        })
+        .collect();
+    for (i, channel) in channels.iter_mut().enumerate() {
+        channel
+            .groups
+            .extend(groups.iter().take(i % 3).map(|g| g.id.clone()));
+    }
+    channels[5].groups.extend(many.iter().map(|g| g.id.clone()));
+    groups.extend(many);
+    let movies = Group {
+        id: GroupId::from_provider(SourceKind::Xtream, ContentKind::Movie, "5"),
+        name: "Movies".into(),
+        kind: ContentKind::Movie,
+        provider_id: Some("5".into()),
+        adult: false,
     };
-    let (mut expected, source) = prepare();
-    let counts = expected
-        .replace_catalog(source, &groups, &new, &[], &[])
+    let vod: Vec<VodItem> = (0..40)
+        .map(|i| VodItem {
+            id: ContentId::from_provider(
+                SourceKind::Xtream,
+                ContentKind::Movie,
+                &format!("{tag}{i}"),
+            ),
+            provider_id: Some(i.to_string()),
+            name: format!("{tag} movie {i}"),
+            groups: vec![movies.id.clone()],
+            poster: None,
+            plot: Some("A synthetic plot.".into()),
+            year: Some(2020),
+            rating_x10: Some(70),
+            added: Some(1_700_000_000 + i),
+            duration_secs: Some(5400),
+            stream: StreamLocator::Xtream {
+                stream_id: i as u64,
+                container_extension: Some("mkv".into()),
+            },
+            is_series: false,
+            episode_numbers: Vec::new(),
+        })
+        .collect();
+    let series: Vec<Series> = (0..15)
+        .map(|i| Series {
+            id: ContentId::from_provider(
+                SourceKind::Xtream,
+                ContentKind::Series,
+                &format!("{tag}{i}"),
+            ),
+            provider_id: Some(i.to_string()),
+            name: format!("{tag} show {i}"),
+            groups: vec![movies.id.clone()],
+            poster: None,
+            plot: None,
+            year: Some(2021),
+            rating_x10: None,
+            last_modified: Some(1_700_000_500),
+        })
+        .collect();
+    groups.push(movies);
+    let mut catalog = Catalog {
+        groups,
+        channels,
+        vod,
+        series,
+    };
+    let (c, v, s) = (
+        catalog.channels[3].clone(),
+        catalog.vod[2].clone(),
+        catalog.series[1].clone(),
+    );
+    catalog.channels.push(c);
+    catalog.vod.push(v);
+    catalog.series.push(s);
+    catalog
+}
+
+/// A store with an old catalog and overlays on it; `fts: false` stores
+/// without a search index (an SQLite without FTS5).
+fn prepared(fts: bool) -> (Store, SourceId) {
+    let (mut store, source) = store();
+    if !fts {
+        store.fts_index = false;
+        store.fts = false;
+    }
+    let old = full_catalog(300, "Old");
+    store
+        .reference_replace_catalog(source, &old.groups, &old.channels, &old.vod, &old.series)
         .unwrap();
-    for budget in BUDGETS {
-        let (mut store, source) = prepare();
+    // Overlays survive by stable id.
+    store
+        .set_favorite(source, &old.channels[3].id, true)
+        .unwrap();
+    store
+        .rename_channel(source, &old.channels[4].id, Some("Renamed"))
+        .unwrap();
+    (store, source)
+}
+
+#[test]
+fn a_catalog_replacement_writes_what_master_wrote() {
+    let new = full_catalog(500, "New");
+    for fts in [true, false] {
+        let (mut expected, source) = prepared(fts);
+        let counts = expected
+            .reference_replace_catalog(source, &new.groups, &new.channels, &new.vod, &new.series)
+            .unwrap();
+        assert_eq!(counts.duplicates, 3);
+        let expected = dump(&expected);
+        // One call (the one-shot method), slices, and slices then `finish`.
+        let (mut store, source) = prepared(fts);
+        assert_eq!(
+            store
+                .replace_catalog(source, &new.groups, &new.channels, &new.vod, &new.series)
+                .unwrap(),
+            counts
+        );
+        assert_same(&dump(&store), &expected, &format!("one call, fts {fts}"));
+        for budget in BUDGETS {
+            let (mut store, source) = prepared(fts);
+            let mut job = CatalogReplacement::new(
+                &mut store,
+                source,
+                &new.groups[..],
+                &new.channels[..],
+                &new.vod[..],
+                &new.series[..],
+            );
+            let (published, steps) = drive(|| job.step(budget));
+            assert!(job.is_done());
+            assert!(
+                job.step(budget).is_err(),
+                "a finished job does nothing more"
+            );
+            drop(job);
+            assert_eq!(published.counts, counts);
+            assert!(budget >= 400 || steps > 2, "budget {budget}: {steps} steps");
+            assert_same(
+                &dump(&store),
+                &expected,
+                &format!("budget {budget}, fts {fts}"),
+            );
+        }
+        for steps in [1, 5, 20, 400, 2000] {
+            let (mut store, source) = prepared(fts);
+            let mut job = CatalogReplacement::new(
+                &mut store,
+                source,
+                &new.groups[..],
+                &new.channels[..],
+                &new.vod[..],
+                &new.series[..],
+            );
+            for _ in 0..steps {
+                if let Step::Done(_) = job.step(7).unwrap() {
+                    break;
+                }
+            }
+            if job.is_done() {
+                drop(job);
+            } else {
+                assert_eq!(job.finish().unwrap().counts, counts);
+            }
+            assert_same(
+                &dump(&store),
+                &expected,
+                &format!("{steps} steps then finish, fts {fts}"),
+            );
+        }
+    }
+}
+
+/// The budget counts every row a step writes, group memberships included:
+/// a channel in 300 groups is written over many steps. (Without the search
+/// index: SQLite counts an FTS5 row as several changes.)
+#[test]
+fn a_step_writes_no_more_rows_than_its_budget() {
+    let new = full_catalog(200, "New");
+    for budget in [1, 7, 50] {
+        let (mut store, source) = prepared(false);
         let mut job = CatalogReplacement::new(
             &mut store,
             source,
-            groups.clone(),
-            new.clone(),
-            Vec::new(),
-            Vec::new(),
+            &new.groups[..],
+            &new.channels[..],
+            &new.vod[..],
+            &new.series[..],
         );
-        let (published, steps) = drive(|| job.step(budget));
-        assert!(job.is_done());
+        let mut deltas = Vec::new();
+        loop {
+            let before = job.store().conn.total_changes();
+            let step = job.step(budget).unwrap();
+            deltas.push(job.store().conn.total_changes() - before);
+            if let Step::Done(_) = step {
+                break;
+            }
+        }
+        // The first step also checks the source; the last records the import.
+        let inner = &deltas[1..deltas.len() - 1];
+        let most = inner.iter().copied().max().unwrap();
         assert!(
-            job.step(budget).is_err(),
-            "a finished job does nothing more"
+            most <= u64::from(budget),
+            "budget {budget}: a step wrote {most} rows"
         );
-        drop(job);
-        assert_eq!(published.counts, counts);
-        assert!(budget >= 400 || steps > 2, "budget {budget}: {steps} steps");
-        assert_same(&dump(&store), &dump(&expected), &format!("budget {budget}"));
     }
 }
 
@@ -202,50 +387,119 @@ fn stages() -> &'static std::path::Path {
     DIR.get_or_init(|| tempfile::tempdir().unwrap()).path()
 }
 
-fn stage_of(store: &Store, groups: &[Group], channels: &[Channel]) -> CatalogStage {
+fn stage_of(store: &Store, catalog: &Catalog) -> CatalogStage {
     let mut stage =
         CatalogStage::create_in_with(stages(), |path| store.open_staging_connection(path)).unwrap();
-    for group in groups {
-        stage.push(CatalogRow::Group(group.clone())).unwrap();
-    }
-    for channel in channels {
-        stage.push(CatalogRow::Channel(channel.clone())).unwrap();
+    let rows = (catalog.groups.iter().cloned().map(CatalogRow::Group))
+        .chain(catalog.channels.iter().cloned().map(CatalogRow::Channel))
+        .chain(catalog.vod.iter().cloned().map(CatalogRow::Vod))
+        .chain(catalog.series.iter().cloned().map(CatalogRow::Series));
+    for row in rows {
+        stage.push(row).unwrap();
     }
     stage.finish().unwrap();
     stage
 }
 
 #[test]
-fn a_sliced_stage_publication_writes_what_the_one_shot_writes() {
-    let (old_groups, old) = catalog(200, "Old");
-    let (groups, new) = catalog(700, "New");
+fn a_stage_publication_writes_what_master_wrote() {
+    let new = full_catalog(700, "New");
     let urls = vec![SecretUrl::new("https://guide.example.test/provider.xml")];
-    let prepare = || {
-        let (mut store, source) = store();
-        store
-            .replace_catalog(source, &old_groups, &old, &[], &[])
-            .unwrap();
-        store.set_favorite(source, &old[7].id, true).unwrap();
-        (store, source)
+    let details = Source {
+        name: "Edited".into(),
+        config: SourceConfig::M3u(M3uSourceConfig {
+            location: SecretUrl::new("https://playlist.example.test/edited.m3u"),
+            user_agent: Some("Synthetic/2".into()),
+            referrer: None,
+        }),
     };
-    let (mut expected, source) = prepare();
-    let stage = stage_of(&expected, &groups, &new);
-    let (counts, guides) = expected
-        .publish_catalog_stage_with_provider_guides(source, stage, None, &urls, None)
-        .unwrap();
-    assert_eq!(guides.len(), 1);
-    for budget in BUDGETS {
-        let (mut store, source) = prepare();
-        let stage = stage_of(&store, &groups, &new);
-        let publication = StagePublication::new().provider_guides(urls.clone(), None);
-        let mut job =
-            CatalogReplacement::from_stage(&mut store, source, stage, publication).unwrap();
-        let (published, steps): (CatalogPublished, _) = drive(|| job.step(budget));
-        drop(job);
-        assert_eq!(published.counts, counts);
-        assert_eq!(published.guides.as_deref(), Some(guides.as_slice()));
-        assert!(budget >= 400 || steps > 2, "budget {budget}: {steps} steps");
-        assert_same(&dump(&store), &dump(&expected), &format!("budget {budget}"));
+    // Only the catalog; with details and plain guides; with provider guides.
+    type Variant = (
+        Option<Source>,
+        Option<Vec<GuideSource>>,
+        Option<Vec<SecretUrl>>,
+    );
+    let variants: [Variant; 3] = [
+        (None, None, None),
+        (Some(details.clone()), Some(guide_sources()), None),
+        (Some(details), None, Some(urls)),
+    ];
+    for (index, (details, guides, urls)) in variants.into_iter().enumerate() {
+        for fts in [true, false] {
+            let (mut expected, source) = prepared(fts);
+            let stage = stage_of(&expected, &new);
+            let (counts, published) = expected
+                .reference_publish_stage(
+                    source,
+                    stage,
+                    details.as_ref(),
+                    guides.as_deref(),
+                    urls.as_deref(),
+                )
+                .unwrap();
+            let expected = dump(&expected);
+            let publication = || {
+                let mut publication = StagePublication::new();
+                if let Some(details) = &details {
+                    publication = publication.details(details.clone());
+                }
+                if let Some(urls) = &urls {
+                    publication = publication.provider_guides(urls.clone(), guides.clone());
+                } else if let Some(guides) = &guides {
+                    publication = publication.guides(guides.clone());
+                }
+                publication
+            };
+            for budget in [None, Some(1), Some(7), Some(61), Some(400)] {
+                let (mut store, source) = prepared(fts);
+                let stage = stage_of(&store, &new);
+                let mut job =
+                    CatalogReplacement::from_stage(&mut store, source, stage, publication())
+                        .unwrap();
+                let (result, steps): (CatalogPublished, _) = match budget {
+                    Some(budget) => {
+                        let done = drive(|| job.step(budget));
+                        drop(job);
+                        done
+                    }
+                    None => (job.finish().unwrap(), 1),
+                };
+                assert_eq!(result.counts, counts);
+                assert_eq!(result.guides, published);
+                assert!(
+                    budget.is_none_or(|b| b >= 400) || steps > 2,
+                    "budget {budget:?}: {steps} steps"
+                );
+                assert_same(
+                    &dump(&store),
+                    &expected,
+                    &format!("variant {index}, budget {budget:?}, fts {fts}"),
+                );
+            }
+            // Slices, then the rest in one call, from every phase.
+            for steps in [10, 60, 150, 250, 350, 1000] {
+                let (mut store, source) = prepared(fts);
+                let stage = stage_of(&store, &new);
+                let mut job =
+                    CatalogReplacement::from_stage(&mut store, source, stage, publication())
+                        .unwrap();
+                for _ in 0..steps {
+                    if let Step::Done(_) = job.step(13).unwrap() {
+                        break;
+                    }
+                }
+                if job.is_done() {
+                    drop(job);
+                } else {
+                    job.finish().unwrap();
+                }
+                assert_same(
+                    &dump(&store),
+                    &expected,
+                    &format!("variant {index}, {steps} slices then finish, fts {fts}"),
+                );
+            }
+        }
     }
 }
 
@@ -268,7 +522,13 @@ fn an_abandoned_catalog_replacement_leaves_the_store_unchanged() {
     // No transaction was left open.
     store.set_favorite(source, &old[0].id, true).unwrap();
 
-    let stage = stage_of(&store, &groups, &new);
+    let staged = Catalog {
+        groups: groups.clone(),
+        channels: new.clone(),
+        vod: Vec::new(),
+        series: Vec::new(),
+    };
+    let stage = stage_of(&store, &staged);
     let mut job =
         CatalogReplacement::from_stage(&mut store, source, stage, StagePublication::new()).unwrap();
     assert_eq!(job.step(10).unwrap(), Step::Pending);
@@ -278,8 +538,8 @@ fn an_abandoned_catalog_replacement_leaves_the_store_unchanged() {
 }
 
 /// A staged guide of `channels` EPG channels with `per_channel` programs
-/// each (every other one described), bound to playlist keys, some bound
-/// twice and one bound to a feed that is not stored.
+/// each (every other one described), bound to playlist keys: feed 1's
+/// twice, feed 2's once, and keys bound to a feed 3 that is never stored.
 fn guide(store: &Store, channels: usize, per_channel: i64, tag: &str) -> (EpgStage, EpgImport) {
     let mut stage = EpgStage::create_in_store(store, stages()).unwrap();
     let mut listed = Vec::new();
@@ -333,7 +593,11 @@ fn guide(store: &Store, channels: usize, per_channel: i64, tag: &str) -> (EpgSta
                 ),
                 (
                     iptv_epg::ChannelKey(format!("c{c:04}")),
-                    epg(3, MatchKind::Override),
+                    epg(2, MatchKind::Override),
+                ),
+                (
+                    iptv_epg::ChannelKey(format!("d{c:04}")),
+                    epg(3, MatchKind::TvgId),
                 ),
             ]
         })
@@ -377,42 +641,83 @@ fn guide_sources() -> Vec<GuideSource> {
 }
 
 #[test]
-fn a_sliced_guide_replacement_writes_what_the_one_shot_writes() {
+fn a_guide_replacement_writes_what_master_wrote() {
     let prepare = || {
         let (mut store, source) = store();
         store.set_guide_sources(source, &guide_sources()).unwrap();
         let (mut stage, import) = guide(&store, 30, 20, "Old");
         store
-            .replace_epg(source, &mut stage, &import, &feeds(), 1)
+            .reference_replace_epg(source, &mut stage, &import, &feeds(), 1)
             .unwrap();
         (store, source)
     };
-    let (mut expected, source) = prepare();
-    let (mut stage, import) = guide(&expected, 40, 25, "New");
-    let counts = expected
-        .replace_epg(source, &mut stage, &import, &feeds()[..1], 2)
-        .unwrap();
-    drop(stage);
-    assert_eq!(counts.channels, 40);
-    assert_eq!(counts.skipped_bindings, 40);
-    for budget in BUDGETS {
+    // Every feed stored, and one feed missing (its bindings skipped).
+    for stored in [2, 1] {
+        let feeds = feeds()[..stored].to_vec();
+        let (mut expected, source) = prepare();
+        let (mut stage, import) = guide(&expected, 40, 25, "New");
+        let counts = expected
+            .reference_replace_epg(source, &mut stage, &import, &feeds, 2)
+            .unwrap();
+        drop(stage);
+        assert_eq!(counts.channels, 40 * stored as u64);
+        let expected = dump(&expected);
+        for budget in [None, Some(1), Some(7), Some(61), Some(400)] {
+            let (mut store, source) = prepare();
+            let (mut stage, import) = guide(&store, 40, 25, "New");
+            let mut job = EpgReplacement::new(
+                &mut store,
+                source,
+                &mut stage,
+                Cow::Borrowed(&import),
+                &feeds[..],
+                2,
+            )
+            .unwrap();
+            let (sliced, steps) = match budget {
+                Some(budget) => {
+                    let done = drive(|| job.step(budget));
+                    drop(job);
+                    done
+                }
+                None => (job.finish().unwrap(), 1),
+            };
+            assert_eq!(sliced, counts);
+            assert!(
+                budget.is_none_or(|b| b >= 400) || steps > 2,
+                "budget {budget:?}: {steps} steps"
+            );
+            assert_same(
+                &dump(&store),
+                &expected,
+                &format!("{stored} feeds, budget {budget:?}"),
+            );
+        }
+        // Slices, then the rest in one call; and an owned stage.
         let (mut store, source) = prepare();
-        let (mut stage, import) = guide(&store, 40, 25, "New");
-        let mut job = EpgReplacement::new(
+        let (stage, import) = guide(&store, 40, 25, "New");
+        let mut job = EpgReplacement::with_stage(
             &mut store,
             source,
-            &mut stage,
+            stage,
             Cow::Owned(import),
-            feeds()[..1].to_vec(),
+            feeds.clone(),
             2,
         )
         .unwrap();
-        let (sliced, steps) = drive(|| job.step(budget));
-        drop(job);
-        drop(stage);
-        assert_eq!(sliced, counts);
-        assert!(budget >= 400 || steps > 2, "budget {budget}: {steps} steps");
-        assert_same(&dump(&store), &dump(&expected), &format!("budget {budget}"));
+        for _ in 0..40 {
+            let _ = job.step(17).unwrap();
+        }
+        if job.is_done() {
+            drop(job);
+        } else {
+            assert_eq!(job.finish().unwrap(), counts);
+        }
+        assert_same(
+            &dump(&store),
+            &expected,
+            &format!("{stored} feeds, slices then finish"),
+        );
     }
 }
 

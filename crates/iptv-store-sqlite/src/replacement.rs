@@ -157,5 +157,8 @@ pub(crate) fn channel_slice_end(
 }
 
 #[cfg(test)]
+#[path = "replacement/reference.rs"]
+mod reference;
+#[cfg(test)]
 #[path = "replacement/tests.rs"]
 mod tests;
