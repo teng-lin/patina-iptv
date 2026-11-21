@@ -558,20 +558,17 @@ async fn serve(
         }
     };
     socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n").await?;
-    let Some(first) = first else {
+    let Some(mut bytes) = first else {
         return Ok(());
     };
-    tokio::time::timeout(Duration::from_secs(15), socket.write_all(&first))
-        .await
-        .map_err(io::Error::other)??;
     loop {
-        let bytes = reader
-            .next()
-            .await
-            .map_err(|_| io::Error::other("Input ended or lagged"))?;
         tokio::time::timeout(Duration::from_secs(15), socket.write_all(&bytes))
             .await
             .map_err(io::Error::other)??;
+        bytes = reader
+            .next()
+            .await
+            .map_err(|_| io::Error::other("Input ended or lagged"))?;
     }
 }
 

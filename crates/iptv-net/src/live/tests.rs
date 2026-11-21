@@ -887,7 +887,10 @@ async fn finite_hls_provider() -> (String, tokio::task::JoinHandle<()>) {
                 } else {
                     [first_packets(), packet(2).repeat(6)].concat()
                 };
-                let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
                 socket.write_all(head.as_bytes()).await?;
                 socket.write_all(&body).await?;
                 Ok::<(), io::Error>(())
