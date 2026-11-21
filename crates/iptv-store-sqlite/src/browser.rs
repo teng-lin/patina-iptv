@@ -662,6 +662,16 @@ impl BrowserFiles {
         if self.has_publish_copy() {
             return Err(unavailable("a publish copy of the database exists"));
         }
+        // The host's write of that take would land on top of the restored
+        // database, so storage would mix two databases.
+        if self
+            .database()
+            .is_some_and(|file| lock(&file).take_outstanding)
+        {
+            return Err(unavailable(
+                "a take of the database's chunks is not saved yet",
+            ));
+        }
         if size > MAX_DATABASE_BYTES || !size.is_multiple_of(MIN_PAGE_BYTES) {
             return Err(StoreError::InvalidData(format!(
                 "a stored database of {size} bytes is not a SQLite database this store restores"
@@ -697,6 +707,11 @@ impl BrowserFiles {
             .database()
             .ok_or_else(|| unavailable("restore_size comes before restore_chunk"))?;
         let mut file = lock(&file);
+        if file.take_outstanding {
+            return Err(unavailable(
+                "a take of the database's chunks is not saved yet",
+            ));
+        }
         let start = u64::from(index) * CHUNK_BYTES as u64;
         let expected = file.data.chunk(index as usize).map(<[u8]>::len);
         if expected != Some(bytes.len()) {

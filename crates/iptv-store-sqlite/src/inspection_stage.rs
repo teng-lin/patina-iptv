@@ -108,8 +108,9 @@ impl InspectionStage {
         self.conn.execute_batch("COMMIT; PRAGMA optimize;")?;
         Ok(())
     }
-    /// Native only: `Instant` panics in the browser build, where
-    /// [`Self::bounded_until`] takes the host clock's expiry instead.
+    /// Native only, like the stage itself (a file; the browser build has
+    /// none, so `create`/`open` refuse there): browser callers bound their
+    /// reads with `Store::inspection_read_until`.
     #[cfg(not(target_family = "wasm"))]
     pub fn bounded<T>(
         &mut self,
@@ -123,8 +124,9 @@ impl InspectionStage {
             operation,
         )
     }
-    /// `bounded` (native) with the deadline as `expired`, which says whether
-    /// it has passed.
+    /// [`Self::bounded`] with the deadline as `expired`, which says whether
+    /// it has passed. Native only, as above.
+    #[cfg(not(target_family = "wasm"))]
     pub fn bounded_until<T>(
         &mut self,
         cancel: iptv_import::CancelToken,

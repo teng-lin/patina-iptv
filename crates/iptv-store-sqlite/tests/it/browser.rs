@@ -614,8 +614,40 @@ fn file_operations_are_unavailable_in_the_browser() {
     ));
     assert!(unavailable(EpgStage::create_in("/data").unwrap_err()));
     let store = Store::open_in_memory().unwrap();
+    assert!(unavailable(store.open_reader().unwrap_err()));
     assert!(unavailable(store.snapshot_to(path).unwrap_err()));
+    assert!(unavailable(store.seal_snapshot(path).unwrap_err()));
     assert!(unavailable(Store::validate_snapshot(path).unwrap_err()));
+    assert!(unavailable(
+        Store::validate_encrypted_snapshot(path, &key).unwrap_err()
+    ));
+    let mut input: &[u8] = b"synthetic";
+    assert!(unavailable(
+        store.write_private_file(path, &mut input).unwrap_err()
+    ));
+    assert!(unavailable(store.read_private_file(path).err().unwrap()));
+    use iptv_store_sqlite::InspectionStage;
+    assert!(unavailable(
+        InspectionStage::create(path, &key).err().unwrap()
+    ));
+    assert!(unavailable(
+        InspectionStage::open(path, &key).err().unwrap()
+    ));
+}
+
+/// A restore is refused while a take is out: the host's write of it would
+/// land on the restored database and mix two databases in storage.
+#[test]
+fn a_restore_waits_for_the_outstanding_take() {
+    let files = BrowserFiles::new().unwrap();
+    let store = Store::open_browser(&files).unwrap();
+    let take = store.take_changed_chunks().unwrap();
+    drop(store);
+    assert!(files.restore_size(0).is_err());
+    assert!(files.restore_chunk(0, &[0; 8192]).is_err());
+    take.saved();
+    files.restore_size(0).unwrap();
+    Store::open_browser(&files).unwrap();
 }
 
 /// A replacement that committed some steps on a publish copy and was then
