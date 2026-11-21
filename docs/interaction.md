@@ -167,12 +167,13 @@ and focus on a live channel follows the clock to the program now on air.
   watched without the list being read again (#177).
 - **Now:** an episode ending never changes the screen on its own
   (`vod_view::observe`). Full screen, the next episode plays full screen
-  with `vod.autoplay_next_episode` on, else the series' details open on it
-  with "Ready for the next episode". On that series' details, the next
-  episode plays in the preview behind them with autoplay on, selected with
-  its season, and Play or OK takes it full screen; with autoplay off, or
-  when the next episode would need a PIN, playback stops and the details
-  select it with the same notice. Anywhere else (a list or shelf, the
+  with `vod.autoplay_next_episode` on; with autoplay off, or when the next
+  episode would need a PIN, the series' details open on it with "Ready for
+  the next episode". On that series' details, the next episode plays in
+  the preview behind them with autoplay on, selected with its season, and
+  Play or OK takes it full screen; with autoplay off, or when it would
+  need a PIN, playback stops and the details select it with the same
+  notice. Anywhere else (a list or shelf, the
   guide, another title's details, settings), playback stops as after the
   viewer's Stop, and the series' card and Continue watching hold the next
   episode. A PIN for it is asked for only when the viewer plays it (#187).

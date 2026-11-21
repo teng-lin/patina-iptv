@@ -237,7 +237,8 @@ fn end(run: &mut Run) {
     }
 }
 
-fn stopped(run: &mut Run) {
+/// Nothing plays and no further episode opened since `opens`.
+fn stopped(run: &mut Run, opens: u64) {
     step(
         run.app
             .wait_until("playback stopped", Duration::from_secs(10), |_| {
@@ -245,6 +246,7 @@ fn stopped(run: &mut Run) {
             }),
     );
     assert_eq!(player(&run.app), run.surface, "the same player surface");
+    assert_eq!(iptv_app::player_opens(0), opens, "no next episode opened");
 }
 
 /// The finished episode is saved watched, and its series waits in
@@ -340,21 +342,40 @@ fn series_details_with_autoplay_play_the_next_episode_in_the_preview() {
     assert!(!run.app.shows("Ready for the next episode"));
     assert!(!run.app.shows("Enter parental PIN"));
     assert_eq!(player(&run.app), run.surface);
+    // That one ending in the preview goes on to season 2's first.
+    end(&mut run);
+    plays(&mut run.app, &run.props, "201");
+    assert_eq!(iptv_app::player_opens(0), opens + 2);
+    assert!(run.app.screen().matches("id:vod-screen").unwrap());
+    step(
+        run.app
+            .wait_until("season 2's first chosen", Duration::from_secs(5), |s| {
+                s.accessibility_state("label:/^1 · Generated Third/")
+                    .is_ok_and(|state| state.selected)
+            }),
+    );
+    assert!(run.app.shows("Season 2"));
     // OK on Play takes it full screen the usual way.
     step(run.app.press_key("enter"));
     step(
         run.app
             .wait_for_gone("id:vod-screen", Duration::from_secs(5)),
     );
-    plays(&mut run.app, &run.props, "102");
+    step(run.app.wait_until(
+        "the chosen episode opens again full screen",
+        Duration::from_secs(10),
+        |_| iptv_app::player_opens(0) == opens + 3,
+    ));
+    plays(&mut run.app, &run.props, "201");
 }
 
 #[test]
 fn series_details_without_autoplay_stop_and_choose_the_next_episode() {
     let Some(home) = isolated!() else { return };
     let mut run = watch(home, At::Details, false, Lock::None);
+    let opens = iptv_app::player_opens(0);
     end(&mut run);
-    stopped(&mut run);
+    stopped(&mut run, opens);
     step(run.app.wait_for(READY));
     assert!(run.app.screen().matches("id:vod-screen").unwrap());
     assert!(is_selected(&run.app, SECOND), "the next episode chosen");
@@ -365,8 +386,9 @@ fn series_details_without_autoplay_stop_and_choose_the_next_episode() {
 fn a_list_with_autoplay_stops_with_the_next_episode_up_next() {
     let Some(home) = isolated!() else { return };
     let mut run = watch(home, At::Shows, true, Lock::None);
+    let opens = iptv_app::player_opens(0);
     end(&mut run);
-    stopped(&mut run);
+    stopped(&mut run, opens);
     // Still the Shows list, on the series.
     assert!(run.app.screen().matches("id:vod-screen").unwrap());
     assert!(is_selected(&run.app, SERIES), "the series' card chosen");
@@ -379,8 +401,9 @@ fn a_list_with_autoplay_stops_with_the_next_episode_up_next() {
 fn the_guide_without_autoplay_stops_with_the_next_episode_up_next() {
     let Some(home) = isolated!() else { return };
     let mut run = watch(home, At::Guide, false, Lock::None);
+    let opens = iptv_app::player_opens(0);
     end(&mut run);
-    stopped(&mut run);
+    stopped(&mut run, opens);
     step(run.app.wait_for("text:Nothing playing"));
     assert!(
         !run.app.screen().matches("id:vod-screen").unwrap(),
@@ -393,8 +416,9 @@ fn the_guide_without_autoplay_stops_with_the_next_episode_up_next() {
 fn the_guide_with_autoplay_stops_too() {
     let Some(home) = isolated!() else { return };
     let mut run = watch(home, At::Guide, true, Lock::None);
+    let opens = iptv_app::player_opens(0);
     end(&mut run);
-    stopped(&mut run);
+    stopped(&mut run, opens);
     step(run.app.wait_for("text:Nothing playing"));
     assert!(!run.app.screen().matches("id:vod-screen").unwrap());
     up_next(&mut run);
@@ -404,8 +428,9 @@ fn the_guide_with_autoplay_stops_too() {
 fn a_list_without_autoplay_stops_too() {
     let Some(home) = isolated!() else { return };
     let mut run = watch(home, At::Shows, false, Lock::None);
+    let opens = iptv_app::player_opens(0);
     end(&mut run);
-    stopped(&mut run);
+    stopped(&mut run, opens);
     assert!(run.app.screen().matches("id:vod-screen").unwrap());
     assert!(!run.app.shows("Ready for the next episode"));
     up_next(&mut run);
@@ -431,8 +456,9 @@ fn an_unlocked_series_plays_the_next_episode_in_the_preview_without_a_prompt() {
 fn a_next_episode_needing_a_pin_waits_without_a_prompt() {
     let Some(home) = isolated!() else { return };
     let mut run = watch(home, At::Details, true, Lock::NextEpisode);
+    let opens = iptv_app::player_opens(0);
     end(&mut run);
-    stopped(&mut run);
+    stopped(&mut run, opens);
     step(run.app.wait_for(READY));
     assert!(!run.app.shows("Enter parental PIN"), "no PIN prompt");
     assert!(run.app.screen().matches("id:vod-screen").unwrap());
@@ -440,4 +466,19 @@ fn a_next_episode_needing_a_pin_waits_without_a_prompt() {
     // OK on Play asks for its PIN.
     step(run.app.press_key("enter"));
     step(run.app.wait_for_within(PIN, Duration::from_secs(20)));
+}
+
+/// Full screen too, a next episode needing a PIN pops no prompt: its
+/// series' details open on it, as with autoplay off.
+#[test]
+fn full_screen_with_a_next_episode_needing_a_pin_opens_the_details_without_a_prompt() {
+    let Some(home) = isolated!() else { return };
+    let mut run = watch(home, At::FullScreen, true, Lock::NextEpisode);
+    let opens = iptv_app::player_opens(0);
+    end(&mut run);
+    step(run.app.wait_for(READY));
+    step(run.app.wait_for("id:vod-screen"));
+    assert!(!run.app.shows("Enter parental PIN"), "no PIN prompt");
+    assert!(is_selected(&run.app, SECOND), "the next episode chosen");
+    assert_eq!(iptv_app::player_opens(0), opens, "nothing more plays");
 }
