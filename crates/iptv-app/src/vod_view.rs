@@ -853,7 +853,7 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
         // The screen never changes on its own (#187).
         match where_watched(ui, &details.item.key) {
             Watched::FullScreen | Watched::Details if autoplay => {
-                autoplay_next(ui, details, key, season)
+                autoplay_next(ui, p.key, details, key, season)
             }
             watched => wait_for_next(ui, watched, details, key, season),
         }
@@ -924,15 +924,18 @@ fn wait_for_next(ui: Ui, watched: Watched, details: Details, key: Key, season: u
 /// needs no PIN now. A PIN is asked for only when the viewer plays it:
 /// else it waits as with autoplay off. Nothing happens if the viewer chose
 /// something meanwhile.
-fn autoplay_next(ui: Ui, details: Details, key: Key, season: u32) {
+fn autoplay_next(ui: Ui, ended: Key, details: Details, key: Key, season: u32) {
     let series = details.item.key.clone();
+    // The viewer's choices: a title (`play_key` advances the generation),
+    // or anything else the player plays instead.
+    let generation = ui.vod.with_untracked(|s| s.generation);
     let chosen = move || {
-        (
-            ui.vod.with_untracked(|s| s.generation),
-            ui.player.main().health.with_untracked(|h| h.session()),
-        )
+        ui.vod.with_untracked(|s| s.generation) != generation
+            || !ui
+                .player
+                .vod
+                .with_untracked(|p| p.as_ref().is_some_and(|(p, _)| p.key == ended))
     };
-    let before = chosen();
     crate::data::spawn_in_app(async move {
         let owner = crate::runtime();
         let allowed = owner
@@ -943,7 +946,7 @@ fn autoplay_next(ui: Ui, details: Details, key: Key, season: u32) {
                 .parental_check(&iptv_runtime::vod::target(&key))
                 .await
                 .is_ok();
-        if chosen() != before {
+        if chosen() {
             return;
         }
         match where_watched(ui, &series) {
