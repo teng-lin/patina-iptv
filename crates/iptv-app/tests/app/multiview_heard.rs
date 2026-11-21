@@ -297,11 +297,23 @@ fn one_of_the_main_player_and_its_windows_is_heard_and_each_shows_it() {
     );
     // That window to the operating system's full screen and back (a
     // double click on its video): the sound stays.
-    for _ in 0..2 {
-        step(app.press(&format!("{} >> label:Video", aux(1))));
-        step(app.press(&format!("{} >> label:Video", aux(1))));
-        only_heard(app, &seen, 3, 1, "a window's full screen");
+    use nsh_core::desktop::WindowMode;
+    let mode = |app: &mut Headless| app.window_state("player-window-1").unwrap().unwrap().mode;
+    step(app.press(&format!("{} >> label:Video", aux(1))));
+    step(app.press(&format!("{} >> label:Video", aux(1))));
+    app.settle();
+    assert_eq!(mode(app), WindowMode::FullScreen);
+    only_heard(app, &seen, 3, 1, "a window's full screen");
+    // Escape (its panels first, if a press opened them) leaves it.
+    for _ in 0..3 {
+        if mode(app) == WindowMode::Normal {
+            break;
+        }
+        step(app.press_key("escape"));
+        app.settle();
     }
+    assert_eq!(mode(app), WindowMode::Normal);
+    only_heard(app, &seen, 3, 1, "back from a window's full screen");
 
     // Listen to this among the compact window's controls.
     step(app.hover(&format!("{} >> id:pip-video", aux(2))));
