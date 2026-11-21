@@ -205,7 +205,7 @@ fn start_import_with(
                     // Imports run on blocking workers, which this host has
                     // none of: not a passing condition to retry.
                     let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(
-                        FailureKind::Unsupported,
+                        FailureKind::Unavailable,
                     ))));
                     return;
                 }

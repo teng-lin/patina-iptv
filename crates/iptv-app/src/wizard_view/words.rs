@@ -102,6 +102,7 @@ pub fn failure(kind: PlaylistKind, failure: ImportFailure) -> &'static str {
         FailureKind::Canceled => {
             tr("Stopped. Your entries are kept; add the playlist again when ready.")
         }
+        FailureKind::Unavailable => tr("This device cannot import playlists yet."),
     }
 }
 
@@ -160,6 +161,7 @@ mod tests {
             FailureKind::EmptyPlaylist,
             FailureKind::Unsupported,
             FailureKind::Canceled,
+            FailureKind::Unavailable,
         ];
         let texts: std::collections::BTreeSet<_> = kinds
             .iter()
@@ -280,6 +282,7 @@ mod tests {
             FailureKind::EmptyPlaylist,
             FailureKind::Unsupported,
             FailureKind::Canceled,
+            FailureKind::Unavailable,
         ];
         let told = |kind: PlaylistKind| -> Vec<&'static str> {
             kinds

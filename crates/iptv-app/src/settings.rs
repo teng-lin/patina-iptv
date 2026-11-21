@@ -169,8 +169,18 @@ pub fn text_factor() -> f32 {
 pub fn offer(key: &str) -> Offer {
     // Recording and backups run on blocking workers; a host without them
     // offers neither.
+    // Recording, backups, imports and guide downloads run on blocking
+    // workers; a host without them offers none of them.
     if !crate::host::HAS_WORKERS
-        && (key.starts_with("recordings.") || matches!(key, "general.backup" | "general.restore"))
+        && (key.starts_with("recordings.")
+            || matches!(
+                key,
+                "general.backup"
+                    | "general.restore"
+                    | "playlists.manage"
+                    | "epg.add_source"
+                    | "epg.update_now"
+            ))
     {
         return Offer::Hidden;
     }

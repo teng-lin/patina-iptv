@@ -465,13 +465,16 @@ pub enum FailureKind {
     Unsupported,
     /// The import was stopped before it finished.
     Canceled,
+    /// This device cannot import playlists (a browser TV, whose host has no
+    /// workers for imports yet).
+    Unavailable,
 }
 
 impl FailureKind {
     /// Recoverable failures return to the form; others end on the failure
     /// screen, whose only way on is choosing another type.
     pub fn is_recoverable(self) -> bool {
-        self != FailureKind::Unsupported
+        !matches!(self, FailureKind::Unsupported | FailureKind::Unavailable)
     }
 }
 

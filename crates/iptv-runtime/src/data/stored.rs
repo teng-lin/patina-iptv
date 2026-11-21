@@ -294,7 +294,11 @@ fn start_update(
                 }
                 Ok(_) if !owner.services().has_workers() => {
                     // Downloads run on blocking workers, which this host has
-                    // none of; the shell offers no download there.
+                    // none of (the shell hides the command there); a caller
+                    // that asks anyway hears why nothing happens.
+                    owner.emit(crate::RuntimeEvent::Notify(
+                        "This device cannot import playlists yet.",
+                    ));
                     drop(tx);
                     false
                 }

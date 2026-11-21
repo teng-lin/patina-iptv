@@ -53,7 +53,9 @@ impl From<FailureKind> for ImportProblem {
             FailureKind::Auth => Self::Access,
             FailureKind::Parse | FailureKind::Unsupported => Self::Format,
             FailureKind::Canceled => Self::Stopped,
-            FailureKind::Storage | FailureKind::EmptyPlaylist => Self::Other,
+            FailureKind::Storage | FailureKind::EmptyPlaylist | FailureKind::Unavailable => {
+                Self::Other
+            }
         }
     }
 }

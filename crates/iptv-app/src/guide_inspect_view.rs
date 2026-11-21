@@ -63,13 +63,20 @@ fn current(ui: Ui, id: u64, control: &InspectionControl) -> bool {
 
 pub fn open(ui: Ui, source: SourceId) {
     let from = crate::time::wall_unix();
-    ui.guide_inspect.set(Some(Screen::new(
+    let screen = Screen::new(
         source,
         TimeWindow {
             from,
             to: from + 24 * 3600,
         },
-    )));
+    );
+    // Staged probes need blocking workers.
+    let screen = if crate::host::HAS_WORKERS {
+        screen
+    } else {
+        screen.without_probes()
+    };
+    ui.guide_inspect.set(Some(screen));
     audit(ui, false);
 }
 pub fn is_open(ui: Ui) -> bool {
