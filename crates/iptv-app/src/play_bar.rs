@@ -107,6 +107,14 @@ pub fn bind(ui: Ui) {
             ui.play_bar.update(PlayBar::hide);
         }
     });
+    // A screen reader's user moves from control to control by swipes,
+    // slower than the delay: the bar stays until it is hidden.
+    effect(move || {
+        let reader = screen_reader();
+        if untracked(|| ui.play_bar.with(|b| b.reader != reader)) {
+            untracked(|| update(ui, |b, now| b.screen_reader(reader, now)));
+        }
+    });
     let popup =
         computed(move || ui.chooser.with(Option::is_some) || ui.description.with(Option::is_some));
     effect(move || {

@@ -628,3 +628,97 @@ fn a_popup_hides_its_underlay_while_the_pointer_bar_keeps_its_visible_controls()
     exposure.shown(app, "guide-ui", true);
     exposure.selected_channel(app, "Local B");
 }
+
+/// A screen reader's activation of `id` (TalkBack's double tap, VoiceOver's
+/// and Narrator's activate): the platform's accessibility action turns into
+/// a bare `onPress`, with no finger down, no release and no position
+/// (`A11y.performAccessibilityAction` on Android).
+fn activate(app: &mut Headless, id: NodeId) {
+    app.engine().control().dispatch_event(
+        id,
+        nsh_core::EventKind::Press,
+        nsh_core::EventPayload::None,
+    );
+    step(app.run_for(Duration::from_millis(500)));
+}
+
+/// The program cell airing now on `channel`'s guide row: the first one
+/// right of the channel, as a screen reader reaches it from the row.
+fn program_now(app: &Headless, channel: &str) -> NodeId {
+    let row = app
+        .screen()
+        .id(&format!("role:button[/^{channel}$/]"))
+        .unwrap();
+    let nodes = app.screen().layout_nodes();
+    let row = nodes.iter().find(|n| n.id == row).unwrap().bounds;
+    // The cell under the now line: both slide by one transform, which the
+    // layout leaves out, so their laid-out places compare as they are.
+    let now = nodes
+        .iter()
+        .find(|n| n.test_id.as_deref() == Some("guide-now-line"))
+        .unwrap()
+        .bounds;
+    let x = now.origin.x.0 + now.size.width.0 / 2.0;
+    let y = row.origin.y.0 + row.size.height.0 / 2.0;
+    nodes
+        .iter()
+        .filter(|n| n.test_id.as_deref() == Some("guide-program") && !n.hidden)
+        .filter(|n| n.bounds.origin.x.0 <= x && x < n.bounds.origin.x.0 + n.bounds.size.width.0)
+        .filter(|n| n.bounds.origin.y.0 <= y && y <= n.bounds.origin.y.0 + n.bounds.size.height.0)
+        .max_by(|a, b| a.bounds.size.width.0.total_cmp(&b.bounds.size.width.0))
+        .unwrap_or_else(|| panic!("{channel}'s program on now"))
+        .id
+}
+
+/// #192: what a screen reader activates plays as a tap does. TalkBack's
+/// double tap on a guide row, a program cell or the play bar's buttons
+/// reaches the app as a bare press; the play bar it opens over full-screen
+/// video stays while the reader moves through its controls.
+#[test]
+fn a_screen_readers_activation_plays_from_the_guide_and_keeps_the_play_bar() {
+    let Some(home) = isolated!() else { return };
+    let exposure = Exposure::default();
+    let observed = exposure.clone();
+    let mut settings = Settings::new();
+    settings.set("guide.switch_delay", Value::ms(0)).unwrap();
+    let mut fixture = personalization::start_with_setup(home, settings, true, move |app| {
+        app.observe(move |_, batch| observed.record(batch));
+    });
+    let app = &mut fixture.app;
+    step(app.set_environment("a tablet with TalkBack", |env| {
+        env.idiom = Idiom::Pad;
+        env.screen_reader = true;
+    }));
+    // A channel row: it plays full screen (#86).
+    let row = app.screen().id("role:button[/^Local B$/]").unwrap();
+    activate(app, row);
+    exposure.shown(app, "guide-ui", false);
+    exposure.shown(app, "video", true);
+    // The video opens the play bar, which stays however long the reader
+    // takes to reach a control.
+    let video = app.screen().id("id:video").unwrap();
+    activate(app, video);
+    exposure.shown(app, "play-bar-layer", true);
+    step(app.run_for(Duration::from_secs(
+        4 * iptv_core::play_bar::HIDE_AFTER_MS / 1000,
+    )));
+    exposure.shown(app, "play-bar-layer", true);
+    // Its Guide button goes back to the guide, on the playing channel.
+    let guide = app.screen().id("label:Guide").unwrap();
+    activate(app, guide);
+    exposure.shown(app, "guide-ui", true);
+    exposure.selected_channel(app, "Local B");
+    // A program cell on another row plays its channel.
+    let cell = program_now(app, "Local C");
+    activate(app, cell);
+    exposure.shown(app, "guide-ui", false);
+    step(app.wait_for("text:/Local C  ▶/"));
+    // Without the reader the bar hides after its delay again.
+    step(app.set_environment("TalkBack off", |env| env.screen_reader = false));
+    activate(app, video);
+    exposure.shown(app, "play-bar-layer", true);
+    step(app.run_for(Duration::from_millis(
+        iptv_core::play_bar::HIDE_AFTER_MS + 500,
+    )));
+    step(app.wait_for_gone("id:play-bar-layer", Duration::from_secs(3)));
+}

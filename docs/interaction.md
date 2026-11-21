@@ -98,6 +98,21 @@ In the guide:
   `guide.autoplay` then holds on that channel, after the menu or its details
   close, until the viewer moves the focus to another channel. A choice still
   plays.
+- **Now:** a screen reader's activation (TalkBack's double tap, VoiceOver's
+  and Narrator's activate) is a choice like a tap: a channel row or a
+  program cell plays as the table says, and the guide's buttons act. The app
+  hears it as a press with no position (`accessibility_visibility`).
+- **Next (#192):** on Android, touch exploration only reaches the guide once
+  NSH routes hover by `pointerEvents` as it routes touches. Until then an
+  inert full-screen layer above the guide (the full-screen video's tap
+  target, kept mounted while the guide shows) takes TalkBack's hover, so
+  the accessibility focus stays on the window and a double tap chooses
+  nothing. The NSH fix goes upstream first.
+- **Now:** with a screen reader on, the play bar over full-screen video
+  stays until the viewer hides it (a double tap on the video, Back or a
+  key) instead of hiding after its few seconds: moving from control to
+  control by swipes takes longer than that (WCAG 2.2.1,
+  `iptv_core::play_bar`).
 
 ### Touch gestures in the guide
 
