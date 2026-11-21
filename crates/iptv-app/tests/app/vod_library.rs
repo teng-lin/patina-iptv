@@ -14,7 +14,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-fn player(app: &Headless) -> NodeId {
+pub(crate) fn player(app: &Headless) -> NodeId {
     let nodes: Vec<_> = app
         .screen()
         .layout_nodes()
@@ -53,7 +53,7 @@ fn back_from_player(app: &mut Headless, idiom: nsh_core::platform::Idiom) {
 }
 
 #[track_caller]
-fn is_selected(app: &Headless, selector: &str) -> bool {
+pub(crate) fn is_selected(app: &Headless, selector: &str) -> bool {
     app.screen()
         .accessibility_state(selector)
         .is_ok_and(|state| state.selected)
@@ -487,7 +487,7 @@ fn rebind(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     );
 }
 
-fn engine(idiom: nsh_core::platform::Idiom) -> EngineConfig {
+pub(crate) fn engine(idiom: nsh_core::platform::Idiom) -> EngineConfig {
     let mut config = EngineConfig {
         viewport: Size::new(px(1920.0), px(1080.0)),
         ..EngineConfig::new(Root::of::<iptv_app::App>())
@@ -499,7 +499,7 @@ fn engine(idiom: nsh_core::platform::Idiom) -> EngineConfig {
     config
 }
 
-fn observe_props(app: &mut Headless) -> Arc<Mutex<HashMap<String, Value>>> {
+pub(crate) fn observe_props(app: &mut Headless) -> Arc<Mutex<HashMap<String, Value>>> {
     let props: Arc<Mutex<HashMap<String, Value>>> = Arc::default();
     let observed = props.clone();
     app.observe(move |_, batch| {
@@ -517,7 +517,7 @@ fn observe_props(app: &mut Headless) -> Arc<Mutex<HashMap<String, Value>>> {
     props
 }
 
-const SERIES_INFO: &str = r#"{
+pub(crate) const SERIES_INFO: &str = r#"{
   "info": {"name": "Generated Voyage", "plot": "Generated series plot"},
   "episodes": {
     "1": [
@@ -530,7 +530,7 @@ const SERIES_INFO: &str = r#"{
   }
 }"#;
 
-fn episode_key(series: &iptv_core::vod::Key, provider_id: &str) -> iptv_core::vod::Key {
+pub(crate) fn episode_key(series: &iptv_core::vod::Key, provider_id: &str) -> iptv_core::vod::Key {
     iptv_core::vod::Key {
         source: series.source,
         kind: iptv_core::vod::Kind::Episode,

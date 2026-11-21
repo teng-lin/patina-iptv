@@ -163,8 +163,14 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
 /// the guide.
 pub(crate) fn stop_playback(ui: Ui) {
     crate::interruption::viewer_acted(ui);
-    crate::multiview::close(ui);
     log::info!("iptv player: stopped by the viewer");
+    stopped(ui);
+}
+
+/// Nothing plays, as after the viewer's Stop: also when an episode ends
+/// away from its player (#187).
+pub(crate) fn stopped(ui: Ui) {
+    crate::multiview::close(ui);
     ui.playing.set(None);
     crate::player::stop(ui);
     ui.mode.set(crate::settings::browse_mode());
