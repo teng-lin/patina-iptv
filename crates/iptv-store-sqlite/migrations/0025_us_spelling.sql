@@ -21,7 +21,8 @@ UPDATE epg_feed_results SET error_kind = 'canceled' WHERE error_kind = 'cancelle
 -- Recording jobs: the status CHECK names 'canceled', so the table is built
 -- again. Dropping a parent with foreign keys on deletes its children, so
 -- both children are copied aside and dropped first, then everything is
--- created again with the same ids.
+-- created again with the same ids. A child row whose job is gone (which
+-- foreign keys never allowed) is not copied back rather than failing.
 CREATE TABLE us_spelling_jobs AS SELECT * FROM recording_jobs;
 CREATE TABLE us_spelling_completions AS SELECT * FROM recording_completions;
 CREATE TABLE us_spelling_progress AS SELECT * FROM recording_playback_progress;
@@ -70,7 +71,8 @@ CREATE TABLE recording_completions (
     message TEXT NOT NULL
 );
 INSERT INTO recording_completions (job_id, source_incarnation, outcome, bytes, digest, message)
-SELECT job_id, source_incarnation, outcome, bytes, digest, message FROM us_spelling_completions;
+SELECT job_id, source_incarnation, outcome, bytes, digest, message FROM us_spelling_completions
+WHERE job_id IN (SELECT id FROM recording_jobs);
 
 CREATE TABLE recording_playback_progress (
     recording_id INTEGER PRIMARY KEY REFERENCES recording_jobs(id) ON DELETE CASCADE,
@@ -81,7 +83,8 @@ CREATE TABLE recording_playback_progress (
 );
 INSERT INTO recording_playback_progress
     (recording_id, position_ms, duration_ms, completed, updated_at)
-SELECT recording_id, position_ms, duration_ms, completed, updated_at FROM us_spelling_progress;
+SELECT recording_id, position_ms, duration_ms, completed, updated_at FROM us_spelling_progress
+WHERE recording_id IN (SELECT id FROM recording_jobs);
 
 DROP TABLE us_spelling_jobs;
 DROP TABLE us_spelling_completions;

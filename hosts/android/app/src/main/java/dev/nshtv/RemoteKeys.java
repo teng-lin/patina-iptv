@@ -9,7 +9,7 @@ import android.view.KeyEvent;
  * app action.
  *
  * <ul>
- *   <li>A gamepad's A is the D-pad's center, as Android's
+ *   <li>A gamepad's A is the D-pad's centre, as Android's
  *       {@code KeyEvent.isConfirmKey} treats them.</li>
  *   <li>The keys NSH has no name for keep their key code and report the scan
  *       code of a function key no remote sends ({@link #TRANSPORT}); NSH then

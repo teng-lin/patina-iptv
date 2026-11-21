@@ -704,3 +704,37 @@ fn a_backup_from_before_us_spelling_restores_favorites_and_settings() {
         iptv_settings::Value::Bool(false)
     );
 }
+
+/// Migrating an older settings document does not relax the other rules: an
+/// unknown key or an invalid value still refuses the restore.
+#[test]
+fn an_older_backup_with_unknown_or_invalid_settings_is_still_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("live");
+    seed(&root, "Generated");
+    let old = dir.path().join("v24.sqlite");
+    v24_library(&old);
+    for global in [
+        json!({"generated.unknown_key": true}),
+        json!({"appearance.accent": "generated-not-a-palette"}),
+    ] {
+        let settings = json!({
+            "format": iptv_settings::backup::FORMAT,
+            "version": 3,
+            "global": global
+        })
+        .to_string();
+        assert!(
+            stage(
+                &root,
+                &mut packed(vec![
+                    ("iptv.sqlite", fs::read(&old).unwrap()),
+                    ("settings.json", settings.into_bytes()),
+                ])
+                .as_slice(),
+            )
+            .is_err()
+        );
+    }
+    assert!(!sibling(&root, "restore-pending").exists());
+}

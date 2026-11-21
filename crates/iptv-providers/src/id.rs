@@ -13,7 +13,7 @@
 //!    `id`, Stalker `id`): `"{source}:{kind}:{provider_id}"`, for example
 //!    `xt:live:1234`, `xt:movie:1234`, `st:live:77`. The kind is included
 //!    because panels reuse the same number for a live channel and a movie.
-//!    Numeric ids are canonicalised (`"0042"` → `42`).
+//!    Numeric ids are canonicalized (`"0042"` → `42`).
 //! 2. **No provider id** (M3U entries):
 //!    `"m3u:" + hex(xxh3_64(normalize_stream_url(url) + "\n" + normalize_name(name)))`.
 //!    Normalization removes what changes between refreshes without changing

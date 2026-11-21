@@ -102,8 +102,16 @@ fn a_v24_store_keeps_its_data_under_us_spelling() {
              status,message,source_incarnation)
          SELECT 43,source_id,channel_id,channel_name,title,starts_at+120,ends_at+120,
              'cancelled','Cancelled',source_incarnation FROM recording_jobs WHERE id=41;
-         UPDATE source_imports SET last_error_kind='cancelled',series_error_kind='cancelled'
-         WHERE source_id=1;",
+         INSERT INTO recording_jobs(id,source_id,channel_id,channel_name,title,starts_at,ends_at,
+             status,message,source_incarnation)
+         SELECT 45,source_id,channel_id,channel_name,title,starts_at+240,ends_at+240,
+             'cancelled','Recurring schedule disabled',source_incarnation
+         FROM recording_jobs WHERE id=41;
+         INSERT INTO recording_rule_jobs(job_id,rule_id,starts_at) VALUES(45,71,1800000240);
+         UPDATE source_imports SET last_error_kind='cancelled',movie_error_kind='cancelled',
+             series_error_kind='cancelled' WHERE source_id=1;
+         UPDATE epg_guides SET last_error_kind='cancelled';
+         UPDATE epg_feed_results SET error_kind='cancelled';",
     )
     .unwrap();
     let old_favorites: i64 = conn
@@ -112,7 +120,18 @@ fn a_v24_store_keeps_its_data_under_us_spelling() {
     let old_programs: i64 = conn
         .query_row("SELECT COUNT(*) FROM epg_programmes", [], |r| r.get(0))
         .unwrap();
-    assert!(old_favorites > 0 && old_programs > 0);
+    let old_rule_jobs: i64 = conn
+        .query_row("SELECT COUNT(*) FROM recording_rule_jobs", [], |r| r.get(0))
+        .unwrap();
+    let old_kinds: i64 = conn
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM epg_guides WHERE last_error_kind='cancelled')
+                  + (SELECT COUNT(*) FROM epg_feed_results WHERE error_kind='cancelled')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(old_favorites > 0 && old_programs > 0 && old_rule_jobs >= 3 && old_kinds > 0);
     drop(conn);
 
     let store = Store::open(&path).unwrap();
@@ -121,6 +140,13 @@ fn a_v24_store_keeps_its_data_under_us_spelling() {
     let canceled = jobs.iter().find(|j| j.id == JobId(43)).unwrap();
     assert_eq!(canceled.status, Status::Canceled);
     assert_eq!(canceled.message, "Canceled");
+    // A job a disabled rule canceled keeps the message that lets the rule
+    // restore it, and its link to the rule.
+    let disabled = jobs.iter().find(|j| j.id == JobId(45)).unwrap();
+    assert_eq!(
+        (disabled.status, disabled.message.as_str()),
+        (Status::Canceled, "Recurring schedule disabled")
+    );
     let completed = jobs.iter().find(|j| j.id == JobId(41)).unwrap();
     assert_eq!(
         (completed.status, completed.bytes),
@@ -134,15 +160,27 @@ fn a_v24_store_keeps_its_data_under_us_spelling() {
     let status = store.import_status(SRC).unwrap();
     assert_eq!(status.last_error, Some(ImportErrorKind::Canceled));
     assert_eq!(status.series_error, Some(ImportErrorKind::Canceled));
-    assert_eq!(status.movies_error, Some(ImportErrorKind::HttpStatus));
+    assert_eq!(status.movies_error, Some(ImportErrorKind::Canceled));
+    // check_guide covers v24 in every_historical_version_migrates_with_its_data;
+    // here every guide error kind was set to the old canceled slug instead.
     check_overlays(&store, 24);
-    check_guide(&store, 24);
     drop(store);
 
     let conn = rusqlite::Connection::open(&path).unwrap();
     let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
     assert_eq!(count("SELECT COUNT(*) FROM favorites"), old_favorites);
     assert_eq!(count("SELECT COUNT(*) FROM epg_programs"), old_programs);
+    assert_eq!(
+        count("SELECT COUNT(*) FROM recording_rule_jobs"),
+        old_rule_jobs
+    );
+    assert_eq!(
+        count(
+            "SELECT (SELECT COUNT(*) FROM epg_guides WHERE last_error_kind='canceled')
+                  + (SELECT COUNT(*) FROM epg_feed_results WHERE error_kind='canceled')"
+        ),
+        old_kinds
+    );
     assert_eq!(
         count(
             "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE '%favourite%' OR name LIKE '%programme%' OR sql LIKE '%cancelled%'"
@@ -151,7 +189,10 @@ fn a_v24_store_keeps_its_data_under_us_spelling() {
     );
     assert_eq!(
         count(
-            "SELECT COUNT(*) FROM source_imports WHERE 'cancelled' IN (last_error_kind,movie_error_kind,series_error_kind)"
+            "SELECT (SELECT COUNT(*) FROM source_imports WHERE 'cancelled' IN (last_error_kind,movie_error_kind,series_error_kind))
+                  + (SELECT COUNT(*) FROM epg_guides WHERE last_error_kind='cancelled')
+                  + (SELECT COUNT(*) FROM epg_feed_results WHERE error_kind='cancelled')
+                  + (SELECT COUNT(*) FROM recording_jobs WHERE status='cancelled')"
         ),
         0
     );
