@@ -353,7 +353,9 @@ credential-key callback, OS backup-exclusion hook and startup instrumentation.
 clients (`network::Client`, an `iptv_import::Fetch`) for imports, browsing,
 link resolves, staged probes and artwork; `execution` supplies the store
 lanes, long-lived workers (the refresh pool, the file and favorites writers)
-and each owner's task executor; `entropy` gives random bytes. `Ports::new`
+and each owner's task executor; `entropy` gives random bytes. The runtime
+reads time through `iptv_runtime::time` (the system's clocks natively, the
+host's in a browser build). `Ports::new`
 fills them with the native implementations (`iptv-net`, threads and a
 two-worker Tokio runtime per owner, the OS random source).
 `execution::Cooperative` is the browser's: one thread, lanes run in turns of

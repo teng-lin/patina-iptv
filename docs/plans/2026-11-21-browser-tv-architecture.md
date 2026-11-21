@@ -229,9 +229,13 @@ Each step keeps every native test passing and lands as its own pull request.
   the favorites writer are blocking workers, which a cooperative host
   does not have, so in the browser they report themselves unavailable;
   imports there need the pool's work as local tasks over the async store
-  calls (next step). The runtime still reads `std::time::Instant`
-  (queue metrics, deadlines), which panics on wasm32-unknown-unknown when
-  called; a clock port (or the store's host clock) is still to come.
+  calls (next step); until then `Runtime::has_workers` is false there and
+  the shell offers none of those services. The cooperative lanes share one
+  turn and, in the browser, one connection (the store has no reader
+  there); a `Sliced` step's budget is rows, as the store's `step(rows)`.
+  The runtime's clocks are `crate::time` (std's natively, the host's in a
+  browser build); the store's inspection API still takes std's `Instant`,
+  so bounded inspections cannot run in the browser yet.
 - **1c. Store on wasm32.** `iptv-store-sqlite` builds with the
   `sqlite-wasm-rs` backend on an in-memory VFS that persists changed pages
   to IndexedDB; staging databases are in-memory files; publishes run in
@@ -249,8 +253,9 @@ Each step keeps every native test passing and lands as its own pull request.
   `UnsupportedHost`. Randomness is a port (`Ports::entropy`). Backup files,
   private documents and the encrypted open still use the file system
   without `native`: they compile, and wait for the runtime to open the
-  browser store (`Store::open_browser`, chunk persistence and the sliced
-  publish driver over 1c's API), which is the next change.
+  browser store (`Store::open_browser`, chunk persistence, the sliced
+  publish driver over 1c's API and the `rust_sqlite_wasm_host_*` hooks the
+  final module supplies), which is the next change.
 - **1e. Shell split.** `host/<platform>` modules; images through the network
   port. *Gate*: `cargo check -p iptv-app --target wasm32-unknown-unknown`.
   *Status*: the gate passes with step 1c merged. `src/host/native` and
