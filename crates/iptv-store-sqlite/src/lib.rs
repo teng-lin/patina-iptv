@@ -58,7 +58,7 @@ mod backup;
 #[cfg(target_family = "wasm")]
 mod browser;
 #[cfg(target_family = "wasm")]
-pub use browser::{BrowserFiles, CHUNK_BYTES, ChangedChunks};
+pub use browser::{BrowserFiles, CHUNK_BYTES, ChangedChunks, MAX_DATABASE_BYTES};
 mod encryption;
 pub use encryption::DatabaseKey;
 mod catalog;

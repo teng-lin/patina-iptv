@@ -4,9 +4,7 @@
 use std::collections::BTreeMap;
 
 use iptv_import::{CatalogRow, CatalogSink};
-use iptv_store_sqlite::{
-    BrowserFiles, CHUNK_BYTES, CatalogStage, ChangedChunks, ChannelQuery, SourceId, Store,
-};
+use iptv_store_sqlite::{BrowserFiles, CHUNK_BYTES, CatalogStage, ChannelQuery, SourceId, Store};
 
 use crate::common::{group, m3u_channel, m3u_source};
 
@@ -17,20 +15,35 @@ struct Saved {
     size: u64,
 }
 
+/// What one save wrote.
+struct Taken {
+    size: u64,
+    indices: Vec<u32>,
+}
+
+impl Taken {
+    fn is_empty(&self) -> bool {
+        self.indices.is_empty()
+    }
+}
+
 impl Saved {
-    /// What the host does after a commit: takes the changed chunks, copies
-    /// them out and writes them; drops chunks past the end.
-    fn save(&mut self, store: &Store) -> ChangedChunks {
+    /// What the host does after a commit: takes the changed chunks, writes
+    /// them, drops chunks past the end and acknowledges the take.
+    fn save(&mut self, store: &Store) -> Taken {
         let changed = store.take_changed_chunks().unwrap();
-        for &index in &changed.indices {
-            let mut bytes = Vec::new();
-            store.read_chunk(index, &mut bytes).unwrap();
-            self.chunks.insert(index, bytes);
+        for (index, bytes) in changed.chunks() {
+            self.chunks.insert(index, bytes.to_vec());
         }
-        let count = changed.size.div_ceil(CHUNK_BYTES as u64) as u32;
+        let count = changed.size().div_ceil(CHUNK_BYTES as u64) as u32;
         self.chunks.retain(|&index, _| index < count);
-        self.size = changed.size;
-        changed
+        self.size = changed.size();
+        let taken = Taken {
+            size: changed.size(),
+            indices: changed.indices().collect(),
+        };
+        changed.saved();
+        taken
     }
 
     /// A launch: new files restored from the saved chunks.
@@ -107,25 +120,71 @@ fn a_small_write_changes_few_chunks_and_survives_a_relaunch() {
 #[test]
 fn chunks_are_taken_only_between_transactions_and_can_be_given_back() {
     let files = BrowserFiles::new().unwrap();
-    let mut store = Store::open_browser(&files).unwrap();
-    let source = store.add_source(&m3u_source("Synthetic")).unwrap();
+    let store = Store::open_browser(&files).unwrap();
     let changed = store
         .read_snapshot(|store| Ok(store.take_changed_chunks().is_err()))
         .unwrap();
     assert!(changed, "a read snapshot is a transaction");
     let taken = store.take_changed_chunks().unwrap();
     assert!(!taken.is_empty());
-    store.return_changed_chunks(&taken).unwrap();
-    assert_eq!(store.take_changed_chunks().unwrap(), taken);
-    let _ = source;
+    let indices: Vec<u32> = taken.indices().collect();
+    // A write that failed: dropping the take returns its chunks.
+    drop(taken);
+    let again = store.take_changed_chunks().unwrap();
+    assert_eq!(again.indices().collect::<Vec<_>>(), indices);
+    again.saved();
+    assert!(store.take_changed_chunks().unwrap().is_empty());
+}
+
+/// A take is a snapshot of one commit: a commit after it changes neither its
+/// bytes nor its size, and no second take is given out before it is saved,
+/// so a save never mixes two commits.
+#[test]
+fn a_take_is_one_commit_and_takes_do_not_overlap() {
+    let files = BrowserFiles::new().unwrap();
+    let mut store = Store::open_browser(&files).unwrap();
+    let source = store.add_source(&m3u_source("Synthetic")).unwrap();
+    let mut saved = Saved::default();
+    saved.save(&store);
+    catalog(&mut store, source, 2000, "first");
+    let first = store.take_changed_chunks().unwrap();
+    let before: Vec<(u32, Vec<u8>)> = first.chunks().map(|(i, b)| (i, b.to_vec())).collect();
+    let size = first.size();
+    // A commit before the host has copied the take out: it grows the file.
+    catalog(&mut store, source, 4000, "second");
+    assert!(
+        store.take_changed_chunks().is_err(),
+        "no second take before the first is saved"
+    );
+    let after: Vec<(u32, Vec<u8>)> = first.chunks().map(|(i, b)| (i, b.to_vec())).collect();
+    assert_eq!(after, before, "the take still holds the first commit");
+    assert_eq!(first.size(), size);
+    // Its write fails: the next take covers both commits.
+    drop(first);
+    saved.save(&store);
+    let restored = saved.restore();
+    let store = Store::open_browser(&restored).unwrap();
+    assert_eq!(channel_count(&store, source), 4000);
 }
 
 #[test]
 fn restoring_checks_chunk_sizes_and_refuses_an_open_database() {
     let files = BrowserFiles::new().unwrap();
-    files.restore_size(CHUNK_BYTES as u64 + 10).unwrap();
-    assert!(files.restore_chunk(1, &[0; 9]).is_err());
-    assert!(files.restore_chunk(2, &[0; 10]).is_err());
+    files.restore_size(CHUNK_BYTES as u64 + 1024).unwrap();
+    assert!(files.restore_chunk(1, &[0; 512]).is_err());
+    assert!(files.restore_chunk(2, &[0; 1024]).is_err());
+    files.restore_chunk(1, &[0; 1024]).unwrap();
+    // Chunk 0 is missing: the store does not open on a hole of zeros.
+    assert!(Store::open_browser(&files).is_err());
+    // Sizes that are no SQLite database, or absurdly large ones (a corrupt
+    // manifest), are refused before anything is allocated.
+    assert!(files.restore_size(1000).is_err());
+    assert!(
+        files
+            .restore_size(iptv_store_sqlite::MAX_DATABASE_BYTES + 512)
+            .is_err()
+    );
+    assert!(files.restore_size(1 << 40).is_err());
     let files = BrowserFiles::new().unwrap();
     let store = Store::open_browser(&files).unwrap();
     assert!(files.restore_size(0).is_err());
@@ -275,6 +334,7 @@ fn an_abandoned_publish_leaves_the_database_writable_and_unchanged() {
         "not this store's copy"
     );
     store.abandon_publish(copy).unwrap();
+    assert!(!store.is_publishing());
     assert_eq!(channel_count(&store, source), 100);
     catalog(&mut store, source, 60, "third");
     assert_eq!(channel_count(&store, source), 60);
@@ -390,4 +450,147 @@ fn browser_stores_and_jobs_are_send() {
     send::<iptv_store_sqlite::CatalogReplacement<'static, Store>>();
     send::<iptv_store_sqlite::EpgReplacement<'static, Store>>();
     send::<iptv_store_sqlite::EpgStage>();
+}
+
+/// A publish copy dropped anywhere (an error before its job starts, a job
+/// constructor that fails, a job dropped mid-way) abandons the publish: the
+/// database takes writes again and is unchanged.
+#[test]
+fn a_dropped_publish_copy_or_job_abandons_the_publish() {
+    use iptv_store_sqlite::{CatalogReplacement, StagePublication, Step};
+    let files = BrowserFiles::new().unwrap();
+    let mut store = Store::open_browser(&files).unwrap();
+    let source = store.add_source(&m3u_source("Synthetic")).unwrap();
+    catalog(&mut store, source, 300, "first");
+    let id = store
+        .load_channels(source, &ChannelQuery::default())
+        .unwrap()[0]
+        .channel
+        .id
+        .clone();
+
+    // The copy itself, dropped before any job.
+    let copy = store.begin_publish().unwrap();
+    assert!(store.set_favorite(source, &id, true).is_err());
+    drop(copy);
+    assert!(!store.is_publishing());
+    store.set_favorite(source, &id, true).unwrap();
+
+    // A job constructor that fails takes the copy with it.
+    let copy = store.begin_publish().unwrap();
+    let unfinished =
+        CatalogStage::create_in_with("/stages", |path| copy.open_staging_connection(path)).unwrap();
+    assert!(
+        CatalogReplacement::from_stage(copy, source, unfinished, StagePublication::new()).is_err()
+    );
+    assert!(!store.is_publishing());
+    store.set_favorite(source, &id, false).unwrap();
+
+    // A job dropped mid-way: rolled back, copy gone, database unchanged.
+    let copy = store.begin_publish().unwrap();
+    let groups: Vec<_> = (0..4).map(group).collect();
+    let channels: Vec<_> = (0..500).map(|i| m3u_channel(i, 4, "second")).collect();
+    let mut job = CatalogReplacement::new(copy, source, groups, channels, Vec::new(), Vec::new());
+    for _ in 0..3 {
+        assert_eq!(job.step(100).unwrap(), Step::Pending);
+    }
+    drop(job);
+    assert!(!store.is_publishing());
+    assert_eq!(channel_count(&store, source), 300);
+    store.set_favorite(source, &id, true).unwrap();
+    // A new publish can start.
+    let copy = store.begin_publish().unwrap();
+    store.abandon_publish(copy).unwrap();
+}
+
+/// A catalog replacement in slices on the publish copy, swapped in.
+#[test]
+fn a_catalog_publishes_in_slices_on_the_copy() {
+    use iptv_store_sqlite::{CatalogReplacement, Step};
+    let files = BrowserFiles::new().unwrap();
+    let mut store = Store::open_browser(&files).unwrap();
+    let source = store.add_source(&m3u_source("Synthetic")).unwrap();
+    catalog(&mut store, source, 300, "first");
+    let mut saved = Saved::default();
+    saved.save(&store);
+    let copy = store.begin_publish().unwrap();
+    let groups: Vec<_> = (0..4).map(group).collect();
+    let channels: Vec<_> = (0..900).map(|i| m3u_channel(i, 4, "second")).collect();
+    let mut job = CatalogReplacement::new(copy, source, groups, channels, Vec::new(), Vec::new());
+    let mut slices = 0;
+    loop {
+        slices += 1;
+        match job.step(200).unwrap() {
+            Step::Pending => assert_eq!(channel_count(&store, source), 300),
+            Step::Done(published) => {
+                assert_eq!(published.counts.channels, 900);
+                break;
+            }
+        }
+    }
+    assert!(slices > 5);
+    store.finish_publish(job.into_store()).unwrap();
+    assert_eq!(channel_count(&store, source), 900);
+    saved.save(&store);
+    let files = saved.restore();
+    assert_eq!(
+        channel_count(&Store::open_browser(&files).unwrap(), source),
+        900
+    );
+}
+
+/// Only the store opens its database: a stage's connection can neither
+/// open nor attach it (and so cannot write it behind the publish).
+#[test]
+fn other_connections_cannot_open_or_attach_the_database() {
+    let files = BrowserFiles::new().unwrap();
+    let mut store = Store::open_browser(&files).unwrap();
+    let source = store.add_source(&m3u_source("Synthetic")).unwrap();
+    assert!(
+        store
+            .open_staging_connection(std::path::Path::new("patina.sqlite"))
+            .is_err()
+    );
+    let copy = store.begin_publish().unwrap();
+    let stage = store
+        .open_staging_connection(std::path::Path::new("/stages/intruder.sqlite"))
+        .unwrap();
+    for name in ["patina.sqlite", "patina-publish.sqlite"] {
+        assert!(
+            stage
+                .execute("ATTACH DATABASE ?1 AS other", [name])
+                .is_err(),
+            "{name}"
+        );
+    }
+    drop(stage);
+    store.finish_publish(copy).unwrap();
+    assert!(store.sources().unwrap().iter().any(|s| s.id == source));
+}
+
+/// Freed pages are zeroed: a deleted source's credential leaves no trace in
+/// the saved chunks.
+#[test]
+fn a_deleted_credential_is_not_in_the_saved_chunks() {
+    let files = BrowserFiles::new().unwrap();
+    let mut store = Store::open_browser(&files).unwrap();
+    let mut saved = Saved::default();
+    let source = store
+        .add_source(&crate::common::xtream_source("Secret"))
+        .unwrap();
+    saved.save(&store);
+    let secret = crate::common::XT_PASSWORD.as_bytes();
+    let contains = |saved: &Saved| {
+        saved
+            .chunks
+            .values()
+            .any(|bytes| bytes.windows(secret.len()).any(|w| w == secret))
+    };
+    assert!(contains(&saved), "the credential is stored before");
+    store.delete_source(source).unwrap();
+    saved.save(&store);
+    assert!(
+        !contains(&saved),
+        "a deleted credential stays in a saved page"
+    );
 }
