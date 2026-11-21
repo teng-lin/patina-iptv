@@ -169,23 +169,28 @@ impl Transport {
                     // lost when that executor was dropped, as a recording
                     // host restarted with new services drops the old ones',
                     // and this wait then never ended.)
-                    let closing = input.clone();
+                    // The flag rises and waiters wake however the closing
+                    // ends: done, unwound, or never started (no thread: the
+                    // relay, dropped with the closure, still stops).
+                    struct Closed(Arc<Passthrough>);
+                    impl Drop for Closed {
+                        fn drop(&mut self) {
+                            self.0.closed.store(true, Ordering::Release);
+                            self.0.changed.notify_waiters();
+                        }
+                    }
+                    let closed = Closed(input.clone());
                     let close = move || {
+                        let _closed = closed;
+                        // The relay's shutdown only awaits its own thread's
+                        // oneshot: a runtime without IO or timers drives it.
                         if let Ok(runtime) = tokio::runtime::Builder::new_current_thread().build() {
                             runtime.block_on(relay.shutdown());
                         }
-                        closing.closed.store(true, Ordering::Release);
-                        closing.changed.notify_waiters();
                     };
-                    if std::thread::Builder::new()
+                    let _ = std::thread::Builder::new()
                         .name("iptv-relay-close".into())
-                        .spawn(close)
-                        .is_err()
-                    {
-                        // No thread: the relay, dropped with the closure,
-                        // still stops; nothing is left to wait for.
-                        input.closed.store(true, Ordering::Release);
-                    }
+                        .spawn(close);
                 }
                 loop {
                     let changed = input.changed.notified();
