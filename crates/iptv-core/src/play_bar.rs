@@ -5,9 +5,12 @@
 //! The mouse moving over the video shows it; a tap (or a click) on the
 //! video shows it, and another hides it. It hides once nothing happened
 //! for [`HIDE_AFTER_MS`], but not while the mouse rests on it nor while a
-//! popup it opened (a chooser, the program details) is open. Using one
-//! of its controls counts as something happening. Times are milliseconds
-//! on the caller's monotonic clock (no clock access here).
+//! popup it opened (a chooser, the program details) is open, nor while a
+//! screen reader runs: moving from control to control takes a screen
+//! reader's user longer than the delay, so the bar stays until the viewer
+//! hides it (WCAG 2.2.1). Using one of its controls counts as something
+//! happening. Times are milliseconds on the caller's monotonic clock (no
+//! clock access here).
 
 /// How long the bar stays after the last pointer input.
 pub const HIDE_AFTER_MS: u64 = 3_000;
@@ -41,6 +44,8 @@ pub struct PlayBar {
     pub hovered: bool,
     /// A popup it opened is open: it stays.
     pub held: bool,
+    /// A screen reader runs (TalkBack, VoiceOver): it stays until hidden.
+    pub reader: bool,
     hide_at_ms: Option<u64>,
     /// A held remote key decides tap or hold at this time: apart from the
     /// idle deadline, so the bar's use meanwhile does not pull it in.
@@ -119,6 +124,16 @@ impl PlayBar {
         }
     }
 
+    /// A screen reader started (`true`) or stopped: while one runs the bar
+    /// stays until the viewer hides it; once it stops the delay starts
+    /// again.
+    pub fn screen_reader(&mut self, on: bool, now_ms: u64) {
+        self.reader = on;
+        if self.shown {
+            self.restart(now_ms);
+        }
+    }
+
     pub fn hide(&mut self) {
         self.shown = false;
         self.focus = None;
@@ -128,10 +143,11 @@ impl PlayBar {
     }
 
     /// When it hides unless something happens (for scheduling); `None`
-    /// while hidden, while the mouse rests on it or a popup is open. A
-    /// held key's deadline counts when later than its own.
+    /// while hidden, while the mouse rests on it, a popup is open or a
+    /// screen reader runs. A held key's deadline counts when later than
+    /// its own.
     pub fn hide_at_ms(&self) -> Option<u64> {
-        if self.hovered || self.held {
+        if self.hovered || self.held || self.reader {
             None
         } else {
             match (self.hide_at_ms, self.hold_until_ms) {
@@ -257,6 +273,28 @@ mod tests {
         bar.hold(true, 70_000);
         assert!(!bar.shown);
         // Hiding keeps the hold: it still knows the popup is open.
+        bar.tapped(71_000);
+        assert_eq!(bar.hide_at_ms(), None);
+    }
+
+    #[test]
+    fn it_stays_while_a_screen_reader_runs_until_hidden() {
+        let mut bar = PlayBar::default();
+        bar.screen_reader(true, 0);
+        bar.tapped(0);
+        assert_eq!(bar.hide_at_ms(), None);
+        assert!(!bar.tick(60_000));
+        assert!(bar.shown);
+        // Another tap (a double tap on the video) still hides it.
+        bar.tapped(60_000);
+        assert!(!bar.shown);
+        // The reader stops: the delay counts again from then.
+        bar.tapped(61_000);
+        bar.screen_reader(false, 62_000);
+        assert!(!bar.tick(62_000 + HIDE_AFTER_MS - 1));
+        assert!(bar.tick(62_000 + HIDE_AFTER_MS));
+        // Hidden, it still knows the reader runs.
+        bar.screen_reader(true, 70_000);
         bar.tapped(71_000);
         assert_eq!(bar.hide_at_ms(), None);
     }

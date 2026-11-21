@@ -129,6 +129,11 @@ is below 1.0, a minor release may change behavior.
 
 ### Fixed
 
+- Screen readers: the play bar over full-screen video no longer hides a
+  few seconds after it opens while a screen reader runs, so TalkBack and
+  VoiceOver users can swipe to its controls. It stays until a double tap on
+  the video, Back or (off a TV) a key hides it. Multiview's pointer chrome
+  stays the same way (#192).
 - Movies and Shows: a title that follows another (the next episode, or
   another title chosen) no longer stays on "Loading…" when the recording
   host restarted while the earlier one played. Retiring the earlier
