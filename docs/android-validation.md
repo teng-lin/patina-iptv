@@ -13,6 +13,32 @@ Build the fixture APK and start the local mock server as described in
 Gradle's `assembleDebug`. The smoke helper refuses a normal app APK before install.
 Ensure `adb`, `emulator` and `apkanalyzer` are on PATH from the Android SDK.
 
+## Fixture streams: ending or looping live
+
+`tools/make-hls-fixtures.sh --android-smoke` encodes three 300 s channels
+(`fixtures/hls/ch0`..`ch2`). `tools/mock-server.py` serves them in one of two
+ways, and the playlist from `tools/make-iptv-fixtures.py` works with either,
+since the channel URLs stay `/ch<N>/index.m3u8`:
+
+| Variant | Start | What a channel does |
+| --- | --- | --- |
+| Ending (default) | `python3 tools/mock-server.py 8089 fixtures/hls &` | The generated VOD playlist, ending with `#EXT-X-ENDLIST`. A live channel on it ends after 300 s: the app's local live server answers 503 and the player reconnects. Use it to exercise that reconnect path; the CI smoke uses it. |
+| Looping live | `python3 tools/mock-server.py --loop 8089 fixtures/hls &` | An endless live stream: a sliding playlist of the newest 30 segments (`--window`), without `#EXT-X-ENDLIST`, whose media sequence numbers rise with the clock as the 300 s of segments repeat (`live-<sequence>.ts`). Each repeat is served with its timestamps and continuity counters carried on, so the stream the app joins from the segments has one timeline at the wrap. It needs no `#EXT-X-DISCONTINUITY`, and it has none, because the app joins segments into one stream and would drop that tag. |
+
+Use the looping live variant for any run longer than a channel's media (300 s
+with `--android-smoke`, 30 s without), such as soak, timing, stream-request
+counts or a held journey (`IPTV_SMOKE_HOLD`). With the ending variant those
+runs see a reconnect each time the media ends, which adds noise
+to timings, request counts and logs and can hide a real stop. With `--loop`
+the server's log shows one `index.m3u8` reload about every second and one
+rising `live-<sequence>.ts` per 2 s segment, with no reconnect. Catch-up
+(`/archive/...`) still serves the ending VOD playlist in both variants.
+Timestamps wrap at 2^33 ticks of 90 kHz (about 26.5 hours of server uptime),
+as MPEG-TS allows, so a multi-day soak sees that wrap once a day.
+`tools/ci/test-mock-server.py` checks both variants.
+
+## Running the emulator
+
 Run one form at a time, with a source profile that is not being modified:
 
 ```sh
