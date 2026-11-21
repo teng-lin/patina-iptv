@@ -282,5 +282,6 @@ iptv-runtime/src/execution/cooperative.rs	a cooperative executor has no workers
 iptv-runtime/src/ports.rs	the host supplied no entropy
 # Byte-budget refusals become typed TooLarge failures; the text is for the log.
 iptv-app/src/host/web.rs	response exceeds its byte budget
+iptv-app/src/host/web.rs	total request time exceeded
 iptv-runtime/src/network.rs	declared body
 iptv-runtime/src/network.rs	{what} exceeds its byte budget

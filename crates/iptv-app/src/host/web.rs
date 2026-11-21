@@ -16,8 +16,10 @@
 //! - The local time zone is UTC until the host reports its offset.
 //! - Recording, backup files and staged probes are unavailable (the
 //!   runtime's capability model reports them so).
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::task::Poll;
 use std::time::Duration;
 
 use iptv_import::{BodyStream, Fetch, FetchError, FetchErrorKind, StreamingResponse};
@@ -67,7 +69,8 @@ struct PageNetwork;
 impl Network for PageNetwork {
     /// The page's fetch cannot cap redirects, the connection time or the
     /// `User-Agent` (the browser owns them); the idle timeout goes to the
-    /// host, and the client enforces the time and byte budgets.
+    /// host; the client's ceiling and byte budgets are enforced here and in
+    /// the client.
     fn client(&self, config: &NetworkConfig) -> Result<Client, FetchError> {
         let fetch = HostFetch::new().with_idle_timeout(config.read_timeout);
         Ok(Client::new(
@@ -87,6 +90,36 @@ struct Page {
     buffered: usize,
 }
 
+/// `work`, unless `deadline` (on `fetch`'s clock) passes first: the request's
+/// total time, which the page's fetch does not bound by itself.
+async fn within<T>(
+    fetch: &HostFetch,
+    deadline: Duration,
+    work: impl Future<Output = Result<T, FetchError>>,
+) -> Result<T, FetchError> {
+    let mut timer = std::pin::pin!(fetch.sleep(deadline.saturating_sub(fetch.elapsed())));
+    let mut work = std::pin::pin!(work);
+    std::future::poll_fn(move |cx| {
+        if let Poll::Ready(result) = work.as_mut().poll(cx) {
+            return Poll::Ready(result);
+        }
+        timer.as_mut().poll(cx).map(|()| {
+            Err(FetchError::new(
+                FetchErrorKind::Deadline,
+                "total request time exceeded",
+            ))
+        })
+    })
+    .await
+}
+
+impl Page {
+    /// When `request`'s total time ends (the client always sets one).
+    fn deadline(&self, request: &HttpRequest) -> Duration {
+        self.fetch.elapsed() + request.timeout.unwrap_or(Duration::MAX / 4)
+    }
+}
+
 impl Transport for Page {
     fn elapsed(&self) -> Duration {
         self.fetch.elapsed()
@@ -97,11 +130,13 @@ impl Transport for Page {
     }
 
     fn fetch(&self, request: HttpRequest) -> NetFuture<'_, Result<HttpResponse, FetchError>> {
-        Box::pin(async move {
+        let deadline = self.deadline(&request);
+        Box::pin(within(&self.fetch, deadline, async move {
             let mut response = self.fetch.fetch_stream(request).await?;
-            if response
-                .content_length
-                .is_some_and(|length| length > self.buffered as u64)
+            if response.is_success()
+                && response
+                    .content_length
+                    .is_some_and(|length| length > self.buffered as u64)
             {
                 return Err(FetchError::new(
                     FetchErrorKind::TooLarge,
@@ -119,29 +154,39 @@ impl Transport for Page {
                 bytes.extend_from_slice(&chunk);
             }
             Ok(HttpResponse::new(response.status, bytes))
-        })
+        }))
     }
 
     fn fetch_stream(
         &self,
         request: HttpRequest,
     ) -> NetFuture<'_, Result<StreamingResponse<Body>, FetchError>> {
+        let deadline = self.deadline(&request);
         Box::pin(async move {
-            let response = self.fetch.fetch_stream(request).await?;
+            let response = within(&self.fetch, deadline, self.fetch.fetch_stream(request)).await?;
             Ok(StreamingResponse {
                 status: response.status,
                 content_length: response.content_length,
-                body: Body::new(PageBody(response.body)),
+                body: Body::new(PageBody {
+                    body: response.body,
+                    fetch: self.fetch.clone(),
+                    deadline,
+                }),
             })
         })
     }
 }
 
-struct PageBody(HostBody);
+/// A streamed body whose chunks end with the request's total time.
+struct PageBody {
+    body: HostBody,
+    fetch: HostFetch,
+    deadline: Duration,
+}
 
 impl Chunks for PageBody {
     fn next_chunk(&mut self) -> NetFuture<'_, Result<Option<Vec<u8>>, FetchError>> {
-        Box::pin(self.0.next_chunk())
+        Box::pin(within(&self.fetch, self.deadline, self.body.next_chunk()))
     }
 }
 
