@@ -277,5 +277,26 @@ fn an_unfolded_phone_takes_the_tablets_sizes() {
     step(app.set_environment("folded", phone));
     present(app, SIDEWAYS[1], 1.0);
     assert_eq!(row(app), 35.0, "the phone's rows again");
+
+    // Full screen with the bar up: its buttons follow too (the bar is made
+    // again when the screen turns from a phone's into a tablet's).
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    step(app.wait_until("B plays", WAIT, |_| iptv_app::player_has_source(0)));
+    step(app.press("id:guide-preview"));
+    let side = |app: &mut crate::headless::Headless| {
+        if bounds(app, "play-bar-back").is_none() {
+            step(app.press("id:video"));
+        }
+        step(app.wait_for("id:play-bar-mute"));
+        bounds(app, "play-bar-mute").expect("mute")[2]
+    };
+    assert_eq!(side(app), 44.0, "a phone's buttons");
+    step(app.set_environment("unfolded", |e| e.idiom = Idiom::Pad));
+    present(app, (1280.0, 800.0), 1.0);
+    assert_eq!(side(app), 48.0, "the tablet's buttons once unfolded");
+    step(app.set_environment("folded", phone));
+    present(app, SIDEWAYS[1], 1.0);
+    assert_eq!(side(app), 44.0, "the phone's buttons again");
     persistent(app, &lifetime, surface);
 }
