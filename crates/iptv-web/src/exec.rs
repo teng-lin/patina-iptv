@@ -127,6 +127,9 @@ struct Slot {
     https: bool,
     /// Content-supplied: every hop must be a public address.
     public_only: bool,
+    /// The origin the request was configured for: a hop to another one
+    /// must be public, as natively.
+    origin: Option<String>,
 }
 
 fn next_id() -> u32 {
@@ -246,7 +249,9 @@ pub(crate) fn deliver_error(id: u32, kind: u32, detail: String) {
 pub(crate) fn deliver_redirect(id: u32, url: &str) {
     let refused = deliver(id, |s| {
         let downgrade = s.https && !url.trim_start().to_ascii_lowercase().starts_with("https:");
-        let private = s.public_only && iptv_providers::content_url::validate(url).is_err();
+        let elsewhere = origin(url) != s.origin;
+        let private =
+            (s.public_only || elsewhere) && iptv_providers::content_url::validate(url).is_err();
         if downgrade || private {
             let why = if downgrade {
                 "redirect to plain HTTP refused"
@@ -298,11 +303,15 @@ pub(crate) fn storage_put(key: &str, value: &[u8]) {
 
 /// The request as the host reads it.
 ///
-/// `redirect` is `error` for a content-supplied request: the page's fetch
-/// follows redirects before Rust sees a hop, so a public address could
-/// lead it to a private one. Hosts that honour it refuse such a request's
-/// redirects; the Live TV bridge's worker always follows and checks the
-/// final address afterwards (`deliver_redirect`).
+/// `redirect` is `error` for a request that carries a header another origin
+/// must not receive (anything outside
+/// [`iptv_providers::http::CROSS_ORIGIN_HEADERS`]): the page's fetch would
+/// forward it to wherever a redirect leads, where the native adapter drops
+/// it. Every other request follows; the final address is then checked
+/// (`deliver_redirect`): public when the request was content-supplied or
+/// the origin changed, never a downgrade. Hops before the last reach their
+/// address before Rust sees them (`docs/security.md`). The Live TV
+/// bridge's worker always follows.
 fn request_json(request: &HttpRequest, idle_ms: u64) -> String {
     let headers: Vec<serde_json::Value> = request
         .headers
@@ -316,9 +325,24 @@ fn request_json(request: &HttpRequest, idle_ms: u64) -> String {
         "body": request.body,
         "timeoutMs": request.timeout.map(|t| t.as_millis() as u64),
         "idleMs": idle_ms,
-        "redirect": if request.public_only { "error" } else { "follow" },
+        "redirect": if origin_bound(request) { "error" } else { "follow" },
     })
     .to_string()
+}
+
+/// `request` carries a header that belongs to its origin.
+fn origin_bound(request: &HttpRequest) -> bool {
+    request.headers.iter().any(|(name, _)| {
+        !iptv_providers::http::CROSS_ORIGIN_HEADERS
+            .iter()
+            .any(|kept| name.eq_ignore_ascii_case(kept))
+    })
+}
+
+/// `scheme://host:port` of `address`, when it is one.
+fn origin(address: &str) -> Option<String> {
+    let url = url::Url::parse(address.trim()).ok()?;
+    Some(url.origin().ascii_serialization())
 }
 
 /// A download that receives nothing for this long fails (the native
@@ -395,6 +419,7 @@ impl HostFetch {
                 .to_ascii_lowercase()
                 .starts_with("https:");
             s.public_only = request.public_only;
+            s.origin = origin(&request.url);
         });
         host().fetch(id, &request_json(request, self.idle_ms), stream);
         let (status, length) = std::future::poll_fn(|cx| {
@@ -555,16 +580,22 @@ mod request_tests {
     use super::*;
 
     #[test]
-    fn a_content_supplied_request_refuses_redirects_the_page_would_follow() {
-        let mut content = HttpRequest::get("https://example.test/logo.png");
-        content.public_only = true;
-        let json: serde_json::Value =
-            serde_json::from_str(&request_json(&content, 15_000)).unwrap();
-        assert_eq!(json["redirect"], "error");
-        assert_eq!(json["idleMs"], 15_000);
-        let picked = HttpRequest::get("https://example.test/list.m3u");
-        let json: serde_json::Value =
-            serde_json::from_str(&request_json(&picked, IDLE_TIMEOUT_MS)).unwrap();
-        assert_eq!(json["redirect"], "follow");
+    fn a_request_with_origin_headers_refuses_redirects_the_page_would_follow() {
+        let redirect = |request: &HttpRequest| {
+            let json: serde_json::Value =
+                serde_json::from_str(&request_json(request, 15_000)).unwrap();
+            assert_eq!(json["idleMs"], 15_000);
+            json["redirect"].as_str().unwrap().to_owned()
+        };
+        let mut logo = HttpRequest::get("https://example.test/logo.png");
+        logo.public_only = true;
+        assert_eq!(redirect(&logo), "follow", "a redirected logo still loads");
+        let negotiated = HttpRequest::get("https://example.test/list.m3u")
+            .with_header("User-Agent", "Synthetic/1")
+            .with_header("Range", "bytes=0-");
+        assert_eq!(redirect(&negotiated), "follow");
+        let keyed =
+            HttpRequest::get("https://example.test/list.m3u").with_header("X-Api-Key", "synthetic");
+        assert_eq!(redirect(&keyed), "error");
     }
 }

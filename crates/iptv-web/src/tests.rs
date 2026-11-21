@@ -724,3 +724,41 @@ fn a_request_wakes_its_task_under_another_executor() {
     );
     assert!(request.as_mut().poll(&mut cx).is_ready());
 }
+
+#[test]
+fn a_chosen_address_may_not_redirect_to_a_private_origin() {
+    use iptv_import::Fetch;
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    let fetch = crate::exec::HostFetch::new();
+    let request = |url: &str| {
+        let fetch = fetch.clone();
+        let url = url.to_owned();
+        async move {
+            fetch
+                .fetch_stream(iptv_providers::HttpRequest::get(url))
+                .await
+        }
+    };
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    let mut elsewhere = std::pin::pin!(request("https://example.test/list.m3u"));
+    assert!(elsewhere.as_mut().poll(&mut cx).is_pending());
+    let id = fake.requests.borrow().last().unwrap().0;
+    crate::exec::deliver_redirect(id, "https://192.168.1.20/list.m3u");
+    match elsewhere.as_mut().poll(&mut cx) {
+        std::task::Poll::Ready(Err(error)) => {
+            assert_eq!(error.kind, iptv_import::FetchErrorKind::Redirect)
+        }
+        _ => panic!("a private origin after a redirect is refused"),
+    }
+    // A chosen LAN address keeps its own origin.
+    let mut home = std::pin::pin!(request("https://192.168.1.20/list.m3u"));
+    assert!(home.as_mut().poll(&mut cx).is_pending());
+    let id = fake.requests.borrow().last().unwrap().0;
+    crate::exec::deliver_redirect(id, "https://192.168.1.20/other.m3u");
+    crate::exec::deliver_status(id, 200, None);
+    assert!(matches!(
+        home.as_mut().poll(&mut cx),
+        std::task::Poll::Ready(Ok(_))
+    ));
+}

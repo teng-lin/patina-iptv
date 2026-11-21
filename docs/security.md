@@ -140,8 +140,9 @@ the database on Windows, under the application's process-lifetime instance lock.
 
 ## Artwork and provider-selected destinations
 
-Artwork passes through the public-address/DNS-pinning transport before NSH sees
-bytes. Each response is capped at 4 MiB. Raster headers must describe nonzero
+Natively, artwork passes through the public-address/DNS-pinning transport
+before NSH sees bytes; in the browser build it goes through the page's fetch
+under the policy described in [Browser build of the app](#browser-build-of-the-app). Each response is capped at 4 MiB. Raster headers must describe nonzero
 sizes of at most 8,192 pixels per side and 16,777,216 pixels total before reaching
 a native decoder. This bounds one raster canvas, not all frames of an animation;
 NSH's shared decoded-image budget remains responsible for cached frames. Malformed
@@ -218,6 +219,35 @@ unacknowledged returns its chunks to the next one. Storage therefore always
 holds one commit's state: a crash or power loss can lose the last changes,
 never mix two commits. At launch the store refuses to open while a chunk the
 saved size calls for is missing.
+
+## Browser build of the app
+
+The NSH build for browser TVs (`iptv-app`'s `host/web`, not yet shipped)
+fetches through the page, like the Tizen host above, so the native transport's
+guarantees hold only in part:
+
+- **Destinations.** A content-supplied address is checked with
+  `iptv_providers::content_url` before the request, and the final address
+  after a redirect is checked again: it must be public when the request was
+  content-supplied or the redirect changed origin, and may not downgrade
+  HTTPS. The page's fetch follows redirects before Rust sees them, so an
+  intermediate hop reaches its address (a LAN address included) before the
+  final one is refused; only its response is discarded. The browser
+  resolves names itself, so a public name that resolves to a LAN address is
+  not detected.
+- **Headers.** A request carrying a header another origin must not receive
+  (anything outside `iptv_providers::http::CROSS_ORIGIN_HEADERS`: portal
+  identity, a playlist's API key) asks the page to refuse redirects
+  altogether, since the page would forward the header to the new origin,
+  where the native adapter drops it. A refused redirect surfaces as a
+  connection failure. The page cannot send `Cookie`, `User-Agent` or other
+  forbidden headers at all, so Stalker portals, which need them, do not
+  work there.
+- **Limits.** Byte budgets, the total time and the idle timeout are enforced
+  by the runtime's network client and the web host; redirect counts and
+  connection timeouts are the browser's own.
+- **Storage.** The browser store is unencrypted (no key store), and settings
+  and favorites last for the session until a private-files port exists.
 
 ## Native assumptions and dependency exceptions
 

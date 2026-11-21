@@ -20,6 +20,20 @@ pub enum Method {
     Post,
 }
 
+/// Request headers another origin may receive unchanged: content
+/// negotiation and range requests, which say nothing about the account.
+/// Every other header belongs to the origin the request was configured for
+/// (portal identity, a playlist's API key), and a redirect to another origin
+/// must not carry it.
+pub const CROSS_ORIGIN_HEADERS: &[&str] = &[
+    "user-agent",
+    "accept",
+    "accept-encoding",
+    "accept-language",
+    "range",
+    "if-range",
+];
+
 /// A request for the networking adapter to perform.
 #[derive(Clone, PartialEq, Eq)]
 pub struct HttpRequest {
