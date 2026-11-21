@@ -209,3 +209,26 @@ fn a_held_key_keeps_the_card_until_its_press_is_decided() {
     p.keep_until(9_000);
     assert_eq!(p.hide_at_ms(), None);
 }
+
+#[test]
+fn input_during_a_hold_does_not_pull_its_deadline_in() {
+    let mut p = Panels::default();
+    p.timeouts.controls_ms = 1_000;
+    p.show_card(0);
+    p.keep_until(2_050);
+    // A zap commits mid-hold: the card stays (it owns input) and its own
+    // timer restarts, but the held key's deadline stands.
+    p.show_banner(250);
+    assert_eq!(p.shown, Shown::Card);
+    assert_eq!(p.hide_at_ms(), Some(2_050));
+    assert!(!p.tick(1_500));
+    // Decided: the card's own timer alone.
+    p.release_hold();
+    assert!(!p.holding());
+    assert_eq!(p.hide_at_ms(), Some(1_250));
+    // A hold over the card does not keep the strip that replaced it.
+    p.show_card(3_000);
+    p.keep_until(9_000);
+    p.show_controls(3_100);
+    assert_eq!(p.hide_at_ms(), Some(4_100));
+}

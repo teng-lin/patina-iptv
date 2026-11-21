@@ -28,6 +28,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("i18n/pseudo.rs", "ENABLED"),      // test-support-only pseudolocale environment flag.
     ("i18n/pseudo.rs", "FIXED"),        // test-support-only immutable expanded catalogue.
     ("input.rs", "REMOTE_PHASES"),      // test-support-only remote key phase switch.
+    ("input.rs", "REPEATS"),            // test-support-only keyboard repeat mirror.
     ("lib.rs", "RUNTIME"),              // The shell's single application handle.
     ("lib.rs", "ROOT_STARTED"), // Guard: the handle is asked for on the application thread only.
     ("lists.rs", "HINT_SHOWN"), // Visible navigation hint revision.

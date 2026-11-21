@@ -39,9 +39,14 @@ pub(super) const KEYS: &[(&str, RemoteKey)] = &[
 
 pub(super) const DIGITS: [&str; 10] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
+/// The most physical keys tracked down at once (missed releases age out).
+const MAX_HELD: usize = 8;
+
+/// The remote keys down now, per physical key: a key pressed while
+/// another is held does not lose the other's release.
 #[derive(Default)]
 pub(super) struct RawKeys {
-    held: Option<(SharedString, RemoteKey)>,
+    held: Vec<(SharedString, RemoteKey)>,
 }
 
 impl RawKeys {
@@ -61,19 +66,23 @@ impl RawKeys {
         } else {
             &event.code
         };
+        let at = self.held.iter().position(|(held, _)| held == id);
         if phase == Phase::Up {
-            return self
-                .held
-                .take_if(|(held, _)| held == id)
-                .map(|(_, key)| key);
+            return at.map(|at| self.held.remove(at).1);
         }
         if phase == Phase::Repeat
-            && let Some((_, key)) = self.held.as_ref().filter(|(held, _)| held == id)
+            && let Some(at) = at
         {
-            return Some(*key);
+            return Some(self.held[at].1);
+        }
+        if let Some(at) = at {
+            self.held.remove(at);
         }
         let key = remote(event, true)?;
-        self.held = Some((id.clone(), key));
+        if self.held.len() == MAX_HELD {
+            self.held.remove(0);
+        }
+        self.held.push((id.clone(), key));
         Some(key)
     }
 }
@@ -229,5 +238,18 @@ mod tests {
             Some((RemoteKey::Right, Press::Short))
         );
         assert_eq!(detector.poll(400), None);
+    }
+
+    #[test]
+    fn a_key_pressed_while_another_is_held_keeps_the_others_release() {
+        let mut keys = RawKeys::default();
+        let back = event("GoBack", "");
+        let right = event("ArrowRight", "ArrowRight");
+        assert_eq!(keys.key(&back, Phase::Down, true), Some(RemoteKey::Back));
+        assert_eq!(keys.key(&right, Phase::Down, true), Some(RemoteKey::Right));
+        assert_eq!(keys.key(&right, Phase::Up, true), Some(RemoteKey::Right));
+        assert_eq!(keys.key(&back, Phase::Repeat, true), Some(RemoteKey::Back));
+        assert_eq!(keys.key(&back, Phase::Up, true), Some(RemoteKey::Back));
+        assert_eq!(keys.key(&back, Phase::Up, true), None, "released once");
     }
 }

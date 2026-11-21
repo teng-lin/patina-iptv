@@ -100,6 +100,16 @@ is below 1.0, a minor release may change behaviour.
   the prompt does not close it), holding Menu or `M` no longer opens and
   closes the menu or the play bar repeatedly, and a hold on the play bar
   always returns focus to Play/pause.
+- TV remote: a key held while touch opens and closes a PIN prompt no longer
+  chooses or steps back on release; a Back pressed in a prompt that touch
+  then closes no longer backs out of the screen beneath, and its repeats no
+  longer stop playback; tapping another key while Back is held no longer
+  lets Back's release dismiss the prompt; a channel change while OK is held
+  on the info card no longer hides the card before the press is decided;
+  and OK held on the play bar no longer opens the info card after Menu hides
+  the bar. On a desktop keyboard, holding the Enter that closed a PIN prompt
+  no longer acts on the screen beneath; a key the prompt took repeats again
+  once pressed afresh (#145).
 - Movies and Shows, TV remote: in a wider window an empty screen without an
   action (an import running) no longer leaves the remote on nothing. After
   **Refresh now** it moves to the categories; Right from them reaches Search

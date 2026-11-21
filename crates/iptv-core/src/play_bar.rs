@@ -42,6 +42,9 @@ pub struct PlayBar {
     /// A popup it opened is open: it stays.
     pub held: bool,
     hide_at_ms: Option<u64>,
+    /// A held remote key decides tap or hold at this time: apart from the
+    /// idle deadline, so the bar's use meanwhile does not pull it in.
+    hold_until_ms: Option<u64>,
 }
 
 impl PlayBar {
@@ -121,15 +124,20 @@ impl PlayBar {
         self.focus = None;
         self.hovered = false;
         self.hide_at_ms = None;
+        self.hold_until_ms = None;
     }
 
     /// When it hides unless something happens (for scheduling); `None`
-    /// while hidden, while the mouse rests on it or a popup is open.
+    /// while hidden, while the mouse rests on it or a popup is open. A
+    /// held key's deadline counts when later than its own.
     pub fn hide_at_ms(&self) -> Option<u64> {
         if self.hovered || self.held {
             None
         } else {
-            self.hide_at_ms
+            match (self.hide_at_ms, self.hold_until_ms) {
+                (Some(idle), Some(hold)) => Some(idle.max(hold)),
+                (idle, hold) => idle.or(hold.filter(|_| self.shown)),
+            }
         }
     }
 
@@ -148,8 +156,19 @@ impl PlayBar {
     /// stays at least until then, so the press finds it on release.
     pub fn keep_until(&mut self, at_ms: u64) {
         if self.shown {
-            self.hide_at_ms = Some(self.hide_at_ms.map_or(at_ms, |t| t.max(at_ms)));
+            self.hold_until_ms = Some(at_ms);
         }
+    }
+
+    /// The held key's press was decided or dropped: only the bar's own
+    /// deadline counts again.
+    pub fn release_hold(&mut self) {
+        self.hold_until_ms = None;
+    }
+
+    /// Whether a held key keeps the bar ([`Self::keep_until`]).
+    pub fn holding(&self) -> bool {
+        self.hold_until_ms.is_some()
     }
 
     fn restart(&mut self, now_ms: u64) {
@@ -182,6 +201,14 @@ mod tests {
         bar.keep_until(HIDE_AFTER_MS + 500);
         assert!(!bar.tick(HIDE_AFTER_MS));
         assert!(bar.tick(HIDE_AFTER_MS + 500));
+        // Use meanwhile restarts its own timer, not the held key's.
+        bar.remote(0);
+        bar.keep_until(5_000);
+        bar.used(100);
+        assert_eq!(bar.hide_at_ms(), Some(5_000));
+        bar.release_hold();
+        assert!(!bar.holding());
+        assert_eq!(bar.hide_at_ms(), Some(100 + HIDE_AFTER_MS));
     }
 
     #[test]

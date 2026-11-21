@@ -185,6 +185,11 @@ pub(crate) fn keep_until(ui: Ui, at: u64) {
     update(ui, |b, _| b.keep_until(at));
 }
 
+/// That key's press was decided: the bar's own delay alone counts.
+pub(crate) fn release_hold(ui: Ui) {
+    update(ui, |b, _| b.release_hold());
+}
+
 /// A control of the bar (or of multiview's pointer chrome) acted.
 pub(crate) fn used(ui: Ui) {
     update(ui, PlayBar::used);

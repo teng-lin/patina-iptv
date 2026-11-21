@@ -39,6 +39,9 @@ mod i18n;
 #[cfg(feature = "test-support")]
 pub use i18n::pseudo_fixed_for_test;
 mod input;
+/// Whether a keyboard binding fires on auto-repeats now (headless tests).
+#[cfg(feature = "test-support")]
+pub use input::keyboard_repeats;
 /// Take keys as an Android remote's raw Down/Repeat/Up phases (headless tests).
 #[cfg(feature = "test-support")]
 pub use input::use_remote_key_phases;

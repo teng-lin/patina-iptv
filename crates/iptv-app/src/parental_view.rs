@@ -40,6 +40,14 @@ impl PartialEq for Open {
 pub fn is_open(ui: Ui) -> bool {
     ui.parental.with(Option::is_some)
 }
+/// Which prompt is open: the same for as long as it shows, another for
+/// the next one.
+pub(crate) fn prompt(ui: Ui) -> Option<usize> {
+    ui.parental.with(|o| {
+        o.as_ref()
+            .map(|o| Rc::as_ptr(&o.done).cast::<()>() as usize)
+    })
+}
 pub fn close(ui: Ui) {
     // Credential changes can commit before their recovery notice returns.
     // Keep the modal until that result is shown instead of discarding it.
