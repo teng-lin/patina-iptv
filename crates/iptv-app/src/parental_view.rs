@@ -9,7 +9,8 @@ use nsh_core::element::input;
 use nsh_core::prelude::*;
 use std::{cell::RefCell, rc::Rc};
 
-type AfterUnlock = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
+type Unlock = RefCell<Option<Box<dyn FnOnce()>>>;
+type AfterUnlock = Rc<Unlock>;
 
 #[derive(Clone)]
 pub struct Open {
@@ -40,13 +41,19 @@ impl PartialEq for Open {
 pub fn is_open(ui: Ui) -> bool {
     ui.parental.with(Option::is_some)
 }
-/// Which prompt is open: the same for as long as it shows, another for
-/// the next one.
-pub(crate) fn prompt(ui: Ui) -> Option<usize> {
-    ui.parental.with(|o| {
-        o.as_ref()
-            .map(|o| Rc::as_ptr(&o.done).cast::<()>() as usize)
-    })
+/// Which prompt is open: equal for as long as it shows, unequal for any
+/// later one (the handle keeps its allocation, so no address is reused).
+#[derive(Clone)]
+pub(crate) struct Prompt(std::rc::Weak<Unlock>);
+impl PartialEq for Prompt {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.ptr_eq(&other.0)
+    }
+}
+/// The prompt open now (tracked).
+pub(crate) fn prompt(ui: Ui) -> Option<Prompt> {
+    ui.parental
+        .with(|o| o.as_ref().map(|o| Prompt(Rc::downgrade(&o.done))))
 }
 pub fn close(ui: Ui) {
     // Credential changes can commit before their recovery notice returns.

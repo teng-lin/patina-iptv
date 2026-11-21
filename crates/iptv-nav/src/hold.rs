@@ -88,15 +88,6 @@ impl<S: Copy + PartialEq + Debug> HeldPresses<S> {
         let began = match phase {
             Phase::Down => {
                 self.displaced.retain(|k| *k != key);
-                // A waiting (or decided) press another key replaces: its
-                // repeats must not start a new press where it did not go
-                // down.
-                if let Some((held, Some(_))) = self.held
-                    && held != key
-                    && !self.displaced.contains(&held)
-                {
-                    self.displaced.push(held);
-                }
                 self.start(key, context, has_long)
             }
             Phase::Repeat => match self.held {
@@ -129,6 +120,14 @@ impl<S: Copy + PartialEq + Debug> HeldPresses<S> {
     }
 
     fn start(&mut self, key: RemoteKey, context: S, has_long: bool) -> Option<S> {
+        // A waiting (or decided) press another key replaces: its repeats
+        // must not start a new press where it did not go down.
+        if let Some((held, Some(_))) = self.held
+            && held != key
+            && !self.displaced.contains(&held)
+        {
+            self.displaced.push(held);
+        }
         let began = has_long.then_some(context);
         self.held = Some((key, began));
         began
@@ -320,6 +319,11 @@ mod tests {
             feed(&mut h, &keys, Player, Ok, Phase::Up, 850),
             act(Ok, Press::Short, Player)
         );
+        // A repeat of a key whose press was never seen displaces too.
+        assert_eq!(feed(&mut h, &keys, Player, Ok, Phase::Down, 860), None);
+        assert!(feed(&mut h, &keys, Player, Down, Phase::Repeat, 870).is_some());
+        assert_eq!(feed(&mut h, &keys, Player, Ok, Phase::Repeat, 880), None);
+        assert_eq!(feed(&mut h, &keys, Player, Ok, Phase::Up, 890), None);
         // A fresh Down of a displaced key also ends its displacement.
         assert_eq!(feed(&mut h, &keys, Player, Ok, Phase::Down, 900), None);
         assert!(feed(&mut h, &keys, Player, Down, Phase::Down, 950).is_some());

@@ -91,16 +91,20 @@ struct Nav {
     /// down afresh. A signal: a keyboard binding of such a key holds its
     /// auto-repeats meanwhile (`bind`).
     consumed: Signal<Vec<RemoteKey>>,
-    /// The prompt (or editor capture) a Back went down in, until its
-    /// release: Android's Back on that release closes only that one.
-    back_in: Option<Capture>,
+    /// The capture seen open and its session: one number for as long as
+    /// it stays open, a new one for the next (even of the same prompt).
+    capture: Option<(Capture, u64)>,
+    sessions: u64,
+    /// The capture session a Back went down in, until its release:
+    /// Android's Back on that release closes only that one.
+    back_in: Option<u64>,
 }
 
 /// What takes the keys: a PIN prompt (which one) or the remote editor
 /// waiting for a key.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq)]
 enum Capture {
-    Pin(usize),
+    Pin(crate::parental_view::Prompt),
     Editor,
 }
 
@@ -155,7 +159,26 @@ impl Nav {
             presses: HeldPresses::default(),
             raw: RawKeys::default(),
             consumed: signal(Vec::new()),
+            capture: None,
+            sessions: 0,
             back_in: None,
+        }
+    }
+
+    /// The session of capture `now` (none when nothing captures), and
+    /// whether it just began.
+    fn session(&mut self, now: Option<Capture>) -> (Option<u64>, bool) {
+        let Some(now) = now else {
+            self.capture = None;
+            return (None, false);
+        };
+        match &self.capture {
+            Some((seen, id)) if *seen == now => (Some(*id), false),
+            _ => {
+                self.sessions += 1;
+                self.capture = Some((now, self.sessions));
+                (Some(self.sessions), true)
+            }
         }
     }
 
@@ -178,12 +201,14 @@ impl Nav {
         was
     }
 
-    /// A prompt or the editor took the keys: the press held now is cut
-    /// short and stays so until its release or a fresh press (its
-    /// release or timer must not act once the prompt closes).
+    /// A prompt or the editor took the keys: every key down now (the
+    /// press waiting and any other held) is cut short and stays so until
+    /// its release or a fresh press (its repeats, release or timer must
+    /// not act once the prompt closes).
     fn cut_short(&mut self) {
-        if let Some(held) = self.presses.held_key() {
-            self.consume(held);
+        let held = self.presses.held_key().into_iter().chain(self.raw.keys());
+        for key in held.collect::<Vec<_>>() {
+            self.consume(key);
         }
         self.presses.cancel();
     }
@@ -344,14 +369,13 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
     // A prompt or the editor that opens while a key is held (by touch,
     // say) takes that key as one a key event under it would.
     let nav = input.nav.clone();
-    let open = Cell::new(None);
     effect(move || {
         let now = capture(ui);
-        if now.is_some() && open.replace(now) != now {
-            nav.borrow_mut().cut_short();
+        let mut nav = nav.borrow_mut();
+        if nav.session(now).1 {
+            nav.cut_short();
+            drop(nav);
             release_controls(ui);
-        } else if now.is_none() {
-            open.set(None);
         }
     });
     if crate::desktop::DESKTOP {
@@ -418,6 +442,7 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
         ui.back_guard.update(BackGuard::pressed);
     }
     let captured = untracked(|| capture(ui));
+    let session = nav.borrow_mut().session(captured.clone()).0;
     if key == RemoteKey::Back {
         let mut nav = nav.borrow_mut();
         if phase == Phase::Down {
@@ -428,14 +453,15 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
             // release does not act on what it exposed.
             if phase == Phase::Up {
                 nav.back_in = None;
-                if captured != Some(began) {
+                nav.unconsume(key);
+                if session != Some(began) {
                     swallow_release(ui);
                 }
             }
             return;
         }
     }
-    if let Some(capture) = captured {
+    if let (Some(capture), Some(session)) = (captured, session) {
         // A prompt or the editor takes the keys: a press pending from
         // before is cut short, and a key it takes acts nowhere else while
         // held.
@@ -451,7 +477,7 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
                 // The platform's Back (`go_back`) closes the PIN prompt or
                 // cancels the editor's capture, once; acting here too
                 // would also step back from what the prompt exposes.
-                nav.back_in = Some(capture);
+                nav.back_in = Some(session);
             } else {
                 nav.consume(key);
                 drop(nav);
@@ -514,9 +540,11 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     // shorter than the long press): the release finds what was pressed.
     // Once the press is decided, their own timeout alone counts.
     let waiting = nav.borrow().presses.long_deadline_ms();
+    // (Another key's release leaves a waiting press as it is.)
     match waiting {
         Some(at) if phase != Phase::Up => keep_controls_until(ui, at + 50),
-        _ => release_controls(ui),
+        Some(_) => {}
+        None => release_controls(ui),
     }
     let action = decision.and_then(|d| resolve(ui, &nav.borrow().keymap, d));
     if let Some((key, press, action)) = action {

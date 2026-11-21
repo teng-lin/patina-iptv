@@ -50,6 +50,11 @@ pub(super) struct RawKeys {
 }
 
 impl RawKeys {
+    /// The remote keys down now.
+    pub(super) fn keys(&self) -> impl Iterator<Item = RemoteKey> + '_ {
+        self.held.iter().map(|(_, key)| *key)
+    }
+
     pub(super) fn key(
         &mut self,
         event: &KeyEvent,

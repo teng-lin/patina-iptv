@@ -853,6 +853,21 @@ fn touch_around_a_held_key_leaves_it_cut_short_and_back_with_its_prompt() {
     step(app.remote_tap(RemoteKey::Back));
     step(app.back());
     step(app.wait_for_gone(PIN, Duration::from_secs(2)));
+
+    // Back held, OK pressed over it (Back's press is replaced), then
+    // touch opens the prompt: Back, still down, is cut short too.
+    step(app.remote_phase(RemoteKey::Back, KeyPhase::Down));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
+    step(app.press("id:guide-ui >> label:Local C"));
+    step(app.run_for(Duration::from_millis(300)));
+    step(app.wait_for(PIN));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
+    step(app.remote_phase(RemoteKey::Back, KeyPhase::Up));
+    step(app.back());
+    assert!(shows(app, PIN), "the replaced Back leaves the prompt open");
+    step(app.remote_tap(RemoteKey::Back));
+    step(app.back());
+    step(app.wait_for_gone(PIN, Duration::from_secs(2)));
     persistent(app, &lifetime, player);
 }
 
@@ -882,6 +897,21 @@ fn a_zap_or_menu_during_a_hold_does_not_cut_it_short_or_restart_it() {
     step(app.run_for(Duration::from_millis(1_500)));
     plays(app, &lifetime, "http://example.test/b", 2);
     assert!(shows(app, "id:player-card"), "the held key keeps the card");
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
+    step(app.wait_for_gone("id:player-card", Duration::from_secs(2)));
+    assert!(!shows(app, "id:player-banner"), "the guide, not the video");
+
+    // Right held on the card, OK goes down, then Right goes up: Right's
+    // release leaves OK's hold of the card as it is.
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("id:player-banner"));
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("id:player-actions"));
+    step(app.remote_phase(RemoteKey::Right, KeyPhase::Down));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
+    step(app.remote_phase(RemoteKey::Right, KeyPhase::Up));
+    step(app.run_for(Duration::from_millis(1_500)));
+    assert!(shows(app, "id:player-card"), "the held OK keeps the card");
     step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
     step(app.wait_for_gone("id:player-card", Duration::from_secs(2)));
     assert!(!shows(app, "id:player-banner"), "the guide, not the video");
