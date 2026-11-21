@@ -1,6 +1,6 @@
 # Patina on browser TVs: target architecture, crates and boundaries
 
-Status: proposed on 2026-11-21; decisions updated after a second round of spikes the same day. This is the Patina integration plan that M7 of
+Status: proposed on 2026-11-21; decisions updated after a second round of spikes the same day. Steps 1a, 1b, 1d and 1e are implemented (see their status lines); 1c is the store's own change. This is the Patina integration plan that M7 of
 [External NSH TV support](2026-11-15-nsh-tv-platform-support.md) asks for. It is
 based on the current code and on spikes run on a 2020 Samsung TV (Tizen 5.5).
 Sections marked **Today** describe the code as it is; everything else is a
@@ -215,9 +215,23 @@ Each step keeps every native test passing and lands as its own pull request.
 - **0. Bridge.** Merge PR #190. Freeze the JavaScript host.
 - **1a. Network port.** The runtime takes a client factory over `Fetch`
   instead of `iptv_net` types. *Gate*: no `iptv_net::` outside `native`.
+  *Status*: done (`Ports::network`, `network.rs`). The Stalker link client
+  is the same factory's client, cached per configuration; Stalker's
+  cookies are request headers, so nothing native stays in it. Artwork
+  loads through it too.
 - **1b. Execution port.** Store queues, workers and the Tokio pool sit behind
   an executor supplied by `Ports`. *Gate*: no thread or runtime creation
-  outside `native`.
+  outside `native`. *Status*: done (`Ports::execution`, `execution.rs`):
+  lanes, long-lived workers and a per-owner task executor, native as
+  before; `execution::Cooperative` for the browser, which also drives
+  `Sliced` jobs one step per turn (the shape of the store's resumable
+  publish). Differs from the plan: the refresh pool, the file writer and
+  the favorites writer are blocking workers, which a cooperative host
+  does not have, so in the browser they report themselves unavailable;
+  imports there need the pool's work as local tasks over the async store
+  calls (next step). The runtime still reads `std::time::Instant`
+  (queue metrics, deadlines), which panics on wasm32-unknown-unknown when
+  called; a clock port (or the store's host clock) is still to come.
 - **1c. Store on wasm32.** `iptv-store-sqlite` builds with the
   `sqlite-wasm-rs` backend on an in-memory VFS that persists changed pages
   to IndexedDB; staging databases are in-memory files; publishes run in
@@ -227,9 +241,22 @@ Each step keeps every native test passing and lands as its own pull request.
 - **1d. Native-only services behind `native`.** Recording, backup, credential
   store, staged probes, with the capability model reporting them unavailable.
   *Gate*: `cargo check -p iptv-runtime --no-default-features --target
-  wasm32-unknown-unknown`.
+  wasm32-unknown-unknown`. *Status*: the gate passes with step 1c merged.
+  Recording capture, the recording host and the playback relay are behind
+  `native` (a stub keeps the API, reports recording unavailable, and
+  plays through the identity transport). Staged probes are refused where
+  tasks cannot block, and `foundation_capabilities` reports them
+  `UnsupportedHost`. Randomness is a port (`Ports::entropy`). Backup files,
+  private documents and the encrypted open still use the file system
+  without `native`: they compile, and wait for the runtime to open the
+  browser store (`Store::open_browser`, chunk persistence and the sliced
+  publish driver over 1c's API), which is the next change.
 - **1e. Shell split.** `host/<platform>` modules; images through the network
   port. *Gate*: `cargo check -p iptv-app --target wasm32-unknown-unknown`.
+  *Status*: the gate passes with step 1c merged. `src/host/native` and
+  `src/host/web` (a stub over `iptv-web`'s adapters); screens ask
+  `crate::host`. Five files keep a platform `cfg` (listed in the shell's
+  architecture test, which only lets the list shrink).
 - **2. Tizen platform.** The spike becomes the extension's Tizen platform:
   native-component registry (for `tv.player`), text input, fonts, images,
   the remaining mount items. `hosts/tizen` gains the AVPlay player and host
