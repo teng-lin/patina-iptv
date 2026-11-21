@@ -39,8 +39,8 @@ apk=${2:-}
 # Optional manual hold (see the end): whole seconds, bounded, checked before any
 # device change. disposable-avd.py adds the same hold to the smoke's budget.
 hold=${IPTV_SMOKE_HOLD:-}
-if [ -n "$hold" ] && { [[ ! "$hold" =~ ^[1-9][0-9]{0,2}$ ]] || [ "$hold" -gt 900 ]; }; then
-  echo 'IPTV_SMOKE_HOLD must be whole seconds from 1 through 900.' >&2
+if [ -n "$hold" ] && { [[ ! "$hold" =~ ^[1-9][0-9]{0,3}$ ]] || [ "$hold" -gt 1800 ]; }; then
+  echo 'IPTV_SMOKE_HOLD must be whole seconds from 1 through 1800.' >&2
   exit 2
 fi
 port=${IPTV_SMOKE_PORT:-8089}

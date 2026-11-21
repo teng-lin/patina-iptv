@@ -32,8 +32,8 @@ class Profiles(unittest.TestCase):
     def test_smoke_hold_is_bounded_and_extends_the_budget(self):
         self.assertEqual(a.smoke_timeout({}), a.SMOKE_BUDGET)
         self.assertEqual(a.smoke_timeout({"IPTV_SMOKE_HOLD": "480"}), a.SMOKE_BUDGET + 480)
-        self.assertEqual(a.smoke_timeout({"IPTV_SMOKE_HOLD": "900"}), a.SMOKE_BUDGET + 900)
-        for bad in ("0", "901", "-5", "1e3", "99999999999999999999", " 60", "60s"):
+        self.assertEqual(a.smoke_timeout({"IPTV_SMOKE_HOLD": "1800"}), a.SMOKE_BUDGET + 1800)
+        for bad in ("0", "1801", "18000", "-5", "1e3", "99999999999999999999", " 60", "60s"):
             with self.assertRaises(ValueError, msg=bad):
                 a.smoke_timeout({"IPTV_SMOKE_HOLD": bad})
 
