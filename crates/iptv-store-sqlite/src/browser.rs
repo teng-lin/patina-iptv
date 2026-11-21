@@ -57,7 +57,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use rsqlite_vfs::{
     AccessMode, LockLevel, OpenOptions as VfsOpenOptions, OpenRequest, OpenedFile, SQLiteIoMethods,
-    SQLiteVfs, SyncOptions, VfsError, VfsErrorCode, VfsFile, VfsRegistration, VfsResult, VfsStore,
+    SQLiteVfs, SyncOptions, VfsError, VfsErrorCode, VfsFile, VfsResult, VfsStore,
 };
 use rusqlite::{Connection, OpenFlags};
 
@@ -83,10 +83,22 @@ fn zero_chunk() -> Chunk {
     Arc::new([0; CHUNK_BYTES])
 }
 
-/// Whether `name` is a file only its own store may open.
+/// Whether `name` is a file only its own store may open: the database, the
+/// publish copy, or a name SQLite would take for one of their journals.
 fn reserved(name: &str) -> bool {
-    name == DATABASE || name == PUBLISH_COPY
+    [DATABASE, PUBLISH_COPY].into_iter().any(|base| {
+        name.strip_prefix(base)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('-'))
+    })
 }
+
+/// The one VFS every browser store's files live under, registered once
+/// for the life of the process (SQLite's VFS list is process-wide too):
+/// a connection that outlives its store, even a `:memory:` one that never
+/// opened a file, can still call it. Each [`BrowserFiles`] is a namespace
+/// of it, `/patina-<id>/...`, dropped with its last clone.
+const VFS: &str = "patina-chunks";
+const PREFIX: &str = "/patina-";
 
 fn chunk_count(len: u64) -> usize {
     usize::try_from(len.div_ceil(CHUNK_BYTES as u64)).unwrap_or(usize::MAX)
@@ -203,6 +215,9 @@ struct FileState {
     locks: Locks,
     /// Removed from the namespace when its last connection closes.
     scratch: bool,
+    /// SQLite handles open on it (a take's snapshot holds the file too, so
+    /// the `Arc`'s count says nothing about connections).
+    handles: u32,
 }
 
 type SharedFile = Arc<Mutex<FileState>>;
@@ -214,18 +229,13 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// What the VFS callbacks share: the files and SQLite's last error.
+/// The files of one [`BrowserFiles`].
 #[derive(Default)]
 struct Namespace {
     files: Mutex<HashMap<String, SharedFile>>,
-    /// Open file handles, including anonymous temporary files.
-    handles: AtomicU32,
-    /// Handle ids, for lock ownership.
-    next_handle: AtomicU64,
     /// The reserved file the store is opening its own connection on; any
     /// other open of a reserved file is refused.
     admitted: Mutex<Option<&'static str>>,
-    error: Mutex<Option<VfsError>>,
 }
 
 impl Namespace {
@@ -234,7 +244,35 @@ impl Namespace {
     }
 }
 
-type AppData = Arc<Namespace>;
+/// What the VFS callbacks share: the live namespaces and SQLite's last
+/// error.
+#[derive(Default)]
+struct Registry {
+    namespaces: Mutex<HashMap<u32, std::sync::Weak<Namespace>>>,
+    next_namespace: AtomicU32,
+    /// Handle ids, for lock ownership.
+    next_handle: AtomicU64,
+    error: Mutex<Option<VfsError>>,
+}
+
+impl Registry {
+    /// The namespace and local name of a VFS path `/patina-<id>/<name>`.
+    fn resolve<'n>(&self, path: &'n str) -> VfsResult<(Arc<Namespace>, &'n str)> {
+        let gone = || VfsError::new(VfsErrorCode::CantOpen, "no such browser store".into());
+        let (id, name) = path
+            .strip_prefix(PREFIX)
+            .and_then(|rest| rest.split_once('/'))
+            .ok_or_else(gone)?;
+        let id: u32 = id.parse().map_err(|_| gone())?;
+        let namespace = lock(&self.namespaces)
+            .get(&id)
+            .and_then(std::sync::Weak::upgrade)
+            .ok_or_else(gone)?;
+        Ok((namespace, name))
+    }
+}
+
+type AppData = Arc<Registry>;
 
 /// An open file: SQLite reads and writes through it.
 struct Handle {
@@ -320,6 +358,11 @@ impl VfsFile for Handle {
                 file.locks.writer = Some(id);
             }
             LockLevel::Pending | LockLevel::Exclusive => {
+                // BEGIN EXCLUSIVE, VACUUM and exclusive locking mode go
+                // straight here, past the reserved lock.
+                if file.frozen {
+                    return Err(busy("a publish copy of the database exists"));
+                }
                 if other_writer {
                     return Err(busy("another connection is writing the file"));
                 }
@@ -378,10 +421,10 @@ impl VfsStore for ChunkStore {
                 scratch: true,
                 ..FileState::default()
             })),
-            Some(name) => {
-                let name = name.path();
+            Some(path) => {
+                let (namespace, name) = data.resolve(path.path())?;
                 if reserved(name) {
-                    let mut admitted = lock(&data.admitted);
+                    let mut admitted = lock(&namespace.admitted);
                     if *admitted != Some(name) {
                         return Err(VfsError::new(
                             VfsErrorCode::CantOpen,
@@ -390,8 +433,8 @@ impl VfsStore for ChunkStore {
                     }
                     *admitted = None;
                 }
-                let mut files = lock(&data.files);
-                match files.get(name) {
+                let mut files = lock(&namespace.files);
+                let file = match files.get(name) {
                     Some(_) if options.create() && options.exclusive() => {
                         return Err(VfsError::new(
                             VfsErrorCode::CantOpen,
@@ -411,16 +454,15 @@ impl VfsStore for ChunkStore {
                     None => {
                         return Err(VfsError::new(VfsErrorCode::CantOpen, "no such file".into()));
                     }
+                };
+                if options.delete_on_close() {
+                    // Unlinked at open: the handle keeps the data until it closes.
+                    files.remove(name);
                 }
+                file
             }
         };
-        if options.delete_on_close()
-            && let Some(name) = request.filename
-        {
-            // Unlinked at open: the handle keeps the data until it closes.
-            lock(&data.files).remove(name.path());
-        }
-        data.handles.fetch_add(1, Ordering::Relaxed);
+        lock(&file).handles += 1;
         Ok(OpenedFile {
             file: Handle {
                 file,
@@ -434,19 +476,25 @@ impl VfsStore for ChunkStore {
 
     fn close_file(
         data: &AppData,
-        name: Option<&str>,
+        path: Option<&str>,
         mut handle: Handle,
         _options: VfsOpenOptions,
     ) -> VfsResult<()> {
-        data.handles.fetch_sub(1, Ordering::Relaxed);
         handle.unlock(LockLevel::None)?;
-        let scratch = lock(&handle.file).scratch;
-        if let Some(name) = name.filter(|_| scratch) {
-            let mut files = lock(&data.files);
-            // The namespace's reference and this handle's: the last close.
+        let (scratch, last) = {
+            let mut file = lock(&handle.file);
+            file.handles = file.handles.saturating_sub(1);
+            (file.scratch, file.handles == 0)
+        };
+        if scratch
+            && last
+            && let Some(path) = path
+            && let Ok((namespace, name)) = data.resolve(path)
+        {
+            let mut files = lock(&namespace.files);
             if files
                 .get(name)
-                .is_some_and(|file| Arc::ptr_eq(file, &handle.file) && Arc::strong_count(file) == 2)
+                .is_some_and(|file| Arc::ptr_eq(file, &handle.file))
             {
                 files.remove(name);
             }
@@ -454,22 +502,27 @@ impl VfsStore for ChunkStore {
         Ok(())
     }
 
-    fn access(data: &AppData, name: &str, _mode: AccessMode) -> VfsResult<bool> {
-        Ok(lock(&data.files).contains_key(name))
+    fn access(data: &AppData, path: &str, _mode: AccessMode) -> VfsResult<bool> {
+        Ok(match data.resolve(path) {
+            // The database's journals never exist (its journal is in memory).
+            Ok((namespace, name)) => lock(&namespace.files).contains_key(name),
+            Err(_) => false,
+        })
     }
 
     fn full_pathname(_data: &AppData, name: &str) -> VfsResult<String> {
         Ok(name.to_owned())
     }
 
-    fn delete_file(data: &AppData, name: &str, _sync_dir: bool) -> VfsResult<()> {
+    fn delete_file(data: &AppData, path: &str, _sync_dir: bool) -> VfsResult<()> {
+        let (namespace, name) = data.resolve(path)?;
         if reserved(name) {
             return Err(VfsError::new(
                 VfsErrorCode::IoDelete,
                 "the browser database is not deleted through SQLite".into(),
             ));
         }
-        lock(&data.files).remove(name);
+        lock(&namespace.files).remove(name);
         Ok(())
     }
 }
@@ -490,21 +543,31 @@ impl SQLiteVfs<ChunkIo> for ChunkVfs {
     }
 }
 
-/// The VFS registration, freed with the last [`BrowserFiles`] clone when no
-/// file is open any more.
-struct Registration(Option<VfsRegistration<AppData>>);
-
-// SAFETY: `wasm32-unknown-unknown` without atomics runs one thread (the
-// `compile_error!` above refuses a threaded build), so the registration's
-// raw pointers never reach another thread; the store is `Send` only so that
-// code generic over threads compiles for both targets. `Inner` is `Sync`
-// through the `Mutex` around it.
-unsafe impl Send for Registration {}
+/// The registry of the process's one browser VFS, registered on first use.
+fn registry() -> Result<&'static AppData> {
+    static REGISTRY: std::sync::OnceLock<Option<AppData>> = std::sync::OnceLock::new();
+    REGISTRY
+        .get_or_init(|| {
+            let registry = AppData::default();
+            // SAFETY: the method table, file type and app data are this
+            // module's own and agree; the name is this module's; the one
+            // thread registers it once. `into_raw` keeps it for the life of
+            // the process, so no connection can outlive it.
+            let registered = unsafe {
+                rsqlite_vfs::register_vfs::<ChunkIo, ChunkVfs>(VFS, registry.clone(), false)
+            };
+            registered.ok().map(|registration| {
+                let _ = registration.into_raw();
+                registry
+            })
+        })
+        .as_ref()
+        .ok_or_else(|| unavailable("could not register the browser storage"))
+}
 
 struct Inner {
-    name: String,
-    namespace: AppData,
-    registration: Mutex<Registration>,
+    id: u32,
+    namespace: Arc<Namespace>,
 }
 
 impl Drop for Inner {
@@ -512,19 +575,8 @@ impl Drop for Inner {
         // Free the files a closed store left. A staging connection that
         // outlives every store keeps its own file until it closes.
         lock(&self.namespace.files).clear();
-        let Some(registration) = lock(&self.registration).0.take() else {
-            return;
-        };
-        if self.namespace.handles.load(Ordering::Relaxed) == 0 {
-            // SAFETY: no file of this VFS is open, every store holding it
-            // is gone, and the one thread is here.
-            if let Err((registration, _)) = unsafe { registration.unregister() } {
-                let _ = registration.into_raw();
-            }
-        } else {
-            // An open file still calls into the VFS: keep it registered
-            // (a few hundred bytes) for the rest of the process.
-            let _ = registration.into_raw();
+        if let Ok(registry) = registry() {
+            lock(&registry.namespaces).remove(&self.id);
         }
     }
 }
@@ -537,7 +589,7 @@ pub struct BrowserFiles(Arc<Inner>);
 impl std::fmt::Debug for BrowserFiles {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BrowserFiles")
-            .field("vfs", &self.0.name)
+            .field("namespace", &self.0.id)
             .finish_non_exhaustive()
     }
 }
@@ -547,36 +599,49 @@ fn unavailable(reason: &'static str) -> StoreError {
 }
 
 impl BrowserFiles {
-    /// New, empty files under a VFS of their own.
+    /// New, empty files: a namespace of the browser VFS.
     pub fn new() -> Result<Self> {
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let name = format!("patina-chunks-{}", NEXT.fetch_add(1, Ordering::Relaxed));
-        let namespace = AppData::default();
-        // SAFETY: the method table, file type and app data are this module's
-        // own and agree; the name is fresh; one thread registers and uses it.
-        let registration = unsafe {
-            rsqlite_vfs::register_vfs::<ChunkIo, ChunkVfs>(&name, namespace.clone(), false)
-        }
-        .map_err(|_| unavailable("could not register the browser storage"))?;
-        Ok(Self(Arc::new(Inner {
-            name,
-            namespace,
-            registration: Mutex::new(Registration(Some(registration))),
-        })))
+        let registry = registry()?;
+        let id = registry.next_namespace.fetch_add(1, Ordering::Relaxed);
+        let namespace = Arc::new(Namespace::default());
+        lock(&registry.namespaces).insert(id, Arc::downgrade(&namespace));
+        Ok(Self(Arc::new(Inner { id, namespace })))
+    }
+
+    /// The VFS path of file `name` of these files.
+    pub(crate) fn path(&self, name: &str) -> String {
+        format!("{PREFIX}{}/{}", self.0.id, name.trim_start_matches('/'))
+    }
+
+    /// The local name of a caller's path (a stage's).
+    fn local(path: &std::path::Path) -> Option<&str> {
+        path.to_str().map(|name| name.trim_start_matches('/'))
+    }
+
+    /// How many scratch files (stages) these files hold: none once every
+    /// stage is dropped.
+    pub fn scratch_files(&self) -> usize {
+        lock(&self.0.namespace.files)
+            .values()
+            .filter(|file| lock(file).scratch)
+            .count()
     }
 
     fn file(&self, name: &str) -> Option<SharedFile> {
         self.0.namespace.file(name)
     }
 
+    fn has_publish_copy(&self) -> bool {
+        lock(&self.0.namespace.files).contains_key(PUBLISH_COPY)
+    }
+
     fn database(&self) -> Option<SharedFile> {
         self.file(DATABASE)
     }
 
-    /// Whether `file`, as the namespace holds it, is open on some
-    /// connection (each open handle holds another reference).
+    /// Whether `file` is open on some connection.
     fn is_open(file: &SharedFile) -> bool {
-        Arc::strong_count(file) > 1
+        lock(file).handles > 0
     }
 
     fn database_is_open(&self) -> bool {
@@ -593,6 +658,9 @@ impl BrowserFiles {
     pub fn restore_size(&self, size: u64) -> Result<()> {
         if self.database_is_open() {
             return Err(unavailable("the browser database is open"));
+        }
+        if self.has_publish_copy() {
+            return Err(unavailable("a publish copy of the database exists"));
         }
         if size > MAX_DATABASE_BYTES || !size.is_multiple_of(MIN_PAGE_BYTES) {
             return Err(StoreError::InvalidData(format!(
@@ -622,6 +690,9 @@ impl BrowserFiles {
         if self.database_is_open() {
             return Err(unavailable("the browser database is open"));
         }
+        if self.has_publish_copy() {
+            return Err(unavailable("a publish copy of the database exists"));
+        }
         let file = self
             .database()
             .ok_or_else(|| unavailable("restore_size comes before restore_chunk"))?;
@@ -644,31 +715,42 @@ impl BrowserFiles {
     /// publish copy) admits this one open only.
     fn open(&self, name: &str) -> Result<Connection> {
         crate::initialize_sqlite()?;
+        registry()?;
         let reserved_name = [DATABASE, PUBLISH_COPY].into_iter().find(|&n| n == name);
         *lock(&self.0.namespace.admitted) = reserved_name;
         let opened = Connection::open_with_flags_and_vfs(
-            name,
+            self.path(name),
             OpenFlags::SQLITE_OPEN_READ_WRITE
                 | OpenFlags::SQLITE_OPEN_CREATE
                 | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-            self.0.name.as_str(),
+            VFS,
         );
         *lock(&self.0.namespace.admitted) = None;
         Ok(opened?)
     }
 
-    /// Opens a scratch database (a stage) in these files.
-    pub(crate) fn open_scratch(&self, name: &str) -> Result<Connection> {
-        if reserved(name) {
-            return Err(unavailable("a stage cannot use the database's name"));
-        }
-        self.open(name)
+    /// Opens a scratch database (a stage) at a caller's `path` in these
+    /// files. It never waits for a lock: on one thread nothing could release
+    /// one meanwhile (rusqlite's default would block the app for 5 s).
+    pub(crate) fn open_scratch(&self, path: &std::path::Path) -> Result<Connection> {
+        let name = Self::local(path)
+            .filter(|name| !name.is_empty() && !reserved(name))
+            .ok_or_else(|| unavailable("a stage cannot use the database's names"))?;
+        let conn = self.open(name)?;
+        conn.busy_timeout(std::time::Duration::ZERO)?;
+        // No journal files: a stage that outlives its store's files can
+        // still write (and the stages set their own journal anyway).
+        let _mode: String =
+            conn.pragma_update_and_check(None, "journal_mode", "MEMORY", |r| r.get(0))?;
+        Ok(conn)
     }
 
-    /// Whether a scratch file named `path` exists in these files.
-    pub(crate) fn contains(&self, path: &std::path::Path) -> bool {
-        path.to_str()
-            .is_some_and(|name| !reserved(name) && lock(&self.0.namespace.files).contains_key(name))
+    /// The VFS path to attach a caller's scratch `path` by, when it exists
+    /// in these files.
+    pub(crate) fn attachable(&self, path: &std::path::Path) -> Option<String> {
+        let name = Self::local(path)?;
+        (!reserved(name) && lock(&self.0.namespace.files).contains_key(name))
+            .then(|| self.path(name))
     }
 
     fn same(&self, other: &Self) -> bool {
@@ -688,6 +770,12 @@ pub(crate) enum Role {
 struct PublishGuard {
     files: BrowserFiles,
     copy: SharedFile,
+    /// The database this publish copied: the one it unfreezes, and the only
+    /// one it may replace (a restore since gives the files another).
+    database: SharedFile,
+    /// A replacement on the copy committed some of its steps but not its
+    /// last: the copy holds half a publish and must not be swapped in.
+    partial: bool,
     armed: bool,
 }
 
@@ -707,9 +795,7 @@ impl PublishGuard {
                 names.remove(PUBLISH_COPY);
             }
         }
-        if let Some(database) = self.files.database() {
-            lock(&database).frozen = false;
-        }
+        lock(&self.database).frozen = false;
     }
 }
 
@@ -826,6 +912,10 @@ pub(crate) fn configure(conn: &Connection) -> Result<()> {
     conn.pragma_update(None, "synchronous", "OFF")?;
     conn.pragma_update(None, "temp_store", "MEMORY")?;
     conn.pragma_update(None, "secure_delete", true)?;
+    // The size a restore accepts is also the size the database may grow to.
+    let page_size: i64 = conn.pragma_query_value(None, "page_size", |r| r.get(0))?;
+    let pages = MAX_DATABASE_BYTES as i64 / page_size.max(1);
+    conn.pragma_update(None, "max_page_count", pages)?;
     Ok(())
 }
 
@@ -920,6 +1010,27 @@ impl Store {
         })
     }
 
+    /// The memory files of a browser store.
+    pub fn browser_files(&self) -> Option<&BrowserFiles> {
+        self.browser.as_ref().map(Link::files)
+    }
+
+    /// Whether this is a publish copy: a replacement on it commits each step
+    /// (`replacement.rs`), as rolling back is dropping the copy.
+    pub(crate) fn is_publish_copy(&self) -> bool {
+        self.browser
+            .as_ref()
+            .is_some_and(|link| link.role == Role::PublishCopy)
+    }
+
+    /// Marks this publish copy as holding part of a replacement (or no
+    /// longer): `finish_publish` refuses a partial copy.
+    pub(crate) fn set_partial(&mut self, partial: bool) {
+        if let Some(guard) = self.browser.as_mut().and_then(|link| link.publish.as_mut()) {
+            guard.partial = partial;
+        }
+    }
+
     /// Whether a publish copy exists ([`Self::begin_publish`]).
     pub fn is_publishing(&self) -> bool {
         self.database_file()
@@ -966,6 +1077,8 @@ impl Store {
         let guard = PublishGuard {
             files: files.clone(),
             copy,
+            database,
+            partial: false,
             armed: true,
         };
         let mut store = Self::open_role(
@@ -986,7 +1099,13 @@ impl Store {
     fn check_copy(&self, copy: &Self) -> Result<BrowserFiles> {
         let link = self.database_link()?;
         let theirs = copy.link()?;
-        if theirs.role != Role::PublishCopy || !link.files.same(&theirs.files) {
+        let database = link.files.database();
+        let ours = theirs.publish.as_ref().is_some_and(|guard| {
+            database
+                .as_ref()
+                .is_some_and(|database| Arc::ptr_eq(database, &guard.database))
+        });
+        if theirs.role != Role::PublishCopy || !link.files.same(&theirs.files) || !ours {
             return Err(unavailable("not this store's publish copy"));
         }
         Ok(link.files.clone())
@@ -1011,9 +1130,10 @@ impl Store {
             .ok_or_else(|| unavailable("the publish copy has ended"))?;
         // Closes the copy's connection; the guard still owns the publish.
         drop(copy);
-        let database = files
-            .database()
-            .ok_or_else(|| unavailable("the browser database is missing"))?;
+        if guard.partial {
+            return Err(unavailable("the replacement on the copy did not finish"));
+        }
+        let database = guard.database.clone();
         let new = std::mem::take(&mut lock(&guard.copy).data);
         let (old, changed_before) = {
             let mut database = lock(&database);
@@ -1238,9 +1358,163 @@ mod tests {
             .query_row("SELECT count(*) FROM staged.rows", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 1);
-        assert!(stage.execute("INSERT INTO rows VALUES(2)", []).is_err());
+        assert!(is_busy(stage.execute("INSERT INTO rows VALUES(2)", [])));
         store.conn.execute_batch("COMMIT").unwrap();
         stage.execute("INSERT INTO rows VALUES(2)", []).unwrap();
         store.conn.execute_batch("DETACH DATABASE staged").unwrap();
+    }
+
+    fn is_busy<T: std::fmt::Debug>(result: rusqlite::Result<T>) -> bool {
+        matches!(
+            result,
+            Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == rusqlite::ErrorCode::DatabaseBusy
+        )
+    }
+
+    fn store_with_marks(files: &BrowserFiles) -> Store {
+        let store = Store::open_browser(files).unwrap();
+        store
+            .conn
+            .execute_batch("CREATE TABLE marks(value TEXT); INSERT INTO marks VALUES('old');")
+            .unwrap();
+        store
+    }
+
+    /// The VFS lives as long as the process: a connection that outlives its
+    /// store and files (a `:memory:` one opens no file; a stage's keeps its
+    /// own) still works.
+    #[test]
+    fn connections_outlive_their_store_and_files() {
+        let files = BrowserFiles::new().unwrap();
+        let store = Store::open_browser(&files).unwrap();
+        let memory = Connection::open_with_flags_and_vfs(
+            ":memory:",
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
+            VFS,
+        )
+        .unwrap();
+        let stage = store
+            .open_staging_connection(std::path::Path::new("/stages/outliving.sqlite"))
+            .unwrap();
+        stage
+            .execute_batch("CREATE TABLE rows(value); INSERT INTO rows VALUES(1);")
+            .unwrap();
+        drop(store);
+        drop(files);
+        let now: i64 = memory
+            .query_row("SELECT unixepoch('now')", [], |r| r.get(0))
+            .unwrap();
+        assert!(now > 1_700_000_000);
+        stage.execute("INSERT INTO rows VALUES(2)", []).unwrap();
+        let n: i64 = stage
+            .query_row("SELECT count(*) FROM rows", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 2);
+        // A file of gone files cannot be opened again.
+        assert!(BrowserFiles::new().unwrap().path("x").starts_with(PREFIX));
+    }
+
+    /// A restore is refused while a publish copy exists, so an old publish
+    /// can never replace a restored database.
+    #[test]
+    fn a_restore_is_refused_while_a_publish_copy_exists() {
+        let files = BrowserFiles::new().unwrap();
+        let mut store = store_with_marks(&files);
+        let copy = store.begin_publish().unwrap();
+        drop(store);
+        assert!(files.restore_size(8192).is_err());
+        assert!(files.restore_chunk(0, &[0; 8192]).is_err());
+        drop(copy);
+        files.restore_size(0).unwrap();
+    }
+
+    /// Every write lock is refused while a publish copy exists, also the
+    /// ones that skip the reserved lock (BEGIN EXCLUSIVE, VACUUM).
+    #[test]
+    fn exclusive_writes_are_refused_during_a_publish() {
+        let files = BrowserFiles::new().unwrap();
+        let mut store = store_with_marks(&files);
+        let copy = store.begin_publish().unwrap();
+        assert!(is_busy(store.conn.execute_batch("BEGIN EXCLUSIVE")));
+        let _ = store.conn.execute_batch("ROLLBACK");
+        assert!(is_busy(store.conn.execute_batch("VACUUM")));
+        assert!(is_busy(
+            store.conn.execute("UPDATE marks SET value = 'lost'", [])
+        ));
+        store.finish_publish(copy).unwrap();
+        let value: String = store
+            .conn
+            .query_row("SELECT value FROM marks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(value, "old");
+    }
+
+    /// Names SQLite would take for the database's journals are reserved: a
+    /// stage cannot pose as a hot journal of the database.
+    #[test]
+    fn a_stage_cannot_take_a_journal_name_of_the_database() {
+        let files = BrowserFiles::new().unwrap();
+        let store = store_with_marks(&files);
+        for name in [
+            "patina.sqlite",
+            "patina.sqlite-journal",
+            "patina.sqlite-wal",
+            "patina-publish.sqlite-journal",
+        ] {
+            assert!(
+                store
+                    .open_staging_connection(std::path::Path::new(name))
+                    .is_err(),
+                "{name}"
+            );
+        }
+        let stage = store
+            .open_staging_connection(std::path::Path::new("patina.sqlite.stage"))
+            .unwrap();
+        drop(stage);
+    }
+
+    /// The size a restore accepts is the size the database may grow to.
+    #[test]
+    fn the_database_is_capped_at_the_restorable_size() {
+        let files = BrowserFiles::new().unwrap();
+        let store = Store::open_browser(&files).unwrap();
+        let (pages, size): (i64, i64) = store
+            .conn
+            .query_row(
+                "SELECT (SELECT * FROM pragma_max_page_count), (SELECT * FROM pragma_page_size)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(pages * size, MAX_DATABASE_BYTES as i64);
+    }
+
+    /// An unsaved take holds the database's chunks, not its connection: a
+    /// closed store opens again.
+    #[test]
+    fn an_unsaved_take_does_not_keep_the_database_open() {
+        let files = BrowserFiles::new().unwrap();
+        let store = store_with_marks(&files);
+        let take = store.take_changed_chunks().unwrap();
+        drop(store);
+        let store = Store::open_browser(&files).unwrap();
+        drop(take);
+        assert!(!store.take_changed_chunks().unwrap().is_empty());
+    }
+
+    /// Stages vanish with their last connection.
+    #[test]
+    fn dropped_stages_leave_no_scratch_files() {
+        let files = BrowserFiles::new().unwrap();
+        let store = Store::open_browser(&files).unwrap();
+        let stage = crate::EpgStage::create_in_store(&store, "/stages").unwrap();
+        let catalog = crate::CatalogStage::create_in_with("/stages", |path| {
+            store.open_staging_connection(path)
+        })
+        .unwrap();
+        assert_eq!(files.scratch_files(), 2);
+        drop((stage, catalog));
+        assert_eq!(files.scratch_files(), 0);
     }
 }

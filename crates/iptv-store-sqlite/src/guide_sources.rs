@@ -477,5 +477,7 @@ mod allocation_tests {
             0,
             "failed stage must be removed"
         );
+        #[cfg(target_family = "wasm")]
+        assert_eq!(store.browser_files().unwrap().scratch_files(), 0);
     }
 }

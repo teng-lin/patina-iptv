@@ -76,6 +76,7 @@ impl Store {
     /// Opens an encrypted database, converting a legacy plaintext file atomically.
     /// The original remains usable if export, validation, or migration fails.
     pub fn open_encrypted(path: impl AsRef<Path>, key: &DatabaseKey) -> Result<Self> {
+        crate::files_available()?;
         let path = path.as_ref();
         let lock = private_file(&sibling(path, ".encryption-lock"), false)?;
         lock.lock().map_err(io_error)?;
@@ -122,27 +123,28 @@ impl Store {
     ///
     /// A browser store has no files: the stage is a scratch file among its
     /// memory files, named by `path`, gone when its last connection closes.
+    /// Every store of the browser build is a browser store.
     pub fn open_staging_connection(&self, path: &Path) -> Result<Connection> {
         #[cfg(target_family = "wasm")]
-        if let Some(link) = &self.browser {
-            let name = path.to_str().ok_or(StoreError::Unavailable(
-                "scratch database path is not UTF-8",
+        {
+            let link = self.browser.as_ref().ok_or(StoreError::Unavailable(
+                "the browser build stages only through a browser store",
             ))?;
-            let conn = link.files().open_scratch(name)?;
+            let conn = link.files().open_scratch(path)?;
             conn.pragma_update(None, "temp_store", "MEMORY")?;
-            return Ok(conn);
+            Ok(conn)
         }
-        // Without files (wasm), `path` names a file of SQLite's default
-        // memory VFS.
         #[cfg(not(target_family = "wasm"))]
-        drop(private_file(path, false)?);
-        crate::initialize_sqlite()?;
-        let conn = Connection::open(path)?;
-        if let Some(key) = &self.key {
-            key.apply(&conn)?;
+        {
+            drop(private_file(path, false)?);
+            crate::initialize_sqlite()?;
+            let conn = Connection::open(path)?;
+            if let Some(key) = &self.key {
+                key.apply(&conn)?;
+            }
+            conn.pragma_update(None, "temp_store", "MEMORY")?;
+            Ok(conn)
         }
-        conn.pragma_update(None, "temp_store", "MEMORY")?;
-        Ok(conn)
     }
     /// Attaches a scratch database created by this store. SQLCipher must receive
     /// the raw key again: inheriting a main database codec also inherits its salt.
@@ -157,15 +159,23 @@ impl Store {
             ));
         }
         // ATTACH creates a missing file: a stage made outside this store's
-        // memory files would be published as an empty catalog.
+        // memory files would be published as an empty catalog. Browser
+        // files are attached by their VFS path.
         #[cfg(target_family = "wasm")]
-        if let Some(link) = &self.browser
-            && !link.files().contains(path)
-        {
-            return Err(StoreError::Unavailable(
+        let target = self
+            .browser
+            .as_ref()
+            .and_then(|link| link.files().attachable(path))
+            .ok_or(StoreError::Unavailable(
                 "the stage is not among the browser store's files",
-            ));
-        }
+            ))?;
+        #[cfg(not(target_family = "wasm"))]
+        let target = path
+            .to_str()
+            .ok_or(StoreError::Unavailable(
+                "scratch database path is not UTF-8",
+            ))?
+            .to_owned();
         let key = self
             .key
             .as_ref()
@@ -174,12 +184,7 @@ impl Store {
         self.conn
             .execute(
                 &format!("ATTACH DATABASE ?1 AS \"{schema}\" KEY ?2"),
-                params![
-                    path.to_str().ok_or(StoreError::Unavailable(
-                        "scratch database path is not UTF-8"
-                    ))?,
-                    &*key
-                ],
+                params![target, &*key],
             )
             .map_err(|_| StoreError::Unavailable("could not attach scratch database"))?;
         Ok(())

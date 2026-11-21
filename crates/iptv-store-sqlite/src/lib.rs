@@ -172,6 +172,16 @@ fn system_now() -> i64 {
         .map_or(0, |ms| ms.div_euclid(1000))
 }
 
+/// Refuses file-based operations (backups, encrypted file stores, private
+/// files, inspection stages) in the browser build, which has no files.
+#[inline]
+pub(crate) fn files_available() -> Result<()> {
+    #[cfg(target_family = "wasm")]
+    return Err(StoreError::Unavailable("the browser build has no files"));
+    #[cfg(not(target_family = "wasm"))]
+    Ok(())
+}
+
 /// Completes SQLite's initialization before a connection opens. Natively
 /// that includes SQLCipher's provider ([`iptv_sqlcipher_init`]); the
 /// browser's SQLite has no cipher and needs nothing beyond what opening does.

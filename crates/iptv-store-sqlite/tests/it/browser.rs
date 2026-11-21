@@ -594,3 +594,26 @@ fn a_deleted_credential_is_not_in_the_saved_chunks() {
         "a deleted credential stays in a saved page"
     );
 }
+
+/// The file-based operations are refused in the browser build, which has
+/// no files, with `Unavailable`.
+#[test]
+fn file_operations_are_unavailable_in_the_browser() {
+    use iptv_store_sqlite::{DatabaseKey, EpgStage, StoreError};
+    let unavailable = |e: StoreError| matches!(e, StoreError::Unavailable(_));
+    let path = std::path::Path::new("/data/store.sqlite");
+    assert!(unavailable(Store::open(path).unwrap_err()));
+    assert!(unavailable(
+        Store::open_with(path, &iptv_store_sqlite::OpenOptions::default()).unwrap_err()
+    ));
+    let key = DatabaseKey::from_bytes([7; 32]);
+    assert!(unavailable(Store::open_encrypted(path, &key).unwrap_err()));
+    assert!(unavailable(CatalogStage::create_in("/data").err().unwrap()));
+    assert!(unavailable(
+        EpgStage::create("/data/stage.sqlite").unwrap_err()
+    ));
+    assert!(unavailable(EpgStage::create_in("/data").unwrap_err()));
+    let store = Store::open_in_memory().unwrap();
+    assert!(unavailable(store.snapshot_to(path).unwrap_err()));
+    assert!(unavailable(Store::validate_snapshot(path).unwrap_err()));
+}

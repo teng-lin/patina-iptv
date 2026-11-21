@@ -71,6 +71,8 @@ fn incomplete_and_failed_steps_preserve_saved_rows_and_overlays() {
             .count(),
         0
     );
+    #[cfg(target_family = "wasm")]
+    assert_eq!(store.browser_files().unwrap().scratch_files(), 0);
 }
 
 #[test]

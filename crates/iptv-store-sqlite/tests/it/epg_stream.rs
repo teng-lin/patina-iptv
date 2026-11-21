@@ -506,6 +506,8 @@ fn a_canceled_or_failed_download_keeps_the_stored_guide() {
     assert_eq!(store.epg_guide(source).unwrap(), state);
     #[cfg(not(target_family = "wasm"))]
     assert_eq!(stage_files(dir.path()), Vec::<String>::new());
+    #[cfg(target_family = "wasm")]
+    assert_eq!(store.browser_files().unwrap().scratch_files(), 0);
 
     // A connection dropped mid-way: that feed fails, so does the import.
     let mut g = stream_support::Generated::new(shape(NOW, 6));
@@ -525,6 +527,8 @@ fn a_canceled_or_failed_download_keeps_the_stored_guide() {
     assert_eq!(titles(&store, source, &chans), before);
     #[cfg(not(target_family = "wasm"))]
     assert_eq!(stage_files(dir.path()), Vec::<String>::new());
+    #[cfg(target_family = "wasm")]
+    assert_eq!(store.browser_files().unwrap().scratch_files(), 0);
 }
 
 #[test]

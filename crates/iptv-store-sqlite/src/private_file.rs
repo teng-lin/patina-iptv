@@ -90,6 +90,7 @@ impl Store {
     /// Writes a new encrypted document; callers atomically replace old copies
     /// only after this succeeds. No plaintext intermediate is created.
     pub fn write_private_file(&self, path: &Path, input: &mut impl Read) -> Result<()> {
+        crate::files_available()?;
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -145,6 +146,7 @@ impl Store {
         result
     }
     pub fn read_private_file(&self, path: &Path) -> Result<PrivateFileReader> {
+        crate::files_available()?;
         crate::initialize_sqlite()?;
         let conn = Connection::open_with_flags(
             path,
