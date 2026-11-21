@@ -504,6 +504,10 @@ pub fn header(ui: Ui) -> impl IntoElement {
     // programme (`iptv_core::layout`). Only this header's own views change:
     // the preview keeps its place, and the player under it is resized.
     let below = computed(move || crate::panels::shortcuts_now() == Shortcuts::Below);
+    // A compact portrait window stacks the programme under a preview as wide
+    // as the window (`GuideHeader::stacked`); the player under the preview
+    // is resized with it, as for any other arrangement.
+    let stacked = computed(move || crate::panels::guide_header_now().stacked());
     view()
         .pt_safe_area()
         .accessibility_elements_hidden(move || crate::organization_view::guide_order_open(ui))
@@ -513,14 +517,24 @@ pub fn header(ui: Ui) -> impl IntoElement {
                 .h(move || px(header_now().0))
                 .p(px(PREVIEW_MARGIN))
                 .child(
-                    view()
-                        .flex_1()
-                        .min_h(px(0.0))
-                        .flex_row()
-                        .gap(move || size.px(24.0))
-                        .child(preview(ui, size))
-                        .child(details(ui, program, size))
-                        .child(when(move || !below.get(), move || side(ui))),
+                    when(stacked, move || {
+                        view()
+                            .flex_1()
+                            .min_h(px(0.0))
+                            .gap(move || px(crate::panels::guide_header_now().stack_gap))
+                            .child(preview(ui, size))
+                            .child(details(ui, program, size))
+                    })
+                    .otherwise(move || {
+                        view()
+                            .flex_1()
+                            .min_h(px(0.0))
+                            .flex_row()
+                            .gap(move || size.px(24.0))
+                            .child(preview(ui, size))
+                            .child(details(ui, program, size))
+                            .child(when(move || !below.get(), move || side(ui)))
+                    }),
                 )
                 .child(when(move || below.get(), move || shortcuts_row(ui)))
                 .child(preview_ring(ui))

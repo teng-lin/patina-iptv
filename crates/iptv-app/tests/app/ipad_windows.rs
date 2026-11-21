@@ -36,7 +36,7 @@ use serde_json::{Value as Json, json};
 
 const WAIT: Duration = Duration::from_secs(5);
 /// The play bar's buttons (`play_bar::control_id`): its panel's rows.
-const BAR_CONTROLS: [&str; 12] = [
+pub(crate) const BAR_CONTROLS: [&str; 12] = [
     "play-bar-mute",
     "play-bar-rewind",
     "play-bar-play-pause",
@@ -75,13 +75,13 @@ fn ipad(env: &mut nsh_core::platform::Environment) {
     env.os = Os::Ios;
 }
 
-fn present(app: &mut Headless, (w, h): (f32, f32), text: f32) {
+pub(crate) fn present(app: &mut Headless, (w, h): (f32, f32), text: f32) {
     step(app.set_viewport(Size::new(px(w), px(h))));
     step(app.set_environment("Dynamic Type", |e| e.font_scale = text));
     app.settle();
 }
 
-fn player(app: &Headless) -> NodeId {
+pub(crate) fn player(app: &Headless) -> NodeId {
     let players: Vec<_> = app
         .screen()
         .layout_nodes()
@@ -137,11 +137,11 @@ fn inside(b: [f32; 4], (w, h): (f32, f32), what: &str) {
 
 /// The guide header an iPad window gets: the full-size guide (an iPad does
 /// not scale it with its window) at the text size `text`.
-fn policy((w, h): (f32, f32), text: f32) -> GuideHeader {
+pub(crate) fn policy((w, h): (f32, f32), text: f32) -> GuideHeader {
     GuideHeader::of(w, h, 1.0, text)
 }
 
-fn channel_selected(app: &Headless, name: &str) -> bool {
+pub(crate) fn channel_selected(app: &Headless, name: &str) -> bool {
     app.screen()
         .accessibility_state(&format!("id:guide-ui >> label:{name}"))
         .is_ok_and(|s| s.selected)
@@ -151,10 +151,22 @@ fn channel_selected(app: &Headless, name: &str) -> bool {
 /// corner ‹ inside it, the shortcuts beside or under it by the policy and
 /// inside the window, the programme's minutes left on screen.
 #[track_caller]
-fn header_fits(app: &Headless, player: NodeId, size: (f32, f32), text: f32) {
+pub(crate) fn header_fits(app: &Headless, player: NodeId, size: (f32, f32), text: f32) {
+    header_fits_as(app, player, size, text, policy(size, text));
+}
+
+/// [`header_fits`], against the header `want` the window's guide scale
+/// gives (a phone draws its guide smaller than an iPad).
+#[track_caller]
+pub(crate) fn header_fits_as(
+    app: &Headless,
+    player: NodeId,
+    size: (f32, f32),
+    text: f32,
+    want: GuideHeader,
+) {
     let (w, h) = size;
     let what = format!("{w}x{h} at text {text:.2}");
-    let want = policy(size, text);
     let video = find(app, |n| n.id == player).expect("the video laid out");
     let preview = bounds(app, "guide-preview", &what);
     for (v, p) in video.iter().zip(preview) {

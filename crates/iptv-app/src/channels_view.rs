@@ -13,6 +13,7 @@ use crate::i18n::tr;
 use crate::lists::entry_name;
 
 use iptv_core::channel_list::{ChannelList, ListMode, ListPane, Outcome};
+use iptv_core::layout::ListPanel;
 use iptv_core::lists::{ChannelList as Rows, Entry, FAVORITES, entry_count};
 use iptv_nav::Action;
 use nsh_core::prelude::*;
@@ -74,28 +75,41 @@ fn groups_shown(ui: Ui) -> bool {
         .with(|c| c.is_some_and(|c| c.pane == ListPane::Groups))
 }
 
-/// The width the list takes at the left.
-fn panel_width(ui: Ui) -> f32 {
+/// The columns at the left in a window `width` points wide, kept inside
+/// it (`iptv_core::layout::ListPanel`).
+fn panel(ui: Ui, width: f32) -> ListPanel {
     let scale = crate::scale::now();
-    (LIST_W * scale).round()
-        + if groups_shown(ui) {
-            (GROUPS_W * scale).round()
-        } else {
-            0.0
-        }
+    let groups = if groups_shown(ui) {
+        (GROUPS_W * scale).round()
+    } else {
+        0.0
+    };
+    ListPanel::of(width, (LIST_W * scale).round(), groups)
+}
+
+/// The columns in the window now (reactive).
+fn panel_now(ui: Ui) -> ListPanel {
+    panel(ui, window().width.0)
 }
 
 /// The video's rectangle while the list shows beside it: right of the
-/// list, 16:9, at the top.
+/// list, 16:9, at the top. `None` in the overlay layout, and in a window
+/// with no room beside the list (a phone held upright), where the video
+/// stays full screen under the list.
 pub fn preview_rect(ui: Ui, width: f32, _height: f32) -> Option<(f32, f32, f32, f32)> {
     let preview = ui
         .channels
         .with(|c| c.is_some_and(|c| c.mode == ListMode::Preview));
-    preview.then(|| {
-        let x = panel_width(ui) + 40.0;
-        let w = (width - x - 40.0).max(160.0);
-        (x, 40.0, w, w * 9.0 / 16.0)
-    })
+    if !preview {
+        return None;
+    }
+    panel(ui, width).preview(width)
+}
+
+/// Whether the list shows over the video rather than beside it (reactive).
+fn over_video(ui: Ui) -> bool {
+    let w = window();
+    is_open(ui) && preview_rect(ui, w.width.0, w.height.0).is_none()
 }
 
 /// Runs a step on the list's state with the guide's list and the groups
@@ -204,7 +218,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     });
     let open = move || is_open(ui);
     let state = move || ui.channels.get();
-    let overlay = move || state().is_some_and(|c| c.mode == ListMode::Overlay);
+    // Over the video in the overlay layout, and in the preview layout of a
+    // window with no room for the video beside the list.
+    let overlay = move || over_video(ui);
     let groups = move || groups_shown(ui);
     let row_focus = computed(move || state().map(|c| (c.row, c.pane == ListPane::Channels)));
     let entry_focus = computed(move || state().map(|c| (c.entry, c.pane == ListPane::Groups)));
@@ -234,7 +250,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     let groups_column = view()
         .test_id("channel-list-groups")
         .accessibility_elements_hidden(move || !groups())
-        .w(move || px(if groups() { size.whole(GROUPS_W) } else { 0.0 }))
+        .w(move || px(if groups() { panel_now(ui).groups } else { 0.0 }))
         .opacity(move || if groups() { 1.0_f32 } else { 0.0 })
         .overflow_hidden()
         .pt_safe_area()
@@ -255,7 +271,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         );
     let channels_column = crate::browse_playback::watch_drags(view(), ui)
         .test_id("channel-list")
-        .w(move || px(size.whole(LIST_W)))
+        .w(move || px(panel_now(ui).list))
         .pt_safe_area()
         .px(px(12.0))
         .py(px(16.0))

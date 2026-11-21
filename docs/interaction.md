@@ -213,7 +213,13 @@ what the content needs at the current text size, not from the device type.
 - **Now:** the guide scales from 1.0 to 0.8 with the desktop window
   (`crates/iptv-app/src/scale.rs`). Tablets keep the full sizes in every
   window: an Android tablet's screen, and an iPad's full screen in either
-  orientation, Split View, Slide Over and Stage Manager windows.
+  orientation, Split View, Slide Over and Stage Manager windows. A phone
+  draws the guide at 0.7 (rows 50 → 35 dp, type 20 → 14), with the
+  system's font scale still on top: the tablet's sizes were far too large
+  on a 360-point screen. For now a phone runs in landscape (#168): its
+  screen (smallest width under 600 dp, not a TV) asks for landscape on
+  either side, as the rotation lock allows, until portrait has a design of
+  its own. Tablets, an unfolded phone and TVs rotate freely.
 - **Now:** the guide's header (`iptv_core::layout::GuideHeader`) puts its
   shortcuts (the list on screen, Movies, Shows, Add playlist) on a row of their
   own under the preview and the focused programme in Compact, and in Medium
@@ -230,6 +236,20 @@ what the content needs at the current text size, not from the device type.
   title stays on one line and is truncated. The shortcuts' row scrolls
   sideways where the window is narrower than it. The
   guide's rows already take the full width below the header in every class.
+- **Now:** a Compact window at least 1.6 times as tall as it is wide (a phone
+  held upright, a narrow portrait Split View window) stacks the header: the
+  preview spans the window's width inside its margins, the focused programme
+  sits under it, then the shortcuts' row. Beside the programme the preview
+  would be a thumbnail (132 × 74 points at 412 points wide); stacked it is
+  388 × 218. The stacked header keeps the same 55% (70%) limit, and a window
+  where it would pass that keeps the other arrangement. A small desktop window
+  (400 × 600 is 1.5) and a phone on its side keep the preview beside the
+  programme.
+- **Now:** the player's channel list keeps its columns inside the window
+  (`iptv_core::layout::ListPanel`): the groups column first, then the list in
+  what is left. In the preview layout the video goes beside them only where
+  it keeps 160 points of width. A narrower window, a phone held upright for
+  one, leaves it full screen under the list, as the overlay layout does.
 - **Now:** in Movies and Shows, details replace the list in every class and
   the poster grid reflows its columns. In Compact, an empty catalogue (no
   titles, nothing filtered) is a pane of its own: its message and action take
@@ -239,7 +259,10 @@ what the content needs at the current text size, not from the device type.
 - **Planned:** collapsing the categories beside the posters in Compact; until
   then they share the width with the poster grid.
 - **Now:** the play bar keeps its three groups on one row where the window
-  has room for all their buttons; a narrower window (an iPad's Split View or
+  has room for all their buttons. On a phone its buttons are 44 points and
+  its side margins 12, so a phone on its side (740 points across and wider)
+  keeps the one row, the quality and the channel's name on a line above the
+  buttons; a narrower window (an iPad's Split View or
   Slide Over, a narrow desktop window) gives the right-hand group the rows
   under the transport, its buttons wrapping, so none is cut off at the edge.
   Choosers over the video keep clear of the bar's laid-out height and are

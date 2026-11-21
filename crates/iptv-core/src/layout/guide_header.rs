@@ -1,7 +1,10 @@
 //! The guide's header: the preview at the top left, the focused programme
 //! beside it, and the shortcuts (the list on screen, Movies, Shows, Add
 //! playlist) at the right or, where the window has no room for three
-//! columns, on a row of their own under the other two.
+//! columns, on a row of their own under the other two. A compact portrait
+//! window (a phone held upright) stacks them instead: the preview across
+//! the window's width, the programme under it, then the shortcuts' row,
+//! where beside the programme the preview would be a thumbnail.
 //!
 //! The preview keeps its place at the top left in every arrangement: the
 //! player under it is only resized, never hidden or moved elsewhere, and it
@@ -54,6 +57,14 @@ pub const TIMES_GAP: f32 = 12.0;
 /// The most lines each part of the times row takes: the app ends a longer
 /// part with an ellipsis (`header.rs`, `number_of_lines(2)`).
 pub const MAX_TIMES_LINES: f32 = 2.0;
+/// A compact window at least this many times as tall as it is wide stacks
+/// the header ([`GuideHeader::stacked`]): a phone held upright (about 2.2)
+/// and a portrait tablet's narrow Split View window, not a small desktop
+/// window (400 × 600 is 1.5), which keeps its rows for the guide.
+pub const STACK_RATIO: f32 = 1.6;
+/// The gap between the stacked preview and the programme under it (points
+/// at scale 1).
+pub const STACK_GAP: f32 = 12.0;
 
 /// Where the guide's header puts its shortcuts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +87,10 @@ pub struct GuideHeader {
     /// The shortcuts' row height and the gap above it (0 beside).
     pub row: f32,
     pub row_gap: f32,
+    /// The gap between the preview and the focused programme under it, in
+    /// a stacked header ([`GuideHeader::stacked`]); 0 when the programme is
+    /// beside the preview.
+    pub stack_gap: f32,
 }
 
 impl GuideHeader {
@@ -85,6 +100,12 @@ impl GuideHeader {
         let scale = if scale > 0.0 { scale } else { 1.0 };
         let font = if font > 0.0 { font } else { 1.0 };
         let text = scale * font;
+        if Class::of(width, text) == Class::Compact
+            && height >= STACK_RATIO * width
+            && let Some(stacked) = stack(width, height, scale, font)
+        {
+            return stacked;
+        }
         // The programme's width if the shortcuts stayed beside it, with the
         // preview as that arrangement draws it.
         let (_, beside) = fit(width, height, 0.0, 0.0, HEADER_MAX_SHARE);
@@ -109,8 +130,49 @@ impl GuideHeader {
             shortcuts,
             row,
             row_gap,
+            stack_gap: 0.0,
         }
     }
+
+    /// Whether the focused programme sits under the preview, which spans
+    /// the window's width, rather than beside it.
+    pub fn stacked(&self) -> bool {
+        self.stack_gap > 0.0
+    }
+}
+
+/// The stacked header of a compact portrait window: the preview as wide as
+/// the window inside its margins, the programme's title and times under it,
+/// then the shortcuts' row. `None` where that header would pass the
+/// header's largest share of the height (very large text, or a window
+/// barely taller than the ratio): the window keeps the other arrangement.
+/// A header shorter than its usual share grows to it, which gives the
+/// programme's description the room.
+fn stack(width: f32, height: f32, scale: f32, font: f32) -> Option<GuideHeader> {
+    let text = scale * font;
+    let w = (width - 2.0 * PREVIEW_MARGIN).floor();
+    let h = (w * 9.0 / 16.0).round();
+    if h < PREVIEW_MIN_H {
+        return None;
+    }
+    let row = (SHORTCUTS_ROW * scale * font.max(1.0)).round();
+    let row_gap = (SHORTCUTS_GAP * scale).round();
+    let stack_gap = (STACK_GAP * scale).round().max(1.0);
+    let details = details_height(w, scale, text).ceil();
+    let wanted = 2.0 * PREVIEW_MARGIN + h + stack_gap + details + row_gap + row;
+    let most = if text >= LARGE_TEXT {
+        LARGE_TEXT_MAX_SHARE
+    } else {
+        HEADER_MAX_SHARE
+    };
+    (wanted <= (height * most).floor()).then(|| GuideHeader {
+        height: wanted.max((height * HEADER_SHARE).round()),
+        preview: (w, h),
+        shortcuts: Shortcuts::Below,
+        row,
+        row_gap,
+        stack_gap,
+    })
 }
 
 /// The header's height and preview width, and the shortcuts' row and gap,
@@ -342,8 +404,17 @@ mod tests {
             } else {
                 0.0
             };
-            let column = w - 2.0 * PREVIEW_MARGIN - g.preview.0 - COLUMN_GAP - side;
-            let room = g.height - 2.0 * PREVIEW_MARGIN - g.row - g.row_gap;
+            let (column, room) = if g.stacked() {
+                (
+                    g.preview.0,
+                    g.height - 2.0 * PREVIEW_MARGIN - g.preview.1 - g.stack_gap - g.row - g.row_gap,
+                )
+            } else {
+                (
+                    w - 2.0 * PREVIEW_MARGIN - g.preview.0 - COLUMN_GAP - side,
+                    g.height - 2.0 * PREVIEW_MARGIN - g.row - g.row_gap,
+                )
+            };
             assert!(
                 room + 0.5 >= details_height(column, 1.0, font),
                 "{w}x{h} at {font}: {g:?}, room {room}"
@@ -400,6 +471,64 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_phone_held_upright_stacks_a_full_width_preview() {
+        // Phones at full size: the preview spans the window inside its
+        // margins, the programme and the shortcuts' row under it.
+        for (w, h, want) in [
+            (412.0, 915.0, (364.0, 388.0, 218.0)),
+            (390.0, 844.0, (385.0, 366.0, 206.0)),
+            (360.0, 800.0, (368.0, 336.0, 189.0)),
+        ] {
+            let g = GuideHeader::of(w, h, 1.0, 1.0);
+            assert!(g.stacked(), "{w}x{h}: {g:?}");
+            assert_eq!(g.shortcuts, Shortcuts::Below, "{w}x{h}");
+            assert_eq!((g.height, g.preview.0, g.preview.1), want, "{w}x{h}");
+            assert_eq!((g.row, g.row_gap, g.stack_gap), (48.0, 8.0, 12.0));
+            let room =
+                g.height - 2.0 * PREVIEW_MARGIN - g.preview.1 - g.stack_gap - g.row - g.row_gap;
+            assert!(
+                room >= details_height(g.preview.0, 1.0, 1.0),
+                "{w}x{h}: {g:?}"
+            );
+        }
+        // The largest text still stacks on a tall phone.
+        let g = GuideHeader::of(412.0, 915.0, 1.0, 2.0);
+        assert!(g.stacked(), "{g:?}");
+        assert!(g.height <= (915.0 * LARGE_TEXT_MAX_SHARE).floor(), "{g:?}");
+    }
+
+    #[test]
+    fn only_tall_compact_windows_stack() {
+        // A phone on its side keeps the preview beside the programme, with
+        // the guide's rows under a third of the height.
+        for (w, h, want) in [
+            (915.0, 412.0, (136.0, 199.0, 112.0)),
+            (780.0, 360.0, (119.0, 169.0, 95.0)),
+        ] {
+            let g = GuideHeader::of(w, h, 1.0, 1.0);
+            assert!(!g.stacked(), "{w}x{h}: {g:?}");
+            assert_eq!(g.shortcuts, Shortcuts::Beside, "{w}x{h}");
+            assert_eq!((g.height, g.preview.0, g.preview.1), want, "{w}x{h}");
+        }
+        // A small desktop window (1.5 times as tall as wide), a portrait
+        // tablet (medium) and a TV keep their arrangement.
+        for (w, h, scale) in [
+            (400.0, 600.0, 0.8),
+            (800.0, 1280.0, 1.0),
+            (960.0, 540.0, 0.8),
+        ] {
+            let g = GuideHeader::of(w, h, scale, 1.0);
+            assert!(!g.stacked(), "{w}x{h}: {g:?}");
+            assert_eq!(g.stack_gap, 0.0);
+        }
+        // A stacked header past its largest share does not stack: very
+        // large text in a window just tall enough.
+        let g = GuideHeader::of(360.0, 600.0, 1.0, 2.0);
+        assert!(!g.stacked(), "{g:?}");
+        assert!(g.preview.1 >= PREVIEW_MIN_H, "{g:?}");
     }
 
     #[test]
