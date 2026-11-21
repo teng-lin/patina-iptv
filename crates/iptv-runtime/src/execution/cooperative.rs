@@ -105,6 +105,10 @@ impl Execution for Cooperative {
     fn shares_connection(&self) -> bool {
         true
     }
+
+    fn has_workers(&self) -> bool {
+        false
+    }
 }
 
 enum Item {
@@ -325,10 +329,6 @@ impl Tasks for HostTasks {
 
     fn delay(&self, duration: Duration) -> Task {
         self.0.delay(duration)
-    }
-
-    fn can_block(&self) -> bool {
-        false
     }
 }
 

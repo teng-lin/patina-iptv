@@ -292,6 +292,12 @@ fn start_update(
                     drop(tx);
                     false
                 }
+                Ok(_) if !owner.services().has_workers() => {
+                    // Downloads run on blocking workers, which this host has
+                    // none of; the shell offers no download there.
+                    drop(tx);
+                    false
+                }
                 Ok(guides) => {
                     let visible = super::source_is_visible(&owner, source);
                     let services = owner.services();

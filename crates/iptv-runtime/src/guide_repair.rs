@@ -208,7 +208,7 @@ impl Runtime {
     pub fn foundation_capabilities(&self) -> Vec<Capability> {
         // Staged probes download on workers that block; a cooperative host
         // has none and refuses them.
-        let probe = if self.services().can_block() {
+        let probe = if self.services().has_workers() {
             CapabilityState::Implemented
         } else {
             CapabilityState::UnsupportedHost

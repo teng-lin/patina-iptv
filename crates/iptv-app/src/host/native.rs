@@ -39,6 +39,10 @@ pub(crate) use platform_data::{flush_on_host_stop, initialize, resolve_data_dir}
 pub(crate) use process::{log_library_base, process_age};
 pub(crate) use recording_host::command as recording_command;
 
+/// The execution this host supplies has blocking workers
+/// (`Runtime::has_workers`).
+pub(crate) const HAS_WORKERS: bool = true;
+
 /// The runtime's ports on this host.
 pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     let mut ports = crate::runtime::Ports::new(directory, credential_key::database_key);

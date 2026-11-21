@@ -220,7 +220,7 @@ pub(crate) struct Service {
     analysis: Lane,
     epochs: Epochs,
     /// The owner's task executor from its execution port, made on first use.
-    tasks: OnceLock<Box<dyn crate::execution::Tasks>>,
+    pub(crate) tasks: OnceLock<Box<dyn crate::execution::Tasks>>,
     files: super::file_writer::Files,
     pool: OnceLock<super::workers::Pool>,
     settings: super::settings::Shared,
@@ -486,9 +486,9 @@ impl Services {
         crate::execution::spawn_blocking(self.service.tasks(), work)
     }
 
-    /// The owner's tasks may block on I/O ([`crate::execution::Tasks::can_block`]).
-    pub(crate) fn can_block(&self) -> bool {
-        self.service.tasks().can_block()
+    /// The host has blocking workers ([`crate::execution::Execution::has_workers`]).
+    pub(crate) fn has_workers(&self) -> bool {
+        self.service.ports.execution.has_workers()
     }
 
     /// Drive a non-Send import on its bounded blocking worker, sharing the

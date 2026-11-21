@@ -201,6 +201,14 @@ fn start_import_with(
                 if cancel.is_canceled() {
                     return;
                 }
+                if !services.has_workers() {
+                    // Imports run on blocking workers, which this host has
+                    // none of: not a passing condition to retry.
+                    let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(
+                        FailureKind::Unsupported,
+                    ))));
+                    return;
+                }
                 let failed = tx.clone();
                 let worker = services.clone();
                 if !services.submit(visible, move || {
@@ -806,6 +814,12 @@ async fn read_guide(
     };
     let (tx, mut rx) = unbounded_channel();
     let services = owner.services();
+    if !services.has_workers() {
+        // Guide reads run on blocking workers, which this host has none of:
+        // no check is owed and none is retried.
+        owner.end_guide_check(source);
+        return;
+    }
     let worker = services.clone();
     if !services.submit(source_is_visible(owner, source), move || {
         worker.block_on(guide_pipeline(&worker, source, &tx, read, &cancel));

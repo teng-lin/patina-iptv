@@ -111,6 +111,14 @@ impl Runtime {
         crate::playback::link_client(self, config)
     }
 
+    /// The host has blocking workers: imports, guide downloads, staged
+    /// probes, backups and the file and favorites writers need them. A
+    /// cooperative browser host has none, and its shell offers none of
+    /// those services.
+    pub fn has_workers(&self) -> bool {
+        self.services().has_workers()
+    }
+
     /// A client of this owner's network port for `config` (artwork, which
     /// sets its own limits).
     pub fn network_client(

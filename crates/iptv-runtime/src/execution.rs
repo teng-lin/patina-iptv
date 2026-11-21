@@ -64,6 +64,15 @@ pub trait Execution: Send + Sync {
     fn shares_connection(&self) -> bool {
         false
     }
+
+    /// The host has workers that may block on I/O and timers
+    /// ([`Execution::worker`], [`Tasks::block_on`]). False for a cooperative
+    /// executor: what needs them (imports, staged probes, the file and
+    /// favorites writers) is unavailable there, and reported so, instead of
+    /// being started. Asking makes no thread or runtime.
+    fn has_workers(&self) -> bool {
+        true
+    }
 }
 
 /// A serial queue: jobs run one at a time, in the order they were pushed.
@@ -160,13 +169,6 @@ pub trait Tasks: Send + Sync {
 
     /// A future that ends after `duration`.
     fn delay(&self, duration: Duration) -> Task;
-
-    /// [`Tasks::block_on`] may wait for I/O and timers. False for a
-    /// cooperative executor: work that blocks is refused there, as having
-    /// no capacity, instead of being started.
-    fn can_block(&self) -> bool {
-        true
-    }
 }
 
 /// The output of spawned work, awaited by whoever spawned it. Dropping it

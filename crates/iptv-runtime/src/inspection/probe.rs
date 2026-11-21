@@ -766,7 +766,7 @@ fn admitted_worker<T: Send + 'static, Permit: Send + 'static>(
             };
             // Probe workers block on their downloads: a host whose tasks
             // cannot block has no capacity for them.
-            if work._permit.is_some() && services.can_block() {
+            if work._permit.is_some() && services.has_workers() {
                 services.spawn_blocking(move || work.run())
             } else {
                 drop(work);
@@ -810,6 +810,25 @@ impl Runtime {
     }
 
     pub fn probe_feed(
+        &self,
+        request: ProbeRequest,
+        control: InspectionControl,
+    ) -> impl Future<Output = InspectionResult<ProbeSummary>> + use<> {
+        // Staged probes need blocking workers: a host without them refuses
+        // before any clock is read or store work is queued.
+        let admitted = self
+            .services()
+            .has_workers()
+            .then(|| self.probe_feed_admitted(request, control));
+        async move {
+            match admitted {
+                Some(admitted) => admitted.await,
+                None => Err(InspectionError::Busy),
+            }
+        }
+    }
+
+    fn probe_feed_admitted(
         &self,
         request: ProbeRequest,
         control: InspectionControl,
@@ -1052,6 +1071,28 @@ impl Runtime {
         limit: u32,
         control: InspectionControl,
     ) -> impl Future<Output = InspectionResult<Page<Candidate>>> + use<> {
+        // Staged probes need blocking workers: a host without them refuses
+        // before any clock is read or store work is queued.
+        let admitted = self
+            .services()
+            .has_workers()
+            .then(|| self.probe_candidates_admitted(evidence, text, after, limit, control));
+        async move {
+            match admitted {
+                Some(admitted) => admitted.await,
+                None => Err(InspectionError::Busy),
+            }
+        }
+    }
+
+    fn probe_candidates_admitted(
+        &self,
+        evidence: ProbeEvidence,
+        text: String,
+        after: Option<Cursor>,
+        limit: u32,
+        control: InspectionControl,
+    ) -> impl Future<Output = InspectionResult<Page<Candidate>>> + use<> {
         let lease = self.lease_probe(&evidence);
         let services = self.services();
         let deadline = Instant::now() + control.timeout.min(super::QUERY_DEADLINE);
@@ -1125,6 +1166,27 @@ impl Runtime {
     }
 
     pub fn probe_schedule(
+        &self,
+        evidence: ProbeEvidence,
+        candidate: CandidateRef,
+        window: TimeWindow,
+        control: InspectionControl,
+    ) -> impl Future<Output = InspectionResult<Vec<CandidateProgram>>> + use<> {
+        // Staged probes need blocking workers: a host without them refuses
+        // before any clock is read or store work is queued.
+        let admitted = self
+            .services()
+            .has_workers()
+            .then(|| self.probe_schedule_admitted(evidence, candidate, window, control));
+        async move {
+            match admitted {
+                Some(admitted) => admitted.await,
+                None => Err(InspectionError::Busy),
+            }
+        }
+    }
+
+    fn probe_schedule_admitted(
         &self,
         evidence: ProbeEvidence,
         candidate: CandidateRef,
@@ -1371,5 +1433,54 @@ mod worker_tests {
         );
         owner.store.hooks.set_drain_limit(None);
         assert!(owner.drain_services());
+    }
+}
+
+#[cfg(all(test, feature = "test-support", feature = "native"))]
+mod host_tests {
+    use super::*;
+
+    struct Unpolled;
+    impl crate::execution::CooperativeHost for Unpolled {
+        fn spawn(&self, _: crate::execution::Task) {}
+        fn delay(&self, _: Duration) -> crate::execution::Task {
+            Box::pin(std::future::pending())
+        }
+        fn now(&self) -> Duration {
+            Duration::ZERO
+        }
+    }
+
+    #[test]
+    fn a_host_without_workers_refuses_a_probe_before_queueing_anything() {
+        let directory = tempfile::tempdir().unwrap();
+        let ports = crate::Ports::with_adapters(
+            directory.path().to_owned(),
+            |_| Ok(DatabaseKey::from_bytes([0x75; 32])),
+            Arc::new(crate::native::network::NativeNetwork),
+            Arc::new(crate::execution::Cooperative::new(Arc::new(Unpolled))),
+        );
+        let owner = Runtime::new(ports);
+        owner.start_services();
+        let refused = owner.probe_feed(
+            ProbeRequest {
+                source: iptv_library::SourceId(1),
+                target: ProbeTarget::Configured(FeedId(1)),
+            },
+            InspectionControl::default(),
+        );
+        let mut refused = std::pin::pin!(refused);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(matches!(
+            refused.as_mut().poll(&mut context),
+            std::task::Poll::Ready(Err(InspectionError::Busy))
+        ));
+        assert!(
+            owner
+                .store_queue_stats()
+                .iter()
+                .all(|lane| lane.pending == 0)
+        );
+        assert_eq!(owner.active_inspection_workers(), 0);
     }
 }

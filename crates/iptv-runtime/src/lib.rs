@@ -569,6 +569,43 @@ mod tests {
     }
 
     #[test]
+    fn the_worker_capability_is_the_executions_and_asking_starts_nothing() {
+        use iptv_library::guide_repair::CapabilityState;
+        let native = Runtime::default();
+        assert!(native.has_workers());
+        let probe = |owner: &Runtime| {
+            owner
+                .foundation_capabilities()
+                .into_iter()
+                .find(|capability| capability.name == "epg_probe")
+                .unwrap()
+                .state
+        };
+        assert_eq!(probe(&native), CapabilityState::Implemented);
+        assert!(
+            native.store.tasks.get().is_none(),
+            "no runtime was made to ask"
+        );
+
+        struct Unpolled;
+        impl execution::CooperativeHost for Unpolled {
+            fn spawn(&self, _: execution::Task) {}
+            fn delay(&self, _: std::time::Duration) -> execution::Task {
+                Box::pin(std::future::pending())
+            }
+            fn now(&self) -> std::time::Duration {
+                std::time::Duration::ZERO
+            }
+        }
+        let mut ports = Ports::for_tests();
+        ports.execution =
+            std::sync::Arc::new(execution::Cooperative::new(std::sync::Arc::new(Unpolled)));
+        let browser = Runtime::new(ports);
+        assert!(!browser.has_workers());
+        assert_eq!(probe(&browser), CapabilityState::UnsupportedHost);
+    }
+
+    #[test]
     fn independent_runtimes_can_apply_events_during_delivery() {
         let first = Rc::new(Runtime::default());
         let second = Runtime::default();

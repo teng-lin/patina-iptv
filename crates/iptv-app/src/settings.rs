@@ -167,6 +167,13 @@ pub fn text_factor() -> f32 {
 /// time matters only where keys report their release (Android), and
 /// picture in picture on leaving only on Android.
 pub fn offer(key: &str) -> Offer {
+    // Recording and backups run on blocking workers; a host without them
+    // offers neither.
+    if !crate::host::HAS_WORKERS
+        && (key.starts_with("recordings.") || matches!(key, "general.backup" | "general.restore"))
+    {
+        return Offer::Hidden;
+    }
     if key == "recordings.quit_host" && !crate::capabilities::HOST.startup_registration() {
         return Offer::Hidden;
     }

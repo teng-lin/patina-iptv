@@ -134,7 +134,8 @@ pub fn enabled(ui: Ui, control: Control) -> bool {
     match control {
         Control::Multiview => crate::capabilities::multiview(ui).available(),
         Control::Record => {
-            ui.player_surface == 0
+            crate::host::HAS_WORKERS
+                && ui.player_surface == 0
                 && ui.playback.get() == crate::Playback::Live
                 && !ui.recordings.with(|s| s.busy || s.starting.is_some())
                 && ui
@@ -142,7 +143,8 @@ pub fn enabled(ui: Ui, control: Control) -> bool {
                     .get()
                     .is_some_and(crate::recordings_view::available)
         }
-        Control::Recordings | Control::Search => ui.player_surface == 0,
+        Control::Recordings => crate::host::HAS_WORKERS && ui.player_surface == 0,
+        Control::Search => ui.player_surface == 0,
         Control::ChannelList | Control::Favorite | Control::Scaling | Control::SleepTimer => true,
         Control::VideoTracks => choice(Track::Video),
         Control::AudioTracks => choice(Track::Audio),
