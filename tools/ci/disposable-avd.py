@@ -177,14 +177,14 @@ def stop(process):
 # Seconds an operator may hold the smoke for manual checks (IPTV_SMOKE_HOLD);
 # the runner adds the hold to the smoke's own budget.
 SMOKE_BUDGET = 1200
-HOLD_LIMIT = 900
+HOLD_LIMIT = 1800
 
 
 def smoke_timeout(env):
     hold = env.get("IPTV_SMOKE_HOLD", "")
     if not hold:
         return SMOKE_BUDGET
-    if not re.fullmatch(r"[1-9][0-9]{0,2}", hold) or int(hold) > HOLD_LIMIT:
+    if not re.fullmatch(r"[1-9][0-9]{0,3}", hold) or int(hold) > HOLD_LIMIT:
         raise ValueError(f"IPTV_SMOKE_HOLD must be whole seconds from 1 through {HOLD_LIMIT}")
     return SMOKE_BUDGET + int(hold)
 

@@ -75,7 +75,8 @@ An uncatchable process/machine termination can leave a copy behind: inspect it a
 its marker manually; never substitute the original profile path into cleanup.
 
 For manual journey checks on the same owned emulator, set `IPTV_SMOKE_HOLD` to
-whole seconds from 1 through 900, and optionally `IPTV_SMOKE_HOLD_FILE` to a
+whole seconds from 1 through 1800 (enough for a 20-minute playback run such
+as the looping live check of #178), and optionally `IPTV_SMOKE_HOLD_FILE` to a
 path whose creation ends the hold early (the smoke removes an existing file when
 the hold starts). Both the runner and the smoke refuse another value before any
 device action; the runner adds the hold to the smoke's 1200 s budget. The smoke
