@@ -131,6 +131,15 @@ class TvActivity : Activity() {
     ) {
         super.onPictureInPictureModeChanged(inPip, config)
         pip.modeChanged(inPip)
+        landscapeOnPhones(config)
+    }
+
+    override fun onMultiWindowModeChanged(
+        inMultiWindow: Boolean,
+        config: Configuration,
+    ) {
+        super.onMultiWindowModeChanged(inMultiWindow, config)
+        landscapeOnPhones(config)
     }
 
     override fun onConfigurationChanged(config: Configuration) {
@@ -150,12 +159,15 @@ class TvActivity : Activity() {
      * A phone's screen (smallest width under 600 dp, not a TV) asks for
      * landscape, either side as the rotation lock allows; anything wider,
      * such as a phone unfolded to a tablet's screen, gives the orientation
-     * back. The system ignores the request in multi-window and picture in
-     * picture, where the window is not the screen.
+     * back. In multi-window and picture in picture the window is not the
+     * screen (a tablet's split window can be narrower than 600 dp): it asks
+     * for nothing there, and asks again when the window fills the screen
+     * (a configuration change).
      */
     private fun landscapeOnPhones(config: Configuration) {
         val tv = packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
-        val phone = !tv && config.smallestScreenWidthDp in 1 until PHONE_MAX_DP
+        val windowed = isInMultiWindowMode || isInPictureInPictureMode
+        val phone = !tv && !windowed && config.smallestScreenWidthDp in 1 until PHONE_MAX_DP
         val wanted =
             if (phone) {
                 ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE

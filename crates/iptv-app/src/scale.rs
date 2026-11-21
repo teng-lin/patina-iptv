@@ -45,7 +45,12 @@ fn scales() -> bool {
 /// A phone: an Android or iOS build reporting the phone idiom, or a
 /// headless Android phone. (NSH's default headless environment, an iOS
 /// phone, is not one: the scenarios built on it measure the desktop.)
+///
+/// Reactive through the window's size: NSH reads the idiom untracked, and
+/// Android derives it from the window's smallest width (a foldable phone
+/// unfolded becomes a tablet), so a change of idiom comes with a resize.
 pub(crate) fn phone() -> bool {
+    let _ = window();
     idiom() == Idiom::Phone && (!SCALES || os() == Os::Android)
 }
 
@@ -70,15 +75,17 @@ pub fn scale_for(width: f32, height: f32, scales: bool) -> f32 {
     ((raw / STEP).round() * STEP).clamp(MIN, MAX)
 }
 
-/// The scale of the window now (reactive: the window's size).
+/// The scale of the window now (reactive: the window's size, which a change
+/// of idiom comes with: read before the TV's and the phone's fixed scales,
+/// so a foldable phone unfolded takes the tablet's).
 pub fn now() -> f32 {
+    let w = window();
     if idiom() == Idiom::Tv {
         return TV;
     }
     if phone() {
         return PHONE;
     }
-    let w = window();
     scale_for(w.width.0, w.height.0, scales())
 }
 

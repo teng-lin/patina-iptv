@@ -1,7 +1,7 @@
 //! A phone (#168), run headless as Android reports one (`Idiom::Phone`):
 //! a small and a large phone held upright and on their side, at the
 //! default text size and at large ones, the guide drawn at the phone's scale
-//! (0.8, as on a TV). Upright, the guide's header stacks
+//! (0.7). Upright, the guide's header stacks
 //! a preview as wide as the window over the focused programme
 //! (`iptv_core::layout::GuideHeader::stacked`); on its side it keeps the
 //! preview beside the programme. The player's channel list stays inside an
@@ -254,4 +254,28 @@ fn phone_play_bar_keeps_one_row_on_its_side() {
             persistent(app, &lifetime, surface);
         }
     }
+}
+
+/// A foldable phone unfolded becomes a tablet (Android derives the idiom
+/// from the window's smallest width) and folded a phone again: the guide's
+/// rows take each one's size as the window changes.
+#[test]
+fn an_unfolded_phone_takes_the_tablets_sizes() {
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, lifetime) = preview_fixture_with(home, |settings| {
+        settings.set("guide.autoplay", Value::Bool(false)).unwrap();
+    });
+    let app = &mut fixture.app;
+    step(app.set_environment("phone", phone));
+    present(app, SIDEWAYS[1], 1.0);
+    let surface = player(app);
+    let row = |app: &crate::headless::Headless| bounds(app, "guide-row").expect("a row")[3];
+    assert_eq!(row(app), 35.0, "a phone's rows");
+    step(app.set_environment("unfolded", |e| e.idiom = Idiom::Pad));
+    present(app, (1280.0, 800.0), 1.0);
+    assert_eq!(row(app), 50.0, "the tablet's rows once unfolded");
+    step(app.set_environment("folded", phone));
+    present(app, SIDEWAYS[1], 1.0);
+    assert_eq!(row(app), 35.0, "the phone's rows again");
+    persistent(app, &lifetime, surface);
 }

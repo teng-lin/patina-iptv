@@ -30,7 +30,9 @@ impl ListPanel {
     /// the groups column first, then the list in what is left, both
     /// leaving [`LIST_BESIDE_MIN`] at the right.
     pub fn of(width: f32, list: f32, groups: f32) -> Self {
-        let room = (width - LIST_BESIDE_MIN).max(0.0);
+        // Whole points, as the columns are drawn (a phone's width in dp
+        // may be fractional: 1080 px at 2.625 is 411.43).
+        let room = (width - LIST_BESIDE_MIN).floor().max(0.0);
         let groups = groups.clamp(0.0, room);
         let list = list.clamp(0.0, room - groups);
         Self { groups, list }
@@ -95,6 +97,12 @@ mod tests {
         let edge = ListPanel::of(660.0, 420.0, 0.0);
         assert_eq!(edge.preview(660.0).map(|r| r.2), Some(LIST_PREVIEW_MIN_W));
         assert_eq!(ListPanel::of(659.0, 420.0, 0.0).preview(659.0), None);
+    }
+
+    #[test]
+    fn a_fractional_width_gives_whole_columns() {
+        let p = ListPanel::of(411.43, 460.0, 260.0);
+        assert_eq!((p.groups, p.list), (260.0, 103.0));
     }
 
     #[test]

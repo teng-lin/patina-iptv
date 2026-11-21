@@ -299,7 +299,14 @@ fn narrow(ui: Ui) -> bool {
     window().width.0 < one_row_width(ui)
 }
 
+/// The bar, made again when the screen turns from a phone's into a
+/// tablet's or back (a foldable phone, unfolded): its buttons' side and
+/// margins are read as it is made.
 fn bar(ui: Ui) -> impl IntoElement {
+    when(crate::scale::phone, move || bar_now(ui)).otherwise(move || bar_now(ui))
+}
+
+fn bar_now(ui: Ui) -> impl IntoElement {
     // Hidden, the bar is unmounted: forget its height, which a resize or a
     // text change meanwhile makes stale, until it lays out again.
     cleanup(move || {
