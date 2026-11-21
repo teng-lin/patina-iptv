@@ -254,7 +254,7 @@ mod tests {
         let mut child = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "credential_key::tests::isolated_secret_service_persists_key_and_reopens_catalog",
+                "host::native::credential_key::tests::isolated_secret_service_persists_key_and_reopens_catalog",
                 "--ignored",
             ])
             .env("IPTV_TEST_BROKER_UNAVAILABLE_CHILD", "1")

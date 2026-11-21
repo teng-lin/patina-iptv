@@ -19,7 +19,7 @@ fn main() {
     }
 }
 
-/// Writes the iOS simulator's entitlements for `src/simulator_entitlements.rs`
+/// Writes the iOS simulator's entitlements for `src/host/native/simulator_entitlements.rs`
 /// to link: the app's identity and its own Keychain access group, both the
 /// bundle id in `nsh.json`, as Xcode gives a simulator build.
 fn simulator_entitlements() {

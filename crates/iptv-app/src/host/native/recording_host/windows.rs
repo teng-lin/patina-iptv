@@ -92,7 +92,7 @@ pub(super) fn schedule(next: i64) -> iptv_core::recording::WakeCapability {
     let _tasks = TASKS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let Ok(directory) = crate::platform_data::resolve_data_dir() else {
+    let Ok(directory) = crate::host::native::platform_data::resolve_data_dir() else {
         return WakeCapability::Denied;
     };
     if !directory.join("recording-login.enabled").exists() {

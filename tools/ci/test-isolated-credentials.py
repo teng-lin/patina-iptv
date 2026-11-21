@@ -11,6 +11,14 @@ SPEC.loader.exec_module(c)
 
 
 class Isolation(unittest.TestCase):
+    def test_the_named_test_is_the_brokers_test_at_its_module_path(self):
+        *modules, tests, name = c.TEST.split("::")
+        self.assertEqual(tests, "tests")
+        source = c.ROOT / "crates/iptv-app/src" / ("/".join(modules) + ".rs")
+        text = source.read_text(encoding="utf-8")
+        self.assertIn("mod tests", text)
+        self.assertIn(f"fn {name}()", text)
+
     def test_environment_preserves_toolchain_but_replaces_profile_and_bus(self):
         original = {"HOME": "/synthetic/login", "DBUS_SESSION_BUS_ADDRESS": "synthetic-login-bus",
                     "GNOME_KEYRING_CONTROL": "/synthetic/login-keyring", "CARGO_HOME": "/synthetic/cache",

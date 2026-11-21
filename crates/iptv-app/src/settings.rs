@@ -182,7 +182,7 @@ pub fn offer(key: &str) -> Offer {
     }
     // Leaving the app into a picture-in-picture window: Android only.
     let android = crate::capabilities::HOST.automatic_pip();
-    if matches!(key, "general.backup" | "general.restore") && cfg!(target_os = "ios") {
+    if matches!(key, "general.backup" | "general.restore") && crate::host::IPAD {
         return Offer::NotYet;
     }
     if NOT_OFFERED.contains(&key) {
@@ -300,8 +300,9 @@ pub fn overlay_alpha(s: &Settings) -> u8 {
 /// timeouts, now and after every change.
 pub fn bind(ui: Ui) {
     REVISION.with(|r| r.set(Some(ui.app.settings)));
-    #[cfg(target_os = "android")]
-    effect(move || crate::recording_host::set_language(crate::i18n::language().tag));
+    if crate::host::NOTIFICATIONS_FOLLOW_LANGUAGE {
+        effect(move || crate::host::language_changed(crate::i18n::language().tag));
+    }
     let last_mode = std::cell::Cell::new(None);
     effect(move || {
         let s = read(ui);
@@ -378,7 +379,7 @@ mod tests {
         assert_eq!(offer("parental.change_pin"), Offer::Active);
         assert_eq!(offer("history.keep_days"), Offer::Hidden);
         assert_eq!(offer("remote.key_overrides"), Offer::ReadOnly);
-        let pip = if cfg!(target_os = "android") {
+        let pip = if crate::host::ANDROID {
             Offer::Active
         } else {
             Offer::Hidden

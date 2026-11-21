@@ -40,7 +40,7 @@ pub fn install_test_data_dir(directory: PathBuf) -> io::Result<()> {
             "test storage directory must be absolute",
         ));
     }
-    crate::credential_key::database_key(&directory).map_err(|_| {
+    crate::host::native::credential_key::database_key(&directory).map_err(|_| {
         io::Error::new(
             io::ErrorKind::PermissionDenied,
             "synthetic database key was not installed",
@@ -178,7 +178,7 @@ fn host_stop_flush(limit: std::time::Duration) -> bool {
 /// The restrictive process mask also covers SQLite WAL/SHM and temporary files.
 pub(crate) fn initialize() -> io::Result<PathBuf> {
     #[cfg(windows)]
-    if crate::recording_host::activate_existing() {
+    if crate::host::native::recording_host::activate_existing() {
         std::process::exit(0);
     }
     let directory = resolve_data_dir()?;
@@ -270,7 +270,7 @@ mod tests {
         }
         let parent = tempfile::tempdir().unwrap();
         let result = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "platform_data::tests::explicit_test_profile_requires_a_key_and_precedes_all_app_storage", "--nocapture"])
+            .args(["--exact", "host::native::platform_data::tests::explicit_test_profile_requires_a_key_and_precedes_all_app_storage", "--nocapture"])
             .env(CHILD, parent.path()).output().unwrap();
         assert!(
             result.status.success(),
@@ -352,7 +352,7 @@ mod tests {
             child
                 .args([
                     "--exact",
-                    "platform_data::tests::bad_storage_displays_error_before_runtime_construction",
+                    "host::native::platform_data::tests::bad_storage_displays_error_before_runtime_construction",
                     "--nocapture",
                     "--test-threads=1",
                 ])
@@ -425,7 +425,7 @@ mod tests {
         let result = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "platform_data::tests::new_storage_is_private_under_permissive_umask",
+                "host::native::platform_data::tests::new_storage_is_private_under_permissive_umask",
                 "--nocapture",
             ])
             .env(CHILD, "1")

@@ -51,7 +51,7 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_PlaybackTransport_create(
         let relay = PlaybackRelay::start_with_policy(
             &url,
             &fields,
-            crate::transport::policy(public_only != 0),
+            crate::host::native::transport::policy(public_only != 0),
         )
         .ok()?;
         let local = relay.url().to_owned();

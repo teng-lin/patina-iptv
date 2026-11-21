@@ -862,7 +862,7 @@ fn action_view(ui: Ui, size: Scale) -> impl IntoElement {
 }
 
 fn requirements() -> &'static str {
-    if cfg!(target_os = "ios") {
+    if crate::host::IPAD {
         tr("Keep Patina open and this device awake for recordings. \
              Recordings use local app storage and are excluded from backups.")
     } else {

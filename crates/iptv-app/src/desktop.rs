@@ -19,7 +19,7 @@ pub mod pip_window;
 pub mod player_windows;
 /// The desktop backends, where the app owns the window and the sound:
 /// Linux, macOS and Windows.
-pub const DESKTOP: bool = cfg!(any(target_os = "linux", target_os = "macos", windows));
+pub const DESKTOP: bool = crate::host::LINUX || crate::host::MACOS || crate::host::WINDOWS;
 
 /// Login/task launches run the recorder without automatically opening a viewer.
 /// Explicit foreground playback remains available when the user opens the UI.
@@ -73,7 +73,7 @@ pub fn bind(ui: Ui) {
 /// Whether the host reports and honors window positions: macOS and
 /// Windows. GTK 4 tells no position on Linux (X11 or Wayland), where the
 /// window manager or compositor keeps windows on the displays there are.
-const POSITIONS: bool = cfg!(any(target_os = "macos", windows));
+const POSITIONS: bool = crate::host::MACOS || crate::host::WINDOWS;
 
 /// Keeps `window` reachable when displays go away or are arranged again,
 /// when it first reports its state (a saved place restored onto a display
@@ -165,7 +165,7 @@ pub fn fullscreen() -> bool {
 /// screen) and Window. Elsewhere none: GTK would draw a menu bar in the
 /// window. Call while the app renders.
 pub fn menus(ui: Ui) {
-    if !cfg!(target_os = "macos") {
+    if !crate::host::MACOS {
         return;
     }
     effect(move || {

@@ -16,7 +16,7 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
-TEST = "credential_key::tests::isolated_secret_service_persists_key_and_reopens_catalog"
+TEST = "host::native::credential_key::tests::isolated_secret_service_persists_key_and_reopens_catalog"
 
 
 def environment(root, inherited):

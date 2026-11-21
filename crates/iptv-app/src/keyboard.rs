@@ -11,7 +11,7 @@ pub(crate) fn bridge() -> impl IntoElement {
     let visibility = signal(None);
     provide_context(ImeVisibility(visibility));
     // Only the floating IME scenarios simulate the Android host observer.
-    let enabled = cfg!(target_os = "android")
+    let enabled = crate::host::ANDROID
         || (cfg!(feature = "test-support") && std::env::var_os("IPTV_TEST_FLOATING_IME").is_some());
     when(
         move || enabled,

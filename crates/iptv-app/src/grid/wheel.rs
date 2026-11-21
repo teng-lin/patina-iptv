@@ -17,7 +17,7 @@ use nsh_core::prelude::*;
 use super::Pan;
 
 /// Room to scroll either way before the view goes back to the middle.
-const PAD: f32 = if cfg!(any(target_os = "android", target_os = "ios")) {
+const PAD: f32 = if crate::host::ANDROID || crate::host::IPAD {
     0.0
 } else {
     20_000.0

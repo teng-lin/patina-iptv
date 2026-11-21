@@ -1,21 +1,9 @@
 //! One host projection for feature controls and action admission.
 use crate::Ui;
-use iptv_core::capabilities::{Availability, Host, Platform, Reason};
+use iptv_core::capabilities::{Availability, Host, Reason};
 
 pub const HOST: Host = Host {
-    platform: if cfg!(target_os = "android") {
-        Platform::Android
-    } else if cfg!(target_os = "linux") {
-        Platform::Linux
-    } else if cfg!(target_os = "macos") {
-        Platform::Macos
-    } else if cfg!(windows) {
-        Platform::Windows
-    } else if cfg!(target_os = "ios") {
-        Platform::Ipad
-    } else {
-        Platform::Unknown
-    },
+    platform: crate::host::PLATFORM,
 };
 
 pub fn multiview(ui: Ui) -> Availability {

@@ -24,7 +24,7 @@ use back::{act, swallow_release};
 use keys::{DIGITS, KEYS, RawKeys};
 
 /// The Android remote profile distinguishes a tap from a held key.
-const ANDROID_KEYS: bool = cfg!(target_os = "android");
+const ANDROID_KEYS: bool = crate::host::ANDROID;
 
 /// Headless scenarios that drive a remote's raw Down/Repeat/Up phases
 /// (`use_remote_key_phases`), set before the app starts.
@@ -406,7 +406,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
     on_key("ctrl+up", move |_| crate::media::step_volume(ui, true));
     on_key("ctrl+down", move |_| crate::media::step_volume(ui, false));
     // macOS keeps Ctrl+Up/Down for Mission Control: Cmd+Up/Down there.
-    if cfg!(target_os = "macos") {
+    if crate::host::MACOS {
         on_key("cmd+up", move |_| crate::media::step_volume(ui, true));
         on_key("cmd+down", move |_| crate::media::step_volume(ui, false));
     }

@@ -1248,7 +1248,7 @@ pub fn bind(ui: Ui) {
 /// reopens them after, and so does iOS's (`mpv/ios.rs`), so waiting then
 /// is no stall. Desktop players play on in a minimized window.
 fn stopped_in_background(lifecycle: Lifecycle) -> bool {
-    cfg!(any(target_os = "android", target_os = "ios")) && lifecycle == Lifecycle::Background
+    (crate::host::ANDROID || crate::host::IPAD) && lifecycle == Lifecycle::Background
 }
 
 fn follow_playing(ui: Ui) {

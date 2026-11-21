@@ -86,7 +86,7 @@ pub fn bind(ui: Ui) {
     if !crate::desktop::DESKTOP {
         // Android reports through its persistent player. Other hosts have no
         // native PiP implementation to acknowledge availability later.
-        if !cfg!(target_os = "android") {
+        if !crate::host::ANDROID {
             ui.pip.update(|p| {
                 p.report(false, false, false);
             });

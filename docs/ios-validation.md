@@ -16,7 +16,7 @@ or unavailable` and adding a playlist fails with "The server refused access"
 before any request reaches the server (#136).
 
 So `iptv-app` links them itself on the simulator only
-([`simulator_entitlements.rs`](../crates/iptv-app/src/simulator_entitlements.rs)):
+([`simulator_entitlements.rs`](../crates/iptv-app/src/host/native/simulator_entitlements.rs)):
 `build.rs` writes `application-identifier` and `keychain-access-groups`, both the
 `id` in [`nsh.json`](../crates/iptv-app/nsh.json), and a `#[used]` static puts
 them in the section. Device builds are unaffected; they take their entitlements
