@@ -5,6 +5,15 @@
 //   cargo test -p iptv-store-sqlite --target wasm32-unknown-unknown --test it --no-run
 //   node tools/wasm-test.mjs target/wasm32-unknown-unknown/debug/deps/it-*.wasm
 //
+// Use `--lib` for the unit tests. Compiling SQLite needs a clang with the
+// wasm32 target. For the 2020 TV's feature set (MVP with sign-extension and
+// mutable globals), build with the pinned nightly instead:
+//
+//   CFLAGS_wasm32_unknown_unknown="-mcpu=mvp -msign-ext -mmutable-globals" \
+//   RUSTFLAGS="-C target-cpu=mvp -C target-feature=+sign-ext,+mutable-globals" \
+//   cargo +"$(tools/ci/fuzz-imports.sh --toolchain)" test -Zbuild-std=std,panic_abort,test \
+//     -p iptv-store-sqlite --target wasm32-unknown-unknown --test it --no-run
+//
 // The target has no stdout and aborts on the first panic, so libtest's
 // report is invisible: the executable's panic hook sends the message here,
 // and the exit status says whether every test passed.

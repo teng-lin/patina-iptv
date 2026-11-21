@@ -452,7 +452,7 @@ directory and are never overwritten by restored recording identities.
 | `crates/iptv-player-mpv` | libmpv playback adapter for desktop and iPad |
 | `crates/iptv-runtime` | Headless application runtime, lanes, background tasks and scheduler |
 | `crates/iptv-net` | HTTP adapter (reqwest + rustls) |
-| `crates/iptv-store-sqlite` | Encrypted SQLite store |
+| `crates/iptv-store-sqlite` | SQLite store: encrypted natively, in-memory chunk files in the browser |
 | `crates/iptv-sqlcipher-init` | Native SQLCipher initialization barrier |
 | `crates/iptv-app` | NSH app: screens, theme, video layer (libmpv on desktop and iPad) |
 | `hosts/android` | Kotlin host with the Media3 player |
@@ -460,7 +460,8 @@ directory and are never overwritten by restored recording identities.
 
 All crates except `iptv-app`, `iptv-net`, `iptv-store-sqlite`, `iptv-sqlcipher-init`,
 `iptv-player-mpv` and `iptv-runtime` are
-sans-IO and build for `wasm32-unknown-unknown`.
+sans-IO and build for `wasm32-unknown-unknown`. `iptv-store-sqlite` builds
+for it too, with the browser's SQLite.
 
 Run every check before committing:
 
